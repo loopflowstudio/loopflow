@@ -71,7 +71,7 @@ public struct ConnectionInfo: Sendable {
     }
 }
 
-public struct LocalWaveService: @unchecked Sendable {
+public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     public init() {}
     private let baseURL = lfdBaseURL
     private let apiBaseURL = lfdApiBaseURL
@@ -170,19 +170,13 @@ public struct LocalWaveService: @unchecked Sendable {
     }
 
     /// List flows and steps from lfd.
-    /// Result from the /flows endpoint containing flows, steps, and directions.
-    public struct FlowsResult: Sendable {
-        public var flows: [Flow]
-        public var directions: [String]
-    }
-
-    public func listFlowsAndDirections(repo: URL) async throws -> FlowsResult {
+    public func listFlowsAndDirections(repo: URL) async throws -> WaveFlowsResult {
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
         guard let url = components.url else {
             LoggingService.lfd("listFlows: invalid URL")
-            return FlowsResult(flows: [], directions: [])
+            return WaveFlowsResult(flows: [], directions: [])
         }
 
         LoggingService.lfd("listFlows: GET \(url)")
@@ -190,11 +184,11 @@ public struct LocalWaveService: @unchecked Sendable {
         do {
             let (data, response) = try await session.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                return FlowsResult(flows: [], directions: [])
+                return WaveFlowsResult(flows: [], directions: [])
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let result = json["result"] as? [String: Any] else {
-                return FlowsResult(flows: [], directions: [])
+                return WaveFlowsResult(flows: [], directions: [])
             }
 
             var allFlows: [Flow] = []
@@ -218,9 +212,9 @@ public struct LocalWaveService: @unchecked Sendable {
             let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
             let directions = (result["directions"] as? [String]) ?? []
 
-            return FlowsResult(flows: flows + steps, directions: directions)
+            return WaveFlowsResult(flows: flows + steps, directions: directions)
         } catch {
-            return FlowsResult(flows: [], directions: [])
+            return WaveFlowsResult(flows: [], directions: [])
         }
     }
 

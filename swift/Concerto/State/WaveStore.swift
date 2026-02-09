@@ -72,6 +72,20 @@ final class WaveStore {
         previousStatuses = [:]
     }
 
+    // MARK: - Optimistic mutations
+
+    func applyOptimistic(_ id: String, _ mutation: (inout WaveViewModel) -> Void) -> WaveViewModel? {
+        guard var wave = waves[id] else { return nil }
+        let snapshot = wave
+        mutation(&wave)
+        set(wave)
+        return snapshot
+    }
+
+    func rollback(_ snapshot: WaveViewModel) {
+        set(snapshot)
+    }
+
     // MARK: - Queries
 
     func wave(for id: String) -> WaveViewModel? { waves[id] }

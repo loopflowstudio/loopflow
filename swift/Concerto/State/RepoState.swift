@@ -417,8 +417,13 @@ final class RepoState {
     }
 
     func renameWave(_ wave: WaveViewModel, to newName: String) async throws {
-        _ = try await waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
-        await refreshWaves()
+        let snapshot = waveStore.applyOptimistic(wave.id) { $0.name = newName }
+        do {
+            _ = try await waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
+        } catch {
+            if let snapshot { waveStore.rollback(snapshot) }
+            throw error
+        }
     }
 
     func updateWave(
@@ -429,15 +434,26 @@ final class RepoState {
         stimulus: Stimulus? = nil,
         status: WaveStatus? = nil
     ) async throws {
-        let config = WaveConfigUpdate(
-            area: area,
-            direction: direction,
-            flow: flow,
-            stimulus: stimulus,
-            status: status
-        )
-        _ = try await waveService.updateWave(wave.id, config: config)
-        await refreshWaves()
+        let snapshot = waveStore.applyOptimistic(wave.id) { w in
+            if let area { w.area = area }
+            if let direction { w.direction = direction }
+            if let flow { w.flow = flow }
+            if let stimulus { w.stimulus = stimulus }
+            if let status { w.status = status }
+        }
+        do {
+            let config = WaveConfigUpdate(
+                area: area,
+                direction: direction,
+                flow: flow,
+                stimulus: stimulus,
+                status: status
+            )
+            _ = try await waveService.updateWave(wave.id, config: config)
+        } catch {
+            if let snapshot { waveStore.rollback(snapshot) }
+            throw error
+        }
     }
 
     func landWave(_ wave: WaveViewModel) async throws {

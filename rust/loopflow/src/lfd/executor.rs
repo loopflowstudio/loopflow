@@ -16,7 +16,8 @@ use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteFork, ConcreteItem, ConcreteStep, FlowAction,
     ForkSelect, Step,
 };
-use crate::engine::git::current_branch;
+use crate::engine::git::{create_branch, current_branch, push_with_upstream};
+use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_context_prompt, format_prompt, format_task_prompt,
     gather_context, trim_context_with_breakdown, write_prompt_log, GatherContextOpts,
@@ -25,7 +26,7 @@ use crate::engine::prompt::{
 use crate::engine::stream::{render_event, ParseResult, StreamParser};
 use crate::engine::worktree::{create_worktree, remove_worktree};
 use crate::engine::worktrees::{
-    create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
+    branch_exists, create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
 };
 
 use time::OffsetDateTime;
@@ -36,7 +37,8 @@ use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SharedStore};
 use crate::lfd::types::{
-    Agent, AgentStatus, Event, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, Event, StimulusKind, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus,
+    WaveStatus,
 };
 
 #[async_trait]
@@ -314,6 +316,53 @@ impl WaveExecutor {
                         Ok(None) => {}
                         Err(err) => {
                             warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                        }
+                    }
+
+                    // For recurring waves (loop/watch/cron), advance to a new
+                    // branch so the next iteration gets its own PR.
+                    if run.snapshot.pr.is_some() {
+                        if let Ok(stimuli) = self.store.list_stimuli(Some(&wave.id)) {
+                            let is_recurring = stimuli.iter().any(|s| {
+                                s.enabled
+                                    && matches!(
+                                        s.kind,
+                                        StimulusKind::Loop
+                                            | StimulusKind::Watch
+                                            | StimulusKind::Cron
+                                    )
+                            });
+                            if is_recurring {
+                                let wt = run.worktree.clone();
+                                let name = wave.name.clone();
+                                match tokio::task::spawn_blocking(move || {
+                                    advance_branch(Path::new(&wt), &name)
+                                })
+                                .await
+                                {
+                                    Ok(Ok(new_branch)) => {
+                                        info!(
+                                            run_id = %run.id,
+                                            new_branch = %new_branch,
+                                            "advanced to new branch for next iteration"
+                                        );
+                                    }
+                                    Ok(Err(err)) => {
+                                        warn!(
+                                            run_id = %run.id,
+                                            error = %err,
+                                            "failed to advance branch"
+                                        );
+                                    }
+                                    Err(err) => {
+                                        warn!(
+                                            run_id = %run.id,
+                                            error = %err,
+                                            "advance_branch task panicked"
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -913,6 +962,22 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
             None
         }
     }
+}
+
+/// Create a new branch in the worktree for the next loop iteration.
+fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result<String> {
+    let config = load_config_or_default(Some(worktree));
+    let branch_config = config.branch_names.as_ref();
+    let mut new_branch = format_branch_name(wave_name, branch_config, worktree)
+        .map_err(|e| anyhow!("failed to generate branch name: {e}"))?;
+
+    while branch_exists(worktree, &new_branch)? {
+        new_branch = format!("{new_branch}.{}", generate_word_pair());
+    }
+
+    create_branch(worktree, &new_branch)?;
+    push_with_upstream(worktree, "origin", &new_branch)?;
+    Ok(new_branch)
 }
 
 #[cfg(test)]

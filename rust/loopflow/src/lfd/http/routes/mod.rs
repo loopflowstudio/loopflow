@@ -5,7 +5,9 @@ pub mod wave_runs;
 pub mod waves;
 pub mod ws;
 
-use crate::lfd::http::dto::{wave_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto};
+use crate::lfd::http::dto::{
+    format_datetime, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
+};
 use crate::lfd::http::run_store;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{SharedStore, StoreError};
@@ -48,6 +50,21 @@ pub async fn build_wave_dto(
 ) -> Result<WaveDto, StoreError> {
     let wave_id = wave.id.clone();
     let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
+    let wave_id = wave.id.clone();
+    let open_pr_count = run_store(store, move |store| {
+        let runs = store.list_wave_runs(Some(&wave_id), None)?;
+        let count = runs
+            .into_iter()
+            .filter(|run| {
+                run.snapshot
+                    .pr
+                    .as_ref()
+                    .is_some_and(|pr| is_open_pr_state(pr.state.as_deref()))
+            })
+            .count();
+        Ok(count as u32)
+    })
+    .await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
     let flow_name = wave.flow.clone();
@@ -84,15 +101,25 @@ pub async fn build_wave_dto(
         None => (None, None, Vec::new(), None),
     };
 
-    Ok(wave_dto(
-        &wave,
-        active_run,
+    Ok(WaveDto {
+        id: wave.id.to_string(),
+        object: "wave".to_string(),
+        name: wave.name,
+        repo: wave.repo,
+        flow: wave.flow,
+        direction: wave.direction,
+        area: wave.area,
+        created_at: format_datetime(wave.created_at),
+        status: wave.status.as_str().to_string(),
+        iteration: wave.iteration,
         local_worktree,
         remote_branch,
         commits,
         diff_stat,
         flow_steps,
-    ))
+        open_pr_count,
+        active_run,
+    })
 }
 
 /// Cursor-based pagination over a list of items with an `id: LfdId` field.
@@ -152,6 +179,13 @@ fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
     })
 }
 
+fn is_open_pr_state(state: Option<&str>) -> bool {
+    match state {
+        Some(state) => state.eq_ignore_ascii_case("open") || state.eq_ignore_ascii_case("draft"),
+        None => true,
+    }
+}
+
 /// Find the nearest ancestor branch for diff comparison.
 ///
 /// Candidates are the default branch plus any remote branches belonging to this wave
@@ -175,7 +209,7 @@ fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
     let mut candidates: Vec<String> = vec![default_branch.clone()];
     if let Some(sibling_branches) = wave_remote_branches(worktree, &wave_slug) {
         for branch in sibling_branches {
-            if branch != current && !candidates.contains(&branch) {
+            if !is_current_or_tracking_branch(&branch, &current) && !candidates.contains(&branch) {
                 candidates.push(branch);
             }
         }
@@ -199,6 +233,15 @@ fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
     }
 
     best_ref
+}
+
+fn is_current_or_tracking_branch(candidate: &str, current: &str) -> bool {
+    if candidate == current {
+        return true;
+    }
+    candidate
+        .split_once('/')
+        .is_some_and(|(_, branch)| branch == current)
 }
 
 /// List remote branches whose name contains the wave slug (e.g. ".conviction.").
@@ -271,5 +314,26 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
         None
     } else {
         Some(stat)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_tracking_branch_matches_local_branch_name() {
+        assert!(is_current_or_tracking_branch(
+            "origin/jack.wave.20260209_1000",
+            "jack.wave.20260209_1000"
+        ));
+    }
+
+    #[test]
+    fn sibling_branch_does_not_match_current_branch_name() {
+        assert!(!is_current_or_tracking_branch(
+            "origin/jack.wave.20260209_1001",
+            "jack.wave.20260209_1000"
+        ));
     }
 }

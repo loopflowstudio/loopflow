@@ -19,6 +19,22 @@ use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParse
 /// to this process before exiting so the agent doesn't survive as an orphan.
 static CHILD_PID: AtomicU32 = AtomicU32::new(0);
 
+/// Tracks the active agent PID and clears it even on early returns.
+struct ChildPidGuard;
+
+impl ChildPidGuard {
+    fn new(pid: u32) -> Self {
+        CHILD_PID.store(pid, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for ChildPidGuard {
+    fn drop(&mut self) {
+        CHILD_PID.store(0, Ordering::Release);
+    }
+}
+
 /// Kill the child agent process if one is running.
 pub fn kill_child_if_running() {
     let pid = CHILD_PID.load(Ordering::Acquire);
@@ -303,9 +319,8 @@ fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     let child = cmd.spawn()?;
-    CHILD_PID.store(child.id(), Ordering::Release);
+    let _pid_guard = ChildPidGuard::new(child.id());
     let output = child.wait_with_output()?;
-    CHILD_PID.store(0, Ordering::Release);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
@@ -320,13 +335,12 @@ fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
 fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     let mut child = cmd.spawn()?;
-    CHILD_PID.store(child.id(), Ordering::Release);
+    let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
     let status = child.wait()?;
-    CHILD_PID.store(0, Ordering::Release);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
@@ -347,7 +361,7 @@ fn launch_streaming(
 
     let start = Instant::now();
     let mut child = cmd.spawn()?;
-    CHILD_PID.store(child.id(), Ordering::Release);
+    let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
 
     let stdout = child
@@ -439,7 +453,6 @@ fn launch_streaming(
     }
 
     let status = child.wait()?;
-    CHILD_PID.store(0, Ordering::Release);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent streaming completed"

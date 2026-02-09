@@ -540,6 +540,7 @@ struct ParseWaveFromJSONTests {
             "status": "running",
             "iteration": 0,
             "flow_steps": ["ingest", "kickoff"],
+            "open_pr_count": 3,
             "active_run": [
                 "id": "run-1",
                 "wave_id": "wave-1",
@@ -558,6 +559,7 @@ struct ParseWaveFromJSONTests {
         let wave = LocalWaveService.parseWaveFromJSON(json)
 
         #expect(wave.flowSteps == ["ingest", "kickoff"])
+        #expect(wave.openPRCount == 3)
         #expect(wave.activeRun?.stepIndex == 1)
 
         let vm = WaveViewModel(api: wave)
@@ -572,7 +574,8 @@ struct ParseWaveFromJSONTests {
             "repo": "/tmp/repo",
             "flow": "start",
             "status": "idle",
-            "flow_steps": ["ingest", "kickoff"]
+            "flow_steps": ["ingest", "kickoff"],
+            "open_pr_count": 0
         ]
 
         let wave = LocalWaveService.parseWaveFromJSON(json)

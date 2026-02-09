@@ -14,7 +14,10 @@ struct WaveStoreOptimisticTests {
         status: WaveStatus = .idle,
         flow: String = "ship",
         area: [String] = ["src/"],
-        direction: [String] = []
+        direction: [String] = [],
+        openPRCount: Int = 0,
+        prNumber: Int? = nil,
+        prState: PRState? = nil
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -26,8 +29,11 @@ struct WaveStoreOptimisticTests {
                 area: area,
                 stimulus: Stimulus(kind: .once),
                 status: status,
-                iteration: 0
-            )
+                iteration: 0,
+                openPRCount: openPRCount
+            ),
+            prNumber: prNumber,
+            prState: prState
         )
     }
 
@@ -214,5 +220,18 @@ struct WaveStoreOptimisticTests {
 
         #expect(store.wave(for: "wave-1")?.name == "optimistic")
         #expect(store.wave(for: "wave-2")?.name == "other-updated")
+    }
+
+    @Test("PR grouping uses backend count and pending PR fallback")
+    func prGroupingUsesEffectiveCount() {
+        let store = WaveStore()
+        store.setAll([
+            makeWave(id: "wave-1", openPRCount: 2),
+            makeWave(id: "wave-2", prNumber: 12, prState: .open),
+            makeWave(id: "wave-3"),
+        ])
+
+        #expect(store.groups.pr.count == 2)
+        #expect(store.groups.openPRCount == 3)
     }
 }

@@ -93,6 +93,10 @@ struct WaveDetailPanel: View {
         .onChange(of: selectedTab) { _, _ in
             loadRuns()
         }
+        .onChange(of: runsRefreshKey) { _, _ in
+            guard selectedTab == .runs else { return }
+            loadRuns()
+        }
     }
 
     // MARK: - Blended View (header + context + actions)
@@ -217,6 +221,9 @@ struct WaveDetailPanel: View {
             if let prNumber = wave.prNumber, let prState = wave.prState {
                 prBadge(number: prNumber, state: prState, url: wave.prURL)
             }
+            if wave.effectiveOpenPRCount > 1 {
+                openPRCountBadge
+            }
 
             // Stop button when running
             if wave.status == .running || wave.status == .waiting {
@@ -273,6 +280,18 @@ struct WaveDetailPanel: View {
         .help("View PR on GitHub")
     }
 
+    private var openPRCountBadge: some View {
+        Label("\(wave.effectiveOpenPRCount) open", systemImage: "arrow.triangle.pull")
+            .font(.caption)
+            .fontWeight(.medium)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.statusWarning.opacity(0.14))
+            .foregroundStyle(Color.statusWarning)
+            .clipShape(Capsule())
+            .help("\(wave.effectiveOpenPRCount) open PRs in this stack")
+    }
+
     // MARK: - Wave Config Summary (read-only, shown when running)
 
     private var waveConfigSummary: some View {
@@ -319,6 +338,8 @@ struct WaveDetailPanel: View {
     private var quickActionsBar: some View {
         HStack(spacing: 12) {
             if let path = wave.worktreePath {
+                let hasWorktree = FileManager.default.fileExists(atPath: path)
+
                 Button {
                     openInTerminal(path: path)
                 } label: {
@@ -330,7 +351,8 @@ struct WaveDetailPanel: View {
                     }
                 }
                 .buttonStyle(DarkButtonStyle())
-                .help("Open in \(terminalApp.displayName)")
+                .disabled(!hasWorktree)
+                .help(hasWorktree ? "Open in \(terminalApp.displayName)" : "Worktree path no longer exists")
 
                 Button {
                     openInIDE(path: path)
@@ -343,7 +365,14 @@ struct WaveDetailPanel: View {
                     }
                 }
                 .buttonStyle(DarkButtonStyle())
-                .help("Open in \(ideApp.displayName)")
+                .disabled(!hasWorktree)
+                .help(hasWorktree ? "Open in \(ideApp.displayName)" : "Worktree path no longer exists")
+
+                if !hasWorktree {
+                    Label("Worktree missing", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(Color.statusWarning)
+                }
 
                 Spacer()
             }
@@ -737,6 +766,14 @@ struct WaveDetailPanel: View {
 
     private func loadRuns() {
         Task { await fetchRuns() }
+    }
+
+    private var runsRefreshKey: String {
+        let activeRunId = wave.activeRun?.id ?? "-"
+        let activeStatus = wave.activeRun?.status.rawValue ?? "-"
+        let prNumber = wave.prNumber.map(String.init) ?? "-"
+        let prState = wave.prState?.rawValue ?? "-"
+        return "\(wave.iteration)|\(wave.status.rawValue)|\(activeRunId)|\(activeStatus)|\(prNumber)|\(prState)"
     }
 
     private func collapsePRs() async throws -> CollapsePRsResult {

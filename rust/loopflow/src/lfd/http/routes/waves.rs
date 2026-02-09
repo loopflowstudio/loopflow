@@ -2,8 +2,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
+use std::path::Path as FsPath;
 use std::str::FromStr;
 use time::OffsetDateTime;
+use tracing::warn;
 
 use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
 use crate::engine::naming::sanitize_for_branch;
@@ -13,7 +15,7 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
     AbsorbResponse, AbsorbResponseResult, CollapseResponse, CollapseResponseResult,
-    ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse,
+    ContinueWaveResponse, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
     NextWaveResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
@@ -630,10 +632,13 @@ pub async fn land_wave_handler(
     .await
     .map_err(map_store_error)?;
 
-    let worktree = payload
+    let latest_worktree = payload
         .worktree
         .or_else(|| latest_run.as_ref().map(|run| run.worktree.clone()))
         .filter(|value| !value.is_empty());
+    let worktree =
+        resolve_wave_work_dir_for_api(wave.repo.clone(), wave.name.clone(), latest_worktree)
+            .await?;
 
     let strict = payload.strict.unwrap_or(false);
     let local = payload.local.unwrap_or(false);
@@ -649,7 +654,7 @@ pub async fn land_wave_handler(
                 strict,
                 local,
                 create_pr,
-                worktree,
+                worktree: Some(worktree),
                 lint,
             },
             &progress,
@@ -688,16 +693,14 @@ pub async fn next_wave_handler(
         .as_ref()
         .map(|run| run.worktree.clone())
         .filter(|value| !value.is_empty());
+    let work_dir =
+        resolve_wave_work_dir_for_api(wave.repo.clone(), wave.name.clone(), worktree).await?;
 
     let wave_name = wave.name.clone();
-    let repo_path = wave.repo.clone();
     let result = tokio::task::spawn_blocking(move || {
         let progress = crate::ops::NullProgress;
-        let work_dir = worktree
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from(&repo_path));
         crate::ops::next_branch(
-            &work_dir,
+            std::path::Path::new(&work_dir),
             &crate::ops::NextOptions {
                 wave_name: Some(wave_name),
                 create_pr: true,
@@ -781,10 +784,7 @@ pub async fn absorb_wave_handler(
     }))
 }
 
-async fn wave_and_work_dir(
-    state: &HttpState,
-    wave_id: &LfdId,
-) -> Result<(Wave, String), (StatusCode, Json<crate::lfd::http::dto::ErrorResponse>)> {
+async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, String), ApiError> {
     let wave = run_store(&state.store, {
         let wave_id = wave_id.clone();
         move |store| store.get_wave(&wave_id)
@@ -800,12 +800,51 @@ async fn wave_and_work_dir(
     .await
     .map_err(map_store_error)?;
 
-    let work_dir = latest_run
+    let latest_worktree = latest_run
         .map(|run| run.worktree)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| wave.repo.clone());
+        .filter(|value| !value.is_empty());
+    let work_dir =
+        resolve_wave_work_dir_for_api(wave.repo.clone(), wave.name.clone(), latest_worktree)
+            .await?;
 
     Ok((wave, work_dir))
+}
+
+type ApiError = (StatusCode, Json<ErrorResponse>);
+
+async fn resolve_wave_work_dir_for_api(
+    repo_path: String,
+    wave_name: String,
+    latest_worktree: Option<String>,
+) -> Result<String, ApiError> {
+    tokio::task::spawn_blocking(move || {
+        resolve_wave_work_dir(&repo_path, &wave_name, latest_worktree)
+    })
+    .await
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err))
+}
+
+fn resolve_wave_work_dir(
+    repo_path: &str,
+    wave_name: &str,
+    latest_worktree: Option<String>,
+) -> Result<String, String> {
+    if let Some(worktree) = latest_worktree {
+        let path = FsPath::new(&worktree);
+        if path.exists() && path.join(".git").exists() {
+            return Ok(worktree);
+        }
+        warn!(
+            worktree = %path.display(),
+            wave_name,
+            "stored worktree missing; recreating wave worktree"
+        );
+    }
+
+    let (worktree, _) =
+        ensure_wave_worktree(FsPath::new(repo_path), wave_name).map_err(|err| err.to_string())?;
+    Ok(worktree)
 }
 
 fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {

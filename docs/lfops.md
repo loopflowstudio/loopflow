@@ -72,7 +72,7 @@ Preserve the current worktree and create a fresh branch.
 lf ops next
 ```
 
-Moves the current worktree to a timestamped path, creates a new branch from the default branch, and recreates the worktree at the original path. Use it to keep moving after a PR without losing the existing worktree.
+Commits and pushes current changes, optionally rebases, then creates and pushes a timestamped successor branch in the same worktree. If the current PR is already merged, it first resets to the default branch and syncs from origin before creating the next branch.
 
 ## lf ops commit
 

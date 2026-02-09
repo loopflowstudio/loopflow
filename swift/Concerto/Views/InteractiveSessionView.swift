@@ -15,7 +15,7 @@ struct InteractiveSessionView: View {
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var wave: WaveViewModel? {
-        repoState.waves.first { $0.id == session.waveId }
+        repoState.waveStore.wave(for: session.waveId)
     }
 
     var body: some View {

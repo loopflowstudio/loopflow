@@ -17,20 +17,8 @@ struct WaveSidebar: View {
     @State private var isEditingWaveName = false
     @FocusState private var isSidebarFocused: Bool
 
-    private var waveGroups: RepoState.WaveGroups {
+    private var waveGroups: WaveGroups {
         repoState.waveGroups
-    }
-
-    private func pendingPR(for wave: WaveViewModel) -> (number: Int, url: URL?)? {
-        guard let prNumber = wave.prNumber,
-              wave.prState == .open else {
-            return nil
-        }
-        return (number: prNumber, url: wave.prURL)
-    }
-
-    private var allWavesInOrder: [WaveViewModel] {
-        waveGroups.allInOrder
     }
 
     private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
@@ -57,12 +45,10 @@ struct WaveSidebar: View {
         ForEach(waves) { wave in
             WaveRow(
                 wave: wave,
-                isSelected: repoState.selectedWave?.id == wave.id,
+                isSelected: repoState.selectedWaveId == wave.id,
                 isKeyboardFocused: keyboardFocusedId == wave.id,
-                pendingPR: pendingPR(for: wave),
                 onSelect: {
-                    repoState.selectedWave = wave
-                    keyboardFocusedId = wave.id
+                    selectWave(wave.id)
                 },
                 onDelete: {
                     Task {
@@ -106,8 +92,8 @@ struct WaveSidebar: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .selectWave)) { notification in
             if let waveId = notification.userInfo?["waveId"] as? String,
-               let wave = repoState.waves.first(where: { $0.id == waveId }) {
-                repoState.selectedWave = wave
+               repoState.waveStore.wave(for: waveId) != nil {
+                selectWave(waveId)
             }
         }
     }
@@ -313,15 +299,15 @@ struct WaveSidebar: View {
         .onKeyPress(.return) {
             guard !isEditingWaveName else { return .ignored }
             if let id = keyboardFocusedId,
-               let wave = repoState.waves.first(where: { $0.id == id }) {
-                repoState.selectedWave = wave
+               repoState.waveStore.wave(for: id) != nil {
+                selectWave(id)
             }
             return .handled
         }
     }
 
     private func moveFocus(_ delta: Int) {
-        let waves = allWavesInOrder
+        let waves = waveGroups.allInOrder
         guard !waves.isEmpty else { return }
 
         if let currentId = keyboardFocusedId,
@@ -331,6 +317,11 @@ struct WaveSidebar: View {
         } else {
             keyboardFocusedId = delta > 0 ? waves.first?.id : waves.last?.id
         }
+    }
+
+    private func selectWave(_ waveId: String) {
+        repoState.selectedWaveId = waveId
+        keyboardFocusedId = waveId
     }
 
     private func createWaveDirectly() {

@@ -19,6 +19,7 @@ use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
+use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{AgentStatus, Event, Wave, WaveRun, WaveRunStatus, WaveStatus};
 
 #[derive(Deserialize)]
@@ -454,30 +455,13 @@ pub async fn run_wave_handler(
         }
     };
 
-    let exec = state.executor.clone();
-    let store = state.store.clone();
-    let scheduler = state.scheduler.clone();
-    let run_id_for_release = run.id.clone();
-    tokio::spawn(async move {
-        if let Err(err) = exec.execute(&run_id_for_release).await {
-            tracing::error!(run_id = %run_id_for_release, error = %err, "run execution failed");
-            if let Ok(Some(mut run)) = store.get_wave_run(&run_id_for_release) {
-                run.status = WaveRunStatus::Failed;
-                run.error = Some(err.to_string());
-                run.ended_at = Some(OffsetDateTime::now_utc());
-                let _ = store.update_wave_run(&run);
-                if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
-                    wave.status = WaveStatus::Failed;
-                    let _ = store.update_wave(&wave);
-                }
-            }
-        }
-        scheduler.release(run_id_for_release.as_str());
-    });
-
-    state
-        .event_hub
-        .send(Event::wave_started(wave.id.clone(), run.id.clone()));
+    spawn_run_task_with_slot(
+        state.store.clone(),
+        (*state.executor).clone(),
+        state.scheduler.clone(),
+        state.event_hub.clone(),
+        run.clone(),
+    );
 
     Ok(Json(RunWaveResponse {
         started: true,
@@ -608,27 +592,13 @@ pub async fn continue_wave_handler(
         ));
     }
 
-    // Spawn executor to continue the flow.
-    let exec = state.executor.clone();
-    let store = state.store.clone();
-    let scheduler = state.scheduler.clone();
-    let run_id = run.id.clone();
-    tokio::spawn(async move {
-        if let Err(err) = exec.execute(&run_id).await {
-            tracing::error!(run_id = %run_id, error = %err, "run execution failed");
-            if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
-                run.status = WaveRunStatus::Failed;
-                run.error = Some(err.to_string());
-                run.ended_at = Some(OffsetDateTime::now_utc());
-                let _ = store.update_wave_run(&run);
-            }
-        }
-        scheduler.release(run_id.as_str());
-    });
-
-    state
-        .event_hub
-        .send(Event::wave_started(wave_id.clone(), run.id.clone()));
+    spawn_run_task_with_slot(
+        state.store.clone(),
+        (*state.executor).clone(),
+        state.scheduler.clone(),
+        state.event_hub.clone(),
+        run.clone(),
+    );
 
     Ok(Json(ContinueWaveResponse {
         continued: true,

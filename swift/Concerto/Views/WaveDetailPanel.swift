@@ -106,7 +106,11 @@ struct WaveDetailPanel: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if selectedTab == .current {
-                        if wave.status == .idle {
+                        if wave.status == .idle || wave.status == .failed {
+                            if wave.status == .failed {
+                                failedRunDetail
+                            }
+
                             StepRunner(wave: wave)
 
                             if !wave.commits.isEmpty {
@@ -119,14 +123,12 @@ struct WaveDetailPanel: View {
 
                             if !wave.commits.isEmpty || wave.prURL != nil {
                                 opsActionsBar
-                            } else if !wave.recentSteps.isEmpty {
+                            } else if wave.status == .idle && !wave.recentSteps.isEmpty {
                                 Divider()
                                 NextActionsBar(wave: wave)
                             }
-                        } else if wave.status == .failed {
-                            failedRunDetail
-                            StepRunner(wave: wave)
-                            if !outputBuffer.output(for: wave.id).isEmpty {
+
+                            if wave.status == .failed && !outputBuffer.output(for: wave.id).isEmpty {
                                 liveOutputSection
                             }
                         } else {
@@ -298,14 +300,16 @@ struct WaveDetailPanel: View {
                     .foregroundStyle(.secondary)
                 }
 
-                Label {
-                    Text(wave.flowDisplay)
-                        .font(.caption)
-                } icon: {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.caption2)
+                if !wave.flow.isEmpty {
+                    Label {
+                        Text(wave.flow)
+                            .font(.caption)
+                    } icon: {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
             }
         }
     }
@@ -737,7 +741,6 @@ struct WaveDetailPanel: View {
     }
 
     private func loadRunsIfNeeded(for tab: DetailTab) {
-        guard tab == .runs else { return }
         Task { await fetchRuns() }
     }
 

@@ -53,7 +53,7 @@ struct StepRunner: View {
             Text(errorMessage ?? "Failed to run step")
         }
         .onAppear {
-            selectedFlow = wave.flow.isEmpty ? "ship" : wave.flow
+            selectedFlow = wave.flow
             selectedStimulus = wave.stimulus.kind == .manual ? .once : wave.stimulus.kind
             if let cron = wave.stimulus.cron {
                 cronExpression = cron
@@ -170,7 +170,7 @@ struct StepRunner: View {
 
     private var runButtonLabel: String {
         switch selectedStimulus {
-        case .once, .manual: return "Run \(selectedFlow)"
+        case .once, .manual: return selectedFlow.isEmpty ? "Run" : "Run \(selectedFlow)"
         case .loop: return "Start Loop"
         case .watch: return "Start Watching"
         case .cron: return "Start Schedule"

@@ -160,20 +160,6 @@ struct WaveModelTests {
         #expect(wave.directionDisplay == "")
     }
 
-    @Test("flowDisplay returns flow name")
-    func flowDisplayName() {
-        let wave = makeWave(id: "test", repo: "/tmp", flow: "polish")
-
-        #expect(wave.flowDisplay == "polish")
-    }
-
-    @Test("flowDisplay returns ship for empty flow")
-    func flowDisplayDefault() {
-        let wave = makeWave(id: "test", repo: "/tmp", flow: "")
-
-        #expect(wave.flowDisplay == "ship")
-    }
-
     @Test("worktree and branch fall back to wave when no active run")
     func worktreeBranchFallbackToWave() {
         let model = WaveViewModel(

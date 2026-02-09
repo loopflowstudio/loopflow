@@ -388,7 +388,7 @@ public struct LocalWaveService: @unchecked Sendable {
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
             repo: json["repo"] as? String ?? "",
-            flow: json["flow"] as? String ?? "design",
+            flow: json["flow"] as? String ?? "",
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
             stimulus: stimulus,
@@ -426,7 +426,8 @@ public struct LocalWaveService: @unchecked Sendable {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
+        // Rename may move worktree + rename branch + push, so use longSession.
+        let (data, response) = try await longSession.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0

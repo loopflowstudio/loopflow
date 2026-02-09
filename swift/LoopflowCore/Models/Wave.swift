@@ -169,7 +169,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         id: String,
         name: String = "",
         repo: String,
-        flow: String = "design",
+        flow: String = "",
         direction: [String] = [],
         area: [String] = [],
         stimulus: Stimulus = Stimulus(kind: .once),

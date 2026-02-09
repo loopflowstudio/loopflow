@@ -331,7 +331,9 @@ impl WaveExecutor {
     fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
         if let Ok(Some(mut wave)) = self.store.get_wave(wave_id) {
             wave.status = status;
-            let _ = self.store.update_wave(&wave);
+            if let Err(err) = self.store.update_wave(&wave) {
+                error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
+            }
         }
     }
 
@@ -720,7 +722,9 @@ pub fn create_wave_run_with_id(
     if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
         wave.status = WaveStatus::Running;
         wave.iteration = iteration;
-        let _ = store.update_wave(&wave);
+        if let Err(err) = store.update_wave(&wave) {
+            warn!(wave_id = %wave.id, error = %err, "failed to set wave status to running");
+        }
     }
     Ok(run)
 }

@@ -35,9 +35,8 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SharedStore};
-use crate::lfd::types::Event;
 use crate::lfd::types::{
-    Agent, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, Event, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 #[async_trait]
@@ -389,8 +388,7 @@ impl WaveExecutor {
             AgentStatus::Failed
         };
         self.store.end_agent(&agent_id, status.as_i32(), ended_at)?;
-        self.event_hub
-            .send(Event::agent_ended(agent_id, status.as_str().to_string()));
+        self.event_hub.send(Event::agent_ended(agent_id, status));
 
         Ok(exit_code)
     }
@@ -588,10 +586,7 @@ impl WaveExecutor {
                     _ => AgentStatus::Failed,
                 };
                 let _ = store.end_agent(&agent.id, agent_status.as_i32(), ended_at);
-                event_hub.send(Event::agent_ended(
-                    agent.id.clone(),
-                    agent_status.as_str().to_string(),
-                ));
+                event_hub.send(Event::agent_ended(agent.id.clone(), agent_status));
 
                 let status = match &result {
                     Ok(0) => {

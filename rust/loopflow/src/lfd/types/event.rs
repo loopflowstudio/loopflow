@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
+use crate::lfd::types::agent::AgentStatus;
 
 /// Event payload variants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,10 +156,10 @@ impl Event {
         }
     }
 
-    pub fn agent_ended(agent_id: LfdId, status: String) -> Self {
+    pub fn agent_ended(agent_id: LfdId, status: AgentStatus) -> Self {
         Self::AgentEnded {
             agent_id,
-            status,
+            status: status.as_str().to_string(),
             timestamp: Self::now(),
         }
     }

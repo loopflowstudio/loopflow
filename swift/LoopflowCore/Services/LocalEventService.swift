@@ -195,74 +195,17 @@ public actor LocalEventService {
             return .connected(ConnectedEvent(timestamp: timestamp, waves: waves))
         case "ping":
             return nil
-        case "wave_created":
-            guard let waveId = json["wave_id"] as? String else { return nil }
+        case "wave_created", "wave_updated", "wave_deleted",
+             "wave_started", "wave_stopped", "wave_waiting":
+            guard let waveId = json["wave_id"] as? String,
+                  let eventType = WaveEventType(rawValue: String(type.dropFirst(5))) else { return nil }
             let wave = (json["wave"] as? [String: Any]).map { LocalWaveService.parseWaveFromJSON($0) }
             return .wave(WaveEvent(
-                type: .created,
-                waveId: waveId,
-                waveRunId: nil,
-                step: nil,
-                name: json["name"] as? String,
-                wave: wave,
-                timestamp: parseTimestamp(json["timestamp"])
-            ))
-        case "wave_updated":
-            guard let waveId = json["wave_id"] as? String else { return nil }
-            let wave = (json["wave"] as? [String: Any]).map { LocalWaveService.parseWaveFromJSON($0) }
-            return .wave(WaveEvent(
-                type: .updated,
-                waveId: waveId,
-                waveRunId: nil,
-                step: nil,
-                name: nil,
-                wave: wave,
-                timestamp: parseTimestamp(json["timestamp"])
-            ))
-        case "wave_deleted":
-            guard let waveId = json["wave_id"] as? String else { return nil }
-            return .wave(WaveEvent(
-                type: .deleted,
-                waveId: waveId,
-                waveRunId: nil,
-                step: nil,
-                name: nil,
-                wave: nil,
-                timestamp: parseTimestamp(json["timestamp"])
-            ))
-        case "wave_started":
-            guard let waveId = json["wave_id"] as? String else { return nil }
-            let wave = (json["wave"] as? [String: Any]).map { LocalWaveService.parseWaveFromJSON($0) }
-            return .wave(WaveEvent(
-                type: .started,
-                waveId: waveId,
-                waveRunId: json["wave_run_id"] as? String,
-                step: nil,
-                name: nil,
-                wave: wave,
-                timestamp: parseTimestamp(json["timestamp"])
-            ))
-        case "wave_stopped":
-            guard let waveId = json["wave_id"] as? String else { return nil }
-            let wave = (json["wave"] as? [String: Any]).map { LocalWaveService.parseWaveFromJSON($0) }
-            return .wave(WaveEvent(
-                type: .stopped,
-                waveId: waveId,
-                waveRunId: nil,
-                step: nil,
-                name: nil,
-                wave: wave,
-                timestamp: parseTimestamp(json["timestamp"])
-            ))
-        case "wave_waiting":
-            guard let waveId = json["wave_id"] as? String else { return nil }
-            let wave = (json["wave"] as? [String: Any]).map { LocalWaveService.parseWaveFromJSON($0) }
-            return .wave(WaveEvent(
-                type: .waiting,
+                type: eventType,
                 waveId: waveId,
                 waveRunId: json["wave_run_id"] as? String,
                 step: json["step"] as? String,
-                name: nil,
+                name: json["name"] as? String,
                 wave: wave,
                 timestamp: parseTimestamp(json["timestamp"])
             ))

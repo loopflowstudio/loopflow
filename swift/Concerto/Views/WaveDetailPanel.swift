@@ -735,23 +735,19 @@ struct WaveDetailPanel: View {
         }
     }
 
-    private func refreshRunsAndWaves() async {
-        await fetchRuns()
-    }
-
     private func loadRuns() {
         Task { await fetchRuns() }
     }
 
     private func collapsePRs() async throws -> CollapsePRsResult {
         let result = try await waveService.collapsePRs(wave.id)
-        await refreshRunsAndWaves()
+        await fetchRuns()
         return result
     }
 
     private func absorbIntoPR(_ prNumber: Int) async throws -> AbsorbIntoPRResult {
         let result = try await waveService.absorbIntoPR(wave.id, prNumber: prNumber)
-        await refreshRunsAndWaves()
+        await fetchRuns()
         return result
     }
 

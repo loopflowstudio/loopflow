@@ -121,12 +121,10 @@ final class RepoState {
         switch mode {
         case .emptyWorkspaces:
             break
-        case .sampleWorkspaces:
+        case .sampleWorkspaces, .mockWaves:
             configureMockWaves()
-        case .mockWaves:
-            configureMockWaves()
-            if let selectBranch {
-                selectedWave = waves.first { $0.branch == selectBranch }
+            if mode == .mockWaves, let selectBranch {
+                selectedWaveId = waves.first { $0.branch == selectBranch }?.id
             }
         }
     }
@@ -323,15 +321,14 @@ final class RepoState {
             )
 
         case .idle:
-            if let prNumber = wave.prNumber, wave.prState == .open {
-                if oldStatus == .running {
-                    NotificationService.shared.notifyPRReady(
-                        waveId: wave.id,
-                        waveName: wave.displayName,
-                        prNumber: prNumber
-                    )
-                }
+            guard oldStatus == .running, let prNumber = wave.prNumber, wave.prState == .open else {
+                break
             }
+            NotificationService.shared.notifyPRReady(
+                waveId: wave.id,
+                waveName: wave.displayName,
+                prNumber: prNumber
+            )
 
         case .running, .paused:
             break

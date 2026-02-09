@@ -35,14 +35,29 @@ final class WaveStore {
     // MARK: - Mutations
 
     func set(_ wave: WaveViewModel) {
-        detectStatusChange(wave)
+        let oldStatus = previousStatuses[wave.id]
+        if oldStatus != wave.status {
+            onStatusChange?(wave, oldStatus, wave.status)
+        }
+        previousStatuses[wave.id] = wave.status
         waves[wave.id] = wave
     }
 
     func setAll(_ newWaves: [WaveViewModel]) {
-        for wave in newWaves { detectStatusChange(wave) }
-        waves = Dictionary(uniqueKeysWithValues: newWaves.map { ($0.id, $0) })
-        previousStatuses = Dictionary(uniqueKeysWithValues: newWaves.map { ($0.id, $0.status) })
+        var updatedWaves: [String: WaveViewModel] = [:]
+        var updatedStatuses: [String: WaveStatus] = [:]
+
+        for wave in newWaves {
+            let oldStatus = previousStatuses[wave.id]
+            if oldStatus != wave.status {
+                onStatusChange?(wave, oldStatus, wave.status)
+            }
+            updatedWaves[wave.id] = wave
+            updatedStatuses[wave.id] = wave.status
+        }
+
+        waves = updatedWaves
+        previousStatuses = updatedStatuses
     }
 
     @discardableResult
@@ -63,40 +78,31 @@ final class WaveStore {
 
     // MARK: - Private
 
-    private func detectStatusChange(_ wave: WaveViewModel) {
-        let old = previousStatuses[wave.id]
-        if old != wave.status {
-            onStatusChange?(wave, old, wave.status)
-        }
-        previousStatuses[wave.id] = wave.status
-    }
-
     private func recompute() {
         let allWaves = Array(waves.values)
 
         let blocked = allWaves.filter { $0.status == .failed }
+        let nonFailedWithoutPR = allWaves.filter { $0.status != .failed && $0.pendingPR == nil }
         let pr = allWaves.filter { $0.status != .failed && $0.pendingPR != nil }
 
         let hourAgo = Date().addingTimeInterval(-3600)
-        let recentActivity = Array(allWaves
+        let recentActivity = Array(nonFailedWithoutPR
             .filter { wave in
                 guard let lastActivity = wave.lastActivityAt else { return false }
-                return lastActivity > hourAgo && wave.status != .failed && wave.pendingPR == nil
+                return lastActivity > hourAgo
             }
             .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
             .prefix(5))
 
         let recentIds = Set(recentActivity.map(\.id))
 
-        let active = allWaves.filter { wave in
+        let active = nonFailedWithoutPR.filter { wave in
             (wave.status == .running || wave.status == .waiting)
-                && wave.pendingPR == nil
                 && !recentIds.contains(wave.id)
         }
 
-        let idle = allWaves.filter { wave in
+        let idle = nonFailedWithoutPR.filter { wave in
             wave.status == .idle
-                && wave.pendingPR == nil
                 && !recentIds.contains(wave.id)
         }
 

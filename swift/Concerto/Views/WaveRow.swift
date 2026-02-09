@@ -115,14 +115,14 @@ struct WaveRow: View {
                         .accessibilityIdentifier("wave-pr-limit")
                 }
 
-                if wave.stimulus.kind == .cron, let cron = wave.stimulus.cron {
+                if let stimulusLabel {
                     Text("•")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.3))
-                    Text(formatCron(cron))
+                    Text(stimulusLabel)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
-                        .accessibilityIdentifier("wave-cron")
+                        .accessibilityIdentifier("wave-stimulus")
                 }
             }
 
@@ -198,6 +198,29 @@ struct WaveRow: View {
         isEditingName = false
         isEditingAnyName = false
         isNameFocused = false
+    }
+
+    private var stimulusLabel: String? {
+        switch wave.stimulus.kind {
+        case .loop: return "loop"
+        case .watch: return "watching"
+        case .cron: return wave.stimulus.cron.map { formatCron($0) }
+        case .once, .manual: return nil
+        }
+    }
+
+    private var statusHelpText: String {
+        switch wave.status {
+        case .running: return "Running"
+        case .waiting: return "Waiting (PR limit reached)"
+        case .idle:
+            if wave.stimulus.kind == .cron {
+                return "Scheduled"
+            }
+            return "Idle"
+        case .failed: return "Failed"
+        case .paused: return "Paused"
+        }
     }
 
     private func formatCron(_ cron: String) -> String {

@@ -93,7 +93,7 @@ struct WaveRowViewTests {
         let wave = makeWave(stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"))
         let row = makeRow(wave: wave)
 
-        let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-cron").text()
+        let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-stimulus").text()
         #expect(try cronText.string() == "9am daily")
     }
 
@@ -102,7 +102,7 @@ struct WaveRowViewTests {
         let wave = makeWave(stimulus: Stimulus(kind: .cron, cron: "*/15 * * * *"))
         let row = makeRow(wave: wave)
 
-        let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-cron").text()
+        let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-stimulus").text()
         #expect(try cronText.string() == "*/15 * * * *")
     }
 

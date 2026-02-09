@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
-
 WAVE_MINIMAL = {
     "id": "abc-123",
     "name": "reduce",
@@ -52,18 +49,3 @@ WAVE_RUN_MINIMAL = {
     "local_worktree": "/tmp/wt",
     "remote_branch": "wave/reduce",
 }
-
-
-@pytest.fixture
-def wave_minimal():
-    return WAVE_MINIMAL.copy()
-
-
-@pytest.fixture
-def wave_full():
-    return WAVE_FULL.copy()
-
-
-@pytest.fixture
-def wave_run_minimal():
-    return WAVE_RUN_MINIMAL.copy()

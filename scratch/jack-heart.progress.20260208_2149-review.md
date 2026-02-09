@@ -47,5 +47,4 @@ The data flows one direction: Rust resolves flow steps at API response time, cli
 ## What's not included
 
 - No caching of flow step resolution results.
-- No Python test for `flow_steps` parsing (the field is accepted via Pydantic's default behavior; existing `test_unknown_fields_ignored` covers the pattern).
 - No Concerto UI tests for the running-state commit/diff display — these are view-layer changes best verified visually.

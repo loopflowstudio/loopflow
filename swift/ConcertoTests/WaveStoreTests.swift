@@ -151,4 +151,68 @@ struct WaveStoreOptimisticTests {
 
         #expect(notifiedNew == .idle)
     }
+
+    // MARK: - Pending mutations guard
+
+    @Test("set skips waves with pending optimistic mutations")
+    func setSkipsPendingMutations() {
+        let store = WaveStore()
+        store.set(makeWave(name: "original"))
+
+        _ = store.applyOptimistic("wave-1") { $0.name = "optimistic" }
+
+        // External set (simulating event arrival) should be blocked
+        store.set(makeWave(name: "from-event"))
+
+        #expect(store.wave(for: "wave-1")?.name == "optimistic")
+    }
+
+    @Test("commitMutation allows subsequent set calls through")
+    func commitMutationUnblocks() {
+        let store = WaveStore()
+        store.set(makeWave(name: "original"))
+
+        _ = store.applyOptimistic("wave-1") { $0.name = "optimistic" }
+        store.commitMutation("wave-1")
+
+        store.set(makeWave(name: "from-event"))
+
+        #expect(store.wave(for: "wave-1")?.name == "from-event")
+    }
+
+    @Test("rollback clears pending mutation state")
+    func rollbackClearsPendingState() {
+        let store = WaveStore()
+        store.set(makeWave(name: "original"))
+
+        let snapshot = store.applyOptimistic("wave-1") { $0.name = "optimistic" }
+
+        // Set blocked while pending
+        store.set(makeWave(name: "blocked"))
+        #expect(store.wave(for: "wave-1")?.name == "optimistic")
+
+        store.rollback(snapshot!)
+
+        // After rollback, set should work again
+        store.set(makeWave(name: "after-rollback"))
+        #expect(store.wave(for: "wave-1")?.name == "after-rollback")
+    }
+
+    @Test("setAll preserves optimistic state for pending waves")
+    func setAllPreservesPendingState() {
+        let store = WaveStore()
+        store.set(makeWave(id: "wave-1", name: "original"))
+        store.set(makeWave(id: "wave-2", name: "other"))
+
+        _ = store.applyOptimistic("wave-1") { $0.name = "optimistic" }
+
+        // Simulate full refresh from connected event
+        store.setAll([
+            makeWave(id: "wave-1", name: "server-name"),
+            makeWave(id: "wave-2", name: "other-updated"),
+        ])
+
+        #expect(store.wave(for: "wave-1")?.name == "optimistic")
+        #expect(store.wave(for: "wave-2")?.name == "other-updated")
+    }
 }

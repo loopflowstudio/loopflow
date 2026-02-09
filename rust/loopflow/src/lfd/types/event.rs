@@ -223,4 +223,40 @@ mod tests {
             assert_eq!(json, json2);
         }
     }
+
+    #[test]
+    fn wave_event_can_be_enriched_with_extra_field() {
+        let event = Event::wave_updated(test_id("wave-1"));
+        let mut base = serde_json::to_value(&event).unwrap();
+
+        // Simulate enrichment: add a "wave" object to the serialized event
+        let wave_data = serde_json::json!({ "id": "wave-1", "name": "test-wave" });
+        if let serde_json::Value::Object(ref mut map) = base {
+            map.insert("wave".to_string(), wave_data);
+        }
+
+        let json_str = serde_json::to_string(&base).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // Original event fields preserved
+        assert_eq!(parsed["type"], "wave_updated");
+        assert_eq!(parsed["wave_id"], "wave-1");
+        assert!(parsed["timestamp"].is_string());
+
+        // Enriched wave field present
+        assert_eq!(parsed["wave"]["id"], "wave-1");
+        assert_eq!(parsed["wave"]["name"], "test-wave");
+    }
+
+    #[test]
+    fn non_wave_events_have_no_wave_id_for_enrichment() {
+        // Agent events shouldn't be enriched — verify they don't match wave_id extraction
+        let event = Event::agent_started(
+            test_id("agent-1"),
+            "review".to_string(),
+            "/tmp/wt".to_string(),
+        );
+        let json = serde_json::to_value(&event).unwrap();
+        assert!(json.get("wave_id").is_none());
+    }
 }

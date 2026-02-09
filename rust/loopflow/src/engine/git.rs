@@ -157,7 +157,7 @@ pub fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
     let output = run_git(repo, &["symbolic-ref", "--short", "HEAD"])?;
     if output.status.success() {
         Ok(Some(
-            String::from_utf8_lossy(&output.stdout).to_string(),
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
         ))
     } else {
         // Detached HEAD

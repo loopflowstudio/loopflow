@@ -1,4 +1,9 @@
 # Open questions
 
-- Collapse currently filters open PRs by `headRefName` containing the sanitized wave name token. If branch naming diverges from wave names, we may need a stronger linkage (e.g., wave metadata in run snapshots).
-- The Runs tab chooses the absorb target as the most recent open/draft PR. Confirm if users should be able to pick any open PR instead.
+1. **PR identification for collapse**
+   - Collapse currently infers wave PRs from branch-name matching.
+   - Do we want explicit wave metadata on runs/PRs so collapse targets are unambiguous?
+
+2. **Absorb target selection UX**
+   - Runs tab currently absorbs into the most recent open/draft PR.
+   - Should users be able to choose any open PR as the absorb target?

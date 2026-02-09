@@ -25,7 +25,7 @@ struct NextActionsBar: View {
             // Status message
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Color.statusSuccess)
 
                 Text("\(stepsRunCount) step\(stepsRunCount == 1 ? "" : "s") run")
                     .font(.subheadline)

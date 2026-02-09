@@ -42,9 +42,14 @@ struct LiveOutput: View {
     }
 
     private func colorFor(_ text: String) -> Color {
+        // Parsed stream format from lfd
+        if text.hasPrefix("->") { return .white.opacity(0.45) }
+        if text == "ok" || text.hasPrefix("ok (") { return Color.statusSuccess }
+        if text == "failed" { return Color.statusError }
+        // Legacy prefix format
         if text.hasPrefix("→") { return .blue }
-        if text.hasPrefix("✓") { return .green }
-        if text.hasPrefix("✗") { return .red }
+        if text.hasPrefix("✓") { return Color.statusSuccess }
+        if text.hasPrefix("✗") { return Color.statusError }
         if text.hasPrefix("⚠") { return .orange }
         return .white.opacity(0.8)
     }

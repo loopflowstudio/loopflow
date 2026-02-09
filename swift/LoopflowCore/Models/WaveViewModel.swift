@@ -183,11 +183,11 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var statusIndicator: (icon: String, color: Color) {
         switch status {
         case .running:
-            return ("circle.fill", .green)
+            return ("circle.fill", .statusSuccess)
         case .waiting:
-            return ("circle.lefthalf.filled", .yellow)
+            return ("circle.lefthalf.filled", .statusWarning)
         case .failed:
-            return ("xmark.circle.fill", .red)
+            return ("xmark.circle.fill", .statusError)
         case .idle:
             if stimulus.kind == .cron {
                 return ("clock", .gray)

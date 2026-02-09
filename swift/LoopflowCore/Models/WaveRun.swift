@@ -13,11 +13,11 @@ public enum WaveRunStatus: String, Sendable, Codable {
 
     public var color: Color {
         switch self {
-        case .running: return .green
-        case .waiting: return .yellow
+        case .running: return .statusSuccess
+        case .waiting: return .statusWarning
         case .pending: return .blue
         case .completed: return .gray
-        case .failed: return .red
+        case .failed: return .statusError
         case .cancelled: return .orange
         }
     }

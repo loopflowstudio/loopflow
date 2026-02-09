@@ -123,7 +123,7 @@ struct StepRunner: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.lg)
-            .background(selectedFlow.isEmpty ? Color.gray : Color.green)
+            .background(selectedFlow.isEmpty ? Color.gray : palette.accent)
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         }

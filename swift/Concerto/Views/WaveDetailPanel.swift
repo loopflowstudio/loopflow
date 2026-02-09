@@ -204,9 +204,9 @@ struct WaveDetailPanel: View {
 
     private func prBadge(number: Int, state: PRState, url: URL?) -> some View {
         let color: Color = switch state {
-        case .open: .green
+        case .open: .statusSuccess
         case .merged: .purple
-        case .closed: .red
+        case .closed: .statusError
         case .draft: .orange
         }
 
@@ -359,7 +359,7 @@ struct WaveDetailPanel: View {
             if let error = wave.activeRun?.error {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.statusError)
                         .font(.caption)
                     Text(error)
                         .font(.caption)
@@ -368,7 +368,7 @@ struct WaveDetailPanel: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.08))
+                .background(Color.statusError.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 Text("No error details available.")
@@ -464,15 +464,60 @@ struct WaveDetailPanel: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
-            Text(stat)
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .padding(Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(stat.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                    coloredDiffStatLine(line)
+                }
+            }
+            .font(.system(.caption2, design: .monospaced))
+            .textSelection(.enabled)
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
         }
+    }
+
+    private func coloredDiffStatLine(_ line: String) -> Text {
+        // Lines with "|" have a stat bar: " src/foo.rs | 10 ++++----"
+        guard let pipeRange = line.range(of: " | ") else {
+            // Summary line: color insertion/deletion counts
+            return coloredDiffSummaryLine(line)
+        }
+
+        let prefix = Text(String(line[line.startIndex..<pipeRange.upperBound]))
+            .foregroundColor(.secondary)
+
+        let bar = String(line[pipeRange.upperBound...])
+        var result = prefix
+        for char in bar {
+            switch char {
+            case "+":
+                result = result + Text("+").foregroundColor(Color.statusSuccess)
+            case "-":
+                result = result + Text("-").foregroundColor(Color.statusError)
+            default:
+                result = result + Text(String(char)).foregroundColor(.secondary)
+            }
+        }
+        return result
+    }
+
+    private func coloredDiffSummaryLine(_ line: String) -> Text {
+        // "2 files changed, 8 insertions(+), 7 deletions(-)"
+        let parts = line.components(separatedBy: ", ")
+        var result = Text("")
+        for (i, part) in parts.enumerated() {
+            let separator = i > 0 ? Text(", ").foregroundColor(.secondary) : Text("")
+            if part.contains("insertion") {
+                result = result + separator + Text(part).foregroundColor(Color.statusSuccess)
+            } else if part.contains("deletion") {
+                result = result + separator + Text(part).foregroundColor(Color.statusError)
+            } else {
+                result = result + separator + Text(part).foregroundColor(.secondary)
+            }
+        }
+        return result
     }
 
     @State private var isLanding = false

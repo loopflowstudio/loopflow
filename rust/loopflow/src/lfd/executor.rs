@@ -22,6 +22,7 @@ use crate::engine::prompt::{
     gather_context, trim_context_with_breakdown, write_prompt_log, GatherContextOpts,
     DEFAULT_CONTEXT_BUDGET,
 };
+use crate::engine::stream::{render_event, ParseResult, StreamParser};
 use crate::engine::worktree::{create_worktree, remove_worktree};
 use crate::engine::worktrees::{
     create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
@@ -139,14 +140,34 @@ async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
     wave_run_id: String,
     agent_id: String,
 ) {
+    let mut parser = StreamParser::new();
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        output.send(OutputEvent {
-            wave_id: wave_id.clone(),
-            wave_run_id: wave_run_id.clone(),
-            agent_id: agent_id.clone(),
-            text: line,
-        });
+        match parser.feed_line(&line) {
+            ParseResult::Events(events) => {
+                for event in &events {
+                    let (stdout, stderr) = render_event(event, false);
+                    let text = if !stdout.is_empty() { stdout } else { stderr };
+                    if !text.is_empty() {
+                        output.send(OutputEvent {
+                            wave_id: wave_id.clone(),
+                            wave_run_id: wave_run_id.clone(),
+                            agent_id: agent_id.clone(),
+                            text,
+                        });
+                    }
+                }
+            }
+            ParseResult::Skipped => {}
+            ParseResult::Passthrough => {
+                output.send(OutputEvent {
+                    wave_id: wave_id.clone(),
+                    wave_run_id: wave_run_id.clone(),
+                    agent_id: agent_id.clone(),
+                    text: line,
+                });
+            }
+        }
     }
 }
 
@@ -845,5 +866,91 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
             warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to fetch PR info");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use tokio::io::{AsyncWriteExt, DuplexStream};
+
+    async fn write_lines(mut writer: DuplexStream, lines: &[&str]) {
+        for line in lines {
+            writer
+                .write_all(line.as_bytes())
+                .await
+                .expect("writer should accept line");
+            writer
+                .write_all(b"\n")
+                .await
+                .expect("writer should accept newline");
+        }
+        writer.shutdown().await.expect("writer should shut down");
+    }
+
+    #[tokio::test]
+    async fn read_stream_renders_stream_json_events() {
+        let output_dir = tempdir().expect("tempdir should be created");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let (writer, reader) = tokio::io::duplex(4096);
+
+        let write_task = tokio::spawn(write_lines(
+            writer,
+            &[
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}"#,
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"src/lib.rs"}}]}}"#,
+                r#"{"type":"result","subtype":"success"}"#,
+            ],
+        ));
+
+        read_stream(
+            reader,
+            output.clone(),
+            "wave-1".to_string(),
+            "run-1".to_string(),
+            "agent-1".to_string(),
+        )
+        .await;
+
+        write_task.await.expect("writer task should complete");
+
+        let lines = output.read_log("run-1").expect("output log should exist").0;
+
+        assert_eq!(lines, vec!["hello", "-> Read  src/lib.rs", "ok"]);
+    }
+
+    #[tokio::test]
+    async fn read_stream_skips_known_events_and_passes_through_unknown_lines() {
+        let output_dir = tempdir().expect("tempdir should be created");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let (writer, reader) = tokio::io::duplex(4096);
+
+        let write_task = tokio::spawn(write_lines(
+            writer,
+            &[
+                r#"{"type":"system","message":"skip me"}"#,
+                r#"{"type":"mystery","payload":42}"#,
+                "plain text line",
+            ],
+        ));
+
+        read_stream(
+            reader,
+            output.clone(),
+            "wave-1".to_string(),
+            "run-2".to_string(),
+            "agent-1".to_string(),
+        )
+        .await;
+
+        write_task.await.expect("writer task should complete");
+
+        let lines = output.read_log("run-2").expect("output log should exist").0;
+
+        assert_eq!(
+            lines,
+            vec![r#"{"type":"mystery","payload":42}"#, "plain text line"]
+        );
     }
 }

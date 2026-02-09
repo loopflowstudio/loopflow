@@ -66,8 +66,8 @@ struct WaveRow: View {
                             .fontWeight(.medium)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.3))
-                            .foregroundStyle(.green)
+                            .background(Color.statusSuccess.opacity(0.3))
+                            .foregroundStyle(Color.statusSuccess)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -120,7 +120,7 @@ struct WaveRow: View {
                         .foregroundStyle(.white.opacity(0.3))
                     Text("PR limit")
                         .font(.caption)
-                        .foregroundStyle(.yellow.opacity(0.7))
+                        .foregroundStyle(Color.statusWarning.opacity(0.7))
                         .accessibilityIdentifier("wave-pr-limit")
                 }
 

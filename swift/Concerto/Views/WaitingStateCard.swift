@@ -20,7 +20,7 @@ struct WaitingStateCard: View {
             // Status line
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "pause.circle.fill")
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(Color.statusWarning)
                 Text("Waiting")
                     .font(.headline)
             }
@@ -67,7 +67,7 @@ struct WaitingStateCard: View {
             if let error = collapseError {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusError)
             }
         }
         .padding(Spacing.lg)

@@ -44,7 +44,7 @@ struct InteractiveSessionView: View {
         HStack(spacing: 12) {
             // Status indicator
             Circle()
-                .fill(.green)
+                .fill(Color.statusSuccess)
                 .frame(width: 8, height: 8)
 
             // Wave name
@@ -89,7 +89,7 @@ struct InteractiveSessionView: View {
             case .failed(let error):
                 Label("Error", systemImage: "exclamationmark.triangle")
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusError)
                     .help(error)
             }
         }

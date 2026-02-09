@@ -318,6 +318,7 @@ impl Default for Config {
 /// - claude -> opus (Claude Opus 4.5)
 /// - gemini -> 2.5-pro (Gemini 2.5 Pro)
 /// - codex -> None (let Codex CLI pick its default)
+/// - opencode -> None (let OpenCode use its own config)
 pub fn parse_model(model: &str) -> (String, Option<String>) {
     let parts: Vec<&str> = model.splitn(2, ':').collect();
     let backend = parts[0].to_string();

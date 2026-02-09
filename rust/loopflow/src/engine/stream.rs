@@ -1,9 +1,9 @@
 //! Stateful parser and formatter for agent stream-json events.
 //!
-//! Parses streaming JSON lines from Claude, Codex, and Gemini into structured
-//! events and renders them as human-readable output (tool use summaries,
-//! cost/duration, text fragments). Gracefully degrades: unrecognized lines
-//! pass through to the caller.
+//! Parses streaming JSON lines from Claude, Codex, Gemini, and OpenCode into
+//! structured events and renders them as human-readable output (tool use
+//! summaries, cost/duration, text fragments). Gracefully degrades: unrecognized
+//! lines pass through to the caller.
 
 use std::io::Write;
 
@@ -52,9 +52,9 @@ pub enum StreamFormat {
 
 /// Stateful parser for stream-json lines.
 ///
-/// Handles Claude (`--output-format stream-json`), Codex (`--json`), and
-/// Gemini (`--output-format stream-json`) formats, normalizing all three
-/// into the same `StreamEvent` types.
+/// Handles Claude (`--output-format stream-json`), Codex (`--json`),
+/// Gemini (`--output-format stream-json`), and OpenCode (`--format json`)
+/// formats, normalizing all into the same `StreamEvent` types.
 #[derive(Debug, Default)]
 pub struct StreamParser;
 

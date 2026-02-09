@@ -1,9 +1,6 @@
-"""Shared fixtures for Python tests."""
+"""Shared test payloads for Python tests."""
 
 from __future__ import annotations
-
-import pytest
-
 
 WAVE_MINIMAL = {
     "id": "abc-123",
@@ -20,6 +17,7 @@ WAVE_FULL = {
     **WAVE_MINIMAL,
     "stimulus": {"kind": "manual"},
     "created_at": "2026-02-08T01:56:54Z",
+    "flow_steps": ["review", "iterate", "ship", "gate"],
     "commits": [
         {"sha": "a1b2c3d", "message": "implement: add retry logic"},
         {"sha": "e4f5g6h", "message": "design: initial sketch"},
@@ -51,18 +49,3 @@ WAVE_RUN_MINIMAL = {
     "local_worktree": "/tmp/wt",
     "remote_branch": "wave/reduce",
 }
-
-
-@pytest.fixture
-def wave_minimal():
-    return WAVE_MINIMAL.copy()
-
-
-@pytest.fixture
-def wave_full():
-    return WAVE_FULL.copy()
-
-
-@pytest.fixture
-def wave_run_minimal():
-    return WAVE_RUN_MINIMAL.copy()

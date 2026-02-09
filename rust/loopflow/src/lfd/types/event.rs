@@ -136,4 +136,90 @@ impl Event {
             timestamp: Self::now(),
         }
     }
+
+    pub fn wave_waiting(wave_id: LfdId, wave_run_id: LfdId, step: String) -> Self {
+        Self::WaveWaiting {
+            wave_id,
+            wave_run_id,
+            step,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn agent_started(agent_id: LfdId, step: String, worktree: String) -> Self {
+        Self::AgentStarted {
+            agent_id,
+            step,
+            worktree,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn agent_ended(agent_id: LfdId, status: String) -> Self {
+        Self::AgentEnded {
+            agent_id,
+            status,
+            timestamp: Self::now(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_id(s: &str) -> LfdId {
+        LfdId::from_raw(s)
+    }
+
+    #[test]
+    fn wave_waiting_serializes_correctly() {
+        let event =
+            Event::wave_waiting(test_id("wave-1"), test_id("run-1"), "implement".to_string());
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "wave_waiting");
+        assert_eq!(json["wave_id"], "wave-1");
+        assert_eq!(json["wave_run_id"], "run-1");
+        assert_eq!(json["step"], "implement");
+        assert!(json["timestamp"].is_string());
+    }
+
+    #[test]
+    fn agent_started_serializes_correctly() {
+        let event = Event::agent_started(
+            test_id("agent-1"),
+            "review".to_string(),
+            "/tmp/wt".to_string(),
+        );
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "agent_started");
+        assert_eq!(json["agent_id"], "agent-1");
+        assert_eq!(json["step"], "review");
+        assert_eq!(json["worktree"], "/tmp/wt");
+    }
+
+    #[test]
+    fn agent_ended_serializes_correctly() {
+        let event = Event::agent_ended(test_id("agent-1"), "completed".to_string());
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "agent_ended");
+        assert_eq!(json["agent_id"], "agent-1");
+        assert_eq!(json["status"], "completed");
+    }
+
+    #[test]
+    fn event_roundtrips_through_json() {
+        let id = || LfdId::new();
+        let events = vec![
+            Event::wave_waiting(id(), id(), "step".to_string()),
+            Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
+            Event::agent_ended(id(), "failed".to_string()),
+        ];
+        for event in events {
+            let json = serde_json::to_string(&event).unwrap();
+            let parsed: Event = serde_json::from_str(&json).unwrap();
+            let json2 = serde_json::to_string(&parsed).unwrap();
+            assert_eq!(json, json2);
+        }
+    }
 }

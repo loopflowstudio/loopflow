@@ -30,10 +30,12 @@ use crate::engine::worktrees::{
 
 use time::OffsetDateTime;
 
+use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SharedStore};
+use crate::lfd::types::Event;
 use crate::lfd::types::{
     Agent, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
@@ -177,16 +179,23 @@ pub struct WaveExecutor {
     scheduler: Arc<Scheduler>,
     output: OutputHub,
     runner: Arc<dyn StepRunner>,
+    event_hub: EventHub,
 }
 
 impl WaveExecutor {
-    pub fn new(store: SharedStore, scheduler: Arc<Scheduler>, output: OutputHub) -> Self {
+    pub fn new(
+        store: SharedStore,
+        scheduler: Arc<Scheduler>,
+        output: OutputHub,
+        event_hub: EventHub,
+    ) -> Self {
         let runner = Arc::new(AgentRunner::new(store.clone()));
         Self {
             store,
             scheduler,
             output,
             runner,
+            event_hub,
         }
     }
 
@@ -196,6 +205,7 @@ impl WaveExecutor {
         store: SharedStore,
         scheduler: Arc<Scheduler>,
         output: OutputHub,
+        event_hub: EventHub,
         runner: Arc<dyn StepRunner>,
     ) -> Self {
         Self {
@@ -203,6 +213,7 @@ impl WaveExecutor {
             scheduler,
             output,
             runner,
+            event_hub,
         }
     }
 
@@ -265,6 +276,11 @@ impl WaveExecutor {
                     run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run)?;
                     self.set_wave_status(&wave.id, WaveStatus::Waiting);
+                    self.event_hub.send(Event::wave_waiting(
+                        wave.id.clone(),
+                        run.id.clone(),
+                        step.step.name.clone(),
+                    ));
                     return Ok(());
                 }
                 FlowAction::Fork { fork } => match &fork.select {
@@ -306,6 +322,7 @@ impl WaveExecutor {
                     // Wave goes back to Idle after a run completes — the run
                     // is done, but the wave is ready for its next iteration.
                     self.set_wave_status(&wave.id, WaveStatus::Idle);
+                    self.event_hub.send(Event::wave_updated(wave.id.clone()));
                     return Ok(());
                 }
             }
@@ -325,6 +342,7 @@ impl WaveExecutor {
         run.error = Some(error);
         self.store.update_wave_run(run)?;
         self.set_wave_status(&wave.id, WaveStatus::Failed);
+        self.event_hub.send(Event::wave_updated(wave.id.clone()));
         Ok(())
     }
 
@@ -346,6 +364,11 @@ impl WaveExecutor {
         );
         let agent_id = agent.id.clone();
         self.store.start_agent(&agent)?;
+        self.event_hub.send(Event::agent_started(
+            agent_id.clone(),
+            step.step.name.clone(),
+            worktree.clone(),
+        ));
 
         let exit_code = self
             .runner
@@ -366,6 +389,8 @@ impl WaveExecutor {
             AgentStatus::Failed
         };
         self.store.end_agent(&agent_id, status.as_i32(), ended_at)?;
+        self.event_hub
+            .send(Event::agent_ended(agent_id, status.as_str().to_string()));
 
         Ok(exit_code)
     }
@@ -470,6 +495,7 @@ impl WaveExecutor {
             let runner = self.runner.clone();
             let output = self.output.clone();
             let scheduler = self.scheduler.clone();
+            let event_hub = self.event_hub.clone();
             let cancel = cancel.clone();
             let tx = tx.clone();
             let fork_wave_id = wave.id.clone();
@@ -538,6 +564,11 @@ impl WaveExecutor {
                     &model,
                 );
                 let _ = store.start_agent(&agent);
+                event_hub.send(Event::agent_started(
+                    agent.id.clone(),
+                    step.step.name.clone(),
+                    worktree.clone(),
+                ));
 
                 let result = runner
                     .run(
@@ -557,6 +588,10 @@ impl WaveExecutor {
                     _ => AgentStatus::Failed,
                 };
                 let _ = store.end_agent(&agent.id, agent_status.as_i32(), ended_at);
+                event_hub.send(Event::agent_ended(
+                    agent.id.clone(),
+                    agent_status.as_str().to_string(),
+                ));
 
                 let status = match &result {
                     Ok(0) => {

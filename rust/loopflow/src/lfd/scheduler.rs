@@ -5,6 +5,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::store::SharedStore;
 use crate::lfd::triggers;
@@ -79,6 +80,7 @@ impl Scheduler {
         self: Arc<Self>,
         store: SharedStore,
         executor: WaveExecutor,
+        event_hub: EventHub,
         cancel: CancellationToken,
     ) -> Vec<JoinHandle<()>> {
         vec![
@@ -86,18 +88,21 @@ impl Scheduler {
                 self.clone(),
                 store.clone(),
                 executor.clone(),
+                event_hub.clone(),
                 cancel.clone(),
             ),
             triggers::spawn_watch_poller(
                 store.clone(),
                 executor.clone(),
                 self.clone(),
+                event_hub.clone(),
                 cancel.clone(),
             ),
             triggers::spawn_cron_poller(
                 store.clone(),
                 executor.clone(),
                 self.clone(),
+                event_hub,
                 cancel.clone(),
             ),
             triggers::spawn_recovery_loop(store, executor, cancel),

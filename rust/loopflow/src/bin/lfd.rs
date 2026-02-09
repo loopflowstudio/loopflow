@@ -72,11 +72,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
     let event_hub = EventHub::new(1024);
-    let executor = WaveExecutor::new(store.clone(), scheduler.clone(), output.clone());
-    let loop_handles =
-        scheduler
-            .clone()
-            .start_loops(store.clone(), executor.clone(), cancel.clone());
+    let executor = WaveExecutor::new(
+        store.clone(),
+        scheduler.clone(),
+        output.clone(),
+        event_hub.clone(),
+    );
+    let loop_handles = scheduler.clone().start_loops(
+        store.clone(),
+        executor.clone(),
+        event_hub.clone(),
+        cancel.clone(),
+    );
 
     let http_state = HttpState {
         store: store.clone(),

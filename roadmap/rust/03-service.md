@@ -481,5 +481,5 @@ lfd uninstall
 
 ## Dependencies
 
-- Requires: 02-lfd-primary (daemon needs to actually work)
+- Requires: Phase 1 lfd working (it does)
 - Enables: Persistent wave execution (loop, watch, cron)

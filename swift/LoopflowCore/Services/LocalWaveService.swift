@@ -382,6 +382,8 @@ public struct LocalWaveService: @unchecked Sendable {
             commits = []
         }
 
+        let flowSteps = json["flow_steps"] as? [String] ?? []
+
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
@@ -396,6 +398,7 @@ public struct LocalWaveService: @unchecked Sendable {
             remoteBranch: json["remote_branch"] as? String,
             commits: commits,
             diffStat: json["diff_stat"] as? String,
+            flowSteps: flowSteps,
             activeRun: activeRun,
             createdAt: createdAt
         )

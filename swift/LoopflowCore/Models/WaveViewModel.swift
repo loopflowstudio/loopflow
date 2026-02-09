@@ -22,7 +22,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var pid: Int?
     public var lastMainSha: String?
     public var waitingReason: WaitingReason?
-    public var flowSteps: [String]?
     public var runStartedAt: Date?
 
     public init(
@@ -46,7 +45,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         pid: Int? = nil,
         lastMainSha: String? = nil,
         waitingReason: WaitingReason? = nil,
-        flowSteps: [String]? = nil,
         runStartedAt: Date? = nil
     ) {
         let activeRun = api.activeRun
@@ -70,7 +68,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         self.pid = pid
         self.lastMainSha = lastMainSha
         self.waitingReason = waitingReason
-        self.flowSteps = flowSteps
         self.runStartedAt = runStartedAt ?? activeRun?.startedAt
     }
 
@@ -153,6 +150,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var commits: [CommitEntry] { api.commits }
     public var diffStat: String? { api.diffStat }
+    public var flowSteps: [String] { api.flowSteps }
 
     public var statusText: String {
         switch status {

@@ -92,6 +92,7 @@ pub struct WaveDto {
     pub commits: Vec<CommitEntryDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff_stat: Option<String>,
+    pub flow_steps: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
 }
@@ -234,6 +235,7 @@ pub fn wave_dto(
     remote_branch: Option<String>,
     commits: Vec<CommitEntryDto>,
     diff_stat: Option<String>,
+    flow_steps: Vec<String>,
 ) -> WaveDto {
     WaveDto {
         id: wave.id.to_string(),
@@ -250,6 +252,7 @@ pub fn wave_dto(
         remote_branch,
         commits,
         diff_stat,
+        flow_steps,
         active_run,
     }
 }

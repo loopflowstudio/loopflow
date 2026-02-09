@@ -161,6 +161,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var remoteBranch: String?
     public var commits: [CommitEntry]
     public var diffStat: String?
+    public var flowSteps: [String]
     public var activeRun: WaveRun?
     public var createdAt: Date?
 
@@ -178,6 +179,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         remoteBranch: String? = nil,
         commits: [CommitEntry] = [],
         diffStat: String? = nil,
+        flowSteps: [String] = [],
         activeRun: WaveRun? = nil,
         createdAt: Date? = nil
     ) {
@@ -194,6 +196,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.remoteBranch = remoteBranch
         self.commits = commits
         self.diffStat = diffStat
+        self.flowSteps = flowSteps
         self.activeRun = activeRun
         self.createdAt = createdAt
     }

@@ -50,10 +50,24 @@ pub async fn build_wave_dto(
     let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
-    let git_state = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
-        .await
-        .ok()
-        .flatten();
+    let flow_name = wave.flow.clone();
+    let flow_repo = wave.repo.clone();
+    let (git_state, flow_steps) = tokio::join!(
+        async {
+            tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
+                .await
+                .ok()
+                .flatten()
+        },
+        async {
+            tokio::task::spawn_blocking(move || {
+                flows::load_flow_steps(&flow_name, std::path::Path::new(&flow_repo))
+                    .unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default()
+        }
+    );
 
     let active_run = if include_active_run {
         latest.map(wave_run_dto)
@@ -77,6 +91,7 @@ pub async fn build_wave_dto(
         remote_branch,
         commits,
         diff_stat,
+        flow_steps,
     ))
 }
 

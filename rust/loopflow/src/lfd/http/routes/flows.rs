@@ -104,7 +104,7 @@ fn list_repo_flows(repo: &Path) -> Vec<(String, Vec<String>)> {
     result
 }
 
-fn load_flow_steps(name: &str, repo: &Path) -> Option<Vec<String>> {
+pub(super) fn load_flow_steps(name: &str, repo: &Path) -> Option<Vec<String>> {
     let flow = crate::engine::flow::load_flow(name, repo).ok()?;
     let items = crate::engine::flow::expand_flow(&flow, repo).ok()?;
     Some(extract_step_names(&items))

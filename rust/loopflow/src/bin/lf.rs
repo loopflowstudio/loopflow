@@ -37,7 +37,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 
 /// Known subcommands that should not be treated as step names.
-const KNOWN_COMMANDS: &[&str] = &["run", ":", "ops", "help"];
+const KNOWN_COMMANDS: &[&str] = &["run", ":", "ops", "summarize", "help"];
 
 /// Reorder args so flags come before the step/flow name.
 /// This allows `lf debug -c` to work like `lf -c debug`.
@@ -159,6 +159,9 @@ fn main() -> anyhow::Result<()> {
             loopflow::lf::commands::run::run(None, Some(&text), &cli)
         }
         Some(Commands::Ops { op }) => loopflow::lf::commands::ops::run(op),
+        Some(Commands::Summarize { path, force }) => {
+            loopflow::lf::commands::summarize::run(path.as_deref(), *force)
+        }
         Some(Commands::External(args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(args)?;
             let message = if step_args.is_empty() {

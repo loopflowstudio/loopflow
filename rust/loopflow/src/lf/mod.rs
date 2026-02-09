@@ -99,6 +99,14 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
+    /// Generate area summaries for LLM context
+    Summarize {
+        /// Specific area path to summarize (default: all configured areas)
+        path: Option<String>,
+        /// Force regeneration even if cache is fresh
+        #[arg(long)]
+        force: bool,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),

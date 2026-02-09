@@ -9,9 +9,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
+use crate::engine::config::SummaryConfig;
 use crate::engine::error::CoreError;
 use crate::engine::flow::{load_direction, load_step, Direction, Step};
 use once_cell::sync::Lazy;
+use sha2::{Digest, Sha256};
 use tiktoken_rs::CoreBPE;
 use tracing::debug;
 
@@ -415,6 +417,16 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         "gathered area docs"
     );
 
+    // Load cached summaries from .lf/summaries/
+    let summaries_start = Instant::now();
+    let config = crate::engine::config::load_config_or_default(Some(repo_root));
+    let summaries = load_summaries(repo_root, &config.summaries);
+    debug!(
+        elapsed_ms = summaries_start.elapsed().as_millis(),
+        count = summaries.len(),
+        "loaded summaries"
+    );
+
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         run_mode: opts.run_mode.clone(),
@@ -425,7 +437,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
         directions,
-        summaries: Vec::new(), // TODO: implement summary loading
+        summaries,
         wave: opts.wave.clone(),
         loopflow_doc,
         message: opts.message.clone(),
@@ -434,6 +446,176 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         area_docs,
         area: opts.area.clone(),
     })
+}
+
+/// Compute SHA-256 hash of a normalized area path.
+fn path_hash(path: &str) -> String {
+    let normalized = path.trim_end_matches('/');
+    let mut hasher = Sha256::new();
+    hasher.update(normalized.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// Compute SHA-256 of concatenated file contents in an area.
+///
+/// Files are sorted by relative path for determinism. Respects `.gitignore`.
+pub fn compute_source_hash(repo_root: &Path, area_path: &str) -> Result<String, CoreError> {
+    let full_path = repo_root.join(area_path);
+    if !full_path.exists() {
+        return Ok(String::new());
+    }
+
+    let walker = ignore::WalkBuilder::new(&full_path)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    for entry in walker.flatten() {
+        if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            files.push(entry.into_path());
+        }
+    }
+    files.sort();
+
+    let mut hasher = Sha256::new();
+    for file in &files {
+        if let Ok(content) = fs::read(file) {
+            hasher.update(&content);
+        }
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Load cached summaries from `.lf/summaries/` for configured areas.
+///
+/// Returns a `Document` per area that has a cached summary file.
+/// Missing summaries are skipped silently — they're supplementary, never blocking.
+pub fn load_summaries(repo_root: &Path, summaries: &[SummaryConfig]) -> Vec<Document> {
+    let summaries_dir = repo_root.join(".lf/summaries");
+    if !summaries_dir.exists() || summaries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut docs = Vec::new();
+    for config in summaries {
+        let hash = path_hash(&config.path);
+        let summary_file = summaries_dir.join(format!("{}.md", hash));
+
+        if let Ok(content) = fs::read_to_string(&summary_file) {
+            // Strip YAML frontmatter if present
+            let body = strip_frontmatter(&content);
+            if !body.trim().is_empty() {
+                docs.push(Document {
+                    path: config.path.clone(),
+                    content: body,
+                    category: "summaries".to_string(),
+                });
+            }
+        }
+    }
+
+    docs
+}
+
+/// Parse YAML frontmatter from a summary file, returning the metadata as key-value pairs.
+pub fn parse_summary_frontmatter(content: &str) -> HashMap<String, String> {
+    let mut meta = HashMap::new();
+    if !content.starts_with("---") {
+        return meta;
+    }
+    if let Some(end) = content[3..].find("\n---") {
+        let yaml_block = &content[3..3 + end];
+        for line in yaml_block.lines() {
+            if let Some((key, value)) = line.split_once(':') {
+                meta.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+    }
+    meta
+}
+
+/// Strip YAML frontmatter from content, returning just the body.
+fn strip_frontmatter(content: &str) -> String {
+    if !content.starts_with("---") {
+        return content.to_string();
+    }
+    if let Some(end) = content[3..].find("\n---") {
+        let after = 3 + end + 4; // skip past "\n---"
+        if after < content.len() {
+            return content[after..].trim_start_matches('\n').to_string();
+        }
+    }
+    content.to_string()
+}
+
+/// Check if a cached summary is fresh by comparing source hashes.
+pub fn is_summary_fresh(repo_root: &Path, area_path: &str) -> Result<bool, CoreError> {
+    let hash = path_hash(area_path);
+    let summary_file = repo_root.join(".lf/summaries").join(format!("{}.md", hash));
+
+    if !summary_file.exists() {
+        return Ok(false);
+    }
+
+    let content = fs::read_to_string(&summary_file)?;
+    let meta = parse_summary_frontmatter(&content);
+
+    let stored_hash = match meta.get("source_hash") {
+        Some(h) => h.clone(),
+        None => return Ok(false),
+    };
+
+    let current_hash = compute_source_hash(repo_root, area_path)?;
+    Ok(stored_hash == current_hash)
+}
+
+/// Count total tokens of source files in an area (for preload threshold).
+pub fn count_area_tokens(repo_root: &Path, area_path: &str) -> Result<usize, CoreError> {
+    let full_path = repo_root.join(area_path);
+    if !full_path.exists() {
+        return Ok(0);
+    }
+
+    let walker = ignore::WalkBuilder::new(&full_path)
+        .hidden(true)
+        .git_ignore(true)
+        .build();
+
+    let mut total = 0;
+    for entry in walker.flatten() {
+        if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                total += count_tokens(&content);
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// Write a summary file with YAML frontmatter.
+pub fn write_summary(
+    repo_root: &Path,
+    area_path: &str,
+    source_hash: &str,
+    tokens: usize,
+    model: &str,
+    body: &str,
+) -> Result<(), CoreError> {
+    let summaries_dir = repo_root.join(".lf/summaries");
+    fs::create_dir_all(&summaries_dir)?;
+
+    let hash = path_hash(area_path);
+    let summary_file = summaries_dir.join(format!("{}.md", hash));
+
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    let content = format!(
+        "---\npath: {}\nsource_hash: {}\ntokens: {}\ngenerated_at: {}\nmodel: {}\n---\n{}",
+        area_path, source_hash, tokens, now, model, body
+    );
+
+    fs::write(&summary_file, content)?;
+    Ok(())
 }
 
 /// Gather docs from repo (scratch/, roadmap/<wave>/, root .md files).
@@ -1044,6 +1226,11 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     }
 
     Ok(())
+}
+
+/// Public wrapper for ensure_gitignore_entry.
+pub fn ensure_gitignore_entry_pub(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
+    ensure_gitignore_entry(repo_root, entry)
 }
 
 /// Format direction tags as XML blocks.

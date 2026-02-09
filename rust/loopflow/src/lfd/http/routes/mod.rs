@@ -5,7 +5,7 @@ pub mod wave_runs;
 pub mod waves;
 pub mod ws;
 
-use crate::lfd::http::dto::{wave_dto, wave_run_dto, ErrorResponse, WaveDto};
+use crate::lfd::http::dto::{wave_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto};
 use crate::lfd::http::run_store;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{SharedStore, StoreError};
@@ -47,25 +47,37 @@ pub async fn build_wave_dto(
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
     let wave_id = wave.id.clone();
-    let active = run_store(store, move |store| store.get_active_wave_run(&wave_id)).await?;
+    let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
-    let wave_worktree = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
+    let git_state = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
         .await
         .ok()
         .flatten();
 
     let active_run = if include_active_run {
-        active.map(wave_run_dto)
+        latest.map(wave_run_dto)
     } else {
         None
     };
-    let (local_worktree, remote_branch) = match wave_worktree {
-        Some((worktree, branch)) => (Some(worktree), branch),
-        None => (None, None),
+    let (local_worktree, remote_branch, commits, diff_stat) = match git_state {
+        Some(state) => (
+            Some(state.worktree),
+            state.branch,
+            state.commits,
+            state.diff_stat,
+        ),
+        None => (None, None, Vec::new(), None),
     };
 
-    Ok(wave_dto(&wave, active_run, local_worktree, remote_branch))
+    Ok(wave_dto(
+        &wave,
+        active_run,
+        local_worktree,
+        remote_branch,
+        commits,
+        diff_stat,
+    ))
 }
 
 /// Cursor-based pagination over a list of items with an `id: LfdId` field.
@@ -97,12 +109,71 @@ pub fn paginate<T>(
     (items, has_more)
 }
 
-fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<(String, Option<String>)> {
+struct WaveGitState {
+    worktree: String,
+    branch: Option<String>,
+    commits: Vec<CommitEntryDto>,
+    diff_stat: Option<String>,
+}
+
+fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
     let repo_path = std::path::Path::new(repo);
     let worktree = crate::engine::worktrees::worktree_path(repo_path, wave_name);
     if !worktree.exists() {
         return None;
     }
     let branch = crate::engine::git::current_branch(&worktree).ok().flatten();
-    Some((worktree.to_string_lossy().to_string(), branch))
+
+    let main_repo =
+        crate::engine::worktrees::main_repo_root(&worktree).unwrap_or_else(|_| worktree.clone());
+    let base_branch = crate::engine::git::get_default_branch(&main_repo).unwrap_or_default();
+    let diff_ref = format!("origin/{base_branch}");
+
+    let commits = git_commit_log(&worktree, &diff_ref);
+    let diff_stat = git_diff_stat(&worktree, &diff_ref);
+
+    Some(WaveGitState {
+        worktree: worktree.to_string_lossy().to_string(),
+        branch,
+        commits,
+        diff_stat,
+    })
+}
+
+fn git_commit_log(worktree: &std::path::Path, diff_ref: &str) -> Vec<CommitEntryDto> {
+    let output = std::process::Command::new("git")
+        .args(["log", "--oneline", &format!("{diff_ref}..HEAD")])
+        .current_dir(worktree)
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let (sha, message) = line.split_once(' ')?;
+            Some(CommitEntryDto {
+                sha: sha.to_string(),
+                message: message.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--stat", diff_ref])
+        .current_dir(worktree)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stat.is_empty() {
+        None
+    } else {
+        Some(stat)
+    }
 }

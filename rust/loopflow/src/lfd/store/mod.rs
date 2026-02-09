@@ -76,6 +76,7 @@ pub trait RunStore: Send + Sync {
     ) -> StoreResult<Vec<WaveRun>>;
     fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>>;
     fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
+    fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
     fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
     fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
 
@@ -315,9 +316,10 @@ mod tests {
         assert!(store.get_wave(&wave.id).unwrap().is_none());
     }
 
-    /// get_active_wave_run must return failed runs so the UI can display
-    /// error details. Previously only pending/running/waiting were included.
-    fn run_active_run_includes_failed(store: &dyn RunStore) {
+    /// get_active_wave_run excludes failed runs (they're not active).
+    /// get_latest_wave_run returns the most recent run regardless of status,
+    /// so the UI can still display error details for failed waves.
+    fn run_active_excludes_failed_latest_includes(store: &dyn RunStore) {
         let wave = make_wave("/repo-fail-test");
         store.create_wave(&wave).unwrap();
 
@@ -343,22 +345,26 @@ mod tests {
         };
         store.create_wave_run(&run).unwrap();
 
-        // Should find the running run
+        // Should find the running run as active
         let active = store.get_active_wave_run(&wave.id).unwrap();
         assert!(active.is_some(), "should find running run");
 
-        // Mark as failed with an error message
+        // Mark as failed
         run.status = WaveRunStatus::Failed;
         run.error = Some("step reduce failed".to_string());
         run.ended_at = Some(OffsetDateTime::now_utc());
         store.update_wave_run(&run).unwrap();
 
-        // Should still find the failed run
+        // get_active_wave_run should NOT return failed runs
         let active = store.get_active_wave_run(&wave.id).unwrap();
-        assert!(active.is_some(), "should find failed run");
-        let active = active.unwrap();
-        assert_eq!(active.status, WaveRunStatus::Failed);
-        assert_eq!(active.error.as_deref(), Some("step reduce failed"));
+        assert!(active.is_none(), "failed run should not be active");
+
+        // get_latest_wave_run should still return the failed run
+        let latest = store.get_latest_wave_run(&wave.id).unwrap();
+        assert!(latest.is_some(), "should find failed run via latest");
+        let latest = latest.unwrap();
+        assert_eq!(latest.status, WaveRunStatus::Failed);
+        assert_eq!(latest.error.as_deref(), Some("step reduce failed"));
 
         store.delete_wave(&wave.id).unwrap();
     }
@@ -390,7 +396,7 @@ mod tests {
             .to_string();
         let store = super::sqlite::SqliteStore::new(&PathBuf::from(path)).unwrap();
         run_store_suite(&store);
-        run_active_run_includes_failed(&store);
+        run_active_excludes_failed_latest_includes(&store);
     }
 
     #[test]
@@ -405,7 +411,7 @@ mod tests {
             reset_postgres(&url);
             let store = super::postgres::PostgresStore::connect(&url).unwrap();
             run_store_suite(&store);
-            run_active_run_includes_failed(&store);
+            run_active_excludes_failed_latest_includes(&store);
             return;
         }
 
@@ -426,6 +432,6 @@ mod tests {
         reset_postgres(&url);
         let store = super::postgres::PostgresStore::connect(&url).unwrap();
         run_store_suite(&store);
-        run_active_run_includes_failed(&store);
+        run_active_excludes_failed_latest_includes(&store);
     }
 }

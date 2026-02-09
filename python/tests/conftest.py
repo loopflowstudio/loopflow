@@ -20,6 +20,11 @@ WAVE_FULL = {
     **WAVE_MINIMAL,
     "stimulus": {"kind": "manual"},
     "created_at": "2026-02-08T01:56:54Z",
+    "commits": [
+        {"sha": "a1b2c3d", "message": "implement: add retry logic"},
+        {"sha": "e4f5g6h", "message": "design: initial sketch"},
+    ],
+    "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
     "active_run": {
         "id": "run-1",
         "wave_id": "abc-123",

@@ -68,6 +68,12 @@ impl<T> ListResponse<T> {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CommitEntryDto {
+    pub sha: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct WaveDto {
     pub id: String,
     pub object: String,
@@ -83,6 +89,9 @@ pub struct WaveDto {
     pub local_worktree: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_branch: Option<String>,
+    pub commits: Vec<CommitEntryDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_stat: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
 }
@@ -148,6 +157,11 @@ pub struct LandWaveResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct NextWaveResponse {
+    pub new_branch: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,
@@ -194,6 +208,8 @@ pub fn wave_dto(
     active_run: Option<WaveRunDto>,
     local_worktree: Option<String>,
     remote_branch: Option<String>,
+    commits: Vec<CommitEntryDto>,
+    diff_stat: Option<String>,
 ) -> WaveDto {
     WaveDto {
         id: wave.id.to_string(),
@@ -208,6 +224,8 @@ pub fn wave_dto(
         iteration: wave.iteration,
         local_worktree,
         remote_branch,
+        commits,
+        diff_stat,
         active_run,
     }
 }

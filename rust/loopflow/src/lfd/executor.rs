@@ -265,8 +265,26 @@ impl WaveExecutor {
                 FlowAction::Complete => {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
+
+                    // Auto-create draft PR (best-effort).
+                    let worktree = run.worktree.clone();
+                    match tokio::task::spawn_blocking(move || auto_create_pr(Path::new(&worktree)))
+                        .await
+                    {
+                        Ok(Some(pr)) => {
+                            info!(run_id = %run.id, url = %pr.url, "auto-created draft PR");
+                            run.snapshot.pr = Some(pr);
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                        }
+                    }
+
                     self.store.update_wave_run(&run)?;
-                    self.set_wave_status(&wave.id, WaveStatus::Completed);
+                    // Wave goes back to Idle after a run completes — the run
+                    // is done, but the wave is ready for its next iteration.
+                    self.set_wave_status(&wave.id, WaveStatus::Idle);
                     return Ok(());
                 }
             }
@@ -789,5 +807,43 @@ fn build_agent_for_step(
         pid: None,
         model: model.to_string(),
         run_mode: "auto".to_string(),
+    }
+}
+
+/// Commit any remaining changes, push, and create a draft PR.
+/// Returns the PR info if successful, None if skipped or failed.
+fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
+    use crate::ops::{commit_workflow, current_pr, CommitOptions, NullProgress};
+
+    let commit_options = CommitOptions {
+        add: true,
+        lint: false,
+        push: true,
+        create_draft_pr: true,
+        task: "commit".to_string(),
+        flow_parents: Vec::new(),
+        message: None,
+    };
+    if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {
+        warn!(worktree = %worktree.display(), error = %err, "auto-create PR: commit/push failed");
+        return None;
+    }
+
+    match current_pr(worktree) {
+        Ok(Some(pr)) => Some(crate::lfd::types::PullRequest {
+            url: pr.url,
+            number: Some(pr.number as u32),
+            state: Some(pr.state),
+            branch: Some(pr.branch),
+            title: None,
+        }),
+        Ok(None) => {
+            debug!(worktree = %worktree.display(), "auto-create PR: no PR found after push");
+            None
+        }
+        Err(err) => {
+            warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to fetch PR info");
+            None
+        }
     }
 }

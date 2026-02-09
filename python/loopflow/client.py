@@ -39,14 +39,14 @@ class Client:
         params: dict[str, str] = {}
         if repo:
             params["repo"] = repo
-        payload = self._request_json("GET", "/v1/waves", params=params)
+        payload = self._request_json("GET", "/v0/waves", params=params)
         data = payload.get("data", [])
         return [Wave.model_validate(item) for item in data]
 
     def wave(self, name_or_id: str) -> Optional[Wave]:
         payload = self._request_json(
             "GET",
-            f"/v1/waves/{name_or_id}",
+            f"/v0/waves/{name_or_id}",
             allow_not_found=True,
         )
         if payload is None:
@@ -68,7 +68,7 @@ class Client:
             body["direction"] = direction
         if area is not None:
             body["area"] = area
-        payload = self._request_json("POST", "/v1/waves", json=body)
+        payload = self._request_json("POST", "/v0/waves", json=body)
         return Wave.model_validate(payload)
 
     def update_wave(
@@ -91,11 +91,11 @@ class Client:
             body["stimulus"] = stimulus.model_dump(exclude_none=True)
         if status is not None:
             body["status"] = status
-        payload = self._request_json("PATCH", f"/v1/waves/{name_or_id}", json=body)
+        payload = self._request_json("PATCH", f"/v0/waves/{name_or_id}", json=body)
         return Wave.model_validate(payload)
 
     def delete_wave(self, name_or_id: str) -> None:
-        self._request_json("DELETE", f"/v1/waves/{name_or_id}")
+        self._request_json("DELETE", f"/v0/waves/{name_or_id}")
 
     def run_wave(
         self,
@@ -111,10 +111,10 @@ class Client:
             body["direction"] = direction
         if area is not None:
             body["area"] = area
-        return self._request_json("POST", f"/v1/waves/{name_or_id}/run", json=body)
+        return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
 
     def stop_wave(self, name_or_id: str) -> dict[str, Any]:
-        return self._request_json("POST", f"/v1/waves/{name_or_id}/stop")
+        return self._request_json("POST", f"/v0/waves/{name_or_id}/stop")
 
     def land_wave(
         self,
@@ -136,7 +136,10 @@ class Client:
             body["worktree"] = worktree
         if lint is not None:
             body["lint"] = lint
-        return self._request_json("POST", f"/v1/waves/{name_or_id}/land", json=body)
+        return self._request_json("POST", f"/v0/waves/{name_or_id}/land", json=body)
+
+    def next_wave(self, name_or_id: str) -> dict[str, Any]:
+        return self._request_json("POST", f"/v0/waves/{name_or_id}/next")
 
     def wave_runs(
         self,
@@ -151,7 +154,7 @@ class Client:
             params["repo"] = repo
         if limit is not None:
             params["limit"] = str(limit)
-        payload = self._request_json("GET", "/v1/wave_runs", params=params)
+        payload = self._request_json("GET", "/v0/wave_runs", params=params)
         data = payload.get("data", [])
         return [WaveRun.model_validate(item) for item in data]
 
@@ -159,7 +162,7 @@ class Client:
         try:
             with self._client.stream(
                 "GET",
-                f"/v1/waves/{name_or_id}/logs",
+                f"/v0/waves/{name_or_id}/logs",
             ) as response:
                 if response.status_code >= 400:
                     message = _extract_error_message(response)

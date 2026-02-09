@@ -431,7 +431,7 @@ final class RepoState {
                 }
             }
 
-        case .running, .completed, .paused:
+        case .running, .paused:
             break  // No notification needed
         }
     }
@@ -542,6 +542,16 @@ final class RepoState {
             status: status
         )
         _ = try await waveService.updateWave(wave.id, config: config)
+        await refreshWaves()
+    }
+
+    func landWave(_ wave: WaveViewModel) async throws {
+        try await waveService.landWave(wave.id)
+        await refreshWaves()
+    }
+
+    func nextWave(_ wave: WaveViewModel) async throws {
+        _ = try await waveService.nextWave(wave.id)
         await refreshWaves()
     }
 

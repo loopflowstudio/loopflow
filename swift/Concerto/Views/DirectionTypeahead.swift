@@ -57,7 +57,7 @@ struct DirectionTypeahead: View {
             }
         }
         .onAppear {
-            selectedDirections = wave.direction.filter { $0 != "default" }
+            selectedDirections = wave.direction
         }
     }
 

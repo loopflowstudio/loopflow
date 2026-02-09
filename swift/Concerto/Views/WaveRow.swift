@@ -1,5 +1,5 @@
-// Row view for displaying an wave in the sidebar.
-// Uses status indicators from design: ● Running, ◐ Waiting, ○ Idle, ◷ Scheduled, ✓ Completed, ✗ Error
+// Row view for displaying a wave in the sidebar.
+// Uses status indicators from design: ● Running, ◐ Waiting, ○ Idle, ◷ Scheduled, ✗ Failed
 
 import SwiftUI
 import AppKit
@@ -218,7 +218,6 @@ struct WaveRow: View {
                 return "Scheduled"
             }
             return "Idle"
-        case .completed: return "Completed"
         case .failed: return "Failed"
         case .paused: return "Paused"
         }

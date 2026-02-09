@@ -34,6 +34,11 @@ class WaveRun(BaseModel):
     flow_parents: list[str] = Field(default_factory=list)
 
 
+class CommitEntry(BaseModel):
+    sha: str
+    message: str
+
+
 class Wave(BaseModel):
     id: str
     name: str
@@ -46,6 +51,8 @@ class Wave(BaseModel):
     iteration: int
     local_worktree: Optional[str] = None
     remote_branch: Optional[str] = None
+    commits: list[CommitEntry] = Field(default_factory=list)
+    diff_stat: Optional[str] = None
     active_run: Optional[WaveRun] = None
     created_at: Optional[datetime] = None
 

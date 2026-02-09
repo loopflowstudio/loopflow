@@ -11,8 +11,8 @@ use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree, kill_process};
 use crate::lfd::http::dto::{
-    ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse, RunWaveResponse,
-    StopWaveResponse, WaveDto,
+    ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse,
+    NextWaveResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
@@ -288,14 +288,10 @@ pub async fn update_wave_handler(
         wave.flow = flow;
     }
     if let Some(direction) = payload.direction {
-        if !direction.is_empty() {
-            wave.direction = direction;
-        }
+        wave.direction = direction;
     }
     if let Some(area) = payload.area {
-        if !area.is_empty() {
-            wave.area = area;
-        }
+        wave.area = area;
     }
     if let Some(status) = payload.status {
         wave.status = WaveStatus::from_str(&status)
@@ -406,14 +402,10 @@ pub async fn run_wave_handler(
         wave.flow = flow;
     }
     if let Some(direction) = payload.direction {
-        if !direction.is_empty() {
-            wave.direction = direction;
-        }
+        wave.direction = direction;
     }
     if let Some(area) = payload.area {
-        if !area.is_empty() {
-            wave.area = area;
-        }
+        wave.area = area;
     }
 
     let wave_clone = wave.clone();
@@ -651,16 +643,16 @@ pub async fn land_wave_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    let active_run = run_store(&state.store, move |store| {
+    let latest_run = run_store(&state.store, move |store| {
         let wave_id = LfdId::from_raw(wave.id.clone());
-        store.get_active_wave_run(&wave_id)
+        store.get_latest_wave_run(&wave_id)
     })
     .await
     .map_err(map_store_error)?;
 
     let worktree = payload
         .worktree
-        .or_else(|| active_run.as_ref().map(|run| run.worktree.clone()))
+        .or_else(|| latest_run.as_ref().map(|run| run.worktree.clone()))
         .filter(|value| !value.is_empty());
 
     let strict = payload.strict.unwrap_or(false);
@@ -688,6 +680,57 @@ pub async fn land_wave_handler(
     .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
 
     Ok(Json(LandWaveResponse { merged: true }))
+}
+
+pub async fn next_wave_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<NextWaveResponse> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let wave = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    let latest_run = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_latest_wave_run(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    let worktree = latest_run
+        .as_ref()
+        .map(|run| run.worktree.clone())
+        .filter(|value| !value.is_empty());
+
+    let wave_name = wave.name.clone();
+    let repo_path = wave.repo.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let progress = crate::ops::NullProgress;
+        let work_dir = worktree
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(&repo_path));
+        crate::ops::next_branch(
+            &work_dir,
+            &crate::ops::NextOptions {
+                wave_name: Some(wave_name),
+                create_pr: true,
+                ..Default::default()
+            },
+            &progress,
+        )
+    })
+    .await
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+
+    Ok(Json(NextWaveResponse {
+        new_branch: result.new_branch,
+    }))
 }
 
 fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {

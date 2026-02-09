@@ -44,7 +44,6 @@ public enum WaveStatus: String, Sendable, Codable {
     case idle
     case running
     case waiting
-    case completed
     case failed
     case paused
 
@@ -53,7 +52,6 @@ public enum WaveStatus: String, Sendable, Codable {
         case .running: return .green
         case .waiting: return .yellow
         case .idle: return .gray
-        case .completed: return .green
         case .failed: return .red
         case .paused: return .gray
         }
@@ -64,7 +62,6 @@ public enum WaveStatus: String, Sendable, Codable {
         case .running: return "circle.fill"
         case .waiting: return "circle.lefthalf.filled"
         case .idle: return "circle"
-        case .completed: return "checkmark.circle.fill"
         case .failed: return "xmark.circle.fill"
         case .paused: return "pause.circle"
         }
@@ -138,6 +135,18 @@ public func shellEscape(_ string: String) -> String {
     return "'\(escaped)'"
 }
 
+public struct CommitEntry: Sendable, Hashable, Identifiable {
+    public let sha: String
+    public let message: String
+
+    public var id: String { sha }
+
+    public init(sha: String, message: String) {
+        self.sha = sha
+        self.message = message
+    }
+}
+
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String
@@ -150,6 +159,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var iteration: Int
     public var localWorktree: String?
     public var remoteBranch: String?
+    public var commits: [CommitEntry]
+    public var diffStat: String?
     public var activeRun: WaveRun?
     public var createdAt: Date?
 
@@ -165,6 +176,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         iteration: Int = 0,
         localWorktree: String? = nil,
         remoteBranch: String? = nil,
+        commits: [CommitEntry] = [],
+        diffStat: String? = nil,
         activeRun: WaveRun? = nil,
         createdAt: Date? = nil
     ) {
@@ -179,6 +192,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.iteration = iteration
         self.localWorktree = localWorktree
         self.remoteBranch = remoteBranch
+        self.commits = commits
+        self.diffStat = diffStat
         self.activeRun = activeRun
         self.createdAt = createdAt
     }

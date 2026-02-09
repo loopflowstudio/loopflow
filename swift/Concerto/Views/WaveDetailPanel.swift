@@ -93,9 +93,26 @@ struct WaveDetailPanel: View {
                 VStack(spacing: 16) {
                     if wave.status == .idle {
                         StepRunner(wave: wave)
-                        if !wave.recentSteps.isEmpty {
+
+                        if !wave.commits.isEmpty {
+                            commitLogSection
+                        }
+
+                        if let stat = wave.diffStat {
+                            diffStatSection(stat)
+                        }
+
+                        if !wave.commits.isEmpty || wave.prURL != nil {
+                            opsActionsBar
+                        } else if !wave.recentSteps.isEmpty {
                             Divider()
                             NextActionsBar(wave: wave)
+                        }
+                    } else if wave.status == .failed {
+                        failedRunDetail
+                        StepRunner(wave: wave)
+                        if !outputBuffer.output(for: wave.id).isEmpty {
+                            liveOutputSection
                         }
                     } else {
                         waveConfigSummary
@@ -231,7 +248,7 @@ struct WaveDetailPanel: View {
                     .foregroundStyle(.secondary)
                 }
 
-                if !wave.directionDisplay.isEmpty && wave.directionDisplay != "default" {
+                if !wave.directionDisplay.isEmpty {
                     Label {
                         Text(wave.directionDisplay)
                             .font(.caption)
@@ -302,36 +319,13 @@ struct WaveDetailPanel: View {
                     .font(.headline)
 
                 // Status description with progress
-                HStack(spacing: 8) {
-                    switch wave.status {
-                    case .running:
-                        FlowProgressPills(
-                            steps: wave.flowSteps ?? [wave.flow],
-                            currentIndex: wave.stepIndex,
-                            startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt
-                        )
-
-                    case .completed:
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Completed")
-                            .foregroundStyle(.secondary)
-
-                    case .failed:
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                        Text("Failed")
-                            .foregroundStyle(.secondary)
-
-                    case .idle, .waiting, .paused:
-                        EmptyView()
-                    }
-                }
-                .font(.subheadline)
-
-                // Error detail for failed runs
-                if wave.status == .failed {
-                    failedRunDetail
+                if wave.status == .running {
+                    FlowProgressPills(
+                        steps: wave.flowSteps ?? [wave.flow],
+                        currentIndex: wave.stepIndex,
+                        startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt
+                    )
+                    .font(.subheadline)
                 }
 
                 // Activity summary (recent output line)
@@ -426,7 +420,168 @@ struct WaveDetailPanel: View {
         }
     }
 
+    // MARK: - Git State Sections
+
+    private var commitLogSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Commits")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 0) {
+                ForEach(wave.commits) { entry in
+                    HStack(spacing: Spacing.sm) {
+                        Text(entry.sha)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 60, alignment: .leading)
+
+                        Text(entry.message)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, Spacing.sm)
+
+                    if entry.sha != wave.commits.last?.sha {
+                        Divider()
+                    }
+                }
+            }
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        }
+    }
+
+    private func diffStatSection(_ stat: String) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Diff")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+
+            Text(stat)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .padding(Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        }
+    }
+
+    @State private var isLanding = false
+    @State private var isNexting = false
+
+    private var opsActionsBar: some View {
+        HStack(spacing: Spacing.lg) {
+            // Commit count
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+                    .foregroundStyle(.secondary)
+                Text("\(wave.commits.count) commit\(wave.commits.count == 1 ? "" : "s")")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            // View PR
+            if let prURL = wave.prURL {
+                Button {
+                    terminalLauncher.openURL(prURL)
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption)
+                        Text("View PR")
+                    }
+                }
+                .buttonStyle(DarkButtonStyle())
+            }
+
+            // Land
+            Button {
+                landWave()
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    if isLanding {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    } else {
+                        Image(systemName: "arrow.merge")
+                            .font(.caption)
+                    }
+                    Text("Land")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isLanding || isNexting)
+
+            // Next
+            Button {
+                nextWave()
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    if isNexting {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    } else {
+                        Image(systemName: "arrow.forward.circle")
+                            .font(.caption)
+                    }
+                    Text("Next")
+                }
+            }
+            .buttonStyle(DarkButtonStyle())
+            .disabled(isLanding || isNexting)
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.md)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+    }
+
     // MARK: - Actions
+
+    private func landWave() {
+        isLanding = true
+        Task {
+            do {
+                try await repoState.landWave(wave)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to land: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+            await MainActor.run {
+                isLanding = false
+            }
+        }
+    }
+
+    private func nextWave() {
+        isNexting = true
+        Task {
+            do {
+                try await repoState.nextWave(wave)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to start next: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+            await MainActor.run {
+                isNexting = false
+            }
+        }
+    }
 
     private func launchInteractive() {
         guard let path = wave.worktreePath else { return }

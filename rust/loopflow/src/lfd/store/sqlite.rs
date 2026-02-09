@@ -458,7 +458,7 @@ impl RunStore for SqliteStore {
                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
                    snapshot_area, snapshot_pr, flow_parents
             FROM wave_runs
-            WHERE wave_id = ?1 AND status IN (?2, ?3, ?4, ?5)
+            WHERE wave_id = ?1 AND status IN (?2, ?3, ?4)
             ORDER BY started_at DESC
             LIMIT 1
             ",
@@ -470,10 +470,28 @@ impl RunStore for SqliteStore {
                     WaveRunStatus::Pending.as_i32(),
                     WaveRunStatus::Running.as_i32(),
                     WaveRunStatus::Waiting.as_i32(),
-                    WaveRunStatus::Failed.as_i32(),
                 ],
                 map_wave_run_row,
             )
+            .optional()?;
+        Ok(run)
+    }
+
+    fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "
+            SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+                   started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                   snapshot_area, snapshot_pr, flow_parents
+            FROM wave_runs
+            WHERE wave_id = ?1
+            ORDER BY started_at DESC
+            LIMIT 1
+            ",
+        )?;
+        let run = stmt
+            .query_row(params![wave_id], map_wave_run_row)
             .optional()?;
         Ok(run)
     }

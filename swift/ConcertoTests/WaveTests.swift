@@ -119,15 +119,6 @@ struct WaveModelTests {
         #expect(indicator.color == .red)
     }
 
-    @Test("statusIndicator returns green checkmark for completed")
-    func statusIndicatorCompleted() {
-        let wave = makeWave(id: "test", repo: "/tmp", status: .completed)
-        let indicator = wave.statusIndicator
-
-        #expect(indicator.icon == "checkmark.circle.fill")
-        #expect(indicator.color == .green)
-    }
-
     // MARK: - Computed Properties
 
     @Test("areaDisplay joins multiple areas")
@@ -442,7 +433,6 @@ struct WaveStatusTests {
         #expect(WaveStatus.running.color == .green)
         #expect(WaveStatus.waiting.color == .yellow)
         #expect(WaveStatus.idle.color == .gray)
-        #expect(WaveStatus.completed.color == .green)
         #expect(WaveStatus.failed.color == .red)
     }
 
@@ -451,7 +441,6 @@ struct WaveStatusTests {
         #expect(WaveStatus.running.icon == "circle.fill")
         #expect(WaveStatus.waiting.icon == "circle.lefthalf.filled")
         #expect(WaveStatus.idle.icon == "circle")
-        #expect(WaveStatus.completed.icon == "checkmark.circle.fill")
         #expect(WaveStatus.failed.icon == "xmark.circle.fill")
     }
 }

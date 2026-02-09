@@ -14,7 +14,6 @@ struct StepRunner: View {
     @State private var selectedStimulus: Stimulus.Kind = .once
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
-    @State private var isRunning = false
     @State private var errorMessage: String?
     @State private var showingError = false
 
@@ -191,7 +190,7 @@ struct StepRunner: View {
             runFlow()
         } label: {
             HStack(spacing: Spacing.sm) {
-                if isRunning {
+                if isWaveActive {
                     ProgressView()
                         .scaleEffect(0.8)
                 } else {
@@ -214,7 +213,7 @@ struct StepRunner: View {
     }
 
     private var runButtonDisabled: Bool {
-        isRunning || selectedFlow.isEmpty || isWaveActive
+        selectedFlow.isEmpty || isWaveActive
     }
 
     // MARK: - Actions
@@ -222,7 +221,6 @@ struct StepRunner: View {
     private func runFlow() {
         guard !selectedFlow.isEmpty else { return }
 
-        isRunning = true
         let stimulus = Stimulus(
             kind: selectedStimulus,
             cron: selectedStimulus == .cron ? cronExpression : nil
@@ -239,9 +237,6 @@ struct StepRunner: View {
                     errorMessage = error.localizedDescription
                     showingError = true
                 }
-            }
-            await MainActor.run {
-                isRunning = false
             }
         }
     }

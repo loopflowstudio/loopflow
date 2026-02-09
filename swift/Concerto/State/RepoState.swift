@@ -81,6 +81,13 @@ final class RepoState {
         set { selectedWaveId = newValue?.id }
     }
 
+    // In-flight actions (land) — buttons disable while pending
+    private(set) var inFlightActions: Set<String> = []
+
+    func isActionInFlight(_ waveId: String) -> Bool {
+        inFlightActions.contains(waveId)
+    }
+
     // Loading
     var isLoading: Bool = false
     var errorMessage: String?
@@ -372,17 +379,33 @@ final class RepoState {
         flow: String? = nil,
         stimulus: Stimulus? = nil
     ) async throws {
-        let overrides = RunOverrides(
-            area: area,
-            direction: direction,
-            flow: flow,
-            stimulus: stimulus
-        )
-        try await waveService.run(wave.id, overrides: overrides)
+        let snapshot = waveStore.applyOptimistic(wave.id) { $0.status = .running }
+        do {
+            let overrides = RunOverrides(
+                area: area,
+                direction: direction,
+                flow: flow,
+                stimulus: stimulus
+            )
+            try await waveService.run(wave.id, overrides: overrides)
+            waveStore.commitMutation(wave.id)
+            scheduleRefresh(for: wave.id)
+        } catch {
+            if let snapshot { waveStore.rollback(snapshot) }
+            throw error
+        }
     }
 
     func stopWave(_ wave: WaveViewModel) async throws {
-        try await waveService.stop(wave.id)
+        let snapshot = waveStore.applyOptimistic(wave.id) { $0.status = .idle }
+        do {
+            try await waveService.stop(wave.id)
+            waveStore.commitMutation(wave.id)
+            scheduleRefresh(for: wave.id)
+        } catch {
+            if let snapshot { waveStore.rollback(snapshot) }
+            throw error
+        }
     }
 
     func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
@@ -469,11 +492,26 @@ final class RepoState {
     }
 
     func landWave(_ wave: WaveViewModel) async throws {
-        try await waveService.landWave(wave.id)
+        inFlightActions.insert(wave.id)
+        do {
+            try await waveService.landWave(wave.id)
+            inFlightActions.remove(wave.id)
+        } catch {
+            inFlightActions.remove(wave.id)
+            throw error
+        }
     }
 
     func nextWave(_ wave: WaveViewModel) async throws {
-        _ = try await waveService.nextWave(wave.id)
+        let snapshot = waveStore.applyOptimistic(wave.id) { $0.status = .idle }
+        do {
+            _ = try await waveService.nextWave(wave.id)
+            waveStore.commitMutation(wave.id)
+            scheduleRefresh(for: wave.id)
+        } catch {
+            if let snapshot { waveStore.rollback(snapshot) }
+            throw error
+        }
     }
 
     func connectLfd(outputBuffer: OutputBuffer) async throws {
@@ -482,5 +520,17 @@ final class RepoState {
         LoggingService.lfd("connectLfd: waveService.connectLfd completed")
         startEventSubscription(outputBuffer: outputBuffer)
         LoggingService.lfd("connectLfd: event subscription started")
+    }
+
+    // MARK: - Timeout Safety Net
+
+    private func scheduleRefresh(for waveId: String, delay: TimeInterval = 10) {
+        Task {
+            try? await Task.sleep(for: .seconds(delay))
+            guard waveStore.wave(for: waveId) != nil else { return }
+            if let wave = try? await waveService.getWave(waveId) {
+                waveStore.set(WaveViewModel(api: wave))
+            }
+        }
     }
 }

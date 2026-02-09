@@ -358,4 +358,67 @@ struct WaveStoreOptimisticTests {
         #expect(store.wave(for: "wave-1")?.name == "refreshed")
         #expect(store.wave(for: "pending-1")?.name == "pending wave")
     }
+
+    // MARK: - Responsive actions (optimistic status)
+
+    @Test("optimistic run sets status to running, blocks events")
+    func optimisticRunSetsRunning() {
+        let store = WaveStore()
+        store.set(makeWave(status: .idle))
+
+        let snapshot = store.applyOptimistic("wave-1") { $0.status = .running }
+
+        #expect(store.wave(for: "wave-1")?.status == .running)
+        #expect(snapshot?.status == .idle)
+
+        // Event with old status should be blocked
+        store.set(makeWave(status: .idle))
+        #expect(store.wave(for: "wave-1")?.status == .running)
+
+        // After commit, events flow through
+        store.commitMutation("wave-1")
+        store.set(makeWave(status: .running))
+        #expect(store.wave(for: "wave-1")?.status == .running)
+    }
+
+    @Test("optimistic stop sets status to idle, rollback restores running")
+    func optimisticStopSetsIdle() {
+        let store = WaveStore()
+        store.set(makeWave(status: .running))
+
+        let snapshot = store.applyOptimistic("wave-1") { $0.status = .idle }
+
+        #expect(store.wave(for: "wave-1")?.status == .idle)
+        #expect(store.groups.idle.count == 1)
+        #expect(store.groups.active.count == 0)
+
+        // Rollback restores running
+        store.rollback(snapshot!)
+        #expect(store.wave(for: "wave-1")?.status == .running)
+        #expect(store.groups.active.count == 1)
+        #expect(store.groups.idle.count == 0)
+    }
+
+    @Test("optimistic next sets status to idle")
+    func optimisticNextSetsIdle() {
+        let store = WaveStore()
+        store.set(makeWave(status: .waiting))
+
+        _ = store.applyOptimistic("wave-1") { $0.status = .idle }
+
+        #expect(store.wave(for: "wave-1")?.status == .idle)
+    }
+
+    @Test("event overwrites optimistic status after commit")
+    func eventOverwritesAfterCommit() {
+        let store = WaveStore()
+        store.set(makeWave(status: .idle))
+
+        _ = store.applyOptimistic("wave-1") { $0.status = .running }
+        store.commitMutation("wave-1")
+
+        // WebSocket event arrives with actual status
+        store.set(makeWave(status: .waiting))
+        #expect(store.wave(for: "wave-1")?.status == .waiting)
+    }
 }

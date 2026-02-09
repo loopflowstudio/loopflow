@@ -601,9 +601,6 @@ struct WaveDetailPanel: View {
         return result
     }
 
-    @State private var isLanding = false
-    @State private var isNexting = false
-
     private var opsActionsBar: some View {
         HStack(spacing: Spacing.lg) {
             // Commit count
@@ -636,7 +633,7 @@ struct WaveDetailPanel: View {
                 landWave()
             } label: {
                 HStack(spacing: Spacing.xs) {
-                    if isLanding {
+                    if repoState.isActionInFlight(wave.id) {
                         ProgressView()
                             .scaleEffect(0.6)
                     } else {
@@ -647,25 +644,20 @@ struct WaveDetailPanel: View {
                 }
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(isLanding || isNexting)
+            .disabled(repoState.isActionInFlight(wave.id))
 
             // Next
             Button {
                 nextWave()
             } label: {
                 HStack(spacing: Spacing.xs) {
-                    if isNexting {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                    } else {
-                        Image(systemName: "arrow.forward.circle")
-                            .font(.caption)
-                    }
+                    Image(systemName: "arrow.forward.circle")
+                        .font(.caption)
                     Text("Next")
                 }
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(isLanding || isNexting)
+            .disabled(repoState.isActionInFlight(wave.id))
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
@@ -676,7 +668,6 @@ struct WaveDetailPanel: View {
     // MARK: - Actions
 
     private func landWave() {
-        isLanding = true
         Task {
             do {
                 try await repoState.landWave(wave)
@@ -686,14 +677,10 @@ struct WaveDetailPanel: View {
                     showingActionError = true
                 }
             }
-            await MainActor.run {
-                isLanding = false
-            }
         }
     }
 
     private func nextWave() {
-        isNexting = true
         Task {
             do {
                 try await repoState.nextWave(wave)
@@ -702,9 +689,6 @@ struct WaveDetailPanel: View {
                     actionError = "Failed to start next: \(error.localizedDescription)"
                     showingActionError = true
                 }
-            }
-            await MainActor.run {
-                isNexting = false
             }
         }
     }

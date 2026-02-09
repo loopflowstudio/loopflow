@@ -452,7 +452,7 @@ final class RepoState {
                 name: waveName,
                 repo: repo.path,
                 flow: "design",
-                direction: ["default"],
+                direction: [],
                 area: [],
                 stimulus: Stimulus(kind: .once),
                 status: .idle,

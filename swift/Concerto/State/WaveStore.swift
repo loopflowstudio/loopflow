@@ -32,9 +32,17 @@ final class WaveStore {
     private var previousStatuses: [String: WaveStatus] = [:]
     var onStatusChange: ((WaveViewModel, WaveStatus?, WaveStatus) -> Void)?
 
+    // Pending optimistic mutations — events skip these waves until committed
+    private var pendingMutations: Set<String> = []
+
     // MARK: - Mutations
 
     func set(_ wave: WaveViewModel) {
+        guard !pendingMutations.contains(wave.id) else { return }
+        _set(wave)
+    }
+
+    private func _set(_ wave: WaveViewModel) {
         let oldStatus = previousStatuses[wave.id]
         if oldStatus != wave.status {
             onStatusChange?(wave, oldStatus, wave.status)
@@ -48,6 +56,14 @@ final class WaveStore {
         var updatedStatuses: [String: WaveStatus] = [:]
 
         for wave in newWaves {
+            if pendingMutations.contains(wave.id) {
+                // Preserve optimistic state for waves with in-flight mutations
+                if let existing = waves[wave.id] {
+                    updatedWaves[wave.id] = existing
+                    updatedStatuses[wave.id] = previousStatuses[wave.id] ?? existing.status
+                }
+                continue
+            }
             let oldStatus = previousStatuses[wave.id]
             if oldStatus != wave.status {
                 onStatusChange?(wave, oldStatus, wave.status)
@@ -78,12 +94,18 @@ final class WaveStore {
         guard var wave = waves[id] else { return nil }
         let snapshot = wave
         mutation(&wave)
-        set(wave)
+        pendingMutations.insert(id)
+        _set(wave)
         return snapshot
     }
 
+    func commitMutation(_ id: String) {
+        pendingMutations.remove(id)
+    }
+
     func rollback(_ snapshot: WaveViewModel) {
-        set(snapshot)
+        pendingMutations.remove(snapshot.id)
+        _set(snapshot)
     }
 
     // MARK: - Queries

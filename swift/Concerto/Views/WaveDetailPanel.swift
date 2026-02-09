@@ -737,7 +737,6 @@ struct WaveDetailPanel: View {
 
     private func refreshRunsAndWaves() async {
         await fetchRuns()
-        await repoState.refreshWaves()
     }
 
     private func loadRuns() {

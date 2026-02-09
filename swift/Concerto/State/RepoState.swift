@@ -261,7 +261,9 @@ final class RepoState {
     private func handleWaveEvent(_ event: WaveEvent) async {
         switch event.type {
         case .created, .updated, .started, .stopped, .waiting:
-            if let wave = try? await waveService.getWave(event.waveId) {
+            if let wave = event.wave {
+                waveStore.set(WaveViewModel(api: wave))
+            } else if let wave = try? await waveService.getWave(event.waveId) {
                 waveStore.set(WaveViewModel(api: wave))
             }
         case .deleted:
@@ -391,13 +393,10 @@ final class RepoState {
             stimulus: stimulus
         )
         try await waveService.run(wave.id, overrides: overrides)
-
-        await refreshWaves()
     }
 
     func stopWave(_ wave: WaveViewModel) async throws {
         try await waveService.stop(wave.id)
-        await refreshWaves()
     }
 
     func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
@@ -420,6 +419,7 @@ final class RepoState {
         let snapshot = waveStore.applyOptimistic(wave.id) { $0.name = newName }
         do {
             _ = try await waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
+            waveStore.commitMutation(wave.id)
         } catch {
             if let snapshot { waveStore.rollback(snapshot) }
             throw error
@@ -450,6 +450,7 @@ final class RepoState {
                 status: status
             )
             _ = try await waveService.updateWave(wave.id, config: config)
+            waveStore.commitMutation(wave.id)
         } catch {
             if let snapshot { waveStore.rollback(snapshot) }
             throw error
@@ -458,12 +459,10 @@ final class RepoState {
 
     func landWave(_ wave: WaveViewModel) async throws {
         try await waveService.landWave(wave.id)
-        await refreshWaves()
     }
 
     func nextWave(_ wave: WaveViewModel) async throws {
         _ = try await waveService.nextWave(wave.id)
-        await refreshWaves()
     }
 
     func connectLfd(outputBuffer: OutputBuffer) async throws {

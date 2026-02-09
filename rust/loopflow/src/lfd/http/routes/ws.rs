@@ -7,10 +7,11 @@ use tokio::time::{interval, Duration};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::lfd::http::dto::ErrorResponse;
-use crate::lfd::http::routes::build_wave_dtos;
+use crate::lfd::http::routes::{build_wave_dto, build_wave_dtos};
 use crate::lfd::http::run_store;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::id::LfdId;
+use crate::lfd::store::SharedStore;
 use crate::lfd::types::Event;
 
 pub async fn ws_handler(
@@ -66,7 +67,10 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
             maybe_event = events.next() => {
                 let Some(event) = maybe_event else { break };
                 if let Ok(event) = event {
-                    let json = serde_json::to_string(&event).unwrap_or_default();
+                    let json = match enrich_event(&event, &state.store).await {
+                        Some(enriched) => enriched,
+                        None => serde_json::to_string(&event).unwrap_or_default(),
+                    };
                     if sender.send(Message::Text(json)).await.is_err() {
                         break;
                     }
@@ -108,4 +112,28 @@ async fn current_snapshot(
     build_wave_dtos(store, waves, true)
         .await
         .map_err(|err| err.to_string())
+}
+
+/// Enrich wave lifecycle events with the full WaveDto payload.
+/// Returns `None` for non-wave events, letting the caller fall back to plain serialization.
+async fn enrich_event(event: &Event, store: &SharedStore) -> Option<String> {
+    let wave_id = match event {
+        Event::WaveCreated { wave_id, .. }
+        | Event::WaveUpdated { wave_id, .. }
+        | Event::WaveStarted { wave_id, .. }
+        | Event::WaveStopped { wave_id, .. }
+        | Event::WaveWaiting { wave_id, .. } => wave_id.clone(),
+        _ => return None,
+    };
+
+    let wave = run_store(store, move |s| s.get_wave(&wave_id))
+        .await
+        .ok()??;
+    let dto = build_wave_dto(store, wave, true).await.ok()?;
+
+    let mut base = serde_json::to_value(event).ok()?;
+    if let serde_json::Value::Object(ref mut map) = base {
+        map.insert("wave".to_string(), serde_json::to_value(&dto).ok()?);
+    }
+    serde_json::to_string(&base).ok()
 }

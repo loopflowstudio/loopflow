@@ -1,5 +1,4 @@
 // Row view for displaying a wave in the sidebar.
-// Uses status indicators from design: ● Running, ◐ Waiting, ○ Idle, ◷ Scheduled, ✗ Failed
 
 import SwiftUI
 import AppKit
@@ -23,13 +22,6 @@ struct WaveRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                // Status indicator using design system icons
-                Image(systemName: wave.statusIndicator.icon)
-                    .font(.system(size: 10))
-                    .foregroundStyle(wave.statusIndicator.color)
-                    .help(statusHelpText)
-                    .accessibilityIdentifier("wave-status")
-
                 // Display name (click to edit)
                 if isEditingName {
                     TextField("Wave name", text: $editingName)
@@ -207,20 +199,6 @@ struct WaveRow: View {
         isEditingName = false
         isEditingAnyName = false
         isNameFocused = false
-    }
-
-    private var statusHelpText: String {
-        switch wave.status {
-        case .running: return "Running"
-        case .waiting: return "Waiting (PR limit reached)"
-        case .idle:
-            if wave.stimulus.kind == .cron {
-                return "Scheduled"
-            }
-            return "Idle"
-        case .failed: return "Failed"
-        case .paused: return "Paused"
-        }
     }
 
     private func formatCron(_ cron: String) -> String {

@@ -1,6 +1,6 @@
 use std::path::Path;
-use std::process::Command;
 
+use crate::engine::builtins::get_builtin_step;
 use crate::engine::git::{fetch, rebase};
 use crate::engine::prompt::{format_prompt, gather_context, GatherContextOpts};
 use crate::engine::{launch_agent, load_config_or_default, LaunchConfig};
@@ -30,6 +30,7 @@ pub fn rebase_with_recovery(
         }
     }
 
+    // Try auto-rebase first. rebase() aborts on conflict and returns the conflict list.
     progress.status(&format!("Rebasing onto {}...", options.onto));
     let result = rebase(repo, &options.onto, None)?;
     if result.success {
@@ -39,29 +40,22 @@ pub fn rebase_with_recovery(
         return Ok(RebaseResult { success: true });
     }
 
-    if let Some(conflicts) = result.conflicts {
-        let conflict_list = conflicts
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>();
-        progress.error("Rebase conflicts detected");
-        run_rebase_agent(repo, &conflict_list, progress)?;
+    // Auto-rebase failed (and was aborted). Launch the rebase agent to handle
+    // the full workflow: re-attempt the rebase, resolve conflicts, continue.
+    progress.status("Auto-rebase failed, launching rebase assistant...");
+    run_rebase_agent(repo, &options.onto, progress)?;
 
-        progress.status(&format!("Retrying rebase onto {}...", options.onto));
-        let retry = rebase(repo, &options.onto, None)?;
-        if retry.success {
-            if options.push {
-                crate::ops::commit::push_with_upstream_or_error(repo)?;
-            }
-            return Ok(RebaseResult { success: true });
-        }
+    if options.push {
+        crate::ops::commit::push_with_upstream_or_error(repo)?;
     }
-
-    Err(OpsError::Message("rebase failed".to_string()))
+    Ok(RebaseResult { success: true })
 }
 
-fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress) -> OpsResult<()> {
+fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsResult<()> {
     let config = load_config_or_default(Some(repo));
+
+    let step_content = get_builtin_step("rebase").expect("built-in rebase step must exist");
+
     let opts = GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: None,
@@ -78,11 +72,10 @@ fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress)
     };
     let components = gather_context(&opts)?;
     let base_prompt = format_prompt(&components);
-    let task = format!(
-        "Resolve git rebase conflicts.\n\nConflicts:\n{}\n\nFix conflicts and ensure the rebase can be retried.",
-        conflicts.join("\n")
+    let prompt = format!(
+        "{}\n\n<lf:step>\n{}\n</lf:step>\n\nRebase onto: {}\n",
+        base_prompt, step_content, onto
     );
-    let prompt = format!("{}\n\n<lf:task>\n{}\n</lf:task>", base_prompt, task);
 
     let launch_config = LaunchConfig {
         auto: true,
@@ -101,8 +94,6 @@ fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress)
     if result.exit_code != 0 {
         return Err(OpsError::AgentFailed(result.stderr));
     }
-
-    let _ = Command::new("git").arg("status").current_dir(repo).status();
 
     Ok(())
 }

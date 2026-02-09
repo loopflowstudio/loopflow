@@ -37,7 +37,7 @@ pub struct PrInfo {
 struct GhPr {
     url: String,
     state: String,
-    #[serde(default)]
+    #[serde(default, rename = "isDraft")]
     is_draft: bool,
     number: u64,
 }

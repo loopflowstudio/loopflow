@@ -71,7 +71,7 @@ public struct ConnectionInfo: Sendable {
     }
 }
 
-public struct LocalWaveService: @unchecked Sendable {
+public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     public init() {}
     private let baseURL = lfdBaseURL
     private let apiBaseURL = lfdApiBaseURL
@@ -170,11 +170,7 @@ public struct LocalWaveService: @unchecked Sendable {
     }
 
     /// List flows and steps from lfd.
-    /// Result from the /flows endpoint containing flows, steps, and directions.
-    public struct FlowsResult: Sendable {
-        public var flows: [Flow]
-        public var directions: [String]
-    }
+    public typealias FlowsResult = WaveFlowsResult
 
     public func listFlowsAndDirections(repo: URL) async throws -> FlowsResult {
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!

@@ -144,10 +144,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         direction.isEmpty ? "" : direction.joined(separator: ", ")
     }
 
-    public var flowDisplay: String {
-        flow.isEmpty ? "ship" : flow
-    }
-
     public var commits: [CommitEntry] { api.commits }
     public var diffStat: String? { api.diffStat }
     public var flowSteps: [String] { api.flowSteps }
@@ -169,7 +165,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var detailText: String {
         var parts: [String] = []
         if !areaDisplay.isEmpty { parts.append(areaDisplay) }
-        if !flowDisplay.isEmpty { parts.append(flowDisplay) }
+        if !flow.isEmpty { parts.append(flow) }
         if stimulus.kind != .manual { parts.append(stimulus.kind.rawValue) }
         return parts.joined(separator: " · ")
     }

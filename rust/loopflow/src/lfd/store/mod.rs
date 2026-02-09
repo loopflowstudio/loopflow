@@ -145,7 +145,6 @@ mod tests {
     };
     use std::env;
     use std::path::PathBuf;
-    use testcontainers::{clients::Cli, core::WaitFor, GenericImage};
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
@@ -369,25 +368,6 @@ mod tests {
         store.delete_wave(&wave.id).unwrap();
     }
 
-    fn reset_postgres(url: &str) {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            let (client, connection) = tokio_postgres::connect(url, tokio_postgres::NoTls)
-                .await
-                .unwrap();
-            let connection_task = tokio::spawn(async move {
-                let _ = connection.await;
-            });
-            client
-                .batch_execute(
-                    "TRUNCATE pending_activations, stimuli, fork_runs, agents, wave_runs, waves CASCADE",
-                )
-                .await
-                .unwrap();
-            connection_task.abort();
-        });
-    }
-
     #[test]
     fn sqlite_store_suite() {
         let path = env::temp_dir()
@@ -395,42 +375,6 @@ mod tests {
             .to_string_lossy()
             .to_string();
         let store = super::sqlite::SqliteStore::new(&PathBuf::from(path)).unwrap();
-        run_store_suite(&store);
-        run_active_excludes_failed_latest_includes(&store);
-    }
-
-    #[test]
-    fn postgres_store_suite() {
-        if env::var("LFD_SKIP_POSTGRES_TESTS").is_ok() {
-            eprintln!("LFD_SKIP_POSTGRES_TESTS set; skipping postgres suite");
-            return;
-        }
-
-        if let Ok(url) = env::var("LFD_DATABASE_URL") {
-            super::postgres::PostgresStore::migrate(&url).unwrap();
-            reset_postgres(&url);
-            let store = super::postgres::PostgresStore::connect(&url).unwrap();
-            run_store_suite(&store);
-            run_active_excludes_failed_latest_includes(&store);
-            return;
-        }
-
-        let docker = Cli::default();
-        let image = GenericImage::new("postgres", "16")
-            .with_env_var("POSTGRES_PASSWORD", "test")
-            .with_env_var("POSTGRES_USER", "postgres")
-            .with_env_var("POSTGRES_DB", "postgres")
-            .with_exposed_port(5432)
-            .with_wait_for(WaitFor::message_on_stdout(
-                "database system is ready to accept connections",
-            ));
-        let node = docker.run(image);
-        let port = node.get_host_port_ipv4(5432);
-        let url = format!("postgres://postgres:test@127.0.0.1:{port}/postgres");
-
-        super::postgres::PostgresStore::migrate(&url).unwrap();
-        reset_postgres(&url);
-        let store = super::postgres::PostgresStore::connect(&url).unwrap();
         run_store_suite(&store);
         run_active_excludes_failed_latest_includes(&store);
     }

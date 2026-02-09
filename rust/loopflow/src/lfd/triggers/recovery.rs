@@ -54,10 +54,14 @@ fn recover_stuck_runs(store: &SharedStore) {
                 run.status = WaveRunStatus::Failed;
                 run.error = Some("agent stuck >4h".to_string());
                 run.ended_at = Some(OffsetDateTime::now_utc());
-                let _ = store.update_wave_run(&run);
+                if let Err(err) = store.update_wave_run(&run) {
+                    tracing::error!(run_id = %run.id, error = %err, "failed to update stuck run status");
+                }
                 if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
                     wave.status = WaveStatus::Failed;
-                    let _ = store.update_wave(&wave);
+                    if let Err(err) = store.update_wave(&wave) {
+                        tracing::error!(wave_id = %run.wave_id, error = %err, "failed to update wave status");
+                    }
                 }
             }
         }

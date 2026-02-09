@@ -80,7 +80,7 @@ struct WaveDetailPanel: View {
         }
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
-            loadRunsIfNeeded(for: selectedTab)
+            loadRuns()
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)
@@ -88,10 +88,10 @@ struct WaveDetailPanel: View {
         .onChange(of: wave.id) { oldId, newId in
             outputBuffer.stopStreaming(waveId: oldId)
             outputBuffer.startStreaming(waveId: newId)
-            loadRunsIfNeeded(for: selectedTab)
+            loadRuns()
         }
-        .onChange(of: selectedTab) { _, tab in
-            loadRunsIfNeeded(for: tab)
+        .onChange(of: selectedTab) { _, _ in
+            loadRuns()
         }
     }
 
@@ -106,7 +106,11 @@ struct WaveDetailPanel: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if selectedTab == .current {
-                        if wave.status == .idle {
+                        if wave.status == .idle || wave.status == .failed {
+                            if wave.status == .failed {
+                                failedRunDetail
+                            }
+
                             StepRunner(wave: wave)
 
                             if !wave.commits.isEmpty {
@@ -119,14 +123,12 @@ struct WaveDetailPanel: View {
 
                             if !wave.commits.isEmpty || wave.prURL != nil {
                                 opsActionsBar
-                            } else if !wave.recentSteps.isEmpty {
+                            } else if wave.status == .idle && !wave.recentSteps.isEmpty {
                                 Divider()
                                 NextActionsBar(wave: wave)
                             }
-                        } else if wave.status == .failed {
-                            failedRunDetail
-                            StepRunner(wave: wave)
-                            if !outputBuffer.output(for: wave.id).isEmpty {
+
+                            if wave.status == .failed && !outputBuffer.output(for: wave.id).isEmpty {
                                 liveOutputSection
                             }
                         } else {
@@ -298,14 +300,16 @@ struct WaveDetailPanel: View {
                     .foregroundStyle(.secondary)
                 }
 
-                Label {
-                    Text(wave.flowDisplay)
-                        .font(.caption)
-                } icon: {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.caption2)
+                if !wave.flow.isEmpty {
+                    Label {
+                        Text(wave.flow)
+                            .font(.caption)
+                    } icon: {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
             }
         }
     }
@@ -613,7 +617,7 @@ struct WaveDetailPanel: View {
                     Text("Land")
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(DarkButtonStyle())
             .disabled(isLanding || isNexting)
 
             // Next
@@ -736,8 +740,7 @@ struct WaveDetailPanel: View {
         await repoState.refreshWaves()
     }
 
-    private func loadRunsIfNeeded(for tab: DetailTab) {
-        guard tab == .runs else { return }
+    private func loadRuns() {
         Task { await fetchRuns() }
     }
 

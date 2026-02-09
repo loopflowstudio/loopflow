@@ -331,7 +331,9 @@ impl WaveExecutor {
     fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
         if let Ok(Some(mut wave)) = self.store.get_wave(wave_id) {
             wave.status = status;
-            let _ = self.store.update_wave(&wave);
+            if let Err(err) = self.store.update_wave(&wave) {
+                error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
+            }
         }
     }
 
@@ -720,7 +722,9 @@ pub fn create_wave_run_with_id(
     if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
         wave.status = WaveStatus::Running;
         wave.iteration = iteration;
-        let _ = store.update_wave(&wave);
+        if let Err(err) = store.update_wave(&wave) {
+            warn!(wave_id = %wave.id, error = %err, "failed to set wave status to running");
+        }
     }
     Ok(run)
 }
@@ -864,7 +868,9 @@ fn build_agent_for_step(
 /// Commit any remaining changes, push, and create a draft PR.
 /// Returns the PR info if successful, None if skipped or failed.
 fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
-    use crate::ops::{commit_workflow, current_pr, CommitOptions, NullProgress};
+    use crate::ops::{
+        commit_workflow, current_pr, generate_pr_message, update_pr, CommitOptions, NullProgress,
+    };
 
     let commit_options = CommitOptions {
         add: true,
@@ -881,13 +887,29 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
     }
 
     match current_pr(worktree) {
-        Ok(Some(pr)) => Some(crate::lfd::types::PullRequest {
-            url: pr.url,
-            number: Some(pr.number as u32),
-            state: Some(pr.state),
-            branch: Some(pr.branch),
-            title: None,
-        }),
+        Ok(Some(pr)) => {
+            // Update the draft PR with an LLM-generated title and description,
+            // matching what `lf ops pr` produces.
+            match generate_pr_message(worktree) {
+                Ok(message) => {
+                    if let Err(err) = update_pr(worktree, pr.number, &message.title, &message.body)
+                    {
+                        warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to update title/body");
+                    }
+                }
+                Err(err) => {
+                    warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to generate PR message");
+                }
+            }
+
+            Some(crate::lfd::types::PullRequest {
+                url: pr.url,
+                number: Some(pr.number as u32),
+                state: Some(pr.state),
+                branch: Some(pr.branch),
+                title: None,
+            })
+        }
         Ok(None) => {
             debug!(worktree = %worktree.display(), "auto-create PR: no PR found after push");
             None

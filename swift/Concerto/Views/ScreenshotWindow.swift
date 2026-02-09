@@ -135,6 +135,7 @@ private struct ScreenshotLayout: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let wave = repoState.selectedWave {
             WaveDetailPanel(wave: wave)
+                .id(wave.id)
         } else {
             QuickExperimentDetailView { _ in
                 // No-op for screenshots - just display the view

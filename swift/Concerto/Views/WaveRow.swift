@@ -62,8 +62,8 @@ struct WaveRow: View {
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                } else {
-                    Text(wave.flowDisplay)
+                } else if !wave.flow.isEmpty {
+                    Text(wave.flow)
                         .font(.caption2)
                         .fontWeight(.medium)
                         .padding(.horizontal, 6)
@@ -145,6 +145,9 @@ struct WaveRow: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovering = hovering
+        }
+        .onChange(of: isSelected) { _, selected in
+            if selected { isHovering = false }
         }
         .onTapGesture {
             onSelect()

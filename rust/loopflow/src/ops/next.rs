@@ -77,6 +77,7 @@ pub fn next_branch(
     }
 
     if let Some(pr_number) = current_pr_number(repo)? {
+        mark_pr_ready(repo);
         enable_auto_merge(repo, pr_number, progress)?;
         if options.block {
             wait_for_merge(repo, pr_number, progress)?;
@@ -162,6 +163,14 @@ fn pr_state(repo: &Path, number: u64) -> OpsResult<Option<String>> {
     } else {
         Ok(Some(state))
     }
+}
+
+fn mark_pr_ready(repo: &Path) {
+    let _ = Command::new("gh")
+        .arg("pr")
+        .arg("ready")
+        .current_dir(repo)
+        .status();
 }
 
 fn enable_auto_merge(repo: &Path, number: u64, progress: &impl Progress) -> OpsResult<()> {

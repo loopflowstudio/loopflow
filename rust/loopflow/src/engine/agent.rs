@@ -10,20 +10,6 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::Instant;
 
-/// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
-/// to this process before exiting so the agent doesn't survive as an orphan.
-static CHILD_PID: AtomicU32 = AtomicU32::new(0);
-
-/// Kill the child agent process if one is running.
-pub fn kill_child_if_running() {
-    let pid = CHILD_PID.load(Ordering::Acquire);
-    if pid != 0 {
-        let _ = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status();
-    }
-}
-
 use crate::engine::config::parse_model;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;

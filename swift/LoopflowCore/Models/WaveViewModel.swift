@@ -198,6 +198,11 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         }
     }
 
+    public var pendingPR: (number: Int, url: URL?)? {
+        guard let prNumber, prState == .open else { return nil }
+        return (number: prNumber, url: prURL)
+    }
+
     public var lastActivityAt: Date? {
         recentSteps.first?.endedAt ?? recentSteps.first?.startedAt
     }

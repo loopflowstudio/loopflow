@@ -61,9 +61,6 @@ final class WaveStore {
 
     func wave(for id: String) -> WaveViewModel? { waves[id] }
 
-    var isEmpty: Bool { waves.isEmpty }
-    var count: Int { waves.count }
-
     // MARK: - Private
 
     private func detectStatusChange(_ wave: WaveViewModel) {
@@ -78,15 +75,13 @@ final class WaveStore {
         let allWaves = Array(waves.values)
 
         let blocked = allWaves.filter { $0.status == .failed }
-        let pr = allWaves.filter { wave in
-            wave.status != .failed && pendingPR(for: wave) != nil
-        }
+        let pr = allWaves.filter { $0.status != .failed && $0.pendingPR != nil }
 
         let hourAgo = Date().addingTimeInterval(-3600)
         let recentActivity = Array(allWaves
             .filter { wave in
                 guard let lastActivity = wave.lastActivityAt else { return false }
-                return lastActivity > hourAgo && wave.status != .failed && pendingPR(for: wave) == nil
+                return lastActivity > hourAgo && wave.status != .failed && wave.pendingPR == nil
             }
             .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
             .prefix(5))
@@ -95,13 +90,13 @@ final class WaveStore {
 
         let active = allWaves.filter { wave in
             (wave.status == .running || wave.status == .waiting)
-                && pendingPR(for: wave) == nil
+                && wave.pendingPR == nil
                 && !recentIds.contains(wave.id)
         }
 
         let idle = allWaves.filter { wave in
             wave.status == .idle
-                && pendingPR(for: wave) == nil
+                && wave.pendingPR == nil
                 && !recentIds.contains(wave.id)
         }
 
@@ -113,12 +108,5 @@ final class WaveStore {
             idle: idle
         )
         ordered = groups.allInOrder
-    }
-
-    private func pendingPR(for wave: WaveViewModel) -> (number: Int, url: URL?)? {
-        guard let prNumber = wave.prNumber, wave.prState == .open else {
-            return nil
-        }
-        return (number: prNumber, url: wave.prURL)
     }
 }

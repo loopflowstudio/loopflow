@@ -21,14 +21,6 @@ struct WaveSidebar: View {
         repoState.waveGroups
     }
 
-    private func pendingPR(for wave: WaveViewModel) -> (number: Int, url: URL?)? {
-        guard let prNumber = wave.prNumber,
-              wave.prState == .open else {
-            return nil
-        }
-        return (number: prNumber, url: wave.prURL)
-    }
-
     private var allWavesInOrder: [WaveViewModel] {
         waveGroups.allInOrder
     }
@@ -59,7 +51,6 @@ struct WaveSidebar: View {
                 wave: wave,
                 isSelected: repoState.selectedWave?.id == wave.id,
                 isKeyboardFocused: keyboardFocusedId == wave.id,
-                pendingPR: pendingPR(for: wave),
                 onSelect: {
                     repoState.selectedWave = wave
                     keyboardFocusedId = wave.id

@@ -8,7 +8,6 @@ struct WaveRow: View {
     let wave: WaveViewModel
     let isSelected: Bool
     var isKeyboardFocused: Bool = false
-    var pendingPR: (number: Int, url: URL?)? = nil  // PR awaiting review
     let onSelect: () -> Void
     var onDelete: (() -> Void)? = nil
     var onRename: ((String) -> Void)? = nil
@@ -47,7 +46,7 @@ struct WaveRow: View {
                 Spacer()
 
                 // PR badge (if pending review) or Flow badge
-                if let pr = pendingPR {
+                if let pr = wave.pendingPR {
                     Button {
                         if let url = pr.url {
                             NSWorkspace.shared.open(url)

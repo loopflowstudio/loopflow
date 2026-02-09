@@ -33,13 +33,11 @@ struct WaveRowViewTests {
 
     private func makeRow(
         wave: WaveViewModel,
-        isSelected: Bool = false,
-        pendingPR: (number: Int, url: URL?)? = nil
+        isSelected: Bool = false
     ) -> WaveRow {
         WaveRow(
             wave: wave,
             isSelected: isSelected,
-            pendingPR: pendingPR,
             onSelect: {},
             isEditingAnyName: .constant(false)
         )

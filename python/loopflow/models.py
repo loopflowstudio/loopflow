@@ -53,6 +53,7 @@ class Wave(BaseModel):
     remote_branch: Optional[str] = None
     commits: list[CommitEntry] = Field(default_factory=list)
     diff_stat: Optional[str] = None
+    flow_steps: list[str] = Field(default_factory=list)
     active_run: Optional[WaveRun] = None
     created_at: Optional[datetime] = None
 

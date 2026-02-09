@@ -264,7 +264,7 @@ struct WaveSidebar: View {
                 }
 
                 if !waveGroups.pr.isEmpty {
-                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .statusSuccess, count: waveGroups.pr.count)
+                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .statusSuccess, count: waveGroups.openPRCount)
                     waveRows(waveGroups.pr)
                 }
 

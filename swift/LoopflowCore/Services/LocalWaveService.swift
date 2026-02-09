@@ -393,6 +393,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             commits: commits,
             diffStat: json["diff_stat"] as? String,
             flowSteps: flowSteps,
+            openPRCount: normalizeInt(json["open_pr_count"]),
             activeRun: activeRun,
             createdAt: createdAt
         )

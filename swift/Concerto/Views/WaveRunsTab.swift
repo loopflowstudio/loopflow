@@ -13,6 +13,8 @@ struct WaveRunsTab: View {
     @State private var isCollapsing = false
     @State private var isAbsorbing = false
     @State private var actionError: String?
+    @State private var actionSuccess: String?
+    @State private var successDismissTask: Task<Void, Never>?
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -43,6 +45,17 @@ struct WaveRunsTab: View {
                     .foregroundStyle(Color.statusError)
             }
 
+            if let actionSuccess {
+                Label(actionSuccess, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.statusSuccess)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .background(Color.statusSuccess.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                    .transition(.opacity)
+            }
+
             if runs.isEmpty {
                 Text("No runs yet")
                     .font(.caption)
@@ -64,6 +77,9 @@ struct WaveRunsTab: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This combines open PRs into one PR and closes old PRs.")
+        }
+        .onDisappear {
+            successDismissTask?.cancel()
         }
     }
 
@@ -142,9 +158,11 @@ struct WaveRunsTab: View {
     private func collapsePRs() async {
         isCollapsing = true
         actionError = nil
+        actionSuccess = nil
 
         do {
             let result = try await onCollapse()
+            showSuccess("Collapsed \(result.closedPRs.count) PR\(result.closedPRs.count == 1 ? "" : "s") into one stack PR")
             if let urlString = result.newPRUrl, let url = URL(string: urlString) {
                 terminalLauncher.openURL(url)
             }
@@ -158,14 +176,28 @@ struct WaveRunsTab: View {
     private func absorbIntoPR(prNumber: Int) async {
         isAbsorbing = true
         actionError = nil
+        actionSuccess = nil
 
         do {
-            _ = try await onAbsorb(prNumber)
+            let result = try await onAbsorb(prNumber)
+            showSuccess("Absorbed \(result.commitsAbsorbed) commit\(result.commitsAbsorbed == 1 ? "" : "s") into \(result.targetBranch)")
         } catch {
             actionError = error.localizedDescription
         }
 
         isAbsorbing = false
+    }
+
+    private func showSuccess(_ message: String) {
+        successDismissTask?.cancel()
+        actionSuccess = message
+        successDismissTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                actionSuccess = nil
+            }
+        }
     }
 }
 

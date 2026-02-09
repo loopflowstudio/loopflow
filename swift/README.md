@@ -76,6 +76,15 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 - `Models/` — Swift structs mirroring Python dataclasses
 - `Services/Ghostty/` — Embedded terminal integration
 
+## Wave Detail: Current + Runs
+
+Wave detail now has two tabs:
+
+- **Current** — active run state, output, commit/diff context, and run actions (`Land`, `Next`)
+- **Runs** — historical run list with PR state, plus:
+  - **Collapse**: combine multiple open PRs into one
+  - **Absorb**: fold unpublished local commits into an existing open PR
+
 ## Communication with lfd
 
 Two patterns, intentionally different:

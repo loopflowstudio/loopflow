@@ -150,3 +150,50 @@ fn absorb_cherry_picks_current_commits_into_target_pr_branch() {
     let last_commit = git_output(&repo, &["log", "-1", "--format=%s"]);
     assert_eq!(last_commit, "current work commit");
 }
+
+#[test]
+fn absorb_fast_forwards_stale_local_target_branch() {
+    let gh_script = write_gh_absorb_script("target-pr-branch");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+
+    repo.create_branch("target-pr-branch");
+    repo.create_file("target.txt", "target\n");
+    repo.stage_all();
+    repo.commit("target base commit");
+    let base_sha = git_output(&repo, &["rev-parse", "HEAD"]);
+    repo.push_new_branch("target-pr-branch");
+
+    repo.create_file("target.txt", "target remote update\n");
+    repo.stage_all();
+    repo.commit("target remote commit");
+    let remote_tip_sha = git_output(&repo, &["rev-parse", "HEAD"]);
+    repo.push();
+
+    repo.checkout("main");
+    git_output(&repo, &["branch", "-f", "target-pr-branch", &base_sha]);
+
+    repo.create_branch("current-work");
+    repo.create_file("current.txt", "current\n");
+    repo.stage_all();
+    repo.commit("current work commit");
+
+    let result = absorb_into_pr(
+        repo.path(),
+        &AbsorbOptions {
+            target_pr_number: 42,
+        },
+        &NullProgress,
+    )
+    .expect("absorb should succeed");
+
+    assert_eq!(result.target_branch, "target-pr-branch");
+    assert_eq!(result.commits_absorbed, 1);
+
+    let current_branch = git_output(&repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    assert_eq!(current_branch, "target-pr-branch");
+
+    let parent_sha = git_output(&repo, &["rev-parse", "HEAD^"]);
+    assert_eq!(parent_sha, remote_tip_sha);
+}

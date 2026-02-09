@@ -350,23 +350,29 @@ fn pr_head_branch(repo: &Path, pr_number: u64) -> OpsResult<String> {
 }
 
 fn checkout_target_branch(repo: &Path, target_branch: &str) -> OpsResult<()> {
+    let remote_ref = format!("origin/{target_branch}");
     let checkout_existing = Command::new("git")
         .args(["checkout", target_branch])
         .current_dir(repo)
         .output()?;
     if checkout_existing.status.success() {
-        return Ok(());
+        let ff_output = Command::new("git")
+            .args(["merge", "--ff-only", &remote_ref])
+            .current_dir(repo)
+            .output()?;
+        if ff_output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&ff_output.stderr)
+            .trim()
+            .to_string();
+        return Err(OpsError::Message(format!(
+            "local branch {target_branch} diverged from {remote_ref}; sync it before absorbing ({stderr})"
+        )));
     }
 
-    run_git(
-        repo,
-        [
-            "checkout",
-            "-b",
-            target_branch,
-            &format!("origin/{target_branch}"),
-        ],
-    )?;
+    run_git(repo, ["checkout", "-b", target_branch, &remote_ref])?;
     Ok(())
 }
 

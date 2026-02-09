@@ -14,7 +14,6 @@ pub enum WaveStatus {
     Waiting = 3,
     Paused = 4,
     Failed = 5,
-    Completed = 6,
 }
 
 impl WaveStatus {
@@ -25,7 +24,6 @@ impl WaveStatus {
             3 => Self::Waiting,
             4 => Self::Paused,
             5 => Self::Failed,
-            6 => Self::Completed,
             _ => Self::Idle,
         }
     }
@@ -41,7 +39,6 @@ impl WaveStatus {
             Self::Waiting => "waiting",
             Self::Paused => "paused",
             Self::Failed => "failed",
-            Self::Completed => "completed",
         }
     }
 }
@@ -56,7 +53,6 @@ impl std::str::FromStr for WaveStatus {
             "waiting" => Ok(Self::Waiting),
             "paused" => Ok(Self::Paused),
             "failed" | "error" => Ok(Self::Failed),
-            "completed" => Ok(Self::Completed),
             _ => Err(()),
         }
     }

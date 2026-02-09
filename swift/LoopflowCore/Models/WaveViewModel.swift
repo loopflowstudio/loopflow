@@ -151,12 +151,14 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         flow.isEmpty ? "ship" : flow
     }
 
+    public var commits: [CommitEntry] { api.commits }
+    public var diffStat: String? { api.diffStat }
+
     public var statusText: String {
         switch status {
         case .running: return "Running"
         case .waiting: return "Waiting"
         case .idle: return "Idle"
-        case .completed: return "Completed"
         case .failed: return "Failed"
         case .paused: return "Paused"
         }
@@ -186,8 +188,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
             return ("circle.lefthalf.filled", .yellow)
         case .failed:
             return ("xmark.circle.fill", .red)
-        case .completed:
-            return ("checkmark.circle.fill", .green)
         case .idle:
             if stimulus.kind == .cron {
                 return ("clock", .gray)

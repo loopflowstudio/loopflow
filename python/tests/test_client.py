@@ -116,6 +116,17 @@ class TestClientResponses:
         assert "area" not in received
         client.close()
 
+    def test_next_wave(self):
+        def handler(request):
+            assert request.url.path == "/v0/waves/reduce/next"
+            assert request.method == "POST"
+            return httpx.Response(200, json={"new_branch": "wave/reduce.2"})
+
+        client = _mock_client(handler)
+        result = client.next_wave("reduce")
+        assert result["new_branch"] == "wave/reduce.2"
+        client.close()
+
 
 class TestExtractErrorMessage:
     def test_nested_error_message(self):

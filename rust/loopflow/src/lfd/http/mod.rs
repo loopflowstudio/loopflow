@@ -38,6 +38,7 @@ pub fn router(state: HttpState) -> Router {
             post(waves::continue_wave_handler),
         )
         .route("/waves/:wave_id/land", post(waves::land_wave_handler))
+        .route("/waves/:wave_id/next", post(waves::next_wave_handler))
         .route(
             "/waves/:wave_id/runs",
             get(wave_runs::list_wave_runs_for_wave_handler),
@@ -62,7 +63,7 @@ pub fn router(state: HttpState) -> Router {
         // Unauthenticated: health probes, metrics, git hooks.
         .route("/health", get(system::health_handler))
         .route("/metrics", get(system::metrics_handler))
-        .nest("/v1", api_routes)
+        .nest("/v0", api_routes)
         .merge(protected_routes)
         .route("/hooks/git", post(hooks::git_hook_handler))
         .layer(TraceLayer::new_for_http())

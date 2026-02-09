@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from typing import Any, Optional
 
 from .client import Client
-from .models import PullRequest, Stimulus, Wave, WaveRun
+from .models import CommitEntry, PullRequest, Stimulus, Wave, WaveRun
 
 _default_client: Optional[Client] = None
 
@@ -100,6 +100,10 @@ def land_wave(
     )
 
 
+def next_wave(name_or_id: str) -> dict[str, Any]:
+    return _client().next_wave(name_or_id)
+
+
 def wave_runs(
     wave_id: Optional[str] = None,
     repo: Optional[str] = None,
@@ -114,6 +118,7 @@ def wave_logs(name_or_id: str) -> Iterator[str]:
 
 __all__ = [
     "Client",
+    "CommitEntry",
     "PullRequest",
     "Stimulus",
     "Wave",
@@ -128,6 +133,7 @@ __all__ = [
     "run_wave",
     "stop_wave",
     "land_wave",
+    "next_wave",
     "wave_runs",
     "wave_logs",
 ]

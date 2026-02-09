@@ -362,9 +362,25 @@ public struct LocalWaveService: @unchecked Sendable {
         }
 
         let statusValue = json["status"] as? String ?? "idle"
-        let normalizedStatus = statusValue == "error" ? "failed" : statusValue
+        let normalizedStatus: String
+        switch statusValue {
+        case "error": normalizedStatus = "failed"
+        case "completed": normalizedStatus = "idle"
+        default: normalizedStatus = statusValue
+        }
         let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
         let activeRun = (json["active_run"] as? [String: Any]).flatMap(Self.parseWaveRunFromJSON)
+
+        let commits: [CommitEntry]
+        if let commitsData = json["commits"] as? [[String: Any]] {
+            commits = commitsData.compactMap { entry in
+                guard let sha = entry["sha"] as? String,
+                      let message = entry["message"] as? String else { return nil }
+                return CommitEntry(sha: sha, message: message)
+            }
+        } else {
+            commits = []
+        }
 
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
@@ -378,6 +394,8 @@ public struct LocalWaveService: @unchecked Sendable {
             iteration: json["iteration"] as? Int ?? 0,
             localWorktree: json["local_worktree"] as? String,
             remoteBranch: json["remote_branch"] as? String,
+            commits: commits,
+            diffStat: json["diff_stat"] as? String,
             activeRun: activeRun,
             createdAt: createdAt
         )
@@ -508,6 +526,47 @@ public struct LocalWaveService: @unchecked Sendable {
             let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
+    }
+
+    /// Land a wave's current branch (merge via PR).
+    public func landWave(_ id: String) async throws {
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/land")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["create_pr": true])
+
+        let (data, response) = try await longSession.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+    }
+
+    /// Start the next iteration of a wave (create new branch).
+    public func nextWave(_ id: String) async throws -> String {
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/next")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await longSession.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let newBranch = json["new_branch"] as? String else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return newBranch
     }
 
     /// Clone a wave with a new name.

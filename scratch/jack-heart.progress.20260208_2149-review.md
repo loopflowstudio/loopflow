@@ -1,50 +1,31 @@
-# Flow Steps & Running-State Commits: Review
+# Python Wave `flow_steps` parity: Review
 
 ## What was implemented
 
-Wire the expanded flow step names from the Rust backend through to the Swift UI so the `FlowProgressPills` component shows actual step names (e.g., "implement", "compress", "gate") instead of just the flow name. Also show commit log and diff stat while a wave is running, not only when idle.
+Added `flow_steps` to the Python `Wave` model so Python clients receive the same flow-step data already exposed by the API and consumed by the Swift app.
 
-## Key changes
+Also cleaned up Python test fixtures by removing unused pytest fixture functions and keeping shared payloads as plain constants.
 
-**Rust (API layer)**
-- `WaveDto` gains `flow_steps: Vec<String>` — always present, empty when no flow is configured.
-- `build_wave_dto` runs `infer_wave_git_state` and `load_flow_steps` concurrently via `tokio::join!`, avoiding serial blocking calls.
-- `load_flow_steps` visibility widened to `pub(super)` so routes/mod.rs can call it.
+## Key choices
 
-**Swift (model + UI)**
-- `Wave` model gets `flowSteps: [String]` (non-optional, defaults to `[]`).
-- `WaveViewModel` removes its own `flowSteps: [String]?` field and proxies through `api.flowSteps` instead — single source of truth.
-- `WaveDetailPanel.runProgressSection` uses `wave.flowSteps` for pill labels and shows commit log + diff stat sections while running.
-- `LocalWaveService.parseWaveFromJSON` parses `flow_steps` from the API response.
-
-**Python (model)**
-- `Wave` model gains `flow_steps: list[str]` with empty-list default, matching the Rust DTO.
+- **`flow_steps` defaults to an empty list** in `Wave` (`Field(default_factory=list)`), so older API responses that omit the field still parse safely.
+- **Model tests cover default + populated + round-trip behavior** to prove parsing is stable for both minimal and full payloads.
+- **Removed unused `pytest` fixture functions from `python/tests/conftest.py`** because tests already import shared payload dictionaries directly; this reduces dead code and avoids fixture indirection.
 
 ## How it fits together
 
-```
-lfd API (Rust)
-  └─ build_wave_dto
-       ├─ infer_wave_git_state (git log, diff --stat) ─┐
-       └─ load_flow_steps (expand flow definition)    ──┤ tokio::join!
-                                                        ▼
-                                            WaveDto { flow_steps, commits, diff_stat }
-                                                        │
-                                            ┌───────────┴───────────┐
-                                            ▼                       ▼
-                                    Swift (Concerto)         Python (lfq)
-                                    Wave.flowSteps           Wave.flow_steps
-```
+`lfd` now returns `flow_steps` in wave payloads. The Python client deserializes those payloads into `Wave`; with this change, `Wave.flow_steps` is preserved and available to callers.
 
-The data flows one direction: Rust resolves flow steps at API response time, clients consume them.
+The tests in `python/tests/test_models.py` verify this field is present when provided and defaults correctly when missing.
 
 ## Risks and bottlenecks
 
-- **Flow step resolution adds latency to wave list/detail calls.** Mitigated by running it concurrently with git state inference via `tokio::join!`. Both are already `spawn_blocking` so they share the blocking thread pool.
-- **`load_flow_steps` reads flow YAML from disk on every API call.** For the typical wave count (< 10) this is fine. If wave count grows significantly, caching would help.
-- **Empty `flow_steps` fallback in UI.** When the flow can't be resolved (deleted/invalid flow name), the UI falls back to `[wave.flow]` — showing just the flow name. Graceful but loses step granularity.
+- **No runtime bottleneck added**: this is model-field plumbing only.
+- **Main risk is schema drift** between API and Python models; this change reduces that risk by restoring parity.
+- **Mutable test payload constants** are shared across tests. Current tests treat them as read-only; mutating them in future tests could create coupling.
 
 ## What's not included
 
-- No caching of flow step resolution results.
-- No Concerto UI tests for the running-state commit/diff display — these are view-layer changes best verified visually.
+- No Rust or Swift changes (already handled separately).
+- No CLI output changes.
+- No additional docs updates beyond this review note, since no command behavior changed.

@@ -139,10 +139,7 @@ fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
     }
     let branch = crate::engine::git::current_branch(&worktree).ok().flatten();
 
-    let main_repo =
-        crate::engine::worktrees::main_repo_root(&worktree).unwrap_or_else(|_| worktree.clone());
-    let base_branch = crate::engine::git::get_default_branch(&main_repo).unwrap_or_default();
-    let diff_ref = format!("origin/{base_branch}");
+    let diff_ref = nearest_base_ref(&worktree, wave_name);
 
     let commits = git_commit_log(&worktree, &diff_ref);
     let diff_stat = git_diff_stat(&worktree, &diff_ref);
@@ -153,6 +150,90 @@ fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
         commits,
         diff_stat,
     })
+}
+
+/// Find the nearest ancestor branch for diff comparison.
+///
+/// Candidates are the default branch plus any remote branches belonging to this wave
+/// (matched by the sanitized wave name in the branch). For each candidate, compute
+/// merge-base with HEAD and pick the closest one (fewest commits away). This handles
+/// stacking: after `next`, the previous iteration branch is a closer ancestor than main.
+/// After the parent merges and you rebase onto main, main becomes closest again.
+fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
+    let main_repo = crate::engine::worktrees::main_repo_root(worktree)
+        .unwrap_or_else(|_| worktree.to_path_buf());
+    let default_branch = crate::engine::git::get_default_branch(&main_repo)
+        .unwrap_or_else(|_| "main".to_string());
+
+    let current = crate::engine::git::current_branch(worktree)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    // Candidates: default branch + remote branches sharing this wave's name.
+    let wave_slug = crate::engine::naming::sanitize_for_branch(wave_name);
+    let mut candidates: Vec<String> = vec![default_branch.clone()];
+    if let Some(sibling_branches) = wave_remote_branches(worktree, &wave_slug) {
+        for branch in sibling_branches {
+            if branch != current && !candidates.contains(&branch) {
+                candidates.push(branch);
+            }
+        }
+    }
+
+    // For each candidate, find merge-base with HEAD and count commits from there to HEAD.
+    // Pick the one closest to HEAD.
+    let mut best_ref = default_branch;
+    let mut best_distance = u64::MAX;
+
+    for candidate in &candidates {
+        let mb = match crate::engine::git::merge_base(worktree, "HEAD", candidate) {
+            Ok(sha) => sha,
+            Err(_) => continue,
+        };
+        let distance = commit_count(worktree, &mb);
+        if distance < best_distance {
+            best_distance = distance;
+            best_ref = mb;
+        }
+    }
+
+    best_ref
+}
+
+/// List remote branches whose name contains the wave slug (e.g. ".conviction.").
+fn wave_remote_branches(worktree: &std::path::Path, wave_slug: &str) -> Option<Vec<String>> {
+    let pattern = format!(".{}.", wave_slug);
+    let output = std::process::Command::new("git")
+        .args(["branch", "-r", "--format=%(refname:short)"])
+        .current_dir(worktree)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branches = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| line.contains(&pattern))
+        .map(|line| line.trim().to_string())
+        .collect();
+    Some(branches)
+}
+
+fn commit_count(worktree: &std::path::Path, from_ref: &str) -> u64 {
+    std::process::Command::new("git")
+        .args(["rev-list", "--count", &format!("{from_ref}..HEAD")])
+        .current_dir(worktree)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8_lossy(&o.stdout).trim().parse().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(u64::MAX)
 }
 
 fn git_commit_log(worktree: &std::path::Path, diff_ref: &str) -> Vec<CommitEntryDto> {

@@ -583,6 +583,10 @@ pub async fn continue_wave_handler(
         .await
         .map_err(map_store_error)?;
 
+    state
+        .event_hub
+        .send(Event::wave_updated(wave_id.clone()));
+
     // Re-acquire scheduler slot (idempotent for same run_id).
     let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;
     if !acquired {
@@ -614,6 +618,7 @@ pub async fn land_wave_handler(
 ) -> ApiResult<LandWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
+    let wave_id_for_event = wave_id.clone();
     let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
         .await
         .map_err(map_store_error)?
@@ -654,6 +659,8 @@ pub async fn land_wave_handler(
     .await
     .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
     .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+
+    state.event_hub.send(Event::wave_updated(wave_id_for_event));
 
     Ok(Json(LandWaveResponse { merged: true }))
 }
@@ -704,6 +711,8 @@ pub async fn next_wave_handler(
     .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
     .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
 
+    state.event_hub.send(Event::wave_updated(wave_id));
+
     Ok(Json(NextWaveResponse {
         new_branch: result.new_branch,
     }))
@@ -729,6 +738,8 @@ pub async fn collapse_wave_handler(
     .await
     .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
     .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+
+    state.event_hub.send(Event::wave_updated(wave_id));
 
     Ok(Json(CollapseResponse {
         ok: true,
@@ -759,6 +770,8 @@ pub async fn absorb_wave_handler(
     .await
     .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
     .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+
+    state.event_hub.send(Event::wave_updated(wave_id));
 
     Ok(Json(AbsorbResponse {
         ok: true,

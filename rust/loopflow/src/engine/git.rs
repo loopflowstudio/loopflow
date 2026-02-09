@@ -95,6 +95,11 @@ pub fn is_ancestor(repo: &Path, commit: &str, descendant: &str) -> Result<bool, 
     Ok(output.status.success())
 }
 
+/// Find the merge-base (common ancestor) of two refs.
+pub fn merge_base(repo: &Path, a: &str, b: &str) -> Result<String, GitError> {
+    git_stdout(repo, &["merge-base", a, b]).map(|s| s.trim().to_string())
+}
+
 /// Checkout a ref (branch, tag, or commit).
 pub fn checkout(repo: &Path, ref_name: &str) -> Result<(), GitError> {
     git_stdout(repo, &["checkout", ref_name])?;

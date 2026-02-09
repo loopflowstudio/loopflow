@@ -111,10 +111,15 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Ensure Ctrl+C terminates lf. Without this, cmd.output() and
-    // child.wait() retry on EINTR and the process hangs while the
-    // child agent catches SIGINT and keeps running.
-    ctrlc::set_handler(|| std::process::exit(130)).expect("failed to set Ctrl+C handler");
+    // Ensure Ctrl+C terminates lf and the child agent. Without this,
+    // child.wait() retries on EINTR and hangs while the agent catches
+    // SIGINT and keeps running. SIGTERM the agent first so it doesn't
+    // survive as an orphan.
+    ctrlc::set_handler(|| {
+        loopflow::engine::agent::kill_child_if_running();
+        std::process::exit(130);
+    })
+    .expect("failed to set Ctrl+C handler");
 
     // Initialize tracing with RUST_LOG env filter
     // Usage: RUST_LOG=lf=debug lf debug

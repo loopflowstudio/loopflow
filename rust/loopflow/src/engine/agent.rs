@@ -5,9 +5,24 @@
 
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::Instant;
+
+/// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
+/// to this process before exiting so the agent doesn't survive as an orphan.
+static CHILD_PID: AtomicU32 = AtomicU32::new(0);
+
+/// Kill the child agent process if one is running.
+pub fn kill_child_if_running() {
+    let pid = CHILD_PID.load(Ordering::Acquire);
+    if pid != 0 {
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+    }
+}
 
 use crate::engine::config::parse_model;
 use crate::engine::error::CoreError;
@@ -286,7 +301,12 @@ pub fn launch_agent(
 
 fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
-    let output = cmd.output()?;
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let child = cmd.spawn()?;
+    CHILD_PID.store(child.id(), Ordering::Release);
+    let output = child.wait_with_output()?;
+    CHILD_PID.store(0, Ordering::Release);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
@@ -301,11 +321,13 @@ fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
 fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     let mut child = cmd.spawn()?;
+    CHILD_PID.store(child.id(), Ordering::Release);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
     let status = child.wait()?;
+    CHILD_PID.store(0, Ordering::Release);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
@@ -326,6 +348,7 @@ fn launch_streaming(
 
     let start = Instant::now();
     let mut child = cmd.spawn()?;
+    CHILD_PID.store(child.id(), Ordering::Release);
     tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
 
     let stdout = child
@@ -417,6 +440,7 @@ fn launch_streaming(
     }
 
     let status = child.wait()?;
+    CHILD_PID.store(0, Ordering::Release);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent streaming completed"

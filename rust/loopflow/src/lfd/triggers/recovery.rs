@@ -4,7 +4,8 @@ use time::OffsetDateTime;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::lfd::executor::{kill_process, WaveExecutor};
+use crate::engine::platform::kill_process;
+use crate::lfd::executor::WaveExecutor;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{AgentStatus, WaveRunStatus, WaveStatus};
 

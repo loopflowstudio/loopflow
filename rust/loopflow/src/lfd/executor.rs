@@ -199,7 +199,6 @@ impl WaveExecutor {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub fn with_runner(
         store: SharedStore,
         scheduler: Arc<Scheduler>,
@@ -250,6 +249,7 @@ impl WaveExecutor {
                         run.status = WaveRunStatus::Running;
                         run.flow_parents = flow_parents_for_index(&plan, run.step_index);
                         self.store.update_wave_run(&run)?;
+                        self.event_hub.send(Event::wave_updated(wave.id.clone()));
                     } else {
                         self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))?;
                         return Ok(());
@@ -436,6 +436,7 @@ impl WaveExecutor {
         run.status = WaveRunStatus::Running;
         run.flow_parents = flow_parents_for_index(plan, run.step_index);
         self.store.update_wave_run(run)?;
+        self.event_hub.send(Event::wave_updated(wave.id.clone()));
         Ok(())
     }
 
@@ -668,6 +669,7 @@ impl WaveExecutor {
         run.status = WaveRunStatus::Running;
         run.flow_parents = flow_parents_for_index(plan, run.step_index);
         self.store.update_wave_run(run)?;
+        self.event_hub.send(Event::wave_updated(wave.id.clone()));
         Ok(())
     }
 
@@ -744,14 +746,6 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
     let result = create_with_schema(main_repo, wave_name, None, branch_config)?;
     Ok((result.path.to_string_lossy().to_string(), result.branch))
-}
-
-/// Kill a process by PID using SIGTERM.
-pub fn kill_process(pid: u32) {
-    let _ = std::process::Command::new("kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status();
 }
 
 fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
@@ -924,6 +918,7 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::store::sqlite::SqliteStore;
     use tempfile::tempdir;
     use tokio::io::{AsyncWriteExt, DuplexStream};
 
@@ -1003,6 +998,117 @@ mod tests {
         assert_eq!(
             lines,
             vec![r#"{"type":"mystery","payload":42}"#, "plain text line"]
+        );
+    }
+
+    struct MockRunner;
+
+    #[async_trait]
+    impl StepRunner for MockRunner {
+        async fn run(
+            &self,
+            _cmd: Vec<String>,
+            _cwd: &Path,
+            _wave_id: &str,
+            _agent_id: &str,
+            _wave_run_id: &str,
+            _output: &OutputHub,
+        ) -> Result<i32> {
+            Ok(0)
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_emits_wave_updated_on_step_advance() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+
+        // Create a two-step flow
+        let flow_dir = repo.join(".lf/flows");
+        std::fs::create_dir_all(&flow_dir).unwrap();
+        std::fs::write(flow_dir.join("test-flow.yaml"), "- step-a\n- step-b\n").unwrap();
+
+        // Create step files so load_step resolves
+        let step_dir = repo.join(".lf/steps");
+        std::fs::create_dir_all(&step_dir).unwrap();
+        std::fs::write(step_dir.join("step-a.md"), "do step a").unwrap();
+        std::fs::write(step_dir.join("step-b.md"), "do step b").unwrap();
+
+        // Set up store
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).unwrap());
+
+        let wave_id = LfdId::new();
+        let run_id = LfdId::new();
+
+        let wave = Wave {
+            id: wave_id.clone(),
+            name: "test-wave".to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: "test-flow".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Running,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.create_wave(&wave).unwrap();
+
+        let run = WaveRun {
+            id: run_id.clone(),
+            wave_id: wave_id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: repo.to_string_lossy().to_string(),
+                flow: "test-flow".to_string(),
+                direction: vec![],
+                area: vec![],
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: repo.to_string_lossy().to_string(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+        };
+        store.create_wave_run(&run).unwrap();
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let mut rx = event_hub.subscribe();
+
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor.execute(&run_id).await.unwrap();
+
+        // Collect all wave_updated events
+        let mut wave_updated_count = 0;
+        while let Ok(event) = rx.try_recv() {
+            let json = serde_json::to_value(&event).unwrap();
+            if json["type"] == "wave_updated" {
+                wave_updated_count += 1;
+            }
+        }
+
+        // Two steps means two step advances (step-a -> step-b, step-b -> complete),
+        // plus one final wave_updated when the run completes.
+        // After step-a: step_index 0->1, emit wave_updated
+        // After step-b: step_index 1->2, emit wave_updated
+        // Run completes: emit wave_updated
+        assert_eq!(
+            wave_updated_count, 3,
+            "expected wave_updated after each step advance and on completion"
         );
     }
 }

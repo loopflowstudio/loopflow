@@ -9,3 +9,11 @@ pub fn open_url(url: &str) {
     };
     let _ = Command::new(cmd).arg(url).status();
 }
+
+/// Send SIGTERM to a process by PID.
+pub fn kill_process(pid: u32) {
+    let _ = Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+}

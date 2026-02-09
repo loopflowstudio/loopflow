@@ -3,6 +3,7 @@
 import Foundation
 import SwiftUI
 import Testing
+@testable import Concerto
 @testable import LoopflowCore
 
 @Suite("Wave View Model")
@@ -392,6 +393,193 @@ struct AbsorbIntoPRResultTests {
 
         #expect(result.targetBranch == "wave-b")
         #expect(result.commitsAbsorbed == 3)
+    }
+}
+
+@Suite("Flow step progress")
+struct FlowStepProgressTests {
+
+    @Test("stepIndex reflects active run step_index")
+    func stepIndexFromActiveRun() {
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "start",
+            area: ".",
+            repo: "/tmp/repo",
+            stepIndex: 1
+        )
+        let wave = WaveViewModel(
+            api: Wave(
+                id: "wave-1",
+                repo: "/tmp/repo",
+                flow: "start",
+                status: .running,
+                flowSteps: ["ingest", "kickoff"],
+                activeRun: run
+            )
+        )
+
+        #expect(wave.stepIndex == 1)
+        #expect(wave.flowSteps == ["ingest", "kickoff"])
+    }
+
+    @Test("stepIndex defaults to 0 when no active run")
+    func stepIndexDefaultsToZero() {
+        let wave = WaveViewModel(
+            api: Wave(
+                id: "wave-1",
+                repo: "/tmp/repo",
+                flow: "start",
+                status: .idle,
+                flowSteps: ["ingest", "kickoff"]
+            )
+        )
+
+        #expect(wave.stepIndex == 0)
+    }
+
+    @Test("stepIndex advances when active run updates")
+    func stepIndexAdvancesWithRun() {
+        let run0 = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "ship",
+            area: ".",
+            repo: "/tmp/repo",
+            stepIndex: 0
+        )
+        let run1 = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "ship",
+            area: ".",
+            repo: "/tmp/repo",
+            stepIndex: 2
+        )
+
+        let wave0 = WaveViewModel(
+            api: Wave(
+                id: "wave-1",
+                repo: "/tmp/repo",
+                flow: "ship",
+                status: .running,
+                flowSteps: ["implement", "compress", "gate", "consolidate"],
+                activeRun: run0
+            )
+        )
+        let wave1 = WaveViewModel(
+            api: Wave(
+                id: "wave-1",
+                repo: "/tmp/repo",
+                flow: "ship",
+                status: .running,
+                flowSteps: ["implement", "compress", "gate", "consolidate"],
+                activeRun: run1
+            )
+        )
+
+        #expect(wave0.stepIndex == 0)
+        #expect(wave1.stepIndex == 2)
+    }
+}
+
+@Suite("WaveStore reactivity")
+struct WaveStoreReactivityTests {
+
+    @MainActor
+    @Test("WaveStore.set updates stepIndex when wave refreshed with new active run")
+    func storeReflectsUpdatedStepIndex() {
+        let store = WaveStore()
+
+        // Initial wave at step 0
+        let run0 = WaveRun(
+            id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
+            stepIndex: 0
+        )
+        let wave0 = WaveViewModel(
+            api: Wave(
+                id: "wave-1", repo: "/tmp/repo", flow: "start", status: .running,
+                flowSteps: ["ingest", "kickoff"], activeRun: run0
+            )
+        )
+        store.set(wave0)
+
+        #expect(store.wave(for: "wave-1")?.stepIndex == 0)
+
+        // Simulate wave_updated event: re-fetch returns step 1
+        let run1 = WaveRun(
+            id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
+            stepIndex: 1
+        )
+        let wave1 = WaveViewModel(
+            api: Wave(
+                id: "wave-1", repo: "/tmp/repo", flow: "start", status: .running,
+                flowSteps: ["ingest", "kickoff"], activeRun: run1
+            )
+        )
+        store.set(wave1)
+
+        #expect(store.wave(for: "wave-1")?.stepIndex == 1)
+        #expect(store.wave(for: "wave-1")?.flowSteps == ["ingest", "kickoff"])
+    }
+}
+
+@Suite("parseWaveFromJSON")
+struct ParseWaveFromJSONTests {
+
+    @Test("parses active_run with step_index")
+    func parsesActiveRunStepIndex() {
+        let json: [String: Any] = [
+            "id": "wave-1",
+            "name": "ux",
+            "repo": "/tmp/repo",
+            "flow": "start",
+            "direction": ["designer"],
+            "area": ["."],
+            "status": "running",
+            "iteration": 0,
+            "flow_steps": ["ingest", "kickoff"],
+            "active_run": [
+                "id": "run-1",
+                "wave_id": "wave-1",
+                "flow": "start",
+                "repo": "/tmp/repo",
+                "direction": ["designer"],
+                "area": ["."],
+                "iteration": 0,
+                "step_index": 1,
+                "status": "running",
+                "local_worktree": "/tmp/wt",
+                "remote_branch": "jack/ux"
+            ] as [String: Any]
+        ]
+
+        let wave = LocalWaveService.parseWaveFromJSON(json)
+
+        #expect(wave.flowSteps == ["ingest", "kickoff"])
+        #expect(wave.activeRun?.stepIndex == 1)
+
+        let vm = WaveViewModel(api: wave)
+        #expect(vm.stepIndex == 1)
+    }
+
+    @Test("parses wave without active_run defaults stepIndex to 0")
+    func parsesWaveWithoutActiveRun() {
+        let json: [String: Any] = [
+            "id": "wave-1",
+            "name": "ux",
+            "repo": "/tmp/repo",
+            "flow": "start",
+            "status": "idle",
+            "flow_steps": ["ingest", "kickoff"]
+        ]
+
+        let wave = LocalWaveService.parseWaveFromJSON(json)
+        let vm = WaveViewModel(api: wave)
+
+        #expect(vm.stepIndex == 0)
+        #expect(wave.activeRun == nil)
     }
 }
 

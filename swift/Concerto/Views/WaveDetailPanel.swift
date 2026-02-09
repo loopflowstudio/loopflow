@@ -360,7 +360,7 @@ struct WaveDetailPanel: View {
                 // Status description with progress
                 if wave.status == .running {
                     FlowProgressPills(
-                        steps: wave.flowSteps ?? [wave.flow],
+                        steps: wave.flowSteps.isEmpty ? [wave.flow] : wave.flowSteps,
                         currentIndex: wave.stepIndex,
                         startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt
                     )
@@ -379,6 +379,15 @@ struct WaveDetailPanel: View {
                         .padding(.vertical, 4)
                         .background(palette.background)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+
+                // Commits and diff while running
+                if !wave.commits.isEmpty {
+                    commitLogSection
+                }
+
+                if let stat = wave.diffStat {
+                    diffStatSection(stat)
                 }
 
                 // Live output (running or any buffered output)

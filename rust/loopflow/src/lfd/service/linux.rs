@@ -138,40 +138,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unit_contains_exec_start() {
-        let unit = generate_unit("/usr/local/bin/lfd");
-        assert!(unit.contains("ExecStart=/usr/local/bin/lfd run"));
-    }
+    fn generate_unit_produces_valid_config() {
+        let unit = generate_unit("/opt/custom/bin/lfd");
 
-    #[test]
-    fn unit_has_restart_policy() {
-        let unit = generate_unit("/usr/local/bin/lfd");
+        // Binary path and subcommand.
+        assert!(unit.contains("ExecStart=/opt/custom/bin/lfd run"));
+
+        // Restart behavior with exponential backoff.
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("RestartSec=1s"));
-    }
-
-    #[test]
-    fn unit_has_exponential_backoff() {
-        let unit = generate_unit("/usr/local/bin/lfd");
         assert!(unit.contains("RestartSteps=5"));
         assert!(unit.contains("RestartMaxDelaySec=60s"));
-    }
 
-    #[test]
-    fn unit_has_install_section() {
-        let unit = generate_unit("/usr/local/bin/lfd");
-        assert!(unit.contains("WantedBy=default.target"));
-    }
-
-    #[test]
-    fn unit_has_description() {
-        let unit = generate_unit("/usr/local/bin/lfd");
+        // Metadata and install target.
         assert!(unit.contains("Description=Loopflow Daemon"));
-    }
-
-    #[test]
-    fn unit_uses_provided_binary_path() {
-        let unit = generate_unit("/opt/custom/bin/lfd");
-        assert!(unit.contains("/opt/custom/bin/lfd"));
+        assert!(unit.contains("WantedBy=default.target"));
     }
 }

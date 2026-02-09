@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
+fn home_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
 /// Root data directory: ~/.lf
 pub fn data_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".lf")
+    home_dir().join(".lf")
 }
 
 /// SQLite database path: ~/.lf/lfd.db
@@ -23,9 +26,7 @@ pub fn output_dir() -> PathBuf {
 pub fn log_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Library/Logs/lfd")
+        home_dir().join("Library/Logs/lfd")
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -39,20 +40,14 @@ pub fn log_dir() -> PathBuf {
 /// launchd plist path (macOS only).
 #[cfg(target_os = "macos")]
 pub fn plist_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Library/LaunchAgents/studio.loopflow.lfd.plist")
+    home_dir().join("Library/LaunchAgents/studio.loopflow.lfd.plist")
 }
 
 /// systemd user service path (Linux only).
 #[cfg(target_os = "linux")]
 pub fn service_path() -> PathBuf {
     dirs::config_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".config")
-        })
+        .unwrap_or_else(|| home_dir().join(".config"))
         .join("systemd/user/lfd.service")
 }
 

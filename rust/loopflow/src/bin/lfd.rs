@@ -50,30 +50,18 @@ enum Commands {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
+    use loopflow::lfd::service;
+
     match cli.command.unwrap_or(Commands::Run) {
-        Commands::Run => run_daemon().await,
-        Commands::Install => {
-            loopflow::lfd::service::install()?;
-            Ok(())
-        }
-        Commands::Uninstall => {
-            loopflow::lfd::service::uninstall()?;
-            Ok(())
-        }
-        Commands::Start => {
-            loopflow::lfd::service::start()?;
-            Ok(())
-        }
-        Commands::Stop => {
-            loopflow::lfd::service::stop()?;
-            Ok(())
-        }
-        Commands::Status => {
-            loopflow::lfd::service::status()?;
-            Ok(())
-        }
-        Commands::Migrate { status } => run_migrate(status).await,
+        Commands::Run => return run_daemon().await,
+        Commands::Migrate { status } => return run_migrate(status).await,
+        Commands::Install => service::install()?,
+        Commands::Uninstall => service::uninstall()?,
+        Commands::Start => service::start()?,
+        Commands::Stop => service::stop()?,
+        Commands::Status => service::status()?,
     }
+    Ok(())
 }
 
 async fn run_migrate(status_only: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -97,7 +85,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
     let db_path = std::env::var("LFD_DB_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| loopflow::lfd::default_db_path());
+        .unwrap_or_else(|_| loopflow::lfd::paths::db_path());
     let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
 
     let max_slots = std::env::var("LFD_MAX_SLOTS")
@@ -125,7 +113,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
     };
     let scheduler = Arc::new(Scheduler::new(max_slots));
-    let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
+    let output = OutputHub::new(2048, loopflow::lfd::paths::output_dir());
     let event_hub = EventHub::new(1024);
     let executor = WaveExecutor::new(
         store.clone(),

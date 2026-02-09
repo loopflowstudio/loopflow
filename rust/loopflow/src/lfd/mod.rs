@@ -17,8 +17,6 @@ pub mod store;
 pub mod triggers;
 pub mod types;
 
-use std::path::PathBuf;
-
 use tokio_util::sync::CancellationToken;
 
 use self::auth::AuthContext;
@@ -65,14 +63,6 @@ pub async fn setup_registration(
             std::process::exit(1);
         }
     }
-}
-
-pub fn default_db_path() -> PathBuf {
-    paths::db_path()
-}
-
-pub fn default_output_dir() -> PathBuf {
-    paths::output_dir()
 }
 
 pub fn default_max_slots() -> usize {

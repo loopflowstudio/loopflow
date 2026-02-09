@@ -193,53 +193,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plist_contains_label() {
-        let plist = generate_plist("/usr/local/bin/lfd", "/var/log/lfd");
-        assert!(plist.contains(LABEL));
-    }
+    fn generate_plist_produces_valid_config() {
+        let plist = generate_plist("/opt/homebrew/bin/lfd", "/Users/jack/Library/Logs/lfd");
 
-    #[test]
-    fn plist_contains_binary_path() {
-        let plist = generate_plist("/opt/homebrew/bin/lfd", "/var/log/lfd");
-        assert!(plist.contains("/opt/homebrew/bin/lfd"));
-    }
-
-    #[test]
-    fn plist_contains_run_subcommand() {
-        let plist = generate_plist("/usr/local/bin/lfd", "/var/log/lfd");
-        assert!(plist.contains("<string>run</string>"));
-    }
-
-    #[test]
-    fn plist_has_keep_alive() {
-        let plist = generate_plist("/usr/local/bin/lfd", "/var/log/lfd");
-        assert!(plist.contains("KeepAlive"));
-        assert!(plist.contains("SuccessfulExit"));
-    }
-
-    #[test]
-    fn plist_has_throttle_interval() {
-        let plist = generate_plist("/usr/local/bin/lfd", "/var/log/lfd");
-        assert!(plist.contains("ThrottleInterval"));
-    }
-
-    #[test]
-    fn plist_has_process_type_adaptive() {
-        let plist = generate_plist("/usr/local/bin/lfd", "/var/log/lfd");
-        assert!(plist.contains("Adaptive"));
-    }
-
-    #[test]
-    fn plist_has_log_paths() {
-        let plist = generate_plist("/usr/local/bin/lfd", "/Users/jack/Library/Logs/lfd");
-        assert!(plist.contains("/Users/jack/Library/Logs/lfd/lfd.log"));
-        assert!(plist.contains("/Users/jack/Library/Logs/lfd/lfd.err"));
-    }
-
-    #[test]
-    fn plist_is_valid_xml() {
-        let plist = generate_plist("/usr/local/bin/lfd", "/var/log/lfd");
+        // Valid XML structure.
         assert!(plist.starts_with("<?xml"));
         assert!(plist.contains("</plist>"));
+
+        // Label and binary path.
+        assert!(plist.contains(LABEL));
+        assert!(plist.contains("/opt/homebrew/bin/lfd"));
+        assert!(plist.contains("<string>run</string>"));
+
+        // Restart and process behavior.
+        assert!(plist.contains("KeepAlive"));
+        assert!(plist.contains("SuccessfulExit"));
+        assert!(plist.contains("ThrottleInterval"));
+        assert!(plist.contains("Adaptive"));
+
+        // Log paths.
+        assert!(plist.contains("/Users/jack/Library/Logs/lfd/lfd.log"));
+        assert!(plist.contains("/Users/jack/Library/Logs/lfd/lfd.err"));
     }
 }

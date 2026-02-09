@@ -234,4 +234,128 @@ struct WaveStoreOptimisticTests {
         #expect(store.groups.pr.count == 2)
         #expect(store.groups.openPRCount == 3)
     }
+
+    // MARK: - insertPending / replacePending / removePending
+
+    @Test("insertPending adds wave and blocks set for that ID")
+    func insertPendingBlocksSet() {
+        let store = WaveStore()
+        let pending = makeWave(id: "pending-1", name: "new wave")
+        store.insertPending(pending)
+
+        #expect(store.wave(for: "pending-1")?.name == "new wave")
+
+        // External set should be blocked
+        store.set(makeWave(id: "pending-1", name: "from-event"))
+        #expect(store.wave(for: "pending-1")?.name == "new wave")
+    }
+
+    @Test("replacePending swaps pending for real wave and unblocks set")
+    func replacePendingSwapsAndUnblocks() {
+        let store = WaveStore()
+        store.insertPending(makeWave(id: "pending-1", name: "pending"))
+
+        let real = makeWave(id: "real-1", name: "server wave")
+        store.replacePending("pending-1", with: real)
+
+        #expect(store.wave(for: "pending-1") == nil)
+        #expect(store.wave(for: "real-1")?.name == "server wave")
+
+        // set should work for the real ID (not pending-guarded)
+        store.set(makeWave(id: "real-1", name: "updated"))
+        #expect(store.wave(for: "real-1")?.name == "updated")
+    }
+
+    @Test("removePending removes wave and clears pending state")
+    func removePendingClearsAll() {
+        let store = WaveStore()
+        store.insertPending(makeWave(id: "pending-1", name: "pending"))
+
+        store.removePending("pending-1")
+
+        #expect(store.wave(for: "pending-1") == nil)
+
+        // ID should no longer be pending-guarded
+        store.set(makeWave(id: "pending-1", name: "reused"))
+        #expect(store.wave(for: "pending-1")?.name == "reused")
+    }
+
+    // MARK: - applyDelete
+
+    @Test("applyDelete removes wave but blocks set for that ID")
+    func applyDeleteBlocksReInsertion() {
+        let store = WaveStore()
+        store.set(makeWave(id: "wave-1", name: "original"))
+
+        store.applyDelete("wave-1")
+
+        #expect(store.wave(for: "wave-1") == nil)
+
+        // WebSocket event should not re-insert
+        store.set(makeWave(id: "wave-1", name: "from-event"))
+        #expect(store.wave(for: "wave-1") == nil)
+    }
+
+    @Test("applyDelete + rollback restores the wave")
+    func applyDeleteRollbackRestores() {
+        let store = WaveStore()
+        let wave = makeWave(id: "wave-1", name: "original")
+        store.set(wave)
+
+        store.applyDelete("wave-1")
+        #expect(store.wave(for: "wave-1") == nil)
+
+        store.rollback(wave)
+        #expect(store.wave(for: "wave-1")?.name == "original")
+
+        // set should work again after rollback
+        store.set(makeWave(id: "wave-1", name: "updated"))
+        #expect(store.wave(for: "wave-1")?.name == "updated")
+    }
+
+    @Test("setAll during pending delete does not re-insert the wave")
+    func setAllDuringPendingDelete() {
+        let store = WaveStore()
+        store.set(makeWave(id: "wave-1", name: "original"))
+        store.set(makeWave(id: "wave-2", name: "other"))
+
+        store.applyDelete("wave-1")
+
+        store.setAll([
+            makeWave(id: "wave-1", name: "server-name"),
+            makeWave(id: "wave-2", name: "other-updated"),
+        ])
+
+        // wave-1 should stay deleted (pending guard blocks it)
+        #expect(store.wave(for: "wave-1") == nil)
+        #expect(store.wave(for: "wave-2")?.name == "other-updated")
+    }
+
+    @Test("applyDelete + commitMutation allows future set")
+    func applyDeleteCommitAllowsFutureSet() {
+        let store = WaveStore()
+        store.set(makeWave(id: "wave-1", name: "original"))
+
+        store.applyDelete("wave-1")
+        store.commitMutation("wave-1")
+
+        // After commit, a new wave with the same ID can be set
+        store.set(makeWave(id: "wave-1", name: "new"))
+        #expect(store.wave(for: "wave-1")?.name == "new")
+    }
+
+    @Test("setAll preserves pending-inserted waves not in server list")
+    func setAllPreservesPendingInsert() {
+        let store = WaveStore()
+        store.set(makeWave(id: "wave-1", name: "existing"))
+        store.insertPending(makeWave(id: "pending-1", name: "pending wave"))
+
+        // Server refresh doesn't include the pending wave
+        store.setAll([
+            makeWave(id: "wave-1", name: "refreshed"),
+        ])
+
+        #expect(store.wave(for: "wave-1")?.name == "refreshed")
+        #expect(store.wave(for: "pending-1")?.name == "pending wave")
+    }
 }

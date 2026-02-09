@@ -348,33 +348,19 @@ final class RepoState {
 
         let pendingId = "pending-\(UUID().uuidString)"
         let pending = WaveViewModel(
-            api: Wave(
-                id: pendingId,
-                name: waveName,
-                repo: repo.path,
-                flow: "design",
-                direction: [],
-                area: [],
-                stimulus: Stimulus(kind: .once),
-                status: .idle,
-                iteration: 0
-            )
+            api: Wave(id: pendingId, name: waveName, repo: repo.path)
         )
-        waveStore.set(pending)
+        waveStore.insertPending(pending)
         selectedWaveId = pendingId
 
         do {
             let wave = try await waveService.createWave(name: waveName, repo: repo)
-            let viewModel = WaveViewModel(api: wave)
-            waveStore.remove(pendingId)
-            waveStore.set(viewModel)
-            selectedWaveId = viewModel.id
+            waveStore.replacePending(pendingId, with: WaveViewModel(api: wave))
+            selectedWaveId = wave.id
             LoggingService.model("createWave: selectedWave=\(wave.id)")
         } catch {
-            waveStore.remove(pendingId)
-            if selectedWaveId == pendingId {
-                selectedWaveId = nil
-            }
+            waveStore.removePending(pendingId)
+            if selectedWaveId == pendingId { selectedWaveId = nil }
             throw error
         }
     }
@@ -400,18 +386,45 @@ final class RepoState {
     }
 
     func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
-        let cloned = try await waveService.cloneWave(wave.id, name: nil)
-        let viewModel = WaveViewModel(api: cloned)
-        waveStore.set(viewModel)
-        selectedWave = viewModel
-        return viewModel
+        let pendingId = "pending-\(UUID().uuidString)"
+        let pendingWave = Wave(
+            id: pendingId,
+            name: "\(wave.name) (copy)",
+            repo: wave.api.repo,
+            flow: wave.api.flow,
+            direction: wave.api.direction,
+            area: wave.api.area,
+            stimulus: wave.api.stimulus,
+            status: .idle,
+            iteration: 0
+        )
+        let pending = WaveViewModel(api: pendingWave)
+        waveStore.insertPending(pending)
+        selectedWaveId = pendingId
+
+        do {
+            let cloned = try await waveService.cloneWave(wave.id, name: nil)
+            let viewModel = WaveViewModel(api: cloned)
+            waveStore.replacePending(pendingId, with: viewModel)
+            selectedWaveId = viewModel.id
+            return viewModel
+        } catch {
+            waveStore.removePending(pendingId)
+            if selectedWaveId == pendingId { selectedWaveId = nil }
+            throw error
+        }
     }
 
     func deleteWave(_ wave: WaveViewModel) async throws {
-        try await waveService.deleteWave(wave.id)
-        waveStore.remove(wave.id)
-        if selectedWaveId == wave.id {
-            selectedWaveId = nil
+        waveStore.applyDelete(wave.id)
+        if selectedWaveId == wave.id { selectedWaveId = nil }
+
+        do {
+            try await waveService.deleteWave(wave.id)
+            waveStore.commitMutation(wave.id)
+        } catch {
+            waveStore.rollback(wave)
+            throw error
         }
     }
 

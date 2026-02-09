@@ -20,7 +20,7 @@ pub fn spawn_run_task_with_slot(
     let run_id_for_release = run.id.clone();
     event_hub.send(Event::wave_started(run.wave_id.clone(), run.id.clone()));
     tokio::spawn(async move {
-        execute_run_inner(&store, &executor, &run).await;
+        execute_run_inner(&store, &executor, &event_hub, &run).await;
         scheduler.release(run_id_for_release.as_str());
     });
 }
@@ -28,6 +28,7 @@ pub fn spawn_run_task_with_slot(
 async fn execute_run_inner(
     store: &SharedStore,
     executor: &WaveExecutor,
+    event_hub: &EventHub,
     run: &crate::lfd::types::WaveRun,
 ) {
     if let Err(err) = executor.execute(&run.id).await {
@@ -40,6 +41,7 @@ async fn execute_run_inner(
             if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
                 wave.status = WaveStatus::Failed;
                 let _ = store.update_wave(&wave);
+                event_hub.send(Event::wave_updated(run.wave_id.clone()));
             }
         }
     }

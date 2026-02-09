@@ -1,6 +1,7 @@
 use crate::engine::config::SummaryConfig;
 use crate::engine::prompt::{
-    compute_source_hash, count_area_tokens, count_tokens, is_summary_fresh, write_summary,
+    compute_source_hash, count_area_tokens, count_tokens, is_summary_fresh, walk_area_files,
+    write_summary,
 };
 use crate::engine::{
     check_cli_available, launch_agent, load_config_or_default, parse_model, LaunchConfig,
@@ -27,7 +28,7 @@ pub fn run(path: Option<&str>, force: bool) -> Result<()> {
     }
 
     // Ensure .lf/summaries/ is gitignored
-    crate::engine::prompt::ensure_gitignore_entry_pub(&repo_root, ".lf/summaries/")?;
+    crate::engine::prompt::ensure_gitignore_entry(&repo_root, ".lf/summaries/")?;
 
     let areas: Vec<SummaryConfig> = if let Some(p) = path {
         let matching = config
@@ -124,76 +125,40 @@ fn build_summarize_prompt(
     preload: bool,
 ) -> Result<String> {
     let step_template = include_str!("../../engine/builtins/ops/summarize.md");
+    let files = walk_area_files(repo_root, area_path);
 
     if preload {
-        let content = collect_area_content(repo_root, area_path)?;
-        let prompt = step_template
+        let mut content = String::new();
+        for file in &files {
+            let rel = file
+                .strip_prefix(repo_root)
+                .unwrap_or(file)
+                .to_string_lossy();
+            if let Ok(text) = fs::read_to_string(file) {
+                content.push_str(&format!("=== {} ===\n{}\n\n", rel, text));
+            }
+        }
+        Ok(step_template
             .replace("{token_budget}", &token_budget.to_string())
-            .replace("{content}", &content);
-        Ok(prompt)
+            .replace("{content}", &content))
     } else {
-        let files = list_area_files(repo_root, area_path)?;
-        let file_list = files.join("\n");
-        let prompt = step_template
+        let file_list: Vec<String> = files
+            .iter()
+            .map(|f| {
+                f.strip_prefix(repo_root)
+                    .unwrap_or(f)
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        Ok(step_template
             .replace("{token_budget}", &token_budget.to_string())
             .replace(
                 "<source>\n{content}\n</source>",
                 &format!(
                     "Read the files in these paths and summarize:\n{}",
-                    file_list
+                    file_list.join("\n")
                 ),
-            );
-        Ok(prompt)
+            ))
     }
-}
-
-fn collect_area_content(repo_root: &std::path::Path, area_path: &str) -> Result<String> {
-    let full_path = repo_root.join(area_path);
-    let walker = ignore::WalkBuilder::new(&full_path)
-        .hidden(true)
-        .git_ignore(true)
-        .build();
-
-    let mut files: Vec<std::path::PathBuf> = Vec::new();
-    for entry in walker.flatten() {
-        if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-            files.push(entry.into_path());
-        }
-    }
-    files.sort();
-
-    let mut output = String::new();
-    for file in &files {
-        let rel = file
-            .strip_prefix(repo_root)
-            .unwrap_or(file)
-            .to_string_lossy();
-        if let Ok(content) = fs::read_to_string(file) {
-            output.push_str(&format!("=== {} ===\n{}\n\n", rel, content));
-        }
-    }
-    Ok(output)
-}
-
-fn list_area_files(repo_root: &std::path::Path, area_path: &str) -> Result<Vec<String>> {
-    let full_path = repo_root.join(area_path);
-    let walker = ignore::WalkBuilder::new(&full_path)
-        .hidden(true)
-        .git_ignore(true)
-        .build();
-
-    let mut files: Vec<String> = Vec::new();
-    for entry in walker.flatten() {
-        if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-            let rel = entry
-                .path()
-                .strip_prefix(repo_root)
-                .unwrap_or(entry.path())
-                .to_string_lossy()
-                .to_string();
-            files.push(rel);
-        }
-    }
-    files.sort();
-    Ok(files)
 }

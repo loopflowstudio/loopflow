@@ -456,13 +456,11 @@ fn path_hash(path: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// Compute SHA-256 of concatenated file contents in an area.
-///
-/// Files are sorted by relative path for determinism. Respects `.gitignore`.
-pub fn compute_source_hash(repo_root: &Path, area_path: &str) -> Result<String, CoreError> {
+/// Walk an area directory and return sorted file paths, respecting `.gitignore`.
+pub fn walk_area_files(repo_root: &Path, area_path: &str) -> Vec<PathBuf> {
     let full_path = repo_root.join(area_path);
     if !full_path.exists() {
-        return Ok(String::new());
+        return Vec::new();
     }
 
     let walker = ignore::WalkBuilder::new(&full_path)
@@ -470,13 +468,23 @@ pub fn compute_source_hash(repo_root: &Path, area_path: &str) -> Result<String, 
         .git_ignore(true)
         .build();
 
-    let mut files: Vec<PathBuf> = Vec::new();
-    for entry in walker.flatten() {
-        if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-            files.push(entry.into_path());
-        }
-    }
+    let mut files: Vec<PathBuf> = walker
+        .flatten()
+        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+        .map(|e| e.into_path())
+        .collect();
     files.sort();
+    files
+}
+
+/// Compute SHA-256 of concatenated file contents in an area.
+///
+/// Files are sorted by relative path for determinism. Respects `.gitignore`.
+pub fn compute_source_hash(repo_root: &Path, area_path: &str) -> Result<String, CoreError> {
+    let files = walk_area_files(repo_root, area_path);
+    if files.is_empty() {
+        return Ok(String::new());
+    }
 
     let mut hasher = Sha256::new();
     for file in &files {
@@ -572,22 +580,10 @@ pub fn is_summary_fresh(repo_root: &Path, area_path: &str) -> Result<bool, CoreE
 
 /// Count total tokens of source files in an area (for preload threshold).
 pub fn count_area_tokens(repo_root: &Path, area_path: &str) -> Result<usize, CoreError> {
-    let full_path = repo_root.join(area_path);
-    if !full_path.exists() {
-        return Ok(0);
-    }
-
-    let walker = ignore::WalkBuilder::new(&full_path)
-        .hidden(true)
-        .git_ignore(true)
-        .build();
-
     let mut total = 0;
-    for entry in walker.flatten() {
-        if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                total += count_tokens(&content);
-            }
+    for file in &walk_area_files(repo_root, area_path) {
+        if let Ok(content) = fs::read_to_string(file) {
+            total += count_tokens(&content);
         }
     }
     Ok(total)
@@ -1202,7 +1198,7 @@ fn dedup_documents(docs: &mut Vec<Document>) {
 /// Ensure an entry exists in the repo's root .gitignore.
 ///
 /// Adds the entry on a new line if not already present.
-fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
+pub fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
     let gitignore_path = repo_root.join(".gitignore");
     let content = if gitignore_path.exists() {
         fs::read_to_string(&gitignore_path)?
@@ -1226,11 +1222,6 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     }
 
     Ok(())
-}
-
-/// Public wrapper for ensure_gitignore_entry.
-pub fn ensure_gitignore_entry_pub(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
-    ensure_gitignore_entry(repo_root, entry)
 }
 
 /// Format direction tags as XML blocks.

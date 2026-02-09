@@ -28,8 +28,8 @@ pub use flow::{
 };
 pub use prompt::{
     compute_source_hash, count_area_tokens, count_tokens, drop_native_instruction_docs,
-    ensure_gitignore_entry_pub, format_context_prompt, format_prompt, format_task_prompt,
-    gather_context, is_summary_fresh, load_summaries, trim_context_with_breakdown,
+    ensure_gitignore_entry, format_context_prompt, format_prompt, format_task_prompt,
+    gather_context, is_summary_fresh, load_summaries, trim_context_with_breakdown, walk_area_files,
     write_prompt_log, write_summary, ContextBreakdown, DiffTier, Document, GatherContextOpts,
     PromptComponents, DEFAULT_CONTEXT_BUDGET,
 };

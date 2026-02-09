@@ -37,7 +37,6 @@ fn next_creates_branch_from_current() {
     let result = next_branch(
         repo.path(),
         &NextOptions {
-            block: false,
             create_pr: false,
             rebase: false,
             wave_name: None,
@@ -66,7 +65,6 @@ fn next_with_naming_schema() {
     let result = next_branch(
         repo.path(),
         &NextOptions {
-            block: false,
             create_pr: false,
             rebase: false,
             wave_name: Some("wave".to_string()),
@@ -95,7 +93,6 @@ fn next_detects_merged_pr_starts_fresh() {
     let result = next_branch(
         repo.path(),
         &NextOptions {
-            block: false,
             create_pr: false,
             rebase: false,
             wave_name: None,
@@ -122,7 +119,6 @@ fn next_appends_suffix_on_branch_name_collision() {
     let result = next_branch(
         repo.path(),
         &NextOptions {
-            block: false,
             create_pr: false,
             rebase: false,
             wave_name: Some("wave".to_string()),

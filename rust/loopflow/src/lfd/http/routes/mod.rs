@@ -209,7 +209,7 @@ fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
     let mut candidates: Vec<String> = vec![default_branch.clone()];
     if let Some(sibling_branches) = wave_remote_branches(worktree, &wave_slug) {
         for branch in sibling_branches {
-            if branch != current && !candidates.contains(&branch) {
+            if !is_current_or_tracking_branch(&branch, &current) && !candidates.contains(&branch) {
                 candidates.push(branch);
             }
         }
@@ -233,6 +233,15 @@ fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
     }
 
     best_ref
+}
+
+fn is_current_or_tracking_branch(candidate: &str, current: &str) -> bool {
+    if candidate == current {
+        return true;
+    }
+    candidate
+        .split_once('/')
+        .is_some_and(|(_, branch)| branch == current)
 }
 
 /// List remote branches whose name contains the wave slug (e.g. ".conviction.").
@@ -305,5 +314,26 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
         None
     } else {
         Some(stat)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_tracking_branch_matches_local_branch_name() {
+        assert!(is_current_or_tracking_branch(
+            "origin/jack.wave.20260209_1000",
+            "jack.wave.20260209_1000"
+        ));
+    }
+
+    #[test]
+    fn sibling_branch_does_not_match_current_branch_name() {
+        assert!(!is_current_or_tracking_branch(
+            "origin/jack.wave.20260209_1001",
+            "jack.wave.20260209_1000"
+        ));
     }
 }

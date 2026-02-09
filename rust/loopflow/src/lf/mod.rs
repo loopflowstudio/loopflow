@@ -149,8 +149,6 @@ pub enum OpsCommand {
     },
     Sync,
     Next {
-        #[arg(long)]
-        block: bool,
         #[arg(short = 'c', long = "create-pr")]
         create_pr: bool,
         #[arg(long = "no-rebase")]

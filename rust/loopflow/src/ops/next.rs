@@ -14,7 +14,6 @@ use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone, Default)]
 pub struct NextOptions {
-    pub block: bool,
     pub create_pr: bool,
     pub rebase: bool,
     /// Wave name override (used when lfd orchestrates). If None, inferred from worktree or branch.

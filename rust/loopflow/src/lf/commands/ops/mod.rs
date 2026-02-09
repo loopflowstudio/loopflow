@@ -39,10 +39,9 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         OpsCommand::Pr { refresh, no_lint } => open_pr(*refresh, !no_lint, &progress),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
-            block,
             create_pr,
             no_rebase,
-        } => next_branch_cmd(*block, *create_pr, !*no_rebase, &progress),
+        } => next_branch_cmd(*create_pr, !*no_rebase, &progress),
         OpsCommand::Commit {
             message,
             push,
@@ -141,17 +140,11 @@ fn sync_current() -> Result<()> {
     Ok(())
 }
 
-fn next_branch_cmd(
-    block: bool,
-    create_pr: bool,
-    rebase: bool,
-    progress: &impl Progress,
-) -> Result<()> {
+fn next_branch_cmd(create_pr: bool, rebase: bool, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     let result = next_branch(
         &repo_root,
         &NextOptions {
-            block,
             create_pr,
             rebase,
             wave_name: None,

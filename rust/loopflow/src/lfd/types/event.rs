@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn agent_ended_serializes_correctly() {
-        let event = Event::agent_ended(test_id("agent-1"), "completed".to_string());
+        let event = Event::agent_ended(test_id("agent-1"), AgentStatus::Completed);
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "agent_ended");
         assert_eq!(json["agent_id"], "agent-1");
@@ -214,7 +214,7 @@ mod tests {
         let events = vec![
             Event::wave_waiting(id(), id(), "step".to_string()),
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
-            Event::agent_ended(id(), "failed".to_string()),
+            Event::agent_ended(id(), AgentStatus::Failed),
         ];
         for event in events {
             let json = serde_json::to_string(&event).unwrap();

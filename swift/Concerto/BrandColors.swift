@@ -28,14 +28,7 @@ extension Color {
     }
 }
 
-// MARK: - Status Colors (synced with VISUAL_DESIGN.md)
-
-extension Color {
-    static let statusSuccess = Color(hex: 0x2D6A4F)
-    static let statusError = Color(hex: 0xB45309)
-    static let statusWarning = Color(hex: 0xB0812A)
-    static let statusInfo = Color.loopflowInfo
-}
+// Status colors are defined in LoopflowCore/Models/StatusColors.swift
 
 struct LoopflowPalette {
     let background: Color

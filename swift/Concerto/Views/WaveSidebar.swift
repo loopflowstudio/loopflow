@@ -136,7 +136,7 @@ struct WaveSidebar: View {
             Spacer()
 
             Circle()
-                .fill(repoState.lfdConnected ? Color.green : Color.white.opacity(0.3))
+                .fill(repoState.lfdConnected ? Color.statusSuccess : Color.white.opacity(0.3))
                 .frame(width: 6, height: 6)
                 .help(repoState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
 
@@ -278,7 +278,7 @@ struct WaveSidebar: View {
                 }
 
                 if !waveGroups.pr.isEmpty {
-                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green, count: waveGroups.pr.count)
+                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .statusSuccess, count: waveGroups.pr.count)
                     waveRows(waveGroups.pr)
                 }
 

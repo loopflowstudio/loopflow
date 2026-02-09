@@ -49,10 +49,10 @@ struct TerminalTestWindow: View {
             }
         case .ready:
             Label("Ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.statusSuccess)
         case .failed(let error):
             Label("Error", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.statusError)
                 .help(error)
         }
     }
@@ -62,7 +62,7 @@ struct TerminalTestWindow: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 48))
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.statusError)
 
             Text("Failed to initialize Ghostty")
                 .font(.headline)

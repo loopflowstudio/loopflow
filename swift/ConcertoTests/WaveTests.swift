@@ -69,22 +69,22 @@ struct WaveModelTests {
 
     // MARK: - Status Indicator
 
-    @Test("statusIndicator returns green circle for running")
+    @Test("statusIndicator returns forest green circle for running")
     func statusIndicatorRunning() {
         let wave = makeWave(id: "test", repo: "/tmp", status: .running)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle.fill")
-        #expect(indicator.color == .green)
+        #expect(indicator.color == .statusSuccess)
     }
 
-    @Test("statusIndicator returns yellow half-circle for waiting")
+    @Test("statusIndicator returns goldenrod half-circle for waiting")
     func statusIndicatorWaiting() {
         let wave = makeWave(id: "test", repo: "/tmp", status: .waiting)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle.lefthalf.filled")
-        #expect(indicator.color == .yellow)
+        #expect(indicator.color == .statusWarning)
     }
 
     @Test("statusIndicator returns gray circle for idle")
@@ -110,13 +110,13 @@ struct WaveModelTests {
         #expect(indicator.color == .gray)
     }
 
-    @Test("statusIndicator returns red X for failed")
+    @Test("statusIndicator returns burnt orange X for failed")
     func statusIndicatorFailed() {
         let wave = makeWave(id: "test", repo: "/tmp", status: .failed)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "xmark.circle.fill")
-        #expect(indicator.color == .red)
+        #expect(indicator.color == .statusError)
     }
 
     // MARK: - Computed Properties
@@ -397,6 +397,52 @@ struct CollapsePRsResultTests {
     }
 }
 
+@Suite("AbsorbIntoPRResult")
+struct AbsorbIntoPRResultTests {
+
+    @Test("initializes with target branch and absorbed commit count")
+    func initializesWithBranchAndCount() {
+        let result = AbsorbIntoPRResult(targetBranch: "wave-b", commitsAbsorbed: 3)
+
+        #expect(result.targetBranch == "wave-b")
+        #expect(result.commitsAbsorbed == 3)
+    }
+}
+
+@Suite("WaveRun helpers")
+struct WaveRunHelpersTests {
+    @Test("duration formats minutes and seconds")
+    func durationFormatsMinutesAndSeconds() {
+        let start = Date(timeIntervalSince1970: 0)
+        let end = Date(timeIntervalSince1970: 125)
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "ship",
+            area: ".",
+            repo: "/tmp/repo",
+            startedAt: start,
+            endedAt: end
+        )
+
+        #expect(run.duration == "2m05s")
+    }
+
+    @Test("relativeTime returns non-empty value")
+    func relativeTimeNonEmpty() {
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "ship",
+            area: ".",
+            repo: "/tmp/repo",
+            createdAt: Date().addingTimeInterval(-60)
+        )
+
+        #expect(!run.relativeTime.isEmpty)
+    }
+}
+
 @Suite("Stimulus")
 struct StimulusTests {
 
@@ -430,10 +476,10 @@ struct WaveStatusTests {
 
     @Test("color returns correct SwiftUI color")
     func colorForStatus() {
-        #expect(WaveStatus.running.color == .green)
-        #expect(WaveStatus.waiting.color == .yellow)
+        #expect(WaveStatus.running.color == .statusSuccess)
+        #expect(WaveStatus.waiting.color == .statusWarning)
         #expect(WaveStatus.idle.color == .gray)
-        #expect(WaveStatus.failed.color == .red)
+        #expect(WaveStatus.failed.color == .statusError)
     }
 
     @Test("icon returns correct SF Symbol")

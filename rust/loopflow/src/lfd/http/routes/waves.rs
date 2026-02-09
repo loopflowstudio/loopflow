@@ -11,6 +11,7 @@ use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree, kill_process};
 use crate::lfd::http::dto::{
+    AbsorbResponse, AbsorbResponseResult, CollapseResponse, CollapseResponseResult,
     ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse,
     NextWaveResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
@@ -107,6 +108,11 @@ pub struct LandWaveRequest {
     create_pr: Option<bool>,
     worktree: Option<String>,
     lint: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct AbsorbWaveRequest {
+    pr_number: u64,
 }
 
 pub async fn list_waves_handler(
@@ -731,6 +737,93 @@ pub async fn next_wave_handler(
     Ok(Json(NextWaveResponse {
         new_branch: result.new_branch,
     }))
+}
+
+pub async fn collapse_wave_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<CollapseResponse> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let (wave, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
+    let wave_name = wave.name.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        crate::ops::collapse_prs(
+            std::path::Path::new(&work_dir),
+            &crate::ops::CollapseOptions {
+                wave_name: Some(wave_name),
+            },
+            &crate::ops::NullProgress,
+        )
+    })
+    .await
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+
+    Ok(Json(CollapseResponse {
+        ok: true,
+        result: CollapseResponseResult {
+            new_pr_url: result.new_pr_url,
+            closed_prs: result.closed_prs,
+        },
+    }))
+}
+
+pub async fn absorb_wave_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+    Json(payload): Json<AbsorbWaveRequest>,
+) -> ApiResult<AbsorbResponse> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let (_, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
+
+    let result = tokio::task::spawn_blocking(move || {
+        crate::ops::absorb_into_pr(
+            std::path::Path::new(&work_dir),
+            &crate::ops::AbsorbOptions {
+                target_pr_number: payload.pr_number,
+            },
+            &crate::ops::NullProgress,
+        )
+    })
+    .await
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+
+    Ok(Json(AbsorbResponse {
+        ok: true,
+        result: AbsorbResponseResult {
+            target_branch: result.target_branch,
+            commits_absorbed: result.commits_absorbed,
+        },
+    }))
+}
+
+async fn wave_and_work_dir(
+    state: &HttpState,
+    wave_id: &LfdId,
+) -> Result<(Wave, String), (StatusCode, Json<crate::lfd::http::dto::ErrorResponse>)> {
+    let wave = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    let latest_run = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_latest_wave_run(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    let work_dir = latest_run
+        .map(|run| run.worktree)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| wave.repo.clone());
+
+    Ok((wave, work_dir))
 }
 
 fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {

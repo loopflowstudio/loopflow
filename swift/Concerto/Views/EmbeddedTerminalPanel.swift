@@ -46,7 +46,7 @@ struct EmbeddedTerminalPanel: View {
 
             if let wave = repoState.selectedWave, wave.status == .running {
                 Circle()
-                    .fill(.green)
+                    .fill(Color.statusSuccess)
                     .frame(width: 8, height: 8)
 
                 Text("running")
@@ -78,7 +78,7 @@ struct EmbeddedTerminalPanel: View {
             case .failed(let error):
                 Label("Error", systemImage: "exclamationmark.triangle")
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusError)
                     .help(error)
             }
 

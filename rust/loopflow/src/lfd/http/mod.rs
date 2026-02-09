@@ -40,6 +40,11 @@ pub fn router(state: HttpState) -> Router {
         .route("/waves/:wave_id/land", post(waves::land_wave_handler))
         .route("/waves/:wave_id/next", post(waves::next_wave_handler))
         .route(
+            "/waves/:wave_id/collapse",
+            post(waves::collapse_wave_handler),
+        )
+        .route("/waves/:wave_id/absorb", post(waves::absorb_wave_handler))
+        .route(
             "/waves/:wave_id/runs",
             get(wave_runs::list_wave_runs_for_wave_handler),
         )

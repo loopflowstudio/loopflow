@@ -45,13 +45,13 @@ struct SetupView: View {
                 } else if installStep == .complete {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 48))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Color.statusSuccess)
                     Text("Ready to go")
                         .font(.headline)
                 } else if let path = status?.lfPath {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 48))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Color.statusSuccess)
                     VStack(spacing: 4) {
                         Text("Loopflow installed")
                             .font(.headline)
@@ -74,7 +74,7 @@ struct SetupView: View {
             if let error = errorMessage {
                 Text(error)
                     .font(.callout)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusError)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
             }

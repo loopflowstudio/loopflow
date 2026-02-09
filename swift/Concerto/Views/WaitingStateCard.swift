@@ -7,25 +7,19 @@ struct WaitingStateCard: View {
     let wave: WaveViewModel
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var showCollapseConfirmation = false
-    @State private var isCollapsing = false
-    @State private var collapseError: String?
 
     private let terminalLauncher = TerminalLauncher()
-    private let waveService = LocalWaveService()
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            // Status line
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "pause.circle.fill")
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(Color.statusWarning)
                 Text("Waiting")
                     .font(.headline)
             }
 
-            // Reason with count
             if let reason = wave.waitingReason {
                 Text(reason.description)
                     .font(.subheadline)
@@ -38,7 +32,6 @@ struct WaitingStateCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            // Action buttons
             HStack(spacing: Spacing.sm) {
                 Button {
                     openPRList()
@@ -48,94 +41,26 @@ struct WaitingStateCard: View {
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Review open pull requests")
 
-                Button {
-                    showCollapseConfirmation = true
-                } label: {
-                    if isCollapsing {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label("Collapse into One", systemImage: "arrow.triangle.merge")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.loopflowBurgundy)
-                .disabled(isCollapsing || !canCollapse)
-                .accessibilityLabel("Collapse all PRs into a single PR")
-            }
-
-            if let error = collapseError {
-                Text(error)
+                Text("Use the Runs tab to collapse or absorb PRs.")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(Spacing.lg)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
-        .confirmationDialog(
-            "Collapse PRs?",
-            isPresented: $showCollapseConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Collapse into One PR") {
-                Task { await collapsePRs() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            if let reason = wave.waitingReason,
-               case .prLimitReached(let open, _) = reason {
-                Text("This will combine \(open) open PRs into a single PR, close the old PRs, and delete the old branches.")
-            } else {
-                Text("This will combine all open PRs into a single PR.")
-            }
-        }
-    }
-
-    private var canCollapse: Bool {
-        // Need at least 2 PRs to collapse
-        if let reason = wave.waitingReason,
-           case .prLimitReached(let open, _) = reason {
-            return open >= 2
-        }
-        return false
-    }
-
-    private func collapsePRs() async {
-        isCollapsing = true
-        collapseError = nil
-
-        do {
-            let result = try await waveService.collapsePRs(wave.id)
-            if let urlString = result.newPRUrl, let url = URL(string: urlString) {
-                terminalLauncher.openURL(url)
-            }
-        } catch {
-            collapseError = error.localizedDescription
-        }
-
-        isCollapsing = false
     }
 
     private func openPRList() {
-        // Construct GitHub PR list URL for this repo
-        // wave.repo gives us the repo path - we need to extract owner/repo from git remote
-        let repoPath = wave.repo
-
-        // Try to get owner/repo from the worktree's git remote
-        if let worktreePath = wave.worktreePath {
-            let ownerRepo = extractOwnerRepo(from: worktreePath) ?? extractOwnerRepoFromPath(repoPath)
-            if let ownerRepo = ownerRepo,
-               let url = URL(string: "https://github.com/\(ownerRepo)/pulls?q=is:open+is:pr+author:@me") {
-                terminalLauncher.openURL(url)
-            }
-        } else {
-            // Fallback: try to extract from repo path
-            if let ownerRepo = extractOwnerRepoFromPath(repoPath),
-               let url = URL(string: "https://github.com/\(ownerRepo)/pulls?q=is:open+is:pr+author:@me") {
-                terminalLauncher.openURL(url)
-            }
+        let ownerRepo =
+            wave.worktreePath.flatMap(extractOwnerRepo(from:))
+            ?? extractOwnerRepoFromPath(wave.repo)
+        guard let ownerRepo,
+              let url = URL(string: "https://github.com/\(ownerRepo)/pulls?q=is:open+is:pr+author:@me")
+        else {
+            return
         }
+        terminalLauncher.openURL(url)
     }
 
     private func extractOwnerRepo(from worktreePath: String) -> String? {
@@ -164,9 +89,7 @@ struct WaitingStateCard: View {
     }
 
     private func parseGitRemoteURL(_ url: String) -> String? {
-        // Parse git@github.com:owner/repo.git or https://github.com/owner/repo.git
         if url.contains("github.com") {
-            // SSH format: git@github.com:owner/repo.git
             if let colonIndex = url.lastIndex(of: ":"),
                url.hasPrefix("git@") {
                 var ownerRepo = String(url[url.index(after: colonIndex)...])
@@ -176,7 +99,6 @@ struct WaitingStateCard: View {
                 return ownerRepo
             }
 
-            // HTTPS format: https://github.com/owner/repo.git
             if let range = url.range(of: "github.com/") {
                 var ownerRepo = String(url[range.upperBound...])
                 if ownerRepo.hasSuffix(".git") {
@@ -189,12 +111,10 @@ struct WaitingStateCard: View {
     }
 
     private func extractOwnerRepoFromPath(_ repoPath: String) -> String? {
-        // Last resort: assume the folder structure mimics GitHub (e.g., ~/src/owner/repo)
         let components = repoPath.split(separator: "/")
         guard components.count >= 2 else { return nil }
         let repo = String(components[components.count - 1])
         let owner = String(components[components.count - 2])
-        // Only return if both look like valid names
         if owner.isEmpty || repo.isEmpty || owner == "src" || owner == "Users" {
             return nil
         }

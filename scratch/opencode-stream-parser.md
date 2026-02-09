@@ -6,89 +6,30 @@ phase: 2
 
 Parse opencode's NDJSON streaming output into `StreamEvent` types.
 
-## Current
+## Problem
 
-`StreamParser::feed_line` dispatches by `"type"` field:
-- **Claude**: `"assistant"` → text/tool_use blocks, `"result"` → cost/duration
-- **Codex**: `"item.started"` / `"turn.completed"` → items, turns
-- **Gemini**: `"message"` / `"tool_use"` → text, tools
+`StreamParser::feed_line` handles Claude, Codex, and Gemini output but not OpenCode. When `lf implement --agent opencode` runs with streaming, OpenCode's NDJSON lines fall through to `Passthrough` and dump raw JSON to the user. OpenCode needs the same formatted streaming experience as the other three agents.
 
-## OpenCode's NDJSON Format
+## Approach
 
-`opencode run --format json` emits one JSON object per line. Each event has:
+Add OpenCode event parsing directly into the existing `feed_line` match block in `stream.rs`. Three new match arms, two helper functions. Stateless—no changes to the parser struct.
 
-```json
-{
-  "type": "text",
-  "timestamp": 1759406015783,
-  "sessionID": "ses_65b3acf58ffe...",
-  "part": {
-    "id": "prt_9a4c543c6001...",
-    "messageID": "msg_9a4c53490001...",
-    "sessionID": "ses_65b3acf58ffe...",
-    "type": "text",
-    "text": "Here's what I found...",
-    "time": { "start": 1759406015783, "end": 1759406015783 }
-  }
-}
-```
-
-### Known event types
-
-| Top-level `type` | `part.type` | Maps to |
-|-------------------|-------------|---------|
-| `"step_start"` | `"step-start"` | Skip (session init) |
-| `"text"` | `"text"` | `StreamEvent::Text(part.text)` |
-| `"step_finish"` | `"step-finish"` | `StreamEvent::Result` with cost/tokens |
-
-### step_finish part
+OpenCode's NDJSON format (`opencode run --format json`) emits one JSON object per line:
 
 ```json
-{
-  "type": "step-finish",
-  "tokens": {
-    "input": 1234,
-    "output": 567,
-    "reasoning": 0,
-    "cache_read": 800,
-    "cache_write": 200
-  },
-  "cost": 0.0523
-}
+{"type":"text","timestamp":1759406015783,"sessionID":"ses_abc","part":{"type":"text","text":"Hello world"}}
+{"type":"step_start","timestamp":1759406015000,"sessionID":"ses_abc","part":{"type":"step-start"}}
+{"type":"step_finish","timestamp":1759406020000,"sessionID":"ses_abc","part":{"type":"step-finish","tokens":{"input":1234,"output":567},"cost":0.05}}
 ```
 
-### Tool events (likely)
+### Match arms
 
-Tool call events probably exist but aren't documented in the NDJSON schema. If they follow the pattern, they'd be:
-
-```json
-{
-  "type": "tool_call",
-  "part": { "type": "tool-call", "name": "edit", "input": {...} }
-}
-```
-
-Handle gracefully: if we see unknown types, `Passthrough` them for now. Add specific parsing when we can capture real output.
-
-## Build
-
-### Disambiguation
-
-OpenCode events use `"text"`, `"step_start"`, `"step_finish"` as top-level types. These don't conflict with existing agents:
-- Claude uses `"assistant"`, `"system"`, `"user"`
-- Codex uses `"item.started"`, `"turn.completed"`
-- Gemini uses `"message"`, `"tool_use"`
-
-The `"text"` type is unique to opencode. `"result"` is shared with Claude/Gemini but opencode uses `"step_finish"` instead. No conflicts.
-
-To be safe, disambiguate by checking for the `"sessionID"` field (opencode-specific) or the `"part"` wrapper.
-
-### Parse functions (`stream.rs`)
+Add before the shared `"result"` arm:
 
 ```rust
-// In feed_line match block — add before the catch-all:
-
 // ── OpenCode ─────────────────────────────────────────────
+// OpenCode emits text/step_start/step_finish with a "part" wrapper.
+// Guard "text" on sessionID to avoid conflicts with future agents.
 "text" if v.get("sessionID").is_some() => {
     match parse_opencode_text(&v) {
         Some(event) => ParseResult::Events(vec![event]),
@@ -96,10 +37,10 @@ To be safe, disambiguate by checking for the `"sessionID"` field (opencode-speci
     }
 }
 "step_start" => ParseResult::Skipped,
-"step_finish" => {
-    ParseResult::Events(vec![parse_opencode_finish(&v)])
-}
+"step_finish" => ParseResult::Events(vec![parse_opencode_finish(&v)]),
 ```
+
+### Helpers
 
 ```rust
 fn parse_opencode_text(v: &serde_json::Value) -> Option<StreamEvent> {
@@ -118,8 +59,6 @@ fn parse_opencode_finish(v: &serde_json::Value) -> StreamEvent {
     let cost = part
         .and_then(|p| p.get("cost"))
         .and_then(|c| c.as_f64());
-    // OpenCode doesn't emit duration — compute from step_start/step_finish timestamps
-    // or leave as None for now.
     StreamEvent::Result {
         subtype: ResultSubtype::Success,
         cost_usd: cost,
@@ -128,67 +67,36 @@ fn parse_opencode_finish(v: &serde_json::Value) -> StreamEvent {
 }
 ```
 
-### Tests
+## Alternatives considered
 
-```rust
-#[test]
-fn parse_opencode_text_event() {
-    let mut parser = StreamParser::new();
-    let line = r#"{"type":"text","timestamp":1759406015783,"sessionID":"ses_abc","part":{"type":"text","text":"Hello world","time":{"start":1759406015783,"end":1759406015783}}}"#;
-    match parser.feed_line(line) {
-        ParseResult::Events(events) => {
-            assert_eq!(events.len(), 1);
-            assert_eq!(events[0], StreamEvent::Text("Hello world".to_string()));
-        }
-        other => panic!("Expected Events, got {:?}", other),
-    }
-}
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Pre-detect agent format on first event, then dispatch | More robust disambiguation but requires stateful parser | Parser is a unit struct by design. Statefulness adds complexity for zero benefit with four agents. |
+| Use `part` field instead of `sessionID` for guard | Slightly simpler guard expression | `sessionID` is definitively opencode-specific. `part` is a generic JSON pattern any future agent could use. |
+| Parse tool events speculatively | Would handle `tool_call` events if they exist | No real samples of tool event NDJSON. Speculative parsing risks wrong assumptions. Unknown types already `Passthrough` to the user. |
 
-#[test]
-fn parse_opencode_step_start_skipped() {
-    let mut parser = StreamParser::new();
-    let line = r#"{"type":"step_start","timestamp":1759406015000,"sessionID":"ses_abc","part":{"type":"step-start"}}"#;
-    assert_eq!(parser.feed_line(line), ParseResult::Skipped);
-}
+## Key decisions
 
-#[test]
-fn parse_opencode_step_finish() {
-    let mut parser = StreamParser::new();
-    let line = r#"{"type":"step_finish","timestamp":1759406020000,"sessionID":"ses_abc","part":{"type":"step-finish","tokens":{"input":1234,"output":567},"cost":0.05}}"#;
-    match parser.feed_line(line) {
-        ParseResult::Events(events) => {
-            assert_eq!(events.len(), 1);
-            match &events[0] {
-                StreamEvent::Result { cost_usd, .. } => {
-                    assert_eq!(*cost_usd, Some(0.05));
-                }
-                other => panic!("Expected Result, got {:?}", other),
-            }
-        }
-        other => panic!("Expected Events, got {:?}", other),
-    }
-}
+- **`sessionID` guard on `"text"` only.** `"step_start"` and `"step_finish"` are unambiguous—no other agent uses them. `"text"` needs the guard because it's generic enough that another agent format could use it.
+- **No duration.** OpenCode doesn't emit duration in its step_finish event. We could compute it from `step_start`/`step_finish` timestamps, but that requires state. Leave as `None`—cost is the more useful metric anyway.
+- **Unknown types → Passthrough.** Tool events (`tool_call`, etc.) aren't documented in OpenCode's NDJSON schema. Unknown types fall through the catch-all `_` arm to `Passthrough`, which prints raw JSON. Users still see everything; we add structured parsing when we capture real samples.
+- **Cost in `part.cost`.** Unlike Claude/Gemini which use a separate `"result"` event, OpenCode puts cost in the `step_finish` part. No conflict with the shared `"result"` arm because OpenCode uses `"step_finish"` instead.
 
-#[test]
-fn parse_opencode_unknown_passthrough() {
-    let mut parser = StreamParser::new();
-    let line = r#"{"type":"tool_call","sessionID":"ses_abc","part":{"type":"tool-call","name":"edit"}}"#;
-    // Unknown opencode event types pass through
-    assert_eq!(parser.feed_line(line), ParseResult::Passthrough);
-}
-```
+## Scope
 
-## Constraints
-
-- Event types must not conflict with existing parsers — use `sessionID` guard on `"text"`
-- Unknown event types → `Passthrough` (raw output to user), not `Skipped`
-- Parser stays stateless (unit struct)
-- Tool call events: gracefully degrade until we capture real output samples
-- Cost is in the `part.cost` field of `step_finish`, not in a separate `"result"` event
+- In scope: parsing `text`, `step_start`, `step_finish` events; tests for all three plus unknown event passthrough
+- Out of scope: tool event parsing (no real samples), duration computation (requires state), token count extraction (no current `StreamEvent` field for it)
 
 ## Done when
 
 ```bash
-cargo test -p loopflow -- opencode_stream
 cargo test -p loopflow -- opencode
+# Specifically:
+# - parse_opencode_text_event
+# - parse_opencode_step_start_skipped
+# - parse_opencode_step_finish
+# - parse_opencode_unknown_passthrough
+# - parse_opencode_empty_text_skipped (empty text → Skipped, not Events)
+cargo fmt --check
+cargo clippy -- -D warnings
 ```

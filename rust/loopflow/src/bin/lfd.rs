@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use clap::{Parser, Subcommand};
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 
@@ -16,26 +17,80 @@ use loopflow::lfd::store::postgres::PostgresStore;
 use loopflow::lfd::store::sqlite::SqliteStore;
 use loopflow::lfd::store::SharedStore;
 
+#[derive(Parser)]
+#[command(name = "lfd", about = "Loopflow daemon")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run the daemon (foreground). Default when no subcommand given.
+    Run,
+    /// Install as a system service (launchd on macOS, systemd on Linux)
+    Install,
+    /// Uninstall the system service
+    Uninstall,
+    /// Start the installed service
+    Start,
+    /// Stop the installed service
+    Stop,
+    /// Show service status
+    Status,
+    /// Run database migrations (postgres only)
+    Migrate {
+        /// Show current schema version without migrating
+        #[arg(long)]
+        status: bool,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    loopflow::lfd::obs::init_tracing();
+    let cli = Cli::parse();
 
-    let mut args = std::env::args();
-    if let Some(command) = args.nth(1) {
-        if command == "migrate" {
-            let status_only = args.any(|arg| arg == "--status");
-            let database_url = std::env::var("LFD_DATABASE_URL")
-                .expect("LFD_DATABASE_URL required for postgres migrations");
-            if status_only {
-                let version = PostgresStore::migrate_status_async(&database_url).await?;
-                println!("schema_version={version}");
-            } else {
-                let version = PostgresStore::migrate_async(&database_url).await?;
-                println!("migrated schema to version {version}");
-            }
-            return Ok(());
+    match cli.command.unwrap_or(Commands::Run) {
+        Commands::Run => run_daemon().await,
+        Commands::Install => {
+            loopflow::lfd::service::install()?;
+            Ok(())
         }
+        Commands::Uninstall => {
+            loopflow::lfd::service::uninstall()?;
+            Ok(())
+        }
+        Commands::Start => {
+            loopflow::lfd::service::start()?;
+            Ok(())
+        }
+        Commands::Stop => {
+            loopflow::lfd::service::stop()?;
+            Ok(())
+        }
+        Commands::Status => {
+            loopflow::lfd::service::status()?;
+            Ok(())
+        }
+        Commands::Migrate { status } => run_migrate(status).await,
     }
+}
+
+async fn run_migrate(status_only: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let database_url = std::env::var("LFD_DATABASE_URL")
+        .expect("LFD_DATABASE_URL required for postgres migrations");
+    if status_only {
+        let version = PostgresStore::migrate_status_async(&database_url).await?;
+        println!("schema_version={version}");
+    } else {
+        let version = PostgresStore::migrate_async(&database_url).await?;
+        println!("migrated schema to version {version}");
+    }
+    Ok(())
+}
+
+async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
+    loopflow::lfd::obs::init_tracing();
 
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:2486".to_string())

@@ -66,14 +66,20 @@ final class RepoState {
     var currentRepo: URL?
     var flows: [Flow] = []
     var availableDirections: [String] = []
-    var waves: [WaveViewModel] = [] {
-        didSet {
-            waveGroups = buildWaveGroups(from: waves)
-        }
-    }
 
-    // Selection
-    var selectedWave: WaveViewModel?
+    // Wave state — delegated to WaveStore
+    let waveStore = WaveStore()
+
+    var waves: [WaveViewModel] { waveStore.ordered }
+    var waveGroups: WaveGroups { waveStore.groups }
+
+    // Selection — ID-based, derived from store
+    var selectedWaveId: String?
+
+    var selectedWave: WaveViewModel? {
+        get { selectedWaveId.flatMap { waveStore.wave(for: $0) } }
+        set { selectedWaveId = newValue?.id }
+    }
 
     // Loading
     var isLoading: Bool = false
@@ -86,71 +92,10 @@ final class RepoState {
     private let waveService = LocalWaveService()
     private var eventService: LocalEventService?
 
-    // Track previous wave statuses for notification transitions
-    private var previousWaveStatuses: [String: WaveStatus] = [:]
-
-    struct WaveGroups {
-        let blocked: [WaveViewModel]
-        let pr: [WaveViewModel]
-        let recentActivity: [WaveViewModel]
-        let active: [WaveViewModel]
-        let idle: [WaveViewModel]
-
-        var attentionCount: Int { blocked.count + pr.count }
-        var allInOrder: [WaveViewModel] { blocked + pr + recentActivity + active + idle }
-    }
-
-    var waveGroups: WaveGroups = WaveGroups(
-        blocked: [],
-        pr: [],
-        recentActivity: [],
-        active: [],
-        idle: []
-    )
-
-    private func buildWaveGroups(from waves: [WaveViewModel]) -> WaveGroups {
-        let blocked = waves.filter { $0.status == .failed }
-        let pr = waves.filter { wave in
-            wave.status != .failed && pendingPR(for: wave) != nil
+    init() {
+        waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
+            self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
         }
-
-        let hourAgo = Date().addingTimeInterval(-3600)
-        let recentActivity = Array(waves
-            .filter { wave in
-                guard let lastActivity = wave.lastActivityAt else { return false }
-                return lastActivity > hourAgo && wave.status != .failed && pendingPR(for: wave) == nil
-            }
-            .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
-            .prefix(5))
-
-        let recentIds = Set(recentActivity.map(\.id))
-
-        let active = waves.filter { wave in
-            (wave.status == .running || wave.status == .waiting)
-                && pendingPR(for: wave) == nil
-                && !recentIds.contains(wave.id)
-        }
-
-        let idle = waves.filter { wave in
-            wave.status == .idle
-                && pendingPR(for: wave) == nil
-                && !recentIds.contains(wave.id)
-        }
-
-        return WaveGroups(
-            blocked: blocked,
-            pr: pr,
-            recentActivity: recentActivity,
-            active: active,
-            idle: idle
-        )
-    }
-
-    private func pendingPR(for wave: WaveViewModel) -> (number: Int, url: URL?)? {
-        guard let prNumber = wave.prNumber, wave.prState == .open else {
-            return nil
-        }
-        return (number: prNumber, url: wave.prURL)
     }
 
     static func uiTestMode() -> UITestMode? {
@@ -167,15 +112,15 @@ final class RepoState {
     func configureForUITest(_ mode: UITestMode, repoURL: URL) {
         currentRepo = repoURL
         flows = []
-        waves = []
-        selectedWave = nil
+        waveStore.removeAll()
+        selectedWaveId = nil
         isLoading = false
         errorMessage = nil
         let selectBranch = ProcessInfo.processInfo.environment["CONCERTO_UI_TEST_SELECT_BRANCH"]
 
         switch mode {
         case .emptyWorkspaces:
-            waves = []
+            break
         case .sampleWorkspaces:
             configureMockWaves()
         case .mockWaves:
@@ -188,7 +133,7 @@ final class RepoState {
 
     func configureMockWaves() {
         lfdConnected = true
-        waves = [
+        waveStore.setAll([
             WaveViewModel(
                 api: Wave(
                     id: "mock-wave-1",
@@ -252,8 +197,7 @@ final class RepoState {
                 prLimit: 5,
                 mergeMode: .pr
             )
-        ]
-        lfdConnected = true
+        ])
     }
 
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
@@ -291,10 +235,7 @@ final class RepoState {
                         switch event {
                         case .connected(let connected):
                             self.lfdConnected = true
-                            self.waves = connected.waves.map { WaveViewModel(api: $0) }
-                            for wave in self.waves {
-                                self.previousWaveStatuses[wave.id] = wave.status
-                            }
+                            self.waveStore.setAll(connected.waves.map { WaveViewModel(api: $0) })
                             await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
                             await self.handleWaveEvent(waveEvent)
@@ -323,30 +264,13 @@ final class RepoState {
         switch event.type {
         case .created, .updated, .started, .stopped, .waiting:
             if let wave = try? await waveService.getWave(event.waveId) {
-                upsertWave(WaveViewModel(api: wave))
+                waveStore.set(WaveViewModel(api: wave))
             }
         case .deleted:
-            waves.removeAll { $0.id == event.waveId }
-            if selectedWave?.id == event.waveId {
-                selectedWave = nil
+            waveStore.remove(event.waveId)
+            if selectedWaveId == event.waveId {
+                selectedWaveId = nil
             }
-        }
-    }
-
-    private func upsertWave(_ wave: WaveViewModel) {
-        let oldStatus = previousWaveStatuses[wave.id]
-        if oldStatus != wave.status {
-            handleWaveStatusChange(wave: wave, from: oldStatus, to: wave.status)
-        }
-        previousWaveStatuses[wave.id] = wave.status
-
-        if let index = waves.firstIndex(where: { $0.id == wave.id }) {
-            waves[index] = wave
-        } else {
-            waves.insert(wave, at: 0)
-        }
-        if selectedWave?.id == wave.id {
-            selectedWave = wave
         }
     }
 
@@ -372,35 +296,16 @@ final class RepoState {
         do {
             let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
-            let newViewModels = newWaves.map { WaveViewModel(api: $0) }
-
-            // Detect status transitions and notify
-            for wave in newViewModels {
-                let oldStatus = previousWaveStatuses[wave.id]
-                let newStatus = wave.status
-
-                if oldStatus != newStatus {
-                    LoggingService.model("refreshWaves: wave \(wave.id) status changed \(String(describing: oldStatus)) -> \(newStatus)")
-                    handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
-                }
-                previousWaveStatuses[wave.id] = newStatus
-            }
-
-            waves = newViewModels
-            if let selected = selectedWave,
-               let updated = waves.first(where: { $0.id == selected.id }) {
-                selectedWave = updated
-            }
+            waveStore.setAll(newWaves.map { WaveViewModel(api: $0) })
         } catch {
             LoggingService.model("refreshWaves: error=\(error.localizedDescription)")
-            waves = []
+            waveStore.removeAll()
         }
     }
 
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
         switch newStatus {
         case .waiting:
-            // Get current step from recentSteps if available
             let step = wave.recentSteps.first?.step ?? "step"
             NotificationService.shared.notifyNeedsInteractive(
                 waveId: wave.id,
@@ -409,7 +314,6 @@ final class RepoState {
             )
 
         case .failed:
-            // Use step name for error message
             let step = wave.recentSteps.first?.step ?? "unknown step"
             let message = "Error in \(step)"
             NotificationService.shared.notifyError(
@@ -419,9 +323,7 @@ final class RepoState {
             )
 
         case .idle:
-            // Check if PR was just created (prNumber set, wasn't before or status changed)
             if let prNumber = wave.prNumber, wave.prState == .open {
-                // Only notify if this is a new PR (not just a refresh)
                 if oldStatus == .running {
                     NotificationService.shared.notifyPRReady(
                         waveId: wave.id,
@@ -432,7 +334,7 @@ final class RepoState {
             }
 
         case .running, .paused:
-            break  // No notification needed
+            break
         }
     }
 
@@ -459,24 +361,20 @@ final class RepoState {
                 iteration: 0
             )
         )
-        waves.insert(pending, at: 0)
-        selectedWave = pending
+        waveStore.set(pending)
+        selectedWaveId = pendingId
 
         do {
             let wave = try await waveService.createWave(name: waveName, repo: repo)
             let viewModel = WaveViewModel(api: wave)
-
-            if let index = waves.firstIndex(where: { $0.id == pendingId }) {
-                waves[index] = viewModel
-            } else {
-                waves.insert(viewModel, at: 0)
-            }
-            selectedWave = viewModel
+            waveStore.remove(pendingId)
+            waveStore.set(viewModel)
+            selectedWaveId = viewModel.id
             LoggingService.model("createWave: selectedWave=\(wave.id)")
         } catch {
-            waves.removeAll { $0.id == pendingId }
-            if selectedWave?.id == pendingId {
-                selectedWave = nil
+            waveStore.remove(pendingId)
+            if selectedWaveId == pendingId {
+                selectedWaveId = nil
             }
             throw error
         }
@@ -508,16 +406,16 @@ final class RepoState {
     func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
         let cloned = try await waveService.cloneWave(wave.id, name: nil)
         let viewModel = WaveViewModel(api: cloned)
-        waves.insert(viewModel, at: 0)
+        waveStore.set(viewModel)
         selectedWave = viewModel
         return viewModel
     }
 
     func deleteWave(_ wave: WaveViewModel) async throws {
         try await waveService.deleteWave(wave.id)
-        waves.removeAll { $0.id == wave.id }
-        if selectedWave?.id == wave.id {
-            selectedWave = nil
+        waveStore.remove(wave.id)
+        if selectedWaveId == wave.id {
+            selectedWaveId = nil
         }
     }
 

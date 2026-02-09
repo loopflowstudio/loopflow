@@ -17,7 +17,7 @@ struct WaveSidebar: View {
     @State private var isEditingWaveName = false
     @FocusState private var isSidebarFocused: Bool
 
-    private var waveGroups: RepoState.WaveGroups {
+    private var waveGroups: WaveGroups {
         repoState.waveGroups
     }
 

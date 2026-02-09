@@ -162,8 +162,8 @@ fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
 fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
     let main_repo = crate::engine::worktrees::main_repo_root(worktree)
         .unwrap_or_else(|_| worktree.to_path_buf());
-    let default_branch = crate::engine::git::get_default_branch(&main_repo)
-        .unwrap_or_else(|_| "main".to_string());
+    let default_branch =
+        crate::engine::git::get_default_branch(&main_repo).unwrap_or_else(|_| "main".to_string());
 
     let current = crate::engine::git::current_branch(worktree)
         .ok()

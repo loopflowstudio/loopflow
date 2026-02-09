@@ -199,7 +199,6 @@ impl WaveExecutor {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub fn with_runner(
         store: SharedStore,
         scheduler: Arc<Scheduler>,
@@ -749,14 +748,6 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     Ok((result.path.to_string_lossy().to_string(), result.branch))
 }
 
-/// Kill a process by PID using SIGTERM.
-pub fn kill_process(pid: u32) {
-    let _ = std::process::Command::new("kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status();
-}
-
 fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
     format!("{}-fork-{branch_index}", run.worktree)
 }
@@ -1115,6 +1106,9 @@ mod tests {
         // After step-a: step_index 0->1, emit wave_updated
         // After step-b: step_index 1->2, emit wave_updated
         // Run completes: emit wave_updated
-        assert_eq!(wave_updated_count, 3, "expected wave_updated after each step advance and on completion");
+        assert_eq!(
+            wave_updated_count, 3,
+            "expected wave_updated after each step advance and on completion"
+        );
     }
 }

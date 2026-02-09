@@ -7,9 +7,10 @@ use time::OffsetDateTime;
 
 use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
 use crate::engine::naming::sanitize_for_branch;
+use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
-use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree, kill_process};
+use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
     AbsorbResponse, AbsorbResponseResult, CollapseResponse, CollapseResponseResult,
     ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse,
@@ -583,9 +584,7 @@ pub async fn continue_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    state
-        .event_hub
-        .send(Event::wave_updated(wave_id.clone()));
+    state.event_hub.send(Event::wave_updated(wave_id.clone()));
 
     // Re-acquire scheduler slot (idempotent for same run_id).
     let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;

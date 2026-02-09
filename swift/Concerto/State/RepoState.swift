@@ -394,9 +394,7 @@ final class RepoState {
             flow: wave.api.flow,
             direction: wave.api.direction,
             area: wave.api.area,
-            stimulus: wave.api.stimulus,
-            status: .idle,
-            iteration: 0
+            stimulus: wave.api.stimulus
         )
         let pending = WaveViewModel(api: pendingWave)
         waveStore.insertPending(pending)

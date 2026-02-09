@@ -124,20 +124,18 @@ final class WaveStore {
 
     func replacePending(_ pendingId: String, with wave: WaveViewModel) {
         pendingMutations.remove(pendingId)
-        waves.removeValue(forKey: pendingId)
-        previousStatuses.removeValue(forKey: pendingId)
+        remove(pendingId)
         _set(wave)
     }
 
     func removePending(_ id: String) {
         pendingMutations.remove(id)
-        waves.removeValue(forKey: id)
-        previousStatuses.removeValue(forKey: id)
+        remove(id)
     }
 
     func applyDelete(_ id: String) {
         pendingMutations.insert(id)
-        waves.removeValue(forKey: id)
+        remove(id)
     }
 
     // MARK: - Queries

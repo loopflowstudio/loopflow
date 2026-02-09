@@ -16,6 +16,7 @@ class TestWaveModel:
         assert wave.created_at is None
         assert wave.commits == []
         assert wave.diff_stat is None
+        assert wave.flow_steps == []
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)
@@ -28,6 +29,7 @@ class TestWaveModel:
         assert wave.commits[0].sha == "a1b2c3d"
         assert wave.commits[0].message == "implement: add retry logic"
         assert wave.diff_stat == " 3 files changed, 42 insertions(+), 7 deletions(-)"
+        assert wave.flow_steps == ["review", "iterate", "ship", "gate"]
 
     def test_round_trip(self):
         wave = Wave.model_validate(WAVE_FULL)
@@ -37,6 +39,7 @@ class TestWaveModel:
         assert reparsed.active_run.pr.url == wave.active_run.pr.url
         assert reparsed.commits == wave.commits
         assert reparsed.diff_stat == wave.diff_stat
+        assert reparsed.flow_steps == wave.flow_steps
 
     def test_unknown_fields_ignored(self):
         data = {**WAVE_MINIMAL, "new_field": "surprise"}

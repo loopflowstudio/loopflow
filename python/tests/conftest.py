@@ -1,4 +1,4 @@
-"""Shared fixtures for Python tests."""
+"""Shared test payloads for Python tests."""
 
 from __future__ import annotations
 

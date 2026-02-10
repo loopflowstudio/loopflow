@@ -28,12 +28,14 @@ OpenCode (anomalyco/opencode) is a TypeScript-based CLI coding agent with:
 
 ## PRs
 
-| PR | Scope | ~Lines |
-|----|-------|--------|
-| [01](01-command-builder-and-launch.md) | Command builder + launch integration | ~150 |
-| [02](02-stream-parser.md) | NDJSON stream parser | ~200 |
-| [03](03-context-injection.md) | Context injection via OPENCODE_CONFIG_CONTENT | ~100 |
-| [04](04-tests-and-docs.md) | Full test coverage + README updates | ~150 |
+All PRs are complete.
+
+| PR | Scope |
+|----|-------|
+| 01 | Command builder + launch integration |
+| 02 | NDJSON stream parser |
+| 03 | Context injection via OPENCODE_CONFIG_CONTENT |
+| 04 | Full test coverage + README updates |
 
 ## Model String Format
 

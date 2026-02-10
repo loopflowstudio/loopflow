@@ -862,6 +862,14 @@ mod tests {
         assert_eq!(parser.feed_line(line), ParseResult::Passthrough);
     }
 
+    #[test]
+    fn parse_opencode_malformed_text_skipped() {
+        let mut parser = StreamParser::new();
+        // Valid JSON with sessionID but missing part.text — graceful degrade to Skipped
+        let line = r#"{"type":"text","sessionID":"ses_abc","part":{"type":"text"}}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
     // ── General tests ───────────────────────────────────────────
 
     #[test]

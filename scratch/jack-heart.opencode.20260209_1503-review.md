@@ -8,7 +8,7 @@ Full integration of OpenCode as a fourth coding agent alongside Claude, Codex, a
 
 2. **Stream parser** (`stream.rs`): Three match arms in `feed_line` handle `text`, `step_start`, and `step_finish` NDJSON events. Two helper functions (`parse_opencode_text`, `parse_opencode_finish`) extract text content and cost from OpenCode's `part`-wrapped JSON format.
 
-3. **Tests and docs**: 15 opencode-specific tests across `agent.rs`, `stream.rs`, and `config.rs`. README and `docs/config.md` updated to list opencode as a supported backend.
+3. **Tests and docs**: 18 opencode-specific tests across `agent.rs`, `stream.rs`, and `config.rs`. README and `docs/config.md` updated to list opencode as a supported backend.
 
 ## Key choices
 

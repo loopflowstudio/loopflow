@@ -1,66 +1,90 @@
 ---
-status: todo
+status: in_progress
 phase: 4
 ---
 # OpenCode Tests and Docs
 
-Full test coverage for all opencode integration code, plus README and config doc updates.
+## Problem
 
-## Current
+OpenCode integration (PRs 01-03) is implemented and passes 15 unit tests. But the test spec identifies two gaps, and the roadmap PR table still references deleted files. Close these gaps so `cargo test -p loopflow -- opencode` covers every spec item and the roadmap is clean.
 
-Each agent has:
-- Unit tests in `agent.rs` (command building)
-- Stream parser tests in `stream.rs`
-- Golden prompt tests (`cargo test -p loopflow golden_prompt`)
-- Parity tests (`uv run pytest tests/parity/test_prompt_parity.py`)
-- Listed in README.md integrations section
+## Approach
 
-## Build
+Add two missing test categories from the spec, then clean up the roadmap. No new features — this is pure coverage and hygiene.
 
-### Consolidate tests from PRs 01-03
+### 1. `build_agent_command` integration tests (agent.rs)
 
-PRs 01-03 each include inline tests. This PR adds any missing coverage:
+The spec requires end-to-end tests that exercise `parse_model` → `build_model_command` → prompt append in a single call. No backend currently has these tests, but the spec calls them out explicitly for opencode:
 
-- `parse_model("opencode")` → `("opencode", None)` — no default variant
-- `parse_model("opencode:openai/gpt-4o")` → `("opencode", Some("openai/gpt-4o"))`
-- `build_agent_command("opencode", "fix the bug", &config)` → full command with prompt
-- `build_agent_command("opencode:anthropic/claude-sonnet", ...)` → model parsed and passed
-- `OPENCODE_CONFIG_CONTENT` env var correctness with both permission + instructions
-- Stream parser: empty text events → `None`
-- Stream parser: malformed JSON → `Passthrough`
+```rust
+#[test]
+fn build_agent_command_opencode_default() {
+    let config = LaunchConfig { auto: true, ..Default::default() };
+    let cmd = build_agent_command("opencode", "fix the bug", &config);
+    assert_eq!(cmd[0], "opencode");
+    assert_eq!(cmd[1], "run");
+    assert_eq!(*cmd.last().unwrap(), "fix the bug");
+}
 
-### Documentation updates
-
-**README.md** — add opencode to integrations:
-
-```markdown
-**Coding Agents**
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — Anthropic's coding agent (default)
-- [Codex CLI](https://github.com/openai/codex) — OpenAI's coding agent
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) — Google's coding agent
-- [OpenCode](https://github.com/anomalyco/opencode) — Open source coding agent
+#[test]
+fn build_agent_command_opencode_with_variant() {
+    let config = LaunchConfig { auto: true, ..Default::default() };
+    let cmd = build_agent_command("opencode:anthropic/claude-sonnet", "fix the bug", &config);
+    assert!(cmd.contains(&"--model".to_string()));
+    assert!(cmd.contains(&"anthropic/claude-sonnet".to_string()));
+    assert_eq!(*cmd.last().unwrap(), "fix the bug");
+}
 ```
 
-**Config docs** — document opencode model format:
+These prove `build_agent_command` correctly wires `parse_model` → `build_opencode_command` → prompt for the two model string forms.
 
-```yaml
-agent_model: opencode                          # use opencode's default model
-agent_model: opencode:anthropic/claude-sonnet  # explicit model
-agent_model: opencode:openai/gpt-4o            # any provider opencode supports
+### 2. Malformed JSON stream test (stream.rs)
+
+The spec asks for "Stream parser: malformed JSON → `Passthrough`". The existing `non_json_passes_through` test covers completely broken input (non-JSON). Add one test with valid JSON missing the `part` wrapper — a plausible opencode format deviation:
+
+```rust
+#[test]
+fn parse_opencode_malformed_text_passthrough() {
+    let mut parser = StreamParser::new();
+    // Valid JSON with sessionID but missing part.text — no crash, passthrough or skip
+    let line = r#"{"type":"text","sessionID":"ses_abc","part":{"type":"text"}}"#;
+    assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+}
 ```
 
-## Constraints
+This is actually `Skipped` (not `Passthrough`) because the `"text"` arm catches it via the sessionID guard, then `parse_opencode_text` returns `None` (missing `text` field). That's correct behavior — the spec's "malformed JSON → Passthrough" is covered by the existing `non_json_passes_through` test for truly broken input, and this test covers the graceful-degrade path for structurally-off opencode events.
 
-- Tests must not require opencode to be installed (test command building and parsing, not execution)
-- Stream parser tests use fixture JSON strings from the NDJSON format documented in PR 02
-- No default model variant for opencode — verify this explicitly
+### 3. Roadmap cleanup
+
+The roadmap PR table at `roadmap/opencode/README.md` links to `02-stream-parser.md` and `03-context-injection.md`, both deleted in this branch. Remove the dead links, mark PR 04 as done, and collapse the table since all 4 PRs are complete.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Add golden prompt test for opencode | Tests prompt assembly, not agent wiring | Golden tests verify `gather_context` + `format_prompt`, which are agent-agnostic. No opencode-specific prompt assembly exists. |
+| Add parity tests | Python test infrastructure doesn't exist yet | Parity tests (`test_prompt_parity.py`) aren't implemented for any backend. Adding them for opencode alone would be premature. |
+| Skip `build_agent_command` tests | Other backends don't have them either | The spec explicitly asks for them. They're cheap (4 lines each) and prove the full model→command→prompt pipeline. |
+
+## Key decisions
+
+- **Add `build_agent_command` tests only for opencode.** The spec asks for these specifically. Other backends can add them later, but that's not this PR's scope.
+- **Malformed JSON test uses `Skipped` not `Passthrough`.** The actual behavior for a well-typed but structurally incomplete opencode event is `Skipped` (the `"text"` arm catches it, `parse_opencode_text` returns `None`). The spec's "malformed JSON → Passthrough" describes truly broken input, which the existing `non_json_passes_through` test already covers.
+- **Roadmap cleanup is in scope.** Dead links in `roadmap/opencode/README.md` are a maintenance hazard. The PR table references files we deleted.
+
+Following the wave's design priorities: "Same fidelity as existing agents" — these tests ensure opencode has the same integration-test coverage pattern. "Minimal config surface" — no new config, just verification.
+
+## Scope
+
+- In scope: 2-3 new tests in agent.rs and stream.rs, roadmap/opencode/README.md cleanup
+- Out of scope: golden prompt tests, parity tests, tool event parsing, duration computation
 
 ## Done when
 
 ```bash
-cargo test -p loopflow -- opencode
-cargo fmt --check
-cargo clippy -- -D warnings
+cargo test -p loopflow -- opencode    # 17-18 tests pass (was 15)
+cargo fmt --check                     # clean
+cargo clippy -- -D warnings           # zero warnings
 ```
 
-All pass with zero warnings. README lists opencode as a supported agent.
+Every item in the spec's test list is covered. Roadmap has no dead links.

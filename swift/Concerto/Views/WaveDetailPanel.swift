@@ -726,17 +726,11 @@ struct WaveDetailPanel: View {
     }
 
     private func collapsePRs() async throws -> CollapsePRsResult {
-        let waveService = LocalWaveService()
-        let result = try await waveService.collapsePRs(wave.id)
-        repoState.loadRuns(for: wave.id)
-        return result
+        try await repoState.collapsePRs(wave.id)
     }
 
     private func absorbIntoPR(_ prNumber: Int) async throws -> AbsorbIntoPRResult {
-        let waveService = LocalWaveService()
-        let result = try await waveService.absorbIntoPR(wave.id, prNumber: prNumber)
-        repoState.loadRuns(for: wave.id)
-        return result
+        try await repoState.absorbIntoPR(wave.id, prNumber: prNumber)
     }
 
     // MARK: - Name Editing

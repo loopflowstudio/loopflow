@@ -325,6 +325,18 @@ final class RepoState {
         }
     }
 
+    func collapsePRs(_ waveId: String) async throws -> CollapsePRsResult {
+        let result = try await waveService.collapsePRs(waveId)
+        loadRuns(for: waveId)
+        return result
+    }
+
+    func absorbIntoPR(_ waveId: String, prNumber: Int) async throws -> AbsorbIntoPRResult {
+        let result = try await waveService.absorbIntoPR(waveId, prNumber: prNumber)
+        loadRuns(for: waveId)
+        return result
+    }
+
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
         switch newStatus {
         case .waiting:

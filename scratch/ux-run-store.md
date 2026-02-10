@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 seq: 6
 ---
 
@@ -24,7 +24,6 @@ final class RunStore {
     private(set) var runs: [String: [WaveRun]] = [:]
 
     func setRuns(for waveId: String, _ newRuns: [WaveRun])
-    func upsertRun(_ run: WaveRun)
     func runs(for waveId: String) -> [WaveRun]
     func clear(for waveId: String)
 }
@@ -38,9 +37,7 @@ final class RunStore {
 
 First load still shows the spinner (empty cache). Every subsequent load shows stale data instantly, then silently refreshes.
 
-**Event-driven updates:** `handleWaveEvent` already handles `.started`/`.stopped`/`.updated` by refreshing the wave. Extend it: on `.started`, fetch the new run and upsert it into RunStore. On `.stopped`/`.updated`, re-fetch runs for that wave (the run's status/endedAt changed). This is cheap — one GET per event, and events are infrequent.
-
-Why fetch instead of constructing from the event? The `WaveEvent` has `waveRunId` but not the full run payload (flow, branch, worktree, PR, etc). The API returns everything. One extra GET is simpler than enriching events server-side.
+**Event-driven updates:** `handleWaveEvent` already handles `.started`/`.stopped`/`.updated` by refreshing the wave. Extend it: on any of these events, re-fetch runs for that wave via `loadRuns(for:)`. This is cheap — one GET per event, and events are infrequent.
 
 **OutputBuffer cleanup on wave delete:** When `deleteWave` succeeds (after `commitMutation`), clear OutputBuffer for that wave. This is a one-liner — `outputBuffer.clearOutput(for: wave.id)` — but it requires OutputBuffer to be accessible from RepoState. Pass it to `connectLfd` already; store a weak reference.
 
@@ -65,12 +62,12 @@ Why fetch instead of constructing from the event? The `WaveEvent` has `waveRunId
 
 4. **Weak OutputBuffer reference in RepoState.** RepoState already receives OutputBuffer in `connectLfd`. Store `weak var outputBuffer: OutputBuffer?` so `deleteWave` can clear output. Follows the wave's "In-memory only" principle — deleting a wave clears all traces.
 
-5. **`upsertRun` for event-driven single-run updates.** When a run event arrives and we fetch the run, upsert it into the cached array (replace if same ID exists, append if new). This avoids re-fetching the full list for every event.
+5. **Full re-fetch on events, not upsert.** `loadRuns(for:)` re-fetches the full run list on started/stopped/updated events. Simpler than upsert — run events are rare enough that a full fetch is invisible.
 
 ## Scope
 
 In scope:
-- RunStore with `setRuns`, `upsertRun`, `runs(for:)`, `clear`
+- RunStore with `setRuns`, `runs(for:)`, `clear`
 - RepoState owns RunStore, exposes `loadRuns(for:)`
 - Event handler updates RunStore on wave.started/stopped/updated
 - WaveDetailPanel reads from RunStore instead of local state

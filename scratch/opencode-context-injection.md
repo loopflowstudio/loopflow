@@ -1,88 +1,69 @@
----
-status: todo
-phase: 3
----
 # OpenCode Context Injection
 
-Enable loopflow to inject assembled context (LOOPFLOW.md, area docs, directions, diffs) into opencode sessions.
+## Problem
 
-## Current
+Loopflow assembles context (area docs, directions, diffs, LOOPFLOW.md) into a temp file and injects it into each agent's session. Each agent uses a different mechanism: Claude uses `--append-system-prompt-file`, Codex uses `-c model_instructions_file=`, Gemini uses `GEMINI_SYSTEM_MD` env var. OpenCode needs the same treatment so `lf implement --agent opencode` gets full context.
 
-Each agent has a different context injection mechanism:
-- **Claude**: `--append-system-prompt-file <path>` CLI flag
-- **Codex**: `-c model_instructions_file="<path>"` config override
-- **Gemini**: `GEMINI_SYSTEM_MD=<path>` environment variable
+## Approach
 
-Loopflow writes assembled context to a temp file, then passes it via the agent's mechanism.
+Use `OPENCODE_CONFIG_CONTENT` env var to inject both permission auto-approve and context file path in a single JSON object. This is already implemented in `launch_agent` at `agent.rs:282-303`.
 
-## OpenCode's Options
-
-OpenCode has three mechanisms for injecting instructions:
-
-1. **`AGENTS.md`** — reads from project root automatically. Also falls back to `CLAUDE.md`. But this is a file on disk, not a temp file we control per-run.
-
-2. **`instructions` array in `opencode.json`** — points to file paths/globs. But modifying `opencode.json` per-run is invasive.
-
-3. **`OPENCODE_CONFIG_CONTENT` env var** — inline JSON config that merges at runtime. This is the winner: we can inject an instructions reference to our temp file without touching any config files.
-
-## Build
-
-In `launch_agent`, when `backend == "opencode"`, merge the context file path into the `OPENCODE_CONFIG_CONTENT` env var (which PR 01 already uses for permission auto-approve):
-
-```rust
-if backend == "opencode" {
-    let mut config_content = serde_json::Map::new();
-
-    // Auto-approve permissions in auto mode
-    if config.auto {
-        config_content.insert(
-            "permission".into(),
-            serde_json::Value::String("allow".into()),
-        );
-    }
-
-    // Inject context file as an instruction source
-    if let Some(ref context_file) = config.context_file {
-        config_content.insert(
-            "instructions".into(),
-            serde_json::json!([context_file.to_string_lossy()]),
-        );
-    }
-
-    if !config_content.is_empty() {
-        cmd.env(
-            "OPENCODE_CONFIG_CONTENT",
-            serde_json::Value::Object(config_content).to_string(),
-        );
-    }
-}
-```
-
-This produces:
+The env var produces JSON like:
 ```json
 {"permission":"allow","instructions":["/tmp/lf-context-abc123.md"]}
 ```
 
-OpenCode loads the instructions array and includes the file contents in the LLM's context, alongside any user-defined instructions from their `opencode.json`.
+OpenCode merges this with its existing config at runtime. User-owned `opencode.json` is never modified.
 
-### Update PR 01
+### What's done
 
-PR 01 sets `OPENCODE_CONFIG_CONTENT` to just `{"permission":"allow"}`. This PR refactors that into the unified env var builder above. The permission logic moves from a hardcoded string to the `serde_json::Map` approach.
+PR 01 already implements the unified `serde_json::Map` approach:
+- `permission: "allow"` when `config.auto == true`
+- `instructions: [path]` when `config.context_file.is_some()`
+- Both keys coexist in a single JSON object
+- Empty map → no env var set (interactive mode, no context)
 
-## Constraints
+### What's left
 
-- Don't modify opencode's `opencode.json` — that's user-owned config
-- `OPENCODE_CONFIG_CONTENT` merges with existing config, doesn't replace it
-- Context file is a temp file cleaned up after the run
-- The `instructions` array accepts relative or absolute paths — use absolute for temp files
-- This approach lets users keep their own instructions in `opencode.json` while loopflow adds its context alongside
+The env var construction happens inside `launch_agent`, which spawns a real subprocess. Current tests only cover `build_opencode_command` (CLI args). The env var logic is untested.
+
+**Option A: Extract and test.** Pull the env var construction into a testable function like `build_opencode_env(config: &LaunchConfig) -> Option<String>`. Test it directly.
+
+**Option B: Test via integration.** Keep the code in `launch_agent` and test via the existing golden prompt / parity test infrastructure.
+
+Choose **Option A**. The function is pure (config in, JSON string out) and trivial to unit test. Matches how `build_opencode_command` is already extracted and tested for CLI args.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Write `AGENTS.md` to project root | OpenCode reads it automatically, no env var needed | Pollutes the user's repo with a temp file. `AGENTS.md` is user-owned. Race conditions if multiple runs overlap. |
+| Modify `opencode.json` per-run | Direct config file manipulation | Invasive. Breaks if user edits config concurrently. Must restore after run. |
+| Use `--instructions` CLI flag | Simpler than env var | Flag doesn't exist in opencode's CLI. `OPENCODE_CONFIG_CONTENT` is the documented runtime config mechanism. |
+| Separate env vars for permission and instructions | Clearer separation of concerns | OpenCode only supports one config override mechanism: `OPENCODE_CONFIG_CONTENT`. Can't split it. |
+
+## Key decisions
+
+- **Single env var for all config overrides.** OpenCode's `OPENCODE_CONFIG_CONTENT` merges with base config. One insertion point, not two. Follows the wave's "minimal config surface" principle.
+- **Absolute paths for temp files.** The `instructions` array accepts relative or absolute paths. Temp files get absolute paths to avoid CWD sensitivity.
+- **No env var when empty.** If neither `auto` nor `context_file` is set (interactive mode), don't set the env var at all. Clean environment for the TUI.
+- **Extract env builder for testability.** `build_opencode_env` returns `Option<String>` — testable without spawning a process.
+
+## Scope
+
+- In scope: Extract `build_opencode_env`, unit tests for all combinations (auto + context, auto only, context only, neither)
+- Out of scope: Testing that OpenCode actually reads the env var (requires opencode installed), `AGENTS.md` fallback, interactive mode context
 
 ## Done when
 
 ```bash
-# With opencode installed:
-lf implement --agent opencode  # in a repo with .lf/ context
-# Verify the assembled context reaches the opencode session
+cargo test -p loopflow -- opencode_env
+cargo fmt --check
+cargo clippy -- -D warnings
 ```
 
-Unit test: verify `OPENCODE_CONFIG_CONTENT` env var contains both `permission` and `instructions` keys when both `auto` and `context_file` are set.
+Tests cover:
+- `auto=true, context_file=Some(...)` → JSON with both keys
+- `auto=true, context_file=None` → JSON with permission only
+- `auto=false, context_file=Some(...)` → JSON with instructions only
+- `auto=false, context_file=None` → `None` (no env var)

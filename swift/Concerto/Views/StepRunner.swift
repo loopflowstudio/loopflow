@@ -19,10 +19,6 @@ struct StepRunner: View {
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
-    private var promptPlaceholder: String {
-        "Additional context (optional)"
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
             // Configuration: area + direction (wave state)
@@ -152,7 +148,7 @@ struct StepRunner: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            TextField(promptPlaceholder, text: $prompt, axis: .vertical)
+            TextField("Additional context (optional)", text: $prompt, axis: .vertical)
                 .textFieldStyle(.plain)
                 .padding(Spacing.md)
                 .background(palette.surface)

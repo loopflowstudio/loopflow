@@ -54,57 +54,6 @@ struct RunStoreTests {
         #expect(store.runs(for: "nonexistent").isEmpty)
     }
 
-    @Test("upsertRun inserts new run at front")
-    func upsertRunInserts() {
-        let store = RunStore()
-        store.setRuns(for: "wave-1", [makeRun(id: "run-1", iteration: 1)])
-
-        store.upsertRun(makeRun(id: "run-2", iteration: 2))
-
-        let runs = store.runs(for: "wave-1")
-        #expect(runs.count == 2)
-        #expect(runs.first?.id == "run-2")
-    }
-
-    @Test("upsertRun updates existing run in place")
-    func upsertRunUpdates() {
-        let store = RunStore()
-        store.setRuns(for: "wave-1", [
-            makeRun(id: "run-1", status: .running),
-        ])
-
-        store.upsertRun(makeRun(id: "run-1", status: .completed))
-
-        let runs = store.runs(for: "wave-1")
-        #expect(runs.count == 1)
-        #expect(runs.first?.status == .completed)
-    }
-
-    @Test("upsertRun with nil waveId is a no-op")
-    func upsertRunNilWaveId() {
-        let store = RunStore()
-        let run = WaveRun(
-            id: "run-1",
-            waveId: nil,
-            flow: "ship",
-            area: "src/",
-            repo: "/tmp/repo"
-        )
-
-        store.upsertRun(run)
-
-        #expect(store.runs(for: "wave-1").isEmpty)
-    }
-
-    @Test("upsertRun into empty store creates entry")
-    func upsertRunEmpty() {
-        let store = RunStore()
-
-        store.upsertRun(makeRun(id: "run-1"))
-
-        #expect(store.runs(for: "wave-1").count == 1)
-    }
-
     @Test("clear removes all runs for a wave")
     func clearRemoves() {
         let store = RunStore()

@@ -1,6 +1,6 @@
 # Loopflow
 
-Loopflow helps you maintain flow and craft using coding agents (Claude Code, Codex, Gemini CLI) at high scale.
+Loopflow helps you maintain flow and craft using coding agents (Claude Code, Codex, Gemini CLI, OpenCode) at high scale.
 
 Loopflow helps you create and run **Waves**. Waves are chains of coding agents working together in pre-defined ways.  
 
@@ -183,6 +183,7 @@ loopflow.run_wave("engbot")
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — Anthropic's coding agent (default)
 - [Codex CLI](https://github.com/openai/codex) — OpenAI's coding agent
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — Google's coding agent
+- [OpenCode](https://github.com/anomalyco/opencode) — Open source coding agent
 
 **Skill Libraries**
 - [superpowers](https://github.com/obra/superpowers) — prompt library (`lf sp:<skill>`)
@@ -192,7 +193,7 @@ loopflow.run_wave("engbot")
 ## Requirements
 
 - macOS
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [OpenCode](https://github.com/anomalyco/opencode)
 
 ## License
 

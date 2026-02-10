@@ -26,29 +26,6 @@ OpenCode (anomalyco/opencode) is a TypeScript-based CLI coding agent with:
 - **Same fidelity as existing agents**: streaming, model variants, context injection
 - **No default model variant**: like codex, let opencode use its own config
 
-## PRs
+## Status
 
-All PRs are complete.
-
-| PR | Scope |
-|----|-------|
-| 01 | Command builder + launch integration |
-| 02 | NDJSON stream parser |
-| 03 | Context injection via OPENCODE_CONFIG_CONTENT |
-| 04 | Full test coverage + README updates |
-
-## Model String Format
-
-```
-opencode                          → opencode run "prompt"
-opencode:anthropic/claude-sonnet  → opencode run --model anthropic/claude-sonnet "prompt"
-opencode:openai/gpt-4o            → opencode run --model openai/gpt-4o "prompt"
-```
-
-`parse_model("opencode:anthropic/claude-sonnet")` already produces `("opencode", Some("anthropic/claude-sonnet"))`.
-
-## Permission Handling
-
-OpenCode's `opencode run` blocks on permission prompts by default. For auto mode, loopflow injects `"permission": "allow"` via `OPENCODE_CONFIG_CONTENT` env var. This is equivalent to Claude's `--dangerously-skip-permissions`.
-
-For interactive mode, opencode's TUI handles permissions natively.
+Complete. Model string format and permission handling documented in `docs/config.md`.

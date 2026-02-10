@@ -24,13 +24,12 @@ struct WaveDetailPanel: View {
     @State private var isEditingName = false
     @State private var currentTime = Date()
     @State private var selectedTab: DetailTab = .current
-    @State private var waveRuns: [WaveRun] = []
-    @State private var isLoadingRuns = false
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
-    private let waveService = LocalWaveService()
     private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var waveRuns: [WaveRun] { repoState.runStore.runs(for: wave.id) }
 
     private var ideApp: IDEApp { .cursor }
     private var terminalApp: TerminalApp { .warp }
@@ -80,7 +79,7 @@ struct WaveDetailPanel: View {
         }
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
-            loadRuns()
+            repoState.loadRuns(for: wave.id)
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)
@@ -88,14 +87,7 @@ struct WaveDetailPanel: View {
         .onChange(of: wave.id) { oldId, newId in
             outputBuffer.stopStreaming(waveId: oldId)
             outputBuffer.startStreaming(waveId: newId)
-            loadRuns()
-        }
-        .onChange(of: selectedTab) { _, _ in
-            loadRuns()
-        }
-        .onChange(of: runsRefreshKey) { _, _ in
-            guard selectedTab == .runs else { return }
-            loadRuns()
+            repoState.loadRuns(for: newId)
         }
     }
 
@@ -144,11 +136,6 @@ struct WaveDetailPanel: View {
                             quickActionsBar
                         }
                     } else {
-                        if isLoadingRuns && waveRuns.isEmpty {
-                            ProgressView("Loading runs…")
-                                .frame(maxWidth: .infinity, alignment: .center)
-                        }
-
                         WaveRunsTab(
                             wave: wave,
                             runs: waveRuns,
@@ -738,37 +725,17 @@ struct WaveDetailPanel: View {
         }
     }
 
-    private func fetchRuns() async {
-        isLoadingRuns = true
-        defer { isLoadingRuns = false }
-        do {
-            waveRuns = try await waveService.listWaveRuns(waveId: wave.id)
-        } catch {
-            waveRuns = []
-        }
-    }
-
-    private func loadRuns() {
-        Task { await fetchRuns() }
-    }
-
-    private var runsRefreshKey: String {
-        let activeRunId = wave.activeRun?.id ?? "-"
-        let activeStatus = wave.activeRun?.status.rawValue ?? "-"
-        let prNumber = wave.prNumber.map(String.init) ?? "-"
-        let prState = wave.prState?.rawValue ?? "-"
-        return "\(wave.iteration)|\(wave.status.rawValue)|\(activeRunId)|\(activeStatus)|\(prNumber)|\(prState)"
-    }
-
     private func collapsePRs() async throws -> CollapsePRsResult {
+        let waveService = LocalWaveService()
         let result = try await waveService.collapsePRs(wave.id)
-        await fetchRuns()
+        repoState.loadRuns(for: wave.id)
         return result
     }
 
     private func absorbIntoPR(_ prNumber: Int) async throws -> AbsorbIntoPRResult {
+        let waveService = LocalWaveService()
         let result = try await waveService.absorbIntoPR(wave.id, prNumber: prNumber)
-        await fetchRuns()
+        repoState.loadRuns(for: wave.id)
         return result
     }
 

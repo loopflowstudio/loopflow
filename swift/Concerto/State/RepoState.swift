@@ -69,6 +69,7 @@ final class RepoState {
 
     // Wave state — delegated to WaveStore
     let waveStore = WaveStore()
+    let runStore = RunStore()
 
     var waves: [WaveViewModel] { waveStore.ordered }
     var waveGroups: WaveGroups { waveStore.groups }
@@ -98,6 +99,7 @@ final class RepoState {
     // Services
     private let waveService = LocalWaveService()
     private var eventService: LocalEventService?
+    private weak var outputBuffer: OutputBuffer?
 
     init() {
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
@@ -228,6 +230,7 @@ final class RepoState {
 
     func startEventSubscription(outputBuffer: OutputBuffer) {
         LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
+        self.outputBuffer = outputBuffer
         if eventService != nil { return }
         LoggingService.append("creating LocalEventService", category: LoggingService.Category.lfd)
         eventService = LocalEventService()
@@ -273,8 +276,13 @@ final class RepoState {
             } else if let wave = try? await waveService.getWave(event.waveId) {
                 waveStore.set(WaveViewModel(api: wave))
             }
+            // Update runs cache on run lifecycle events
+            if event.type == .started || event.type == .stopped || event.type == .updated {
+                loadRuns(for: event.waveId)
+            }
         case .deleted:
             waveStore.remove(event.waveId)
+            runStore.clear(for: event.waveId)
             if selectedWaveId == event.waveId {
                 selectedWaveId = nil
             }
@@ -307,6 +315,13 @@ final class RepoState {
         } catch {
             LoggingService.model("refreshWaves: error=\(error.localizedDescription)")
             waveStore.removeAll()
+        }
+    }
+
+    func loadRuns(for waveId: String) {
+        Task {
+            guard let runs = try? await waveService.listWaveRuns(waveId: waveId) else { return }
+            runStore.setRuns(for: waveId, runs)
         }
     }
 
@@ -426,6 +441,8 @@ final class RepoState {
         do {
             try await waveService.deleteWave(wave.id)
             waveStore.commitMutation(wave.id)
+            runStore.clear(for: wave.id)
+            outputBuffer?.clearOutput(for: wave.id)
         } catch {
             waveStore.rollback(wave)
             throw error

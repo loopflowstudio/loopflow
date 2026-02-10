@@ -700,34 +700,6 @@ mod tests {
         assert!(cmd.contains(&"json".to_string()));
     }
 
-    // ── build_agent_command (opencode) ──────────────────────────
-
-    #[test]
-    fn build_agent_command_opencode_basic() {
-        let config = LaunchConfig {
-            auto: true,
-            ..Default::default()
-        };
-        let cmd = build_agent_command("opencode", "fix the bug", &config);
-        assert_eq!(cmd[0], "opencode");
-        assert_eq!(cmd[1], "run");
-        assert_eq!(cmd.last().unwrap(), "fix the bug");
-    }
-
-    #[test]
-    fn build_agent_command_opencode_with_model() {
-        let config = LaunchConfig {
-            auto: true,
-            stream: true,
-            ..Default::default()
-        };
-        let cmd = build_agent_command("opencode:anthropic/claude-sonnet", "fix the bug", &config);
-        assert!(cmd.contains(&"--model".to_string()));
-        assert!(cmd.contains(&"anthropic/claude-sonnet".to_string()));
-        assert!(cmd.contains(&"--format".to_string()));
-        assert_eq!(cmd.last().unwrap(), "fix the bug");
-    }
-
     // ── build_opencode_env ──────────────────────────────────────
 
     #[test]

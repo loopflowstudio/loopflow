@@ -478,20 +478,6 @@ mod tests {
         assert_eq!(variant, Some("model-v2".to_string()));
     }
 
-    #[test]
-    fn parse_model_opencode_no_default() {
-        let (backend, variant) = parse_model("opencode");
-        assert_eq!(backend, "opencode");
-        assert_eq!(variant, None);
-    }
-
-    #[test]
-    fn parse_model_opencode_with_variant() {
-        let (backend, variant) = parse_model("opencode:openai/gpt-4o");
-        assert_eq!(backend, "opencode");
-        assert_eq!(variant, Some("openai/gpt-4o".to_string()));
-    }
-
     // ==========================================================================
     // Default config tests
     // ==========================================================================

@@ -465,6 +465,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_model_opencode_no_default() {
+        let (backend, variant) = parse_model("opencode");
+        assert_eq!(backend, "opencode");
+        assert_eq!(variant, None);
+    }
+
+    #[test]
+    fn parse_model_opencode_with_variant() {
+        let (backend, variant) = parse_model("opencode:anthropic/claude-sonnet");
+        assert_eq!(backend, "opencode");
+        assert_eq!(variant, Some("anthropic/claude-sonnet".to_string()));
+    }
+
+    #[test]
     fn parse_model_unknown_backend() {
         let (backend, variant) = parse_model("unknown");
         assert_eq!(backend, "unknown");

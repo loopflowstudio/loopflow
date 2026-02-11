@@ -45,7 +45,7 @@ Check if the coding agent is stuck on a permission prompt or clarifying question
 
 **Symptom:** Tasks fail with rate limit errors.
 
-Claude, Codex, and Gemini have usage limits. Options:
+Claude, Codex, Gemini, and OpenCode have usage limits. Options:
 
 - Wait and retry
 - Reduce parallel waves

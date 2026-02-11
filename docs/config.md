@@ -198,7 +198,15 @@ Default model for all steps.
 | **Config** | `agent_model: claude:opus` |
 | **Default** | `claude:opus` |
 
-Backends: `claude`, `codex`, `gemini`. Use `backend:variant` for specific models.
+Backends: `claude`, `codex`, `gemini`, `opencode`. Use `backend:variant` for specific models.
+
+OpenCode passes model strings through to its own provider system:
+
+```yaml
+agent_model: opencode                          # use opencode's default model
+agent_model: opencode:anthropic/claude-sonnet  # explicit model
+agent_model: opencode:openai/gpt-4o            # any provider opencode supports
+```
 
 ### Run Mode
 
@@ -261,7 +269,7 @@ Skip permissions. Codex uses the danger-full-access sandbox.
 | **Config** | `yolo: true` |
 | **Default** | `false` |
 
-Claude: `--dangerously-skip-permissions`. Codex: `--sandbox danger-full-access` with `approval_policy="never"`. Gemini: `--yolo`.
+Claude: `--dangerously-skip-permissions`. Codex: `--sandbox danger-full-access` with `approval_policy="never"`. Gemini: `--yolo`. OpenCode: `permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
 
 ### Autoprune
 

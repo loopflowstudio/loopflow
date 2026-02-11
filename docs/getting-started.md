@@ -20,7 +20,7 @@ Install the Python CLI/API (lfq + loopflow) separately:
 uv tool install loopflow
 ```
 
-Requires macOS and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli).
+Requires macOS and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [OpenCode](https://github.com/anomalyco/opencode).
 
 ---
 

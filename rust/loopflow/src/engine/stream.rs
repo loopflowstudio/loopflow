@@ -130,6 +130,16 @@ impl StreamParser {
             },
             "init" | "tool_result" => ParseResult::Skipped,
 
+            // ── OpenCode ─────────────────────────────────────────────
+            // OpenCode emits text/step_start/step_finish with a "part" wrapper.
+            // Guard "text" on sessionID to avoid conflicts with future agents.
+            "text" if v.get("sessionID").is_some() => match parse_opencode_text(&v) {
+                Some(event) => ParseResult::Events(vec![event]),
+                None => ParseResult::Skipped,
+            },
+            "step_start" => ParseResult::Skipped,
+            "step_finish" => ParseResult::Events(vec![parse_opencode_finish(&v)]),
+
             // ── Shared ──────────────────────────────────────────────
             // Both Claude and Gemini emit "result" events (different schemas).
             "result" => ParseResult::Events(vec![parse_result(&v)]),
@@ -367,6 +377,29 @@ fn summarize_gemini_tool(name: &str, params: &serde_json::Value) -> String {
             .unwrap_or("")
             .to_string(),
         _ => String::new(),
+    }
+}
+
+// ── OpenCode parsing ────────────────────────────────────────────────────────
+
+fn parse_opencode_text(v: &serde_json::Value) -> Option<StreamEvent> {
+    let text = v
+        .get("part")
+        .and_then(|p| p.get("text"))
+        .and_then(|t| t.as_str())?;
+    if text.is_empty() {
+        return None;
+    }
+    Some(StreamEvent::Text(text.to_string()))
+}
+
+fn parse_opencode_finish(v: &serde_json::Value) -> StreamEvent {
+    let part = v.get("part");
+    let cost = part.and_then(|p| p.get("cost")).and_then(|c| c.as_f64());
+    StreamEvent::Result {
+        subtype: ResultSubtype::Success,
+        cost_usd: cost,
+        duration_secs: None,
     }
 }
 
@@ -779,6 +812,61 @@ mod tests {
     fn gemini_init_skipped() {
         let mut parser = StreamParser::new();
         let line = r#"{"type":"init","timestamp":"2025-01-01T00:00:00Z","session_id":"s1","model":"gemini-2.0-flash"}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
+    // ── OpenCode tests ──────────────────────────────────────────
+
+    #[test]
+    fn parse_opencode_text_event() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"text","timestamp":1759406015783,"sessionID":"ses_abc","part":{"type":"text","text":"Hello world","time":{"start":1759406015783,"end":1759406015783}}}"#;
+        assert_eq!(
+            parser.feed_line(line),
+            ParseResult::Events(vec![StreamEvent::Text("Hello world".to_string())])
+        );
+    }
+
+    #[test]
+    fn parse_opencode_empty_text_skipped() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"text","timestamp":1759406015783,"sessionID":"ses_abc","part":{"type":"text","text":""}}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
+    #[test]
+    fn parse_opencode_step_start_skipped() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"step_start","timestamp":1759406015000,"sessionID":"ses_abc","part":{"type":"step-start"}}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
+    #[test]
+    fn parse_opencode_step_finish() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"step_finish","timestamp":1759406020000,"sessionID":"ses_abc","part":{"type":"step-finish","tokens":{"input":1234,"output":567},"cost":0.05}}"#;
+        assert_eq!(
+            parser.feed_line(line),
+            ParseResult::Events(vec![StreamEvent::Result {
+                subtype: ResultSubtype::Success,
+                cost_usd: Some(0.05),
+                duration_secs: None,
+            }])
+        );
+    }
+
+    #[test]
+    fn parse_opencode_unknown_passthrough() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"tool_call","sessionID":"ses_abc","part":{"type":"tool-call","name":"edit"}}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Passthrough);
+    }
+
+    #[test]
+    fn parse_opencode_malformed_text_skipped() {
+        let mut parser = StreamParser::new();
+        // Valid JSON with sessionID but missing part.text — graceful degrade to Skipped
+        let line = r#"{"type":"text","sessionID":"ses_abc","part":{"type":"text"}}"#;
         assert_eq!(parser.feed_line(line), ParseResult::Skipped);
     }
 

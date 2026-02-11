@@ -199,6 +199,30 @@ pub fn build_opencode_command(config: &LaunchConfig) -> Vec<String> {
     cmd
 }
 
+/// Build the `OPENCODE_CONFIG_CONTENT` env var JSON string.
+///
+/// Returns `None` when no config overrides are needed (interactive mode, no context).
+pub fn build_opencode_env(config: &LaunchConfig) -> Option<String> {
+    let mut oc_config = serde_json::Map::new();
+    if config.auto {
+        oc_config.insert(
+            "permission".into(),
+            serde_json::Value::String("allow".into()),
+        );
+    }
+    if let Some(ref context_file) = config.context_file {
+        oc_config.insert(
+            "instructions".into(),
+            serde_json::json!([context_file.to_string_lossy()]),
+        );
+    }
+    if oc_config.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(oc_config).to_string())
+    }
+}
+
 /// Build command for any model.
 pub fn build_model_command(model: &str, config: &LaunchConfig) -> Vec<String> {
     match model {
@@ -281,24 +305,8 @@ pub fn launch_agent(
 
     // For OpenCode, set OPENCODE_CONFIG_CONTENT env var for permissions and context
     if backend == "opencode" {
-        let mut oc_config = serde_json::Map::new();
-        if config.auto {
-            oc_config.insert(
-                "permission".into(),
-                serde_json::Value::String("allow".into()),
-            );
-        }
-        if let Some(ref context_file) = config.context_file {
-            oc_config.insert(
-                "instructions".into(),
-                serde_json::json!([context_file.to_string_lossy()]),
-            );
-        }
-        if !oc_config.is_empty() {
-            cmd.env(
-                "OPENCODE_CONFIG_CONTENT",
-                serde_json::Value::Object(oc_config).to_string(),
-            );
+        if let Some(env_val) = build_opencode_env(config) {
+            cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
         }
     }
 
@@ -690,5 +698,76 @@ mod tests {
         assert!(cmd.contains(&"run".to_string()));
         assert!(cmd.contains(&"--format".to_string()));
         assert!(cmd.contains(&"json".to_string()));
+    }
+
+    // ── build_opencode_env ──────────────────────────────────────
+
+    #[test]
+    fn build_opencode_env_auto_and_context() {
+        let config = LaunchConfig {
+            auto: true,
+            context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
+            ..Default::default()
+        };
+        let env = build_opencode_env(&config).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&env).unwrap();
+        assert_eq!(v["permission"], "allow");
+        assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
+    }
+
+    #[test]
+    fn build_opencode_env_auto_only() {
+        let config = LaunchConfig {
+            auto: true,
+            ..Default::default()
+        };
+        let env = build_opencode_env(&config).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&env).unwrap();
+        assert_eq!(v["permission"], "allow");
+        assert!(v.get("instructions").is_none());
+    }
+
+    #[test]
+    fn build_opencode_env_context_only() {
+        let config = LaunchConfig {
+            context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
+            ..Default::default()
+        };
+        let env = build_opencode_env(&config).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&env).unwrap();
+        assert!(v.get("permission").is_none());
+        assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
+    }
+
+    #[test]
+    fn build_opencode_env_neither() {
+        let config = LaunchConfig::default();
+        assert!(build_opencode_env(&config).is_none());
+    }
+
+    // ── build_agent_command: opencode integration ───────────────
+
+    #[test]
+    fn build_agent_command_opencode_default() {
+        let config = LaunchConfig {
+            auto: true,
+            ..Default::default()
+        };
+        let cmd = build_agent_command("opencode", "fix the bug", &config);
+        assert_eq!(cmd[0], "opencode");
+        assert_eq!(cmd[1], "run");
+        assert_eq!(*cmd.last().unwrap(), "fix the bug");
+    }
+
+    #[test]
+    fn build_agent_command_opencode_with_variant() {
+        let config = LaunchConfig {
+            auto: true,
+            ..Default::default()
+        };
+        let cmd = build_agent_command("opencode:anthropic/claude-sonnet", "fix the bug", &config);
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"anthropic/claude-sonnet".to_string()));
+        assert_eq!(*cmd.last().unwrap(), "fix the bug");
     }
 }

@@ -105,7 +105,7 @@ struct StepRunner: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            TextField("Additional context (optional)", text: $prompt, axis: .vertical)
+            TextField("e.g. focus on error handling", text: $prompt, axis: .vertical)
                 .textFieldStyle(.plain)
                 .padding(Spacing.md)
                 .background(palette.surface)
@@ -204,6 +204,7 @@ struct StepRunner: View {
                     .padding(.horizontal, Spacing.sm)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Change auto mode")
         }
         .background(buttonsDisabled ? Color.gray : palette.surface)
         .foregroundStyle(buttonsDisabled ? .white : palette.text)

@@ -5,7 +5,7 @@ title: lf Command Reference
 
 # lf Command Reference
 
-`lf` is a prompt launcher. Every command launches a prompt—assembling context and passing it to Claude, Codex, or Gemini.
+`lf` is a prompt launcher. Every command launches a prompt—assembling context and passing it to Claude, Codex, Gemini, or OpenCode.
 
 ## Basic Usage
 
@@ -81,7 +81,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `gemini`) |
+| `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `gemini`, `opencode`) |
 | `-d, --direction DIRECTION` | Apply direction (comma-separated for multiple) |
 
 ## Output Flags

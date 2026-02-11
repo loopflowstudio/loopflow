@@ -1,4 +1,4 @@
-// StepRunner - step/flow execution UI with direction pills and prompt field.
+// StepRunner - wave execution UI with flow selection and run/loop controls.
 
 import SwiftUI
 import LoopflowCore
@@ -6,22 +6,34 @@ import LoopflowCore
 struct StepRunner: View {
     let wave: WaveViewModel
 
+    private struct AutoModeOption: Identifiable {
+        let kind: Stimulus.Kind
+        let label: String
+        let icon: String
+
+        var id: String { kind.rawValue }
+    }
+
     @Environment(RepoState.self) private var repoState
-    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedFlow: String = ""
-    @State private var selectedStimulus: Stimulus.Kind = .once
+    @State private var autoMode: Stimulus.Kind = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
+    @State private var isRunning = false
     @State private var errorMessage: String?
     @State private var showingError = false
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
+    private static let autoModeOptions = [
+        AutoModeOption(kind: .loop, label: "Loop", icon: "repeat"),
+        AutoModeOption(kind: .watch, label: "Watch", icon: "eye"),
+        AutoModeOption(kind: .cron, label: "Schedule", icon: "clock")
+    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
-            // Configuration: area + direction (wave state)
             VStack(alignment: .leading, spacing: Spacing.md) {
                 areaHeader
                 directionHeader
@@ -29,15 +41,15 @@ struct StepRunner: View {
 
             Divider()
 
-            // Execution: flow + stimulus + prompt + run
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 flowHeader
-
-                stimulusPicker
-
                 promptField
 
-                runButton
+                if autoMode == .cron {
+                    cronField
+                }
+
+                actionButtons
             }
         }
         .padding(Spacing.xl)
@@ -49,14 +61,14 @@ struct StepRunner: View {
         }
         .onAppear {
             selectedFlow = wave.flow
-            selectedStimulus = wave.stimulus.kind == .manual ? .once : wave.stimulus.kind
+            autoMode = normalizedAutoMode(from: wave.stimulus.kind)
             if let cron = wave.stimulus.cron {
                 cronExpression = cron
             }
         }
     }
 
-    // MARK: - Area Header
+    // MARK: - Configuration
 
     private var areaHeader: some View {
         AreaTypeahead(wave: wave) { areas in
@@ -66,8 +78,6 @@ struct StepRunner: View {
         }
     }
 
-    // MARK: - Direction Header
-
     private var directionHeader: some View {
         DirectionTypeahead(wave: wave) { directions in
             Task {
@@ -75,8 +85,6 @@ struct StepRunner: View {
             }
         }
     }
-
-    // MARK: - Flow Header
 
     private var flowHeader: some View {
         FlowTypeahead(wave: wave) { flow in
@@ -89,58 +97,7 @@ struct StepRunner: View {
         }
     }
 
-    // MARK: - Stimulus Picker
-
-    private var stimulusPicker: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Stimulus")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: Spacing.xs) {
-                stimulusPill(.once, label: "Once", icon: "1.circle")
-                stimulusPill(.loop, label: "Loop", icon: "repeat")
-                stimulusPill(.watch, label: "Watch", icon: "eye")
-                stimulusPill(.cron, label: "Schedule", icon: "clock")
-            }
-
-            if selectedStimulus == .cron {
-                TextField("0 9 * * *", text: $cronExpression)
-                    .textFieldStyle(.plain)
-                    .font(.system(.caption, design: .monospaced))
-                    .padding(Spacing.sm)
-                    .background(palette.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-
-                Text("Examples: 0 9 * * * (daily 9am), */30 * * * * (every 30 min)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private func stimulusPill(_ kind: Stimulus.Kind, label: String, icon: String) -> some View {
-        let isSelected = selectedStimulus == kind
-
-        return Button {
-            selectedStimulus = kind
-        } label: {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: icon)
-                    .font(.caption2)
-                Text(label)
-                    .font(.caption)
-            }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
-            .background(isSelected ? palette.accent.opacity(0.15) : palette.surface)
-            .foregroundStyle(isSelected ? palette.accent : .secondary)
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Prompt Field
+    // MARK: - Fields
 
     private var promptField: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -157,69 +114,122 @@ struct StepRunner: View {
         }
     }
 
-    // MARK: - Run Button
+    private var cronField: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            TextField("0 9 * * *", text: $cronExpression)
+                .textFieldStyle(.plain)
+                .font(.system(.caption, design: .monospaced))
+                .padding(Spacing.sm)
+                .background(palette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
 
-    private var isWaveActive: Bool {
-        wave.status == .running || wave.status == .waiting
-    }
-
-    private var runButtonLabel: String {
-        switch selectedStimulus {
-        case .once, .manual: return selectedFlow.isEmpty ? "Run" : "Run \(selectedFlow)"
-        case .loop: return "Start Loop"
-        case .watch: return "Start Watching"
-        case .cron: return "Start Schedule"
+            Text("Examples: 0 9 * * * (daily 9am), */30 * * * * (every 30 min)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
-    private var runButtonIcon: String {
-        switch selectedStimulus {
-        case .once, .manual: return "play.fill"
-        case .loop: return "repeat"
-        case .watch: return "eye"
-        case .cron: return "clock"
+    // MARK: - Action Buttons
+
+    private var buttonsDisabled: Bool {
+        isRunning || selectedFlow.isEmpty || wave.status == .running || wave.status == .waiting
+    }
+
+    private var selectedAutoMode: AutoModeOption {
+        Self.autoModeOptions.first(where: { $0.kind == autoMode }) ?? Self.autoModeOptions[0]
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: Spacing.md) {
+            runButton
+            autoButton
         }
     }
 
     private var runButton: some View {
         Button {
-            runFlow()
+            runWith(stimulus: .once)
         } label: {
             HStack(spacing: Spacing.sm) {
-                if isWaveActive {
+                if isRunning {
                     ProgressView()
                         .scaleEffect(0.8)
                 } else {
-                    Image(systemName: runButtonIcon)
-                        .font(.title3)
+                    Image(systemName: "play.fill")
                 }
-                Text(runButtonLabel)
-                    .font(.title3)
+                Text("Run")
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.lg)
-            .background(runButtonDisabled ? Color.gray : palette.accent)
+            .background(buttonsDisabled ? Color.gray : palette.accent)
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         }
         .buttonStyle(.plain)
-        .disabled(runButtonDisabled)
-        .opacity(runButtonDisabled ? 0.5 : 1)
+        .disabled(buttonsDisabled)
+        .opacity(buttonsDisabled ? 0.5 : 1)
     }
 
-    private var runButtonDisabled: Bool {
-        selectedFlow.isEmpty || isWaveActive
+    private var autoButton: some View {
+        HStack(spacing: 0) {
+            Button {
+                runWith(stimulus: selectedAutoMode.kind)
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: selectedAutoMode.icon)
+                    Text(selectedAutoMode.label)
+                        .fontWeight(.semibold)
+                }
+                .padding(.vertical, Spacing.lg)
+                .padding(.leading, Spacing.lg)
+                .padding(.trailing, Spacing.sm)
+            }
+            .buttonStyle(.plain)
+
+            Rectangle()
+                .fill(palette.border)
+                .frame(width: 1, height: 20)
+
+            Menu {
+                ForEach(Self.autoModeOptions) { option in
+                    Button { autoMode = option.kind } label: {
+                        Label(option.label, systemImage: option.icon)
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .padding(.vertical, Spacing.lg)
+                    .padding(.horizontal, Spacing.sm)
+            }
+            .buttonStyle(.plain)
+        }
+        .background(buttonsDisabled ? Color.gray : palette.surface)
+        .foregroundStyle(buttonsDisabled ? .white : palette.text)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
+        .disabled(buttonsDisabled)
+        .opacity(buttonsDisabled ? 0.5 : 1)
     }
 
     // MARK: - Actions
 
-    private func runFlow() {
+    private func normalizedAutoMode(from kind: Stimulus.Kind) -> Stimulus.Kind {
+        switch kind {
+        case .loop, .watch, .cron:
+            return kind
+        case .once, .manual:
+            return .loop
+        }
+    }
+
+    private func runWith(stimulus kind: Stimulus.Kind) {
         guard !selectedFlow.isEmpty else { return }
 
+        isRunning = true
         let stimulus = Stimulus(
-            kind: selectedStimulus,
-            cron: selectedStimulus == .cron ? cronExpression : nil
+            kind: kind,
+            cron: kind == .cron ? cronExpression : nil
         )
         Task {
             do {
@@ -233,6 +243,9 @@ struct StepRunner: View {
                     errorMessage = error.localizedDescription
                     showingError = true
                 }
+            }
+            await MainActor.run {
+                isRunning = false
             }
         }
     }
@@ -274,6 +287,5 @@ struct StepRunner: View {
 
     return StepRunner(wave: wave)
         .environment(repoState)
-        .environment(OutputBuffer())
         .frame(width: 500, height: 600)
 }

@@ -24,13 +24,12 @@ struct WaveDetailPanel: View {
     @State private var isEditingName = false
     @State private var currentTime = Date()
     @State private var selectedTab: DetailTab = .current
-    @State private var waveRuns: [WaveRun] = []
-    @State private var isLoadingRuns = false
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
-    private let waveService = LocalWaveService()
     private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var waveRuns: [WaveRun] { repoState.runStore.runs(for: wave.id) }
 
     private var ideApp: IDEApp { .cursor }
     private var terminalApp: TerminalApp { .warp }
@@ -80,7 +79,7 @@ struct WaveDetailPanel: View {
         }
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
-            loadRuns()
+            repoState.loadRuns(for: wave.id)
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)
@@ -88,14 +87,7 @@ struct WaveDetailPanel: View {
         .onChange(of: wave.id) { oldId, newId in
             outputBuffer.stopStreaming(waveId: oldId)
             outputBuffer.startStreaming(waveId: newId)
-            loadRuns()
-        }
-        .onChange(of: selectedTab) { _, _ in
-            loadRuns()
-        }
-        .onChange(of: runsRefreshKey) { _, _ in
-            guard selectedTab == .runs else { return }
-            loadRuns()
+            repoState.loadRuns(for: newId)
         }
     }
 
@@ -144,11 +136,6 @@ struct WaveDetailPanel: View {
                             quickActionsBar
                         }
                     } else {
-                        if isLoadingRuns && waveRuns.isEmpty {
-                            ProgressView("Loading runs…")
-                                .frame(maxWidth: .infinity, alignment: .center)
-                        }
-
                         WaveRunsTab(
                             wave: wave,
                             runs: waveRuns,
@@ -601,9 +588,6 @@ struct WaveDetailPanel: View {
         return result
     }
 
-    @State private var isLanding = false
-    @State private var isNexting = false
-
     private var opsActionsBar: some View {
         HStack(spacing: Spacing.lg) {
             // Commit count
@@ -636,7 +620,7 @@ struct WaveDetailPanel: View {
                 landWave()
             } label: {
                 HStack(spacing: Spacing.xs) {
-                    if isLanding {
+                    if repoState.isActionInFlight(wave.id) {
                         ProgressView()
                             .scaleEffect(0.6)
                     } else {
@@ -647,25 +631,20 @@ struct WaveDetailPanel: View {
                 }
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(isLanding || isNexting)
+            .disabled(repoState.isActionInFlight(wave.id))
 
             // Next
             Button {
                 nextWave()
             } label: {
                 HStack(spacing: Spacing.xs) {
-                    if isNexting {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                    } else {
-                        Image(systemName: "arrow.forward.circle")
-                            .font(.caption)
-                    }
+                    Image(systemName: "arrow.forward.circle")
+                        .font(.caption)
                     Text("Next")
                 }
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(isLanding || isNexting)
+            .disabled(repoState.isActionInFlight(wave.id))
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
@@ -676,7 +655,6 @@ struct WaveDetailPanel: View {
     // MARK: - Actions
 
     private func landWave() {
-        isLanding = true
         Task {
             do {
                 try await repoState.landWave(wave)
@@ -686,14 +664,10 @@ struct WaveDetailPanel: View {
                     showingActionError = true
                 }
             }
-            await MainActor.run {
-                isLanding = false
-            }
         }
     }
 
     private func nextWave() {
-        isNexting = true
         Task {
             do {
                 try await repoState.nextWave(wave)
@@ -702,9 +676,6 @@ struct WaveDetailPanel: View {
                     actionError = "Failed to start next: \(error.localizedDescription)"
                     showingActionError = true
                 }
-            }
-            await MainActor.run {
-                isNexting = false
             }
         }
     }
@@ -754,38 +725,12 @@ struct WaveDetailPanel: View {
         }
     }
 
-    private func fetchRuns() async {
-        isLoadingRuns = true
-        defer { isLoadingRuns = false }
-        do {
-            waveRuns = try await waveService.listWaveRuns(waveId: wave.id)
-        } catch {
-            waveRuns = []
-        }
-    }
-
-    private func loadRuns() {
-        Task { await fetchRuns() }
-    }
-
-    private var runsRefreshKey: String {
-        let activeRunId = wave.activeRun?.id ?? "-"
-        let activeStatus = wave.activeRun?.status.rawValue ?? "-"
-        let prNumber = wave.prNumber.map(String.init) ?? "-"
-        let prState = wave.prState?.rawValue ?? "-"
-        return "\(wave.iteration)|\(wave.status.rawValue)|\(activeRunId)|\(activeStatus)|\(prNumber)|\(prState)"
-    }
-
     private func collapsePRs() async throws -> CollapsePRsResult {
-        let result = try await waveService.collapsePRs(wave.id)
-        await fetchRuns()
-        return result
+        try await repoState.collapsePRs(wave.id)
     }
 
     private func absorbIntoPR(_ prNumber: Int) async throws -> AbsorbIntoPRResult {
-        let result = try await waveService.absorbIntoPR(wave.id, prNumber: prNumber)
-        await fetchRuns()
-        return result
+        try await repoState.absorbIntoPR(wave.id, prNumber: prNumber)
     }
 
     // MARK: - Name Editing

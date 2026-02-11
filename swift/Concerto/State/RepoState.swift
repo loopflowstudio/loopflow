@@ -69,6 +69,7 @@ final class RepoState {
 
     // Wave state — delegated to WaveStore
     let waveStore = WaveStore()
+    let runStore = RunStore()
 
     var waves: [WaveViewModel] { waveStore.ordered }
     var waveGroups: WaveGroups { waveStore.groups }
@@ -81,6 +82,13 @@ final class RepoState {
         set { selectedWaveId = newValue?.id }
     }
 
+    // In-flight actions (land) — buttons disable while pending
+    private(set) var inFlightActions: Set<String> = []
+
+    func isActionInFlight(_ waveId: String) -> Bool {
+        inFlightActions.contains(waveId)
+    }
+
     // Loading
     var isLoading: Bool = false
     var errorMessage: String?
@@ -91,6 +99,7 @@ final class RepoState {
     // Services
     private let waveService = LocalWaveService()
     private var eventService: LocalEventService?
+    private weak var outputBuffer: OutputBuffer?
 
     init() {
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
@@ -221,6 +230,7 @@ final class RepoState {
 
     func startEventSubscription(outputBuffer: OutputBuffer) {
         LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
+        self.outputBuffer = outputBuffer
         if eventService != nil { return }
         LoggingService.append("creating LocalEventService", category: LoggingService.Category.lfd)
         eventService = LocalEventService()
@@ -266,8 +276,13 @@ final class RepoState {
             } else if let wave = try? await waveService.getWave(event.waveId) {
                 waveStore.set(WaveViewModel(api: wave))
             }
+            // Update runs cache on run lifecycle events
+            if event.type == .started || event.type == .stopped || event.type == .updated {
+                loadRuns(for: event.waveId)
+            }
         case .deleted:
             waveStore.remove(event.waveId)
+            runStore.clear(for: event.waveId)
             if selectedWaveId == event.waveId {
                 selectedWaveId = nil
             }
@@ -301,6 +316,25 @@ final class RepoState {
             LoggingService.model("refreshWaves: error=\(error.localizedDescription)")
             waveStore.removeAll()
         }
+    }
+
+    func loadRuns(for waveId: String) {
+        Task {
+            guard let runs = try? await waveService.listWaveRuns(waveId: waveId) else { return }
+            runStore.setRuns(for: waveId, runs)
+        }
+    }
+
+    func collapsePRs(_ waveId: String) async throws -> CollapsePRsResult {
+        let result = try await waveService.collapsePRs(waveId)
+        loadRuns(for: waveId)
+        return result
+    }
+
+    func absorbIntoPR(_ waveId: String, prNumber: Int) async throws -> AbsorbIntoPRResult {
+        let result = try await waveService.absorbIntoPR(waveId, prNumber: prNumber)
+        loadRuns(for: waveId)
+        return result
     }
 
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
@@ -348,33 +382,19 @@ final class RepoState {
 
         let pendingId = "pending-\(UUID().uuidString)"
         let pending = WaveViewModel(
-            api: Wave(
-                id: pendingId,
-                name: waveName,
-                repo: repo.path,
-                flow: "design",
-                direction: [],
-                area: [],
-                stimulus: Stimulus(kind: .once),
-                status: .idle,
-                iteration: 0
-            )
+            api: Wave(id: pendingId, name: waveName, repo: repo.path)
         )
-        waveStore.set(pending)
+        waveStore.insertPending(pending)
         selectedWaveId = pendingId
 
         do {
             let wave = try await waveService.createWave(name: waveName, repo: repo)
-            let viewModel = WaveViewModel(api: wave)
-            waveStore.remove(pendingId)
-            waveStore.set(viewModel)
-            selectedWaveId = viewModel.id
+            waveStore.replacePending(pendingId, with: WaveViewModel(api: wave))
+            selectedWaveId = wave.id
             LoggingService.model("createWave: selectedWave=\(wave.id)")
         } catch {
-            waveStore.remove(pendingId)
-            if selectedWaveId == pendingId {
-                selectedWaveId = nil
-            }
+            waveStore.removePending(pendingId)
+            if selectedWaveId == pendingId { selectedWaveId = nil }
             throw error
         }
     }
@@ -386,43 +406,64 @@ final class RepoState {
         flow: String? = nil,
         stimulus: Stimulus? = nil
     ) async throws {
-        let overrides = RunOverrides(
-            area: area,
-            direction: direction,
-            flow: flow,
-            stimulus: stimulus
-        )
-        try await waveService.run(wave.id, overrides: overrides)
+        try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
+            let overrides = RunOverrides(area: area, direction: direction, flow: flow, stimulus: stimulus)
+            try await self.waveService.run(wave.id, overrides: overrides)
+        }
     }
 
     func stopWave(_ wave: WaveViewModel) async throws {
-        try await waveService.stop(wave.id)
+        try await optimisticAction(wave.id, mutation: { $0.status = .idle }) {
+            try await self.waveService.stop(wave.id)
+        }
     }
 
     func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
-        let cloned = try await waveService.cloneWave(wave.id, name: nil)
-        let viewModel = WaveViewModel(api: cloned)
-        waveStore.set(viewModel)
-        selectedWave = viewModel
-        return viewModel
+        let pendingId = "pending-\(UUID().uuidString)"
+        let pendingWave = Wave(
+            id: pendingId,
+            name: "\(wave.name) (copy)",
+            repo: wave.api.repo,
+            flow: wave.api.flow,
+            direction: wave.api.direction,
+            area: wave.api.area,
+            stimulus: wave.api.stimulus
+        )
+        let pending = WaveViewModel(api: pendingWave)
+        waveStore.insertPending(pending)
+        selectedWaveId = pendingId
+
+        do {
+            let cloned = try await waveService.cloneWave(wave.id, name: nil)
+            let viewModel = WaveViewModel(api: cloned)
+            waveStore.replacePending(pendingId, with: viewModel)
+            selectedWaveId = viewModel.id
+            return viewModel
+        } catch {
+            waveStore.removePending(pendingId)
+            if selectedWaveId == pendingId { selectedWaveId = nil }
+            throw error
+        }
     }
 
     func deleteWave(_ wave: WaveViewModel) async throws {
-        try await waveService.deleteWave(wave.id)
-        waveStore.remove(wave.id)
-        if selectedWaveId == wave.id {
-            selectedWaveId = nil
+        waveStore.applyDelete(wave.id)
+        if selectedWaveId == wave.id { selectedWaveId = nil }
+
+        do {
+            try await waveService.deleteWave(wave.id)
+            waveStore.commitMutation(wave.id)
+            runStore.clear(for: wave.id)
+            outputBuffer?.clearOutput(for: wave.id)
+        } catch {
+            waveStore.rollback(wave)
+            throw error
         }
     }
 
     func renameWave(_ wave: WaveViewModel, to newName: String) async throws {
-        let snapshot = waveStore.applyOptimistic(wave.id) { $0.name = newName }
-        do {
-            _ = try await waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
-            waveStore.commitMutation(wave.id)
-        } catch {
-            if let snapshot { waveStore.rollback(snapshot) }
-            throw error
+        try await optimistic(wave.id, mutation: { $0.name = newName }) {
+            _ = try await self.waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
         }
     }
 
@@ -434,35 +475,28 @@ final class RepoState {
         stimulus: Stimulus? = nil,
         status: WaveStatus? = nil
     ) async throws {
-        let snapshot = waveStore.applyOptimistic(wave.id) { w in
+        try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
             if let flow { w.flow = flow }
             if let stimulus { w.stimulus = stimulus }
             if let status { w.status = status }
-        }
-        do {
-            let config = WaveConfigUpdate(
-                area: area,
-                direction: direction,
-                flow: flow,
-                stimulus: stimulus,
-                status: status
-            )
-            _ = try await waveService.updateWave(wave.id, config: config)
-            waveStore.commitMutation(wave.id)
-        } catch {
-            if let snapshot { waveStore.rollback(snapshot) }
-            throw error
+        }) {
+            let config = WaveConfigUpdate(area: area, direction: direction, flow: flow, stimulus: stimulus, status: status)
+            _ = try await self.waveService.updateWave(wave.id, config: config)
         }
     }
 
     func landWave(_ wave: WaveViewModel) async throws {
+        inFlightActions.insert(wave.id)
+        defer { inFlightActions.remove(wave.id) }
         try await waveService.landWave(wave.id)
     }
 
     func nextWave(_ wave: WaveViewModel) async throws {
-        _ = try await waveService.nextWave(wave.id)
+        try await optimisticAction(wave.id, mutation: { $0.status = .idle }) {
+            _ = try await self.waveService.nextWave(wave.id)
+        }
     }
 
     func connectLfd(outputBuffer: OutputBuffer) async throws {
@@ -471,5 +505,44 @@ final class RepoState {
         LoggingService.lfd("connectLfd: waveService.connectLfd completed")
         startEventSubscription(outputBuffer: outputBuffer)
         LoggingService.lfd("connectLfd: event subscription started")
+    }
+
+    // MARK: - Optimistic helpers
+
+    /// Apply optimistic mutation, run API call, commit on success or rollback on error.
+    private func optimistic(
+        _ id: String,
+        mutation: (inout WaveViewModel) -> Void,
+        apiCall: () async throws -> Void
+    ) async throws {
+        let snapshot = waveStore.applyOptimistic(id, mutation)
+        do {
+            try await apiCall()
+            waveStore.commitMutation(id)
+        } catch {
+            if let snapshot { waveStore.rollback(snapshot) }
+            throw error
+        }
+    }
+
+    /// Like `optimistic`, but also schedules a safety-net refresh after commit.
+    /// Used for actions (run/stop/next) where the real state arrives via WebSocket.
+    private func optimisticAction(
+        _ id: String,
+        mutation: (inout WaveViewModel) -> Void,
+        apiCall: () async throws -> Void
+    ) async throws {
+        try await optimistic(id, mutation: mutation, apiCall: apiCall)
+        scheduleRefresh(for: id)
+    }
+
+    private func scheduleRefresh(for waveId: String, delay: TimeInterval = 10) {
+        Task {
+            try? await Task.sleep(for: .seconds(delay))
+            guard waveStore.wave(for: waveId) != nil else { return }
+            if let wave = try? await waveService.getWave(waveId) {
+                waveStore.set(WaveViewModel(api: wave))
+            }
+        }
     }
 }

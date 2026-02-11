@@ -60,15 +60,17 @@ final class WaveStore {
         var updatedWaves: [String: WaveViewModel] = [:]
         var updatedStatuses: [String: WaveStatus] = [:]
 
-        for wave in newWaves {
-            if pendingMutations.contains(wave.id) {
-                // Preserve optimistic state for waves with in-flight mutations
-                if let existing = waves[wave.id] {
-                    updatedWaves[wave.id] = existing
-                    updatedStatuses[wave.id] = previousStatuses[wave.id] ?? existing.status
-                }
-                continue
+        // Preserve all waves with pending mutations (optimistic inserts/deletes/edits)
+        for id in pendingMutations {
+            if let existing = waves[id] {
+                updatedWaves[id] = existing
+                updatedStatuses[id] = previousStatuses[id] ?? existing.status
             }
+            // If not in waves (e.g. pending delete), stay absent
+        }
+
+        for wave in newWaves {
+            if pendingMutations.contains(wave.id) { continue }
             let oldStatus = previousStatuses[wave.id]
             if oldStatus != wave.status {
                 onStatusChange?(wave, oldStatus, wave.status)
@@ -111,6 +113,29 @@ final class WaveStore {
     func rollback(_ snapshot: WaveViewModel) {
         pendingMutations.remove(snapshot.id)
         _set(snapshot)
+    }
+
+    // MARK: - Pending create/delete
+
+    func insertPending(_ wave: WaveViewModel) {
+        pendingMutations.insert(wave.id)
+        _set(wave)
+    }
+
+    func replacePending(_ pendingId: String, with wave: WaveViewModel) {
+        pendingMutations.remove(pendingId)
+        remove(pendingId)
+        _set(wave)
+    }
+
+    func removePending(_ id: String) {
+        pendingMutations.remove(id)
+        remove(id)
+    }
+
+    func applyDelete(_ id: String) {
+        pendingMutations.insert(id)
+        remove(id)
     }
 
     // MARK: - Queries

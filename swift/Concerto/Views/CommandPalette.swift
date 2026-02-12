@@ -191,10 +191,10 @@ private struct ActionRow: View {
             if let shortcut = action.shortcut {
                 Text(shortcut)
                     .font(.caption)
-                    .foregroundStyle(isSelected ? .white.opacity(0.7) : .gray)
+                    .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(isSelected ? Color.white.opacity(0.2) : Color.gray.opacity(0.15))
+                    .background(isSelected ? Color.white.opacity(0.2) : Color.secondary.opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
         }

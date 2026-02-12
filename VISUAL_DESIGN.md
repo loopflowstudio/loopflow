@@ -65,6 +65,7 @@ The burgundy is the logo wine's "indoor voice"—same family, but appropriate fo
 | `warning` | `#B0812A` | Early-stage, caution |
 | `error` | `#B45309` | Experimental, failing |
 | `info` | `#0AB3CC` | Informational (logo cyan) |
+| `neutral` | `#8B8B8B` | Idle, inactive, completed |
 
 ### CSS Variables
 
@@ -89,6 +90,7 @@ The burgundy is the logo wine's "indoor voice"—same family, but appropriate fo
   --warning: #B0812A;
   --error: #B45309;
   --info: #0AB3CC;
+  --neutral: #8B8B8B;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -126,6 +128,7 @@ extension Color {
     static let statusWarning = Color(hex: 0xB0812A)
     static let statusError = Color(hex: 0xB45309)
     static let statusInfo = Color(hex: 0x0AB3CC)
+    static let statusNeutral = Color(hex: 0x8B8B8B)
 }
 ```
 

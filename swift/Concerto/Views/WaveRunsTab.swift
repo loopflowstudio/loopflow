@@ -296,7 +296,7 @@ private struct RunPRBadge: View {
         let color = switch state {
         case .open: Color.statusSuccess
         case .draft: Color.statusWarning
-        case .merged: Color.purple
+        case .merged: Color.statusInfo
         case .closed: Color.statusError
         case .none: Color.secondary
         }

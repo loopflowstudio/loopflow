@@ -47,10 +47,10 @@ struct LiveOutput: View {
         if text == "ok" || text.hasPrefix("ok (") { return Color.statusSuccess }
         if text == "failed" { return Color.statusError }
         // Legacy prefix format
-        if text.hasPrefix("→") { return .blue }
+        if text.hasPrefix("→") { return .statusInfo }
         if text.hasPrefix("✓") { return Color.statusSuccess }
         if text.hasPrefix("✗") { return Color.statusError }
-        if text.hasPrefix("⚠") { return .orange }
+        if text.hasPrefix("⚠") { return .statusWarning }
         return .white.opacity(0.8)
     }
 }

@@ -259,7 +259,7 @@ struct WaveSidebar: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
                 if !waveGroups.blocked.isEmpty {
-                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange, count: waveGroups.blocked.count)
+                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .statusWarning, count: waveGroups.blocked.count)
                     waveRows(waveGroups.blocked)
                 }
 
@@ -269,12 +269,12 @@ struct WaveSidebar: View {
                 }
 
                 if !waveGroups.recentActivity.isEmpty {
-                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .cyan, count: waveGroups.recentActivity.count)
+                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .statusInfo, count: waveGroups.recentActivity.count)
                     waveRows(waveGroups.recentActivity)
                 }
 
                 if !waveGroups.active.isEmpty {
-                    sectionHeader("Active", icon: "circle.fill", color: .blue, count: waveGroups.active.count)
+                    sectionHeader("Active", icon: "circle.fill", color: .statusSuccess, count: waveGroups.active.count)
                     waveRows(waveGroups.active)
                 }
 

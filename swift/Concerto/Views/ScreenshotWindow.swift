@@ -135,7 +135,7 @@ private struct ScreenshotLayout: View {
 
             // Divider
             Rectangle()
-                .fill(Color.gray.opacity(0.2))
+                .fill(palette.border)
                 .frame(width: 1)
 
             // Detail

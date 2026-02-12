@@ -6,16 +6,6 @@ extension Color {
     static let loopflowBurgundy = Color(hex: 0x722F37)
     static let loopflowBurgundyHover = Color(hex: 0x8B3D47)
     static let loopflowCream = Color(hex: 0xFAF8F5)
-
-    init(hex: UInt, alpha: Double = 1) {
-        self.init(
-            .sRGB,
-            red: Double((hex >> 16) & 0xff) / 255,
-            green: Double((hex >> 08) & 0xff) / 255,
-            blue: Double((hex >> 00) & 0xff) / 255,
-            opacity: alpha
-        )
-    }
 }
 
 // Status colors are defined in LoopflowCore/Models/StatusColors.swift

@@ -1,165 +1,155 @@
 # Swift Codebase Summary
 
-Package: `LoopflowSwift` — macOS 15+, Swift 6
-Products: `LoopflowCore` (library), `Concerto` (app), `Symphonia` (placeholder)
-Dependencies: ViewInspector 0.10+, GhosttyKit (binary xcframework)
-
-Build: `./dev run` (SPM), `./dev test`, `./dev xcode` (XcodeGen from `project.yml`)
-Install target: `~/Applications/Concerto Dev.app`
-
----
-
-## File Structure
+Package: `LoopflowSwift` — Swift 6.0, macOS 15+
 
 ```
 swift/
 ├── Package.swift
-├── project.yml                          # XcodeGen
-├── LoopflowCore/                        # Shared library
-│   ├── LoopflowCore.swift               # Constants: lfdDefaultPort=2486, lfdBaseURL, lfdApiBaseURL
+├── LoopflowCore/          # Shared library — models + services
+│   ├── LoopflowCore.swift # Constants: lfdDefaultPort=2486, lfdBaseURL, lfdApiBaseURL
 │   ├── Models/
-│   │   ├── Wave.swift                   # Wave, WaveStatus, Stimulus, CommitEntry, InteractiveSession, MergeMode, WaitingReason
-│   │   ├── WaveRun.swift                # WaveRun, WaveRunStatus
-│   │   ├── WaveViewModel.swift          # WaveViewModel (UI-enriched Wave)
-│   │   ├── Flow.swift                   # Flow, FlowType
-│   │   ├── Step.swift                   # Step, StepConfig, StepRun
-│   │   ├── PullRequest.swift            # PullRequest, PRState
-│   │   ├── AppPreferences.swift         # TerminalApp, IDEApp enums
-│   │   ├── AppearanceMode.swift         # AppearanceMode (system/light/dark)
-│   │   └── StatusColors.swift           # Color extensions: statusSuccess/Error/Warning/Info/Neutral
+│   │   ├── Flow.swift
+│   │   ├── Step.swift
+│   │   ├── PullRequest.swift
+│   │   ├── AppPreferences.swift
+│   │   └── AppearanceMode.swift
 │   └── Services/
-│       ├── LocalWaveService.swift       # HTTP client for lfd API
-│       ├── LocalEventService.swift      # WebSocket client for lfd events
-│       ├── WaveServiceProtocol.swift    # WaveServiceProtocol, WaveFlowsResult
-│       ├── AuthService.swift            # OAuth via ASWebAuthenticationSession, Keychain JWT
-│       ├── AuthState.swift              # Observable auth state with auto-refresh
-│       ├── AuthError.swift              # AuthError enum
-│       ├── LoggingService.swift         # File logger to ~/Library/Logs/Concerto/
-│       ├── NotificationService.swift    # UNUserNotificationCenter for wave alerts
-│       └── TokenProvider.swift          # TokenProvider protocol, KeychainTokenProvider
-├── Concerto/                            # Main macOS app
-│   ├── ConcertoApp.swift                # @main, WindowGroup scenes, font registration
-│   ├── Flags.swift                      # UserDefaults beta toggle
-│   ├── ScriptCommands.swift             # AppleScript: CaptureScreenshotCommand
+│       ├── LocalWaveService.swift   # HTTP client to lfd daemon
+│       ├── LocalEventService.swift  # WebSocket subscriber
+│       ├── WaveServiceProtocol.swift
+│       ├── AuthService.swift        # OAuth + JWT keychain
+│       ├── AuthState.swift          # Observable auth state
+│       ├── AuthError.swift
+│       ├── TokenProvider.swift
+│       ├── NotificationService.swift
+│       └── LoggingService.swift
+├── Concerto/              # macOS app — wave management UI
+│   ├── ConcertoApp.swift  # Entry point, window groups, fonts
+│   ├── Flags.swift        # Feature flags (beta)
+│   ├── ScriptCommands.swift # AppleScript handlers
 │   ├── Models/
-│   │   └── RecentRepo.swift             # RecentRepo (path, lastOpened)
-│   ├── State/
-│   │   ├── WaveStore.swift              # @Observable dict-keyed wave storage with optimistic updates
-│   │   ├── OutputBuffer.swift           # @Observable output line buffer with HTTP streaming
-│   │   └── RunStore.swift               # @Observable cached wave runs per wave
+│   │   └── RecentRepo.swift
 │   ├── Services/
-│   │   ├── TerminalLauncher.swift       # Launch Warp/iTerm/Terminal/Kitty, open Cursor/VSCode/Zed
-│   │   ├── SetupService.swift           # Check/install lf, uv, claude, lfd daemon
-│   │   ├── SnapshotService.swift        # Window capture via bitmapImageRepForCachingDisplay
-│   │   ├── RecentsService.swift         # UserDefaults recent repos (max 10)
-│   │   ├── RecentAreasService.swift     # UserDefaults recent areas per repo (max 5)
-│   │   ├── NameGenerator.swift          # Random wave names: magical + musical words
-│   │   ├── AppIconProvider.swift        # NSWorkspace app icon lookup
+│   │   ├── TerminalLauncher.swift
+│   │   ├── SetupService.swift
+│   │   ├── SnapshotService.swift
+│   │   ├── RecentsService.swift
+│   │   ├── RecentAreasService.swift
+│   │   ├── NameGenerator.swift
+│   │   ├── AppIconProvider.swift
 │   │   └── Ghostty/
-│   │       ├── GhosttyManager.swift     # Singleton wrapping ghostty_app_t C API
-│   │       └── GhosttyTypes.swift       # TerminalStatus, GhosttySession
-│   ├── BrandColors.swift                # LoopflowPalette (light/dark/deepWine), Color.loopflowBurgundy
-│   ├── DesignSystem.swift               # Spacing, HitTarget, ZIndex, CornerRadius, Typography, DesignAnimation
-│   ├── Views/
-│   │   ├── ContentView.swift            # Main split view (sidebar + detail), command palette overlay
-│   │   ├── WelcomeWindow.swift          # Launch screen with recent repos, "Open Folder"
-│   │   ├── RepoWindow.swift             # Per-repo window: setup check → ContentView
-│   │   ├── ScreenshotWindow.swift       # Automated screenshot mode window
-│   │   ├── WaveSidebar.swift            # Sidebar: grouped wave list with keyboard nav
-│   │   ├── WaveRow.swift                # Single wave row: name, status, PR badge, activity
-│   │   ├── WaveDetailPanel.swift        # Detail: tabs (Current/Runs), header, actions
-│   │   ├── WaveRunsTab.swift            # Historical runs list with Collapse/Absorb actions
-│   │   ├── StepRunner.swift             # Idle-state step execution UI
-│   │   ├── FlowProgressPills.swift      # Current step pills with elapsed time
-│   │   ├── NextActionsBar.swift         # Post-completion action buttons
-│   │   ├── WaitingStateCard.swift       # PR limit reached card
-│   │   ├── LiveOutput.swift             # Terminal-style output display
-│   │   ├── InteractiveSessionView.swift # Embedded terminal for interactive steps
-│   │   ├── EmbeddedTerminalPanel.swift  # Ghostty terminal panel wrapper
-│   │   ├── CommandPalette.swift         # Cmd+K palette: fuzzy search, keyboard nav
-│   │   ├── AreaTypeahead.swift          # Path input with tab completion, multi-select chips
-│   │   ├── FlowTypeahead.swift          # Flow/step picker with ghost completion
-│   │   ├── DirectionTypeahead.swift     # Direction picker with ghost completion
-│   │   ├── TypeaheadComponents.swift    # GhostTextField, TypeaheadChip, WrappingHStack
-│   │   ├── IterationTimeline.swift      # Visual timeline of wave runs
-│   │   ├── QuickExperimentView.swift    # Quick experiment launcher
-│   │   ├── SetupView.swift              # First-run install flow
-│   │   ├── DiagnosticsView.swift        # Debug/diagnostics panel
-│   │   ├── ThemePreview.swift           # Design system preview
-│   │   └── TerminalTestWindow.swift     # Ghostty testing window
-│   └── Fonts/                           # Bundled: CormorantGaramond, Lato, JetBrainsMono
-├── ConcertoTests/                       # Unit tests
-├── ConcertoUITests/                     # Screenshot pipeline tests
-├── Symphonia/                           # Placeholder second app
+│   │       ├── GhosttyManager.swift
+│   │       └── GhosttyTypes.swift
+│   ├── State/
+│   │   ├── RepoState.swift    # Main observable state
+│   │   ├── WaveStore.swift    # Dictionary-keyed wave state
+│   │   ├── OutputBuffer.swift # Agent output buffering
+│   │   └── RunStore.swift     # Wave run cache
+│   └── Views/
+│       ├── RepoWindow.swift
+│       ├── ContentView.swift           # NavigationSplitView layout
+│       ├── WaveSidebar.swift           # Grouped wave list
+│       ├── WaveRow.swift               # Sidebar row
+│       ├── WaveDetailPanel.swift       # Detail: config, output, actions
+│       ├── StepRunner.swift            # Step execution config
+│       ├── InteractiveSessionView.swift # Embedded Ghostty terminal
+│       ├── WaveRunsTab.swift           # Historical runs + PR management
+│       ├── CommandPalette.swift        # ⌘K fuzzy search
+│       ├── AreaTypeahead.swift
+│       ├── DirectionTypeahead.swift
+│       └── FlowTypeahead.swift
+├── Symphonia/             # Teams product — placeholder
+├── ConcertoTests/
+├── ConcertoUITests/
 └── SymphoniaTests/
 ```
 
----
-
-## Core Data Structures
-
-### Wave — autonomous AI coding wave
+## Dependencies
 
 ```swift
-// LoopflowCore/Models/Wave.swift
+// Package.swift
+.package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0")  // SwiftUI test inspection
+.binaryTarget(name: "GhosttyKit", url: "https://bin.loopflow.studio/GhosttyKit-061a0ae.xcframework.zip")
+
+// Concerto linker settings
+.linkedFramework("Carbon"), .linkedFramework("QuartzCore"),
+.linkedFramework("Metal"), .linkedFramework("IOKit"), .linkedLibrary("c++")
+```
+
+Build flag: `GHOSTTY_ENABLED` — conditional compilation for embedded terminal.
+
+---
+
+## LoopflowCore — Models
+
+### Wave (core domain object)
+
+```swift
+// Wave.swift
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String
-    public var repo: String                // Absolute path to git repo
-    public var flow: String                // Flow/step name to execute
-    public var direction: [String]         // Prompt modifier filenames
-    public var area: [String]              // Code areas to focus on
-    public var stimuli: [Stimulus]         // Automation triggers
-    public var status: WaveStatus          // idle/running/waiting/failed/paused
-    public var iteration: Int              // Current iteration number
-    public var localWorktree: String?      // Absolute path to git worktree
-    public var remoteBranch: String?       // Remote branch name
-    public var commits: [CommitEntry]      // Commits on this wave's branch
-    public var diffStat: String?           // Git diff stat summary
-    public var flowSteps: [String]         // Step names in the flow
-    public var openPRCount: Int            // Number of open PRs for this wave
-    public var activeRun: WaveRun?         // Currently executing run (expanded)
+    public var repo: String
+    public var flow: String
+    public var direction: [String]
+    public var area: [String]
+    public var stimuli: [Stimulus]
+    public var status: WaveStatus
+    public var iteration: Int
+    public var localWorktree: String?
+    public var remoteBranch: String?
+    public var commits: [CommitEntry]
+    public var diffStat: String?
+    public var flowSteps: [String]
+    public var openPRCount: Int
+    public var activeRun: WaveRun?
     public var createdAt: Date?
 }
-```
 
-### WaveStatus
-
-```swift
 public enum WaveStatus: String, Sendable, Codable {
     case idle, running, waiting, failed, paused
 }
-```
 
-### Stimulus — automation trigger
-
-```swift
 public struct Stimulus: Sendable, Hashable, Codable, Identifiable {
     public enum Kind: String, Sendable, Codable, CaseIterable {
-        case loop    // Continuous re-run
-        case watch   // On file change
-        case cron    // Scheduled (cron expression)
+        case loop   // Continuous execution
+        case watch  // On file change
+        case cron   // Scheduled
     }
     public var id: String
     public var kind: Kind
-    public var cron: String?   // Cron expression, only for .cron kind
+    public var cron: String?
+}
+
+public struct CommitEntry: Sendable, Hashable, Identifiable {
+    public let sha: String
+    public let message: String
+}
+
+public struct InteractiveSession: Sendable, Identifiable {
+    public let id: String
+    public let waveId: String
+    public let step: String
+    public let worktreePath: String
+    public let prompt: String?
+    public let startedAt: Date
 }
 ```
 
-### WaveRun — single execution of a wave
+### WaveRun (single execution of a wave)
 
 ```swift
-// LoopflowCore/Models/WaveRun.swift
+// WaveRun.swift
 public struct WaveRun: Sendable, Identifiable, Hashable {
     public let id: String
     public let waveId: String?
     public let flow: String
-    public let area: String            // Joined area string
+    public let area: String
     public let repo: String
     public let direction: [String]
-    public var status: WaveRunStatus   // pending/running/waiting/completed/failed/cancelled
+    public var status: WaveRunStatus
     public var iteration: Int
-    public var stepIndex: Int          // Current step within flow
+    public var stepIndex: Int
     public var worktree: String?
     public var branch: String?
     public var currentStep: String?
@@ -175,84 +165,101 @@ public enum WaveRunStatus: String, Sendable, Codable {
 }
 ```
 
-### WaveViewModel — UI-enriched wave for display
+### WaveViewModel (enriched wave with git/UI state)
 
 ```swift
-// LoopflowCore/Models/WaveViewModel.swift
+// WaveViewModel.swift
 public struct WaveViewModel: Sendable, Identifiable, Hashable {
-    public var api: Wave                  // Core wave data from API
-    public var worktreePath: String?      // Resolved from api.activeRun or api.localWorktree
+    public var api: Wave                     // Core API model
+    public var worktreePath: String?
     public var branch: String?
-    public var isDirty: Bool              // Git working tree dirty
+    public var isDirty: Bool
     public var isRebasing: Bool
     public var isMerging: Bool
-    public var hasDiff: Bool              // Has uncommitted changes
-    public var aheadMain: Int             // Commits ahead of main
+    public var hasDiff: Bool
+    public var aheadMain: Int
     public var behindMain: Int
-    public var aheadRemote: Int           // Commits ahead of remote tracking
+    public var aheadRemote: Int
     public var behindRemote: Int
     public var prURL: URL?
     public var prNumber: Int?
-    public var prState: PRState?          // open/merged/closed/draft
-    public var recentSteps: [StepRun]     // Recent step executions
-    public var prLimit: Int               // Max concurrent PRs (default 5)
-    public var mergeMode: MergeMode       // .pr or .land
-    public var pid: Int?                  // Agent process ID
+    public var prState: PRState?
+    public var recentSteps: [StepRun]
+    public var prLimit: Int
+    public var mergeMode: MergeMode
+    public var pid: Int?
     public var lastMainSha: String?
     public var waitingReason: WaitingReason?
     public var runStartedAt: Date?
 
-    // Computed: id, name, repo, flow, direction, area, stimuli, status,
-    //           iteration, activeRun, createdAt (all delegate to api)
-    // displayName, areaDisplay, directionDisplay, statusText, detailText
-    // statusIndicator -> (icon: String, color: Color)
-    // hasOpenPRs, effectiveOpenPRCount, pendingPR, lastActivityAt
+    // Key computed properties
+    public var id: String                    // delegates to api.id
+    public var displayName: String
+    public var areaDisplay: String           // comma-joined areas
+    public var directionDisplay: String      // comma-joined directions
+    public var statusText: String
+    public var iterationText: String         // "iteration N"
+    public var detailText: String            // step progress
+    public var stimulusText: String          // "loop", "watch", "cron: ..."
+    public var hasActiveStimulus: Bool
+    public var statusIndicator: (icon: String, color: Color)
+    public var pendingPR: (number: Int, url: URL?)?
+    public var lastActivityAt: Date?
+    public var lastActivityDescription: String?
 }
 ```
 
-### Flow & Step
+### Flow / Step
 
 ```swift
-// LoopflowCore/Models/Flow.swift
+// Flow.swift
 public enum FlowType: String, Sendable, Codable { case flow, step }
 
 public struct Flow: Sendable, Codable, Identifiable, Equatable {
     public var id: UUID
     public var name: String
     public var steps: [Step]
-    public var type: FlowType   // .flow (multi-step) or .step (single)
+    public var type: FlowType
 }
 
-// LoopflowCore/Models/Step.swift
+// Step.swift
+public struct StepConfig: Sendable, Codable, Equatable {
+    public var model: String?
+    public var direction: String?
+    public var context: [String]?
+    public var isEmpty: Bool  // computed
+}
+
 public struct Step: Sendable, Codable, Equatable, Identifiable {
     public var id: UUID
-    public var prompt: String       // Step/prompt name
-    public var config: StepConfig?  // Optional overrides
-}
-
-public struct StepConfig: Sendable, Codable, Equatable {
-    public var model: String?       // LLM model override
-    public var direction: String?   // Direction override
-    public var context: [String]?   // Additional context files
+    public var prompt: String
+    public var config: StepConfig?
 }
 
 public struct StepRun: Sendable, Identifiable, Codable, Hashable {
     public let id: String
-    public let step: String         // Step name
+    public let step: String
     public let repo: String
     public let worktree: String
-    public let status: String       // "running"/"waiting"/"completed"/"error"
+    public let status: String      // "running", "completed", "error"
     public let startedAt: Date
     public let endedAt: Date?
     public let model: String
     public let runMode: String
+    public var isRunning: Bool     // computed
+    public var isCompleted: Bool   // computed
+    public var isError: Bool       // computed
 }
 ```
 
 ### PullRequest
 
 ```swift
-public enum PRState: String, Sendable, Codable { case open, merged, closed, draft }
+// PullRequest.swift
+public enum PRState: String, Sendable, Codable {
+    case open, merged, closed, draft
+    public var displayText: String  // computed
+}
 
 public struct PullRequest: Sendable, Hashable, Codable {
     public let url: URL
@@ -263,83 +270,36 @@ public struct PullRequest: Sendable, Hashable, Codable {
 }
 ```
 
-### Supporting Types
+### Preferences
 
 ```swift
-public struct CommitEntry: Sendable, Hashable, Identifiable {
-    public let sha: String
-    public let message: String
+// AppPreferences.swift
+public enum TerminalApp: String, Sendable, CaseIterable {
+    case warp, iterm, terminal, kitty
+    public var displayName: String
 }
 
-public enum MergeMode: String, Sendable, Codable { case pr, land }
-
-public enum WaitingReason: Sendable, Hashable {
-    case prLimitReached(open: Int, limit: Int)
+public enum IDEApp: String, Sendable, CaseIterable {
+    case cursor, vscode, zed
+    public var displayName: String
 }
 
-public struct InteractiveSession: Sendable, Identifiable {
-    public let id: String
-    public let waveId: String
-    public let step: String
-    public let worktreePath: String
-    public let prompt: String?
-    public let startedAt: Date
-    var command: String { "lf \(step)" }  // Shell command to run
+// AppearanceMode.swift
+public enum AppearanceMode: String, Sendable, CaseIterable {
+    case system, light, dark
+    public var menuTitle: String
+    public var colorScheme: ColorScheme?
 }
-
-public enum TerminalApp: String, Sendable, CaseIterable { case warp, iterm, terminal, kitty }
-public enum IDEApp: String, Sendable, CaseIterable { case cursor, vscode, zed }
-public enum AppearanceMode: String, Sendable, CaseIterable { case system, light, dark }
 ```
 
 ---
 
-## Communication with lfd Daemon
+## LoopflowCore — Services
 
-Two protocols, intentionally separate:
-
-### HTTP API — `LocalWaveService`
-
-Base: `http://127.0.0.1:2486/v0`
-Timeouts: 3s request / 10s resource (default), 30s/60s for git ops (longSession)
+### LocalWaveService (HTTP client to lfd daemon)
 
 ```swift
-public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
-    // MARK: - Wave CRUD
-    func listWaves(repo: URL) async throws -> [Wave]          // GET /v0/waves?repo=...&expand[]=active_run
-    func getWave(_ id: String) async throws -> Wave            // GET /v0/waves/{id}?expand[]=active_run
-    func createWave(name: String, repo: URL) async throws -> Wave  // POST /v0/waves
-    func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave  // PATCH /v0/waves/{id}
-    func deleteWave(_ id: String) async throws                 // DELETE /v0/waves/{id}
-    func cloneWave(_ id: String, name: String?) async throws -> Wave  // POST /v0/waves/{id}/clone
-
-    // MARK: - Wave Actions
-    func run(_ id: String, overrides: RunOverrides?) async throws     // POST /v0/waves/{id}/run
-    func stop(_ id: String) async throws                              // POST /v0/waves/{id}/stop
-    func landWave(_ id: String) async throws                          // POST /v0/waves/{id}/land
-    func nextWave(_ id: String) async throws -> String                // POST /v0/waves/{id}/next
-    func connect(_ id: String) async throws -> ConnectionInfo         // POST /v0/waves/{id}/connect
-    func collapsePRs(_ id: String) async throws -> CollapsePRsResult  // POST /v0/waves/{id}/collapse
-    func absorbIntoPR(_ id: String, prNumber: Int) async throws -> AbsorbIntoPRResult  // POST /v0/waves/{id}/absorb
-
-    // MARK: - Stimulus
-    func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus  // POST /v0/waves/{id}/stimulus
-    func removeStimulus(_ waveId: String, stimulusId: String) async throws  // DELETE /v0/waves/{id}/stimulus/{sid}
-
-    // MARK: - Queries
-    func listFlowsAndDirections(repo: URL) async throws -> WaveFlowsResult  // GET /v0/flows?repo=...
-    func listWaveRuns(waveId: String?, repo: URL?, limit: Int) async throws -> [WaveRun]  // GET /v0/wave_runs
-    func streamOutput(waveId: String) -> AsyncThrowingStream<String, Error>  // GET /v0/waves/{id}/logs (line streaming)
-
-    // MARK: - Daemon
-    func connectLfd() async throws         // Runs `lfd install`
-    func checkAvailability() async -> Bool  // GET /status
-}
-```
-
-#### Request/Response Types
-
-```swift
+// LocalWaveService.swift
 public struct WaveConfigUpdate: Sendable {
     public var name: String?
     public var area: [String]?
@@ -363,204 +323,294 @@ public struct ConnectionInfo: Sendable {
     public let stepIndex: Int
 }
 
+public struct CollapsePRsResult: Sendable { ... }
+public struct AbsorbIntoPRResult: Sendable { ... }
+
+public struct LocalWaveService: WaveServiceProtocol {
+    public init(tokenProvider: TokenProvider = NoAuthProvider())
+
+    // CRUD
+    func listWaves(repo: URL) async throws -> [Wave]
+    func getWave(_ id: String) async throws -> Wave
+    func createWave(name: String, repo: URL) async throws -> Wave
+    func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave
+    func deleteWave(_ id: String) async throws
+    func cloneWave(_ id: String, name: String?) async throws -> Wave
+
+    // Actions
+    func run(_ id: String, overrides: RunOverrides?) async throws
+    func stop(_ id: String) async throws
+    func landWave(_ id: String) async throws
+    func nextWave(_ id: String) async throws -> String
+    func connect(_ id: String) async throws -> ConnectionInfo
+
+    // PR operations
+    func collapsePRs(_ id: String) async throws -> CollapsePRsResult
+    func absorbIntoPR(_ id: String, prNumber: Int) async throws -> AbsorbIntoPRResult
+
+    // Stimuli
+    func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus
+    func removeStimulus(_ waveId: String, stimulusId: String) async throws
+
+    // Output
+    func streamOutput(waveId: String) -> AsyncThrowingStream<String, Error>
+
+    // Metadata
+    func listFlowsAndDirections(repo: URL) async throws -> WaveFlowsResult
+    func listWaveRuns(waveId: String?, repo: URL?, limit: Int) async throws -> [WaveRun]
+
+    // Setup
+    func connectLfd() async throws
+    func checkAvailability() async -> Bool
+}
+```
+
+### WaveServiceProtocol
+
+```swift
+// WaveServiceProtocol.swift
 public struct WaveFlowsResult: Sendable {
     public var flows: [Flow]
     public var directions: [String]
 }
 
-public struct CollapsePRsResult: Sendable {
-    public let newPRUrl: String?
-    public let closedPRs: [Int]
-}
-
-public struct AbsorbIntoPRResult: Sendable {
-    public let targetBranch: String
-    public let commitsAbsorbed: Int
-}
-
-public enum WaveServiceError: LocalizedError {
-    case commandFailed(String)
+public protocol WaveServiceProtocol: Sendable {
+    func listWaves(repo: URL) async throws -> [Wave]
+    func getWave(_ id: String) async throws -> Wave
+    func createWave(name: String, repo: URL) async throws -> Wave
+    func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave
+    func deleteWave(_ id: String) async throws
+    func cloneWave(_ id: String, name: String?) async throws -> Wave
+    func run(_ id: String, overrides: RunOverrides?) async throws
+    func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus
+    func removeStimulus(_ waveId: String, stimulusId: String) async throws
+    func stop(_ id: String) async throws
+    func landWave(_ id: String) async throws
+    func nextWave(_ id: String) async throws -> String
+    func listFlowsAndDirections(repo: URL) async throws -> WaveFlowsResult
 }
 ```
 
-### WebSocket — `LocalEventService`
-
-URL: `ws://127.0.0.1:2486/ws`
-Auto-reconnect: 1s for first 10 attempts, then 5s
+### LocalEventService (WebSocket)
 
 ```swift
+// LocalEventService.swift
+public enum WaveEventType: String, Sendable {
+    case created, updated, deleted, started, stopped, waiting
+}
+
+public struct WaveEvent: Sendable {
+    public let type: WaveEventType
+    public let waveId: String
+    public let waveRunId: String?
+    public let step: String?
+    public let name: String?
+    public let wave: Wave?
+    public let timestamp: Date
+}
+
+public enum LFDEvent: Sendable {
+    case connected(ConnectedEvent)
+    case wave(WaveEvent)
+    case worktree(WorktreeEvent)
+    case agentStarted(AgentStartedEvent)
+    case agentEnded(AgentEndedEvent)
+    case output(OutputEvent)
+}
+
 public actor LocalEventService {
     func subscribe(
         onEvent: @escaping @Sendable (LFDEvent) -> Void,
         onConnectionChange: @escaping @Sendable (Bool) -> Void
     ) async
     func disconnect() async
-    var isConnected: Bool { get }
+}
+```
+
+### Auth
+
+```swift
+// AuthError.swift
+public enum AuthError: Error, Sendable {
+    case noCallback, invalidCallback, notAuthenticated, tokenExpired
+    case sessionFailed, refreshFailed(String)
+    case keychainWrite(OSStatus), keychainDelete(OSStatus)
+    case unknown(Error)
 }
 
-public enum LFDEvent: Sendable {
-    case connected(ConnectedEvent)         // Initial handshake, includes all waves
-    case wave(WaveEvent)                   // wave_created/updated/deleted/started/stopped/waiting
-    case worktree(WorktreeEvent)           // worktree_updated
-    case agentStarted(AgentStartedEvent)   // agent_started
-    case agentEnded(AgentEndedEvent)       // agent_ended
-    case output(OutputEvent)               // output_line (live agent output)
+// TokenProvider.swift
+public protocol TokenProvider: Sendable {
+    func token() async throws -> String
+}
+public struct NoAuthProvider: TokenProvider { ... }           // Returns ""
+public final class KeychainTokenProvider: TokenProvider { ... } // Reads from keychain
+
+// AuthService.swift
+public final class AuthService: NSObject, @unchecked Sendable {
+    func signIn() async throws -> String      // OAuth via ASWebAuthenticationSession
+    func signOut() throws                     // Clear keychain
+    func currentToken() -> String?
+    func tokenExpiresAt() -> Date?
+    func refreshToken() async throws -> String
 }
 
-public struct ConnectedEvent: Sendable {
-    public let timestamp: Date
-    public let waves: [Wave]               // Full wave list on connect
+// AuthState.swift — Observable wrapper
+@MainActor @Observable
+public final class AuthState {
+    public private(set) var token: String?
+    public private(set) var isLoading: Bool
+    public private(set) var error: AuthError?
+    public var isAuthenticated: Bool  // computed
+    public var isExpired: Bool        // computed
+    public var needsRefresh: Bool     // computed
+    public func signIn() async
+    public func signOut()
+}
+```
+
+### Notifications + Logging
+
+```swift
+// NotificationService.swift
+public final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
+    public static let shared: NotificationService
+    func requestAuthorization() async throws
+    func notifyNeedsInteractive(waveId: String, waveName: String, step: String)
+    func notifyError(waveId: String, waveName: String, message: String)
+    func notifyPRReady(waveId: String, waveName: String, prNumber: Int)
 }
 
-public struct WaveEvent: Sendable {
-    public let type: WaveEventType         // created/updated/deleted/started/stopped/waiting
-    public let waveId: String
-    public let waveRunId: String?
-    public let step: String?
-    public let name: String?
-    public let wave: Wave?                 // Full wave data (on created/updated)
-    public let timestamp: Date
+// LoggingService.swift
+public enum LoggingService {
+    public enum Category: String { case worktrees, lfd, general, ui, model }
+    static func append(_ message: String, category: Category = .worktrees)
+    static func ui(_ message: String)
+    static func model(_ message: String)
+    static func lfd(_ message: String)
+    static func read(category: Category = .worktrees) -> String
 }
-
-public enum WaveEventType: String, Sendable {
-    case created, updated, deleted, started, stopped, waiting
-}
-
-public struct WorktreeEvent: Sendable { let worktree: String; let repo: String; let branch: String?; let timestamp: Date }
-public struct AgentStartedEvent: Sendable { let agentId: String; let step: String; let worktree: String; let timestamp: Date }
-public struct AgentEndedEvent: Sendable { let agentId: String; let status: String; let timestamp: Date }
-public struct OutputEvent: Sendable { let waveId: String; let agentId: String; let text: String; let timestamp: Date }
+// Log directory: ~/Library/Logs/Concerto/
 ```
 
 ---
 
-## App State Layer (Concerto)
+## Concerto — State Management
 
-### WaveStore — dictionary-keyed observable wave storage
+### RepoState (main observable state)
 
 ```swift
-// Concerto/State/WaveStore.swift
+// State/RepoState.swift — ~600 lines
+@MainActor @Observable
+final class RepoState {
+    // Repository
+    var currentRepo: URL?
+    var flows: [Flow] = []
+    var availableDirections: [String] = []
+
+    // Waves (delegated to stores)
+    let waveStore = WaveStore()
+    let runStore = RunStore()
+    var waves: [WaveViewModel] { waveStore.ordered }
+    var waveGroups: WaveGroups { waveStore.groups }
+
+    // Selection
+    var selectedWaveId: String?
+    var selectedWave: WaveViewModel?   // computed from waveStore
+
+    // Connection
+    var lfdConnected: Bool = false
+    var isLoading: Bool = false
+    var errorMessage: String?
+
+    // Key methods
+    func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async
+    func refreshWaves() async
+    func refreshFlowsAsync() async
+    func createWave(name: String?, flow: String, area: [String], direction: [String], stimulus: Stimulus?) async
+    func deleteWave(_ id: String) async
+    func landWave(_ id: String) async
+    func nextIteration(_ id: String) async
+    func stopWave(_ id: String) async
+    func loadRuns(for waveId: String)
+}
+```
+
+### WaveStore (optimistic mutation store)
+
+```swift
+// State/WaveStore.swift — ~185 lines
+struct WaveGroups {
+    let blocked: [WaveViewModel]       // status == .failed
+    let pr: [WaveViewModel]            // has open PRs
+    let recentActivity: [WaveViewModel] // active in last hour, max 5
+    let active: [WaveViewModel]        // running/waiting (excl recent)
+    let idle: [WaveViewModel]          // idle (excl recent)
+    var attentionCount: Int            // blocked.count + openPRCount
+    var openPRCount: Int
+    var allInOrder: [WaveViewModel]
+    static let empty: WaveGroups
+}
+
 @MainActor @Observable
 final class WaveStore {
-    private(set) var waves: [String: WaveViewModel]  // Primary storage, keyed by wave ID
-    private(set) var ordered: [WaveViewModel]         // Sorted: blocked + pr + recentActivity + active + idle
-    private(set) var groups: WaveGroups               // Categorized subsets
+    private(set) var waves: [String: WaveViewModel]
+    private(set) var ordered: [WaveViewModel]
+    private(set) var groups: WaveGroups
+    var onStatusChange: ((WaveViewModel, WaveStatus?, WaveStatus) -> Void)?
 
-    // Optimistic update pattern:
+    // Mutations
+    func set(_ wave: WaveViewModel)
+    func setAll(_ newWaves: [WaveViewModel])
+    func remove(_ id: String) -> WaveViewModel?
+    func removeAll()
+    func wave(for id: String) -> WaveViewModel?
+
+    // Optimistic updates (snapshot → mutate → commit or rollback)
     func applyOptimistic(_ id: String, _ mutation: (inout WaveViewModel) -> Void) -> WaveViewModel?
     func commitMutation(_ id: String)
     func rollback(_ snapshot: WaveViewModel)
 
-    // CRUD:
-    func set(_ wave: WaveViewModel)           // Set single wave (skipped if pending mutation)
-    func setAll(_ newWaves: [WaveViewModel])  // Replace all (preserves pending mutations)
-    func remove(_ id: String) -> WaveViewModel?
-
-    // Pending create/delete:
+    // Pending create/delete
     func insertPending(_ wave: WaveViewModel)
     func replacePending(_ pendingId: String, with wave: WaveViewModel)
+    func removePending(_ id: String)
     func applyDelete(_ id: String)
-
-    // Notification callback:
-    var onStatusChange: ((WaveViewModel, WaveStatus?, WaveStatus) -> Void)?
-}
-
-struct WaveGroups {
-    let blocked: [WaveViewModel]        // status == .failed
-    let pr: [WaveViewModel]             // hasOpenPRs
-    let recentActivity: [WaveViewModel] // Activity within last hour (max 5)
-    let active: [WaveViewModel]         // running/waiting, not in recentActivity
-    let idle: [WaveViewModel]           // idle, not in recentActivity
-    var attentionCount: Int             // blocked.count + pr.count
-    var openPRCount: Int                // Sum of effectiveOpenPRCount across pr group
 }
 ```
 
-### OutputBuffer — agent output streaming
+### OutputBuffer
 
 ```swift
-// Concerto/State/OutputBuffer.swift
-@MainActor @Observable
-final class OutputBuffer {
-    private var waveOutput: [String: [OutputLine]]   // Keyed by wave ID, max 2000 lines
-    private var streamTasks: [String: Task<Void, Never>]
-
-    var interactiveSession: InteractiveSession?
-
-    func appendOutput(waveId: String, text: String, timestamp: Date)  // From WebSocket (skipped if streaming)
-    func output(for waveId: String) -> [OutputLine]
-    func clearOutput(for waveId: String)
-    func startStreaming(waveId: String)    // HTTP replay+follow via /v0/waves/{id}/logs
-    func stopStreaming(waveId: String)
-    func recentOutput(for waveId: String, maxLength: Int) -> String?
-
-    func launchInteractiveSession(waveId: String, step: String, worktreePath: String, prompt: String?)
-    func endInteractiveSession()
-    func hasActiveSession(for waveId: String) -> Bool
-}
-
+// State/OutputBuffer.swift — ~130 lines
 struct OutputLine: Identifiable {
     let id: UUID
     let text: String
     let timestamp: Date
 }
-```
 
-### RepoState — primary app state coordinator
-
-```swift
-// Concerto/State/RepoState.swift
 @MainActor @Observable
-final class RepoState {
-    var currentRepo: URL?
-    var flows: [Flow]
-    var availableDirections: [String]
-    let waveStore = WaveStore()
-    let runStore = RunStore()
-    var selectedWaveId: String?
-    var selectedWave: WaveViewModel?    // Derived from waveStore + selectedWaveId
-    var isLoading: Bool
-    var errorMessage: String?
-    var lfdConnected: Bool
+final class OutputBuffer {
+    var interactiveSession: InteractiveSession?
 
-    // Repo lifecycle
-    func openRepo(_ url: URL, outputBuffer: OutputBuffer) async
-    func startEventSubscription(outputBuffer: OutputBuffer)
-    func refreshWaves() async
-    func refreshFlowsAsync() async
-
-    // Wave CRUD (all use optimistic updates with rollback)
-    func createWave(name: String) async throws
-    func runWave(wave: WaveViewModel, area: [String]?, direction: [String]?, flow: String?) async throws
-    func stopWave(_ wave: WaveViewModel) async throws
-    func deleteWave(_ wave: WaveViewModel) async throws
-    func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel
-    func renameWave(_ wave: WaveViewModel, to newName: String) async throws
-    func updateWave(_ wave: WaveViewModel, area: [String]?, direction: [String]?, flow: String?, status: WaveStatus?) async throws
-    func landWave(_ wave: WaveViewModel) async throws
-    func nextWave(_ wave: WaveViewModel) async throws
-    func addStimulus(wave: WaveViewModel, kind: Stimulus.Kind, cron: String?) async throws
-    func removeStimulus(wave: WaveViewModel, stimulusId: String) async throws
-    func collapsePRs(_ waveId: String) async throws -> CollapsePRsResult
-    func absorbIntoPR(_ waveId: String, prNumber: Int) async throws -> AbsorbIntoPRResult
-    func loadRuns(for waveId: String)
-    func connectLfd(outputBuffer: OutputBuffer) async throws
-
-    // UI test modes
-    enum UITestMode: String { case emptyWorkspaces, sampleWorkspaces, mockWaves }
-    struct ScreenshotMode { let outputPath: String; let repoPath: String?; let windowSize: (Int, Int)?; ... }
-    func configureForUITest(_ mode: UITestMode, repoURL: URL)
-    func configureMockWaves()
+    func appendOutput(waveId: String, text: String, timestamp: Date)
+    func output(for waveId: String) -> [OutputLine]
+    func clearOutput(for waveId: String)
+    func startStreaming(waveId: String)
+    func stopStreaming(waveId: String)
+    func recentOutput(for waveId: String, maxLength: Int = 60) -> String?
+    func launchInteractiveSession(waveId: String, step: String, worktreePath: String, prompt: String?)
+    func endInteractiveSession()
+    func hasActiveSession(for waveId: String) -> Bool
 }
 ```
 
-### RunStore — cached wave run history
+### RunStore
 
 ```swift
-// Concerto/State/RunStore.swift
+// State/RunStore.swift
 @MainActor @Observable
 final class RunStore {
-    private(set) var runs: [String: [WaveRun]]   // Keyed by wave ID, max 50 per wave
+    private(set) var runs: [String: [WaveRun]]
     func setRuns(for waveId: String, _ newRuns: [WaveRun])
     func runs(for waveId: String) -> [WaveRun]
     func clear(for waveId: String)
@@ -569,232 +619,333 @@ final class RunStore {
 
 ---
 
-## App Entry Point
-
-```swift
-// Concerto/ConcertoApp.swift
-@main struct ConcertoApp: App {
-    // Registers bundled fonts: CormorantGaramond (Regular/Medium/SemiBold),
-    //   Lato (Regular/Bold), JetBrainsMono (Regular)
-    // Requests notification authorization on launch
-
-    var body: some Scene {
-        WindowGroup { ... }                      // Welcome window (default 500x400)
-        WindowGroup(id: "repo", for: URL.self)   // Per-repo window (default 900x700)
-        Window("Terminal Test", id: "terminal-test")  // Ghostty test (800x600)
-    }
-
-    // Menu commands: Beta Features toggle, Appearance picker,
-    //   Snapshot for Review (Cmd+4), Command Palette (Cmd+K),
-    //   Terminal Test (Cmd+Shift+T)
-}
-```
-
-### RepoWindow — per-repository window
-
-```swift
-// Concerto/Views/RepoWindow.swift
-struct RepoWindow: View {
-    let repoURL: URL?
-    let recentsService: RecentsService
-    @State private var repoState = RepoState()
-    @State private var outputBuffer = OutputBuffer()
-    // Flow: check setup -> show SetupView or ContentView
-    // Passes repoState and outputBuffer into environment
-}
-```
-
----
-
-## Services
-
-### AuthService — OAuth + JWT Keychain
-
-```swift
-// LoopflowCore/Services/AuthService.swift
-public final class AuthService: NSObject, @unchecked Sendable {
-    // OAuth via ASWebAuthenticationSession
-    // Callback scheme: "loopflow://auth/callback"
-    // Login URL: https://loopflow.studio/auth/login
-    // Refresh URL: https://loopflow.studio/auth/refresh
-    // JWT stored in Keychain (service: "studio.loopflow.auth", account: "jwt")
-
-    func signIn() async throws -> String       // Returns JWT
-    func signOut() throws
-    func currentToken() -> String?
-    func tokenExpiresAt() -> Date?
-    func refreshToken() async throws -> String
-}
-
-// AuthState wraps AuthService with @Observable
-@MainActor @Observable
-public final class AuthState {
-    public private(set) var token: String?
-    public private(set) var isLoading: Bool
-    public private(set) var error: AuthError?
-    public var isAuthenticated: Bool   // token != nil && !isExpired
-    public var needsRefresh: Bool      // Expiry within 24h
-    // Auto-refreshes every hour in background
-}
-```
+## Concerto — Services
 
 ### TerminalLauncher
 
 ```swift
-// Concerto/Services/TerminalLauncher.swift
+// Services/TerminalLauncher.swift — ~327 lines
 struct TerminalLauncher {
-    func launchTerminal(_ terminal: TerminalApp, at path: URL, command: String?)  // Warp/iTerm via AppleScript, Kitty via Process
-    func openInIDE(_ ide: IDEApp, at path: URL, workspace: String?)              // cursor/code/zed CLI
+    func launchTerminal(_ terminal: TerminalApp, at path: URL, command: String?) throws
+    func launchStep(_ step: String, terminal: TerminalApp, at repo: URL) throws
+    func openInIDE(_ ide: IDEApp, at path: URL, workspace: String?) throws
     func openInFinder(at path: URL)
     func openURL(_ url: URL)
-    func launchStep(_ step: String, terminal: TerminalApp, at repo: URL)         // Runs "lf <step>" in terminal
 }
+// Uses AppleScript for Warp/iTerm/Terminal, Process for Kitty
+// IDE: `cursor`/`code`/`zed` CLI commands
 ```
 
-### SetupService — dependency installation
+### GhosttyManager (embedded terminal)
 
 ```swift
-// Concerto/Services/SetupService.swift
-struct SetupService {
-    func checkDependencies() -> DependencyStatus   // Checks for `lf` in standard bin dirs
-    func install() async throws                    // Installs uv, then `uv tool install loopflow`, then Node/Claude Code
-    func ensureDaemonRunning() async throws        // Checks LaunchAgent plist, runs `lfd install` or `launchctl load`
-
-    struct DependencyStatus { var lfInstalled: Bool; var lfPath: String? }
-    // Searches: ~/.local/bin, /opt/homebrew/bin, /usr/local/bin, /usr/bin, ~/.cargo/bin
-    // Log file: ~/.lf/logs/concerto-setup.log
-}
-```
-
-### GhosttyManager — embedded terminal
-
-```swift
-// Concerto/Services/Ghostty/GhosttyManager.swift
-#if GHOSTTY_ENABLED
-@MainActor final class GhosttyManager: ObservableObject {
-    static let shared: GhosttyManager
-    @Published private(set) var state: State   // uninitialized/initializing/ready/failed
-
-    func initialize()                          // ghostty_init + ghostty_config_new + ghostty_app_new
-    func tick()                                // ghostty_app_tick (called from wakeup_cb)
+// Services/Ghostty/GhosttyManager.swift — ~256 lines
+@MainActor
+final class GhosttyManager: ObservableObject {
+    enum State: Equatable { case uninitialized, initializing, ready, failed(String) }
+    @Published private(set) var state: State
+    func initialize()
+    func tick()
     func createSurface(workingDirectory: String, command: String?, view: NSView) -> ghostty_surface_t?
     func destroySurface(_ surface: ghostty_surface_t)
     func registerActiveSession(_ surface: ghostty_surface_t, sessionId: String)
     func destroyActiveSession()
-    func sendText(_ text: String)              // ghostty_surface_text
-    var onSessionClosed: (() -> Void)?
+    func sendText(_ text: String)
 }
-#endif
 
-// Linked frameworks: Carbon, QuartzCore, Metal, IOKit, libc++
-// Custom Loopflow theme: burgundy background (#4A1A2C), cream foreground (#F5E6D3)
+// Services/Ghostty/GhosttyTypes.swift
+enum TerminalStatus: Equatable {
+    case initializing, running, completed(exitCode: Int32), failed(error: String)
+}
+struct GhosttySession: Identifiable {
+    let id: String
+    let worktree: String
+    let command: [String]
+    var status: TerminalStatus
+    var surface: ghostty_surface_t?  // #if canImport(GhosttyKit)
+}
 ```
 
 ### Other Services
 
 ```swift
-// LoggingService — file logging to ~/Library/Logs/Concerto/{category}.log
-public enum LoggingService {
-    enum Category: String { case worktrees, lfd, general, ui, model }
-    static func append(_ message: String, category: Category)
-    static func ui(_ message: String)     // User interactions
-    static func model(_ message: String)  // Data model changes
-    static func lfd(_ message: String)    // lfd communication
+// Services/SetupService.swift — ~223 lines
+struct SetupService {
+    struct DependencyStatus { var lfInstalled: Bool; var lfPath: String? }
+    func checkDependencies() -> DependencyStatus
+    func install() async throws
+    func ensureDaemonRunning() async throws
 }
 
-// NotificationService — macOS user notifications
-public final class NotificationService {
-    static let shared: NotificationService
-    func notifyNeedsInteractive(waveId: String, waveName: String, step: String)
-    func notifyError(waveId: String, waveName: String, message: String)
-    func notifyPRReady(waveId: String, waveName: String, prNumber: Int)
+// Services/SnapshotService.swift
+@MainActor struct SnapshotService {
+    func snapshotKeyWindow() throws -> URL
+    func snapshotKeyWindow(to outputPath: String) throws -> URL
+    func snapshotWindow(_ window: NSWindow, to outputURL: URL) throws -> URL
 }
 
-// RecentsService — recent repos (UserDefaults, max 10)
+// Services/RecentsService.swift
 @Observable final class RecentsService {
     private(set) var recentRepos: [RecentRepo]
     func addRecent(_ url: URL)
     func removeRecent(_ url: URL)
+    func clearAll()
 }
 
-// RecentAreasService — recent area selections per repo (UserDefaults, max 5)
+// Services/RecentAreasService.swift — per-repo area history in UserDefaults
 struct RecentAreasService {
     func recentAreas(for repoURL: URL) -> [String]
     func addRecentArea(_ area: String, for repoURL: URL)
+    func clearRecentAreas(for repoURL: URL)
 }
 
-// SnapshotService — window capture without Screen Recording permission
-@MainActor struct SnapshotService {
-    func snapshotKeyWindow() throws -> URL              // Saves to /tmp/concerto-<timestamp>.png
-    func snapshotKeyWindow(to outputPath: String) throws -> URL
-    func snapshotWindow(_ window: NSWindow, to outputURL: URL) throws -> URL
-    // Uses NSView.bitmapImageRepForCachingDisplay (no screencapture)
-}
-
-// NameGenerator — random wave names
+// Services/NameGenerator.swift
 enum NameGenerator {
-    static func generate() -> String  // e.g. "aurora-allegro", "frost-melody"
-    // magical: aurora, cascade, crystal, drift, echo, ember, ...
-    // musical: allegro, aria, ballad, cadence, canon, chord, ...
+    static func generate() -> String  // e.g. "aurora-aria"
 }
 
-// AppIconProvider — look up installed app icons
+// Services/AppIconProvider.swift
 struct AppIconProvider {
     static func icon(for app: AppIdentifier) -> NSImage?
-    static func iconImage(for app: AppIdentifier, size: CGFloat) -> Image
+    static func iconImage(for app: AppIdentifier, size: CGFloat = 24) -> Image
 }
-
 enum AppIdentifier {
     case cursor, warp, vscode, iterm, terminal, zed, kitty, github
-    var bundleIdentifier: String?  // e.g. "dev.warp.Warp-Stable"
+    init(ide: IDEApp)
+    init(terminal: TerminalApp)
+    var bundleIdentifier: String?
+    var appName: String
+    var fallbackSystemImage: String
+}
+```
+
+### Models
+
+```swift
+// Models/RecentRepo.swift
+struct RecentRepo: Codable, Identifiable {
+    let path: String
+    let lastOpened: Date
+    var id: String { path }
+    var url: URL
+    var displayName: String
+    var exists: Bool
 }
 ```
 
 ---
 
-## Design System
+## Concerto — Views
 
-Defined in DESIGN.md and implemented in view code.
+### Layout hierarchy
 
-**Spacing** (4pt base): xxs=2, xs=4, sm=8, md=12, lg=16, xl=20, xxl=24, xxxl=32
-**Hit Targets**: minimum=24, comfortable=32, touch=44
-**Corner Radius**: sm=4, md=8, lg=12, xl=16, full=9999
-**Z-Index**: base=0, dropdown=100, modal=200, toast=300, tooltip=400
-
-**Typography** (bundled fonts):
-- Serif: Cormorant Garamond (headlines, editorial)
-- Sans: Lato (body, UI)
-- Mono: JetBrains Mono (code)
-
-**Brand Colors**: `Color.loopflowBurgundy` (#722F37), `.loopflowBurgundyHover` (#8B3D47), `.loopflowCream` (#FAF8F5)
-**Status Colors**: `.statusSuccess` (#2D6A4F), `.statusError` (#B45309), `.statusWarning` (#B0812A), `.statusInfo` (#0AB3CC), `.statusNeutral` (#8B8B8B)
-**Animations**: `DesignAnimation.standard/fast/spring(reduceMotion)` — respects accessibilityReduceMotion
-
-**LoopflowPalette** (injected via `@Environment(\.palette)`):
-
-```swift
-struct LoopflowPalette {
-    let background, surface, surfaceMuted, border: Color
-    let text, textSecondary, accent, accentHover: Color
-    static let light: LoopflowPalette   // Cream/white tones
-    static let dark: LoopflowPalette    // Blue-gray tones
-    static let deepWine: LoopflowPalette // Wine-red tones
-}
+```
+ConcertoApp
+└── RepoWindow(repoURL:)
+    ├── SetupView (if lf not installed)
+    └── ContentView
+        └── NavigationSplitView
+            ├── sidebar: WaveSidebar
+            │   └── ForEach(waveGroups) → WaveRow
+            ├── detail:
+            │   ├── WaveDetailPanel(wave:)  (when wave selected)
+            │   │   ├── .current tab → StepRunner + commit log + live output
+            │   │   └── .runs tab → WaveRunsTab
+            │   └── QuickExperimentDetailView  (when no selection)
+            └── overlay: CommandPalette (⌘K)
 ```
 
-**Keyboard shortcuts**: Cmd+K (command palette), Cmd+L (focus prompt), Cmd+N (new workspace), Cmd+4 (snapshot), arrows/Enter (sidebar nav), T/I/D/P/L/Delete (wave actions)
+### Key Views
+
+```swift
+// Views/ContentView.swift
+struct ContentView: View {
+    @Environment(RepoState.self) var repoState
+    @Environment(OutputBuffer.self) var outputBuffer
+    // NavigationSplitView { WaveSidebar() } detail: { ... }
+    // CommandPalette overlay on ⌘K
+}
+
+// Views/WaveSidebar.swift — ~395 lines
+// Groups: Blocked, PR, Recent Activity, Active, Idle
+// Search/filter, new wave button, attention badge (blocked + PR count)
+
+// Views/WaveRow.swift — ~310 lines
+struct WaveRow: View {
+    let wave: WaveViewModel
+    let isSelected: Bool
+    var isKeyboardFocused: Bool = false
+    // Displays: name, area, iteration, PR badge, flow, activity
+    // Inline name editing on click
+}
+
+// Views/WaveDetailPanel.swift — ~795 lines
+struct WaveDetailPanel: View {
+    let wave: WaveViewModel
+    @State private var selectedTab: DetailTab = .current
+    enum DetailTab { case current, runs }
+    // current: StepRunner + commit log + live output + actions (run/stop/land/next)
+    // runs: WaveRunsTab with historical runs + PR collapse/absorb
+}
+
+// Views/StepRunner.swift — ~320 lines
+// Configure: flow, area, direction
+// Run single step or full flow, interactive vs. autonomous mode
+
+// Views/InteractiveSessionView.swift — ~160 lines
+// Embedded Ghostty terminal for interactive wave sessions
+
+// Views/WaveRunsTab.swift — ~320 lines
+// Historical run list + PR management (collapse, absorb)
+
+// Views/CommandPalette.swift — ~230 lines
+struct PaletteAction { let title: String; let icon: String; let shortcut: String?; let action: () -> Void }
+struct CommandPalette: View { @Binding var isPresented: Bool; let actions: [PaletteAction] }
+// Fuzzy search, arrow key navigation, ⌘K toggle
+```
+
+### Typeahead Components
+
+```swift
+// Views/AreaTypeahead.swift — file/directory picker with suggestions
+// Views/DirectionTypeahead.swift — direction suggestions from availableDirections
+// Views/FlowTypeahead.swift — flow/step picker from loaded flows
+```
+
+---
+
+## Concerto — Design System
+
+```swift
+// Views/DesignSystem.swift
+enum Spacing {
+    static let xxs: CGFloat = 2;  static let xs: CGFloat = 4
+    static let sm: CGFloat = 8;   static let md: CGFloat = 12
+    static let lg: CGFloat = 16;  static let xl: CGFloat = 20
+    static let xxl: CGFloat = 24; static let xxxl: CGFloat = 32
+}
+
+enum HitTarget {
+    static let minimum: CGFloat = 24       // Desktop
+    static let comfortable: CGFloat = 32
+    static let touch: CGFloat = 44         // Mobile
+}
+
+enum Typography {
+    static let serifFamily = "Cormorant Garamond"  // Headlines
+    static let sansFamily = "Lato"                  // Body, UI
+    static let monoFamily = "JetBrains Mono"        // Code
+
+    static func heroTitle(_ size: CGFloat = 32) -> Font
+    static func sectionTitle(_ size: CGFloat = 20) -> Font
+    static func body(_ size: CGFloat = 14) -> Font
+    static func caption(_ size: CGFloat = 12) -> Font
+    static func code(_ size: CGFloat = 13) -> Font
+}
+
+// Views/BrandColors.swift
+struct LoopflowPalette {
+    let background, surface, surfaceMuted, border: Color
+    let text, textSecondary: Color
+    let accent: Color           // Burgundy #722F37
+    let accentHover: Color
+    static let light: LoopflowPalette
+    static let dark: LoopflowPalette
+}
+
+// Status colors (in LoopflowCore)
+extension Color {
+    static let statusSuccess = Color(hex: 0x2D6A4F)   // Green
+    static let statusError = Color(hex: 0xB45309)     // Orange
+    static let statusWarning = Color(hex: 0xB0812A)   // Yellow-brown
+    static let statusInfo = Color(hex: 0x0AB3CC)      // Cyan
+    static let statusNeutral = Color(hex: 0x8B8B8B)   // Gray
+}
+
+// Button styles
+struct DarkButtonStyle: ButtonStyle        // Primary actions
+struct GhostButtonStyle: ButtonStyle       // Secondary actions
+struct DestructiveButtonStyle: ButtonStyle // Delete, Stop
+```
+
+### Bundled Fonts
+
+Registered in `ConcertoApp.swift`:
+- Cormorant Garamond (Regular, Medium, SemiBold, Bold, Italic)
+- Lato (Regular, Bold, Italic, BoldItalic)
+- JetBrains Mono (Regular)
+
+---
+
+## Concerto — Automation
+
+```swift
+// ScriptCommands.swift — AppleScript handler
+class CaptureScreenshotCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any?
+    // Captures key window via SnapshotService, returns path
+}
+// Defined in Concerto.sdef, invoked by scripts/generate_screenshots.py
+
+// Flags.swift
+enum Flags {
+    static var beta: Bool     // UserDefaults "beta"
+    static func setBeta(_ enabled: Bool)
+}
+```
 
 ---
 
 ## Key Patterns
 
-1. **Observable state** — Swift `@Observable` macro (not Combine), `@MainActor` isolation
-2. **Optimistic updates** — WaveStore tracks pending mutations, rolls back on failure
-3. **Dictionary-keyed storage** — Waves stored as `[String: WaveViewModel]` for O(1) lookup
-4. **Derived groups** — `WaveGroups` recomputed on every wave dict mutation (blocked/pr/recentActivity/active/idle)
-5. **Dual communication** — HTTP for CRUD/actions, WebSocket for real-time events
-6. **Output dedup** — OutputBuffer skips WebSocket output when HTTP streaming is active for a wave
-7. **Environment injection** — `RepoState` and `OutputBuffer` passed via SwiftUI `.environment()`
-8. **Per-repo windows** — Each `WindowGroup(id: "repo")` gets its own state instances
-9. **JSON parsing** — Manual `JSONSerialization` (not Codable) for API responses, handles flexible server schemas
-10. **Graceful degradation** — Network errors return empty arrays, never crash; errors thrown only for user-initiated actions
+**State management**: `@Observable` (Swift 5.9+) with `@Environment` injection. No Combine (except GhosttyManager which uses `@Published`).
+
+**Data flow**:
+```
+User Action → RepoState → LocalWaveService (HTTP to lfd:2486)
+                  ↓
+           WaveStore (dictionary, optimistic mutations)
+                  ↓
+        @Observable → SwiftUI views
+
+WebSocket: LocalEventService → RepoState.handleEvent → WaveStore → views
+Output:    streamOutput() → OutputBuffer → live output views
+```
+
+**Optimistic updates**: `WaveStore.applyOptimistic` snapshots state, applies mutation immediately for UI responsiveness, then `commitMutation` or `rollback` after API response.
+
+**Wave lifecycle**: Create → Configure (flow, area, direction) → Run → [Running → Waiting → Running...] → Land (merge PR) or Stop.
+
+**Concurrency**: Swift 6 strict concurrency. `@MainActor` on all state/UI. `Sendable` on all models. `actor` for `LocalEventService`.
+
+**Conditional compilation**: `#if canImport(GhosttyKit)` / `GHOSTTY_ENABLED` for embedded terminal.
+
+---
+
+## Tests
+
+```
+ConcertoTests/
+├── AuthServiceTests.swift
+├── GhosttyTests.swift
+├── RunStoreTests.swift
+├── WaveRowTests.swift
+└── WaveStoreTests.swift
+
+ConcertoUITests/
+└── ScreenshotPipelineTests.swift  # UI test modes: empty/sample/mock-waves
+
+SymphoniaTests/
+└── SymphoniaTests.swift           # Placeholder
+```
+
+Run: `swift test --package-path swift`
+
+---
+
+## Symphonia (placeholder)
+
+```swift
+// Symphonia/SymphoniaApp.swift — minimal app shell
+// Symphonia/Views/PlaceholderView.swift — "Coming soon" message
+```

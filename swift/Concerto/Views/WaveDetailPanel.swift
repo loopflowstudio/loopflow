@@ -230,7 +230,7 @@ struct WaveDetailPanel: View {
                         Text("Stop")
                     }
                 }
-                .buttonStyle(DarkButtonStyle())
+                .buttonStyle(DestructiveButtonStyle())
             }
 
             Picker("", selection: $selectedTab) {
@@ -344,7 +344,7 @@ struct WaveDetailPanel: View {
                             .font(Typography.caption())
                     }
                 }
-                .buttonStyle(DarkButtonStyle())
+                .buttonStyle(GhostButtonStyle())
                 .disabled(!hasWorktree)
                 .help(hasWorktree ? "Open in \(terminalApp.displayName)" : "Worktree path no longer exists")
 
@@ -358,7 +358,7 @@ struct WaveDetailPanel: View {
                             .font(Typography.caption())
                     }
                 }
-                .buttonStyle(DarkButtonStyle())
+                .buttonStyle(GhostButtonStyle())
                 .disabled(!hasWorktree)
                 .help(hasWorktree ? "Open in \(ideApp.displayName)" : "Worktree path no longer exists")
 
@@ -619,7 +619,7 @@ struct WaveDetailPanel: View {
                         Text("View PR")
                     }
                 }
-                .buttonStyle(DarkButtonStyle())
+                .buttonStyle(GhostButtonStyle())
             }
 
             // Land

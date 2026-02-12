@@ -107,7 +107,7 @@ struct InteractiveSessionView: View {
             } label: {
                 Text("Cancel")
             }
-            .buttonStyle(DarkButtonStyle())
+            .buttonStyle(DestructiveButtonStyle())
             .keyboardShortcut(.escape, modifiers: [])
             .help("Cancel this session without advancing the flow")
 

@@ -46,7 +46,7 @@ struct NextActionsBar: View {
                     Text("Archive")
                 }
             }
-            .buttonStyle(DarkButtonStyle())
+            .buttonStyle(DestructiveButtonStyle())
             .disabled(isArchiving)
         }
         .padding(.horizontal, Spacing.xl)

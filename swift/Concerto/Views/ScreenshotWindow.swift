@@ -121,11 +121,7 @@ struct ScreenshotWindow: View {
 private struct ScreenshotLayout: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var palette: LoopflowPalette {
-        LoopflowPalette.make(for: colorScheme)
-    }
+    @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 0) {

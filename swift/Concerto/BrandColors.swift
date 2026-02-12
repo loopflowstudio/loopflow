@@ -40,30 +40,53 @@ struct LoopflowPalette {
     let accent: Color
     let accentHover: Color
 
+    static let light = LoopflowPalette(
+        background: .loopflowCream,
+        surface: .loopflowCreamElevated,
+        surfaceMuted: .loopflowCreamMuted,
+        border: Color(hex: 0xE3DDD5),
+        text: .loopflowText,
+        textSecondary: .loopflowTextSecondary,
+        accent: .loopflowBurgundy,
+        accentHover: .loopflowBurgundyHover
+    )
+
+    static let dark = LoopflowPalette(
+        background: .loopflowSlate,
+        surface: .loopflowSlateElevated,
+        surfaceMuted: .loopflowSlateMuted,
+        border: Color(hex: 0x46505B),
+        text: .loopflowTextLight,
+        textSecondary: .loopflowTextSecondaryLight,
+        accent: .loopflowBurgundy,
+        accentHover: .loopflowBurgundyHover
+    )
+
+    static let deepWine = LoopflowPalette(
+        background: Color(hex: 0x1E1215),
+        surface: Color(hex: 0x2A1A20),
+        surfaceMuted: Color(hex: 0x35222A),
+        border: Color(hex: 0x4A3040),
+        text: Color(hex: 0xF5EDE8),
+        textSecondary: Color(hex: 0xC8B0A8),
+        accent: Color(hex: 0x8B2252),
+        accentHover: Color(hex: 0xA52D63)
+    )
+
     static func make(for scheme: ColorScheme) -> LoopflowPalette {
-        switch scheme {
-        case .dark:
-            return LoopflowPalette(
-                background: .loopflowSlate,
-                surface: .loopflowSlateElevated,
-                surfaceMuted: .loopflowSlateMuted,
-                border: Color(hex: 0x46505B),
-                text: .loopflowTextLight,
-                textSecondary: .loopflowTextSecondaryLight,
-                accent: .loopflowBurgundy,
-                accentHover: .loopflowBurgundyHover
-            )
-        default:
-            return LoopflowPalette(
-                background: .loopflowCream,
-                surface: .loopflowCreamElevated,
-                surfaceMuted: .loopflowCreamMuted,
-                border: Color(hex: 0xE3DDD5),
-                text: .loopflowText,
-                textSecondary: .loopflowTextSecondary,
-                accent: .loopflowBurgundy,
-                accentHover: .loopflowBurgundyHover
-            )
-        }
+        scheme == .dark ? .dark : .light
+    }
+}
+
+// MARK: - Palette Environment Key
+
+struct PaletteKey: EnvironmentKey {
+    static let defaultValue = LoopflowPalette.light
+}
+
+extension EnvironmentValues {
+    var palette: LoopflowPalette {
+        get { self[PaletteKey.self] }
+        set { self[PaletteKey.self] = newValue }
     }
 }

@@ -99,11 +99,9 @@ struct SidebarPreviewView: View {
 /// Full placeholder view for the detail panel when no wave is selected.
 struct QuickExperimentDetailView: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     var onLaunchStep: ((String) -> Void)?
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(spacing: Spacing.xxl) {

@@ -15,7 +15,7 @@ struct WaveDetailPanel: View {
 
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
     @Environment(\.screenshotTab) private var screenshotTab
 
     @State private var actionError: String?
@@ -35,7 +35,6 @@ struct WaveDetailPanel: View {
 
     private var ideApp: IDEApp { .cursor }
     private var terminalApp: TerminalApp { .warp }
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         Group {

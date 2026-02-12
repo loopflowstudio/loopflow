@@ -7,7 +7,7 @@ struct StepRunner: View {
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var selectedFlow: String = ""
     @State private var autoMode: Stimulus.Kind = .loop
@@ -17,8 +17,6 @@ struct StepRunner: View {
     @State private var isSendingAuto = false
     @State private var errorMessage: String?
     @State private var showingError = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {

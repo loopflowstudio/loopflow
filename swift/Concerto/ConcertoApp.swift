@@ -8,6 +8,7 @@ import LoopflowCore
 struct ConcertoApp: App {
     @State private var recentsService = RecentsService()
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
@@ -15,6 +16,15 @@ struct ConcertoApp: App {
     init() {
         Task {
             try? await NotificationService.shared.requestAuthorization()
+        }
+    }
+
+    private var resolvedPalette: LoopflowPalette {
+        let mode = AppearanceMode(rawValue: appearanceMode)
+        switch mode {
+        case .light: return .light
+        case .dark: return .dark
+        case .system, .none: return LoopflowPalette.make(for: systemScheme)
         }
     }
 
@@ -29,6 +39,7 @@ struct ConcertoApp: App {
                 ScreenshotWindow(mode: screenshot, recentsService: recentsService)
                     .tint(.loopflowBurgundy)
                     .preferredColorScheme(preferredScheme)
+                    .environment(\.palette, resolvedPalette)
             } else if uiTestMode != nil {
                 RepoWindow(
                     repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
@@ -36,10 +47,12 @@ struct ConcertoApp: App {
                 )
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(preferredScheme)
+                .environment(\.palette, resolvedPalette)
             } else {
                 WelcomeWindow(recentsService: recentsService)
                     .tint(.loopflowBurgundy)
                     .preferredColorScheme(preferredScheme)
+                    .environment(\.palette, resolvedPalette)
             }
         }
         .windowStyle(.automatic)
@@ -50,6 +63,7 @@ struct ConcertoApp: App {
             RepoWindow(repoURL: repoURL, recentsService: recentsService)
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(preferredScheme)
+                .environment(\.palette, resolvedPalette)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
@@ -58,6 +72,7 @@ struct ConcertoApp: App {
         Window("Terminal Test", id: "terminal-test") {
             TerminalTestWindow()
                 .preferredColorScheme(preferredScheme)
+                .environment(\.palette, resolvedPalette)
         }
         .defaultSize(width: 800, height: 600)
 

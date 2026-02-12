@@ -9,13 +9,11 @@ struct DirectionTypeahead: View {
     let onSelect: ([String]) -> Void
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var inputText = ""
     @State private var selectedDirections: [String] = []
     @State private var isFieldFocused = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {

@@ -8,10 +8,8 @@ struct FlowProgressPills: View {
     let currentIndex: Int
     let startedAt: Date?
 
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
     @State private var elapsedSeconds: Int = 0
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -101,12 +99,14 @@ struct FlowProgressPills: View {
 }
 
 #Preview("Running - Step 2 of 4") {
-    FlowProgressPills(
-        steps: ["implement", "compress", "gate", "consolidate"],
-        currentIndex: 1,
-        startedAt: Date().addingTimeInterval(-125) // 2m 5s ago
-    )
-    .padding()
+    ThemePreview {
+        FlowProgressPills(
+            steps: ["implement", "compress", "gate", "consolidate"],
+            currentIndex: 1,
+            startedAt: Date().addingTimeInterval(-125)
+        )
+        .padding()
+    }
 }
 
 #Preview("Running - First Step") {

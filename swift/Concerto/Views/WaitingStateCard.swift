@@ -6,10 +6,9 @@ import LoopflowCore
 struct WaitingStateCard: View {
     let wave: WaveViewModel
 
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     private let terminalLauncher = TerminalLauncher()
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
@@ -135,7 +134,9 @@ struct WaitingStateCard: View {
         waitingReason: .prLimitReached(open: 2, limit: 5)
     )
 
-    return WaitingStateCard(wave: wave)
-        .padding()
-        .frame(width: 400)
+    return ThemePreview {
+        WaitingStateCard(wave: wave)
+            .padding()
+            .frame(width: 400)
+    }
 }

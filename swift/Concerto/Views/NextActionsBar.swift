@@ -7,13 +7,11 @@ struct NextActionsBar: View {
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var isArchiving = false
     @State private var errorMessage: String?
     @State private var showingError = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var stepsRunCount: Int {
         wave.recentSteps.count

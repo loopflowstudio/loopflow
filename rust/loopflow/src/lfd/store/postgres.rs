@@ -12,8 +12,8 @@ use crate::lfd::store::{
     schema::SCHEMA_VERSION, ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult,
 };
 use crate::lfd::types::{
-    Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Wave, WaveRun,
-    WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Summary, Wave,
+    WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -25,11 +25,13 @@ const RETRY_DELAYS: [Duration; 3] = [
 const MIGRATION_001: &str = include_str!("migrations/postgres/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/postgres/002_flow_parents.sql");
 const MIGRATION_003: &str = include_str!("migrations/postgres/003_run_snapshots.sql");
+const MIGRATION_004: &str = include_str!("migrations/postgres/004_summaries.sql");
 
-const BASELINE_MIGRATIONS: [(&str, &str); 3] = [
+const BASELINE_MIGRATIONS: [(&str, &str); 4] = [
     ("001_initial", MIGRATION_001),
     ("002_flow_parents", MIGRATION_002),
     ("003_run_snapshots", MIGRATION_003),
+    ("004_summaries", MIGRATION_004),
 ];
 
 const INCREMENTAL_MIGRATIONS: [(&str, &str); 0] = [];
@@ -976,6 +978,72 @@ impl RunStore for PostgresStore {
                 runs.push(map_agent_row(&row)?);
             }
             Ok(runs)
+        })
+    }
+
+    fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT id, wave_id, content, source_hash, token_budget, model, created_at
+                     FROM summaries WHERE wave_id = $1",
+                    &[&wave_id],
+                )
+                .await?;
+
+            if let Some(row) = rows.first() {
+                let id: LfdId = row.get(0);
+                let wave_id: LfdId = row.get(1);
+                let content: String = row.get(2);
+                let source_hash: String = row.get(3);
+                let token_budget: i64 = row.get(4);
+                let model: String = row.get(5);
+                let created_at: i64 = row.get(6);
+
+                Ok(Some(Summary {
+                    id,
+                    wave_id,
+                    content,
+                    source_hash,
+                    token_budget: token_budget as u32,
+                    model,
+                    created_at: Some(unix_to_datetime(created_at)),
+                }))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let created_at = summary
+                .created_at
+                .map(|dt| dt.unix_timestamp())
+                .unwrap_or_else(now_unix);
+
+            client
+                .execute(
+                    "INSERT INTO summaries (id, wave_id, content, source_hash, token_budget, model, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT(wave_id) DO UPDATE SET
+                         content = excluded.content,
+                         source_hash = excluded.source_hash,
+                         token_budget = excluded.token_budget,
+                         model = excluded.model,
+                         created_at = excluded.created_at",
+                    &[
+                        &summary.id,
+                        &summary.wave_id,
+                        &summary.content,
+                        &summary.source_hash,
+                        &(summary.token_budget as i64),
+                        &summary.model,
+                        &created_at,
+                    ],
+                )
+                .await?;
+            Ok(())
         })
     }
 }

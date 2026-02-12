@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Agent, PendingActivation, Stimulus, Wave, WaveRun};
+use crate::lfd::types::{Agent, PendingActivation, Stimulus, Summary, Wave, WaveRun};
 
 pub mod postgres;
 pub mod schema;
@@ -131,6 +131,10 @@ pub trait RunStore: Send + Sync {
         ended_at: i64,
     ) -> StoreResult<()>;
     fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>>;
+
+    // Summaries
+    fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
+    fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
 }
 
 pub type SharedStore = Arc<dyn RunStore>;
@@ -140,7 +144,7 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, RunStore};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun,
+        Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Summary, Wave, WaveRun,
         WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
     use std::env;
@@ -310,6 +314,36 @@ mod tests {
         store.start_agent(&old_run).unwrap();
         let stuck = store.get_stuck_agents(60).unwrap();
         assert!(stuck.iter().any(|run| run.id == old_run.id));
+
+        // Summary CRUD
+        let summary = Summary {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            content: "# Summary\nCore types and APIs...".to_string(),
+            source_hash: "abc123".to_string(),
+            token_budget: 10000,
+            model: "claude-code".to_string(),
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.upsert_summary(&summary).unwrap();
+        let loaded_summary = store.get_summary(&wave.id).unwrap().unwrap();
+        assert_eq!(loaded_summary.content, summary.content);
+        assert_eq!(loaded_summary.source_hash, "abc123");
+
+        // Upsert replaces on same wave_id
+        let updated_summary = Summary {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            content: "# Updated summary".to_string(),
+            source_hash: "def456".to_string(),
+            token_budget: 10000,
+            model: "claude-code".to_string(),
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.upsert_summary(&updated_summary).unwrap();
+        let reloaded = store.get_summary(&wave.id).unwrap().unwrap();
+        assert_eq!(reloaded.content, "# Updated summary");
+        assert_eq!(reloaded.source_hash, "def456");
 
         store.delete_wave(&wave.id).unwrap();
         assert!(store.get_wave(&wave.id).unwrap().is_none());

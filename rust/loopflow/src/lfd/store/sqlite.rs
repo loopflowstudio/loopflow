@@ -11,8 +11,8 @@ use crate::lfd::store::{
     schema::SCHEMA_VERSION, ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult,
 };
 use crate::lfd::types::{
-    Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Wave, WaveRun,
-    WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Summary, Wave,
+    WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug)]
@@ -150,6 +150,19 @@ impl SqliteStore {
             );
 
             CREATE INDEX IF NOT EXISTS idx_fork_runs_wave_run_id ON fork_runs(wave_run_id, step_index);
+
+            CREATE TABLE IF NOT EXISTS summaries (
+                id TEXT PRIMARY KEY,
+                wave_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                token_budget INTEGER NOT NULL,
+                model TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (wave_id) REFERENCES waves(id) ON DELETE CASCADE
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_summaries_wave_id ON summaries(wave_id);
             ",
         )?;
         ensure_column(&conn, "waves", "step_index", "INTEGER NOT NULL DEFAULT 0")?;
@@ -1072,6 +1085,59 @@ impl RunStore for SqliteStore {
             runs.push(run?);
         }
         Ok(runs)
+    }
+
+    fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, content, source_hash, token_budget, model, created_at
+             FROM summaries WHERE wave_id = ?1",
+        )?;
+
+        let summary = stmt
+            .query_row(params![wave_id], |row| {
+                Ok(Summary {
+                    id: row.get(0)?,
+                    wave_id: row.get(1)?,
+                    content: row.get(2)?,
+                    source_hash: row.get(3)?,
+                    token_budget: row.get::<_, i64>(4)? as u32,
+                    model: row.get(5)?,
+                    created_at: Some(unix_to_datetime(row.get::<_, i64>(6)?)),
+                })
+            })
+            .optional()?;
+
+        Ok(summary)
+    }
+
+    fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let created_at = summary
+            .created_at
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or_else(now_unix);
+
+        conn.execute(
+            "INSERT INTO summaries (id, wave_id, content, source_hash, token_budget, model, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(wave_id) DO UPDATE SET
+                 content = excluded.content,
+                 source_hash = excluded.source_hash,
+                 token_budget = excluded.token_budget,
+                 model = excluded.model,
+                 created_at = excluded.created_at",
+            params![
+                summary.id,
+                summary.wave_id,
+                summary.content,
+                summary.source_hash,
+                summary.token_budget as i64,
+                summary.model,
+                created_at,
+            ],
+        )?;
+        Ok(())
     }
 }
 

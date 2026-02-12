@@ -11,16 +11,17 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::engine::agent::{build_agent_command, LaunchConfig};
+use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteFork, ConcreteItem, ConcreteStep, FlowAction,
     ForkSelect, Step,
 };
-use crate::engine::git::{create_branch, current_branch, push_with_upstream};
+use crate::engine::git::{create_branch, current_branch, hash_areas, push_with_upstream};
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_context_prompt, format_prompt, format_task_prompt,
-    gather_context, trim_context_with_breakdown, write_prompt_log, GatherContextOpts,
+    gather_context, trim_context_with_breakdown, write_prompt_log, Document, GatherContextOpts,
     DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::stream::{render_event, ParseResult, StreamParser};
@@ -37,8 +38,8 @@ use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SharedStore};
 use crate::lfd::types::{
-    Agent, AgentStatus, Event, StimulusKind, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus,
-    WaveStatus,
+    Agent, AgentStatus, Event, StimulusKind, Summary, Wave, WaveRun, WaveRunSnapshot,
+    WaveRunStatus, WaveStatus,
 };
 
 #[async_trait]
@@ -244,6 +245,10 @@ impl WaveExecutor {
 
             match next_action(&plan, run.step_index as usize) {
                 FlowAction::RunStep { step } => {
+                    // Ensure area summary is fresh before each step
+                    if let Err(err) = self.ensure_summary_fresh(&wave, &run).await {
+                        warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
+                    }
                     info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
                     let exit_code = self.run_step(&wave, &mut run, &step).await?;
                     if exit_code == 0 {
@@ -399,8 +404,14 @@ impl WaveExecutor {
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
         let worktree = run.worktree.clone();
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
-        let (prompt, model, launch) =
-            build_step_prompt(&worktree, step, &run.snapshot.direction, Some(&wave.name))?;
+        let (prompt, model, launch) = build_step_prompt(
+            &worktree,
+            step,
+            &run.snapshot.direction,
+            Some(&wave.name),
+            Some(&self.store),
+            Some(&wave.id),
+        )?;
         let cmd = build_agent_command(&model, &prompt, &launch);
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 
@@ -442,6 +453,147 @@ impl WaveExecutor {
         self.event_hub.send(Event::agent_ended(agent_id, status));
 
         Ok(exit_code)
+    }
+
+    // Summary management
+
+    /// Check if the wave's area summary is fresh; regenerate if stale or missing.
+    pub(crate) async fn ensure_summary_fresh(&self, wave: &Wave, run: &WaveRun) -> Result<()> {
+        if wave.area.is_empty() {
+            return Ok(());
+        }
+
+        let worktree_path = Path::new(&run.worktree);
+        let current_hash = match hash_areas(worktree_path, &wave.area) {
+            Ok(h) => h,
+            Err(err) => {
+                warn!(wave = %wave.name, error = %err, "failed to hash areas, skipping summary");
+                return Ok(());
+            }
+        };
+
+        if let Ok(Some(existing)) = self.store.get_summary(&wave.id) {
+            if existing.source_hash == current_hash {
+                debug!(wave = %wave.name, "summary is fresh");
+                return Ok(());
+            }
+            info!(wave = %wave.name, "summary is stale, regenerating");
+        } else {
+            info!(wave = %wave.name, "no summary found, generating");
+        }
+
+        self.run_internal_summarize(wave, run, &current_hash).await
+    }
+
+    /// Run the builtin summarize step as an internal agent and store the result.
+    async fn run_internal_summarize(
+        &self,
+        wave: &Wave,
+        run: &WaveRun,
+        source_hash: &str,
+    ) -> Result<()> {
+        let template = get_builtin_ops_prompt("summarize")
+            .ok_or_else(|| anyhow!("builtin summarize prompt not found"))?;
+
+        let config = load_config_or_default(Some(Path::new(&run.worktree)));
+        let token_budget = config.summary_tokens;
+
+        // Build the prompt with area paths as content guidance
+        let area_list = wave.area.join(", ");
+        let prompt = template
+            .replace("{token_budget}", &token_budget.to_string())
+            .replace(
+                "{content}",
+                &format!("Read and summarize these paths: {area_list}"),
+            );
+
+        let model = config.agent_model.clone();
+        let launch = LaunchConfig {
+            auto: true,
+            stream: true,
+            skip_permissions: config.yolo,
+            model_variant: None,
+            chrome: false,
+            cwd: Some(PathBuf::from(&run.worktree)),
+            context_file: None,
+            ..Default::default()
+        };
+
+        let cmd = build_agent_command(&model, &prompt, &launch);
+        info!(wave = %wave.name, model = %model, "running internal summarize step");
+
+        let step = ConcreteStep {
+            step: Step {
+                name: "_summarize".to_string(),
+                model: Some(model),
+                directions: Vec::new(),
+                interactive: Some(false),
+                content: None,
+            },
+            flow_parents: Vec::new(),
+        };
+
+        let agent = build_agent_for_step(
+            &run.id,
+            &run.snapshot.repo,
+            &run.worktree,
+            &step,
+            AgentStatus::Running,
+            &config.agent_model,
+        );
+        let agent_id = agent.id.clone();
+        self.store.start_agent(&agent)?;
+
+        let exit_code = self
+            .runner
+            .run(
+                cmd,
+                Path::new(&run.worktree),
+                wave.id.as_str(),
+                agent_id.as_str(),
+                run.id.as_str(),
+                &self.output,
+            )
+            .await?;
+
+        let ended_at = OffsetDateTime::now_utc().unix_timestamp();
+        let status = if exit_code == 0 {
+            AgentStatus::Completed
+        } else {
+            AgentStatus::Failed
+        };
+        self.store.end_agent(&agent_id, status.as_i32(), ended_at)?;
+
+        if exit_code != 0 {
+            warn!(wave = %wave.name, exit_code, "summarize step failed, continuing without summary");
+            return Ok(());
+        }
+
+        // Read the summary file the agent wrote
+        let summary_path = Path::new(&run.worktree).join(".lf/summary.md");
+        match std::fs::read_to_string(&summary_path) {
+            Ok(content) if !content.trim().is_empty() => {
+                let summary = Summary {
+                    id: LfdId::new(),
+                    wave_id: wave.id.clone(),
+                    content,
+                    source_hash: source_hash.to_string(),
+                    token_budget: token_budget as u32,
+                    model: config.agent_model,
+                    created_at: Some(OffsetDateTime::now_utc()),
+                };
+                self.store.upsert_summary(&summary)?;
+                info!(wave = %wave.name, "summary stored");
+            }
+            Ok(_) => {
+                warn!(wave = %wave.name, "summarize step produced empty output");
+            }
+            Err(err) => {
+                warn!(wave = %wave.name, error = %err, "failed to read summary file");
+            }
+        }
+
+        Ok(())
     }
 
     async fn run_choose(
@@ -582,7 +734,14 @@ impl WaveExecutor {
                     directions = ?wave_directions,
                     "building fork branch prompt"
                 );
-                let prompt = build_step_prompt(&worktree, &step, &wave_directions, None);
+                let prompt = build_step_prompt(
+                    &worktree,
+                    &step,
+                    &wave_directions,
+                    None,
+                    Some(&store),
+                    Some(&fork_wave_id),
+                );
                 let (prompt, model, launch) = match prompt {
                     Ok(result) => result,
                     Err(err) => {
@@ -827,6 +986,8 @@ fn build_step_prompt(
     step: &ConcreteStep,
     directions: &[String],
     wave: Option<&str>,
+    store: Option<&SharedStore>,
+    wave_id: Option<&LfdId>,
 ) -> Result<(String, String, LaunchConfig)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
     let directions = merge_directions(directions, &step.step.directions);
@@ -848,6 +1009,17 @@ fn build_step_prompt(
     let mut components = gather_context(&opts)?;
     let repo_root = PathBuf::from(worktree);
     drop_native_instruction_docs(&mut components, &repo_root);
+
+    // Inject wave summary if available
+    if let (Some(store), Some(wave_id)) = (store, wave_id) {
+        if let Ok(Some(summary)) = store.get_summary(wave_id) {
+            components.summaries.push(Document {
+                path: "wave-summary".to_string(),
+                content: summary.content,
+                category: "summaries".to_string(),
+            });
+        }
+    }
     let (components, _breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
 
     // Log full prompt, then write context/task split for --append-system-prompt-file

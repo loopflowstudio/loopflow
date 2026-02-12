@@ -102,10 +102,11 @@ impl Scheduler {
                 store.clone(),
                 executor.clone(),
                 self.clone(),
-                event_hub,
+                event_hub.clone(),
                 cancel.clone(),
             ),
-            triggers::spawn_recovery_loop(store, executor, cancel),
+            triggers::spawn_recovery_loop(store.clone(), executor.clone(), cancel.clone()),
+            triggers::spawn_summary_refresh(store, executor, event_hub, cancel),
         ]
     }
 }

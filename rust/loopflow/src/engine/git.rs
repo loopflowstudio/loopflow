@@ -444,6 +444,27 @@ pub fn land(
     })
 }
 
+/// Hash the contents of areas in a repo using git ls-tree.
+///
+/// Returns a hex-encoded SHA-256 digest of the `git ls-tree` output for the
+/// given paths. Changes to any file in any area will produce a different hash.
+/// Fast: reads from the git index, no file I/O.
+pub fn hash_areas(repo: &Path, areas: &[String]) -> Result<String, GitError> {
+    use sha2::{Digest, Sha256};
+
+    let mut args = vec!["ls-tree", "-r", "HEAD", "--"];
+    for area in areas {
+        args.push(area);
+    }
+    let output = git_stdout(repo, &args)?;
+    let digest = Sha256::digest(output.as_bytes());
+    let hash = digest
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    Ok(hash)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,14 +7,31 @@ phase: 4
 
 Small, focused diffs (20-200 lines each). One change per PR. Driven by findings from Phases 1-3.
 
-## Known candidates
+## Candidates from design audit
 
-- **Neon green -> burgundy/organic accent** for status indicators and action buttons
-- Flow badges (ship, debug, polish) — color and weight
+Prioritized by visual impact per line changed. Full details in `reports/viz/design-audit.md`.
+
+### Tier 1: Status color tokens (~45 lines)
+- Add `statusNeutral` token to `StatusColors.swift` and `VISUAL_DESIGN.md`
+- Replace `.gray`/`.blue`/`.orange`/`.purple` with design tokens in `Wave.swift`, `WaveRun.swift`, and 10 views
+
+### Tier 2: Typography tokens (~150 lines, needs font bundling)
+- Bundle Cormorant Garamond, Lato, JetBrains Mono in app resources
+- Replace ~150 system font calls with `Typography` tokens across all views
+
+### Tier 3: Button hierarchy (~60 lines)
+- Add `GhostButtonStyle` and `DestructiveButtonStyle` to `DesignSystem.swift`
+- Restyle secondary actions (Clone, Next, View PR) as ghost, destructive actions (Stop, Archive) as outline
+
+### Tier 4: Token cleanup (~25 lines)
+- Replace hardcoded `cornerRadius:` literals with `CornerRadius` tokens
+- Replace hardcoded padding literals with `Spacing` tokens
+
+### Other candidates
 - Detail view density and hierarchy
 - Empty state refinement
-- Sidebar visual weight and contrast
-- Decluttering (remove visual noise, simplify chrome)
+- Sidebar section header weight (smaller, lower-opacity labels)
+- Flow badge density (capsule pills vs text-only)
 
 ## Process
 

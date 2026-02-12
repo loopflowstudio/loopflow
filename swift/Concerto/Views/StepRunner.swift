@@ -113,7 +113,7 @@ struct StepRunner: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             TextField("0 9 * * *", text: $cronExpression)
                 .textFieldStyle(.plain)
-                .font(Typography.codeSmall())
+                .font(Typography.code(11))
                 .padding(Spacing.sm)
                 .background(palette.surface)
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
@@ -136,7 +136,7 @@ struct StepRunner: View {
                         .fontWeight(.semibold)
                     if let cron = s.cron {
                         Text(cron)
-                            .font(Typography.codeSmall())
+                            .font(Typography.code(11))
                             .foregroundStyle(.secondary)
                     }
                     Spacer()

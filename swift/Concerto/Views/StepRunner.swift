@@ -6,14 +6,6 @@ import LoopflowCore
 struct StepRunner: View {
     let wave: WaveViewModel
 
-    private struct AutoModeOption: Identifiable {
-        let kind: Stimulus.Kind
-        let label: String
-        let icon: String
-
-        var id: String { kind.rawValue }
-    }
-
     @Environment(RepoState.self) private var repoState
     @Environment(\.colorScheme) private var colorScheme
 
@@ -26,11 +18,7 @@ struct StepRunner: View {
     @State private var showingError = false
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
-    private static let autoModeOptions = [
-        AutoModeOption(kind: .loop, label: "Loop", icon: "repeat"),
-        AutoModeOption(kind: .watch, label: "Watch", icon: "eye"),
-        AutoModeOption(kind: .cron, label: "Schedule", icon: "clock")
-    ]
+    private static let autoModeKinds: [Stimulus.Kind] = [.loop, .watch, .cron]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -49,7 +37,10 @@ struct StepRunner: View {
                     cronField
                 }
 
-                actionButtons
+                HStack(spacing: Spacing.md) {
+                    runButton
+                    autoButton
+                }
             }
         }
         .padding(Spacing.xl)
@@ -135,14 +126,16 @@ struct StepRunner: View {
         isRunning || selectedFlow.isEmpty || wave.status == .running || wave.status == .waiting
     }
 
-    private var selectedAutoMode: AutoModeOption {
-        Self.autoModeOptions.first(where: { $0.kind == autoMode }) ?? Self.autoModeOptions[0]
+    private func autoLabel(for kind: Stimulus.Kind) -> String {
+        kind == .cron ? "Schedule" : kind.rawValue.capitalized
     }
 
-    private var actionButtons: some View {
-        HStack(spacing: Spacing.md) {
-            runButton
-            autoButton
+    private func autoIcon(for kind: Stimulus.Kind) -> String {
+        switch kind {
+        case .loop: return "repeat"
+        case .watch: return "eye"
+        case .cron: return "clock"
+        case .once, .manual: return "repeat"
         }
     }
 
@@ -174,11 +167,11 @@ struct StepRunner: View {
     private var autoButton: some View {
         HStack(spacing: 0) {
             Button {
-                runWith(stimulus: selectedAutoMode.kind)
+                runWith(stimulus: autoMode)
             } label: {
                 HStack(spacing: Spacing.sm) {
-                    Image(systemName: selectedAutoMode.icon)
-                    Text(selectedAutoMode.label)
+                    Image(systemName: autoIcon(for: autoMode))
+                    Text(autoLabel(for: autoMode))
                         .fontWeight(.semibold)
                 }
                 .padding(.vertical, Spacing.lg)
@@ -192,9 +185,9 @@ struct StepRunner: View {
                 .frame(width: 1, height: 20)
 
             Menu {
-                ForEach(Self.autoModeOptions) { option in
-                    Button { autoMode = option.kind } label: {
-                        Label(option.label, systemImage: option.icon)
+                ForEach(Self.autoModeKinds, id: \.rawValue) { kind in
+                    Button { autoMode = kind } label: {
+                        Label(autoLabel(for: kind), systemImage: autoIcon(for: kind))
                     }
                 }
             } label: {

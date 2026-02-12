@@ -24,55 +24,30 @@ final class RepoState {
 
         static func fromArgs() -> ScreenshotMode? {
             let args = ProcessInfo.processInfo.arguments
-            guard let snapshotIndex = args.firstIndex(of: "--snapshot"),
-                  args.count > snapshotIndex + 1 else {
-                return nil
+
+            func arg(_ flag: String) -> String? {
+                guard let i = args.firstIndex(of: flag), args.count > i + 1 else { return nil }
+                return args[i + 1]
             }
 
-            let outputPath = args[snapshotIndex + 1]
-            var repoPath: String?
+            guard let outputPath = arg("--snapshot") else { return nil }
+
             var windowSize: (Int, Int)?
-            var selectBranch: String?
-            var mockLoops = false
-            var mockConfig: String?
-            var selectTab: String?
-
-            if let repoIndex = args.firstIndex(of: "--repo"), args.count > repoIndex + 1 {
-                repoPath = args[repoIndex + 1]
-            }
-
-            if let sizeIndex = args.firstIndex(of: "--size"), args.count > sizeIndex + 1 {
-                let sizeStr = args[sizeIndex + 1]
+            if let sizeStr = arg("--size") {
                 let parts = sizeStr.split(separator: "x")
                 if parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]) {
                     windowSize = (w, h)
                 }
             }
 
-            if let selectIndex = args.firstIndex(of: "--select"), args.count > selectIndex + 1 {
-                selectBranch = args[selectIndex + 1]
-            }
-
-            if args.contains("--mock-loops") {
-                mockLoops = true
-            }
-
-            if let configIndex = args.firstIndex(of: "--mock-config"), args.count > configIndex + 1 {
-                mockConfig = args[configIndex + 1]
-            }
-
-            if let tabIndex = args.firstIndex(of: "--tab"), args.count > tabIndex + 1 {
-                selectTab = args[tabIndex + 1]
-            }
-
             return ScreenshotMode(
                 outputPath: outputPath,
-                repoPath: repoPath,
+                repoPath: arg("--repo"),
                 windowSize: windowSize,
-                selectBranch: selectBranch,
-                mockLoops: mockLoops,
-                mockConfig: mockConfig,
-                selectTab: selectTab
+                selectBranch: arg("--select"),
+                mockLoops: args.contains("--mock-loops"),
+                mockConfig: arg("--mock-config"),
+                selectTab: arg("--tab")
             )
         }
     }

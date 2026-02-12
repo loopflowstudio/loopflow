@@ -134,11 +134,9 @@ extension View {
 // MARK: - Button Styles
 
 struct DarkButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     func makeBody(configuration: Configuration) -> some View {
-        let palette = LoopflowPalette.make(for: colorScheme)
-
         configuration.label
             .font(.subheadline)
             .foregroundStyle(Color.loopflowCream)

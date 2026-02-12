@@ -119,10 +119,8 @@ struct TypeaheadChip: View {
     let helpText: String
     let onRemove: () -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
     @State private var isHovered = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         HStack(spacing: 4) {

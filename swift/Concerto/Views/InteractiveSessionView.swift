@@ -9,10 +9,8 @@ struct InteractiveSessionView: View {
 
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
     @StateObject private var ghosttyManager = GhosttyManager.shared
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var wave: WaveViewModel? {
         repoState.waveStore.wave(for: session.waveId)

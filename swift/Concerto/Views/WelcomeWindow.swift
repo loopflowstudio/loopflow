@@ -7,11 +7,7 @@ struct WelcomeWindow: View {
     let recentsService: RecentsService
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var palette: LoopflowPalette {
-        LoopflowPalette.make(for: colorScheme)
-    }
+    @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(spacing: 32) {

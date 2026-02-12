@@ -9,12 +9,8 @@ struct EmbeddedTerminalPanel: View {
     @State private var isExpanded = false
     @StateObject private var ghosttyManager = GhosttyManager.shared
     @State private var terminalHeight: CGFloat = 250
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var palette: LoopflowPalette {
-        LoopflowPalette.make(for: colorScheme)
-    }
 
     var body: some View {
         VStack(spacing: 0) {

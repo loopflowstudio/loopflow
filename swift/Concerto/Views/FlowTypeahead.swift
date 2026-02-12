@@ -9,13 +9,11 @@ struct FlowTypeahead: View {
     let onSelect: (String) -> Void
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var inputText = ""
     @State private var selectedFlow: String = ""
     @State private var isFieldFocused = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var flows: [Flow] {
         repoState.flows.filter { $0.type == .flow }

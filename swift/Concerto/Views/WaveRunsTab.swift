@@ -7,7 +7,7 @@ struct WaveRunsTab: View {
     let onCollapse: () async throws -> CollapsePRsResult
     let onAbsorb: (Int) async throws -> AbsorbIntoPRResult
 
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var showCollapseConfirmation = false
     @State private var isCollapsing = false
@@ -17,8 +17,6 @@ struct WaveRunsTab: View {
     @State private var successDismissTask: Task<Void, Never>?
 
     private let terminalLauncher = TerminalLauncher()
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var openPRRuns: [WaveRun] {
         sortedRuns.filter { $0.pr?.state == .open || $0.pr?.state == .draft }

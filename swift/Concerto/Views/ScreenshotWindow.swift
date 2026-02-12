@@ -7,6 +7,18 @@ import os.log
 
 private let logger = Logger(subsystem: "com.loopflow.concerto", category: "screenshot")
 
+// Environment key to override initial tab in WaveDetailPanel for screenshots
+struct ScreenshotTabKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
+extension EnvironmentValues {
+    var screenshotTab: String? {
+        get { self[ScreenshotTabKey.self] }
+        set { self[ScreenshotTabKey.self] = newValue }
+    }
+}
+
 struct ScreenshotWindow: View {
     let mode: RepoState.ScreenshotMode
     let recentsService: RecentsService
@@ -20,6 +32,7 @@ struct ScreenshotWindow: View {
         ScreenshotLayout()
             .environment(repoState)
             .environment(outputBuffer)
+            .environment(\.screenshotTab, mode.selectTab)
             .task {
                 await setupState()
             }
@@ -43,7 +56,11 @@ struct ScreenshotWindow: View {
 
         // Configure mock waves if requested
         if mode.mockLoops {
-            repoState.configureMockWaves()
+            if mode.mockConfig == "empty" {
+                repoState.configureMockWavesEmpty()
+            } else {
+                repoState.configureMockWaves()
+            }
         }
 
         // Select a specific wave if requested

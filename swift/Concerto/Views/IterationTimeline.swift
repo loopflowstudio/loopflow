@@ -38,7 +38,7 @@ struct IterationTimeline: View {
             case .closed:
                 return .statusError
             case .none:
-                return .gray
+                return .statusNeutral
             }
         }
 
@@ -46,9 +46,9 @@ struct IterationTimeline: View {
         case .failed:
             return .statusError
         case .completed:
-            return .gray
+            return .statusNeutral
         default:
-            return .gray
+            return .statusNeutral
         }
     }
 }

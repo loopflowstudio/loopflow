@@ -248,9 +248,9 @@ struct WaveDetailPanel: View {
     private func prBadge(number: Int, state: PRState, url: URL?) -> some View {
         let color: Color = switch state {
         case .open: .statusSuccess
-        case .merged: .purple
+        case .merged: .statusInfo
         case .closed: .statusError
-        case .draft: .orange
+        case .draft: .statusWarning
         }
 
         return Button {

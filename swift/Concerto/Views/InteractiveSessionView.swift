@@ -69,8 +69,8 @@ struct InteractiveSessionView: View {
                 .fontWeight(.medium)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Color.blue.opacity(0.15))
-                .foregroundStyle(.blue)
+                .background(Color.statusInfo.opacity(0.15))
+                .foregroundStyle(Color.statusInfo)
                 .clipShape(Capsule())
 
             Spacer()

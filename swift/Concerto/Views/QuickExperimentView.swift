@@ -71,9 +71,9 @@ struct SidebarPreviewView: View {
 
             // Mock section structure
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                previewSection("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange)
+                previewSection("Needs Attention", icon: "exclamationmark.triangle.fill", color: .statusWarning)
                 previewSection("Open PRs", icon: "arrow.triangle.pull", color: .statusSuccess)
-                previewSection("Active", icon: "circle.fill", color: .blue)
+                previewSection("Active", icon: "circle.fill", color: .statusSuccess)
                 previewSection("Idle", icon: "circle", color: .white.opacity(0.5))
             }
             .padding(.leading, Spacing.xs)

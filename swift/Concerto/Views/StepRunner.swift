@@ -188,7 +188,7 @@ struct StepRunner: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.lg)
-            .background(runDisabled ? Color.gray : palette.accent)
+            .background(runDisabled ? Color.statusNeutral : palette.accent)
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         }
@@ -237,7 +237,7 @@ struct StepRunner: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Change auto mode")
         }
-        .background(autoDisabled ? Color.gray : palette.surface)
+        .background(autoDisabled ? Color.statusNeutral : palette.surface)
         .foregroundStyle(autoDisabled ? .white : palette.text)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         .disabled(autoDisabled)

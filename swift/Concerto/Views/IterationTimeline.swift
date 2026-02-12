@@ -42,13 +42,7 @@ struct IterationTimeline: View {
             }
         }
 
-        switch run.status {
-        case .failed:
-            return .statusError
-        case .completed:
-            return .statusNeutral
-        default:
-            return .statusNeutral
-        }
+        if run.status == .failed { return .statusError }
+        return .statusNeutral
     }
 }

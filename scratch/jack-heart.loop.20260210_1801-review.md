@@ -15,7 +15,7 @@ The "once" stimulus is now the Run button's dedicated action. The auto button de
 
 **Removed "Once" from auto options.** Once is just Run. Having it in both places was confusing. The auto button only offers loop/watch/cron — modes that imply ongoing execution.
 
-**Default auto mode is Loop.** When a wave has `manual` or `once` stimulus, the auto button defaults to `.loop` rather than showing a meaningless state. The `normalizedAutoMode` function handles this mapping.
+**Default auto mode is Loop.** When a wave has `manual` or `once` stimulus, the auto button defaults to `.loop` rather than showing a meaningless state. `normalizedAutoMode(from:)` handles this mapping.
 
 **Removed OutputBuffer environment dependency.** StepRunner no longer reads from OutputBuffer, so the `@Environment` was removed. The preview was updated to match.
 
@@ -23,12 +23,13 @@ The "once" stimulus is now the Run button's dedicated action. The auto button de
 
 StepRunner is the primary execution panel in Concerto's wave detail view. It sits below the wave configuration (area, direction) and above the output/terminal. The two buttons map directly to the daemon API: `runWith(stimulus:)` sends the selected stimulus kind to `repoState.runWave()`.
 
-`AutoModeOption` is a private struct that pairs a `Stimulus.Kind` with display metadata (label, icon). The static `autoModeOptions` array drives both the dropdown menu and the button face.
+Auto mode metadata (label, icon) is derived inline via `autoLabel(for:)` and `autoIcon(for:)`. The static `autoModeKinds` array (`[.loop, .watch, .cron]`) drives both the dropdown menu and constrains valid auto modes.
 
 ## Risks and bottlenecks
 
 - The split button is a custom composite — `HStack` with two `Button`s and a `Menu`. No native SwiftUI split button exists. The divider is a 1px `Rectangle`. This works but could look off if system font scaling changes significantly.
 - `buttonsDisabled` gates both buttons identically. If a use case arises where Run should be enabled but Auto shouldn't (or vice versa), the logic will need to split.
+- `isSendingRun` tracks the API call, not the wave's running state. There's a brief window between the API call completing and the wave status updating where buttons re-enable. Acceptable for now — the wave status check in `buttonsDisabled` catches up quickly.
 
 ## What's not included
 

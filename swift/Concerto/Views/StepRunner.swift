@@ -13,7 +13,7 @@ struct StepRunner: View {
     @State private var autoMode: Stimulus.Kind = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
-    @State private var isRunning = false
+    @State private var isSendingRun = false
     @State private var errorMessage: String?
     @State private var showingError = false
 
@@ -113,6 +113,7 @@ struct StepRunner: View {
                 .padding(Spacing.sm)
                 .background(palette.surface)
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                .accessibilityLabel("Cron expression")
 
             Text("Examples: 0 9 * * * (daily 9am), */30 * * * * (every 30 min)")
                 .font(.caption2)
@@ -123,7 +124,7 @@ struct StepRunner: View {
     // MARK: - Action Buttons
 
     private var buttonsDisabled: Bool {
-        isRunning || selectedFlow.isEmpty || wave.status == .running || wave.status == .waiting
+        isSendingRun || selectedFlow.isEmpty || wave.status == .running || wave.status == .waiting
     }
 
     private func autoLabel(for kind: Stimulus.Kind) -> String {
@@ -135,7 +136,9 @@ struct StepRunner: View {
         case .loop: return "repeat"
         case .watch: return "eye"
         case .cron: return "clock"
-        case .once, .manual: return "repeat"
+        case .once, .manual:
+            assertionFailure("autoIcon called with non-auto kind: \(kind)")
+            return "repeat"
         }
     }
 
@@ -144,7 +147,7 @@ struct StepRunner: View {
             runWith(stimulus: .once)
         } label: {
             HStack(spacing: Spacing.sm) {
-                if isRunning {
+                if isSendingRun {
                     ProgressView()
                         .scaleEffect(0.8)
                 } else {
@@ -220,7 +223,7 @@ struct StepRunner: View {
     private func runWith(stimulus kind: Stimulus.Kind) {
         guard !selectedFlow.isEmpty else { return }
 
-        isRunning = true
+        isSendingRun = true
         let stimulus = Stimulus(
             kind: kind,
             cron: kind == .cron ? cronExpression : nil
@@ -239,7 +242,7 @@ struct StepRunner: View {
                 }
             }
             await MainActor.run {
-                isRunning = false
+                isSendingRun = false
             }
         }
     }

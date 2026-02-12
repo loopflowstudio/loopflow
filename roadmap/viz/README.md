@@ -28,7 +28,7 @@ Understand what great looks like, find gaps between VISUAL_DESIGN.md and the app
 |------|--------------|
 | [03-visual-research](03-visual-research.md) | Research patterns from Notion, Figma, Linear, Arc |
 | [04-design-audit](04-design-audit.md) | Audit current design against VISUAL_DESIGN.md |
-| [05-docs-inventory](05-docs-inventory.md) | Consolidate existing design docs |
+| ~~05-docs-inventory~~ | Consolidate existing design docs |
 
 ## Phase 3: Theming & tooling
 

@@ -20,11 +20,10 @@ struct ConcertoApp: App {
     }
 
     private var resolvedPalette: LoopflowPalette {
-        let mode = AppearanceMode(rawValue: appearanceMode)
-        switch mode {
+        switch AppearanceMode(rawValue: appearanceMode) {
         case .light: return .light
         case .dark: return .dark
-        case .system, .none: return LoopflowPalette.make(for: systemScheme)
+        case .system, .none: return systemScheme == .dark ? .dark : .light
         }
     }
 

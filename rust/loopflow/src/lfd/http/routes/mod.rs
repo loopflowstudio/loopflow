@@ -6,7 +6,7 @@ pub mod waves;
 pub mod ws;
 
 use crate::lfd::http::dto::{
-    format_datetime, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
+    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
 };
 use crate::lfd::http::run_store;
 use crate::lfd::id::LfdId;
@@ -86,6 +86,12 @@ pub async fn build_wave_dto(
         }
     );
 
+    let wave_id_stim = wave.id.clone();
+    let stimuli_list = run_store(store, move |store| store.list_stimuli(Some(&wave_id_stim)))
+        .await
+        .unwrap_or_default();
+    let stimuli = stimuli_list.into_iter().map(stimulus_dto).collect();
+
     let active_run = if include_active_run {
         latest.map(wave_run_dto)
     } else {
@@ -118,6 +124,7 @@ pub async fn build_wave_dto(
         diff_stat,
         flow_steps,
         open_pr_count,
+        stimuli,
         active_run,
     })
 }

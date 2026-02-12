@@ -49,10 +49,6 @@ async fn tick_loop_waves(
     };
 
     for stimulus in stimuli {
-        if !stimulus.enabled {
-            continue;
-        }
-
         let wave = match store.get_wave(&stimulus.wave_id) {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,

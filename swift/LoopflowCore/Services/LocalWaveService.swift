@@ -7,7 +7,6 @@ public struct WaveConfigUpdate: Sendable {
     public var area: [String]?
     public var direction: [String]?
     public var flow: String?
-    public var stimulus: Stimulus?
     public var status: WaveStatus?
 
     public init(
@@ -15,14 +14,12 @@ public struct WaveConfigUpdate: Sendable {
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
-        stimulus: Stimulus? = nil,
         status: WaveStatus? = nil
     ) {
         self.name = name
         self.area = area
         self.direction = direction
         self.flow = flow
-        self.stimulus = stimulus
         self.status = status
     }
 }
@@ -31,18 +28,15 @@ public struct RunOverrides: Sendable {
     public var area: [String]?
     public var direction: [String]?
     public var flow: String?
-    public var stimulus: Stimulus?
 
     public init(
         area: [String]? = nil,
         direction: [String]? = nil,
-        flow: String? = nil,
-        stimulus: Stimulus? = nil
+        flow: String? = nil
     ) {
         self.area = area
         self.direction = direction
         self.flow = flow
-        self.stimulus = stimulus
     }
 }
 
@@ -340,12 +334,16 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        let stimulus: Stimulus
-        if let stimDict = json["stimulus"] as? [String: Any] {
-            let kind = Stimulus.Kind(rawValue: stimDict["kind"] as? String ?? "once") ?? .once
-            stimulus = Stimulus(kind: kind, cron: stimDict["cron"] as? String)
+        let stimuli: [Stimulus]
+        if let stimArr = json["stimuli"] as? [[String: Any]] {
+            stimuli = stimArr.compactMap { dict in
+                guard let id = dict["id"] as? String,
+                      let kindStr = dict["kind"] as? String,
+                      let kind = Stimulus.Kind(rawValue: kindStr) else { return nil }
+                return Stimulus(id: id, kind: kind, cron: dict["cron"] as? String)
+            }
         } else {
-            stimulus = Stimulus(kind: .once)
+            stimuli = []
         }
 
         let createdAt: Date?
@@ -385,7 +383,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             flow: json["flow"] as? String ?? "",
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
-            stimulus: stimulus,
+            stimuli: stimuli,
             status: status,
             iteration: json["iteration"] as? Int ?? 0,
             localWorktree: json["local_worktree"] as? String,
@@ -399,7 +397,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    /// Update wave configuration (name, area, direction, flow, stimulus, status).
+    /// Update wave configuration (name, area, direction, flow, status).
     public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
         let url = apiBaseURL.appendingPathComponent("waves/\(id)")
 
@@ -412,11 +410,6 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         if let area = config.area { body["area"] = area }
         if let direction = config.direction { body["direction"] = direction }
         if let flow = config.flow { body["flow"] = flow }
-        if let stimulus = config.stimulus {
-            var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
-            if let cron = stimulus.cron { stimDict["cron"] = cron }
-            body["stimulus"] = stimDict
-        }
         if let status = config.status { body["status"] = status.rawValue }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -452,11 +445,6 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             if let area = overrides.area { body["area"] = area }
             if let direction = overrides.direction { body["direction"] = direction }
             if let flow = overrides.flow { body["flow"] = flow }
-            if let stimulus = overrides.stimulus {
-                var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
-                if let cron = stimulus.cron { stimDict["cron"] = cron }
-                body["stimulus"] = stimDict
-            }
         }
 
         if !body.isEmpty {
@@ -474,6 +462,50 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
             let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
+        }
+    }
+
+    // MARK: - Stimulus
+
+    public func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String? = nil) async throws -> Stimulus {
+        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var body: [String: Any] = ["kind": kind.rawValue]
+        if let cron { body["cron"] = cron }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = json["id"] as? String else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return Stimulus(id: id, kind: kind, cron: cron)
+    }
+
+    public func removeStimulus(_ waveId: String, stimulusId: String) async throws {
+        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus/\(stimulusId)")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
     }
 

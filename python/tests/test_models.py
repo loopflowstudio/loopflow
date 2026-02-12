@@ -11,7 +11,7 @@ class TestWaveModel:
     def test_minimal_payload(self):
         wave = Wave.model_validate(WAVE_MINIMAL)
         assert wave.name == "reduce"
-        assert wave.stimulus is None
+        assert wave.stimuli == []
         assert wave.active_run is None
         assert wave.created_at is None
         assert wave.commits == []
@@ -20,7 +20,7 @@ class TestWaveModel:
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)
-        assert wave.stimulus.kind == "manual"
+        assert wave.stimuli[0].kind == "loop"
         assert wave.active_run.status == "running"
         assert wave.active_run.pr.number == 1
         assert wave.created_at is not None

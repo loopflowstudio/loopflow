@@ -1,64 +1,20 @@
-// StepRunner - wave execution UI with flow selection and run/loop controls.
+// StepRunner - wave execution UI with flow selection and run/auto controls.
 
 import SwiftUI
 import LoopflowCore
 
 struct StepRunner: View {
-    private enum AutoMode: String, CaseIterable {
-        case loop
-        case watch
-        case cron
-
-        init(stimulus kind: Stimulus.Kind) {
-            switch kind {
-            case .loop:
-                self = .loop
-            case .watch:
-                self = .watch
-            case .cron:
-                self = .cron
-            case .once, .manual:
-                self = .loop
-            }
-        }
-
-        var stimulusKind: Stimulus.Kind {
-            switch self {
-            case .loop:
-                return .loop
-            case .watch:
-                return .watch
-            case .cron:
-                return .cron
-            }
-        }
-
-        var label: String {
-            self == .cron ? "Schedule" : rawValue.capitalized
-        }
-
-        var icon: String {
-            switch self {
-            case .loop:
-                return "repeat"
-            case .watch:
-                return "eye"
-            case .cron:
-                return "clock"
-            }
-        }
-    }
-
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedFlow: String = ""
-    @State private var autoMode: AutoMode = .loop
+    @State private var autoMode: Stimulus.Kind = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
     @State private var isSendingRun = false
+    @State private var isSendingAuto = false
     @State private var errorMessage: String?
     @State private var showingError = false
 
@@ -77,13 +33,17 @@ struct StepRunner: View {
                 flowHeader
                 promptField
 
-                if autoMode == .cron {
-                    cronField
-                }
+                if wave.hasActiveStimulus {
+                    activeStimulusView
+                } else {
+                    if autoMode == .cron {
+                        cronField
+                    }
 
-                HStack(spacing: Spacing.md) {
-                    runButton
-                    autoButton
+                    HStack(spacing: Spacing.md) {
+                        runButton
+                        autoButton
+                    }
                 }
             }
         }
@@ -96,9 +56,11 @@ struct StepRunner: View {
         }
         .onAppear {
             selectedFlow = wave.flow
-            autoMode = AutoMode(stimulus: wave.stimulus.kind)
-            if let cron = wave.stimulus.cron {
-                cronExpression = cron
+            if let s = wave.stimulus {
+                autoMode = s.kind
+                if let cron = s.cron {
+                    cronExpression = cron
+                }
             }
         }
     }
@@ -165,15 +127,54 @@ struct StepRunner: View {
         }
     }
 
+    // MARK: - Active Stimulus
+
+    private var activeStimulusView: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            if let s = wave.stimulus {
+                HStack {
+                    Image(systemName: s.icon)
+                    Text(s.label)
+                        .fontWeight(.semibold)
+                    if let cron = s.cron {
+                        Text(cron)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        removeActiveStimulus(s.id)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove stimulus")
+                }
+                .padding(Spacing.md)
+                .background(palette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            }
+        }
+    }
+
     // MARK: - Action Buttons
 
-    private var buttonsDisabled: Bool {
-        isSendingRun || selectedFlow.isEmpty || wave.status == .running || wave.status == .waiting
+    private var actionsDisabled: Bool {
+        selectedFlow.isEmpty || wave.status == .running || wave.status == .waiting
+    }
+
+    private var runDisabled: Bool {
+        isSendingRun || actionsDisabled
+    }
+
+    private var autoDisabled: Bool {
+        isSendingAuto || actionsDisabled
     }
 
     private var runButton: some View {
         Button {
-            runWith(stimulus: .once)
+            runOnce()
         } label: {
             HStack(spacing: Spacing.sm) {
                 if isSendingRun {
@@ -187,22 +188,27 @@ struct StepRunner: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.lg)
-            .background(buttonsDisabled ? Color.gray : palette.accent)
+            .background(runDisabled ? Color.gray : palette.accent)
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         }
         .buttonStyle(.plain)
-        .disabled(buttonsDisabled)
-        .opacity(buttonsDisabled ? 0.5 : 1)
+        .disabled(runDisabled)
+        .opacity(runDisabled ? 0.5 : 1)
     }
 
     private var autoButton: some View {
         HStack(spacing: 0) {
             Button {
-                runWith(stimulus: autoMode.stimulusKind)
+                addAutoStimulus()
             } label: {
                 HStack(spacing: Spacing.sm) {
-                    Image(systemName: autoMode.icon)
+                    if isSendingAuto {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: autoMode.icon)
+                    }
                     Text(autoMode.label)
                         .fontWeight(.semibold)
                 }
@@ -217,7 +223,7 @@ struct StepRunner: View {
                 .frame(width: 1, height: 20)
 
             Menu {
-                ForEach(AutoMode.allCases, id: \.rawValue) { kind in
+                ForEach(Stimulus.Kind.allCases, id: \.rawValue) { kind in
                     Button { autoMode = kind } label: {
                         Label(kind.label, systemImage: kind.icon)
                     }
@@ -231,35 +237,27 @@ struct StepRunner: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Change auto mode")
         }
-        .background(buttonsDisabled ? Color.gray : palette.surface)
-        .foregroundStyle(buttonsDisabled ? .white : palette.text)
+        .background(autoDisabled ? Color.gray : palette.surface)
+        .foregroundStyle(autoDisabled ? .white : palette.text)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
-        .disabled(buttonsDisabled)
-        .opacity(buttonsDisabled ? 0.5 : 1)
+        .disabled(autoDisabled)
+        .opacity(autoDisabled ? 0.5 : 1)
     }
 
     // MARK: - Actions
 
-    private func runWith(stimulus kind: Stimulus.Kind) {
+    private func runOnce() {
         guard !selectedFlow.isEmpty else { return }
 
         isSendingRun = true
-        let stimulus = Stimulus(
-            kind: kind,
-            cron: kind == .cron ? cronExpression : nil
-        )
         Task {
             do {
                 try await repoState.runWave(
                     wave: wave,
-                    flow: selectedFlow,
-                    stimulus: stimulus
+                    flow: selectedFlow
                 )
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    showingError = true
-                }
+                showError(error)
             }
             await MainActor.run {
                 isSendingRun = false
@@ -267,6 +265,42 @@ struct StepRunner: View {
         }
     }
 
+    private func addAutoStimulus() {
+        guard !selectedFlow.isEmpty else { return }
+
+        isSendingAuto = true
+        let cron = autoMode == .cron ? cronExpression : nil
+        Task {
+            do {
+                try await repoState.addStimulus(
+                    wave: wave,
+                    kind: autoMode,
+                    cron: cron
+                )
+            } catch {
+                showError(error)
+            }
+            await MainActor.run {
+                isSendingAuto = false
+            }
+        }
+    }
+
+    private func removeActiveStimulus(_ stimulusId: String) {
+        Task {
+            do {
+                try await repoState.removeStimulus(wave: wave, stimulusId: stimulusId)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    @MainActor
+    private func showError(_ error: Error) {
+        errorMessage = error.localizedDescription
+        showingError = true
+    }
 }
 
 #Preview {

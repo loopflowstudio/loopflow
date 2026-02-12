@@ -4,7 +4,7 @@ pub mod state;
 
 use axum::http::StatusCode;
 use axum::middleware;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use tower_http::trace::TraceLayer;
 
@@ -32,6 +32,15 @@ pub fn router(state: HttpState) -> Router {
                 .delete(waves::delete_wave_handler),
         )
         .route("/waves/:wave_id/run", post(waves::run_wave_handler))
+        .route(
+            "/waves/:wave_id/stimulus",
+            post(waves::add_stimulus_handler),
+        )
+        .route(
+            "/waves/:wave_id/stimulus/:stimulus_id",
+            delete(waves::remove_stimulus_handler),
+        )
+        .route("/waves/:wave_id/stimuli", get(waves::list_stimuli_handler))
         .route("/waves/:wave_id/stop", post(waves::stop_wave_handler))
         .route(
             "/waves/:wave_id/continue",

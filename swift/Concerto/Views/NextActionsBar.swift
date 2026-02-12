@@ -62,11 +62,10 @@ struct NextActionsBar: View {
     }
 
     private func archive() {
-        // Archive by stopping and setting stimulus to manual (paused)
         isArchiving = true
         Task {
             do {
-                try await repoState.updateWave(wave, stimulus: Stimulus(kind: .manual), status: .paused)
+                try await repoState.updateWave(wave, status: .paused)
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription

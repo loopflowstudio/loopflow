@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS stimuli (
     cron TEXT NOT NULL DEFAULT '',
     last_main_sha TEXT,
     last_triggered_at BIGINT,
-    enabled INTEGER NOT NULL DEFAULT 1,
     created_at BIGINT NOT NULL
 );
 

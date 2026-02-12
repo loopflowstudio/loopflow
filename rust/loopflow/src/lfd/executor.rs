@@ -329,13 +329,10 @@ impl WaveExecutor {
                     if run.snapshot.pr.is_some() {
                         if let Ok(stimuli) = self.store.list_stimuli(Some(&wave.id)) {
                             let is_recurring = stimuli.iter().any(|s| {
-                                s.enabled
-                                    && matches!(
-                                        s.kind,
-                                        StimulusKind::Loop
-                                            | StimulusKind::Watch
-                                            | StimulusKind::Cron
-                                    )
+                                matches!(
+                                    s.kind,
+                                    StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
+                                )
                             });
                             if is_recurring {
                                 let wt = run.worktree.clone();

@@ -2,7 +2,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lfd::registration::RegistrationState;
-use crate::lfd::types::{WaveRun, WaveRunStatus};
+use crate::lfd::types::{Stimulus, StimulusKind, WaveRun, WaveRunStatus};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -94,6 +94,7 @@ pub struct WaveDto {
     pub diff_stat: Option<String>,
     pub flow_steps: Vec<String>,
     pub open_pr_count: u32,
+    pub stimuli: Vec<StimulusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
 }
@@ -139,6 +140,19 @@ pub struct RunWaveResponse {
     pub started: bool,
     pub wave_id: String,
     pub wave_run_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StimulusDto {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_main_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_triggered_at: Option<i64>,
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,6 +208,16 @@ pub struct DeletedResourceResponse {
     pub deleted: bool,
 }
 
+pub fn stimulus_kind_str(kind: StimulusKind) -> &'static str {
+    match kind {
+        StimulusKind::Loop => "loop",
+        StimulusKind::Watch => "watch",
+        StimulusKind::Cron => "cron",
+        StimulusKind::Once => "once",
+        StimulusKind::Unspecified => "unspecified",
+    }
+}
+
 pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
     datetime?
         .format(&time::format_description::well_known::Rfc3339)
@@ -226,6 +250,21 @@ pub fn wave_run_dto(run: WaveRun) -> WaveRunDto {
         error: run.error,
         flow_parents: run.flow_parents,
         created_at: format_datetime(run.started_at),
+    }
+}
+
+pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
+    StimulusDto {
+        id: s.id.to_string(),
+        kind: stimulus_kind_str(s.kind).to_string(),
+        cron: if s.cron.is_empty() {
+            None
+        } else {
+            Some(s.cron)
+        },
+        last_main_sha: s.last_main_sha,
+        last_triggered_at: s.last_triggered_at,
+        created_at: format_datetime(s.created_at),
     }
 }
 

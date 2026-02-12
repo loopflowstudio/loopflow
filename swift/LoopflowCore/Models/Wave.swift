@@ -1,23 +1,35 @@
 // Wave - an autonomous AI coding wave.
-// Stimulus types: manual (interactive), once (single run), loop (continuous), watch (on file change), cron (scheduled).
+// Stimulus types: loop (continuous), watch (on file change), cron (scheduled).
 
 import Foundation
 import SwiftUI
 
-/// Determines when a wave runs.
-public struct Stimulus: Sendable, Hashable, Codable {
-    public enum Kind: String, Sendable, Codable {
-        case manual  // User-triggered, interactive work
-        case once
+/// Determines when a wave runs. Stored in the stimuli table — existence means active.
+public struct Stimulus: Sendable, Hashable, Codable, Identifiable {
+    public enum Kind: String, Sendable, Codable, CaseIterable {
         case loop
         case watch
         case cron
+
+        public var icon: String {
+            switch self {
+            case .loop: return "repeat"
+            case .watch: return "eye"
+            case .cron: return "clock"
+            }
+        }
+
+        public var label: String {
+            self == .cron ? "Schedule" : rawValue.capitalized
+        }
     }
 
+    public var id: String
     public var kind: Kind
     public var cron: String?
 
-    public init(kind: Kind, cron: String? = nil) {
+    public init(id: String = UUID().uuidString, kind: Kind, cron: String? = nil) {
+        self.id = id
         self.kind = kind
         self.cron = cron
     }
@@ -29,15 +41,9 @@ public struct Stimulus: Sendable, Hashable, Codable {
         return kind.rawValue
     }
 
-    public var icon: String {
-        switch kind {
-        case .manual: return "circle"  // Idle
-        case .once: return "play.circle"
-        case .loop: return "circle.fill"  // Running
-        case .watch: return "eye.circle"
-        case .cron: return "clock"  // Scheduled
-        }
-    }
+    public var icon: String { kind.icon }
+
+    public var label: String { kind.label }
 }
 
 public enum WaveStatus: String, Sendable, Codable {
@@ -154,7 +160,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var flow: String
     public var direction: [String]
     public var area: [String]
-    public var stimulus: Stimulus
+    public var stimuli: [Stimulus]
     public var status: WaveStatus
     public var iteration: Int
     public var localWorktree: String?
@@ -173,7 +179,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         flow: String = "",
         direction: [String] = [],
         area: [String] = [],
-        stimulus: Stimulus = Stimulus(kind: .once),
+        stimuli: [Stimulus] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
         localWorktree: String? = nil,
@@ -191,7 +197,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.flow = flow
         self.direction = direction
         self.area = area
-        self.stimulus = stimulus
+        self.stimuli = stimuli
         self.status = status
         self.iteration = iteration
         self.localWorktree = localWorktree

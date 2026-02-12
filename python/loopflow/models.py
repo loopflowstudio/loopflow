@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class Stimulus(BaseModel):
+    id: Optional[str] = None
     kind: str
     cron: Optional[str] = None
 
@@ -46,7 +47,7 @@ class Wave(BaseModel):
     flow: str
     direction: list[str]
     area: list[str]
-    stimulus: Optional[Stimulus] = None
+    stimuli: list[Stimulus] = Field(default_factory=list)
     status: str
     iteration: int
     local_worktree: Optional[str] = None

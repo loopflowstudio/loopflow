@@ -8,7 +8,7 @@ Improve Concerto's visual design through the feedback loop defined in VISUAL_DES
 |-------|-------|--------|
 | 1 | Screenshot workflow | Done |
 | 2 | Research & audit | Done |
-| 3 | Theming & tooling | Future |
+| 3 | Theming & tooling | In Progress |
 | 4 | Polish | Future |
 
 ## Phase 1: Screenshot workflow
@@ -36,7 +36,7 @@ Fast iteration on visual changes. Approach TBD based on phase 2 findings.
 
 | Item | What it does |
 |------|--------------|
-| [06-theming-system](06-theming-system.md) | Theme switching for quick visual iteration |
+| ~~06-theming-system~~ | Theme switching for quick visual iteration |
 
 ## Phase 4: Polish
 

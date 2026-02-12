@@ -1,39 +1,19 @@
-CREATE TABLE IF NOT EXISTS meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-INSERT INTO meta (key, value)
-VALUES ('schema_version', '2')
-ON CONFLICT (key) DO NOTHING;
-
 CREATE TABLE IF NOT EXISTS waves (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     repo TEXT NOT NULL,
     flow TEXT NOT NULL,
-    direction JSONB NOT NULL DEFAULT '[]'::jsonb,
-    area JSONB NOT NULL DEFAULT '[]'::jsonb,
-    stimulus_kind INTEGER NOT NULL DEFAULT 1,
-    stimulus_cron TEXT NOT NULL DEFAULT '',
-    paused BOOLEAN NOT NULL,
+    direction TEXT NOT NULL DEFAULT '[]',
+    area TEXT NOT NULL DEFAULT '[]',
+    paused INTEGER NOT NULL,
     status INTEGER NOT NULL,
     iteration INTEGER NOT NULL,
-    worktree TEXT NOT NULL DEFAULT '',
-    branch TEXT NOT NULL DEFAULT '',
-    pr_limit INTEGER NOT NULL,
-    merge_mode INTEGER NOT NULL,
-    pid INTEGER,
     created_at BIGINT NOT NULL,
-    last_main_sha TEXT,
-    consecutive_failures INTEGER NOT NULL,
-    pending_activations INTEGER NOT NULL,
-    step_index INTEGER NOT NULL DEFAULT 0,
     UNIQUE(name, repo)
 );
 
+CREATE INDEX IF NOT EXISTS idx_waves_name ON waves(name);
 CREATE INDEX IF NOT EXISTS idx_waves_repo ON waves(repo);
-CREATE INDEX IF NOT EXISTS idx_waves_status ON waves(status);
 
 CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
@@ -49,6 +29,8 @@ CREATE TABLE IF NOT EXISTS agents (
     run_mode TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+
 CREATE TABLE IF NOT EXISTS stimuli (
     id TEXT PRIMARY KEY,
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
@@ -56,7 +38,7 @@ CREATE TABLE IF NOT EXISTS stimuli (
     cron TEXT NOT NULL DEFAULT '',
     last_main_sha TEXT,
     last_triggered_at BIGINT,
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled INTEGER NOT NULL DEFAULT 1,
     created_at BIGINT NOT NULL
 );
 
@@ -84,7 +66,13 @@ CREATE TABLE IF NOT EXISTS wave_runs (
     branch TEXT NOT NULL DEFAULT '',
     started_at BIGINT NOT NULL,
     ended_at BIGINT,
-    error TEXT
+    error TEXT,
+    snapshot_repo TEXT NOT NULL DEFAULT '',
+    snapshot_flow TEXT NOT NULL DEFAULT '',
+    snapshot_direction TEXT NOT NULL DEFAULT '[]',
+    snapshot_area TEXT NOT NULL DEFAULT '[]',
+    snapshot_pr TEXT,
+    flow_parents TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS idx_wave_runs_wave_id ON wave_runs(wave_id, started_at);
@@ -100,4 +88,14 @@ CREATE TABLE IF NOT EXISTS fork_runs (
 
 CREATE INDEX IF NOT EXISTS idx_fork_runs_wave_run_id ON fork_runs(wave_run_id, step_index);
 
-CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+CREATE TABLE IF NOT EXISTS summaries (
+    id TEXT PRIMARY KEY,
+    wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    token_budget INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    created_at BIGINT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_summaries_wave_id ON summaries(wave_id);

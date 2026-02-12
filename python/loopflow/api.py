@@ -47,7 +47,6 @@ def update_wave(
     flow: Optional[str] = None,
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
-    stimulus: Optional[Stimulus] = None,
     status: Optional[str] = None,
 ) -> Wave:
     return _client().update_wave(
@@ -55,7 +54,6 @@ def update_wave(
         flow=flow,
         direction=direction,
         area=area,
-        stimulus=stimulus,
         status=status,
     )
 
@@ -76,6 +74,18 @@ def run_wave(
         direction=direction,
         area=area,
     )
+
+
+def add_stimulus(
+    name_or_id: str,
+    kind: str,
+    cron: Optional[str] = None,
+) -> dict[str, Any]:
+    return _client().add_stimulus(name_or_id, kind, cron=cron)
+
+
+def remove_stimulus(name_or_id: str, stimulus_id: str) -> dict[str, Any]:
+    return _client().remove_stimulus(name_or_id, stimulus_id)
 
 
 def stop_wave(name_or_id: str) -> dict[str, Any]:
@@ -131,6 +141,8 @@ __all__ = [
     "update_wave",
     "delete_wave",
     "run_wave",
+    "add_stimulus",
+    "remove_stimulus",
     "stop_wave",
     "land_wave",
     "next_wave",

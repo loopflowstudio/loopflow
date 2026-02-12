@@ -15,7 +15,7 @@ struct WaveRowViewTests {
         flow: String = "ship",
         status: WaveStatus = .idle,
         iteration: Int = 0,
-        stimulus: Stimulus = Stimulus(kind: .manual)
+        stimuli: [Stimulus] = []
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -24,7 +24,7 @@ struct WaveRowViewTests {
                 repo: "/tmp/repo",
                 flow: flow,
                 area: area,
-                stimulus: stimulus,
+                stimuli: stimuli,
                 status: status,
                 iteration: iteration
             )
@@ -90,7 +90,7 @@ struct WaveRowViewTests {
 
     @Test("Row shows cron schedule for cron waves")
     func showsCronSchedule() throws {
-        let wave = makeWave(stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"))
+        let wave = makeWave(stimuli: [Stimulus(kind: .cron, cron: "0 9 * * *")])
         let row = makeRow(wave: wave)
 
         let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-stimulus").text()
@@ -99,7 +99,7 @@ struct WaveRowViewTests {
 
     @Test("Row shows raw cron when not a known pattern")
     func showsRawCron() throws {
-        let wave = makeWave(stimulus: Stimulus(kind: .cron, cron: "*/15 * * * *"))
+        let wave = makeWave(stimuli: [Stimulus(kind: .cron, cron: "*/15 * * * *")])
         let row = makeRow(wave: wave)
 
         let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-stimulus").text()

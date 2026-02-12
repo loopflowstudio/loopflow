@@ -149,7 +149,7 @@ final class RepoState {
                     flow: "ship",
                     direction: [],
                     area: ["src/auth"],
-                    stimulus: Stimulus(kind: .loop),
+                    stimuli: [Stimulus(kind: .loop)],
                     status: .running,
                     iteration: 3
                 ),
@@ -166,7 +166,7 @@ final class RepoState {
                     flow: "ship",
                     direction: ["product-engineer"],
                     area: ["src/api"],
-                    stimulus: Stimulus(kind: .loop),
+                    stimuli: [Stimulus(kind: .loop)],
                     status: .waiting,
                     iteration: 5
                 ),
@@ -182,7 +182,7 @@ final class RepoState {
                     flow: "debug",
                     direction: [],
                     area: ["."],
-                    stimulus: Stimulus(kind: .manual),
+                    stimuli: [],
                     status: .idle,
                     iteration: 0
                 ),
@@ -197,7 +197,7 @@ final class RepoState {
                     flow: "polish",
                     direction: [],
                     area: ["."],
-                    stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
+                    stimuli: [Stimulus(kind: .cron, cron: "0 9 * * *")],
                     status: .idle,
                     iteration: 12
                 ),
@@ -403,13 +403,24 @@ final class RepoState {
         wave: WaveViewModel,
         area: [String]? = nil,
         direction: [String]? = nil,
-        flow: String? = nil,
-        stimulus: Stimulus? = nil
+        flow: String? = nil
     ) async throws {
         try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
-            let overrides = RunOverrides(area: area, direction: direction, flow: flow, stimulus: stimulus)
+            let overrides = RunOverrides(area: area, direction: direction, flow: flow)
             try await self.waveService.run(wave.id, overrides: overrides)
         }
+    }
+
+    func addStimulus(wave: WaveViewModel, kind: Stimulus.Kind, cron: String? = nil) async throws {
+        let stimulus = try await waveService.addStimulus(wave.id, kind: kind, cron: cron)
+        _ = waveStore.applyOptimistic(wave.id) { $0.stimuli.append(stimulus) }
+        waveStore.commitMutation(wave.id)
+    }
+
+    func removeStimulus(wave: WaveViewModel, stimulusId: String) async throws {
+        try await waveService.removeStimulus(wave.id, stimulusId: stimulusId)
+        _ = waveStore.applyOptimistic(wave.id) { $0.stimuli.removeAll { $0.id == stimulusId } }
+        waveStore.commitMutation(wave.id)
     }
 
     func stopWave(_ wave: WaveViewModel) async throws {
@@ -427,7 +438,7 @@ final class RepoState {
             flow: wave.api.flow,
             direction: wave.api.direction,
             area: wave.api.area,
-            stimulus: wave.api.stimulus
+            stimuli: wave.api.stimuli
         )
         let pending = WaveViewModel(api: pendingWave)
         waveStore.insertPending(pending)
@@ -472,17 +483,15 @@ final class RepoState {
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
-        stimulus: Stimulus? = nil,
         status: WaveStatus? = nil
     ) async throws {
         try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
             if let flow { w.flow = flow }
-            if let stimulus { w.stimulus = stimulus }
             if let status { w.status = status }
         }) {
-            let config = WaveConfigUpdate(area: area, direction: direction, flow: flow, stimulus: stimulus, status: status)
+            let config = WaveConfigUpdate(area: area, direction: direction, flow: flow, status: status)
             _ = try await self.waveService.updateWave(wave.id, config: config)
         }
     }

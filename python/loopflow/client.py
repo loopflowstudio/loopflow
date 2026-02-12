@@ -7,7 +7,7 @@ from typing import Any, Optional
 import httpx
 
 from .errors import LoopflowError, WaveAlreadyRunning
-from .models import Stimulus, Wave, WaveRun
+from .models import Wave, WaveRun
 
 
 def _resolve_base_url() -> str:
@@ -77,7 +77,6 @@ class Client:
         flow: Optional[str] = None,
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
-        stimulus: Optional[Stimulus] = None,
         status: Optional[str] = None,
     ) -> Wave:
         body: dict[str, Any] = {}
@@ -87,8 +86,6 @@ class Client:
             body["direction"] = direction
         if area is not None:
             body["area"] = area
-        if stimulus is not None:
-            body["stimulus"] = stimulus.model_dump(exclude_none=True)
         if status is not None:
             body["status"] = status
         payload = self._request_json("PATCH", f"/v0/waves/{name_or_id}", json=body)
@@ -112,6 +109,22 @@ class Client:
         if area is not None:
             body["area"] = area
         return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
+
+    def add_stimulus(
+        self,
+        name_or_id: str,
+        kind: str,
+        cron: Optional[str] = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"kind": kind}
+        if cron is not None:
+            body["cron"] = cron
+        return self._request_json("POST", f"/v0/waves/{name_or_id}/stimulus", json=body)
+
+    def remove_stimulus(self, name_or_id: str, stimulus_id: str) -> dict[str, Any]:
+        return self._request_json(
+            "DELETE", f"/v0/waves/{name_or_id}/stimulus/{stimulus_id}"
+        )
 
     def stop_wave(self, name_or_id: str) -> dict[str, Any]:
         return self._request_json("POST", f"/v0/waves/{name_or_id}/stop")

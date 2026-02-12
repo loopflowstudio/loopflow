@@ -175,7 +175,6 @@ mod tests {
             cron: "".to_string(),
             last_main_sha: Some("abc123".to_string()),
             last_triggered_at: Some(100),
-            enabled: true,
             created_at: Some(OffsetDateTime::now_utc()),
         }
     }
@@ -232,10 +231,10 @@ mod tests {
         assert_eq!(by_kind.len(), 1);
 
         let mut stimulus_updated = stimulus.clone();
-        stimulus_updated.enabled = false;
+        stimulus_updated.cron = "0 9 * * *".to_string();
         store.update_stimulus(&stimulus_updated).unwrap();
         let loaded_stimulus = store.get_stimulus(&stimulus.id).unwrap().unwrap();
-        assert!(!loaded_stimulus.enabled);
+        assert_eq!(loaded_stimulus.cron, "0 9 * * *");
 
         let run = WaveRun {
             id: LfdId::new(),

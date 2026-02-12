@@ -220,11 +220,11 @@ struct WaveRow: View {
     }
 
     private var stimulusLabel: String? {
-        switch wave.stimulus.kind {
+        guard let stimulus = wave.stimulus else { return nil }
+        switch stimulus.kind {
         case .loop: return "loop"
         case .watch: return "watching"
-        case .cron: return wave.stimulus.cron.map { formatCron($0) }
-        case .once, .manual: return nil
+        case .cron: return stimulus.cron.map { formatCron($0) }
         }
     }
 
@@ -233,7 +233,7 @@ struct WaveRow: View {
         case .running: return "Running"
         case .waiting: return "Waiting (PR limit reached)"
         case .idle:
-            if wave.stimulus.kind == .cron {
+            if wave.stimulus?.kind == .cron {
                 return "Scheduled"
             }
             return "Idle"

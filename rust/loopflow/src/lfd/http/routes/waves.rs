@@ -14,16 +14,18 @@ use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    AbsorbResponse, AbsorbResponseResult, CollapseResponse, CollapseResponseResult,
-    ContinueWaveResponse, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
-    NextWaveResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    stimulus_dto, stimulus_kind_str, AbsorbResponse, AbsorbResponseResult, CollapseResponse,
+    CollapseResponseResult, ContinueWaveResponse, DeletedResourceResponse, ErrorResponse,
+    LandWaveResponse, ListResponse, NextWaveResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
-use crate::lfd::types::{AgentStatus, Event, Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{
+    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
+};
 
 #[derive(Deserialize)]
 pub struct ListWavesQuery {
@@ -103,6 +105,12 @@ pub struct RunWaveRequest {
     area: Option<Vec<String>>,
     direction: Option<Vec<String>>,
     flow: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddStimulusRequest {
+    kind: StimulusKind,
+    cron: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -471,6 +479,82 @@ pub async fn run_wave_handler(
         wave_id: wave.id.to_string(),
         wave_run_id: Some(run.id.to_string()),
     }))
+}
+
+// Stimulus CRUD handlers
+
+pub async fn add_stimulus_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+    Json(payload): Json<AddStimulusRequest>,
+) -> ApiResult<serde_json::Value> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+
+    // Verify wave exists.
+    run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    let stimulus = Stimulus {
+        id: LfdId::new(),
+        wave_id,
+        kind: payload.kind,
+        cron: payload.cron.unwrap_or_default(),
+        last_main_sha: None,
+        last_triggered_at: None,
+        created_at: Some(OffsetDateTime::now_utc()),
+    };
+
+    let stimulus_clone = stimulus.clone();
+    run_store(&state.store, move |store| {
+        store.create_stimulus(&stimulus_clone)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    Ok(Json(serde_json::json!({
+        "id": stimulus.id.to_string(),
+        "kind": stimulus_kind_str(stimulus.kind),
+        "cron": if stimulus.cron.is_empty() { None } else { Some(&stimulus.cron) },
+    })))
+}
+
+pub async fn remove_stimulus_handler(
+    State(state): State<HttpState>,
+    Path((wave_id, stimulus_id)): Path<(String, String)>,
+) -> ApiResult<serde_json::Value> {
+    let _wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let stimulus_id = LfdId::from_str(&stimulus_id)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid stimulus id"))?;
+
+    run_store(&state.store, move |store| {
+        store.delete_stimulus(&stimulus_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+pub async fn list_stimuli_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+
+    let stimuli = run_store(&state.store, move |store| {
+        store.list_stimuli(Some(&wave_id))
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    let dtos: Vec<_> = stimuli.into_iter().map(stimulus_dto).collect();
+
+    Ok(Json(serde_json::json!({ "data": dtos })))
 }
 
 pub async fn stop_wave_handler(

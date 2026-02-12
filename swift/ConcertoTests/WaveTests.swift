@@ -15,7 +15,7 @@ struct WaveModelTests {
         flow: String = "design",
         direction: [String] = [],
         area: [String] = [],
-        stimulus: Stimulus = Stimulus(kind: .once),
+        stimuli: [Stimulus] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
         recentSteps: [StepRun] = [],
@@ -29,7 +29,7 @@ struct WaveModelTests {
                 flow: flow,
                 direction: direction,
                 area: area,
-                stimulus: stimulus,
+                stimuli: stimuli,
                 status: status,
                 iteration: iteration
             ),
@@ -102,7 +102,7 @@ struct WaveModelTests {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
-            stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
+            stimuli: [Stimulus(kind: .cron, cron: "0 9 * * *")],
             status: .idle
         )
         let indicator = wave.statusIndicator
@@ -171,7 +171,6 @@ struct WaveModelTests {
                 flow: "design",
                 direction: [],
                 area: [],
-                stimulus: Stimulus(kind: .once),
                 status: .idle,
                 iteration: 0,
                 localWorktree: "/tmp/repo.test",
@@ -199,20 +198,19 @@ struct WaveModelTests {
             repo: "/tmp",
             flow: "ship",
             area: ["src/"],
-            stimulus: Stimulus(kind: .loop)
+            stimuli: [Stimulus(kind: .loop)]
         )
 
         #expect(wave.detailText == "src/ · ship · loop")
     }
 
-    @Test("detailText omits manual stimulus")
-    func detailTextOmitsManual() {
+    @Test("detailText omits stimulus when none active")
+    func detailTextOmitsWhenNoStimulus() {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
             flow: "debug",
-            area: ["."],
-            stimulus: Stimulus(kind: .manual)
+            area: ["."]
         )
 
         #expect(wave.detailText == ". · debug")
@@ -625,8 +623,6 @@ struct StimulusTests {
 
     @Test("description returns kind for non-cron")
     func descriptionNonCron() {
-        #expect(Stimulus(kind: .manual).description == "manual")
-        #expect(Stimulus(kind: .once).description == "once")
         #expect(Stimulus(kind: .loop).description == "loop")
         #expect(Stimulus(kind: .watch).description == "watch")
     }
@@ -640,10 +636,8 @@ struct StimulusTests {
 
     @Test("icon returns correct SF Symbol for each kind")
     func iconForKind() {
-        #expect(Stimulus(kind: .manual).icon == "circle")
-        #expect(Stimulus(kind: .once).icon == "play.circle")
-        #expect(Stimulus(kind: .loop).icon == "circle.fill")
-        #expect(Stimulus(kind: .watch).icon == "eye.circle")
+        #expect(Stimulus(kind: .loop).icon == "repeat")
+        #expect(Stimulus(kind: .watch).icon == "eye")
         #expect(Stimulus(kind: .cron).icon == "clock")
     }
 }

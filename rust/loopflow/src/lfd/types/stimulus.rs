@@ -40,7 +40,6 @@ pub struct Stimulus {
     pub cron: String,
     pub last_main_sha: Option<String>,
     pub last_triggered_at: Option<i64>,
-    pub enabled: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
@@ -55,7 +54,6 @@ impl Stimulus {
             cron: String::new(),
             last_main_sha: None,
             last_triggered_at: None,
-            enabled: true,
             created_at: Some(OffsetDateTime::now_utc()),
         }
     }

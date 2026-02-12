@@ -20,6 +20,8 @@ public protocol WaveServiceProtocol: Sendable {
     func deleteWave(_ id: String) async throws
     func cloneWave(_ id: String, name: String?) async throws -> Wave
     func run(_ id: String, overrides: RunOverrides?) async throws
+    func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus
+    func removeStimulus(_ waveId: String, stimulusId: String) async throws
     func stop(_ id: String) async throws
     func landWave(_ id: String) async throws
     func nextWave(_ id: String) async throws -> String

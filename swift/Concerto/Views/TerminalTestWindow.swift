@@ -12,7 +12,7 @@ struct TerminalTestWindow: View {
             HStack {
                 Image(systemName: "terminal.fill")
                 Text("Ghostty Terminal Test")
-                    .font(.headline)
+                    .font(Typography.sectionTitle())
 
                 Spacer()
 
@@ -61,14 +61,14 @@ struct TerminalTestWindow: View {
     private func errorView(_ error: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
+                .font(Typography.heroTitle(48))
                 .foregroundStyle(Color.statusError)
 
             Text("Failed to initialize Ghostty")
-                .font(.headline)
+                .font(Typography.sectionTitle())
 
             Text(error)
-                .font(.body)
+                .font(Typography.body())
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)

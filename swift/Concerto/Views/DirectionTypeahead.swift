@@ -18,7 +18,7 @@ struct DirectionTypeahead: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Direction")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 4) {
@@ -68,7 +68,7 @@ struct DirectionTypeahead: View {
                     selectCandidate(candidate)
                 } label: {
                     Text(candidate)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(Typography.code(12))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(palette.surface)

@@ -33,7 +33,10 @@ let package = Package(
                 "GhosttyKit"
             ],
             path: "Concerto",
-            exclude: ["Info.plist", "Concerto.sdef", "UX_DESIGN.md", "AppIcon.icns", "Services/Ghostty/README.md"],
+            exclude: ["Info.plist", "Concerto.sdef", "UX_DESIGN.md", "AppIcon.icns", "Services/Ghostty/README.md", "Fonts"],
+            resources: [
+                .copy("Fonts")
+            ],
             swiftSettings: [
                 .define("GHOSTTY_ENABLED")
             ],

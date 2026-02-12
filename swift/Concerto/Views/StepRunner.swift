@@ -97,7 +97,7 @@ struct StepRunner: View {
     private var promptField: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Additional context (optional)")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             TextField("e.g. focus on error handling", text: $prompt, axis: .vertical)
@@ -113,14 +113,14 @@ struct StepRunner: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             TextField("0 9 * * *", text: $cronExpression)
                 .textFieldStyle(.plain)
-                .font(.system(.caption, design: .monospaced))
+                .font(Typography.codeSmall())
                 .padding(Spacing.sm)
                 .background(palette.surface)
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
                 .accessibilityLabel("Cron expression")
 
             Text("Examples: 0 9 * * * (daily 9am), */30 * * * * (every 30 min)")
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .foregroundStyle(.tertiary)
         }
     }
@@ -136,7 +136,7 @@ struct StepRunner: View {
                         .fontWeight(.semibold)
                     if let cron = s.cron {
                         Text(cron)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(Typography.codeSmall())
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -228,7 +228,7 @@ struct StepRunner: View {
                 }
             } label: {
                 Image(systemName: "chevron.down")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .padding(.vertical, Spacing.lg)
                     .padding(.horizontal, Spacing.sm)
             }

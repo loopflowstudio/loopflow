@@ -48,22 +48,22 @@ struct InteractiveSessionView: View {
             // Wave name
             if let wave {
                 Text(wave.displayName)
-                    .font(.headline)
+                    .font(Typography.sectionTitle())
                     .fontWeight(.semibold)
             } else {
                 Text("Session")
-                    .font(.headline)
+                    .font(Typography.sectionTitle())
                     .fontWeight(.semibold)
             }
 
             // Step name
             Text(session.step)
-                .font(.subheadline)
+                .font(Typography.body())
                 .foregroundStyle(.secondary)
 
             // Interactive badge
             Text("interactive")
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .fontWeight(.medium)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
@@ -77,7 +77,7 @@ struct InteractiveSessionView: View {
             switch ghosttyManager.state {
             case .uninitialized:
                 Text("Terminal not initialized")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .foregroundStyle(.tertiary)
             case .initializing:
                 ProgressView()
@@ -86,7 +86,7 @@ struct InteractiveSessionView: View {
                 EmptyView()
             case .failed(let error):
                 Label("Error", systemImage: "exclamationmark.triangle")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .foregroundStyle(Color.statusError)
                     .help(error)
             }

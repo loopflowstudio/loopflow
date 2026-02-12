@@ -138,7 +138,7 @@ struct DarkButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline)
+            .font(Typography.body())
             .foregroundStyle(Color.loopflowCream)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

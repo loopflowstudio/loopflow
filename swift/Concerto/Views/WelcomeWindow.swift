@@ -14,11 +14,11 @@ struct WelcomeWindow: View {
             // Header
             VStack(spacing: 12) {
                 Image(systemName: "wand.and.sparkles")
-                    .font(.system(size: 48))
+                    .font(Typography.heroTitle(48))
                     .foregroundStyle(.tint)
 
                 Text("Loopflow Concerto")
-                    .font(.title)
+                    .font(Typography.heroTitle())
                     .fontWeight(.semibold)
 
                 Text("Tell it what to build. It writes the code.")
@@ -29,7 +29,7 @@ struct WelcomeWindow: View {
             if !recentsService.recentRepos.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Repositories")
-                        .font(.headline)
+                        .font(Typography.sectionTitle())
                         .padding(.horizontal, 4)
 
                     VStack(spacing: 4) {
@@ -44,7 +44,7 @@ struct WelcomeWindow: View {
                                         Text(recent.displayName)
                                             .fontWeight(.medium)
                                         Text(recent.path)
-                                            .font(.caption)
+                                            .font(Typography.caption())
                                             .foregroundStyle(.tertiary)
                                             .lineLimit(1)
                                             .truncationMode(.middle)

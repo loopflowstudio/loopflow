@@ -164,12 +164,12 @@ struct WaveDetailPanel: View {
                 HStack(spacing: 8) {
                     // Status indicator
                     Image(systemName: wave.statusIndicator.icon)
-                        .font(.system(size: 14))
+                        .font(Typography.body())
                         .foregroundStyle(wave.statusIndicator.color)
 
                     if isEditingName {
                         TextField("Wave name", text: $editingName)
-                            .font(.title2)
+                            .font(Typography.sectionTitle())
                             .fontWeight(.semibold)
                             .textFieldStyle(.plain)
                             .focused($isNameFocused)
@@ -182,7 +182,7 @@ struct WaveDetailPanel: View {
                             }
                     } else {
                         Text(wave.displayName)
-                            .font(.title2)
+                            .font(Typography.sectionTitle())
                             .fontWeight(.semibold)
                             .onTapGesture {
                                 startNameEdit()
@@ -191,7 +191,7 @@ struct WaveDetailPanel: View {
 
                     if wave.iteration > 0 {
                         Text("iter \(wave.iteration)")
-                            .font(.caption)
+                            .font(Typography.caption())
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -205,7 +205,7 @@ struct WaveDetailPanel: View {
                 }
 
                 Text(wave.statusText)
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             }
 
@@ -226,7 +226,7 @@ struct WaveDetailPanel: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "stop.fill")
-                            .font(.caption)
+                            .font(Typography.caption())
                         Text("Stop")
                     }
                 }
@@ -259,9 +259,9 @@ struct WaveDetailPanel: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.up.right.square")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                 Text("PR #\(number)")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .fontWeight(.medium)
             }
             .padding(.horizontal, 8)
@@ -276,7 +276,7 @@ struct WaveDetailPanel: View {
 
     private var openPRCountBadge: some View {
         Label("\(wave.effectiveOpenPRCount) open", systemImage: "arrow.triangle.pull")
-            .font(.caption)
+            .font(Typography.caption())
             .fontWeight(.medium)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -294,10 +294,10 @@ struct WaveDetailPanel: View {
                 if !wave.areaDisplay.isEmpty {
                     Label {
                         Text(wave.areaDisplay)
-                            .font(.caption)
+                            .font(Typography.caption())
                     } icon: {
                         Image(systemName: "folder")
-                            .font(.caption2)
+                            .font(Typography.caption(10))
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -305,10 +305,10 @@ struct WaveDetailPanel: View {
                 if !wave.directionDisplay.isEmpty {
                     Label {
                         Text(wave.directionDisplay)
-                            .font(.caption)
+                            .font(Typography.caption())
                     } icon: {
                         Image(systemName: "target")
-                            .font(.caption2)
+                            .font(Typography.caption(10))
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -316,10 +316,10 @@ struct WaveDetailPanel: View {
                 if !wave.flow.isEmpty {
                     Label {
                         Text(wave.flow)
-                            .font(.caption)
+                            .font(Typography.caption())
                     } icon: {
                         Image(systemName: "arrow.triangle.branch")
-                            .font(.caption2)
+                            .font(Typography.caption(10))
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -339,9 +339,9 @@ struct WaveDetailPanel: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "terminal")
-                            .font(.system(size: 12))
+                            .font(Typography.caption())
                         Text(terminalApp.displayName)
-                            .font(.caption)
+                            .font(Typography.caption())
                     }
                 }
                 .buttonStyle(DarkButtonStyle())
@@ -353,9 +353,9 @@ struct WaveDetailPanel: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "curlybraces")
-                            .font(.system(size: 12))
+                            .font(Typography.caption())
                         Text(ideApp.displayName)
-                            .font(.caption)
+                            .font(Typography.caption())
                     }
                 }
                 .buttonStyle(DarkButtonStyle())
@@ -364,7 +364,7 @@ struct WaveDetailPanel: View {
 
                 if !hasWorktree {
                     Label("Worktree missing", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(Color.statusWarning)
                 }
 
@@ -382,7 +382,7 @@ struct WaveDetailPanel: View {
         } else {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Progress")
-                    .font(.headline)
+                    .font(Typography.sectionTitle())
 
                 // Status description with progress
                 if wave.status == .running {
@@ -391,14 +391,14 @@ struct WaveDetailPanel: View {
                         currentIndex: wave.stepIndex,
                         startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt
                     )
-                    .font(.subheadline)
+                    .font(Typography.body())
                 }
 
                 // Activity summary (recent output line)
                 if wave.status == .running,
                    let recentOutput = outputBuffer.recentOutput(for: wave.id) {
                     Text(recentOutput)
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -435,9 +435,9 @@ struct WaveDetailPanel: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(Color.statusError)
-                        .font(.caption)
+                        .font(Typography.caption())
                     Text(error)
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                 }
@@ -447,14 +447,14 @@ struct WaveDetailPanel: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 Text("No error details available.")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.tertiary)
             }
 
             // Failed step context
             if let step = wave.activeRun?.currentStep {
                 Text("Failed during: \(step)")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             }
 
@@ -464,7 +464,7 @@ struct WaveDetailPanel: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.caption)
+                        .font(Typography.caption())
                     Text("Retry")
                 }
             }
@@ -475,14 +475,14 @@ struct WaveDetailPanel: View {
     private var liveOutputSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(wave.status == .running ? "Live Output" : "Output")
-                .font(.caption)
+                .font(Typography.caption())
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
             let output = outputBuffer.output(for: wave.id)
             if output.isEmpty {
                 Text("Waiting for output…")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
@@ -500,7 +500,7 @@ struct WaveDetailPanel: View {
     private var commitLogSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Commits")
-                .font(.caption)
+                .font(Typography.caption())
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
@@ -508,12 +508,12 @@ struct WaveDetailPanel: View {
                 ForEach(wave.commits) { entry in
                     HStack(spacing: Spacing.sm) {
                         Text(entry.sha)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(Typography.codeSmall())
                             .foregroundStyle(.secondary)
                             .frame(width: 60, alignment: .leading)
 
                         Text(entry.message)
-                            .font(.caption)
+                            .font(Typography.caption())
                             .lineLimit(1)
                             .truncationMode(.tail)
 
@@ -535,7 +535,7 @@ struct WaveDetailPanel: View {
     private func diffStatSection(_ stat: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Diff")
-                .font(.caption)
+                .font(Typography.caption())
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
@@ -544,7 +544,7 @@ struct WaveDetailPanel: View {
                     coloredDiffStatLine(line)
                 }
             }
-            .font(.system(.caption2, design: .monospaced))
+            .font(Typography.codeSmall())
             .textSelection(.enabled)
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -602,7 +602,7 @@ struct WaveDetailPanel: View {
                 Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                     .foregroundStyle(.secondary)
                 Text("\(wave.commits.count) commit\(wave.commits.count == 1 ? "" : "s")")
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .foregroundStyle(.secondary)
             }
 
@@ -615,7 +615,7 @@ struct WaveDetailPanel: View {
                 } label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "arrow.up.right.square")
-                            .font(.caption)
+                            .font(Typography.caption())
                         Text("View PR")
                     }
                 }
@@ -632,7 +632,7 @@ struct WaveDetailPanel: View {
                             .scaleEffect(0.6)
                     } else {
                         Image(systemName: "arrow.merge")
-                            .font(.caption)
+                            .font(Typography.caption())
                     }
                     Text("Land")
                 }
@@ -646,7 +646,7 @@ struct WaveDetailPanel: View {
             } label: {
                 HStack(spacing: Spacing.xs) {
                     Image(systemName: "arrow.forward.circle")
-                        .font(.caption)
+                        .font(Typography.caption())
                     Text("Next")
                 }
             }

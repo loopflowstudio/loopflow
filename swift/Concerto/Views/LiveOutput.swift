@@ -13,7 +13,7 @@ struct LiveOutput: View {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     ForEach(recentLines) { line in
                         Text(line.text)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(Typography.codeSmall(10))
                             .foregroundStyle(colorFor(line.text))
                             .lineLimit(1)
                             .truncationMode(.tail)

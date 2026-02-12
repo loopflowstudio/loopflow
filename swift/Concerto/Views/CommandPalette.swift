@@ -59,7 +59,7 @@ struct CommandPalette: View {
 
                 TextField("Search actions...", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 16))
+                    .font(Typography.body(16))
                     .focused($isSearchFocused)
                     .onSubmit {
                         guard selectedIndex < filteredActions.count else { return }
@@ -77,7 +77,7 @@ struct CommandPalette: View {
                 }
 
                 Text("⌘K")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -93,7 +93,7 @@ struct CommandPalette: View {
             if filteredActions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .font(.title2)
+                        .font(Typography.sectionTitle())
                         .foregroundStyle(.tertiary)
                     Text("No matching actions")
                         .foregroundStyle(.secondary)
@@ -132,7 +132,7 @@ struct CommandPalette: View {
                 Label("select", systemImage: "return")
                 Label("close", systemImage: "escape")
             }
-            .font(.caption2)
+            .font(Typography.caption(10))
             .foregroundStyle(.tertiary)
             .padding(.vertical, 8)
         }
@@ -190,7 +190,7 @@ private struct ActionRow: View {
 
             if let shortcut = action.shortcut {
                 Text(shortcut)
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)

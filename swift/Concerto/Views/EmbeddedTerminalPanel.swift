@@ -37,7 +37,7 @@ struct EmbeddedTerminalPanel: View {
     private var terminalHeader: some View {
         HStack {
             Image(systemName: "terminal")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             if let wave = repoState.selectedWave, wave.status == .running {
@@ -46,7 +46,7 @@ struct EmbeddedTerminalPanel: View {
                     .frame(width: 8, height: 8)
 
                 Text("running")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             } else {
                 Circle()
@@ -54,7 +54,7 @@ struct EmbeddedTerminalPanel: View {
                     .frame(width: 8, height: 8)
 
                 Text("idle")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             }
 
@@ -64,7 +64,7 @@ struct EmbeddedTerminalPanel: View {
             switch ghosttyManager.state {
             case .uninitialized:
                 Text("Terminal not initialized")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .foregroundStyle(.tertiary)
             case .initializing:
                 ProgressView()
@@ -73,7 +73,7 @@ struct EmbeddedTerminalPanel: View {
                 EmptyView()
             case .failed(let error):
                 Label("Error", systemImage: "exclamationmark.triangle")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .foregroundStyle(Color.statusError)
                     .help(error)
             }
@@ -85,7 +85,7 @@ struct EmbeddedTerminalPanel: View {
                 }
             } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
-                    .font(.caption)
+                    .font(Typography.caption())
             }
             .buttonStyle(.plain)
             .help(isExpanded ? "Collapse" : "Expand")

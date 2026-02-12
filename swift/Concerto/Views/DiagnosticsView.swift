@@ -9,7 +9,7 @@ struct DiagnosticsView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Diagnostics")
-                    .font(.headline)
+                    .font(Typography.sectionTitle())
                 Spacer()
                 Button("Refresh") {
                     loadLogs()
@@ -20,11 +20,11 @@ struct DiagnosticsView: View {
             }
 
             Text("Log file: \(LoggingService.logPath())")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             TextEditor(text: $logText)
-                .font(.system(.body, design: .monospaced))
+                .font(Typography.code())
                 .frame(minHeight: 300)
                 .background(Color(.textBackgroundColor))
                 .cornerRadius(8)

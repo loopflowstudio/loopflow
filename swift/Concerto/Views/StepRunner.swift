@@ -4,13 +4,58 @@ import SwiftUI
 import LoopflowCore
 
 struct StepRunner: View {
+    private enum AutoMode: String, CaseIterable {
+        case loop
+        case watch
+        case cron
+
+        init(stimulus kind: Stimulus.Kind) {
+            switch kind {
+            case .loop:
+                self = .loop
+            case .watch:
+                self = .watch
+            case .cron:
+                self = .cron
+            case .once, .manual:
+                self = .loop
+            }
+        }
+
+        var stimulusKind: Stimulus.Kind {
+            switch self {
+            case .loop:
+                return .loop
+            case .watch:
+                return .watch
+            case .cron:
+                return .cron
+            }
+        }
+
+        var label: String {
+            self == .cron ? "Schedule" : rawValue.capitalized
+        }
+
+        var icon: String {
+            switch self {
+            case .loop:
+                return "repeat"
+            case .watch:
+                return "eye"
+            case .cron:
+                return "clock"
+            }
+        }
+    }
+
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedFlow: String = ""
-    @State private var autoMode: Stimulus.Kind = .loop
+    @State private var autoMode: AutoMode = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
     @State private var isSendingRun = false
@@ -18,7 +63,6 @@ struct StepRunner: View {
     @State private var showingError = false
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
-    private static let autoModeKinds: [Stimulus.Kind] = [.loop, .watch, .cron]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -52,7 +96,7 @@ struct StepRunner: View {
         }
         .onAppear {
             selectedFlow = wave.flow
-            autoMode = normalizedAutoMode(from: wave.stimulus.kind)
+            autoMode = AutoMode(stimulus: wave.stimulus.kind)
             if let cron = wave.stimulus.cron {
                 cronExpression = cron
             }
@@ -127,21 +171,6 @@ struct StepRunner: View {
         isSendingRun || selectedFlow.isEmpty || wave.status == .running || wave.status == .waiting
     }
 
-    private func autoLabel(for kind: Stimulus.Kind) -> String {
-        kind == .cron ? "Schedule" : kind.rawValue.capitalized
-    }
-
-    private func autoIcon(for kind: Stimulus.Kind) -> String {
-        switch kind {
-        case .loop: return "repeat"
-        case .watch: return "eye"
-        case .cron: return "clock"
-        case .once, .manual:
-            assertionFailure("autoIcon called with non-auto kind: \(kind)")
-            return "repeat"
-        }
-    }
-
     private var runButton: some View {
         Button {
             runWith(stimulus: .once)
@@ -170,11 +199,11 @@ struct StepRunner: View {
     private var autoButton: some View {
         HStack(spacing: 0) {
             Button {
-                runWith(stimulus: autoMode)
+                runWith(stimulus: autoMode.stimulusKind)
             } label: {
                 HStack(spacing: Spacing.sm) {
-                    Image(systemName: autoIcon(for: autoMode))
-                    Text(autoLabel(for: autoMode))
+                    Image(systemName: autoMode.icon)
+                    Text(autoMode.label)
                         .fontWeight(.semibold)
                 }
                 .padding(.vertical, Spacing.lg)
@@ -188,9 +217,9 @@ struct StepRunner: View {
                 .frame(width: 1, height: 20)
 
             Menu {
-                ForEach(Self.autoModeKinds, id: \.rawValue) { kind in
+                ForEach(AutoMode.allCases, id: \.rawValue) { kind in
                     Button { autoMode = kind } label: {
-                        Label(autoLabel(for: kind), systemImage: autoIcon(for: kind))
+                        Label(kind.label, systemImage: kind.icon)
                     }
                 }
             } label: {
@@ -210,15 +239,6 @@ struct StepRunner: View {
     }
 
     // MARK: - Actions
-
-    private func normalizedAutoMode(from kind: Stimulus.Kind) -> Stimulus.Kind {
-        switch kind {
-        case .loop, .watch, .cron:
-            return kind
-        case .once, .manual:
-            return .loop
-        }
-    }
 
     private func runWith(stimulus kind: Stimulus.Kind) {
         guard !selectedFlow.isEmpty else { return }

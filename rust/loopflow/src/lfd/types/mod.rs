@@ -6,9 +6,11 @@
 mod agent;
 mod event;
 mod stimulus;
+mod summary;
 mod wave;
 
 pub use agent::{Agent, AgentStatus};
 pub use event::Event;
 pub use stimulus::{PendingActivation, Stimulus, StimulusKind};
+pub use summary::Summary;
 pub use wave::{PullRequest, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus};

@@ -444,6 +444,23 @@ pub fn land(
     })
 }
 
+/// Hash the contents of areas in a repo using git ls-tree.
+///
+/// Returns a hex-encoded SHA-256 digest of the `git ls-tree` output for the
+/// given paths. Changes to any file in any area will produce a different hash.
+/// Fast: reads from the git index, no file I/O.
+pub fn hash_areas(repo: &Path, areas: &[String]) -> Result<String, GitError> {
+    use sha2::{Digest, Sha256};
+
+    let mut args = vec!["ls-tree", "-r", "HEAD", "--"];
+    for area in areas {
+        args.push(area);
+    }
+    let output = git_stdout(repo, &args)?;
+    let digest = Sha256::digest(output.as_bytes());
+    Ok(hex::encode(digest))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,5 +749,38 @@ mod tests {
 
         // Clean up
         worktree_remove(repo.path(), &wt_path).expect("remove worktree");
+    }
+
+    #[test]
+    fn hash_areas_returns_stable_digest() {
+        let repo = init_repo();
+        let src = repo.path().join("src");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("lib.rs"), "fn main() {}").unwrap();
+        git_stdout(repo.path(), &["add", "."]).unwrap();
+        git_stdout(repo.path(), &["commit", "-m", "init"]).unwrap();
+
+        let h1 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
+        let h2 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
+        assert_eq!(h1, h2, "same content should produce same hash");
+        assert_eq!(h1.len(), 64, "SHA-256 hex digest should be 64 chars");
+    }
+
+    #[test]
+    fn hash_areas_changes_when_file_changes() {
+        let repo = init_repo();
+        let src = repo.path().join("src");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("lib.rs"), "v1").unwrap();
+        git_stdout(repo.path(), &["add", "."]).unwrap();
+        git_stdout(repo.path(), &["commit", "-m", "v1"]).unwrap();
+        let h1 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
+
+        fs::write(src.join("lib.rs"), "v2").unwrap();
+        git_stdout(repo.path(), &["add", "."]).unwrap();
+        git_stdout(repo.path(), &["commit", "-m", "v2"]).unwrap();
+        let h2 = hash_areas(repo.path(), &["src/".to_string()]).unwrap();
+
+        assert_ne!(h1, h2, "different content should produce different hash");
     }
 }

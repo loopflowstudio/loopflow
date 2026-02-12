@@ -1,4 +1,4 @@
-Summarize this codebase for LLM context. Target: {token_budget} tokens.
+Summarize this codebase area for LLM context. Target: {token_budget} tokens.
 
 Prioritize:
 1. **Data structures** - Core types with field annotations
@@ -8,6 +8,8 @@ Prioritize:
 
 Format as dense markdown. No fluff. Code blocks for types/signatures.
 Omit implementation details unless they're critical to understanding.
+
+Write your summary to `.lf/summary.md`. Create the `.lf/` directory if it doesn't exist.
 
 <source>
 {content}

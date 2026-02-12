@@ -35,6 +35,10 @@ class Screenshot:
     window_size: tuple[int, int] | None = None
     select_branch: str | None = None
     mock_loops: bool = False
+    mock_config: str | None = None
+    select_tab: str | None = None
+    # Persona filtering
+    directions: list[str] = field(default_factory=list)
     # UI test options
     ui_test_mode: str | None = None
     ui_test_select_branch: str | None = None
@@ -62,6 +66,9 @@ def load_manifest(path: Path) -> Manifest:
                 window_size=tuple(size) if size else None,
                 select_branch=shot.get("select_branch"),
                 mock_loops=shot.get("mock_loops", False),
+                mock_config=shot.get("mock_config"),
+                select_tab=shot.get("select_tab"),
+                directions=shot.get("directions", []),
                 ui_test_mode=shot.get("ui_test_mode"),
                 ui_test_select_branch=shot.get("ui_test_select_branch"),
                 ui_test_delay=shot.get("ui_test_delay"),
@@ -387,6 +394,12 @@ def snapshot_swift_screenshot(
     if shot.mock_loops:
         args.append("--mock-loops")
 
+    if shot.mock_config:
+        args.extend(["--mock-config", shot.mock_config])
+
+    if shot.select_tab:
+        args.extend(["--tab", shot.select_tab])
+
     print(f"Snapshotting {shot.name} (Concerto)...")
     log_path = log_dir / f"{shot.name}.log" if log_dir else None
     start = datetime.now()
@@ -549,6 +562,11 @@ def main() -> None:
         help="Timeout (seconds) per UI test screenshot",
     )
     parser.add_argument(
+        "--direction",
+        "-d",
+        help="Only generate screenshots tagged with this direction (e.g. conductor)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Stream xcodebuild output",
@@ -580,6 +598,10 @@ def main() -> None:
         screenshots = [s for s in screenshots if s.type == "snapshot"]
     elif args.ui_test_only:
         screenshots = [s for s in screenshots if s.type == "uitest"]
+
+    # Filter by direction
+    if args.direction:
+        screenshots = [s for s in screenshots if args.direction in s.directions]
 
     # Setup for Concerto snapshots
     snapshot_screenshots = [s for s in screenshots if s.type == "snapshot"]

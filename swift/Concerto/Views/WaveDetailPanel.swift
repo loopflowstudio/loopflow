@@ -16,6 +16,7 @@ struct WaveDetailPanel: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.screenshotTab) private var screenshotTab
 
     @State private var actionError: String?
     @State private var showingActionError = false
@@ -24,6 +25,7 @@ struct WaveDetailPanel: View {
     @State private var isEditingName = false
     @State private var currentTime = Date()
     @State private var selectedTab: DetailTab = .current
+    @State private var hasAppliedScreenshotTab = false
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
@@ -80,6 +82,12 @@ struct WaveDetailPanel: View {
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
             repoState.loadRuns(for: wave.id)
+            if !hasAppliedScreenshotTab, let tab = screenshotTab {
+                hasAppliedScreenshotTab = true
+                if let match = DetailTab.allCases.first(where: { $0.rawValue.lowercased() == tab.lowercased() }) {
+                    selectedTab = match
+                }
+            }
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)

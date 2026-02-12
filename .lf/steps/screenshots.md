@@ -6,7 +6,7 @@ Generate fresh Concerto screenshots and commit results.
 
 ## Workflow
 
-1. Run the screenshot generator:
+1. Run the screenshot generator (pass `--direction <name>` if provided as a step argument):
    ```bash
    uv run python scripts/generate_screenshots.py
    ```

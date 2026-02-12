@@ -54,7 +54,7 @@ struct EmbeddedTerminalPanel: View {
                     .foregroundStyle(.secondary)
             } else {
                 Circle()
-                    .fill(.gray)
+                    .fill(Color.statusNeutral)
                     .frame(width: 8, height: 8)
 
                 Text("idle")

@@ -1,62 +1,68 @@
-# Typography Tokens — Review
+# Viz Phases 1-3 + Typography — Review
 
 Branch: `jack-heart.viz.20260212_1509`
 
 ## What was implemented
 
-Font bundling and typography token adoption across the entire Concerto UI. This closes the single biggest visual gap between the design system (VISUAL_DESIGN.md) and the running app — every view now renders in the specified font families instead of SF Pro.
+Phases 1-3 of the viz roadmap plus the first Phase 4 polish item (typography tokens). The branch transforms Concerto from system fonts and scattered color references to a fully tokenized design system.
 
-### Font bundling
-- 6 font files (~2MB total) added to `Concerto/Fonts/`: Cormorant Garamond (Regular, Medium, SemiBold), Lato (Regular, Bold), JetBrains Mono (Regular)
-- Runtime registration via `CTFontManagerRegisterFontsForURL(.process)` in `ConcertoApp.init()` — works for both SPM and xcodegen builds
-- `Package.swift` excludes `Fonts/` from source compilation, includes as `.copy` resource
-- `project.yml` excludes `Fonts/` from xcodegen sources
+### Phase 1: Screenshot workflow
+- Decoupled screenshot generation from publish (`lf screenshots` step)
+- Screenshot coverage: `directions` tags, `--direction`/`--mock-config`/`--tab` flags, 3 new states
 
-### Typography token migration
-- All ~160 system font calls replaced with `Typography` tokens across 26 view files
-- Five tokens: `heroTitle()`, `sectionTitle()`, `body()`, `caption()`, `code()` — each accepts an optional size parameter
-- Compress pass collapsed `codeSmall()` into `code()` with size parameter, removed unused `bodyBold()`
-- `DarkButtonStyle` migrated from `.font(.subheadline)` to `Typography.body()`
-- WaveRow's inline `.custom("Cormorant Garamond", size: 11)` migrated to `Typography.caption(11)`
+### Phase 2: Research & audit
+- Docs inventory in `reports/viz/`, stale reports deleted
+- Codebase summary (`.lf/summary.md`)
+- Visual research and design audit in `reports/viz/`
 
-### Verification
-- Zero system font calls remain in `swift/Concerto/Views/` (verified via grep)
-- `swift build --package-path swift` succeeds
-- `swift test --package-path swift` passes (97 tests)
-- `cargo test --all` passes, `cargo fmt` and `cargo clippy` clean
+### Phase 3: Theming system
+- `statusNeutral` token added; ~30 system color references replaced with status tokens
+- Environment-based palette injection (`@Environment(\.palette)`) — 17 views migrated
+- Three palette variants: light, dark, deep wine
+- `ThemePreview` for side-by-side comparison in Xcode previews
+- Compress pass inlined palette hex values, deleted dead `make(for:)` factory
+
+### Phase 4: Typography tokens (Tier 2)
+- 6 font files bundled (~2MB): Cormorant Garamond (Regular/Medium/SemiBold), Lato (Regular/Bold), JetBrains Mono (Regular)
+- Runtime registration via `CTFontManagerRegisterFontsForURL(.process)` — works for both SPM and xcodegen
+- All ~160 system font calls replaced with 5 Typography tokens across 26 files
+- Compress pass collapsed `codeSmall()` into `code(size:)`, removed unused `bodyBold()`
 
 ## Key choices
 
-**Runtime registration over Info.plist `ATSApplicationFontsPath`.** The plist approach only works for Xcode `.app` bundles, not SPM `swift build`. `CTFontManagerRegisterFontsForURL` with `.process` scope works identically for both build paths. ~15 lines in `ConcertoApp.init()`.
+**Environment injection for palette.** Enables multi-theme previews — the core requirement for fast visual iteration. One injection point at app root, all views read `@Environment(\.palette)`.
 
-**Minimal weight subset (6 files, not 46).** Only weights actually used by Typography tokens are bundled: Regular/Medium/SemiBold for Cormorant Garamond, Regular/Bold for Lato, Regular for JetBrains Mono. Italic Cormorant reserved for future "special moments" per VISUAL_DESIGN.md.
+**Three palettes: light, dark, deep wine.** Light and dark are production. Deep wine tests whether burgundy can go moodier.
 
-**Five tokens, not more.** `heroTitle`, `sectionTitle`, `body`, `caption`, `code` cover all usage patterns. Weight variants handled by SwiftUI's `.weight()` modifier. `.monospacedDigit()` stays as a chained modifier — orthogonal to font family.
+**Runtime font registration over Info.plist.** `CTFontManagerRegisterFontsForURL` with `.process` scope works for both `swift build` (SPM) and `xcodebuild` (xcodegen). Info.plist only works for Xcode .app bundles.
 
-**`codeSmall` collapsed into `code` during compress.** The separate token existed briefly but added no value — `code(10)` is clearer than `codeSmall()`. Similarly, `bodyBold` was removed in favor of `body().weight(.bold)`.
+**Minimal font subset (6 files, not 46).** Only weights used by Typography tokens. Italic Cormorant reserved for future "special moments" per VISUAL_DESIGN.md.
 
-**One-pass migration.** Same rationale as the palette migration: doing it incrementally creates a half-migrated codebase. All 26 files changed in one commit, compress pass immediately after.
+**Five typography tokens.** `heroTitle`, `sectionTitle`, `body`, `caption`, `code` — each with parameterized size. Weight variants via SwiftUI's `.weight()` modifier. `.monospacedDigit()` stays as chained modifier.
+
+**One-pass migrations.** Both palette and typography migrated all views in single commits. Incremental migration creates half-migrated codebases.
+
+**Inline hex values.** Compress pass removed intermediate named colors (`loopflowCreamElevated`, etc.) that added indirection without value.
 
 ## How it fits together
 
-**Font flow**: Font files in `Concerto/Fonts/` → `registerBundledFonts()` at app launch → fonts available process-wide → `Typography` enum references them by family name → all views use Typography tokens.
+**Color flow**: `VISUAL_DESIGN.md` → `StatusColors.swift` → model files → views via `@Environment(\.palette)`
 
-**Token hierarchy**: `heroTitle` (serif, 32pt default) → `sectionTitle` (serif, 20pt) → `body` (sans, 14pt) → `caption` (sans, 12pt) → `code` (mono, 13pt). Each token maps to one font family, sizes are parameterized.
+**Font flow**: Font files in `Concerto/Fonts/` → `registerBundledFonts()` at app launch → `Typography` enum → all views
 
-**Builds on Phase 3**: The palette migration (`@Environment(\.palette)`) is a prerequisite — views already use environment-injected design tokens. Typography follows the same pattern: centralized definitions, used everywhere.
+**Token hierarchy**: `heroTitle` (serif, 32pt) → `sectionTitle` (serif, 20pt) → `body` (sans, 14pt) → `caption` (sans, 12pt) → `code` (mono, 13pt)
 
-## Risks and bottlenecks
+**Fast iteration**: Change hex in `BrandColors.swift` → all views update. Use `ThemePreview` for side-by-side comparison.
 
-- **Font registration failure is silent.** If `Bundle.module.url` returns nil for a font file, registration is skipped with `continue`. The app falls back to system fonts for that family — degraded but functional. Could add logging but the failure mode is benign.
+## Risks
 
-- **Custom fonts in SwiftUI `.weight()` may not resolve all weights.** If SwiftUI can't find the exact weight file (e.g., `.semibold` requests CormorantGaramond-SemiBold), it may synthesize the weight. This is a SwiftUI limitation, not a bug — the correct files are bundled.
+- **Deep wine contrast untested with real data.** Secondary text (`#C8B0A8`) on deep wine surfaces needs verification.
+- **Font registration failure is silent.** Falls back to system fonts — degraded but functional.
+- **Custom fonts + `.weight()` may synthesize weights.** SwiftUI limitation when exact weight file isn't found.
+- **Duplicate `Color.init(hex:)` across modules.** Pre-existing; compiles because separate modules.
 
-- **Duplicate `Color.init(hex:)` across modules.** Both `StatusColors.swift` (LoopflowCore) and `BrandColors.swift` (Concerto) define this initializer. Pre-existing, compiles because they're in separate modules. Not addressed on this branch.
+## What's next (Phase 4 remaining)
 
-## What's not included
-
-- Italic Cormorant Garamond (no current use case)
-- Typography for LoopflowCore (no views in that module)
-- Ghostty terminal font (separate rendering engine, not SwiftUI)
-- Font weight tokens (SwiftUI's `.weight()` modifier suffices)
-- Runtime font fallback detection or logging
+- Tier 3: Button hierarchy — `GhostButtonStyle`, `DestructiveButtonStyle` (~60 lines)
+- Tier 4: Corner radius / spacing token cleanup (~25 lines)
+- Detail view density, empty states, sidebar headers, flow badge density

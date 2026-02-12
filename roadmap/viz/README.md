@@ -7,7 +7,7 @@ Improve Concerto's visual design through the feedback loop defined in VISUAL_DES
 | Phase | Focus | Status |
 |-------|-------|--------|
 | 1 | Screenshot workflow | Done |
-| 2 | Research & audit | Future |
+| 2 | Research & audit | In Progress |
 | 3 | Theming & tooling | Future |
 | 4 | Polish | Future |
 
@@ -26,7 +26,7 @@ Understand what great looks like, find gaps between VISUAL_DESIGN.md and the app
 
 | Item | What it does |
 |------|--------------|
-| [03-visual-research](03-visual-research.md) | Research patterns from Notion, Figma, Linear, Arc |
+| ~~03-visual-research~~ | Research patterns from Notion, Figma, Linear, Arc |
 | [04-design-audit](04-design-audit.md) | Audit current design against VISUAL_DESIGN.md |
 | ~~05-docs-inventory~~ | Consolidate existing design docs |
 

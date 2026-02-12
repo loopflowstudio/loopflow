@@ -135,8 +135,40 @@ struct DarkButtonStyle: ButtonStyle {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(configuration.isPressed ? palette.accentHover : palette.accent)
+            )
+    }
+}
+
+struct GhostButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Typography.body())
+            .foregroundStyle(palette.accent)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .fill(configuration.isPressed ? palette.surfaceMuted : Color.clear)
+            )
+    }
+}
+
+struct DestructiveButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Typography.body())
+            .foregroundStyle(Color.statusError)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .strokeBorder(Color.statusError.opacity(configuration.isPressed ? 0.8 : 0.5), lineWidth: 1)
             )
     }
 }

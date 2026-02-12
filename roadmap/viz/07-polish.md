@@ -13,9 +13,7 @@ Prioritized by visual impact per line changed. Full details in `reports/viz/desi
 
 ### ~~Tier 1: Status color tokens~~ (done in Phase 3)
 
-### Tier 2: Typography tokens (~150 lines, needs font bundling)
-- Bundle Cormorant Garamond, Lato, JetBrains Mono in app resources
-- Replace ~150 system font calls with `Typography` tokens across all views
+### ~~Tier 2: Typography tokens~~ (done — fonts bundled, 160 system font calls replaced)
 
 ### Tier 3: Button hierarchy (~60 lines)
 - Add `GhostButtonStyle` and `DestructiveButtonStyle` to `DesignSystem.swift`

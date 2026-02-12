@@ -1,5 +1,5 @@
 ---
-status: todo
+status: in-progress
 phase: 4
 ---
 
@@ -11,9 +11,7 @@ Small, focused diffs (20-200 lines each). One change per PR. Driven by findings 
 
 Prioritized by visual impact per line changed. Full details in `reports/viz/design-audit.md`.
 
-### Tier 1: Status color tokens (~45 lines)
-- Add `statusNeutral` token to `StatusColors.swift` and `VISUAL_DESIGN.md`
-- Replace `.gray`/`.blue`/`.orange`/`.purple` with design tokens in `Wave.swift`, `WaveRun.swift`, and 10 views
+### ~~Tier 1: Status color tokens~~ (done in Phase 3)
 
 ### Tier 2: Typography tokens (~150 lines, needs font bundling)
 - Bundle Cormorant Garamond, Lato, JetBrains Mono in app resources

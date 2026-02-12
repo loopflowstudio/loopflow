@@ -26,12 +26,12 @@ struct QuickExperimentSidebarView: View {
         VStack(spacing: Spacing.md) {
             VStack(spacing: Spacing.xs) {
                 Text("Quick Experiment")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .fontWeight(.semibold)
                     .foregroundStyle(.white.opacity(0.8))
 
                 Text("Run a step on your codebase")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .foregroundStyle(.white.opacity(0.5))
             }
 
@@ -42,7 +42,7 @@ struct QuickExperimentSidebarView: View {
                         onLaunchStep?(step)
                     } label: {
                         Text(step)
-                            .font(.caption)
+                            .font(Typography.caption())
                             .fontWeight(.medium)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, Spacing.sm)
@@ -65,7 +65,7 @@ struct SidebarPreviewView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Or create a wave for ongoing work")
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .foregroundStyle(.white.opacity(0.5))
                 .padding(.bottom, Spacing.xs)
 
@@ -84,11 +84,11 @@ struct SidebarPreviewView: View {
     private func previewSection(_ title: String, icon: String, color: Color) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: icon)
-                .font(.system(size: 8))
+                .font(Typography.caption(8))
                 .foregroundStyle(color.opacity(0.6))
 
             Text(title)
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .foregroundStyle(.white.opacity(0.4))
         }
     }
@@ -111,15 +111,15 @@ struct QuickExperimentDetailView: View {
             VStack(spacing: Spacing.lg) {
                 VStack(spacing: Spacing.sm) {
                     Image(systemName: "bolt.fill")
-                        .font(.system(size: 32))
+                        .font(Typography.heroTitle())
                         .foregroundStyle(palette.accent)
 
                     Text("Quick Experiment")
-                        .font(.title2)
+                        .font(Typography.sectionTitle())
                         .fontWeight(.semibold)
 
                     Text("Run a step on the entire codebase")
-                        .font(.subheadline)
+                        .font(Typography.body())
                         .foregroundStyle(.secondary)
                 }
 
@@ -131,11 +131,11 @@ struct QuickExperimentDetailView: View {
                         } label: {
                             VStack(spacing: Spacing.xs) {
                                 Text(step.name)
-                                    .font(.headline)
+                                    .font(Typography.sectionTitle())
                                     .fontWeight(.semibold)
 
                                 Text(step.description)
-                                    .font(.caption)
+                                    .font(Typography.caption())
                                     .foregroundStyle(.secondary)
                             }
                             .frame(width: 120)
@@ -156,7 +156,7 @@ struct QuickExperimentDetailView: View {
                     .frame(maxWidth: 100)
 
                 Text("or")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.tertiary)
 
                 Rectangle()
@@ -168,11 +168,11 @@ struct QuickExperimentDetailView: View {
             // Select wave hint
             VStack(spacing: Spacing.sm) {
                 Text("Select a wave from the sidebar")
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .foregroundStyle(.secondary)
 
                 Text("Waves track ongoing work with branches, PRs, and history")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.tertiary)
             }
 

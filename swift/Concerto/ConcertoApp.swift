@@ -2,6 +2,7 @@
 // macOS 15+ native app for managing waves and launching LLM coding sessions.
 
 import SwiftUI
+import CoreText
 import LoopflowCore
 
 @main
@@ -14,8 +15,26 @@ struct ConcertoApp: App {
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
+        Self.registerBundledFonts()
         Task {
             try? await NotificationService.shared.requestAuthorization()
+        }
+    }
+
+    private static func registerBundledFonts() {
+        let fontFiles = [
+            "CormorantGaramond-Regular.otf",
+            "CormorantGaramond-Medium.otf",
+            "CormorantGaramond-SemiBold.otf",
+            "Lato-Regular.ttf",
+            "Lato-Bold.ttf",
+            "JetBrainsMono-Regular.ttf",
+        ]
+        for file in fontFiles {
+            guard let url = Bundle.module.url(forResource: file, withExtension: nil, subdirectory: "Fonts") else {
+                continue
+            }
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }
     }
 

@@ -16,18 +16,18 @@ struct WaitingStateCard: View {
                 Image(systemName: "pause.circle.fill")
                     .foregroundStyle(Color.statusWarning)
                 Text("Waiting")
-                    .font(.headline)
+                    .font(Typography.sectionTitle())
             }
 
             if let reason = wave.waitingReason {
                 Text(reason.description)
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .accessibilityLabel(reason.accessibilityDescription)
             } else {
                 Text("PR limit reached")
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .foregroundStyle(.secondary)
             }
 
@@ -41,7 +41,7 @@ struct WaitingStateCard: View {
                 .accessibilityLabel("Review open pull requests")
 
                 Text("Use the Runs tab to collapse or absorb PRs.")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             }
         }

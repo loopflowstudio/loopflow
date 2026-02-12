@@ -25,7 +25,7 @@ struct NextActionsBar: View {
                     .foregroundStyle(Color.statusSuccess)
 
                 Text("\(stepsRunCount) step\(stepsRunCount == 1 ? "" : "s") run")
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .foregroundStyle(.secondary)
             }
 
@@ -41,7 +41,7 @@ struct NextActionsBar: View {
                             .scaleEffect(0.6)
                     } else {
                         Image(systemName: "archivebox")
-                            .font(.caption)
+                            .font(Typography.caption())
                     }
                     Text("Archive")
                 }

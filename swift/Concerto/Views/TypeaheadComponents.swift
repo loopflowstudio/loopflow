@@ -125,18 +125,18 @@ struct TypeaheadChip: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(Typography.caption(10))
                 .foregroundStyle(palette.accent)
 
             Text(label)
-                .font(.system(size: 12, design: .monospaced))
+                .font(Typography.code(12))
                 .lineLimit(1)
 
             Button {
                 onRemove()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.caption(9)).fontWeight(.semibold)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)

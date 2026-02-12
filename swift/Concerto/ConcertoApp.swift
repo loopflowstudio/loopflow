@@ -53,25 +53,21 @@ struct ConcertoApp: App {
 
         // Welcome/main window - shown on launch
         WindowGroup {
-            if let screenshot = screenshotMode {
-                ScreenshotWindow(mode: screenshot, recentsService: recentsService)
-                    .tint(.loopflowBurgundy)
-                    .preferredColorScheme(preferredScheme)
-                    .environment(\.palette, resolvedPalette)
-            } else if uiTestMode != nil {
-                RepoWindow(
-                    repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
-                    recentsService: recentsService
-                )
-                .tint(.loopflowBurgundy)
-                .preferredColorScheme(preferredScheme)
-                .environment(\.palette, resolvedPalette)
-            } else {
-                WelcomeWindow(recentsService: recentsService)
-                    .tint(.loopflowBurgundy)
-                    .preferredColorScheme(preferredScheme)
-                    .environment(\.palette, resolvedPalette)
+            Group {
+                if let screenshot = screenshotMode {
+                    ScreenshotWindow(mode: screenshot, recentsService: recentsService)
+                } else if uiTestMode != nil {
+                    RepoWindow(
+                        repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
+                        recentsService: recentsService
+                    )
+                } else {
+                    WelcomeWindow(recentsService: recentsService)
+                }
             }
+            .tint(.loopflowBurgundy)
+            .preferredColorScheme(preferredScheme)
+            .environment(\.palette, resolvedPalette)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 500, height: 400)

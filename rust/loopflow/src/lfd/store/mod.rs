@@ -3,8 +3,9 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Agent, PendingActivation, Stimulus, Summary, Wave, WaveRun};
 
+pub mod migrations;
 pub mod postgres;
-pub mod schema;
+pub mod rows;
 pub mod sqlite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

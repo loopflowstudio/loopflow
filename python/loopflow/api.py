@@ -69,12 +69,14 @@ def run_wave(
     flow: Optional[str] = None,
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
+    stimulus: Optional[Stimulus] = None,
 ) -> dict[str, Any]:
     return _client().run_wave(
         name_or_id,
         flow=flow,
         direction=direction,
         area=area,
+        stimulus=stimulus,
     )
 
 

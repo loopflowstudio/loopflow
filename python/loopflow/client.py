@@ -103,6 +103,7 @@ class Client:
         flow: Optional[str] = None,
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
+        stimulus: Optional[Stimulus] = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {}
         if flow is not None:
@@ -111,6 +112,8 @@ class Client:
             body["direction"] = direction
         if area is not None:
             body["area"] = area
+        if stimulus is not None:
+            body["stimulus"] = stimulus.model_dump(exclude_none=True)
         return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
 
     def stop_wave(self, name_or_id: str) -> dict[str, Any]:

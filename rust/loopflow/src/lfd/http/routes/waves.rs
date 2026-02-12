@@ -23,7 +23,9 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
-use crate::lfd::types::{AgentStatus, Event, Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{
+    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
+};
 
 #[derive(Deserialize)]
 pub struct ListWavesQuery {
@@ -103,6 +105,13 @@ pub struct RunWaveRequest {
     area: Option<Vec<String>>,
     direction: Option<Vec<String>>,
     flow: Option<String>,
+    stimulus: Option<RunWaveStimulus>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunWaveStimulus {
+    kind: StimulusKind,
+    cron: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -422,6 +431,35 @@ pub async fn run_wave_handler(
     run_store(&state.store, move |store| store.update_wave(&wave_clone))
         .await
         .map_err(map_store_error)?;
+
+    // Upsert stimulus for the wave when provided.
+    if let Some(stim) = payload.stimulus {
+        let wave_id_for_stim = wave.id.clone();
+        run_store(&state.store, move |store| {
+            let existing = store.list_stimuli(Some(&wave_id_for_stim))?;
+            if let Some(mut s) = existing.into_iter().next() {
+                s.kind = stim.kind;
+                s.cron = stim.cron.unwrap_or_default();
+                s.enabled = stim.kind != StimulusKind::Once;
+                store.update_stimulus(&s)?;
+            } else {
+                let s = Stimulus {
+                    id: LfdId::new(),
+                    wave_id: wave_id_for_stim,
+                    kind: stim.kind,
+                    cron: stim.cron.unwrap_or_default(),
+                    last_main_sha: None,
+                    last_triggered_at: None,
+                    enabled: stim.kind != StimulusKind::Once,
+                    created_at: Some(OffsetDateTime::now_utc()),
+                };
+                store.create_stimulus(&s)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(map_store_error)?;
+    }
 
     let run_id = LfdId::new();
     let (acquired, _) = state.scheduler.acquire(run_id.as_str()).await;

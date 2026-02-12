@@ -35,6 +35,7 @@ targets:
       - path: Concerto
         excludes:
           - Info.plist
+          - Fonts
     dependencies:
       - target: LoopflowCore
       # GhosttyKit is available via SPM binary target. For local development with

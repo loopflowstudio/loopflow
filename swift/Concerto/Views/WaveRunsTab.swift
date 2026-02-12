@@ -39,13 +39,13 @@ struct WaveRunsTab: View {
 
             if let actionError {
                 Text(actionError)
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(Color.statusError)
             }
 
             if let actionSuccess {
                 Label(actionSuccess, systemImage: "checkmark.circle.fill")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(Color.statusSuccess)
                     .padding(.horizontal, Spacing.sm)
                     .padding(.vertical, Spacing.xs)
@@ -56,7 +56,7 @@ struct WaveRunsTab: View {
 
             if runs.isEmpty {
                 Text("No runs yet")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(sortedRuns) { run in
@@ -94,10 +94,10 @@ struct WaveRunsTab: View {
         HStack {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("\(openPRRuns.count) open PRs")
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .fontWeight(.medium)
                 Text("Combine into a single PR")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             }
 
@@ -126,10 +126,10 @@ struct WaveRunsTab: View {
         HStack {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("\(wave.commits.count) unpublished commit\(wave.commits.count == 1 ? "" : "s")")
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .fontWeight(.medium)
                 Text("Add to PR #\(prNumber)")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
             }
 
@@ -208,12 +208,12 @@ private struct WaveRunRow: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
                 Text("#\(run.iteration)")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .fontWeight(.medium)
                     .monospacedDigit()
 
                 Text(run.flow)
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
 
                 if let pr = run.pr {
@@ -224,13 +224,13 @@ private struct WaveRunRow: View {
 
                 if let duration = run.duration {
                     Text(duration)
-                        .font(.caption2)
+                        .font(Typography.caption(10))
                         .foregroundStyle(.tertiary)
                         .monospacedDigit()
                 }
 
                 Text(run.relativeTime)
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
@@ -258,7 +258,7 @@ private struct WaveRunRow: View {
 
                     if let error = run.error, !error.isEmpty {
                         Text(error)
-                            .font(.caption)
+                            .font(Typography.caption())
                             .foregroundStyle(Color.statusError)
                     }
                 }
@@ -273,10 +273,10 @@ private struct WaveRunRow: View {
     private func detailLine(label: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
             Text("\(label):")
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .textSelection(.enabled)
         }
     }
@@ -303,7 +303,7 @@ private struct RunPRBadge: View {
             terminalLauncher.openURL(pr.url)
         } label: {
             Text(labelText)
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .fontWeight(.medium)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)

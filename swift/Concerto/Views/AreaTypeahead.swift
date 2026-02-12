@@ -18,7 +18,7 @@ struct AreaTypeahead: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Area")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 4) {

@@ -508,7 +508,7 @@ struct WaveDetailPanel: View {
                 ForEach(wave.commits) { entry in
                     HStack(spacing: Spacing.sm) {
                         Text(entry.sha)
-                            .font(Typography.codeSmall())
+                            .font(Typography.code(11))
                             .foregroundStyle(.secondary)
                             .frame(width: 60, alignment: .leading)
 
@@ -544,7 +544,7 @@ struct WaveDetailPanel: View {
                     coloredDiffStatLine(line)
                 }
             }
-            .font(Typography.codeSmall())
+            .font(Typography.code(11))
             .textSelection(.enabled)
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)

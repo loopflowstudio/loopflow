@@ -67,19 +67,11 @@ enum Typography {
         .custom(sansFamily, size: size)
     }
 
-    static func bodyBold(_ size: CGFloat = 14) -> Font {
-        .custom(sansFamily, size: size).weight(.bold)
-    }
-
     static func caption(_ size: CGFloat = 12) -> Font {
         .custom(sansFamily, size: size)
     }
 
     static func code(_ size: CGFloat = 13) -> Font {
-        .custom(monoFamily, size: size)
-    }
-
-    static func codeSmall(_ size: CGFloat = 11) -> Font {
         .custom(monoFamily, size: size)
     }
 }

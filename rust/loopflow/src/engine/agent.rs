@@ -324,6 +324,7 @@ pub fn launch_agent(
 
 fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
+    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     let child = cmd.spawn()?;
@@ -364,6 +365,7 @@ fn launch_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
 ) -> Result<LaunchResult, CoreError> {
+    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 

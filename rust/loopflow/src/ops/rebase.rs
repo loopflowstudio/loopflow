@@ -42,7 +42,7 @@ pub fn rebase_with_recovery(
 
     // Auto-rebase failed (and was aborted). Launch the rebase agent to handle
     // the full workflow: re-attempt the rebase, resolve conflicts, continue.
-    progress.status("Auto-rebase failed, launching rebase assistant...");
+    progress.status("Auto-rebase failed, launching rebase agent...");
     run_rebase_agent(repo, &options.onto, progress)?;
 
     if options.push {
@@ -88,7 +88,7 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
         ..Default::default()
     };
 
-    progress.status("Launching rebase assistant...");
+    progress.status("Launching rebase agent...");
     let result = launch_agent(&config.agent_model, &prompt, &launch_config)
         .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
     if result.exit_code != 0 {

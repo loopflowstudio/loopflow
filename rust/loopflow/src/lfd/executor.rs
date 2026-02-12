@@ -409,8 +409,7 @@ impl WaveExecutor {
             step,
             &run.snapshot.direction,
             Some(&wave.name),
-            Some(&self.store),
-            Some(&wave.id),
+            Some((&self.store, &wave.id)),
         )?;
         let cmd = build_agent_command(&model, &prompt, &launch);
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
@@ -739,8 +738,7 @@ impl WaveExecutor {
                     &step,
                     &wave_directions,
                     None,
-                    Some(&store),
-                    Some(&fork_wave_id),
+                    Some((&store, &fork_wave_id)),
                 );
                 let (prompt, model, launch) = match prompt {
                     Ok(result) => result,
@@ -986,8 +984,7 @@ fn build_step_prompt(
     step: &ConcreteStep,
     directions: &[String],
     wave: Option<&str>,
-    store: Option<&SharedStore>,
-    wave_id: Option<&LfdId>,
+    summary_source: Option<(&SharedStore, &LfdId)>,
 ) -> Result<(String, String, LaunchConfig)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
     let directions = merge_directions(directions, &step.step.directions);
@@ -1011,7 +1008,7 @@ fn build_step_prompt(
     drop_native_instruction_docs(&mut components, &repo_root);
 
     // Inject wave summary if available
-    if let (Some(store), Some(wave_id)) = (store, wave_id) {
+    if let Some((store, wave_id)) = summary_source {
         if let Ok(Some(summary)) = store.get_summary(wave_id) {
             components.summaries.push(Document {
                 path: "wave-summary".to_string(),

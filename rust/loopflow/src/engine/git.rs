@@ -458,11 +458,7 @@ pub fn hash_areas(repo: &Path, areas: &[String]) -> Result<String, GitError> {
     }
     let output = git_stdout(repo, &args)?;
     let digest = Sha256::digest(output.as_bytes());
-    let hash = digest
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    Ok(hash)
+    Ok(hex::encode(digest))
 }
 
 #[cfg(test)]

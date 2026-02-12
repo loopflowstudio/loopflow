@@ -17,7 +17,7 @@ Fix the feedback loop. Screenshots are generated during publish but publishing n
 
 | Item | What it does |
 |------|--------------|
-| [01-decouple-screenshots](01-decouple-screenshots.md) | Separate screenshot generation from publish |
+| ~~01-decouple-screenshots~~ | Separate screenshot generation from publish |
 | [02-screenshot-coverage](02-screenshot-coverage.md) | Add missing states, subdivide by persona |
 
 ## Phase 2: Research & audit

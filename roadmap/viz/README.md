@@ -6,7 +6,7 @@ Improve Concerto's visual design through the feedback loop defined in VISUAL_DES
 
 | Phase | Focus | Status |
 |-------|-------|--------|
-| 1 | Screenshot workflow | Todo |
+| 1 | Screenshot workflow | Done |
 | 2 | Research & audit | Future |
 | 3 | Theming & tooling | Future |
 | 4 | Polish | Future |

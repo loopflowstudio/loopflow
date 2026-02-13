@@ -107,7 +107,7 @@ struct WaveDetailPanel: View {
             Divider()
 
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: Spacing.lg) {
                     if selectedTab == .current {
                         if wave.status == .idle || wave.status == .failed {
                             if wave.status == .failed {
@@ -157,9 +157,9 @@ struct WaveDetailPanel: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
+        HStack(spacing: Spacing.md) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(spacing: Spacing.sm) {
                     // Status indicator
                     Image(systemName: wave.statusIndicator.icon)
                         .font(Typography.body())
@@ -222,11 +222,7 @@ struct WaveDetailPanel: View {
                 Button {
                     showingStopConfirmation = true
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "stop.fill")
-                            .font(Typography.caption())
-                        Text("Stop")
-                    }
+                    Label("Stop", systemImage: "stop.fill")
                 }
                 .buttonStyle(DestructiveButtonStyle())
             }
@@ -251,22 +247,16 @@ struct WaveDetailPanel: View {
         }
 
         return Button {
-            if let url {
-                terminalLauncher.openURL(url)
-            }
+            if let url { terminalLauncher.openURL(url) }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.up.right.square")
-                    .font(Typography.caption(10))
-                Text("PR #\(number)")
-                    .font(Typography.caption())
-                    .fontWeight(.medium)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.15))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
+            Label("PR #\(number)", systemImage: "arrow.up.right.square")
+                .font(Typography.caption())
+                .fontWeight(.medium)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, 3)
+                .background(color.opacity(0.15))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
         }
         .buttonStyle(.plain)
         .help("View PR on GitHub")
@@ -276,7 +266,7 @@ struct WaveDetailPanel: View {
         Label("\(wave.effectiveOpenPRCount) open", systemImage: "arrow.triangle.pull")
             .font(Typography.caption())
             .fontWeight(.medium)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, Spacing.sm)
             .padding(.vertical, 3)
             .background(Color.statusWarning.opacity(0.14))
             .foregroundStyle(Color.statusWarning)
@@ -287,74 +277,38 @@ struct WaveDetailPanel: View {
     // MARK: - Wave Config Summary (read-only, shown when running)
 
     private var waveConfigSummary: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.lg) {
-                if !wave.areaDisplay.isEmpty {
-                    Label {
-                        Text(wave.areaDisplay)
-                            .font(Typography.caption())
-                    } icon: {
-                        Image(systemName: "folder")
-                            .font(Typography.caption(10))
-                    }
-                    .foregroundStyle(.secondary)
-                }
+        HStack(spacing: Spacing.lg) {
+            configLabel("folder", wave.areaDisplay)
+            configLabel("target", wave.directionDisplay)
+            configLabel("arrow.triangle.branch", wave.flow)
+        }
+    }
 
-                if !wave.directionDisplay.isEmpty {
-                    Label {
-                        Text(wave.directionDisplay)
-                            .font(Typography.caption())
-                    } icon: {
-                        Image(systemName: "target")
-                            .font(Typography.caption(10))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-
-                if !wave.flow.isEmpty {
-                    Label {
-                        Text(wave.flow)
-                            .font(Typography.caption())
-                    } icon: {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(Typography.caption(10))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-            }
+    @ViewBuilder
+    private func configLabel(_ icon: String, _ text: String) -> some View {
+        if !text.isEmpty {
+            Label(text, systemImage: icon)
+                .font(Typography.caption())
+                .foregroundStyle(.secondary)
         }
     }
 
     // MARK: - Quick Actions Bar
 
     private var quickActionsBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.md) {
             if let path = wave.worktreePath {
                 let hasWorktree = FileManager.default.fileExists(atPath: path)
 
-                Button {
-                    openInTerminal(path: path)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "terminal")
-                            .font(Typography.caption())
-                        Text(terminalApp.displayName)
-                            .font(Typography.caption())
-                    }
+                Button { openInTerminal(path: path) } label: {
+                    Label(terminalApp.displayName, systemImage: "terminal")
                 }
                 .buttonStyle(GhostButtonStyle())
                 .disabled(!hasWorktree)
                 .help(hasWorktree ? "Open in \(terminalApp.displayName)" : "Worktree path no longer exists")
 
-                Button {
-                    openInIDE(path: path)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "curlybraces")
-                            .font(Typography.caption())
-                        Text(ideApp.displayName)
-                            .font(Typography.caption())
-                    }
+                Button { openInIDE(path: path) } label: {
+                    Label(ideApp.displayName, systemImage: "curlybraces")
                 }
                 .buttonStyle(GhostButtonStyle())
                 .disabled(!hasWorktree)
@@ -378,7 +332,7 @@ struct WaveDetailPanel: View {
         if wave.status == .waiting {
             WaitingStateCard(wave: wave)
         } else {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
                 Text("Progress")
                     .font(Typography.sectionTitle())
 
@@ -400,8 +354,8 @@ struct WaveDetailPanel: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.xs)
                         .background(palette.background)
                         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
                 }
@@ -427,10 +381,10 @@ struct WaveDetailPanel: View {
     }
 
     private var failedRunDetail: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             // Error message from the run
             if let error = wave.activeRun?.error {
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(Color.statusError)
                         .font(Typography.caption())
@@ -457,21 +411,15 @@ struct WaveDetailPanel: View {
             }
 
             // Retry button
-            Button {
-                retryWave()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(Typography.caption())
-                    Text("Retry")
-                }
+            Button { retryWave() } label: {
+                Label("Retry", systemImage: "arrow.counterclockwise")
             }
             .buttonStyle(DarkButtonStyle())
         }
     }
 
     private var liveOutputSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(wave.status == .running ? "Live Output" : "Output")
                 .font(Typography.caption())
                 .fontWeight(.medium)
@@ -517,7 +465,7 @@ struct WaveDetailPanel: View {
 
                         Spacer()
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, Spacing.xs)
                     .padding(.horizontal, Spacing.sm)
 
                     if entry.sha != wave.commits.last?.sha {
@@ -608,14 +556,8 @@ struct WaveDetailPanel: View {
 
             // View PR
             if let prURL = wave.prURL {
-                Button {
-                    terminalLauncher.openURL(prURL)
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(Typography.caption())
-                        Text("View PR")
-                    }
+                Button { terminalLauncher.openURL(prURL) } label: {
+                    Label("View PR", systemImage: "arrow.up.right.square")
                 }
                 .buttonStyle(GhostButtonStyle())
             }
@@ -639,14 +581,8 @@ struct WaveDetailPanel: View {
             .disabled(repoState.isActionInFlight(wave.id))
 
             // Next
-            Button {
-                nextWave()
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "arrow.forward.circle")
-                        .font(Typography.caption())
-                    Text("Next")
-                }
+            Button { nextWave() } label: {
+                Label("Next", systemImage: "arrow.forward.circle")
             }
             .buttonStyle(DarkButtonStyle())
             .disabled(repoState.isActionInFlight(wave.id))
@@ -659,29 +595,27 @@ struct WaveDetailPanel: View {
 
     // MARK: - Actions
 
-    private func landWave() {
+    private func perform(_ label: String, _ action: @escaping () async throws -> Void) {
         Task {
             do {
-                try await repoState.landWave(wave)
+                try await action()
             } catch {
                 await MainActor.run {
-                    actionError = "Failed to land: \(error.localizedDescription)"
+                    actionError = "Failed to \(label): \(error.localizedDescription)"
                     showingActionError = true
                 }
             }
         }
     }
 
-    private func nextWave() {
-        Task {
-            do {
-                try await repoState.nextWave(wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to start next: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
+    private func landWave() { perform("land") { try await repoState.landWave(wave) } }
+    private func nextWave() { perform("start next") { try await repoState.nextWave(wave) } }
+    private func stopWave() { perform("stop wave") { try await repoState.stopWave(wave) } }
+
+    private func retryWave() {
+        perform("retry wave") {
+            outputBuffer.clearOutput(for: wave.id)
+            try await repoState.runWave(wave: wave)
         }
     }
 
@@ -700,33 +634,6 @@ struct WaveDetailPanel: View {
         } catch {
             actionError = "Failed to open \(ideApp.displayName): \(error.localizedDescription)"
             showingActionError = true
-        }
-    }
-
-    private func stopWave() {
-        Task {
-            do {
-                try await repoState.stopWave(wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to stop wave: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
-        }
-    }
-
-    private func retryWave() {
-        Task {
-            do {
-                outputBuffer.clearOutput(for: wave.id)
-                try await repoState.runWave(wave: wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to retry wave: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
         }
     }
 

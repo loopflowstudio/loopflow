@@ -150,9 +150,7 @@ private struct ScreenshotLayout: View {
             WaveDetailPanel(wave: wave)
                 .id(wave.id)
         } else {
-            QuickExperimentDetailView { _ in
-                // No-op for screenshots - just display the view
-            }
+            StartWaveView()
         }
     }
 }

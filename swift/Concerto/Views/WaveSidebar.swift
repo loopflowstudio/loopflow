@@ -203,35 +203,21 @@ struct WaveSidebar: View {
             Spacer()
                 .frame(maxHeight: .infinity)
 
-            VStack(spacing: Spacing.xl) {
-                // Quick experiment section (primary)
-                QuickExperimentSidebarView { step in
-                    launchQuickExperiment(step: step)
+            VStack(spacing: Spacing.sm) {
+                Text("No waves yet")
+                    .font(Typography.caption())
+                    .foregroundStyle(.white.opacity(0.5))
+
+                Button {
+                    createWaveDirectly()
+                } label: {
+                    Label("Create Wave", systemImage: "plus")
+                        .font(Typography.caption())
                 }
-                .accessibilityIdentifier("quick-experiment-section")
-
-                // Divider
-                Rectangle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(height: 1)
-                    .padding(.horizontal, Spacing.lg)
-
-                // Create wave section (secondary)
-                VStack(spacing: Spacing.sm) {
-                    Button {
-                        createWaveDirectly()
-                    } label: {
-                        Label("Create Wave", systemImage: "plus")
-                            .font(Typography.caption())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(isCreatingWave)
-                    .accessibilityIdentifier("wave-empty-create")
-
-                    // Sidebar preview showing wave structure
-                    SidebarPreviewView()
-                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(isCreatingWave)
+                .accessibilityIdentifier("wave-empty-create")
             }
 
             Spacer()
@@ -239,17 +225,6 @@ struct WaveSidebar: View {
         }
         .frame(maxWidth: .infinity)
         .padding()
-    }
-
-    private func launchQuickExperiment(step: String) {
-        guard let repo = repoState.currentRepo else { return }
-        let terminal = TerminalApp.warp
-        do {
-            try TerminalLauncher().launchStep(step, terminal: terminal, at: repo)
-        } catch {
-            actionError = "Failed to launch: \(error.localizedDescription)"
-            showingActionError = true
-        }
     }
 
     private var waveList: some View {

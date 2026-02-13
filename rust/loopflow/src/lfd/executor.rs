@@ -1,11 +1,19 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use bollard::container::{
+    Config as DockerContainerConfig, CreateContainerOptions, LogOutput, LogsOptions,
+    RemoveContainerOptions, StartContainerOptions, StopContainerOptions, WaitContainerOptions,
+};
+use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::Docker;
+use futures_util::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use tracing::{debug, error, info, warn};
@@ -19,6 +27,7 @@ use crate::engine::flow::{
 };
 use crate::engine::git::{create_branch, current_branch, hash_areas, push_with_upstream};
 use crate::engine::naming::{format_branch_name, generate_word_pair};
+use crate::engine::platform::kill_process;
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_context_prompt, format_prompt, format_task_prompt,
     gather_context, trim_context_with_breakdown, write_prompt_log, Document, GatherContextOpts,
@@ -32,6 +41,7 @@ use crate::engine::worktrees::{
 
 use time::OffsetDateTime;
 
+use crate::lfd::config::{ExecutorConfig, ExecutorType};
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
@@ -43,7 +53,7 @@ use crate::lfd::types::{
 };
 
 #[async_trait]
-pub trait StepRunner: Send + Sync {
+pub trait AgentExecutor: Send + Sync {
     async fn run(
         &self,
         cmd: Vec<String>,
@@ -53,26 +63,31 @@ pub trait StepRunner: Send + Sync {
         wave_run_id: &str,
         output: &OutputHub,
     ) -> Result<i32>;
+    async fn terminate(&self, agent_id: &str) -> Result<()>;
 }
 
-pub struct AgentRunner {
+pub struct LocalProcessExecutor {
     store: SharedStore,
+    active: Arc<Mutex<HashMap<String, u32>>>,
 }
 
-impl std::fmt::Debug for AgentRunner {
+impl std::fmt::Debug for LocalProcessExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AgentRunner").finish()
+        f.debug_struct("LocalProcessExecutor").finish()
     }
 }
 
-impl AgentRunner {
+impl LocalProcessExecutor {
     pub fn new(store: SharedStore) -> Self {
-        Self { store }
+        Self {
+            store,
+            active: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
 #[async_trait]
-impl StepRunner for AgentRunner {
+impl AgentExecutor for LocalProcessExecutor {
     async fn run(
         &self,
         cmd: Vec<String>,
@@ -86,6 +101,7 @@ impl StepRunner for AgentRunner {
             return Err(anyhow!("empty agent command"));
         }
 
+        let agent_id_string = agent_id.to_string();
         let mut command = Command::new(&cmd[0]);
         command.args(&cmd[1..]);
         command.current_dir(cwd);
@@ -102,6 +118,10 @@ impl StepRunner for AgentRunner {
                 AgentStatus::Running.as_i32(),
                 Some(pid),
             );
+            self.active
+                .lock()
+                .await
+                .insert(agent_id_string.clone(), pid);
         }
 
         let stdout = child
@@ -131,9 +151,313 @@ impl StepRunner for AgentRunner {
         let status = child.wait().await?;
         let _ = stdout_task.await;
         let _ = stderr_task.await;
+        self.active.lock().await.remove(&agent_id_string);
 
         let exit_code = status.code().unwrap_or(1);
         Ok(exit_code)
+    }
+
+    async fn terminate(&self, agent_id: &str) -> Result<()> {
+        if let Some(pid) = self.active.lock().await.remove(agent_id) {
+            kill_process(pid);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DockerExecutor {
+    docker: Docker,
+    image: String,
+    credential_env: Vec<String>,
+    credential_mounts: Vec<DockerCredentialMount>,
+    active: Arc<Mutex<HashMap<String, String>>>,
+}
+
+#[derive(Debug, Clone)]
+struct DockerCredentialMount {
+    host_path: PathBuf,
+    container_path: String,
+}
+
+impl DockerCredentialMount {
+    fn from_spec(spec: &str) -> Option<Self> {
+        let mut parts = spec.splitn(2, ':');
+        let host_path = parts.next()?.trim();
+        let container_path = parts.next()?.trim();
+        if host_path.is_empty() || container_path.is_empty() {
+            return None;
+        }
+        Some(Self {
+            host_path: PathBuf::from(host_path),
+            container_path: container_path.to_string(),
+        })
+    }
+}
+
+const CONTAINER_WORKSPACE: &str = "/workspace";
+
+impl DockerExecutor {
+    pub fn new(config: &ExecutorConfig) -> Result<Self> {
+        let docker = Docker::connect_with_local_defaults()?;
+        let credential_mounts = config
+            .credentials
+            .mounts
+            .iter()
+            .filter_map(|spec| {
+                let mount = DockerCredentialMount::from_spec(spec);
+                if mount.is_none() {
+                    warn!(mount = %spec, "invalid docker credential mount; expected host:container");
+                }
+                mount
+            })
+            .collect();
+
+        Ok(Self {
+            docker,
+            image: config.image.clone(),
+            credential_env: config.credentials.env.clone(),
+            credential_mounts,
+            active: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
+
+    fn build_container_name(agent_id: &str) -> String {
+        format!("lfd-agent-{}", agent_id.replace('_', "-"))
+    }
+
+    fn rewrite_command_paths(cmd: Vec<String>, host_root: &Path) -> Vec<String> {
+        let host_root = host_root.to_string_lossy().to_string();
+        cmd.into_iter()
+            .map(|arg| {
+                if arg.starts_with(&host_root) {
+                    arg.replacen(&host_root, CONTAINER_WORKSPACE, 1)
+                } else {
+                    arg
+                }
+            })
+            .collect()
+    }
+
+    fn collect_env(&self) -> Vec<String> {
+        self.credential_env
+            .iter()
+            .filter_map(|name| {
+                std::env::var(name)
+                    .ok()
+                    .map(|value| format!("{name}={value}"))
+            })
+            .collect()
+    }
+
+    fn build_mounts(&self, cwd: &Path) -> Vec<Mount> {
+        let mut mounts = vec![Mount {
+            target: Some(CONTAINER_WORKSPACE.to_string()),
+            source: Some(cwd.to_string_lossy().to_string()),
+            typ: Some(MountTypeEnum::BIND),
+            read_only: Some(false),
+            ..Default::default()
+        }];
+
+        for credential_mount in &self.credential_mounts {
+            mounts.push(Mount {
+                target: Some(credential_mount.container_path.clone()),
+                source: Some(credential_mount.host_path.to_string_lossy().to_string()),
+                typ: Some(MountTypeEnum::BIND),
+                read_only: Some(true),
+                ..Default::default()
+            });
+        }
+
+        mounts
+    }
+
+    async fn remove_container(&self, container_id: &str) {
+        let options = RemoveContainerOptions {
+            force: true,
+            v: true,
+            link: false,
+        };
+        if let Err(err) = self
+            .docker
+            .remove_container(container_id, Some(options))
+            .await
+        {
+            warn!(container_id, error = %err, "failed to remove container");
+        }
+    }
+
+    async fn stream_logs(
+        docker: Docker,
+        container_id: String,
+        output: OutputHub,
+        wave_id: String,
+        wave_run_id: String,
+        agent_id: String,
+    ) {
+        let mut logs = docker.logs(
+            &container_id,
+            Some(LogsOptions::<String> {
+                follow: true,
+                stdout: true,
+                stderr: true,
+                timestamps: false,
+                tail: "all".to_string(),
+                ..Default::default()
+            }),
+        );
+
+        let mut parser = StreamParser::new();
+        let mut pending = String::new();
+        while let Some(entry) = logs.next().await {
+            match entry {
+                Ok(LogOutput::StdOut { message })
+                | Ok(LogOutput::StdErr { message })
+                | Ok(LogOutput::Console { message }) => {
+                    pending.push_str(&String::from_utf8_lossy(&message));
+                    while let Some(newline) = pending.find('\n') {
+                        let mut line = pending.drain(..=newline).collect::<String>();
+                        if line.ends_with('\n') {
+                            line.pop();
+                        }
+                        if line.ends_with('\r') {
+                            line.pop();
+                        }
+                        handle_output_line(
+                            &line,
+                            &mut parser,
+                            &output,
+                            &wave_id,
+                            &wave_run_id,
+                            &agent_id,
+                        );
+                    }
+                }
+                Err(err) => {
+                    warn!(container_id, error = %err, "failed streaming container logs");
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if !pending.is_empty() {
+            handle_output_line(
+                &pending,
+                &mut parser,
+                &output,
+                &wave_id,
+                &wave_run_id,
+                &agent_id,
+            );
+        }
+    }
+}
+
+#[async_trait]
+impl AgentExecutor for DockerExecutor {
+    async fn run(
+        &self,
+        cmd: Vec<String>,
+        cwd: &Path,
+        wave_id: &str,
+        agent_id: &str,
+        wave_run_id: &str,
+        output: &OutputHub,
+    ) -> Result<i32> {
+        if cmd.is_empty() {
+            return Err(anyhow!("empty agent command"));
+        }
+
+        let container_name = Self::build_container_name(agent_id);
+        let cmd = Self::rewrite_command_paths(cmd, cwd);
+        let env = self.collect_env();
+        let mounts = self.build_mounts(cwd);
+
+        let host_config = HostConfig {
+            mounts: Some(mounts),
+            network_mode: Some("bridge".to_string()),
+            privileged: Some(false),
+            readonly_rootfs: Some(true),
+            cap_drop: Some(vec!["ALL".to_string()]),
+            auto_remove: Some(false),
+            tmpfs: Some(HashMap::from([(
+                "/tmp".to_string(),
+                "rw,noexec,nosuid".to_string(),
+            )])),
+            ..Default::default()
+        };
+
+        let container = self
+            .docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: container_name,
+                    platform: None,
+                }),
+                DockerContainerConfig {
+                    image: Some(self.image.clone()),
+                    cmd: Some(cmd),
+                    working_dir: Some(CONTAINER_WORKSPACE.to_string()),
+                    env: Some(env),
+                    user: Some("agent".to_string()),
+                    host_config: Some(host_config),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        let container_id = container.id;
+        self.active
+            .lock()
+            .await
+            .insert(agent_id.to_string(), container_id.clone());
+
+        if let Err(err) = self
+            .docker
+            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .await
+        {
+            self.active.lock().await.remove(agent_id);
+            self.remove_container(&container_id).await;
+            return Err(err.into());
+        }
+
+        let logs_task = tokio::spawn(Self::stream_logs(
+            self.docker.clone(),
+            container_id.clone(),
+            output.clone(),
+            wave_id.to_string(),
+            wave_run_id.to_string(),
+            agent_id.to_string(),
+        ));
+
+        let mut wait_stream = self
+            .docker
+            .wait_container(&container_id, None::<WaitContainerOptions<String>>);
+        let wait_result = wait_stream.next().await;
+
+        let _ = logs_task.await;
+        self.active.lock().await.remove(agent_id);
+        self.remove_container(&container_id).await;
+
+        let status =
+            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
+        Ok(status.status_code as i32)
+    }
+
+    async fn terminate(&self, agent_id: &str) -> Result<()> {
+        let container_id = self.active.lock().await.remove(agent_id);
+        if let Some(container_id) = container_id {
+            let _ = self
+                .docker
+                .stop_container(&container_id, Some(StopContainerOptions { t: 1 }))
+                .await;
+            self.remove_container(&container_id).await;
+        }
+        Ok(())
     }
 }
 
@@ -147,30 +471,48 @@ async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
     let mut parser = StreamParser::new();
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        match parser.feed_line(&line) {
-            ParseResult::Events(events) => {
-                for event in &events {
-                    let (stdout, stderr) = render_event(event, false);
-                    let text = if !stdout.is_empty() { stdout } else { stderr };
-                    if !text.is_empty() {
-                        output.send(OutputEvent {
-                            wave_id: wave_id.clone(),
-                            wave_run_id: wave_run_id.clone(),
-                            agent_id: agent_id.clone(),
-                            text,
-                        });
-                    }
+        handle_output_line(
+            &line,
+            &mut parser,
+            &output,
+            &wave_id,
+            &wave_run_id,
+            &agent_id,
+        );
+    }
+}
+
+fn handle_output_line(
+    line: &str,
+    parser: &mut StreamParser,
+    output: &OutputHub,
+    wave_id: &str,
+    wave_run_id: &str,
+    agent_id: &str,
+) {
+    match parser.feed_line(line) {
+        ParseResult::Events(events) => {
+            for event in &events {
+                let (stdout, stderr) = render_event(event, false);
+                let text = if !stdout.is_empty() { stdout } else { stderr };
+                if !text.is_empty() {
+                    output.send(OutputEvent {
+                        wave_id: wave_id.to_string(),
+                        wave_run_id: wave_run_id.to_string(),
+                        agent_id: agent_id.to_string(),
+                        text,
+                    });
                 }
             }
-            ParseResult::Skipped => {}
-            ParseResult::Passthrough => {
-                output.send(OutputEvent {
-                    wave_id: wave_id.clone(),
-                    wave_run_id: wave_run_id.clone(),
-                    agent_id: agent_id.clone(),
-                    text: line,
-                });
-            }
+        }
+        ParseResult::Skipped => {}
+        ParseResult::Passthrough => {
+            output.send(OutputEvent {
+                wave_id: wave_id.to_string(),
+                wave_run_id: wave_run_id.to_string(),
+                agent_id: agent_id.to_string(),
+                text: line.to_string(),
+            });
         }
     }
 }
@@ -180,7 +522,7 @@ pub struct WaveExecutor {
     store: SharedStore,
     scheduler: Arc<Scheduler>,
     output: OutputHub,
-    runner: Arc<dyn StepRunner>,
+    runner: Arc<dyn AgentExecutor>,
     event_hub: EventHub,
 }
 
@@ -190,8 +532,29 @@ impl WaveExecutor {
         scheduler: Arc<Scheduler>,
         output: OutputHub,
         event_hub: EventHub,
+        config: ExecutorConfig,
+    ) -> Result<Self> {
+        let runner: Arc<dyn AgentExecutor> = match config.r#type {
+            ExecutorType::Docker => Arc::new(DockerExecutor::new(&config)?),
+            ExecutorType::Local => Arc::new(LocalProcessExecutor::new(store.clone())),
+        };
+        Ok(Self {
+            store,
+            scheduler,
+            output,
+            runner,
+            event_hub,
+        })
+    }
+
+    #[cfg(test)]
+    pub fn with_runner(
+        store: SharedStore,
+        scheduler: Arc<Scheduler>,
+        output: OutputHub,
+        event_hub: EventHub,
+        runner: Arc<dyn AgentExecutor>,
     ) -> Self {
-        let runner = Arc::new(AgentRunner::new(store.clone()));
         Self {
             store,
             scheduler,
@@ -201,21 +564,8 @@ impl WaveExecutor {
         }
     }
 
-    #[cfg(test)]
-    pub fn with_runner(
-        store: SharedStore,
-        scheduler: Arc<Scheduler>,
-        output: OutputHub,
-        event_hub: EventHub,
-        runner: Arc<dyn StepRunner>,
-    ) -> Self {
-        Self {
-            store,
-            scheduler,
-            output,
-            runner,
-            event_hub,
-        }
+    pub async fn terminate_agent(&self, agent_id: &LfdId) -> Result<()> {
+        self.runner.terminate(agent_id.as_str()).await
     }
 
     pub async fn execute(&self, run_id: &LfdId) -> Result<()> {
@@ -526,7 +876,7 @@ impl WaveExecutor {
         let step = ConcreteStep {
             step: Step {
                 name: "_summarize".to_string(),
-                model: Some(model),
+                model: Some(model.clone()),
                 directions: Vec::new(),
                 interactive: Some(false),
                 content: None,
@@ -1248,10 +1598,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn docker_mount_spec_requires_host_and_container_paths() {
+        let mount = DockerCredentialMount::from_spec("~/.claude:/home/agent/.claude")
+            .expect("mount spec should parse");
+        assert_eq!(mount.host_path, PathBuf::from("~/.claude"));
+        assert_eq!(mount.container_path, "/home/agent/.claude");
+        assert!(DockerCredentialMount::from_spec("missing-colon").is_none());
+        assert!(DockerCredentialMount::from_spec(":/home/agent/.claude").is_none());
+    }
+
+    #[test]
+    fn docker_rewrites_paths_into_workspace() {
+        let cmd = vec![
+            "claude".to_string(),
+            "--append-system-prompt-file".to_string(),
+            "/tmp/worktree/.lf/prompt.md".to_string(),
+            "-C".to_string(),
+            "/tmp/worktree".to_string(),
+        ];
+        let rewritten = DockerExecutor::rewrite_command_paths(cmd, Path::new("/tmp/worktree"));
+        assert_eq!(
+            rewritten,
+            vec![
+                "claude".to_string(),
+                "--append-system-prompt-file".to_string(),
+                "/workspace/.lf/prompt.md".to_string(),
+                "-C".to_string(),
+                "/workspace".to_string(),
+            ]
+        );
+    }
+
     struct MockRunner;
 
     #[async_trait]
-    impl StepRunner for MockRunner {
+    impl AgentExecutor for MockRunner {
         async fn run(
             &self,
             _cmd: Vec<String>,
@@ -1262,6 +1644,10 @@ mod tests {
             _output: &OutputHub,
         ) -> Result<i32> {
             Ok(0)
+        }
+
+        async fn terminate(&self, _agent_id: &str) -> Result<()> {
+            Ok(())
         }
     }
 

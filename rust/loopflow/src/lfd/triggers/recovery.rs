@@ -11,7 +11,7 @@ use crate::lfd::types::{AgentStatus, WaveRunStatus, WaveStatus};
 
 pub fn spawn_recovery_loop(
     store: SharedStore,
-    _executor: WaveExecutor,
+    executor: WaveExecutor,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -23,14 +23,14 @@ pub fn spawn_recovery_loop(
                     break;
                 }
                 _ = interval.tick() => {
-                    recover_stuck_runs(&store);
+                    recover_stuck_runs(&store, &executor).await;
                 }
             }
         }
     })
 }
 
-fn recover_stuck_runs(store: &SharedStore) {
+async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
     let stuck_threshold = 4 * 60 * 60;
     let stuck_runs = match store.get_stuck_agents(stuck_threshold) {
         Ok(runs) => runs,
@@ -42,6 +42,10 @@ fn recover_stuck_runs(store: &SharedStore) {
 
     for agent in stuck_runs {
         tracing::warn!(agent_id = %agent.id, pid = ?agent.pid, "step run stuck >4h, terminating");
+
+        if let Err(err) = executor.terminate_agent(&agent.id).await {
+            tracing::warn!(agent_id = %agent.id, error = %err, "failed to terminate via executor");
+        }
 
         if let Some(pid) = agent.pid {
             kill_process(pid);

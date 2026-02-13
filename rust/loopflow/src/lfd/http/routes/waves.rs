@@ -347,6 +347,9 @@ pub async fn delete_wave_handler(
     .await
     .map_err(map_store_error)?;
     for agent in &agents {
+        if let Err(err) = state.executor.terminate_agent(&agent.id).await {
+            warn!(agent_id = %agent.id, error = %err, "failed to terminate agent executor handle");
+        }
         if let Some(pid) = agent.pid {
             kill_process(pid);
         }
@@ -570,6 +573,9 @@ pub async fn stop_wave_handler(
     .await
     .map_err(map_store_error)?;
     for agent in &agents {
+        if let Err(err) = state.executor.terminate_agent(&agent.id).await {
+            warn!(agent_id = %agent.id, error = %err, "failed to terminate agent executor handle");
+        }
         if let Some(pid) = agent.pid {
             kill_process(pid);
         }

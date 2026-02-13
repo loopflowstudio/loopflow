@@ -52,3 +52,23 @@ LFD_PORT  # default 2486
 ```
 
 If `LFD_URL` is set, it takes precedence.
+
+`lfd` also reads `~/.lf/lfd.yaml` for daemon settings:
+
+```yaml
+executor:
+  type: local # or docker
+  image: loopflow/agent:latest
+  credentials:
+    env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
+    mounts:
+      - ~/.claude:/home/agent/.claude
+      - ~/.codex/auth.json:/home/agent/.codex/auth.json
+```
+
+Environment overrides:
+
+```bash
+LFD_EXECUTOR_TYPE=docker
+LFD_EXECUTOR_IMAGE=loopflow/agent:latest
+```

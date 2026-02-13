@@ -189,6 +189,7 @@ static BUILTIN_OPS_PROMPTS: LazyLock<HashMap<&'static str, &'static str>> = Lazy
         "release_notes",
         include_str!("builtins/ops/release_notes.md"),
     );
+    m.insert("docker_gen", include_str!("builtins/ops/docker_gen.md"));
     m.insert("summarize", include_str!("builtins/ops/summarize.md"));
 
     m

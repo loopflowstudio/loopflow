@@ -12,6 +12,7 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
+use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
     stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
@@ -185,23 +186,25 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    // Create worktree eagerly so it exists immediately.
-    let repo_for_wt = wave.repo.clone();
-    let name_for_wt = wave.name.clone();
-    let wt_result = tokio::task::spawn_blocking(move || {
-        ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
-    })
-    .await
-    .map_err(|err| err.to_string())
-    .and_then(|r| r.map_err(|err| err.to_string()));
+    if state.executor.executor_type() == ExecutorType::Local {
+        // Create worktree eagerly so it exists immediately for local execution.
+        let repo_for_wt = wave.repo.clone();
+        let name_for_wt = wave.name.clone();
+        let wt_result = tokio::task::spawn_blocking(move || {
+            ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|r| r.map_err(|err| err.to_string()));
 
-    if let Err(err) = wt_result {
-        let wave_id = wave.id.clone();
-        let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
-        return Err(api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to create worktree: {err}"),
-        ));
+        if let Err(err) = wt_result {
+            let wave_id = wave.id.clone();
+            let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
+            return Err(api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create worktree: {err}"),
+            ));
+        }
     }
 
     state
@@ -339,18 +342,7 @@ pub async fn delete_wave_handler(
     .map_err(map_store_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    // Kill any running agent processes.
-    let agents = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_agents_for_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
-    for agent in &agents {
-        if let Some(pid) = agent.pid {
-            kill_process(pid);
-        }
-    }
+    terminate_active_agents(&state, &wave_id).await?;
 
     // Delete from the store (cascades to wave_runs, agents, etc.).
     let wave_id_for_delete = wave_id.clone();
@@ -359,6 +351,16 @@ pub async fn delete_wave_handler(
     })
     .await
     .map_err(map_store_error)?;
+
+    if state.executor.executor_type() == ExecutorType::Docker {
+        if let Err(err) = state.executor.cleanup_wave_workspace(&wave).await {
+            warn!(
+                wave_id = %wave.id,
+                error = %err,
+                "failed to remove docker-backed wave workspace"
+            );
+        }
+    }
 
     // Clean up the worktree on disk.
     let repo = wave.repo.clone();
@@ -562,18 +564,7 @@ pub async fn stop_wave_handler(
 ) -> ApiResult<StopWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    // Kill any running agent processes.
-    let agents = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_agents_for_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
-    for agent in &agents {
-        if let Some(pid) = agent.pid {
-            kill_process(pid);
-        }
-    }
+    terminate_active_agents(&state, &wave_id).await?;
 
     let run = run_store(&state.store, {
         let wave_id = wave_id.clone();
@@ -630,6 +621,29 @@ pub async fn stop_wave_handler(
     state.event_hub.send(Event::wave_stopped(wave_id));
 
     Ok(Json(StopWaveResponse { stopped: true }))
+}
+
+async fn terminate_active_agents(
+    state: &HttpState,
+    wave_id: &LfdId,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let agents = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_active_agents_for_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    for agent in agents {
+        if let Err(err) = state.executor.terminate_agent(&agent.id).await {
+            warn!(agent_id = %agent.id, error = %err, "failed to terminate agent executor handle");
+        }
+        if let Some(pid) = agent.pid {
+            kill_process(pid);
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn continue_wave_handler(

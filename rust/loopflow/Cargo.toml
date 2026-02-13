@@ -53,6 +53,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 axum = { version = "0.7", features = ["ws"] }
 bytes = "1"
+bollard = "0.17"
 cron = "0.12"
 deadpool-postgres = "0.12"
 futures-util = "0.3"

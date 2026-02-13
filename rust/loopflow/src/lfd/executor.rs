@@ -1,11 +1,21 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use bollard::container::{
+    Config as DockerContainerConfig, CreateContainerOptions, LogOutput, LogsOptions,
+    RemoveContainerOptions, StartContainerOptions, StopContainerOptions, WaitContainerOptions,
+};
+use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::volume::CreateVolumeOptions;
+use bollard::Docker;
+use futures_util::StreamExt;
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use tracing::{debug, error, info, warn};
@@ -19,6 +29,7 @@ use crate::engine::flow::{
 };
 use crate::engine::git::{create_branch, current_branch, hash_areas, push_with_upstream};
 use crate::engine::naming::{format_branch_name, generate_word_pair};
+use crate::engine::platform::kill_process;
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_context_prompt, format_prompt, format_task_prompt,
     gather_context, trim_context_with_breakdown, write_prompt_log, Document, GatherContextOpts,
@@ -32,6 +43,7 @@ use crate::engine::worktrees::{
 
 use time::OffsetDateTime;
 
+use crate::lfd::config::{ExecutorConfig, ExecutorType};
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
@@ -43,7 +55,7 @@ use crate::lfd::types::{
 };
 
 #[async_trait]
-pub trait StepRunner: Send + Sync {
+pub trait AgentExecutor: Send + Sync {
     async fn run(
         &self,
         cmd: Vec<String>,
@@ -53,26 +65,34 @@ pub trait StepRunner: Send + Sync {
         wave_run_id: &str,
         output: &OutputHub,
     ) -> Result<i32>;
-}
-
-pub struct AgentRunner {
-    store: SharedStore,
-}
-
-impl std::fmt::Debug for AgentRunner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AgentRunner").finish()
+    async fn terminate(&self, agent_id: &str) -> Result<()>;
+    async fn cleanup_wave(&self, _wave: &Wave) -> Result<()> {
+        Ok(())
     }
 }
 
-impl AgentRunner {
+pub struct LocalProcessExecutor {
+    store: SharedStore,
+    active: Arc<Mutex<HashMap<String, u32>>>,
+}
+
+impl std::fmt::Debug for LocalProcessExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalProcessExecutor").finish()
+    }
+}
+
+impl LocalProcessExecutor {
     pub fn new(store: SharedStore) -> Self {
-        Self { store }
+        Self {
+            store,
+            active: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
 #[async_trait]
-impl StepRunner for AgentRunner {
+impl AgentExecutor for LocalProcessExecutor {
     async fn run(
         &self,
         cmd: Vec<String>,
@@ -86,6 +106,7 @@ impl StepRunner for AgentRunner {
             return Err(anyhow!("empty agent command"));
         }
 
+        let agent_id_string = agent_id.to_string();
         let mut command = Command::new(&cmd[0]);
         command.args(&cmd[1..]);
         command.current_dir(cwd);
@@ -102,6 +123,10 @@ impl StepRunner for AgentRunner {
                 AgentStatus::Running.as_i32(),
                 Some(pid),
             );
+            self.active
+                .lock()
+                .await
+                .insert(agent_id_string.clone(), pid);
         }
 
         let stdout = child
@@ -131,9 +156,1058 @@ impl StepRunner for AgentRunner {
         let status = child.wait().await?;
         let _ = stdout_task.await;
         let _ = stderr_task.await;
+        self.active.lock().await.remove(&agent_id_string);
 
         let exit_code = status.code().unwrap_or(1);
         Ok(exit_code)
+    }
+
+    async fn terminate(&self, agent_id: &str) -> Result<()> {
+        if let Some(pid) = self.active.lock().await.remove(agent_id) {
+            kill_process(pid);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct DockerExecutor {
+    store: SharedStore,
+    docker: Docker,
+    image: String,
+    credential_env: Vec<String>,
+    credential_mounts: Vec<DockerCredentialMount>,
+    active: Arc<Mutex<HashMap<String, String>>>,
+    mutation_locks: RepoMutationLocks,
+    prepared_runs: Arc<Mutex<HashSet<String>>>,
+}
+
+impl std::fmt::Debug for DockerExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DockerExecutor")
+            .field("image", &self.image)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct RepoMutationLocks {
+    inner: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+}
+
+impl RepoMutationLocks {
+    async fn for_key(&self, key: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.inner.lock().await;
+        locks
+            .entry(key.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DockerCredentialMount {
+    host_path: PathBuf,
+    container_path: String,
+}
+
+impl DockerCredentialMount {
+    fn from_spec(spec: &str) -> std::result::Result<Self, String> {
+        let mut parts = spec.splitn(2, ':');
+        let host_path = parts
+            .next()
+            .ok_or_else(|| "missing host path".to_string())?
+            .trim();
+        let container_path = parts
+            .next()
+            .ok_or_else(|| "missing container path".to_string())?
+            .trim();
+        if host_path.is_empty() || container_path.is_empty() {
+            return Err("mount paths must be non-empty".to_string());
+        }
+        if !container_path.starts_with('/') {
+            return Err("container path must be absolute".to_string());
+        }
+
+        let host_path = Self::expand_host_path(host_path);
+        if !host_path.is_absolute() {
+            return Err("host path must be absolute or use ~/...".to_string());
+        }
+
+        Ok(Self {
+            host_path,
+            container_path: container_path.to_string(),
+        })
+    }
+
+    fn expand_host_path(path: &str) -> PathBuf {
+        if path == "~" {
+            if let Some(home) = dirs::home_dir() {
+                return home;
+            }
+        }
+        if let Some(rest) = path.strip_prefix("~/") {
+            if let Some(home) = dirs::home_dir() {
+                return home.join(rest);
+            }
+        }
+        PathBuf::from(path)
+    }
+}
+
+const CONTAINER_WORKSPACE: &str = "/workspace";
+const CONTAINER_REPOS_ROOT: &str = "/workspace/repos";
+const LOCAL_REPO_MOUNT: &str = "/host-repo";
+const HOST_WORKTREE_MOUNT: &str = "/host-worktree";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepoVolumeIdentity {
+    repo_key: String,
+    volume_name: String,
+}
+
+impl RepoVolumeIdentity {
+    fn from_identity(identity: &RepoIdentity) -> Self {
+        let repo_hash = short_hash(&identity.canonical, 16);
+        let mut slug = sanitize_token(&identity.canonical);
+        if slug.is_empty() {
+            slug = "repo".to_string();
+        }
+        if slug.len() > 36 {
+            slug.truncate(36);
+        }
+        Self {
+            repo_key: format!("{slug}-{repo_hash}"),
+            volume_name: format!("lfd-repo-{}", short_hash(&identity.canonical, 32)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepoIdentity {
+    canonical: String,
+    has_remote: bool,
+}
+
+impl RepoIdentity {
+    fn from_repo(repo: &Path) -> Self {
+        if let Some(remote) = canonical_repo_url(repo) {
+            return Self {
+                canonical: remote,
+                has_remote: true,
+            };
+        }
+
+        let absolute = repo
+            .canonicalize()
+            .unwrap_or_else(|_| repo.to_path_buf())
+            .to_string_lossy()
+            .to_string();
+        Self {
+            canonical: format!("local:{}", short_hash(&absolute, 32)),
+            has_remote: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DockerWorkspace {
+    volume: RepoVolumeIdentity,
+    repo_source: PathBuf,
+    container_shared_clone: String,
+    container_worktree: String,
+    branch: String,
+    has_remote: bool,
+}
+
+fn short_hash(value: &str, chars: usize) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let mut hash = hex::encode(digest);
+    hash.truncate(chars);
+    hash
+}
+
+fn sanitize_token(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn normalize_repo_url(raw: &str) -> String {
+    let mut value = raw.trim().trim_end_matches('/').to_string();
+    if let Some(stripped) = value.strip_suffix(".git") {
+        value = stripped.to_string();
+    }
+    if value.starts_with("git@") {
+        if let Some((host, path)) = value.split_once(':') {
+            value = format!("ssh://{host}/{path}");
+        }
+    }
+    if let Some((scheme, rest)) = value.split_once("://") {
+        let scheme = scheme.to_ascii_lowercase();
+        if let Some((host, tail)) = rest.split_once('/') {
+            let host = host.to_ascii_lowercase();
+            value = format!("{scheme}://{host}/{}", tail.trim_start_matches('/'));
+        } else {
+            value = format!("{scheme}://{}", rest.to_ascii_lowercase());
+        }
+    }
+    value
+}
+
+fn canonical_repo_url(repo: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(normalize_repo_url(&raw))
+}
+
+impl DockerExecutor {
+    pub fn new(store: SharedStore, config: &ExecutorConfig) -> Result<Self> {
+        let docker = Docker::connect_with_local_defaults()?;
+        let credential_mounts = config
+            .credentials
+            .mounts
+            .iter()
+            .filter_map(|spec| match DockerCredentialMount::from_spec(spec) {
+                Ok(mount) => Some(mount),
+                Err(err) => {
+                    warn!(
+                        mount = %spec,
+                        error = %err,
+                        "invalid docker credential mount; expected host:container"
+                    );
+                    None
+                }
+            })
+            .collect();
+
+        Ok(Self {
+            store,
+            docker,
+            image: config.image.clone(),
+            credential_env: config.credentials.env.clone(),
+            credential_mounts,
+            active: Arc::new(Mutex::new(HashMap::new())),
+            mutation_locks: RepoMutationLocks::default(),
+            prepared_runs: Arc::new(Mutex::new(HashSet::new())),
+        })
+    }
+
+    fn build_container_name(agent_id: &str) -> String {
+        format!("lfd-agent-{}", agent_id.replace('_', "-"))
+    }
+
+    fn build_helper_container_name(label: &str) -> String {
+        format!(
+            "lfd-prep-{}-{}",
+            sanitize_token(label),
+            uuid::Uuid::new_v4().simple()
+        )
+    }
+
+    fn rewrite_command_paths(
+        cmd: Vec<String>,
+        host_root: &Path,
+        container_root: &str,
+    ) -> Vec<String> {
+        let host_root = host_root.to_string_lossy();
+        let host_root = if host_root == "/" {
+            "/".to_string()
+        } else {
+            host_root.trim_end_matches('/').to_string()
+        };
+        cmd.into_iter()
+            .map(|arg| Self::rewrite_command_arg_path(&arg, &host_root, container_root))
+            .collect()
+    }
+
+    fn rewrite_command_arg_path(arg: &str, host_root: &str, container_root: &str) -> String {
+        if arg == host_root {
+            return container_root.to_string();
+        }
+
+        match arg.strip_prefix(host_root) {
+            Some(suffix) if suffix.starts_with('/') => format!("{container_root}{suffix}"),
+            _ => arg.to_string(),
+        }
+    }
+
+    fn collect_env(&self) -> Vec<String> {
+        self.credential_env
+            .iter()
+            .filter_map(|name| {
+                std::env::var(name)
+                    .ok()
+                    .map(|value| format!("{name}={value}"))
+            })
+            .collect()
+    }
+
+    fn build_mounts_for(
+        volume_name: &str,
+        credential_mounts: &[DockerCredentialMount],
+    ) -> Vec<Mount> {
+        let mut mounts = vec![Mount {
+            target: Some(CONTAINER_WORKSPACE.to_string()),
+            source: Some(volume_name.to_string()),
+            typ: Some(MountTypeEnum::VOLUME),
+            read_only: Some(false),
+            ..Default::default()
+        }];
+
+        for credential_mount in credential_mounts {
+            mounts.push(Mount {
+                target: Some(credential_mount.container_path.clone()),
+                source: Some(credential_mount.host_path.to_string_lossy().to_string()),
+                typ: Some(MountTypeEnum::BIND),
+                read_only: Some(true),
+                ..Default::default()
+            });
+        }
+
+        mounts
+    }
+
+    fn build_mounts(&self, volume_name: &str) -> Vec<Mount> {
+        Self::build_mounts_for(volume_name, &self.credential_mounts)
+    }
+
+    fn bind_mount(path: &Path, target: &str, read_only: bool) -> Mount {
+        Mount {
+            target: Some(target.to_string()),
+            source: Some(path.to_string_lossy().to_string()),
+            typ: Some(MountTypeEnum::BIND),
+            read_only: Some(read_only),
+            ..Default::default()
+        }
+    }
+
+    fn helper_mounts(&self, workspace: &DockerWorkspace, extra: Vec<Mount>) -> Vec<Mount> {
+        let mut mounts = self.build_mounts(&workspace.volume.volume_name);
+        mounts.extend(extra);
+        mounts
+    }
+
+    async fn remove_container(&self, container_id: &str) {
+        let options = RemoveContainerOptions {
+            force: true,
+            v: true,
+            link: false,
+        };
+        if let Err(err) = self
+            .docker
+            .remove_container(container_id, Some(options))
+            .await
+        {
+            warn!(container_id, error = %err, "failed to remove container");
+        }
+    }
+
+    async fn stream_logs(
+        docker: Docker,
+        container_id: String,
+        output: OutputHub,
+        wave_id: String,
+        wave_run_id: String,
+        agent_id: String,
+    ) {
+        let mut logs = docker.logs(
+            &container_id,
+            Some(LogsOptions::<String> {
+                follow: true,
+                stdout: true,
+                stderr: true,
+                timestamps: false,
+                tail: "all".to_string(),
+                ..Default::default()
+            }),
+        );
+
+        let mut parser = StreamParser::new();
+        let mut pending = String::new();
+        while let Some(entry) = logs.next().await {
+            match entry {
+                Ok(LogOutput::StdOut { message })
+                | Ok(LogOutput::StdErr { message })
+                | Ok(LogOutput::Console { message }) => {
+                    pending.push_str(&String::from_utf8_lossy(&message));
+                    while let Some(newline) = pending.find('\n') {
+                        let mut line = pending.drain(..=newline).collect::<String>();
+                        if line.ends_with('\n') {
+                            line.pop();
+                        }
+                        if line.ends_with('\r') {
+                            line.pop();
+                        }
+                        handle_output_line(
+                            &line,
+                            &mut parser,
+                            &output,
+                            &wave_id,
+                            &wave_run_id,
+                            &agent_id,
+                        );
+                    }
+                }
+                Err(err) => {
+                    warn!(container_id, error = %err, "failed streaming container logs");
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if !pending.is_empty() {
+            handle_output_line(
+                &pending,
+                &mut parser,
+                &output,
+                &wave_id,
+                &wave_run_id,
+                &agent_id,
+            );
+        }
+    }
+
+    async fn run_helper_command(
+        &self,
+        label: &str,
+        cmd: Vec<String>,
+        mounts: Vec<Mount>,
+        working_dir: Option<String>,
+    ) -> Result<String> {
+        let container = self
+            .docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: Self::build_helper_container_name(label),
+                    platform: None,
+                }),
+                DockerContainerConfig {
+                    image: Some(self.image.clone()),
+                    cmd: Some(cmd),
+                    working_dir,
+                    env: Some(self.collect_env()),
+                    user: Some("root".to_string()),
+                    host_config: Some(HostConfig {
+                        mounts: Some(mounts),
+                        network_mode: Some("bridge".to_string()),
+                        privileged: Some(false),
+                        cap_drop: Some(vec!["ALL".to_string()]),
+                        auto_remove: Some(false),
+                        ..Default::default()
+                    }),
+                    labels: Some(HashMap::from([(
+                        "io.loopflow.managed".to_string(),
+                        "true".to_string(),
+                    )])),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let container_id = container.id;
+
+        if let Err(err) = self
+            .docker
+            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .await
+        {
+            self.remove_container(&container_id).await;
+            return Err(err.into());
+        }
+
+        let mut wait_stream = self
+            .docker
+            .wait_container(&container_id, None::<WaitContainerOptions<String>>);
+        let wait_result = wait_stream.next().await;
+
+        let mut logs = self.docker.logs(
+            &container_id,
+            Some(LogsOptions::<String> {
+                follow: false,
+                stdout: true,
+                stderr: true,
+                timestamps: false,
+                tail: "all".to_string(),
+                ..Default::default()
+            }),
+        );
+        let mut output = String::new();
+        while let Some(entry) = logs.next().await {
+            match entry {
+                Ok(LogOutput::StdOut { message })
+                | Ok(LogOutput::StdErr { message })
+                | Ok(LogOutput::Console { message }) => {
+                    output.push_str(&String::from_utf8_lossy(&message));
+                }
+                Err(err) => {
+                    warn!(container_id, error = %err, "failed reading helper logs");
+                }
+                _ => {}
+            }
+        }
+
+        self.remove_container(&container_id).await;
+
+        let status =
+            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
+        if status.status_code != 0 {
+            return Err(anyhow!(
+                "docker helper '{}' failed ({}): {}",
+                label,
+                status.status_code,
+                output.trim()
+            ));
+        }
+        Ok(output)
+    }
+
+    async fn ensure_volume(&self, volume_name: &str) -> Result<()> {
+        if self.docker.inspect_volume(volume_name).await.is_ok() {
+            return Ok(());
+        }
+
+        let mut labels = HashMap::new();
+        labels.insert("io.loopflow.managed".to_string(), "true".to_string());
+        labels.insert("io.loopflow.kind".to_string(), "repo-volume".to_string());
+
+        let _ = self
+            .docker
+            .create_volume(CreateVolumeOptions::<String> {
+                name: volume_name.to_string(),
+                labels,
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
+
+    fn docker_workspace_for_wave(
+        repo_source: &Path,
+        wave_name: &str,
+        branch: &str,
+    ) -> DockerWorkspace {
+        let repo_identity = RepoIdentity::from_repo(repo_source);
+        let volume = RepoVolumeIdentity::from_identity(&repo_identity);
+        let wave_slug = {
+            let slug = sanitize_token(wave_name);
+            if slug.is_empty() {
+                short_hash(wave_name, 12)
+            } else {
+                slug
+            }
+        };
+        DockerWorkspace {
+            container_shared_clone: format!("{CONTAINER_REPOS_ROOT}/{}/main", volume.repo_key),
+            container_worktree: format!(
+                "{CONTAINER_REPOS_ROOT}/{}/worktrees/{wave_slug}",
+                volume.repo_key
+            ),
+            volume,
+            repo_source: repo_source.to_path_buf(),
+            branch: branch.to_string(),
+            has_remote: repo_identity.has_remote,
+        }
+    }
+
+    fn resolve_wave_run_branch(run: &WaveRun, wave: &Wave) -> String {
+        if !run.branch.trim().is_empty() {
+            return run.branch.clone();
+        }
+        let fallback = sanitize_token(&wave.name);
+        if fallback.is_empty() {
+            "main".to_string()
+        } else {
+            fallback
+        }
+    }
+
+    fn resolve_host_repo(repo: &str) -> PathBuf {
+        let repo_path = PathBuf::from(repo);
+        crate::engine::worktrees::main_repo_root(&repo_path).unwrap_or(repo_path)
+    }
+
+    fn resolve_workspace(&self, wave_id: &str, wave_run_id: &str) -> Result<DockerWorkspace> {
+        let wave_id = LfdId::from_raw(wave_id);
+        let wave = self
+            .store
+            .get_wave(&wave_id)?
+            .ok_or_else(|| anyhow!("wave not found for docker run"))?;
+        let run_id = LfdId::from_raw(wave_run_id);
+        let run = self
+            .store
+            .get_wave_run(&run_id)?
+            .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
+        let repo_source = Self::resolve_host_repo(&wave.repo);
+        let branch = Self::resolve_wave_run_branch(&run, &wave);
+        Ok(Self::docker_workspace_for_wave(
+            &repo_source,
+            &wave.name,
+            &branch,
+        ))
+    }
+
+    async fn git_command(
+        &self,
+        workspace: &DockerWorkspace,
+        label: &str,
+        cmd: Vec<String>,
+        include_local_repo: bool,
+    ) -> Result<String> {
+        let mut mounts = Vec::new();
+        if include_local_repo {
+            mounts.push(Self::bind_mount(
+                &workspace.repo_source,
+                LOCAL_REPO_MOUNT,
+                true,
+            ));
+        }
+        self.run_helper_command(label, cmd, self.helper_mounts(workspace, mounts), None)
+            .await
+    }
+
+    async fn is_git_repo(&self, workspace: &DockerWorkspace, repo_path: &str) -> bool {
+        self.git_command(
+            workspace,
+            "git-probe",
+            vec![
+                "git".to_string(),
+                "-C".to_string(),
+                repo_path.to_string(),
+                "rev-parse".to_string(),
+                "--is-inside-work-tree".to_string(),
+            ],
+            false,
+        )
+        .await
+        .is_ok()
+    }
+
+    async fn ensure_shared_clone(&self, workspace: &DockerWorkspace) -> Result<()> {
+        if self
+            .is_git_repo(workspace, &workspace.container_shared_clone)
+            .await
+        {
+            return Ok(());
+        }
+
+        let root_path = Path::new(&workspace.container_shared_clone)
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| anyhow!("invalid shared clone path"))?;
+        self.run_helper_command(
+            "mkdir",
+            vec![
+                "mkdir".to_string(),
+                "-p".to_string(),
+                root_path.to_string_lossy().to_string(),
+            ],
+            self.build_mounts(&workspace.volume.volume_name),
+            None,
+        )
+        .await?;
+
+        let remote = canonical_repo_url(&workspace.repo_source);
+        let (source, include_local_repo) = if let Some(url) = remote {
+            (url, false)
+        } else {
+            (LOCAL_REPO_MOUNT.to_string(), true)
+        };
+
+        self.git_command(
+            workspace,
+            "git-clone",
+            vec![
+                "git".to_string(),
+                "clone".to_string(),
+                source,
+                workspace.container_shared_clone.clone(),
+            ],
+            include_local_repo,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn fetch_shared_clone(&self, workspace: &DockerWorkspace) -> Result<()> {
+        self.git_command(
+            workspace,
+            "git-fetch",
+            vec![
+                "git".to_string(),
+                "-C".to_string(),
+                workspace.container_shared_clone.clone(),
+                "fetch".to_string(),
+                "--prune".to_string(),
+                "origin".to_string(),
+            ],
+            !workspace.has_remote,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn ensure_worktree(&self, workspace: &DockerWorkspace) -> Result<()> {
+        if self
+            .is_git_repo(workspace, &workspace.container_worktree)
+            .await
+        {
+            return Ok(());
+        }
+
+        let parent = Path::new(&workspace.container_worktree)
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| anyhow!("invalid worktree path"))?;
+        self.run_helper_command(
+            "mkdir",
+            vec![
+                "mkdir".to_string(),
+                "-p".to_string(),
+                parent.to_string_lossy().to_string(),
+            ],
+            self.build_mounts(&workspace.volume.volume_name),
+            None,
+        )
+        .await?;
+
+        let local_branch_ref = format!("refs/heads/{}", workspace.branch);
+        let has_local_branch = self
+            .git_command(
+                workspace,
+                "git-show-ref-local",
+                vec![
+                    "git".to_string(),
+                    "-C".to_string(),
+                    workspace.container_shared_clone.clone(),
+                    "show-ref".to_string(),
+                    "--verify".to_string(),
+                    "--quiet".to_string(),
+                    local_branch_ref,
+                ],
+                false,
+            )
+            .await
+            .is_ok();
+
+        let command = if has_local_branch {
+            vec![
+                "git".to_string(),
+                "-C".to_string(),
+                workspace.container_shared_clone.clone(),
+                "worktree".to_string(),
+                "add".to_string(),
+                "--force".to_string(),
+                workspace.container_worktree.clone(),
+                workspace.branch.clone(),
+            ]
+        } else {
+            vec![
+                "git".to_string(),
+                "-C".to_string(),
+                workspace.container_shared_clone.clone(),
+                "worktree".to_string(),
+                "add".to_string(),
+                "--force".to_string(),
+                "-B".to_string(),
+                workspace.branch.clone(),
+                workspace.container_worktree.clone(),
+                "HEAD".to_string(),
+            ]
+        };
+
+        self.git_command(workspace, "git-worktree-add", command, false)
+            .await?;
+        Ok(())
+    }
+
+    async fn run_hygiene(&self, workspace: &DockerWorkspace) -> Result<()> {
+        let target_ref = format!("refs/heads/{}", workspace.branch);
+        let target = if self
+            .git_command(
+                workspace,
+                "git-rev-parse",
+                vec![
+                    "git".to_string(),
+                    "-C".to_string(),
+                    workspace.container_worktree.clone(),
+                    "rev-parse".to_string(),
+                    "--verify".to_string(),
+                    target_ref.clone(),
+                ],
+                false,
+            )
+            .await
+            .is_ok()
+        {
+            target_ref
+        } else {
+            "HEAD".to_string()
+        };
+
+        self.git_command(
+            workspace,
+            "git-reset",
+            vec![
+                "git".to_string(),
+                "-C".to_string(),
+                workspace.container_worktree.clone(),
+                "reset".to_string(),
+                "--hard".to_string(),
+                target,
+            ],
+            false,
+        )
+        .await?;
+
+        self.git_command(
+            workspace,
+            "git-clean",
+            vec![
+                "git".to_string(),
+                "-C".to_string(),
+                workspace.container_worktree.clone(),
+                "clean".to_string(),
+                "-fdx".to_string(),
+            ],
+            false,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn sync_to_host_worktree(
+        &self,
+        workspace: &DockerWorkspace,
+        host_worktree: &Path,
+    ) -> Result<()> {
+        let script = format!(
+            "set -eu\nfind {HOST_WORKTREE_MOUNT} -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {{}} +\ntar -C '{}' --exclude=.git -cf - . | tar -C {HOST_WORKTREE_MOUNT} -xf -",
+            workspace.container_worktree
+        );
+        self.run_helper_command(
+            "sync-host",
+            vec!["sh".to_string(), "-lc".to_string(), script],
+            self.helper_mounts(
+                workspace,
+                vec![Self::bind_mount(host_worktree, HOST_WORKTREE_MOUNT, false)],
+            ),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn prepare_workspace(
+        &self,
+        workspace: &DockerWorkspace,
+        wave_run_id: &str,
+        host_worktree: &Path,
+    ) -> Result<()> {
+        self.ensure_volume(&workspace.volume.volume_name).await?;
+
+        let should_hygiene = {
+            let mut prepared = self.prepared_runs.lock().await;
+            prepared.insert(wave_run_id.to_string())
+        };
+
+        let lock = self
+            .mutation_locks
+            .for_key(&workspace.volume.repo_key)
+            .await;
+        {
+            let _guard = lock.lock().await;
+            self.ensure_shared_clone(workspace).await?;
+            if should_hygiene {
+                self.fetch_shared_clone(workspace).await?;
+            }
+            self.ensure_worktree(workspace).await?;
+        }
+
+        if should_hygiene {
+            self.run_hygiene(workspace).await?;
+        }
+
+        self.sync_to_host_worktree(workspace, host_worktree).await?;
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl AgentExecutor for DockerExecutor {
+    async fn run(
+        &self,
+        cmd: Vec<String>,
+        cwd: &Path,
+        wave_id: &str,
+        agent_id: &str,
+        wave_run_id: &str,
+        output: &OutputHub,
+    ) -> Result<i32> {
+        if cmd.is_empty() {
+            return Err(anyhow!("empty agent command"));
+        }
+
+        let workspace = self.resolve_workspace(wave_id, wave_run_id)?;
+        self.prepare_workspace(&workspace, wave_run_id, cwd).await?;
+
+        let container_name = Self::build_container_name(agent_id);
+        let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
+        let env = self.collect_env();
+        let mounts = self.build_mounts(&workspace.volume.volume_name);
+
+        let host_config = HostConfig {
+            mounts: Some(mounts),
+            network_mode: Some("bridge".to_string()),
+            privileged: Some(false),
+            cap_drop: Some(vec!["ALL".to_string()]),
+            auto_remove: Some(false),
+            ..Default::default()
+        };
+
+        let container = self
+            .docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: container_name,
+                    platform: None,
+                }),
+                DockerContainerConfig {
+                    image: Some(self.image.clone()),
+                    cmd: Some(cmd),
+                    working_dir: Some(workspace.container_worktree.clone()),
+                    env: Some(env),
+                    user: Some("root".to_string()),
+                    host_config: Some(host_config),
+                    labels: Some(HashMap::from([(
+                        "io.loopflow.managed".to_string(),
+                        "true".to_string(),
+                    )])),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        let container_id = container.id;
+        self.active
+            .lock()
+            .await
+            .insert(agent_id.to_string(), container_id.clone());
+
+        if let Err(err) = self
+            .docker
+            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .await
+        {
+            self.active.lock().await.remove(agent_id);
+            self.remove_container(&container_id).await;
+            return Err(err.into());
+        }
+
+        let logs_task = tokio::spawn(Self::stream_logs(
+            self.docker.clone(),
+            container_id.clone(),
+            output.clone(),
+            wave_id.to_string(),
+            wave_run_id.to_string(),
+            agent_id.to_string(),
+        ));
+
+        let mut wait_stream = self
+            .docker
+            .wait_container(&container_id, None::<WaitContainerOptions<String>>);
+        let wait_result = wait_stream.next().await;
+
+        let _ = logs_task.await;
+        self.active.lock().await.remove(agent_id);
+        self.remove_container(&container_id).await;
+
+        self.sync_to_host_worktree(&workspace, cwd).await?;
+
+        let status =
+            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
+        Ok(status.status_code as i32)
+    }
+
+    async fn terminate(&self, agent_id: &str) -> Result<()> {
+        let container_id = self.active.lock().await.remove(agent_id);
+        if let Some(container_id) = container_id {
+            let _ = self
+                .docker
+                .stop_container(&container_id, Some(StopContainerOptions { t: 1 }))
+                .await;
+            self.remove_container(&container_id).await;
+        }
+        Ok(())
+    }
+
+    async fn cleanup_wave(&self, wave: &Wave) -> Result<()> {
+        let repo = Self::resolve_host_repo(&wave.repo);
+        let workspace = Self::docker_workspace_for_wave(&repo, &wave.name, "main");
+        if self
+            .docker
+            .inspect_volume(&workspace.volume.volume_name)
+            .await
+            .is_err()
+        {
+            return Ok(());
+        }
+
+        let lock = self
+            .mutation_locks
+            .for_key(&workspace.volume.repo_key)
+            .await;
+        let _guard = lock.lock().await;
+        if !self
+            .is_git_repo(&workspace, &workspace.container_shared_clone)
+            .await
+        {
+            return Ok(());
+        }
+
+        let _ = self
+            .git_command(
+                &workspace,
+                "git-worktree-remove",
+                vec![
+                    "git".to_string(),
+                    "-C".to_string(),
+                    workspace.container_shared_clone.clone(),
+                    "worktree".to_string(),
+                    "remove".to_string(),
+                    "--force".to_string(),
+                    workspace.container_worktree.clone(),
+                ],
+                false,
+            )
+            .await;
+        Ok(())
     }
 }
 
@@ -147,32 +1221,49 @@ async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
     let mut parser = StreamParser::new();
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        match parser.feed_line(&line) {
-            ParseResult::Events(events) => {
-                for event in &events {
-                    let (stdout, stderr) = render_event(event, false);
-                    let text = if !stdout.is_empty() { stdout } else { stderr };
-                    if !text.is_empty() {
-                        output.send(OutputEvent {
-                            wave_id: wave_id.clone(),
-                            wave_run_id: wave_run_id.clone(),
-                            agent_id: agent_id.clone(),
-                            text,
-                        });
-                    }
+        handle_output_line(
+            &line,
+            &mut parser,
+            &output,
+            &wave_id,
+            &wave_run_id,
+            &agent_id,
+        );
+    }
+}
+
+fn handle_output_line(
+    line: &str,
+    parser: &mut StreamParser,
+    output: &OutputHub,
+    wave_id: &str,
+    wave_run_id: &str,
+    agent_id: &str,
+) {
+    match parser.feed_line(line) {
+        ParseResult::Events(events) => {
+            for event in &events {
+                let (stdout, stderr) = render_event(event, false);
+                let text = if !stdout.is_empty() { stdout } else { stderr };
+                if !text.is_empty() {
+                    send_output(output, wave_id, wave_run_id, agent_id, text);
                 }
             }
-            ParseResult::Skipped => {}
-            ParseResult::Passthrough => {
-                output.send(OutputEvent {
-                    wave_id: wave_id.clone(),
-                    wave_run_id: wave_run_id.clone(),
-                    agent_id: agent_id.clone(),
-                    text: line,
-                });
-            }
+        }
+        ParseResult::Skipped => {}
+        ParseResult::Passthrough => {
+            send_output(output, wave_id, wave_run_id, agent_id, line.to_string());
         }
     }
+}
+
+fn send_output(output: &OutputHub, wave_id: &str, wave_run_id: &str, agent_id: &str, text: String) {
+    output.send(OutputEvent {
+        wave_id: wave_id.to_string(),
+        wave_run_id: wave_run_id.to_string(),
+        agent_id: agent_id.to_string(),
+        text,
+    });
 }
 
 #[derive(Clone)]
@@ -180,8 +1271,9 @@ pub struct WaveExecutor {
     store: SharedStore,
     scheduler: Arc<Scheduler>,
     output: OutputHub,
-    runner: Arc<dyn StepRunner>,
+    runner: Arc<dyn AgentExecutor>,
     event_hub: EventHub,
+    executor_type: ExecutorType,
 }
 
 impl WaveExecutor {
@@ -190,15 +1282,21 @@ impl WaveExecutor {
         scheduler: Arc<Scheduler>,
         output: OutputHub,
         event_hub: EventHub,
-    ) -> Self {
-        let runner = Arc::new(AgentRunner::new(store.clone()));
-        Self {
+        config: ExecutorConfig,
+    ) -> Result<Self> {
+        let executor_type = config.r#type;
+        let runner: Arc<dyn AgentExecutor> = match executor_type {
+            ExecutorType::Docker => Arc::new(DockerExecutor::new(store.clone(), &config)?),
+            ExecutorType::Local => Arc::new(LocalProcessExecutor::new(store.clone())),
+        };
+        Ok(Self {
             store,
             scheduler,
             output,
             runner,
             event_hub,
-        }
+            executor_type,
+        })
     }
 
     #[cfg(test)]
@@ -207,7 +1305,7 @@ impl WaveExecutor {
         scheduler: Arc<Scheduler>,
         output: OutputHub,
         event_hub: EventHub,
-        runner: Arc<dyn StepRunner>,
+        runner: Arc<dyn AgentExecutor>,
     ) -> Self {
         Self {
             store,
@@ -215,7 +1313,20 @@ impl WaveExecutor {
             output,
             runner,
             event_hub,
+            executor_type: ExecutorType::Local,
         }
+    }
+
+    pub fn executor_type(&self) -> ExecutorType {
+        self.executor_type
+    }
+
+    pub async fn cleanup_wave_workspace(&self, wave: &Wave) -> Result<()> {
+        self.runner.cleanup_wave(wave).await
+    }
+
+    pub async fn terminate_agent(&self, agent_id: &LfdId) -> Result<()> {
+        self.runner.terminate(agent_id.as_str()).await
     }
 
     pub async fn execute(&self, run_id: &LfdId) -> Result<()> {
@@ -299,10 +1410,16 @@ impl WaveExecutor {
                             "running fork (all branches)"
                         );
                         self.run_fork(&wave, &mut run, &plan, &fork).await?;
+                        if run.status == WaveRunStatus::Failed {
+                            return Ok(());
+                        }
                     }
                     ForkSelect::One | ForkSelect::Prompt { .. } => {
                         info!(run_id = %run.id, step_index = run.step_index, "running fork (choose)");
                         self.run_choose(&wave, &mut run, &plan, &fork).await?;
+                        if run.status == WaveRunStatus::Failed {
+                            return Ok(());
+                        }
                     }
                 },
                 FlowAction::Complete => {
@@ -526,7 +1643,7 @@ impl WaveExecutor {
         let step = ConcreteStep {
             step: Step {
                 name: "_summarize".to_string(),
-                model: Some(model),
+                model: Some(model.clone()),
                 directions: Vec::new(),
                 interactive: Some(false),
                 content: None,
@@ -649,6 +1766,15 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
+        if self.executor_type == ExecutorType::Docker {
+            self.fail_run(
+                run,
+                wave,
+                "fork(select=all) is not supported by the docker executor yet".to_string(),
+            )?;
+            return Ok(());
+        }
+
         let mut fork_runs = Vec::new();
         for (index, branch) in fork.branches.iter().enumerate() {
             if branch.step.interactive.unwrap_or(false) {
@@ -1166,6 +2292,7 @@ fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result<String> {
 mod tests {
     use super::*;
     use crate::lfd::store::sqlite::SqliteStore;
+    use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
     use tokio::io::{AsyncWriteExt, DuplexStream};
 
@@ -1248,10 +2375,130 @@ mod tests {
         );
     }
 
+    #[test]
+    fn docker_mount_spec_requires_host_and_container_paths() {
+        let home = dirs::home_dir().expect("home directory should be available");
+        let mount = DockerCredentialMount::from_spec("~/.claude:/home/agent/.claude")
+            .expect("mount spec should parse");
+        assert_eq!(mount.host_path, home.join(".claude"));
+        assert_eq!(mount.container_path, "/home/agent/.claude");
+        assert!(DockerCredentialMount::from_spec("missing-colon").is_err());
+        assert!(DockerCredentialMount::from_spec(":/home/agent/.claude").is_err());
+        assert!(DockerCredentialMount::from_spec("relative:/home/agent/.claude").is_err());
+        assert!(DockerCredentialMount::from_spec("/tmp/claude:relative").is_err());
+    }
+
+    #[test]
+    fn docker_rewrites_paths_into_workspace() {
+        let cmd = vec![
+            "claude".to_string(),
+            "--append-system-prompt-file".to_string(),
+            "/tmp/worktree/.lf/prompt.md".to_string(),
+            "-C".to_string(),
+            "/tmp/worktree".to_string(),
+            "--danger".to_string(),
+            "/tmp/worktree-copy".to_string(),
+        ];
+        let rewritten = DockerExecutor::rewrite_command_paths(
+            cmd,
+            Path::new("/tmp/worktree"),
+            "/workspace/repos/repo/worktrees/wave",
+        );
+        assert_eq!(
+            rewritten,
+            vec![
+                "claude".to_string(),
+                "--append-system-prompt-file".to_string(),
+                "/workspace/repos/repo/worktrees/wave/.lf/prompt.md".to_string(),
+                "-C".to_string(),
+                "/workspace/repos/repo/worktrees/wave".to_string(),
+                "--danger".to_string(),
+                "/tmp/worktree-copy".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn docker_workspace_mount_uses_volume() {
+        let mounts = DockerExecutor::build_mounts_for("lfd-repo-abc", &[]);
+        assert_eq!(mounts.len(), 1);
+        assert_eq!(mounts[0].typ, Some(MountTypeEnum::VOLUME));
+        assert_eq!(mounts[0].source, Some("lfd-repo-abc".to_string()));
+        assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
+    }
+
+    #[test]
+    fn repo_volume_identity_is_deterministic_and_safe() {
+        let repo = tempdir().expect("tempdir");
+        let first = RepoVolumeIdentity::from_identity(&RepoIdentity::from_repo(repo.path()));
+        let second = RepoVolumeIdentity::from_identity(&RepoIdentity::from_repo(repo.path()));
+
+        assert_eq!(first, second);
+        assert!(first.volume_name.starts_with("lfd-repo-"));
+        assert!(first
+            .volume_name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.'));
+    }
+
+    #[test]
+    fn repo_identity_falls_back_to_path_hash() {
+        let repo = tempdir().expect("tempdir");
+        let identity_a = RepoIdentity::from_repo(repo.path());
+        let identity_b = RepoIdentity::from_repo(repo.path());
+        assert_eq!(identity_a, identity_b);
+        assert!(!identity_a.has_remote);
+        assert!(identity_a.canonical.starts_with("local:"));
+    }
+
+    #[test]
+    fn normalize_repo_url_handles_common_forms() {
+        assert_eq!(
+            normalize_repo_url("git@GitHub.com:LoopflowStudio/loopflow.git"),
+            "ssh://git@github.com/LoopflowStudio/loopflow"
+        );
+        assert_eq!(
+            normalize_repo_url("HTTPS://GITHUB.COM/loopflowstudio/loopflow.git/"),
+            "https://github.com/loopflowstudio/loopflow"
+        );
+    }
+
+    #[tokio::test]
+    async fn repo_mutation_locks_serialize_same_repo_key() {
+        let locks = RepoMutationLocks::default();
+        let events = Arc::new(StdMutex::new(Vec::new()));
+
+        let lock_a = locks.for_key("repo-1").await;
+        let events_a = events.clone();
+        let first = tokio::spawn(async move {
+            let _guard = lock_a.lock().await;
+            events_a.lock().expect("lock events").push("first-start");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            events_a.lock().expect("lock events").push("first-end");
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let lock_b = locks.for_key("repo-1").await;
+        let events_b = events.clone();
+        let second = tokio::spawn(async move {
+            let _guard = lock_b.lock().await;
+            events_b.lock().expect("lock events").push("second");
+        });
+
+        first.await.expect("first task should finish");
+        second.await.expect("second task should finish");
+
+        assert_eq!(
+            events.lock().expect("events").as_slice(),
+            ["first-start", "first-end", "second"]
+        );
+    }
+
     struct MockRunner;
 
     #[async_trait]
-    impl StepRunner for MockRunner {
+    impl AgentExecutor for MockRunner {
         async fn run(
             &self,
             _cmd: Vec<String>,
@@ -1262,6 +2509,10 @@ mod tests {
             _output: &OutputHub,
         ) -> Result<i32> {
             Ok(0)
+        }
+
+        async fn terminate(&self, _agent_id: &str) -> Result<()> {
+            Ok(())
         }
     }
 
@@ -1356,6 +2607,101 @@ mod tests {
         assert_eq!(
             wave_updated_count, 3,
             "expected wave_updated after each step advance and on completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_fails_fork_all_with_docker_executor() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+
+        let flow_dir = repo.join(".lf/flows");
+        std::fs::create_dir_all(&flow_dir).expect("flow dir should exist");
+        std::fs::write(
+            flow_dir.join("fork-flow.yaml"),
+            r#"
+- fork:
+    branches:
+      - step: { name: step-a }
+      - step: { name: step-b }
+    select: all
+"#,
+        )
+        .expect("flow file should be written");
+
+        let step_dir = repo.join(".lf/steps");
+        std::fs::create_dir_all(&step_dir).expect("step dir should exist");
+        std::fs::write(step_dir.join("step-a.md"), "do step a").expect("step file should write");
+        std::fs::write(step_dir.join("step-b.md"), "do step b").expect("step file should write");
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+
+        let wave_id = LfdId::new();
+        let run_id = LfdId::new();
+        let wave = Wave {
+            id: wave_id.clone(),
+            name: "fork-wave".to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: "fork-flow".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Running,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.create_wave(&wave).expect("wave should be created");
+
+        let run = WaveRun {
+            id: run_id.clone(),
+            wave_id: wave_id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: repo.to_string_lossy().to_string(),
+                flow: "fork-flow".to_string(),
+                direction: vec![],
+                area: vec![],
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: repo.to_string_lossy().to_string(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+        };
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor {
+            store: store.clone(),
+            scheduler,
+            output,
+            runner: Arc::new(MockRunner),
+            event_hub,
+            executor_type: ExecutorType::Docker,
+        };
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert_eq!(
+            updated_run.error.as_deref(),
+            Some("fork(select=all) is not supported by the docker executor yet")
         );
     }
 }

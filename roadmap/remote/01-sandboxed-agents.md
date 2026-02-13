@@ -6,6 +6,44 @@ Run agents in Docker containers with controlled filesystem, network, and credent
 
 lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes, not on the host. Agents can't access the host filesystem, can't interfere with each other, and only get the credentials they need. lfd itself still runs as a native process.
 
+## Phase 01 staging
+
+### Stage 01A (shipped)
+
+- `AgentExecutor` abstraction with `LocalProcessExecutor` and `DockerExecutor`
+- Executor selection from config/env (`executor.type`, `executor.image`, env overrides)
+- Ephemeral Docker container per step with log streaming and explicit cleanup
+- Executor-aware stop/delete/recovery termination paths
+- Explicit credential injection (env + configured mounts) in Docker mode
+- Local execution remains default
+
+### Stage 01B (next)
+
+**First commit scope (now):**
+
+- **Repo volumes**: persistent per-repo Docker volume keyed by canonical repo URL (fallback: local path hash)
+- **Git layout**: one shared clone + per-wave/branch git worktrees inside that volume
+- **Workspace hygiene per run**: `git fetch`, `git reset --hard`, `git clean -fdx`
+- **Concurrency**: fine-grained locking around shared clone mutations; isolated worktree execution stays concurrent
+- **No broad host path mounts** for repo workspaces
+
+**Follow-up in Stage 01B:**
+
+- **Durability**: persist container metadata in run state; rehydrate across daemon restart
+- **Recovery**: aggressive startup cleanup, but only for loopflow-labeled containers
+
+### Stage 01C (hardening + validation)
+
+- **Fork isolation**: isolated per-branch Docker workspaces so `fork(select: all)` can safely run parallel branch execution
+- **Credentials**: typed mount config with hard allowlist and read-only semantics
+- **Image pipeline**:
+  - explicit rebuild triggers (`.lf/.docker-stale`, `.lf/Dockerfile` hash, `.lf/env-setup.sh` hash, base image ref change, image missing)
+  - `_docker-gen` writes `.lf/Dockerfile` to repo when missing
+  - per-image build lock + waiters for concurrent waves
+- **Tests**:
+  - PR CI: Docker smoke coverage
+  - Nightly: full Docker e2e coverage (run, logs, cancel, cleanup, concurrent waves)
+
 ## Why containerize
 
 Security. Agents run arbitrary code — file edits, bash commands, git operations. A container limits the blast radius:
@@ -20,7 +58,7 @@ Security. Agents run arbitrary code — file edits, bash commands, git operation
 ```
 lfd (native process, has Docker socket access)
   ├── manages wave state, serves API to Concerto
-  ├── repos volume mounted (for git worktree operations)
+  ├── manages repo volumes + git worktrees
   └── creates agent containers via Docker API
 
 wave-1 (container, created by lfd at runtime)
@@ -33,7 +71,7 @@ wave-2 (container, created by lfd at runtime)
   └── (same pattern)
 ```
 
-lfd creates sibling containers via the Docker API (bollard crate). Repo volumes are shared between lfd and agent containers. Agents never touch the host filesystem directly.
+lfd creates sibling containers via the Docker API (bollard crate). Repo volumes are mounted only into loopflow-managed containers. Agents never touch the host filesystem directly.
 
 ## Agent image
 
@@ -57,10 +95,8 @@ RUN curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads
 # lf binary (for context assembly)
 RUN curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 
-# Non-root user
-RUN useradd -m -s /bin/bash agent
-USER agent
-WORKDIR /home/agent
+# Containers run as root (security boundary is the container)
+WORKDIR /workspace
 ```
 
 ### Agent headless commands
@@ -194,6 +230,11 @@ Docker volume: repo-loopflow
 
 The volume persists across container stop/start. Git state (branches, worktrees, objects) is preserved.
 
+### Volume identity
+
+- Primary key: canonical repo remote URL
+- Fallback key: local repo path hash (when no remote is configured)
+
 ## Credentials per wave
 
 Each wave container gets only what it needs:
@@ -213,13 +254,12 @@ Default to subscription auth (mounted credential files, read-only). The user exp
 
 Read-only mounts of auth tokens are acceptable — these aren't arbitrary host directories, they're credentials the user has chosen to share with loopflow.
 
-## Open questions
+### Credential mount policy (Phase 01)
 
-- **Bollard vs shelling out to `docker`**: bollard is a pure Rust Docker client. Alternative: just exec `docker run/stop/logs`. Bollard is cleaner but adds a dependency.
-- **Container lifecycle**: does the container stay running between steps, or does each step get a fresh container? Keeping it running is simpler (no re-clone, warm caches). But a fresh container per step is more isolated.
-- **Network policy**: "outbound only" is the Docker default (bridge mode). Do we need tighter restrictions (allowlist specific domains)?
-- **Image size**: the all-agents image will be large (Node.js + Go + Rust artifacts). Consider a base image with just system deps, and install agents via volume mount or at container start.
-- **Multi-arch**: need ARM images for Apple Silicon Macs and t4g EC2. Docker buildx handles this.
+- Use typed config for credential mounts (no raw `host:container` strings)
+- Enforce hard allowlist for host credential paths
+- Force read-only semantics
+- Deny by default outside allowlist
 
 ## Done when
 
@@ -228,7 +268,12 @@ Read-only mounts of auth tokens are acceptable — these aren't arbitrary host d
 - lfd can spawn a wave agent in a Docker container
 - Agent executes Claude Code headless, produces commits
 - Logs stream from container to lfd to Concerto
-- Repo volume persists across container stop/start
-- Container has no access to host filesystem (only repo volume)
+- Repo volume persists across container stop/start and is keyed per repo
+- Shared clone + git worktree model runs inside Docker-managed repo volumes
+- Container has no access to host filesystem (only repo volume + explicit read-only credential mounts)
+- Container metadata survives daemon restart for stop/delete/recovery paths
+- Docker image build path handles missing `.lf/Dockerfile` via `_docker-gen` and rebuild triggers
+- Concurrent waves coordinate image builds with per-image locks
+- Docker smoke runs in PR CI and full Docker e2e coverage runs nightly
 - `executor.type: docker` in config switches to container mode
 - `executor.type: local` still works (no regression)

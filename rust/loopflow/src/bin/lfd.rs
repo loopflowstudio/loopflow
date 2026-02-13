@@ -92,7 +92,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler.clone(),
         output.clone(),
         event_hub.clone(),
-    );
+        lfd_config.executor.clone(),
+    )?;
     let loop_handles = scheduler.clone().start_loops(
         store.clone(),
         executor.clone(),

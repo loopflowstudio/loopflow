@@ -105,7 +105,7 @@ struct WaveSidebar: View {
                 .help("Waves are autonomous AI workers that run flows on your codebase")
 
             if waveGroups.attentionCount > 0 {
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     Circle()
                         .fill(Color.statusWarning)
                         .frame(width: 6, height: 6)
@@ -149,8 +149,8 @@ struct WaveSidebar: View {
             .accessibleButton("Open diagnostics")
             .minHitTarget()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
     }
 
     private var disconnectedState: some View {
@@ -158,12 +158,12 @@ struct WaveSidebar: View {
             Spacer()
                 .frame(maxHeight: .infinity)
 
-            VStack(spacing: 12) {
+            VStack(spacing: Spacing.md) {
                 Image(systemName: "link.circle")
                     .font(Typography.heroTitle(28))
                     .foregroundStyle(.white.opacity(0.3))
 
-                VStack(spacing: 4) {
+                VStack(spacing: Spacing.xs) {
                     Text("Connect to lfd")
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
@@ -171,7 +171,7 @@ struct WaveSidebar: View {
                         .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, Spacing.lg)
                 }
 
                 Button {

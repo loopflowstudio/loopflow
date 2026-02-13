@@ -1410,10 +1410,16 @@ impl WaveExecutor {
                             "running fork (all branches)"
                         );
                         self.run_fork(&wave, &mut run, &plan, &fork).await?;
+                        if run.status == WaveRunStatus::Failed {
+                            return Ok(());
+                        }
                     }
                     ForkSelect::One | ForkSelect::Prompt { .. } => {
                         info!(run_id = %run.id, step_index = run.step_index, "running fork (choose)");
                         self.run_choose(&wave, &mut run, &plan, &fork).await?;
+                        if run.status == WaveRunStatus::Failed {
+                            return Ok(());
+                        }
                     }
                 },
                 FlowAction::Complete => {
@@ -1760,6 +1766,15 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
+        if self.executor_type == ExecutorType::Docker {
+            self.fail_run(
+                run,
+                wave,
+                "fork(select=all) is not supported by the docker executor yet".to_string(),
+            )?;
+            return Ok(());
+        }
+
         let mut fork_runs = Vec::new();
         for (index, branch) in fork.branches.iter().enumerate() {
             if branch.step.interactive.unwrap_or(false) {
@@ -2592,6 +2607,101 @@ mod tests {
         assert_eq!(
             wave_updated_count, 3,
             "expected wave_updated after each step advance and on completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_fails_fork_all_with_docker_executor() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+
+        let flow_dir = repo.join(".lf/flows");
+        std::fs::create_dir_all(&flow_dir).expect("flow dir should exist");
+        std::fs::write(
+            flow_dir.join("fork-flow.yaml"),
+            r#"
+- fork:
+    branches:
+      - step: { name: step-a }
+      - step: { name: step-b }
+    select: all
+"#,
+        )
+        .expect("flow file should be written");
+
+        let step_dir = repo.join(".lf/steps");
+        std::fs::create_dir_all(&step_dir).expect("step dir should exist");
+        std::fs::write(step_dir.join("step-a.md"), "do step a").expect("step file should write");
+        std::fs::write(step_dir.join("step-b.md"), "do step b").expect("step file should write");
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+
+        let wave_id = LfdId::new();
+        let run_id = LfdId::new();
+        let wave = Wave {
+            id: wave_id.clone(),
+            name: "fork-wave".to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: "fork-flow".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Running,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.create_wave(&wave).expect("wave should be created");
+
+        let run = WaveRun {
+            id: run_id.clone(),
+            wave_id: wave_id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: repo.to_string_lossy().to_string(),
+                flow: "fork-flow".to_string(),
+                direction: vec![],
+                area: vec![],
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: repo.to_string_lossy().to_string(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+        };
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor {
+            store: store.clone(),
+            scheduler,
+            output,
+            runner: Arc::new(MockRunner),
+            event_hub,
+            executor_type: ExecutorType::Docker,
+        };
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert_eq!(
+            updated_run.error.as_deref(),
+            Some("fork(select=all) is not supported by the docker executor yet")
         );
     }
 }

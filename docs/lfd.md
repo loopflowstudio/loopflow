@@ -51,6 +51,8 @@ LFD_STORAGE       # sqlite (default) or postgres
 LFD_DB_PATH       # sqlite path override
 LFD_DATABASE_URL  # required when LFD_STORAGE=postgres
 LFD_MAX_SLOTS     # concurrent run slots
+LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
+LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 ```
 
 `lfd` also reads `~/.lf/lfd.yaml` for daemon settings:
@@ -65,6 +67,9 @@ executor:
       - claude
       - codex
       - ssh
+github:
+  webhook_secret: your-webhook-secret
+  token: ghp_xxx # optional, used for startup /check-ci polling
 ```
 
 `credentials.mounts` uses named allowlisted mounts only:
@@ -83,15 +88,30 @@ Environment overrides:
 ```bash
 LFD_EXECUTOR_TYPE=docker
 LFD_EXECUTOR_IMAGE=loopflow/agent:latest # base image for generated Dockerfiles
+LFD_GITHUB_WEBHOOK_SECRET=your-webhook-secret
+LFD_GITHUB_TOKEN=ghp_xxx
 ```
 
 When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 
 Docker mode also:
 
-- supports `fork` steps with `select: all` by creating isolated fork worktrees
 - builds a repo-specific image tag (`lfd-agent-<repo-key>:latest`) from `.lf/Dockerfile`
 - runs `install-loopflow.sh --install` in generated Dockerfiles when available in the base image
 - treats `.lf/env-setup.sh` as project-owned setup; call `install-loopflow.sh "$@"` first in that script to keep loopflow base tooling aligned
 - requires the `docker` CLI in `PATH` for repo image builds (`docker build`)
 - reattaches to running agent containers after daemon restart
+
+Current limitation: `fork` steps with `select: all` are not supported by the Docker executor yet.
+
+## GitHub CI auto-fix
+
+```bash
+# Webhook target (GitHub check_run failures)
+POST /v0/hooks/github
+
+# One-shot poll for a single wave (requires github.token / LFD_GITHUB_TOKEN)
+POST /v0/waves/{wave_id}/check-ci
+```
+
+Set `github.webhook_secret` (or `LFD_GITHUB_WEBHOOK_SECRET`) before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.

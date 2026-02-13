@@ -74,6 +74,16 @@ pub async fn github_webhook_handler(
         ));
     }
 
+    if headers
+        .get("X-GitHub-Event")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|kind| !kind.eq_ignore_ascii_case("check_run"))
+    {
+        return Ok(Json(
+            serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
+        ));
+    }
+
     let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body)
         .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
 
@@ -327,4 +337,75 @@ async fn emit_ci_failure(
     }
     event_hub.send(event);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lfd::types::{PullRequest, WaveRunKind, WaveRunSnapshot, WaveRunStatus};
+
+    fn wave_run_with_pr(
+        run_kind: WaveRunKind,
+        pr_state: Option<&str>,
+        branch: Option<&str>,
+    ) -> WaveRun {
+        WaveRun {
+            id: LfdId::new(),
+            wave_id: LfdId::new(),
+            snapshot: WaveRunSnapshot {
+                repo: ".".to_string(),
+                flow: "ship".to_string(),
+                direction: Vec::new(),
+                area: Vec::new(),
+                pr: Some(PullRequest {
+                    url: "https://example.test/pr/1".to_string(),
+                    number: Some(1),
+                    state: pr_state.map(ToString::to_string),
+                    title: Some("test".to_string()),
+                    branch: branch.map(ToString::to_string),
+                }),
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: "/tmp/worktree".to_string(),
+            branch: "feature".to_string(),
+            started_at: None,
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind,
+            sidecar_kind: None,
+        }
+    }
+
+    #[test]
+    fn run_matches_ci_target_only_matches_open_main_prs() {
+        let run = wave_run_with_pr(WaveRunKind::Main, Some("open"), Some("feature"));
+        assert!(run_matches_ci_target(&run, Some("feature"), Some(1)));
+
+        let closed = wave_run_with_pr(WaveRunKind::Main, Some("closed"), Some("feature"));
+        assert!(!run_matches_ci_target(&closed, Some("feature"), Some(1)));
+
+        let sidecar = wave_run_with_pr(WaveRunKind::Sidecar, Some("open"), Some("feature"));
+        assert!(!run_matches_ci_target(&sidecar, Some("feature"), Some(1)));
+    }
+
+    #[tokio::test]
+    async fn emit_ci_failure_deduplicates_by_wave_and_commit_sha() {
+        let event_hub = EventHub::new(8);
+        let cache = Arc::new(Mutex::new(HashSet::new()));
+        let event = Event::ci_failure(
+            LfdId::new(),
+            LfdId::new(),
+            1,
+            "feature".to_string(),
+            "abc123".to_string(),
+            "test-check".to_string(),
+            "https://example.test/logs".to_string(),
+        );
+
+        assert!(emit_ci_failure(&event_hub, &cache, event.clone()).await);
+        assert!(!emit_ci_failure(&event_hub, &cache, event).await);
+    }
 }

@@ -1991,7 +1991,16 @@ impl WaveExecutor {
             run_kind: WaveRunKind::Sidecar,
             sidecar_kind: Some(SidecarKind::CiFix),
         };
-        self.store.create_wave_run(&run)?;
+        if let Err(err) = self.store.create_wave_run(&run) {
+            if let Err(cleanup_err) = cleanup_ci_fix_worktree(&worktree_path) {
+                warn!(
+                    worktree = %worktree,
+                    error = %cleanup_err,
+                    "failed to clean up CI fix worktree after create_wave_run error"
+                );
+            }
+            return Err(err.into());
+        }
 
         let result = self.execute_ci_fix_agent(&wave, &run, failure).await;
         run.ended_at = Some(OffsetDateTime::now_utc());
@@ -2001,12 +2010,14 @@ impl WaveExecutor {
         } else {
             run.status = WaveRunStatus::Completed;
         }
-        self.store.update_wave_run(&run)?;
+
+        let update_result = self.store.update_wave_run(&run);
 
         if let Err(err) = cleanup_ci_fix_worktree(&worktree_path) {
             warn!(worktree = %worktree, error = %err, "failed to clean up CI fix worktree");
         }
 
+        update_result?;
         result
     }
 

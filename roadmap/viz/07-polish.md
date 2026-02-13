@@ -21,8 +21,9 @@ Prioritized by visual impact per line changed. Full details in `reports/viz/desi
 
 ### Tier 5: Sidebar section header weight (in progress)
 
+### Tier 6: Detail view density and hierarchy (todo)
+
 ### Other candidates
-- Detail view density and hierarchy
 - Empty state refinement
 - Flow badge density (capsule pills vs text-only)
 

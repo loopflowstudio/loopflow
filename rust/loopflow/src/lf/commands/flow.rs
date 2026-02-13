@@ -181,7 +181,13 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         });
     }
 
-    let manifest_path = write_fork_manifest(repo, &manifest_branches)?;
+    let manifest_path = match write_fork_manifest(repo, &manifest_branches) {
+        Ok(path) => path,
+        Err(err) => {
+            cleanup_fork_artifacts(None, &tasks);
+            return Err(err);
+        }
+    };
     let synthesize_result = run_synthesize(fork.synthesize.as_deref(), message, cli);
     cleanup_fork_artifacts(Some(&manifest_path), &tasks);
 

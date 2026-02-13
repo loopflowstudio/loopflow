@@ -203,35 +203,31 @@ struct WaveSidebar: View {
             Spacer()
                 .frame(maxHeight: .infinity)
 
-            VStack(spacing: Spacing.xl) {
-                // Quick experiment section (primary)
-                QuickExperimentSidebarView { step in
-                    launchQuickExperiment(step: step)
+            VStack(spacing: Spacing.md) {
+                Image(systemName: "wave.3.right")
+                    .font(Typography.heroTitle(28))
+                    .foregroundStyle(.white.opacity(0.3))
+
+                VStack(spacing: Spacing.xs) {
+                    Text("No waves yet")
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white.opacity(0.7))
+                    Text("Waves track ongoing branches, PRs, and runs.")
+                        .font(Typography.caption())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Spacing.lg)
                 }
-                .accessibilityIdentifier("quick-experiment-section")
 
-                // Divider
-                Rectangle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(height: 1)
-                    .padding(.horizontal, Spacing.lg)
-
-                // Create wave section (secondary)
-                VStack(spacing: Spacing.sm) {
-                    Button {
-                        createWaveDirectly()
-                    } label: {
-                        Label("Create Wave", systemImage: "plus")
-                            .font(Typography.caption())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(isCreatingWave)
-                    .accessibilityIdentifier("wave-empty-create")
-
-                    // Sidebar preview showing wave structure
-                    SidebarPreviewView()
+                Button {
+                    createWaveDirectly()
+                } label: {
+                    Label("Create Wave", systemImage: "plus")
+                        .font(Typography.caption())
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(isCreatingWave)
             }
 
             Spacer()
@@ -239,17 +235,6 @@ struct WaveSidebar: View {
         }
         .frame(maxWidth: .infinity)
         .padding()
-    }
-
-    private func launchQuickExperiment(step: String) {
-        guard let repo = repoState.currentRepo else { return }
-        let terminal = TerminalApp.warp
-        do {
-            try TerminalLauncher().launchStep(step, terminal: terminal, at: repo)
-        } catch {
-            actionError = "Failed to launch: \(error.localizedDescription)"
-            showingActionError = true
-        }
     }
 
     private var waveList: some View {

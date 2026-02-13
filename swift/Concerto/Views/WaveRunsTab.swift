@@ -43,9 +43,14 @@ struct WaveRunsTab: View {
             }
 
             if runs.isEmpty {
-                Text("No runs yet")
-                    .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                VStack(spacing: Spacing.xs) {
+                    Text("No runs yet")
+                        .font(Typography.caption())
+                        .foregroundStyle(.secondary)
+                    Text("Runs appear here when the wave executes a flow.")
+                        .font(Typography.caption(10))
+                        .foregroundStyle(.tertiary)
+                }
             } else {
                 ForEach(sortedRuns) { run in
                     WaveRunRow(run: run)

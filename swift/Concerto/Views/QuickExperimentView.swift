@@ -1,5 +1,5 @@
 // QuickExperimentView - run steps directly on the main repo without creating a wave.
-// Used in empty state (sidebar) and placeholder state (detail panel).
+// Used as the detail panel placeholder when no wave is selected.
 
 import SwiftUI
 import LoopflowCore
@@ -13,85 +13,6 @@ enum QuickExperiment {
         ("implement", "Build from a design")
     ]
 
-    static let stepNames: [String] = steps.map(\.name)
-}
-
-// MARK: - Sidebar Empty State Variant
-
-/// Compact version for the sidebar empty state with burgundy styling.
-struct QuickExperimentSidebarView: View {
-    var onLaunchStep: ((String) -> Void)?
-
-    var body: some View {
-        VStack(spacing: Spacing.md) {
-            VStack(spacing: Spacing.xs) {
-                Text("Quick Experiment")
-                    .font(Typography.caption())
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white.opacity(0.8))
-
-                Text("Run a step on your codebase")
-                    .font(Typography.caption(10))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-
-            // Step buttons in 2x2 grid for sidebar width
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Spacing.xs) {
-                ForEach(QuickExperiment.stepNames, id: \.self) { step in
-                    Button {
-                        onLaunchStep?(step)
-                    } label: {
-                        Text(step)
-                            .font(Typography.caption())
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, Spacing.sm)
-                            .background(Color.white.opacity(0.1))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(.horizontal, Spacing.md)
-    }
-}
-
-// MARK: - Sidebar Preview
-
-/// Visual preview of what the sidebar looks like when populated with waves.
-struct SidebarPreviewView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Or create a wave for ongoing work")
-                .font(Typography.caption(10))
-                .foregroundStyle(.white.opacity(0.5))
-                .padding(.bottom, Spacing.xs)
-
-            // Mock section structure
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                previewSection("Needs Attention", icon: "exclamationmark.triangle.fill", color: .statusWarning)
-                previewSection("Open PRs", icon: "arrow.triangle.pull", color: .statusSuccess)
-                previewSection("Active", icon: "circle.fill", color: .statusSuccess)
-                previewSection("Idle", icon: "circle", color: .white.opacity(0.5))
-            }
-            .padding(.leading, Spacing.xs)
-        }
-        .padding(.horizontal, Spacing.md)
-    }
-
-    private func previewSection(_ title: String, icon: String, color: Color) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Image(systemName: icon)
-                .font(Typography.caption(8))
-                .foregroundStyle(color.opacity(0.6))
-
-            Text(title)
-                .font(Typography.caption(10))
-                .foregroundStyle(.white.opacity(0.4))
-        }
-    }
 }
 
 // MARK: - Detail Panel Placeholder
@@ -131,16 +52,16 @@ struct QuickExperimentDetailView: View {
                         } label: {
                             VStack(spacing: Spacing.xs) {
                                 Text(step.name)
-                                    .font(Typography.sectionTitle())
-                                    .fontWeight(.semibold)
+                                    .font(Typography.body())
+                                    .fontWeight(.medium)
 
                                 Text(step.description)
                                     .font(Typography.caption())
                                     .foregroundStyle(.secondary)
                             }
-                            .frame(width: 120)
-                            .padding(.vertical, Spacing.lg)
-                            .background(palette.surface)
+                            .frame(width: 100)
+                            .padding(.vertical, Spacing.md)
+                            .background(palette.surface.opacity(0.7))
                             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
                         }
                         .buttonStyle(.plain)
@@ -165,11 +86,17 @@ struct QuickExperimentDetailView: View {
                     .frame(maxWidth: 100)
             }
 
-            // Select wave hint
+            // Contextual hint
             VStack(spacing: Spacing.sm) {
-                Text("Select a wave from the sidebar")
-                    .font(Typography.body())
-                    .foregroundStyle(.secondary)
+                if repoState.waves.isEmpty {
+                    Text("Or create a wave for ongoing work")
+                        .font(Typography.body())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Select a wave from the sidebar")
+                        .font(Typography.body())
+                        .foregroundStyle(.secondary)
+                }
 
                 Text("Waves track ongoing work with branches, PRs, and history")
                     .font(Typography.caption())
@@ -192,20 +119,3 @@ struct QuickExperimentDetailView: View {
     .frame(width: 600, height: 500)
 }
 
-#Preview("Quick Experiment - Sidebar") {
-    ZStack {
-        Color.loopflowBurgundy
-        QuickExperimentSidebarView { step in
-            print("Launch: \(step)")
-        }
-    }
-    .frame(width: 280, height: 200)
-}
-
-#Preview("Sidebar Preview") {
-    ZStack {
-        Color.loopflowBurgundy
-        SidebarPreviewView()
-    }
-    .frame(width: 280, height: 200)
-}

@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Linux systemd user service management.
-///
-/// Installs a systemd user unit that starts lfd on login, restarts on crash,
-/// and logs through journald.
+// Linux systemd user service management.
+//
+// Installs a systemd user unit that starts lfd on login, restarts on crash,
+// and logs through journald.
 
 const UNIT_NAME: &str = "lfd.service";
 

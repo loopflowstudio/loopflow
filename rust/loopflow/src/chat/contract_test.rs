@@ -37,8 +37,25 @@ fn send_message_args_reject_missing_phase() {
 }
 
 #[test]
+fn send_message_args_reject_invalid_phase() {
+    let payload = r#"{"content":"done","phase":"unknown"}"#;
+
+    assert!(parse_send_message_args(payload).is_err());
+}
+
+#[test]
 fn turn_completion_requires_exactly_one_final_message() {
     let events = vec![message("done", UserMessagePhase::Final)];
+
+    assert_eq!(validate_turn_completion(&events), Ok(()));
+}
+
+#[test]
+fn turn_completion_allows_progress_before_final_message() {
+    let events = vec![
+        message("working", UserMessagePhase::Progress),
+        message("done", UserMessagePhase::Final),
+    ];
 
     assert_eq!(validate_turn_completion(&events), Ok(()));
 }

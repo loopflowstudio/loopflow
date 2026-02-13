@@ -203,35 +203,21 @@ struct WaveSidebar: View {
             Spacer()
                 .frame(maxHeight: .infinity)
 
-            VStack(spacing: Spacing.xl) {
-                // Quick experiment section (primary)
-                QuickExperimentSidebarView { step in
-                    launchQuickExperiment(step: step)
+            VStack(spacing: Spacing.sm) {
+                Text("No waves yet")
+                    .font(Typography.caption())
+                    .foregroundStyle(.white.opacity(0.5))
+
+                Button {
+                    createWaveDirectly()
+                } label: {
+                    Label("Create Wave", systemImage: "plus")
+                        .font(Typography.caption())
                 }
-                .accessibilityIdentifier("quick-experiment-section")
-
-                // Divider
-                Rectangle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(height: 1)
-                    .padding(.horizontal, Spacing.lg)
-
-                // Create wave section (secondary)
-                VStack(spacing: Spacing.sm) {
-                    Button {
-                        createWaveDirectly()
-                    } label: {
-                        Label("Create Wave", systemImage: "plus")
-                            .font(Typography.caption())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(isCreatingWave)
-                    .accessibilityIdentifier("wave-empty-create")
-
-                    // Sidebar preview showing wave structure
-                    SidebarPreviewView()
-                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(isCreatingWave)
+                .accessibilityIdentifier("wave-empty-create")
             }
 
             Spacer()
@@ -239,17 +225,6 @@ struct WaveSidebar: View {
         }
         .frame(maxWidth: .infinity)
         .padding()
-    }
-
-    private func launchQuickExperiment(step: String) {
-        guard let repo = repoState.currentRepo else { return }
-        let terminal = TerminalApp.warp
-        do {
-            try TerminalLauncher().launchStep(step, terminal: terminal, at: repo)
-        } catch {
-            actionError = "Failed to launch: \(error.localizedDescription)"
-            showingActionError = true
-        }
     }
 
     private var waveList: some View {
@@ -323,41 +298,26 @@ struct WaveSidebar: View {
     }
 
     private func createWaveDirectly() {
-        LoggingService.ui("createWave: button clicked, lfdConnected=\(repoState.lfdConnected)")
-        guard !isCreatingWave else {
-            LoggingService.ui("createWave: already in progress, ignoring")
-            return
-        }
+        guard !isCreatingWave else { return }
         isCreatingWave = true
 
         Task {
+            defer { isCreatingWave = false }
+
             do {
-                // Ensure lfd is connected before creating wave
                 if !repoState.lfdConnected {
-                    LoggingService.ui("createWave: lfd not connected, attempting connect")
                     try await repoState.connectLfd(outputBuffer: outputBuffer)
-                    // Brief delay to let the daemon start
                     try await Task.sleep(for: .milliseconds(500))
-                    LoggingService.ui("createWave: connect completed, lfdConnected=\(repoState.lfdConnected)")
                 }
 
-                // Create with auto-generated name, then select it
-                LoggingService.ui("createWave: calling repoState.createWave")
                 try await repoState.createWave(name: "")
-                LoggingService.ui("createWave: success, triggering name edit")
-                // The wave is selected in createWave, trigger name edit
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
-                LoggingService.ui("createWave: error=\(error.localizedDescription)")
-                // Provide clearer error message for daemon issues
-                if !repoState.lfdConnected {
-                    actionError = "lfd daemon not running. Run 'lfd install' in terminal."
-                } else {
-                    actionError = error.localizedDescription
-                }
+                actionError = repoState.lfdConnected
+                    ? error.localizedDescription
+                    : "lfd daemon not running. Run 'lfd install' in terminal."
                 showingActionError = true
             }
-            isCreatingWave = false
         }
     }
 }

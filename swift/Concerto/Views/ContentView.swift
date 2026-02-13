@@ -11,7 +11,6 @@ extension Notification.Name {
 
 struct ContentView: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(OutputBuffer.self) private var outputBuffer
 
     @State private var showingError = false
     @State private var showCommandPalette = false
@@ -108,19 +107,7 @@ struct ContentView: View {
             WaveDetailPanel(wave: wave)
                 .id(wave.id)
         } else {
-            QuickExperimentDetailView { step in
-                launchQuickExperiment(step: step)
-            }
-        }
-    }
-
-    private func launchQuickExperiment(step: String) {
-        guard let repo = repoState.currentRepo else { return }
-        let terminal = TerminalApp.warp
-        do {
-            try TerminalLauncher().launchStep(step, terminal: terminal, at: repo)
-        } catch {
-            repoState.errorMessage = "Failed to launch: \(error.localizedDescription)"
+            StartWaveView()
         }
     }
 }

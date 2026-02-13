@@ -24,18 +24,16 @@ struct WaveSidebar: View {
     private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: icon)
-                .font(Typography.caption(9))
                 .foregroundStyle(.white.opacity(0.3))
             Text(title.uppercased())
-                .font(Typography.caption(9))
                 .foregroundStyle(.white.opacity(0.4))
                 .tracking(0.5)
             if count > 0 {
                 Text("\(count)")
-                    .font(Typography.caption(9))
                     .foregroundStyle(.white.opacity(0.3))
             }
         }
+        .font(Typography.caption(9))
         .padding(.leading, Spacing.sm)
         .padding(.top, Spacing.sm)
         .padding(.bottom, Spacing.xs)

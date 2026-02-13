@@ -508,7 +508,13 @@ fn truncate(s: &str, max: usize) -> String {
 /// `use_color` controls whether ANSI escape codes are included.
 pub fn render_event(event: &StreamEvent, use_color: bool) -> (String, String) {
     match event {
-        StreamEvent::Text(text) => (text.clone(), String::new()),
+        StreamEvent::Text(text) => {
+            if text.ends_with('\n') {
+                (text.clone(), String::new())
+            } else {
+                (format!("{text}\n"), String::new())
+            }
+        }
         StreamEvent::ToolUse { name, summary } => {
             let line = if summary.is_empty() {
                 format!("-> {name}")
@@ -562,22 +568,13 @@ pub fn render_event(event: &StreamEvent, use_color: bool) -> (String, String) {
 }
 
 /// Write a stream event to stdout/stderr. Thin wrapper over `render_event`.
-///
-/// `pending_newline` tracks whether the previous event wrote text to stdout
-/// without a trailing newline. When the next event writes to stderr (tool use
-/// or result), a newline is emitted first so the indicator starts on its own line.
-pub fn format_event(event: &StreamEvent, use_color: bool, pending_newline: &mut bool) {
+pub fn format_event(event: &StreamEvent, use_color: bool) {
     let (stdout_str, stderr_str) = render_event(event, use_color);
     if !stdout_str.is_empty() {
         print!("{stdout_str}");
         let _ = std::io::stdout().flush();
-        *pending_newline = !stdout_str.ends_with('\n');
     }
     if !stderr_str.is_empty() {
-        if *pending_newline {
-            eprintln!();
-            *pending_newline = false;
-        }
         eprintln!("{stderr_str}");
     }
 }

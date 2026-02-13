@@ -21,7 +21,7 @@ struct WaveSidebar: View {
         repoState.waveGroups
     }
 
-    private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
+    private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
                 .font(Typography.caption(9))
@@ -259,27 +259,27 @@ struct WaveSidebar: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
                 if !waveGroups.blocked.isEmpty {
-                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .statusWarning, count: waveGroups.blocked.count)
+                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", count: waveGroups.blocked.count)
                     waveRows(waveGroups.blocked)
                 }
 
                 if !waveGroups.pr.isEmpty {
-                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .statusSuccess, count: waveGroups.openPRCount)
+                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", count: waveGroups.openPRCount)
                     waveRows(waveGroups.pr)
                 }
 
                 if !waveGroups.recentActivity.isEmpty {
-                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .statusInfo, count: waveGroups.recentActivity.count)
+                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", count: waveGroups.recentActivity.count)
                     waveRows(waveGroups.recentActivity)
                 }
 
                 if !waveGroups.active.isEmpty {
-                    sectionHeader("Active", icon: "circle.fill", color: .statusSuccess, count: waveGroups.active.count)
+                    sectionHeader("Active", icon: "circle.fill", count: waveGroups.active.count)
                     waveRows(waveGroups.active)
                 }
 
                 if !waveGroups.idle.isEmpty {
-                    sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5), count: waveGroups.idle.count)
+                    sectionHeader("Idle", icon: "circle", count: waveGroups.idle.count)
                     waveRows(waveGroups.idle)
                 }
             }

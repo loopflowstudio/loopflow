@@ -1727,6 +1727,7 @@ fn handle_output_line(
             for event in &events {
                 let (stdout, stderr) = render_event(event, false);
                 let text = if !stdout.is_empty() { stdout } else { stderr };
+                let text = text.trim_end_matches('\n').to_string();
                 if !text.is_empty() {
                     send_output(output, wave_id, wave_run_id, agent_id, text);
                 }

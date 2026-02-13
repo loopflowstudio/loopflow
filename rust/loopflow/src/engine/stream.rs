@@ -942,7 +942,7 @@ mod tests {
     #[test]
     fn render_text_event() {
         let (stdout, stderr) = render_event(&StreamEvent::Text("hello".to_string()), false);
-        assert_eq!(stdout, "hello");
+        assert_eq!(stdout, "hello\n");
         assert!(stderr.is_empty());
     }
 

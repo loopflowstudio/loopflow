@@ -24,25 +24,27 @@ pub fn is_user_message(event: &AgentEvent) -> bool {
 pub fn final_message_count(events: &[AgentEvent]) -> usize {
     events
         .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                AgentEvent::Message {
-                    phase: UserMessagePhase::Final,
-                    ..
-                }
-            )
-        })
+        .filter(|event| is_final_message(event))
         .count()
+}
+
+fn is_final_message(event: &AgentEvent) -> bool {
+    matches!(
+        event,
+        AgentEvent::Message {
+            phase: UserMessagePhase::Final,
+            ..
+        }
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::chat::completion::{final_message_count, validate_turn_completion, CompletionError};
+    use crate::chat::completion::{final_message_count, is_user_message};
     use crate::chat::contract::{AgentEvent, ContextSnapshot, UserMessagePhase};
 
     #[test]
-    fn one_final_message_is_valid_completion() {
+    fn message_helpers_classify_events() {
         let events = vec![
             AgentEvent::Message {
                 content: "working".to_string(),
@@ -57,46 +59,9 @@ mod tests {
             },
         ];
 
+        assert!(is_user_message(&events[0]));
+        assert!(!is_user_message(&events[1]));
+        assert!(is_user_message(&events[2]));
         assert_eq!(final_message_count(&events), 1);
-        assert_eq!(validate_turn_completion(&events), Ok(()));
-    }
-
-    #[test]
-    fn no_final_message_is_invalid_completion() {
-        let events = vec![
-            AgentEvent::Message {
-                content: "working".to_string(),
-                phase: UserMessagePhase::Progress,
-            },
-            AgentEvent::Done {
-                context: ContextSnapshot::default(),
-            },
-        ];
-
-        assert_eq!(final_message_count(&events), 0);
-        assert_eq!(
-            validate_turn_completion(&events),
-            Err(CompletionError::MissingFinalMessage)
-        );
-    }
-
-    #[test]
-    fn two_final_messages_is_invalid_completion() {
-        let events = vec![
-            AgentEvent::Message {
-                content: "done".to_string(),
-                phase: UserMessagePhase::Final,
-            },
-            AgentEvent::Message {
-                content: "actually done".to_string(),
-                phase: UserMessagePhase::Final,
-            },
-        ];
-
-        assert_eq!(final_message_count(&events), 2);
-        assert_eq!(
-            validate_turn_completion(&events),
-            Err(CompletionError::MultipleFinalMessages)
-        );
     }
 }

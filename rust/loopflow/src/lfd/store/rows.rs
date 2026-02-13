@@ -157,7 +157,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     })
 }
 
-/// SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+/// SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
 pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
     let created_at = unix_to_datetime(row.bigint(6)?);
 
@@ -169,6 +169,7 @@ pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
         last_main_sha: row.opt_text(4)?,
         last_triggered_at: row.opt_bigint(5)?,
         created_at: Some(created_at),
+        enabled: row.int(7)? != 0,
     })
 }
 

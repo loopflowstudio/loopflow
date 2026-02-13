@@ -344,13 +344,13 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (query, params): (&str, Vec<Box<dyn ToSql>>) = if let Some(wave_id) = wave_id {
             (
-                "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+                "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
                  FROM stimuli WHERE wave_id = ?1 ORDER BY created_at",
                 vec![Box::new(wave_id.clone())],
             )
         } else {
             (
-                "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+                "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
                  FROM stimuli ORDER BY created_at",
                 vec![],
             )
@@ -372,7 +372,7 @@ impl RunStore for SqliteStore {
     fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+            "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
              FROM stimuli WHERE kind = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map(params![kind as i64], |row| Ok(map_stimulus_row(row)))?;
@@ -386,7 +386,7 @@ impl RunStore for SqliteStore {
     fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+            "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
              FROM stimuli WHERE id = ?1",
         )?;
         let stimulus = stmt
@@ -403,8 +403,8 @@ impl RunStore for SqliteStore {
             .unwrap_or_else(now_unix);
 
         conn.execute(
-            "INSERT INTO stimuli (id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO stimuli (id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 stimulus.id,
                 stimulus.wave_id,
@@ -413,6 +413,7 @@ impl RunStore for SqliteStore {
                 stimulus.last_main_sha,
                 stimulus.last_triggered_at,
                 created_at,
+                stimulus.enabled as i64,
             ],
         )?;
         Ok(())
@@ -423,13 +424,14 @@ impl RunStore for SqliteStore {
         let updated = conn.execute(
             "UPDATE stimuli SET
                 kind = ?1, cron = ?2, last_main_sha = ?3,
-                last_triggered_at = ?4
-             WHERE id = ?5",
+                last_triggered_at = ?4, enabled = ?5
+             WHERE id = ?6",
             params![
                 stimulus.kind.as_i32() as i64,
                 stimulus.cron,
                 stimulus.last_main_sha,
                 stimulus.last_triggered_at,
+                stimulus.enabled as i64,
                 stimulus.id,
             ],
         )?;

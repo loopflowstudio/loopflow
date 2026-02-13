@@ -8,20 +8,38 @@ Each chat message spawns an agent process the same way a step does — same exec
 
 A Rust agent binary + lfd API surface + Python CLI client.
 
+## Design decisions captured in conversation
+
+> "there is no  'chat' mode to the agent harness. HOWEVER, there is then a separate chat app that sits on top of it"
+
+> "I would like there to always be a final message associated with termination, rather than just no tool use"
+
+> "we think of it more as explicit messages instead of status"
+
+- Prompt input default is memory blocks + current user message + bounded harness history (with compaction).
+- Harness history remains secondary to memory, but is included for reasoning continuity.
+- History bounding is token-based (not turn-count based).
+- Turn termination requires a final user-visible message event; "no tool calls" alone is not a valid completion condition.
+- "At some point" is not enough; every successful turn must end with exactly one terminal/final message.
+- Per-turn user messages are explicit agent-authored messages: `0..∞` progress messages are allowed, followed by exactly one required final message.
+- Progress messages are streamed live to the chat UI as they are emitted.
+- Memory edits are auto-applied and persisted on each memory tool call (not required per turn).
+
 When you send a chat message to a wave, lfd spawns a Rust agent process. The process:
-1. Loads current memory blocks + recent history from lfd (HTTP)
-2. Builds a prompt (system + memory + history + user message)
-3. Calls the LLM API directly (Anthropic first, OpenAI/Gemini later)
-4. Dispatches tool calls (memory edits, file ops, shell, send_message)
-5. Loops until no more tool calls (Codex/OpenCode termination pattern)
-6. Persists updated memory + message log back to lfd
-7. Streams events to lfd during execution
-8. Exits
+1. Resolves wave workspace snapshot (branch + HEAD SHA) at turn start
+2. Loads current memory blocks + bounded harness history from lfd (HTTP)
+3. Builds a prompt (system + memory + token-bounded history + current user message)
+4. Calls the LLM API directly (Anthropic first, OpenAI/Gemini later)
+5. Dispatches tool calls (memory edits, file ops, shell, send_message)
+6. Loops until completion contract is met (final `send_message` + no pending follow-up tool results)
+7. Persists updated memory + message log back to lfd
+8. Streams events to lfd during execution
+9. Exits
 
 ## Architecture
 
 ```
-Python CLI / Swift UI
+Python client (local testing) / Swift client + UI (product surface)
         │
         ▼  HTTP
 lfd  /v0/waves/:id/chat/*     ← API + persistence + process lifecycle (Rust)
@@ -37,6 +55,7 @@ lf-agent                       ← Rust binary, agent loop
 ```
 
 Chat is always part of a wave. The wave provides the sandbox (repo, worktree, area).
+Chat execution is independent of wave step runs: chat turns run in their own executor lane (container or process, matching executor type).
 
 ### Inspired by
 
@@ -46,6 +65,33 @@ Chat is always part of a wave. The wave provides the sandbox (repo, worktree, ar
 - **pydantic-ai** (Python): 3-node agent loop (UserPrompt → ModelRequest → CallTools → loop/end), Model trait with request()/stream(), structured output via tool-based schema.
 
 We study all four but depend on none.
+
+## Compaction strategy (MemGPT/Letta-informed)
+
+Compaction is about reducing prompt tokens while preserving durable working context.
+
+### Invariants to preserve
+
+- User preferences and standing instructions
+- Stable project facts and decisions
+- Active plans and unresolved tasks
+- Recent turn outcomes that changed memory or execution intent
+
+### Compaction flow
+
+1. Compute current token load for memory + bounded history.
+2. If above threshold, run compaction pass:
+   - summarize bounded history into structured "recent context" memory blocks
+   - deduplicate overlapping memory lines
+   - preserve unresolved tasks as explicit checklist entries
+3. Keep original message log for observability, but feed only compacted subset into future prompts.
+4. Emit a compaction event with before/after token counts.
+
+### Design intent
+
+- Prefer targeted `memory_replace` updates for local changes.
+- Use `memory_rethink` for full block reorganization.
+- Keep memory human-editable and transparent even after compaction.
 
 ## Rust Agent Harness: Core Traits
 
@@ -123,15 +169,32 @@ pub trait ToolHandler: Send + Sync {
 pub struct ToolContext {
     pub worktree: PathBuf,
     pub wave_id: String,
+    pub branch: String,
+    pub head_sha_at_start: String,
 }
 
 pub enum ToolOutput {
     /// Tool produced a result to feed back to the model.
     Result(String),
     /// Tool is send_message — this is the user-visible response.
-    UserMessage(String),
+    UserMessage {
+        content: String,
+        phase: UserMessagePhase, // progress | final
+    },
     /// Tool modified memory — return confirmation, memory is updated in-place.
     MemoryEdited(String),
+}
+
+pub enum UserMessagePhase {
+    Progress,
+    Final,
+}
+
+// send_message tool payload (model-facing)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendMessageArgs {
+    pub content: String,
+    pub phase: UserMessagePhase, // "progress" | "final"
 }
 ```
 
@@ -220,6 +283,7 @@ impl Memory {
 ## Agent loop
 
 Two-level loop inspired by Codex. Outer loop handles compaction. Inner loop streams one model response and dispatches tools.
+`history` in this loop starts with token-bounded cross-turn harness history and then appends current-turn assistant/tool exchanges.
 
 ```rust
 pub async fn run_turn(
@@ -233,6 +297,7 @@ pub async fn run_turn(
     history.push(Message::User { content: user_message.to_string() });
 
     let mut user_messages = Vec::new();
+    let mut has_final_message = false;
     let mut memory_edits = Vec::new();
     let mut tool_call_log = Vec::new();
 
@@ -251,9 +316,12 @@ pub async fn run_turn(
         });
 
         if response.tool_calls.is_empty() {
-            // No tool calls — turn is done.
-            // If no send_message was called, treat content as the response.
-            break;
+            // No tool calls is not sufficient for completion.
+            // Every successful turn must include a terminal send_message.
+            if has_final_message {
+                break;
+            }
+            return Err(anyhow!("missing_final_message"));
         }
 
         let mut needs_follow_up = false;
@@ -263,8 +331,11 @@ pub async fn run_turn(
             tool_call_log.push(call.clone());
 
             match &output {
-                ToolOutput::UserMessage(msg) => {
-                    user_messages.push(msg.clone());
+                ToolOutput::UserMessage { content, phase } => {
+                    user_messages.push(content.clone());
+                    if matches!(phase, UserMessagePhase::Final) {
+                        has_final_message = true;
+                    }
                 }
                 ToolOutput::MemoryEdited(confirmation) => {
                     memory_edits.push(call.clone());
@@ -277,7 +348,7 @@ pub async fn run_turn(
             // Feed result back to model
             let result_text = match output {
                 ToolOutput::Result(s) => s,
-                ToolOutput::UserMessage(_) => "Message sent.".to_string(),
+                ToolOutput::UserMessage { .. } => "Message sent.".to_string(),
                 ToolOutput::MemoryEdited(s) => s,
             };
             history.push(Message::ToolResult {
@@ -288,7 +359,7 @@ pub async fn run_turn(
 
         // If only memory edits and send_message — no need for follow-up.
         // If agent tools (read_file, shell) were called — model needs results.
-        if !needs_follow_up {
+        if !needs_follow_up && has_final_message {
             break;
         }
     }
@@ -307,8 +378,8 @@ pub async fn run_turn(
 ```
 
 The loop terminates when:
-1. The model produces no tool calls (text-only response), OR
-2. All tool calls were memory edits or send_message (no results to feed back)
+1. A terminal/final send_message has been emitted, AND
+2. There are no pending tool results that require model follow-up.
 
 Agent tools (read_file, shell, write_file) set `needs_follow_up = true` because the model needs to see the result before responding.
 
@@ -382,7 +453,10 @@ The agent process communicates with lfd via JSON lines on stdout (inspired by Co
 #[serde(tag = "type")]
 enum AgentEvent {
     #[serde(rename = "message")]
-    Message { content: String },
+    Message {
+        content: String,
+        phase: String, // "progress" | "final"
+    },
 
     #[serde(rename = "memory_edit")]
     MemoryEdit { op: String, block: String, detail: String },
@@ -451,7 +525,8 @@ working notes.
 
 ## Rules
 - Update memory with important context, decisions, and state changes.
-- Use send_message for every response — your inner reasoning is private.
+- Use send_message for every user-visible message (progress and final) — your inner reasoning is private.
+- End every turn with exactly one send_message where phase is "final".
 - Keep blocks focused. Create new blocks for new topics.
 - When information changes, use memory_replace to update specific parts.
 - Use memory_rethink only when a block needs wholesale reorganization.
@@ -536,12 +611,69 @@ Total estimated size: ~2000 lines for v1. Dependencies: reqwest, serde, serde_js
 
 - **Always part of a wave.** Chat doesn't exist without a wave. The wave provides repo, worktree, and tool sandbox.
 - **Memory edits are tool calls.** Same function-calling mechanism as agent tools.
-- **send_message is required.** LLM content field is private reasoning. Only send_message reaches the user.
+- **send_message is the only user-output mechanism.** Progress/final messages are explicit `send_message` tool calls from the model.
+- **Final message is required.** Every successful turn must end with exactly one `send_message(phase=\"final\")`.
 - **Blocks are agent-defined.** No predefined schema. Agent creates whatever blocks make sense.
-- **History is expendable.** Compact wipes history. Memory is the durable artifact.
+- **History is bounded by tokens and compacted.** Memory remains the durable artifact.
+- **Memory writes persist per edit.** Each memory tool call is applied and durably saved immediately.
 - **Spawned like a step.** Each chat message spawns a process via lfd. Same executor model.
 - **Own model layer.** No framework dependency. Anthropic first, add providers by implementing the Model trait.
 - **JSON lines on stdout.** Agent → lfd communication. Simple, debuggable, streamable.
+
+## Open design questions (intentional experiments)
+
+- **Failure closure path:** prefer client-side graceful handling first. Optional future enhancement: lfd can emit a synthetic final error message when the agent fails before `phase="final"`.
+- **Workspace mutability across turns:** v1 behavior is ephemeral write/shell effects (isolated container/workspace copy per turn/lane), with optional future mode for persistent branch writes.
+- **Commit/push lifecycle:** preserve theoretical capability from day one, but gate actual branch mutation behind an explicit, auditable process (not implicit in normal chat turns).
+
+## Future extension: explicit branch mutation flow
+
+Default chat-turn behavior remains ephemeral for filesystem changes.  
+If/when enabled, persistent code mutation should be explicit:
+
+1. Agent proposes a patch/commit plan in chat.
+2. System runs explicit "apply/commit" action (separate from normal turn loop).
+3. Commit metadata is recorded in run/chat logs.
+4. Optional explicit "push" action executes after commit.
+
+## Fundamental parts we should not drop
+
+- **Memory-first contract:** memory is durable and explicit; users can view/edit/compact it.
+- **Durability boundary:** memory persists across turns; filesystem changes do not (by default).
+- **Bounded history in prompt:** include bounded/compacted harness history for continuity, but keep memory as primary.
+- **Explicit message tool path:** user-visible output only via `send_message` tool calls.
+- **Progress + final shape:** allow `0..∞` progress messages and require exactly one final message per successful turn.
+- **Tool-call loop architecture:** model call → tool dispatch → tool results fed back → repeat until completion contract.
+- **Codex-derived runtime patterns:** two-level loop shape, tool registry/handler abstraction, and structured event stream.
+- **Wave-scoped tools in v1:** include `read_file`, `write_file`, and `shell`.
+- **JSONL event stream:** agent emits structured events to lfd for live UI streaming and persistence.
+- **Loop safety guardrails:** copy Codex-style hard stops (iteration cap + wall-clock timeout) to prevent runaway turns.
+- **Concurrent lane model:** chat agent runs alongside wave runs, in its own executor lane (container for container executors, process for process executors).
+- **Branch snapshot at turn start:** each chat turn launches against the latest branch state available when that turn starts.
+
+## Ordering and scope (triangular vertical slice)
+
+Design intent from conversation:
+
+> "vertical slice, but triangular shape -- the UI is the thinnest, then the python client, and the lf-agent is the thickest to start"
+
+Implementation order for first draft:
+
+1. **lf-agent (thickest layer)**
+   - Build the core turn loop, tool dispatch, memory mutation semantics, and final-message termination contract.
+   - Implement Anthropic provider and `send_message` + memory tools first.
+2. **Python client (thin middle layer)**
+   - Expose minimal wrappers: `chat_send`, `chat_memory`, `chat_memory_edit`, `chat_compact`.
+   - Keep client logic light; pass through rich payloads from lfd.
+3. **UI surface (thinnest layer)**
+   - Render streamed explicit messages (`progress`/`final`) and failure states gracefully.
+   - No heavy business logic in UI.
+
+### Initial scope choices (locked for first draft)
+
+- **lf-agent:** include `send_message`, memory tools, and wave tools (`read_file`, `write_file`, `shell`) from day one.
+- **Python client:** API methods only (no REPL in first draft), used for local testing.
+- **UI:** Swift client + UI stream and render messages + memory **viewer** (no memory editor yet).
 
 ## Not in v1
 
@@ -550,7 +682,6 @@ Total estimated size: ~2000 lines for v1. Dependencies: reqwest, serde, serde_js
 - Auto-compact (manual compact only)
 - Archival/vector memory (core blocks only)
 - MCP tool integration (hardcoded tools first)
-- Concurrent chat + step execution (queue behind running step)
 - Swift UI (API is designed for it)
 
 ## Done when

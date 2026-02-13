@@ -15,6 +15,12 @@ The design doc is a working document for both humans and LLMs. The implementing 
 
 The design doc is scaffolding—a checkpoint for recovery, not documentation for posterity.
 
+## Setup
+
+1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
+2. Check `reports/` for architecture notes, prior decisions, or context that informs this design
+3. Create `scratch/<branch>.md` early—after the first exchange or two
+
 ## Workflow
 
 Four phases. Don't skip ahead—dreaming and detailing come before scoping.
@@ -70,12 +76,6 @@ Then:
    - `lf add-to-roadmap` if they chose roadmap
 
 Once breaking things up, be aggressive about commit boundaries—each stage should be independently shippable.
-
-## Setup
-
-1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
-2. Check `reports/` for architecture notes, prior decisions, or context that informs this design
-3. Create `scratch/<branch>.md` early—after the first exchange or two
 
 ## What makes a good design doc
 

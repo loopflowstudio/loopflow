@@ -597,16 +597,17 @@ impl DockerExecutor {
         backend: &dyn DockerRecoveryBackend,
         agent: &Agent,
     ) -> Result<Option<String>> {
-        let mut references = Vec::new();
-        if let Some(container_id) = &agent.container_id {
-            if !container_id.trim().is_empty() {
-                references.push(container_id.clone());
-            }
-        }
-        references.push(Self::build_container_name(agent.id.as_str()));
-
-        for container_ref in references {
-            match backend.inspect_container(&container_ref).await {
+        let container_name = Self::build_container_name(agent.id.as_str());
+        let persisted_ref = agent
+            .container_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        for container_ref in persisted_ref
+            .into_iter()
+            .chain(std::iter::once(container_name.as_str()))
+        {
+            match backend.inspect_container(container_ref).await {
                 Ok(Some(container)) if container.running => return Ok(Some(container.id)),
                 Ok(Some(_)) => {}
                 Ok(None) => {}
@@ -707,22 +708,16 @@ impl DockerExecutor {
             .ok_or_else(|| anyhow!("active container missing for reattach"))?;
 
         let workspace = self.resolve_workspace(wave_id.as_str(), wave_run_id.as_str())?;
+        let exit_code = self
+            .wait_for_container_with_logs(
+                &container_id,
+                output,
+                wave_id.as_str(),
+                wave_run_id.as_str(),
+                agent.id.as_str(),
+            )
+            .await;
 
-        let logs_task = tokio::spawn(Self::stream_logs(
-            self.docker.clone(),
-            container_id.clone(),
-            output.clone(),
-            wave_id.to_string(),
-            wave_run_id.to_string(),
-            agent.id.to_string(),
-        ));
-
-        let mut wait_stream = self
-            .docker
-            .wait_container(&container_id, None::<WaitContainerOptions<String>>);
-        let wait_result = wait_stream.next().await;
-
-        let _ = logs_task.await;
         self.active.lock().await.remove(agent.id.as_str());
 
         let sync_result = self
@@ -731,9 +726,7 @@ impl DockerExecutor {
         self.remove_container(&container_id).await;
         sync_result?;
 
-        let status =
-            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
-        Ok(status.status_code as i32)
+        exit_code
     }
 
     async fn finalize_reattached_agent(
@@ -961,6 +954,34 @@ impl DockerExecutor {
         {
             warn!(container_id, error = %err, "failed to remove container");
         }
+    }
+
+    async fn wait_for_container_with_logs(
+        &self,
+        container_id: &str,
+        output: &OutputHub,
+        wave_id: &str,
+        wave_run_id: &str,
+        agent_id: &str,
+    ) -> Result<i32> {
+        let logs_task = tokio::spawn(Self::stream_logs(
+            self.docker.clone(),
+            container_id.to_string(),
+            output.clone(),
+            wave_id.to_string(),
+            wave_run_id.to_string(),
+            agent_id.to_string(),
+        ));
+
+        let mut wait_stream = self
+            .docker
+            .wait_container(container_id, None::<WaitContainerOptions<String>>);
+        let wait_result = wait_stream.next().await;
+
+        let _ = logs_task.await;
+        let status =
+            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
+        Ok(status.status_code as i32)
     }
 
     async fn stream_logs(
@@ -1595,29 +1616,15 @@ impl AgentExecutor for DockerExecutor {
             return Err(err.into());
         }
 
-        let logs_task = tokio::spawn(Self::stream_logs(
-            self.docker.clone(),
-            container_id.clone(),
-            output.clone(),
-            wave_id.to_string(),
-            wave_run_id.to_string(),
-            agent_id.to_string(),
-        ));
-
-        let mut wait_stream = self
-            .docker
-            .wait_container(&container_id, None::<WaitContainerOptions<String>>);
-        let wait_result = wait_stream.next().await;
-
-        let _ = logs_task.await;
+        let exit_code = self
+            .wait_for_container_with_logs(&container_id, output, wave_id, wave_run_id, agent_id)
+            .await;
         self.active.lock().await.remove(agent_id);
         self.remove_container(&container_id).await;
 
         self.sync_to_host_worktree(&workspace, cwd).await?;
 
-        let status =
-            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
-        Ok(status.status_code as i32)
+        exit_code
     }
 
     async fn terminate(&self, agent_id: &str) -> Result<()> {

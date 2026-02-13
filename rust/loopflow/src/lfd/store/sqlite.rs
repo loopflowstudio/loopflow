@@ -585,7 +585,7 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = String::from(
             "SELECT id, step, repo, worktree, wave_run_id, status,
-                    started_at, ended_at, pid, model, run_mode
+                    started_at, ended_at, pid, container_id, model, run_mode
              FROM agents",
         );
         let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
@@ -626,7 +626,7 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, step, repo, worktree, wave_run_id, status,
-                    started_at, ended_at, pid, model, run_mode
+                    started_at, ended_at, pid, container_id, model, run_mode
              FROM agents WHERE id = ?1",
         )?;
         let run = stmt
@@ -639,7 +639,7 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
-                    a.started_at, a.ended_at, a.pid, a.model, a.run_mode
+                    a.started_at, a.ended_at, a.pid, a.container_id, a.model, a.run_mode
              FROM agents a JOIN wave_runs r ON a.wave_run_id = r.id
              WHERE r.wave_id = ?1 AND a.status = ?2
              ORDER BY a.started_at DESC LIMIT 1",
@@ -662,8 +662,8 @@ impl RunStore for SqliteStore {
         conn.execute(
             "INSERT INTO agents (
                 id, step, repo, worktree, wave_run_id, status, started_at,
-                ended_at, pid, model, run_mode
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                ended_at, pid, container_id, model, run_mode
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 agent.id,
                 agent.step,
@@ -674,6 +674,7 @@ impl RunStore for SqliteStore {
                 started_at,
                 agent.ended_at.map(|dt| dt.unix_timestamp()),
                 agent.pid.map(|v| v as i64),
+                agent.container_id.as_deref(),
                 agent.model,
                 agent.run_mode,
             ],
@@ -686,11 +687,16 @@ impl RunStore for SqliteStore {
         agent_id: &LfdId,
         status: i32,
         pid: Option<u32>,
+        container_id: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
-            "UPDATE agents SET status = ?1, pid = COALESCE(?2, pid) WHERE id = ?3",
-            params![status as i64, pid.map(|v| v as i64), agent_id],
+            "UPDATE agents
+             SET status = ?1,
+                 pid = COALESCE(?2, pid),
+                 container_id = COALESCE(?3, container_id)
+             WHERE id = ?4",
+            params![status as i64, pid.map(|v| v as i64), container_id, agent_id],
         )?;
         if updated == 0 {
             return Err(StoreError::NotFound);
@@ -714,7 +720,7 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
-                    a.started_at, a.ended_at, a.pid, a.model, a.run_mode
+                    a.started_at, a.ended_at, a.pid, a.container_id, a.model, a.run_mode
              FROM agents a JOIN wave_runs r ON a.wave_run_id = r.id
              WHERE r.wave_id = ?1 AND a.ended_at IS NULL
              ORDER BY a.started_at DESC",
@@ -751,7 +757,7 @@ impl RunStore for SqliteStore {
         let cutoff = now_unix() - older_than_secs as i64;
         let mut stmt = conn.prepare(
             "SELECT id, step, repo, worktree, wave_run_id, status,
-                    started_at, ended_at, pid, model, run_mode
+                    started_at, ended_at, pid, container_id, model, run_mode
              FROM agents WHERE ended_at IS NULL AND started_at <= ?1
              ORDER BY started_at ASC",
         )?;

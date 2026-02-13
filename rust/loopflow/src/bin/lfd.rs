@@ -77,12 +77,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
     };
-    // Clean up orphaned runs from a previous lfd process.
-    match store.fail_orphaned_runs() {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(count = n, "cleaned up orphaned runs from previous lfd"),
-        Err(err) => tracing::warn!(error = %err, "failed to clean up orphaned runs"),
-    }
 
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
@@ -94,6 +88,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         event_hub.clone(),
         lfd_config.executor.clone(),
     )?;
+
+    match executor.recover_startup().await {
+        Ok(recovery) => {
+            if recovery.orphaned_runs_failed > 0 {
+                tracing::info!(
+                    count = recovery.orphaned_runs_failed,
+                    "cleaned up orphaned runs from previous lfd"
+                );
+            }
+            if recovery.rehydrated_agents > 0 {
+                tracing::info!(
+                    count = recovery.rehydrated_agents,
+                    "reattached running docker agents after restart"
+                );
+            }
+            if recovery.lost_agents_failed > 0 {
+                tracing::warn!(
+                    count = recovery.lost_agents_failed,
+                    "marked running agents failed because containers were missing"
+                );
+            }
+            if recovery.orphaned_containers_removed > 0 {
+                tracing::info!(
+                    count = recovery.orphaned_containers_removed,
+                    "removed orphaned managed docker containers on startup"
+                );
+            }
+        }
+        Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
+    }
+
     let loop_handles = scheduler.clone().start_loops(
         store.clone(),
         executor.clone(),

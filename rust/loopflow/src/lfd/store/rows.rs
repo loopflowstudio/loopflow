@@ -201,11 +201,12 @@ pub fn map_fork_run_row(row: &impl StoreRow) -> StoreResult<ForkRun> {
 }
 
 /// SELECT id, step, repo, worktree, wave_run_id, status,
-///        started_at, ended_at, pid, model, run_mode
+///        started_at, ended_at, pid, container_id, model, run_mode
 pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<Agent> {
     let started_at = unix_to_datetime(row.bigint(6)?);
     let ended_at = row.opt_bigint(7)?;
     let pid = row.opt_int(8)?;
+    let container_id = row.opt_text(9)?;
     let wave_run_id = row.opt_text(4)?;
 
     Ok(Agent {
@@ -218,8 +219,9 @@ pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<Agent> {
         started_at: Some(started_at),
         ended_at: ended_at.map(unix_to_datetime),
         pid: pid.map(|v| v as u32),
-        model: row.text(9)?,
-        run_mode: row.text(10)?,
+        container_id,
+        model: row.text(10)?,
+        run_mode: row.text(11)?,
     })
 }
 

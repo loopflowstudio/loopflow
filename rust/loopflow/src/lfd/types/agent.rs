@@ -55,6 +55,7 @@ pub struct Agent {
     #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
     pub pid: Option<u32>,
+    pub container_id: Option<String>,
     pub model: String,
     pub run_mode: String,
 }
@@ -72,6 +73,7 @@ impl Agent {
             started_at: Some(OffsetDateTime::now_utc()),
             ended_at: None,
             pid: None,
+            container_id: None,
             model: String::new(),
             run_mode: String::new(),
         }

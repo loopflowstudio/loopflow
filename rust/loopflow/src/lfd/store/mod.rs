@@ -125,6 +125,7 @@ pub trait RunStore: Send + Sync {
         agent_id: &LfdId,
         status: i32,
         pid: Option<u32>,
+        container_id: Option<&str>,
     ) -> StoreResult<()>;
     fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
     fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>>;
@@ -205,6 +206,7 @@ mod tests {
             started_at: Some(OffsetDateTime::from_unix_timestamp(started_at).unwrap()),
             ended_at: None,
             pid: None,
+            container_id: None,
             model: "claude-code".to_string(),
             run_mode: "auto".to_string(),
         }
@@ -308,8 +310,16 @@ mod tests {
         let waiting = store.get_waiting_agent_for_wave(&wave.id).unwrap().unwrap();
         assert_eq!(waiting.id, agent.id);
         store
-            .update_agent_status(&agent.id, AgentStatus::Running.as_i32(), Some(123))
+            .update_agent_status(
+                &agent.id,
+                AgentStatus::Running.as_i32(),
+                Some(123),
+                Some("container-123"),
+            )
             .unwrap();
+        let updated_agent = store.get_agent(&agent.id).unwrap().unwrap();
+        assert_eq!(updated_agent.pid, Some(123));
+        assert_eq!(updated_agent.container_id.as_deref(), Some("container-123"));
         store
             .end_agent(&agent.id, AgentStatus::Completed.as_i32(), now + 10)
             .unwrap();

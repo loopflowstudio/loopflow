@@ -36,10 +36,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            "install" => {
-                install_launchd_plist()?;
-                return Ok(());
-            }
+            "install" => return loopflow::lfd::service::install(),
+            "uninstall" => return loopflow::lfd::service::uninstall(),
+            "start" => return loopflow::lfd::service::start(),
+            "stop" => return loopflow::lfd::service::stop(),
+            "status" => return loopflow::lfd::service::status(),
             _ => {} // fall through to serve
         }
     }
@@ -139,76 +140,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cancel.cancel();
     for handle in loop_handles {
         let _ = handle.await;
-    }
-
-    Ok(())
-}
-
-fn install_launchd_plist() -> Result<(), Box<dyn std::error::Error>> {
-    let home = std::env::var("HOME")?;
-    let lfd_path = std::env::current_exe()?
-        .canonicalize()?
-        .to_string_lossy()
-        .to_string();
-    let path_env = std::env::var("PATH").unwrap_or_default();
-    let log_dir = format!("{home}/.lf/logs");
-    std::fs::create_dir_all(&log_dir)?;
-
-    let plist_dir = PathBuf::from(&home).join("Library/LaunchAgents");
-    std::fs::create_dir_all(&plist_dir)?;
-    let plist_path = plist_dir.join("com.loopflow.lfd.plist");
-    let plist_arg = plist_path.to_string_lossy().into_owned();
-
-    let content = format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.loopflow.lfd</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{lfd_path}</string>
-        <string>serve</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
-    <key>ExitTimeOut</key>
-    <integer>30</integer>
-    <key>StandardOutPath</key>
-    <string>{log_dir}/lfd.log</string>
-    <key>StandardErrorPath</key>
-    <string>{log_dir}/lfd.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>{path_env}</string>
-    </dict>
-</dict>
-</plist>
-"#
-    );
-
-    // Unload existing service before overwriting.
-    let _ = std::process::Command::new("launchctl")
-        .args(["unload", plist_arg.as_str()])
-        .output();
-
-    std::fs::write(&plist_path, &content)?;
-    println!("Installed {}", plist_path.display());
-
-    // Load the service.
-    let status = std::process::Command::new("launchctl")
-        .args(["load", plist_arg.as_str()])
-        .status()?;
-    if status.success() {
-        println!("lfd service loaded");
-    } else {
-        eprintln!("Warning: launchctl load failed (exit {})", status);
     }
 
     Ok(())

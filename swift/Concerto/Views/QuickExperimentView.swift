@@ -4,17 +4,6 @@
 import SwiftUI
 import LoopflowCore
 
-// Common steps for quick experiments - single source of truth
-enum QuickExperiment {
-    static let steps: [(name: String, description: String)] = [
-        ("design", "Interactive design session"),
-        ("review", "Analyze the codebase"),
-        ("debug", "Fix an error"),
-        ("implement", "Build from a design")
-    ]
-
-}
-
 // MARK: - Detail Panel Placeholder
 
 /// Full placeholder view for the detail panel when no wave is selected.
@@ -23,6 +12,13 @@ struct QuickExperimentDetailView: View {
     @Environment(\.palette) private var palette
 
     var onLaunchStep: ((String) -> Void)?
+
+    private let steps: [(name: String, description: String)] = [
+        ("design", "Interactive design session"),
+        ("review", "Analyze the codebase"),
+        ("debug", "Fix an error"),
+        ("implement", "Build from a design")
+    ]
 
     var body: some View {
         VStack(spacing: Spacing.xxl) {
@@ -46,7 +42,7 @@ struct QuickExperimentDetailView: View {
 
                 // Step buttons
                 HStack(spacing: Spacing.md) {
-                    ForEach(QuickExperiment.steps, id: \.name) { step in
+                    ForEach(steps, id: \.name) { step in
                         Button {
                             onLaunchStep?(step.name)
                         } label: {

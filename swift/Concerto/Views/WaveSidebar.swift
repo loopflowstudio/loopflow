@@ -153,42 +153,33 @@ struct WaveSidebar: View {
         .padding(.vertical, Spacing.md)
     }
 
-    private var disconnectedState: some View {
+    private func centeredMessage(
+        icon: String,
+        title: String,
+        subtitle: String,
+        @ViewBuilder action: () -> some View
+    ) -> some View {
         VStack(spacing: 0) {
             Spacer()
                 .frame(maxHeight: .infinity)
 
             VStack(spacing: Spacing.md) {
-                Image(systemName: "link.circle")
+                Image(systemName: icon)
                     .font(Typography.heroTitle(28))
                     .foregroundStyle(.white.opacity(0.3))
 
                 VStack(spacing: Spacing.xs) {
-                    Text("Connect to lfd")
+                    Text(title)
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
-                    Text("Start the daemon to manage waves.")
+                    Text(subtitle)
                         .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, Spacing.lg)
                 }
 
-                Button {
-                    Task {
-                        do {
-                            try await repoState.connectLfd(outputBuffer: outputBuffer)
-                        } catch {
-                            actionError = "Failed to connect: \(error.localizedDescription)"
-                            showingActionError = true
-                        }
-                    }
-                } label: {
-                    Label("Connect lfd", systemImage: "link")
-                        .font(Typography.caption())
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                action()
             }
 
             Spacer()
@@ -198,43 +189,46 @@ struct WaveSidebar: View {
         .padding()
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 0) {
-            Spacer()
-                .frame(maxHeight: .infinity)
-
-            VStack(spacing: Spacing.md) {
-                Image(systemName: "wave.3.right")
-                    .font(Typography.heroTitle(28))
-                    .foregroundStyle(.white.opacity(0.3))
-
-                VStack(spacing: Spacing.xs) {
-                    Text("No waves yet")
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white.opacity(0.7))
-                    Text("Waves track ongoing branches, PRs, and runs.")
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, Spacing.lg)
+    private var disconnectedState: some View {
+        centeredMessage(
+            icon: "link.circle",
+            title: "Connect to lfd",
+            subtitle: "Start the daemon to manage waves."
+        ) {
+            Button {
+                Task {
+                    do {
+                        try await repoState.connectLfd(outputBuffer: outputBuffer)
+                    } catch {
+                        actionError = "Failed to connect: \(error.localizedDescription)"
+                        showingActionError = true
+                    }
                 }
-
-                Button {
-                    createWaveDirectly()
-                } label: {
-                    Label("Create Wave", systemImage: "plus")
-                        .font(Typography.caption())
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(isCreatingWave)
+            } label: {
+                Label("Connect lfd", systemImage: "link")
+                    .font(Typography.caption())
             }
-
-            Spacer()
-                .frame(maxHeight: .infinity)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
-        .frame(maxWidth: .infinity)
-        .padding()
+    }
+
+    private var emptyState: some View {
+        centeredMessage(
+            icon: "wave.3.right",
+            title: "No waves yet",
+            subtitle: "Waves track ongoing branches, PRs, and runs."
+        ) {
+            Button {
+                createWaveDirectly()
+            } label: {
+                Label("Create Wave", systemImage: "plus")
+                    .font(Typography.caption())
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(isCreatingWave)
+        }
     }
 
     private var waveList: some View {

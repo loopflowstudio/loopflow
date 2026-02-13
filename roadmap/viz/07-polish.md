@@ -23,8 +23,9 @@ Prioritized by visual impact per line changed. Full details in `reports/viz/desi
 
 ### Tier 6: Detail view density and hierarchy (in progress)
 
+### Tier 7: Empty state refinement (in progress)
+
 ### Other candidates
-- Empty state refinement
 - Flow badge density (capsule pills vs text-only)
 
 ## Process

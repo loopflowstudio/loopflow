@@ -27,28 +27,22 @@ pub fn create_worktree(repo: &Path, worktree: &Path, branch: &str) -> Result<(),
 /// When `force_delete_branch` is true, the branch is deleted even if unmerged.
 /// Use this for temporary worktrees (forks) that we created and know are safe to remove.
 pub fn remove_worktree(worktree: &Path, force_delete_branch: bool) -> Result<(), CoreError> {
+    let git_value = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+
     // Get the branch name before removing the worktree
-    let branch = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("HEAD")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let branch = git_value(&["rev-parse", "--abbrev-ref", "HEAD"]);
 
     // Get the main repo path for worktree removal and branch deletion
-    let main_repo = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .arg("rev-parse")
-        .arg("--show-toplevel")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let main_repo = git_value(&["rev-parse", "--show-toplevel"]);
 
     // Remove the worktree
     let mut remove_cmd = Command::new("git");

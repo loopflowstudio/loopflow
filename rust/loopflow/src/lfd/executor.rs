@@ -200,8 +200,8 @@ pub struct DockerExecutor {
     credential_env: Vec<String>,
     credential_mounts: Vec<DockerCredentialMount>,
     active: Arc<Mutex<HashMap<String, String>>>,
-    mutation_locks: RepoMutationLocks,
-    image_build_locks: ImageBuildLocks,
+    mutation_locks: KeyedLocks,
+    image_build_locks: KeyedLocks,
     prepared_runs: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -214,30 +214,15 @@ impl std::fmt::Debug for DockerExecutor {
 }
 
 #[derive(Debug, Clone, Default)]
-struct RepoMutationLocks {
+struct KeyedLocks {
     inner: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
-impl RepoMutationLocks {
-    async fn for_key(&self, key: &str) -> Arc<Mutex<()>> {
+impl KeyedLocks {
+    async fn for_value(&self, value: &str) -> Arc<Mutex<()>> {
         let mut locks = self.inner.lock().await;
         locks
-            .entry(key.to_string())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone()
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct ImageBuildLocks {
-    inner: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-}
-
-impl ImageBuildLocks {
-    async fn for_tag(&self, tag: &str) -> Arc<Mutex<()>> {
-        let mut locks = self.inner.lock().await;
-        locks
-            .entry(tag.to_string())
+            .entry(value.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
@@ -524,8 +509,8 @@ impl DockerExecutor {
             credential_env: config.credentials.env.clone(),
             credential_mounts,
             active: Arc::new(Mutex::new(HashMap::new())),
-            mutation_locks: RepoMutationLocks::default(),
-            image_build_locks: ImageBuildLocks::default(),
+            mutation_locks: KeyedLocks::default(),
+            image_build_locks: KeyedLocks::default(),
             prepared_runs: Arc::new(Mutex::new(HashSet::new())),
         })
     }
@@ -1045,7 +1030,7 @@ impl DockerExecutor {
 
     async fn ensure_repo_image(&self, workspace: &DockerWorkspace) -> Result<String> {
         let image_tag = self.repo_image_tag(workspace);
-        let lock = self.image_build_locks.for_tag(&image_tag).await;
+        let lock = self.image_build_locks.for_value(&image_tag).await;
         let _guard = lock.lock().await;
 
         let dockerfile_path = self.ensure_repo_dockerfile(&workspace.repo_source)?;
@@ -1675,7 +1660,7 @@ impl DockerExecutor {
 
         let lock = self
             .mutation_locks
-            .for_key(&workspace.volume.repo_key)
+            .for_value(&workspace.volume.repo_key)
             .await;
         {
             let _guard = lock.lock().await;
@@ -1838,7 +1823,7 @@ impl AgentExecutor for DockerExecutor {
 
         let lock = self
             .mutation_locks
-            .for_key(&workspace.volume.repo_key)
+            .for_value(&workspace.volume.repo_key)
             .await;
         let _guard = lock.lock().await;
         if !self
@@ -3032,15 +3017,17 @@ mod tests {
     #[test]
     fn docker_mount_spec_resolves_allowlisted_credentials() {
         let home = dirs::home_dir().expect("home directory should be available");
-        let mount =
-            DockerCredentialMount::from_config(&CredentialMount::Named("claude".to_string()))
-                .expect("mount spec should parse");
+        let mount = DockerCredentialMount::from_config(
+            &CredentialMount::try_from("claude".to_string()).expect("claude mount should parse"),
+        )
+        .expect("mount spec should parse");
         assert_eq!(mount.host_path, home.join(".claude"));
         assert_eq!(mount.container_path, "/home/agent/.claude");
-        assert!(
-            DockerCredentialMount::from_config(&CredentialMount::Named("unknown".to_string()))
-                .is_err()
-        );
+        assert!(DockerCredentialMount::from_config(
+            &CredentialMount::try_from("unknown".to_string())
+                .expect("unknown mount name is still valid syntax"),
+        )
+        .is_err());
     }
 
     #[test]
@@ -3120,10 +3107,10 @@ mod tests {
 
     #[tokio::test]
     async fn repo_mutation_locks_serialize_same_repo_key() {
-        let locks = RepoMutationLocks::default();
+        let locks = KeyedLocks::default();
         let events = Arc::new(StdMutex::new(Vec::new()));
 
-        let lock_a = locks.for_key("repo-1").await;
+        let lock_a = locks.for_value("repo-1").await;
         let events_a = events.clone();
         let first = tokio::spawn(async move {
             let _guard = lock_a.lock().await;
@@ -3134,7 +3121,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-        let lock_b = locks.for_key("repo-1").await;
+        let lock_b = locks.for_value("repo-1").await;
         let events_b = events.clone();
         let second = tokio::spawn(async move {
             let _guard = lock_b.lock().await;

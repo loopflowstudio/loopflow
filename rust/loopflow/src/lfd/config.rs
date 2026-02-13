@@ -87,16 +87,13 @@ pub struct ExecutorCredentialsConfig {
     pub mounts: Vec<CredentialMount>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CredentialMount {
-    Named(String),
-}
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct CredentialMount(String);
 
 impl CredentialMount {
     pub fn name(&self) -> &str {
-        match self {
-            Self::Named(name) => name.as_str(),
-        }
+        self.0.as_str()
     }
 }
 
@@ -117,17 +114,7 @@ impl TryFrom<String> for CredentialMount {
         if name.starts_with('/') {
             return Err("credential mount name must not be an absolute path".to_string());
         }
-        Ok(Self::Named(name.to_string()))
-    }
-}
-
-impl<'de> Deserialize<'de> for CredentialMount {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::try_from(value).map_err(serde::de::Error::custom)
+        Ok(Self(name.to_string()))
     }
 }
 
@@ -193,7 +180,7 @@ executor:
         );
         assert_eq!(
             config.executor.credentials.mounts,
-            vec![CredentialMount::Named("claude".to_string())]
+            vec![CredentialMount::try_from("claude".to_string()).expect("valid mount")]
         );
     }
 

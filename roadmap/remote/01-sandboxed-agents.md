@@ -24,23 +24,10 @@ lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes
 - **Workspace hygiene per run**: `git fetch`, `git reset --hard`, `git clean -fdx`
 - **Concurrency**: fine-grained locking around shared clone mutations; isolated worktree execution stays concurrent
 - **No broad host path mounts** for repo workspaces
-
-**In progress (→ scratch/remote-container-durability.md):**
-
 - **Durability**: persist container metadata in run state; rehydrate across daemon restart
 - **Recovery**: aggressive startup cleanup, but only for loopflow-labeled containers
 
-### Stage 01C (hardening + validation)
-
-- **Fork isolation**: isolated per-branch Docker workspaces so `fork(select: all)` can safely run parallel branch execution
-- **Credentials**: typed mount config with hard allowlist and read-only semantics
-- **Image pipeline**:
-  - explicit rebuild triggers (`.lf/.docker-stale`, `.lf/Dockerfile` hash, `.lf/env-setup.sh` hash, base image ref change, image missing)
-  - `_docker-gen` writes `.lf/Dockerfile` to repo when missing
-  - per-image build lock + waiters for concurrent waves
-- **Tests**:
-  - PR CI: Docker smoke coverage
-  - Nightly: full Docker e2e coverage (run, logs, cancel, cleanup, concurrent waves)
+### Stage 01C (→ scratch/remote-01c-hardening.md)
 
 ## Why containerize
 

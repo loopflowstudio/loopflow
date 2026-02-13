@@ -85,7 +85,7 @@ struct QuickExperimentDetailView: View {
             // Contextual hint
             VStack(spacing: Spacing.sm) {
                 if repoState.waves.isEmpty {
-                    Text("Or create a wave for ongoing work")
+                    Text("Create a wave for ongoing work")
                         .font(Typography.body())
                         .foregroundStyle(.secondary)
                 } else {

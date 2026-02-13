@@ -1,6 +1,7 @@
 ---
 requires: scratch/<branch>.md
 produces: code, tests
+model: codex
 ---
 Turn the design doc into working code.
 

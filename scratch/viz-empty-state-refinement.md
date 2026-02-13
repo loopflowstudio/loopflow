@@ -2,52 +2,25 @@
 
 ## Problem
 
-Empty states are the first thing users see. Concerto has four distinct empty states, each built independently with inconsistent treatment:
+Empty states are the first thing users see. Concerto has five distinct empty states, each built independently with inconsistent treatment. Three of them are actively confusing.
 
-1. **Sidebar disconnected** (`WaveSidebar.swift:156`) — shown when lfd isn't running. Icon + text + "Connect lfd" button. Reasonable but plain.
+**Sidebar empty waves** (`WaveSidebar.swift:201`) is overloaded. For a 280px sidebar, it stacks: QuickExperimentSidebarView (2x2 grid) + divider + Create Wave button + SidebarPreviewView (mock section headers). Four visual ideas fighting for a narrow column. The mock section headers (Needs Attention, Open PRs, Active, Idle) with colored status icons look interactive but aren't — users might think they're broken UI. Meanwhile the disconnected state right above it is clean: icon + title + subtitle + button. The empty waves state should match that pattern.
 
-2. **Sidebar empty waves** (`WaveSidebar.swift:201`) — shown when lfd is connected but no waves exist. Contains QuickExperimentSidebarView (2x2 step grid) + divider + Create Wave button + SidebarPreviewView (mock section list). Busy — three distinct sections competing in a narrow sidebar column.
+**Detail panel no selection** (`QuickExperimentView.swift:100`) has an incoherent bottom section. "Select a wave from the sidebar" appears even when the sidebar is empty — there are no waves to select. The step cards use `sectionTitle()` + `.semibold` at 120px wide, making them feel like primary destinations rather than lightweight options.
 
-3. **Detail panel no selection** (`QuickExperimentView.swift:100`) — full placeholder when no wave is selected. Hero icon + "Quick Experiment" title + 4 step buttons + "or" divider + "Select a wave" hint. Well-structured but the step buttons are large cards that dominate.
+**Runs tab empty** (`WaveRunsTab.swift:45`) — just "No runs yet" with no context. Doesn't explain what a run is or how one starts.
 
-4. **Runs tab empty** (`WaveRunsTab.swift:45`) — "No runs yet" in caption text. Minimal but gives no guidance.
-
-5. **Symphonia placeholder** (`PlaceholderView.swift:5`) — uses system fonts and hardcoded spacing. Not design-system-aware.
-
-### Specific issues
-
-- **Sidebar empty state is overloaded.** Quick experiment grid + divider + create button + preview mock. For a 280px sidebar, that's four visual ideas stacked vertically. Linear's empty states: one sentence, one action.
-
-- **SidebarPreviewView is confusing.** Shows mock section headers (Needs Attention, Open PRs, Active, Idle) with colored icons — but these are preview decorations, not real sections. Users might think they're interactive or broken.
-
-- **Detail panel step cards are oversized.** Each card is 120px wide with `sectionTitle()` font for the step name. Four cards at 120px + spacing = 528px minimum. Doesn't leave room for the rest of the layout to breathe.
-
-- **No runs yet** gives no context. Could say what a run is or how to start one.
-
-- **Symphonia** uses `.font(.system(size: 64))`, `.font(.largeTitle)`, `.font(.title3)`, `.font(.headline)` — all system fonts. Spacing is literal `24` and `16`.
+**Symphonia placeholder** (`PlaceholderView.swift`) — hardcoded system fonts (`.system(size: 64)`, `.largeTitle`, `.title3`, `.headline`) and literal spacing (`24`, `16`). Completely outside the design system.
 
 ## Approach
 
-Two small PRs, each under 100 lines changed.
+Two PRs. Each changes one conceptual layer.
 
-### PR 1: Simplify sidebar empty states
+### PR 1: Sidebar empty state simplification
 
-**Disconnected state** — keep as-is. It's clear and focused: one message, one action.
-
-**Empty waves state** — simplify to match the disconnected pattern:
-
-| Before | After |
-|--------|-------|
-| QuickExperimentSidebarView (2x2 grid) | Remove |
-| Divider | Remove |
-| Create Wave button | Keep — single primary action |
-| SidebarPreviewView (mock sections) | Remove |
-| — | Add subtitle: "Waves track ongoing branches, PRs, and runs" |
-
-The detail panel already has Quick Experiment prominently. Duplicating it in the sidebar clutters the first impression. One CTA (Create Wave) with a one-line description is enough.
+Replace the overloaded sidebar empty state with the disconnected state's pattern: icon + title + subtitle + button.
 
 ```swift
-// After: sidebar empty state
 private var emptyState: some View {
     VStack(spacing: 0) {
         Spacer()
@@ -88,16 +61,16 @@ private var emptyState: some View {
 }
 ```
 
-This mirrors the disconnected state's structure exactly: icon + title + subtitle + button. Consistent visual language for sidebar empty states.
+**Delete these structs** from `QuickExperimentView.swift`:
+- `QuickExperimentSidebarView` (lines 22-59) — only called from sidebar empty state + its own preview
+- `SidebarPreviewView` (lines 64-95) — only called from sidebar empty state + its own preview
+- Their `#Preview` blocks (lines 195-211)
 
-**What gets removed:**
-- `QuickExperimentSidebarView` (still used? No — only called from sidebar empty state)
-- `SidebarPreviewView` (only called from sidebar empty state)
-- Both structs can be deleted from `QuickExperimentView.swift` if they have no other call sites
+**Remove the `ScreenshotWindow` reference** if it uses `QuickExperimentSidebarView`. Check `ScreenshotWindow.swift` before deleting — it may reference the sidebar view for screenshot generation. If so, use the simplified empty state pattern instead.
 
-### PR 2: Polish detail panel + minor empty states
+### PR 2: Detail panel + minor empty states
 
-**Detail panel** (`QuickExperimentDetailView`) — reduce step card visual weight:
+**Detail panel step cards** — reduce visual weight so they feel like options, not destinations:
 
 | Property | Before | After |
 |----------|--------|-------|
@@ -106,17 +79,30 @@ This mirrors the disconnected state's structure exactly: icon + title + subtitle
 | Card padding | `Spacing.lg` vertical | `Spacing.md` vertical |
 | Card background | `palette.surface` | `palette.surface.opacity(0.7)` |
 
-This makes the step cards feel like options rather than destinations. The "Quick Experiment" title and bolt icon already establish the section — the cards don't need to shout.
-
-**Runs tab empty** — add context:
+**Detail panel bottom section** — fix the "select a wave" hint that appears even when no waves exist. Make it conditional:
 
 ```swift
-// Before
-Text("No runs yet")
-    .font(Typography.caption())
-    .foregroundStyle(.secondary)
+// Replace the static "Select a wave from the sidebar" section with:
+VStack(spacing: Spacing.sm) {
+    if repoState.waves.isEmpty {
+        Text("Or create a wave for ongoing work")
+            .font(Typography.body())
+            .foregroundStyle(.secondary)
+    } else {
+        Text("Select a wave from the sidebar")
+            .font(Typography.body())
+            .foregroundStyle(.secondary)
+    }
 
-// After
+    Text("Waves track ongoing work with branches, PRs, and history")
+        .font(Typography.caption())
+        .foregroundStyle(.tertiary)
+}
+```
+
+**Runs tab empty** — add a one-line explanation:
+
+```swift
 VStack(spacing: Spacing.xs) {
     Text("No runs yet")
         .font(Typography.caption())
@@ -148,26 +134,39 @@ VStack(spacing: Spacing.xxl) {
         .foregroundStyle(.tertiary)
         .padding(.top, Spacing.lg)
 }
+.frame(maxWidth: .infinity, maxHeight: .infinity)
 ```
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep Quick Experiment in sidebar, just shrink it | Less change, preserves discoverability | The detail panel already has Quick Experiment prominently. Duplication in a 280px column creates noise at first impression. One CTA is enough. |
+| Remove Quick Experiment from detail panel too | Simpler empty state everywhere | Quick Experiment is genuinely useful as a detail-panel no-selection state. It gives users something to do immediately. Keep it where there's room for it. |
+| Add illustrations/art to empty states | More polished feel | Out of scope — custom illustrations are a separate effort. The icon + text pattern is clean and consistent. Ship this, add art later if needed. |
+| Make "Select a wave" always show (ignore empty sidebar) | Simpler code | Actively misleading when sidebar is empty. Users shouldn't be told to do something impossible. |
 
 ## Key decisions
 
-**Remove Quick Experiment from sidebar.** The detail panel already showcases it prominently. Duplicating in the sidebar creates visual noise at first impression. Users who want Quick Experiment will see it in the main panel.
+**One pattern for sidebar empty states.** The disconnected state already nails it: icon + title + subtitle + action. The empty waves state should mirror that exactly. From the wave direction: "Constraints are friends. The simplest thing that could work."
 
-**Keep disconnected state unchanged.** It's already well-structured — icon + message + action. The empty waves state should match its pattern, not the other way around.
+**Delete, don't hide.** `QuickExperimentSidebarView` and `SidebarPreviewView` have no other call sites. Delete the structs and their previews entirely. Dead code is a liability.
 
-**Two PRs.** Sidebar simplification is one conceptual change (first impressions). Detail + minor states are independent cleanup.
+**Conditional detail panel hint.** "Select a wave from the sidebar" is wrong when no waves exist. "Create a wave for ongoing work" guides correctly. This is a 3-line conditional, not over-engineering.
+
+**Two PRs, not one.** Sidebar simplification is about first impressions (what new users see). Detail + minor states are about polish (what returning users experience). Separate concerns, separate reviews.
 
 ## Scope
 
-- In scope: Sidebar empty state simplification, detail panel card density, runs tab empty message, Symphonia design tokens
-- Out of scope: Welcome window, setup view, command palette, new empty state illustrations
+- In scope: Sidebar empty state simplification, struct deletion, detail panel card density, conditional hint text, runs tab empty message, Symphonia design tokens
+- Out of scope: Welcome window, setup view, command palette, custom illustrations, new empty state animations
 
 ## Done when
 
 - Sidebar empty state shows icon + "No waves yet" + subtitle + Create Wave button
-- SidebarPreviewView and QuickExperimentSidebarView removed (if no other call sites)
-- Detail panel step cards are visually lighter
+- `QuickExperimentSidebarView` and `SidebarPreviewView` deleted from `QuickExperimentView.swift`
+- Detail panel step cards use `Typography.body()` + `.medium` at 100px width
+- Detail panel hint is conditional on whether waves exist
 - Runs tab empty state has explanatory subtitle
-- Symphonia placeholder uses Typography and Spacing tokens
+- Symphonia placeholder uses `Typography` and `Spacing` tokens
 - `swift build --package-path swift` passes

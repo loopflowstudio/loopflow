@@ -22,18 +22,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut args = std::env::args();
     if let Some(command) = args.nth(1) {
-        if command == "migrate" {
-            let status_only = args.any(|arg| arg == "--status");
-            let database_url = std::env::var("LFD_DATABASE_URL")
-                .expect("LFD_DATABASE_URL required for postgres migrations");
-            if status_only {
-                let version = PostgresStore::migrate_status_async(&database_url).await?;
-                println!("schema_version={version}");
-            } else {
-                let version = PostgresStore::migrate_async(&database_url).await?;
-                println!("migrated schema to version {version}");
+        match command.as_str() {
+            "migrate" => {
+                let status_only = args.any(|arg| arg == "--status");
+                let database_url = std::env::var("LFD_DATABASE_URL")
+                    .expect("LFD_DATABASE_URL required for postgres migrations");
+                if status_only {
+                    let version = PostgresStore::migrate_status_async(&database_url).await?;
+                    println!("schema_version={version}");
+                } else {
+                    let version = PostgresStore::migrate_async(&database_url).await?;
+                    println!("migrated schema to version {version}");
+                }
+                return Ok(());
             }
-            return Ok(());
+            "install" => return loopflow::lfd::service::install(),
+            "uninstall" => return loopflow::lfd::service::uninstall(),
+            "start" => return loopflow::lfd::service::start(),
+            "stop" => return loopflow::lfd::service::stop(),
+            "status" => return loopflow::lfd::service::status(),
+            _ => {} // fall through to serve
         }
     }
 
@@ -69,6 +77,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
     };
+    // Clean up orphaned runs from a previous lfd process.
+    match store.fail_orphaned_runs() {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(count = n, "cleaned up orphaned runs from previous lfd"),
+        Err(err) => tracing::warn!(error = %err, "failed to clean up orphaned runs"),
+    }
+
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
     let event_hub = EventHub::new(1024);

@@ -14,10 +14,16 @@ pub struct Migration {
 ///
 /// If a migration genuinely requires different SQL per backend, add separate
 /// entries and filter them in `migrations()`.
-const ALL_MIGRATIONS: &[Migration] = &[Migration {
-    version: "001_initial",
-    sql: include_str!("migrations/001_initial.sql"),
-}];
+const ALL_MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: "001_initial",
+        sql: include_str!("migrations/001_initial.sql"),
+    },
+    Migration {
+        version: "002_stimulus_enabled",
+        sql: include_str!("migrations/002_stimulus_enabled.sql"),
+    },
+];
 
 /// Migrations applicable to a backend. Currently returns all migrations
 /// since everything is portable SQL. Override resolution would go here

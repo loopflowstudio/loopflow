@@ -144,10 +144,8 @@ struct WaveDetailPanel: View {
                         }
                     } else {
                         WaveRunsTab(
-                            wave: wave,
                             runs: waveRuns,
-                            onCollapse: collapsePRs,
-                            onAbsorb: absorbIntoPR(_:)
+                            onCombine: combinePRs
                         )
                     }
                 }
@@ -732,12 +730,8 @@ struct WaveDetailPanel: View {
         }
     }
 
-    private func collapsePRs() async throws -> CollapsePRsResult {
-        try await repoState.collapsePRs(wave.id)
-    }
-
-    private func absorbIntoPR(_ prNumber: Int) async throws -> AbsorbIntoPRResult {
-        try await repoState.absorbIntoPR(wave.id, prNumber: prNumber)
+    private func combinePRs() async throws -> CombinePRsResult {
+        try await repoState.combinePRs(wave.id)
     }
 
     // MARK: - Name Editing

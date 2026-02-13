@@ -40,7 +40,7 @@ struct WaitingStateCard: View {
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Review open pull requests")
 
-                Text("Use the Runs tab to collapse or absorb PRs.")
+                Text("Use the Runs tab to combine PRs.")
                     .font(Typography.caption())
                     .foregroundStyle(.secondary)
             }

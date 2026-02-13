@@ -42,6 +42,12 @@ pub struct Stimulus {
     pub last_triggered_at: Option<i64>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 impl Stimulus {
@@ -55,6 +61,7 @@ impl Stimulus {
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
         }
     }
 }

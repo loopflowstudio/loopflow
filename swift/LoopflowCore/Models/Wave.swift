@@ -26,11 +26,13 @@ public struct Stimulus: Sendable, Hashable, Codable, Identifiable {
 
     public var id: String
     public var kind: Kind
+    public var enabled: Bool
     public var cron: String?
 
-    public init(id: String = UUID().uuidString, kind: Kind, cron: String? = nil) {
+    public init(id: String = UUID().uuidString, kind: Kind, enabled: Bool = true, cron: String? = nil) {
         self.id = id
         self.kind = kind
+        self.enabled = enabled
         self.cron = cron
     }
 
@@ -39,6 +41,14 @@ public struct Stimulus: Sendable, Hashable, Codable, Identifiable {
             return "cron(\(cronExpr))"
         }
         return kind.rawValue
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        cron = try container.decodeIfPresent(String.self, forKey: .cron)
     }
 
     public var icon: String { kind.icon }

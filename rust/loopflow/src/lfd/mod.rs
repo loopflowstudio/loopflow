@@ -10,6 +10,7 @@ pub mod obs;
 pub mod output;
 pub mod registration;
 pub mod scheduler;
+pub mod service;
 pub mod sessions;
 pub mod store;
 pub mod triggers;

@@ -146,6 +146,7 @@ pub struct RunWaveResponse {
 pub struct StimulusDto {
     pub id: String,
     pub kind: String,
+    pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -178,27 +179,15 @@ pub struct NextWaveResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct CollapseResponse {
+pub struct CombineResponse {
     pub ok: bool,
-    pub result: CollapseResponseResult,
+    pub result: CombineResponseResult,
 }
 
 #[derive(Debug, Serialize)]
-pub struct CollapseResponseResult {
+pub struct CombineResponseResult {
     pub new_pr_url: Option<String>,
     pub closed_prs: Vec<u64>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AbsorbResponse {
-    pub ok: bool,
-    pub result: AbsorbResponseResult,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AbsorbResponseResult {
-    pub target_branch: String,
-    pub commits_absorbed: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -257,6 +246,7 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     StimulusDto {
         id: s.id.to_string(),
         kind: stimulus_kind_str(s.kind).to_string(),
+        enabled: s.enabled,
         cron: if s.cron.is_empty() {
             None
         } else {

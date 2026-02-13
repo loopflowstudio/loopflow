@@ -2,16 +2,13 @@ import SwiftUI
 import LoopflowCore
 
 struct WaveRunsTab: View {
-    let wave: WaveViewModel
     let runs: [WaveRun]
-    let onCollapse: () async throws -> CollapsePRsResult
-    let onAbsorb: (Int) async throws -> AbsorbIntoPRResult
+    let onCombine: () async throws -> CombinePRsResult
 
     @Environment(\.palette) private var palette
 
-    @State private var showCollapseConfirmation = false
-    @State private var isCollapsing = false
-    @State private var isAbsorbing = false
+    @State private var showCombineConfirmation = false
+    @State private var isCombining = false
     @State private var actionError: String?
     @State private var actionSuccess: String?
     @State private var successDismissTask: Task<Void, Never>?
@@ -22,19 +19,10 @@ struct WaveRunsTab: View {
         sortedRuns.filter { $0.pr?.state == .open || $0.pr?.state == .draft }
     }
 
-    private var absorbTargetPR: PullRequest? {
-        guard !wave.commits.isEmpty, wave.prURL == nil else { return nil }
-        return openPRRuns.first?.pr
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             if openPRRuns.count >= 2 {
-                collapseBar
-            }
-
-            if let targetPR = absorbTargetPR, let prNumber = targetPR.number {
-                absorbBar(prNumber: prNumber)
+                combineBar
             }
 
             if let actionError {
@@ -65,12 +53,12 @@ struct WaveRunsTab: View {
             }
         }
         .confirmationDialog(
-            "Collapse PRs?",
-            isPresented: $showCollapseConfirmation,
+            "Combine PRs?",
+            isPresented: $showCombineConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Collapse into One PR") {
-                Task { await collapsePRs() }
+            Button("Combine into One PR") {
+                Task { await combinePRs() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -90,7 +78,7 @@ struct WaveRunsTab: View {
         }
     }
 
-    private var collapseBar: some View {
+    private var combineBar: some View {
         HStack {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("\(openPRRuns.count) open PRs")
@@ -104,63 +92,32 @@ struct WaveRunsTab: View {
             Spacer()
 
             Button {
-                showCollapseConfirmation = true
+                showCombineConfirmation = true
             } label: {
-                if isCollapsing {
+                if isCombining {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Label("Collapse", systemImage: "arrow.triangle.merge")
+                    Label("Combine", systemImage: "arrow.triangle.merge")
                 }
             }
             .buttonStyle(.borderedProminent)
             .tint(.loopflowBurgundy)
-            .disabled(isCollapsing || isAbsorbing)
+            .disabled(isCombining)
         }
         .padding(Spacing.lg)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
     }
 
-    private func absorbBar(prNumber: Int) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("\(wave.commits.count) unpublished commit\(wave.commits.count == 1 ? "" : "s")")
-                    .font(Typography.body())
-                    .fontWeight(.medium)
-                Text("Add to PR #\(prNumber)")
-                    .font(Typography.caption())
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                Task { await absorbIntoPR(prNumber: prNumber) }
-            } label: {
-                if isAbsorbing {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Label("Absorb", systemImage: "arrow.down.to.line")
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(isAbsorbing || isCollapsing)
-        }
-        .padding(Spacing.lg)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
-    }
-
-    private func collapsePRs() async {
-        isCollapsing = true
+    private func combinePRs() async {
+        isCombining = true
         actionError = nil
         actionSuccess = nil
 
         do {
-            let result = try await onCollapse()
-            showSuccess("Collapsed \(result.closedPRs.count) PR\(result.closedPRs.count == 1 ? "" : "s") into one stack PR")
+            let result = try await onCombine()
+            showSuccess("Combined \(result.closedPRs.count) PR\(result.closedPRs.count == 1 ? "" : "s") into one stack PR")
             if let urlString = result.newPRUrl, let url = URL(string: urlString) {
                 terminalLauncher.openURL(url)
             }
@@ -168,22 +125,7 @@ struct WaveRunsTab: View {
             actionError = error.localizedDescription
         }
 
-        isCollapsing = false
-    }
-
-    private func absorbIntoPR(prNumber: Int) async {
-        isAbsorbing = true
-        actionError = nil
-        actionSuccess = nil
-
-        do {
-            let result = try await onAbsorb(prNumber)
-            showSuccess("Absorbed \(result.commitsAbsorbed) commit\(result.commitsAbsorbed == 1 ? "" : "s") into \(result.targetBranch)")
-        } catch {
-            actionError = error.localizedDescription
-        }
-
-        isAbsorbing = false
+        isCombining = false
     }
 
     private func showSuccess(_ message: String) {

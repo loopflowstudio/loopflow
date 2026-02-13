@@ -309,13 +309,28 @@ impl WaveExecutor {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
 
-                    // Auto-create draft PR (best-effort).
+                    let is_recurring = self
+                        .store
+                        .list_stimuli(Some(&wave.id))
+                        .map(|stimuli| {
+                            stimuli.iter().any(|s| {
+                                matches!(
+                                    s.kind,
+                                    StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
+                                )
+                            })
+                        })
+                        .unwrap_or(false);
+
+                    // Auto-create PR (draft for manual, ready for auto stimulus).
                     let worktree = run.worktree.clone();
-                    match tokio::task::spawn_blocking(move || auto_create_pr(Path::new(&worktree)))
-                        .await
+                    match tokio::task::spawn_blocking(move || {
+                        auto_create_pr(Path::new(&worktree), is_recurring)
+                    })
+                    .await
                     {
                         Ok(Some(pr)) => {
-                            info!(run_id = %run.id, url = %pr.url, "auto-created draft PR");
+                            info!(run_id = %run.id, url = %pr.url, "auto-created PR");
                             run.snapshot.pr = Some(pr);
                         }
                         Ok(None) => {}
@@ -324,46 +339,36 @@ impl WaveExecutor {
                         }
                     }
 
-                    // For recurring waves (loop/watch/cron), advance to a new
-                    // branch so the next iteration gets its own PR.
-                    if run.snapshot.pr.is_some() {
-                        if let Ok(stimuli) = self.store.list_stimuli(Some(&wave.id)) {
-                            let is_recurring = stimuli.iter().any(|s| {
-                                matches!(
-                                    s.kind,
-                                    StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
-                                )
-                            });
-                            if is_recurring {
-                                let wt = run.worktree.clone();
-                                let name = wave.name.clone();
-                                match tokio::task::spawn_blocking(move || {
-                                    advance_branch(Path::new(&wt), &name)
-                                })
-                                .await
-                                {
-                                    Ok(Ok(new_branch)) => {
-                                        info!(
-                                            run_id = %run.id,
-                                            new_branch = %new_branch,
-                                            "advanced to new branch for next iteration"
-                                        );
-                                    }
-                                    Ok(Err(err)) => {
-                                        warn!(
-                                            run_id = %run.id,
-                                            error = %err,
-                                            "failed to advance branch"
-                                        );
-                                    }
-                                    Err(err) => {
-                                        warn!(
-                                            run_id = %run.id,
-                                            error = %err,
-                                            "advance_branch task panicked"
-                                        );
-                                    }
-                                }
+                    // For recurring waves, advance to a new branch so the
+                    // next iteration gets its own PR.
+                    if run.snapshot.pr.is_some() && is_recurring {
+                        let wt = run.worktree.clone();
+                        let name = wave.name.clone();
+                        match tokio::task::spawn_blocking(move || {
+                            advance_branch(Path::new(&wt), &name)
+                        })
+                        .await
+                        {
+                            Ok(Ok(new_branch)) => {
+                                info!(
+                                    run_id = %run.id,
+                                    new_branch = %new_branch,
+                                    "advanced to new branch for next iteration"
+                                );
+                            }
+                            Ok(Err(err)) => {
+                                warn!(
+                                    run_id = %run.id,
+                                    error = %err,
+                                    "failed to advance branch"
+                                );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    run_id = %run.id,
+                                    error = %err,
+                                    "advance_branch task panicked"
+                                );
                             }
                         }
                     }
@@ -1075,8 +1080,9 @@ fn build_agent_for_step(
 }
 
 /// Commit any remaining changes, push, and create a draft PR.
+/// When `mark_ready` is true (auto-stimulus waves), converts the draft to a real PR.
 /// Returns the PR info if successful, None if skipped or failed.
-fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
+fn auto_create_pr(worktree: &Path, mark_ready: bool) -> Option<crate::lfd::types::PullRequest> {
     use crate::ops::{
         commit_workflow, current_pr, generate_pr_message, update_pr, CommitOptions, NullProgress,
     };
@@ -1097,10 +1103,13 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
 
     match current_pr(worktree) {
         Ok(Some(pr)) => {
+            let mut title = None;
+
             // Update the draft PR with an LLM-generated title and description,
             // matching what `lf ops pr` produces.
             match generate_pr_message(worktree) {
                 Ok(message) => {
+                    title = Some(message.title.clone());
                     if let Err(err) = update_pr(worktree, pr.number, &message.title, &message.body)
                     {
                         warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to update title/body");
@@ -1111,12 +1120,19 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
                 }
             }
 
+            // Auto-stimulus waves get their draft promoted to a real PR.
+            if mark_ready {
+                if let Err(err) = crate::ops::mark_ready(worktree) {
+                    warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to mark PR ready");
+                }
+            }
+
             Some(crate::lfd::types::PullRequest {
                 url: pr.url,
                 number: Some(pr.number as u32),
                 state: Some(pr.state),
                 branch: Some(pr.branch),
-                title: None,
+                title,
             })
         }
         Ok(None) => {

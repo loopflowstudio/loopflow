@@ -55,6 +55,10 @@ async fn check_watch_stimuli(
     let mut started = HashSet::new();
 
     for stimulus in stimuli {
+        if !stimulus.enabled {
+            continue;
+        }
+
         let wave = match store.get_wave(&stimulus.wave_id) {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,

@@ -411,12 +411,35 @@ impl RunStore for PostgresStore {
         })
     }
 
+    fn fail_orphaned_runs(&self) -> StoreResult<u32> {
+        self.with_client(|client| async move {
+            let statuses = [
+                WaveRunStatus::Pending.as_i32(),
+                WaveRunStatus::Running.as_i32(),
+                WaveRunStatus::Waiting.as_i32(),
+            ];
+            let updated = client
+                .execute(
+                    "UPDATE wave_runs SET status = $1, error = $2, ended_at = $3
+                     WHERE status = ANY($4)",
+                    &[
+                        &WaveRunStatus::Failed.as_i32(),
+                        &"orphaned: lfd restarted".to_string(),
+                        &now_unix(),
+                        &&statuses[..],
+                    ],
+                )
+                .await?;
+            Ok(updated as u32)
+        })
+    }
+
     fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
         self.with_client(|client| async move {
             let rows = if let Some(wave_id) = wave_id {
                 client
                     .query(
-                        "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+                        "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
                          FROM stimuli WHERE wave_id = $1 ORDER BY created_at",
                         &[&wave_id],
                     )
@@ -424,7 +447,7 @@ impl RunStore for PostgresStore {
             } else {
                 client
                     .query(
-                        "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+                        "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
                          FROM stimuli ORDER BY created_at",
                         &[],
                     )
@@ -438,7 +461,7 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+                    "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
                      FROM stimuli WHERE kind = $1 ORDER BY created_at",
                     &[&kind],
                 )
@@ -451,7 +474,7 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at
+                    "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
                      FROM stimuli WHERE id = $1",
                     &[&stimulus_id],
                 )
@@ -466,11 +489,12 @@ impl RunStore for PostgresStore {
                 .created_at
                 .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
+            let enabled: i32 = if stimulus.enabled { 1 } else { 0 };
 
             client
                 .execute(
-                    "INSERT INTO stimuli (id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    "INSERT INTO stimuli (id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     &[
                         &stimulus.id,
                         &stimulus.wave_id,
@@ -479,6 +503,7 @@ impl RunStore for PostgresStore {
                         &stimulus.last_main_sha,
                         &stimulus.last_triggered_at,
                         &created_at,
+                        &enabled,
                     ],
                 )
                 .await?;
@@ -488,17 +513,19 @@ impl RunStore for PostgresStore {
 
     fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
         self.with_client(|client| async move {
+            let enabled: i32 = if stimulus.enabled { 1 } else { 0 };
             let updated = client
                 .execute(
                     "UPDATE stimuli SET
                         kind = $1, cron = $2, last_main_sha = $3,
-                        last_triggered_at = $4
-                     WHERE id = $5",
+                        last_triggered_at = $4, enabled = $5
+                     WHERE id = $6",
                     &[
                         &stimulus.kind.as_i32(),
                         &stimulus.cron,
                         &stimulus.last_main_sha,
                         &stimulus.last_triggered_at,
+                        &enabled,
                         &stimulus.id,
                     ],
                 )

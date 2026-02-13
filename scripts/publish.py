@@ -486,11 +486,25 @@ def _release(bump_type: str, dry_run: bool, skip_dmg: bool) -> None:
 def _restart_lfd() -> None:
     label = "com.loopflow.lfd"
     plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+
+    # Use `lfd install` to regenerate the plist (captures current PATH)
+    # and reload the service in one step.
+    lfd_bin = shutil.which("lfd")
+    if lfd_bin:
+        typer.echo("Reinstalling lfd service (updates PATH)...")
+        result = subprocess.run([lfd_bin, "install"], capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            typer.echo("lfd service restarted.")
+            return
+        typer.echo(f"lfd install failed, falling back to launchctl: {result.stderr.strip()}")
+
     if not plist.exists():
         typer.echo("lfd launchd plist not found, skipping restart.")
         return
+
     typer.echo("Restarting lfd...")
-    subprocess.run(["launchctl", "stop", label], capture_output=True, timeout=10)
+    subprocess.run(["launchctl", "unload", str(plist)], capture_output=True, timeout=10)
+    subprocess.run(["launchctl", "load", str(plist)], capture_output=True, timeout=10)
     typer.echo("lfd restarted.")
 
 

@@ -1,3 +1,0 @@
-- CI polling uses `GET /repos/{owner}/{repo}/commits/{branch}/check-runs` with the PR branch name as `{branch}`. This relies on GitHub accepting branch refs on that endpoint.
-- CI fix sidecars create a temporary local branch (`ci-fix-<short-id>`) from `origin/<pr-branch>` and push `HEAD:<pr-branch>` instead of checking out the PR branch directly in two worktrees.
-- Sidecar `WaveRun` snapshots intentionally clear `snapshot.pr` to avoid inflating `open_pr_count` in wave DTOs.

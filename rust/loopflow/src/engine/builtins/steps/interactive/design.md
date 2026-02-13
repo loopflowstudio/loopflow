@@ -50,41 +50,24 @@ This is the natural session exit point. The user's answer determines what to run
 **If implement:**
 
 1. Tighten the scratch doc into the standard design spec (see "Design doc sections" below)
-2. Run `git add scratch/ && git commit -m "design: <branch>"`
-3. End session. User runs `lf implement` next.
 
 **If roadmap:**
 
 1. Break the idea into staged roadmap items
-2. Write `scratch/roadmap-proposal.md` following the roadmap output format:
-
-```markdown
----
-status: proposed
----
-
-# Title
-
-One paragraph describing what and why.
-
-## Context
-
-What analysis led to this proposal.
-
-## Scope
-
-- What's included
-- What's explicitly not included
-
-## Stages
-
-### Stage 1: ...
-### Stage 2: ...
-```
-
+2. Write `scratch/roadmap-proposal.md` using the roadmap output format:
+   - `status: proposed`
+   - `# Title`
+   - `## Context`
+   - `## Scope`
+   - `## Approach` (list the staged plan here)
 3. The first stage becomes the design doc for this branch (`scratch/<branch>.md`)
-4. Run `git add scratch/ && git commit -m "design: <branch>"`
-5. End session. User runs `lf add-to-roadmap` next to promote remaining stages.
+
+Then:
+
+1. Run `git add scratch/ && git commit -m "design: <branch>"`
+2. End session and tell the user what to run next:
+   - `lf implement` if they chose implement
+   - `lf add-to-roadmap` if they chose roadmap
 
 Once breaking things up, be aggressive about commit boundaries—each stage should be independently shippable.
 

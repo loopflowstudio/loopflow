@@ -91,5 +91,7 @@ Docker mode also:
 
 - supports `fork` steps with `select: all` by creating isolated fork worktrees
 - builds a repo-specific image tag (`lfd-agent-<repo-key>:latest`) from `.lf/Dockerfile`
+- runs `install-loopflow.sh --install` in generated Dockerfiles when available in the base image
+- treats `.lf/env-setup.sh` as project-owned setup; call `install-loopflow.sh "$@"` first in that script to keep loopflow base tooling aligned
 - requires the `docker` CLI in `PATH` for repo image builds (`docker build`)
 - reattaches to running agent containers after daemon restart

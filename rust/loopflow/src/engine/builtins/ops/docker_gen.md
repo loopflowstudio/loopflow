@@ -3,7 +3,7 @@ Generate or update the repo's development environment.
 The environment is defined by two files. Both must exist and be correct when you're done.
 
 1. **`.lf/env-setup.sh`** — an idempotent shell script that installs everything the repo needs. Used by the Dockerfile at build time and by agents at runtime to update their live environment.
-2. **`.lf/Dockerfile`** — thin wrapper: `FROM loopflow/agent:latest`, copies the repo, runs `env-setup.sh`.
+2. **`.lf/Dockerfile`** — thin wrapper: `FROM loopflow/agent:latest`, runs `install-loopflow.sh`, then runs project `env-setup.sh`.
 
 ## Workflow
 
@@ -24,6 +24,14 @@ This is the real artifact. One script, idempotent, used everywhere:
 - **Agents** run it at runtime after adding dependencies (their `update_env` command)
 - Running it twice is a no-op — package managers handle this naturally
 
+Start the script by delegating loopflow base setup:
+
+```sh
+if command -v install-loopflow.sh >/dev/null 2>&1; then
+    install-loopflow.sh "$@"
+fi
+```
+
 Structure it in order:
 1. System packages (`apt-get install`)
 2. Language runtimes (rustup, pyenv, nvm — only if not already present)
@@ -32,6 +40,10 @@ Structure it in order:
 ```sh
 #!/bin/sh
 set -e
+
+if command -v install-loopflow.sh >/dev/null 2>&1; then
+    install-loopflow.sh "$@"
+fi
 
 # System packages
 apt-get update && apt-get install -y --no-install-recommends \
@@ -55,15 +67,17 @@ Thin. The script does the work.
 
 ```dockerfile
 FROM loopflow/agent:latest
-COPY . /workspace
+RUN if command -v install-loopflow.sh >/dev/null 2>&1; then install-loopflow.sh --install; fi
+COPY .lf/env-setup.sh /tmp/env-setup.sh
+RUN if [ -f /tmp/env-setup.sh ]; then sh /tmp/env-setup.sh --install; fi
 WORKDIR /workspace
-RUN .lf/env-setup.sh
 ```
 
 ## What matters
 
 - **Correct versions.** Read version pins from manifests (`rust-toolchain.toml`, `.python-version`, `.nvmrc`, `package.json` engines). Install exactly those versions.
 - **Idempotent.** Running the script on a fresh base image gives a working environment. Running it again changes nothing. Running it after adding a dependency installs only the new dependency.
+- **Delegate baseline.** `env-setup.sh` should call `install-loopflow.sh "$@"` first when available, then apply project-specific setup.
 - **Fast re-runs.** Don't re-download or rebuild what's already there. Use `--no-install-recommends`, check before installing runtimes, let package managers deduplicate.
 
 ## What doesn't matter

@@ -782,7 +782,7 @@ impl DockerExecutor {
 
     fn default_dockerfile(&self) -> String {
         format!(
-            "FROM {}\n\n# Project-specific setup\nCOPY .lf/env-setup.sh /tmp/env-setup.sh\nRUN if [ -f /tmp/env-setup.sh ]; then sh /tmp/env-setup.sh; fi\n\nWORKDIR /workspace\n",
+            "FROM {}\n\n# Loopflow baseline setup (provided by loopflow/agent images)\nRUN if command -v install-loopflow.sh >/dev/null 2>&1; then install-loopflow.sh --install; else echo 'install-loopflow.sh not found in base image; skipping loopflow base setup'; fi\n\n# Project-specific setup\nCOPY .lf/env-setup.sh /tmp/env-setup.sh\nRUN if [ -f /tmp/env-setup.sh ]; then sh /tmp/env-setup.sh --install; fi\n\nWORKDIR /workspace\n",
             self.base_image
         )
     }

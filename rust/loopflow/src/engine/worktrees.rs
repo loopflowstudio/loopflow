@@ -196,9 +196,9 @@ fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
     // Build aliased GraphQL query: one field per branch
     let mut fields = String::new();
     for (i, branch) in branches.iter().enumerate() {
-        // GraphQL aliases must be alphanumeric + underscore
+        let escaped = branch.replace('\\', "\\\\").replace('"', "\\\"");
         fields.push_str(&format!(
-            "b{i}: pullRequests(first: 1, headRefName: \"{branch}\", states: MERGED) {{ nodes {{ headRefName }} }}\n"
+            "b{i}: pullRequests(first: 1, headRefName: \"{escaped}\", states: MERGED) {{ nodes {{ headRefName }} }}\n"
         ));
     }
     let query =

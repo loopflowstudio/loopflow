@@ -34,6 +34,7 @@ lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes
 
 ### Stage 01C (hardening + validation)
 
+- **Fork isolation**: isolated per-branch Docker workspaces so `fork(select: all)` can safely run parallel branch execution
 - **Credentials**: typed mount config with hard allowlist and read-only semantics
 - **Image pipeline**:
   - explicit rebuild triggers (`.lf/.docker-stale`, `.lf/Dockerfile` hash, `.lf/env-setup.sh` hash, base image ref change, image missing)

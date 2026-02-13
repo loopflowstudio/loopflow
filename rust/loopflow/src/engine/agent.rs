@@ -450,6 +450,7 @@ fn launch_streaming(
     let mut stderr_content = String::new();
     let mut logged_first_output = false;
     let mut parser = StreamParser::new();
+    let mut pending_newline = false;
 
     let use_color = match stream_format {
         StreamFormat::Human(c) => Some(c),
@@ -470,7 +471,7 @@ fn launch_streaming(
                     match parser.feed_line(&line) {
                         ParseResult::Events(events) => {
                             for event in &events {
-                                format_event(event, color);
+                                format_event(event, color, &mut pending_newline);
                             }
                         }
                         ParseResult::Skipped => {}

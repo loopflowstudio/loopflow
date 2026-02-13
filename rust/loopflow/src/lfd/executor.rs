@@ -496,25 +496,24 @@ fn handle_output_line(
                 let (stdout, stderr) = render_event(event, false);
                 let text = if !stdout.is_empty() { stdout } else { stderr };
                 if !text.is_empty() {
-                    output.send(OutputEvent {
-                        wave_id: wave_id.to_string(),
-                        wave_run_id: wave_run_id.to_string(),
-                        agent_id: agent_id.to_string(),
-                        text,
-                    });
+                    send_output(output, wave_id, wave_run_id, agent_id, text);
                 }
             }
         }
         ParseResult::Skipped => {}
         ParseResult::Passthrough => {
-            output.send(OutputEvent {
-                wave_id: wave_id.to_string(),
-                wave_run_id: wave_run_id.to_string(),
-                agent_id: agent_id.to_string(),
-                text: line.to_string(),
-            });
+            send_output(output, wave_id, wave_run_id, agent_id, line.to_string());
         }
     }
+}
+
+fn send_output(output: &OutputHub, wave_id: &str, wave_run_id: &str, agent_id: &str, text: String) {
+    output.send(OutputEvent {
+        wave_id: wave_id.to_string(),
+        wave_run_id: wave_run_id.to_string(),
+        agent_id: agent_id.to_string(),
+        text,
+    });
 }
 
 #[derive(Clone)]

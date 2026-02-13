@@ -339,21 +339,7 @@ pub async fn delete_wave_handler(
     .map_err(map_store_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    // Kill any running agent processes.
-    let agents = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_agents_for_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
-    for agent in &agents {
-        if let Err(err) = state.executor.terminate_agent(&agent.id).await {
-            warn!(agent_id = %agent.id, error = %err, "failed to terminate agent executor handle");
-        }
-        if let Some(pid) = agent.pid {
-            kill_process(pid);
-        }
-    }
+    terminate_active_agents(&state, &wave_id).await?;
 
     // Delete from the store (cascades to wave_runs, agents, etc.).
     let wave_id_for_delete = wave_id.clone();
@@ -565,21 +551,7 @@ pub async fn stop_wave_handler(
 ) -> ApiResult<StopWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    // Kill any running agent processes.
-    let agents = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_agents_for_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
-    for agent in &agents {
-        if let Err(err) = state.executor.terminate_agent(&agent.id).await {
-            warn!(agent_id = %agent.id, error = %err, "failed to terminate agent executor handle");
-        }
-        if let Some(pid) = agent.pid {
-            kill_process(pid);
-        }
-    }
+    terminate_active_agents(&state, &wave_id).await?;
 
     let run = run_store(&state.store, {
         let wave_id = wave_id.clone();
@@ -636,6 +608,29 @@ pub async fn stop_wave_handler(
     state.event_hub.send(Event::wave_stopped(wave_id));
 
     Ok(Json(StopWaveResponse { stopped: true }))
+}
+
+async fn terminate_active_agents(
+    state: &HttpState,
+    wave_id: &LfdId,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let agents = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_active_agents_for_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    for agent in agents {
+        if let Err(err) = state.executor.terminate_agent(&agent.id).await {
+            warn!(agent_id = %agent.id, error = %err, "failed to terminate agent executor handle");
+        }
+        if let Some(pid) = agent.pid {
+            kill_process(pid);
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn continue_wave_handler(

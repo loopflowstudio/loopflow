@@ -1,10 +1,10 @@
-# Viz Phases 1-3 + Polish Tiers 2-3 — Review
+# Viz Phases 1-3 + Polish Tiers 2-4 — Review
 
-Branch: `viz-collapsed`
+Branch: `viz-collapsed` (collapsed into `jack-heart.viz.20260212_1605`)
 
 ## What was implemented
 
-Phases 1-3 of the viz roadmap plus Phase 4 polish tiers 2 and 3. The branch transforms Concerto from system fonts, scattered color references, and uniform button styles into a fully tokenized design system with visual hierarchy.
+Phases 1-3 of the viz roadmap plus Phase 4 polish tiers 2-4. The branch transforms Concerto from system fonts, scattered color references, and uniform button styles into a fully tokenized design system with visual hierarchy.
 
 ### Phase 1: Screenshot workflow
 - Decoupled screenshot generation from publish (`lf screenshots` step)
@@ -36,6 +36,13 @@ Phases 1-3 of the viz roadmap plus Phase 4 polish tiers 2 and 3. The branch tran
 - `DarkButtonStyle` (existing): filled burgundy — remains for primary actions (Land, Next, Retry)
 - 6 button restyle points across WaveDetailPanel, NextActionsBar, InteractiveSessionView
 
+### Phase 4, Tier 4: Token cleanup
+- All hardcoded `cornerRadius:` literals replaced with `CornerRadius.sm/md/lg` tokens across 7 files
+- `cornerRadius: 6` (LiveOutput, WelcomeWindow) rounded down to `CornerRadius.sm` (4) per VISUAL_DESIGN.md
+- Spacing `40` replaced with `Spacing.xxxl + Spacing.sm` in SetupView, WelcomeWindow, CommandPalette
+- WaveDetailPanel spacing literals (`20`, `16`, `12`) replaced with `Spacing.xl/lg/md`
+- Button styles in DesignSystem.swift now use `CornerRadius.md` instead of literal `8`
+
 ## Key choices
 
 **Environment injection for palette.** Enables multi-theme previews — the core requirement for fast visual iteration. One injection point at app root, all views read `@Environment(\.palette)`.
@@ -54,6 +61,8 @@ Phases 1-3 of the viz roadmap plus Phase 4 polish tiers 2 and 3. The branch tran
 
 **Inline hex values.** Compress pass removed intermediate named colors (`loopflowCreamElevated`, etc.) that added indirection without value.
 
+**Token cleanup: round down, not up.** `cornerRadius: 6` becomes `CornerRadius.sm` (4), not a new token. Tighter radii are more refined per VISUAL_DESIGN.md. Small padding values (6, 2 for keyboard shortcut badges) stay as literals — micro-padding below the token grid, not design deviations.
+
 ## How it fits together
 
 **Color flow**: `VISUAL_DESIGN.md` -> `StatusColors.swift` -> model files -> views via `@Environment(\.palette)`
@@ -63,6 +72,8 @@ Phases 1-3 of the viz roadmap plus Phase 4 polish tiers 2 and 3. The branch tran
 **Token hierarchy**: `heroTitle` (serif, 32pt) -> `sectionTitle` (serif, 20pt) -> `body` (sans, 14pt) -> `caption` (sans, 12pt) -> `code` (mono, 13pt)
 
 **Button hierarchy**: `DarkButtonStyle` (primary) -> `GhostButtonStyle` (secondary) -> `DestructiveButtonStyle` (destructive)
+
+**Spatial tokens**: `Spacing` (4pt grid) and `CornerRadius` enums in `DesignSystem.swift` -> all views use semantic names
 
 **Fast iteration**: Change hex in `BrandColors.swift` -> all views update. Use `ThemePreview` for side-by-side comparison.
 
@@ -74,5 +85,4 @@ Phases 1-3 of the viz roadmap plus Phase 4 polish tiers 2 and 3. The branch tran
 
 ## What's not included
 
-- Tier 4: Corner radius / spacing token cleanup (~25 lines) — intentionally deferred
 - Detail view density, empty states, sidebar headers, flow badge density — future polish items

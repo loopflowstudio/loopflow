@@ -80,7 +80,6 @@ struct ForkBranchTask {
     index: usize,
     step_name: String,
     step_directions: Vec<String>,
-    cli_directions: Vec<String>,
     worktree: PathBuf,
     branch_name: String,
 }
@@ -134,7 +133,6 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             index,
             step_name: branch.step.name.clone(),
             step_directions: branch.step.directions.clone(),
-            cli_directions: cli.direction.clone(),
             worktree,
             branch_name,
         });
@@ -144,7 +142,8 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     for task in tasks.iter().cloned() {
         let worktree = task.worktree.clone();
         let step_name = task.step_name.clone();
-        let directions = merge_directions(&task.cli_directions, &task.step_directions);
+        let mut directions = cli.direction.clone();
+        directions.extend(task.step_directions.iter().cloned());
         let msg = message.map(|value| value.to_string());
         let handle = std::thread::spawn(move || {
             run_fork_branch(&worktree, &step_name, &directions, msg.as_deref())
@@ -188,7 +187,11 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             return Err(err);
         }
     };
-    let synthesize_result = run_synthesize(fork.synthesize.as_deref(), message, cli);
+    let synthesize_result = if let Some(step_name) = fork.synthesize.as_deref() {
+        crate::lf::commands::run::run(Some(step_name), message, cli)
+    } else {
+        Ok(())
+    };
     cleanup_fork_artifacts(Some(&manifest_path), &tasks);
 
     synthesize_result?;
@@ -245,13 +248,6 @@ fn write_fork_manifest(repo: &Path, branches: &[ForkManifestBranch]) -> Result<P
     Ok(manifest_path)
 }
 
-fn run_synthesize(step_name: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
-    if let Some(step_name) = step_name {
-        crate::lf::commands::run::run(Some(step_name), message, cli)?;
-    }
-    Ok(())
-}
-
 fn cleanup_fork_artifacts(manifest_path: Option<&Path>, tasks: &[ForkBranchTask]) {
     if let Some(manifest_path) = manifest_path {
         if let Err(err) = std::fs::remove_file(manifest_path) {
@@ -274,12 +270,6 @@ fn cleanup_fork_artifacts(manifest_path: Option<&Path>, tasks: &[ForkBranchTask]
             );
         }
     }
-}
-
-fn merge_directions(primary: &[String], secondary: &[String]) -> Vec<String> {
-    let mut merged = primary.to_vec();
-    merged.extend(secondary.iter().cloned());
-    merged
 }
 
 fn fork_worktree_path(repo: &Path, index: usize) -> PathBuf {

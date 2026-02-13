@@ -683,7 +683,11 @@ impl DockerExecutor {
             .cloned()
             .ok_or_else(|| anyhow!("active container missing for reattach"))?;
 
-        let workspace = self.resolve_workspace(wave_id.as_str(), wave_run_id.as_str())?;
+        let workspace = self.resolve_workspace_for_cwd(
+            wave_id.as_str(),
+            wave_run_id.as_str(),
+            Path::new(&agent.worktree),
+        )?;
         let exit_code = self
             .wait_for_container_with_logs(
                 &container_id,
@@ -1382,16 +1386,6 @@ impl DockerExecutor {
 
         Ok(workspace)
     }
-
-    fn resolve_workspace(&self, wave_id: &str, wave_run_id: &str) -> Result<DockerWorkspace> {
-        let run_id = LfdId::from_raw(wave_run_id);
-        let run = self
-            .store
-            .get_wave_run(&run_id)?
-            .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
-        self.resolve_workspace_for_cwd(wave_id, wave_run_id, Path::new(&run.worktree))
-    }
-
     async fn git_command(
         &self,
         workspace: &DockerWorkspace,

@@ -55,6 +55,10 @@ async fn check_cron_stimuli(
     let mut started = HashSet::new();
 
     for stimulus in stimuli {
+        if !stimulus.enabled {
+            continue;
+        }
+
         if stimulus.cron.is_empty() {
             continue;
         }

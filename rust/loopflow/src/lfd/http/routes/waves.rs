@@ -426,6 +426,20 @@ pub async fn run_wave_handler(
         .await
         .map_err(map_store_error)?;
 
+    // Re-enable all stimuli (they may have been disabled by a previous stop).
+    let wid = wave.id.clone();
+    let _ = run_store(&state.store, move |store| {
+        let stimuli = store.list_stimuli(Some(&wid))?;
+        for mut s in stimuli {
+            if !s.enabled {
+                s.enabled = true;
+                store.update_stimulus(&s)?;
+            }
+        }
+        Ok(())
+    })
+    .await;
+
     let run_id = LfdId::new();
     let (acquired, _) = state.scheduler.acquire(run_id.as_str()).await;
     if !acquired {
@@ -578,18 +592,33 @@ pub async fn stop_wave_handler(
     .await
     .map_err(map_store_error)?;
 
-    // Check if the wave has auto stimuli — if so, stop should pause.
+    // Disable all auto stimuli so tickers won't restart the wave.
     let has_auto_stimulus = {
         let wid = wave_id.clone();
         let stimuli = run_store(&state.store, move |store| store.list_stimuli(Some(&wid)))
             .await
             .unwrap_or_default();
-        stimuli.iter().any(|s| {
+        let has_auto = stimuli.iter().any(|s| {
             matches!(
                 s.kind,
                 StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
             )
-        })
+        });
+        if has_auto {
+            let wid = wave_id.clone();
+            let _ = run_store(&state.store, move |store| {
+                let stimuli = store.list_stimuli(Some(&wid))?;
+                for mut s in stimuli {
+                    if s.enabled {
+                        s.enabled = false;
+                        store.update_stimulus(&s)?;
+                    }
+                }
+                Ok(())
+            })
+            .await;
+        }
+        has_auto
     };
 
     if let Some(mut run) = run {

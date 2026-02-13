@@ -267,6 +267,18 @@ pub struct Config {
     /// Token budgets
     #[serde(default)]
     pub budgets: BudgetConfig,
+
+    /// Model for RLM sub-agents (default: same as agent_model)
+    #[serde(default)]
+    pub rlm_model: Option<String>,
+
+    /// Max concurrent RLM sub-agents
+    #[serde(default = "default_rlm_max_parallel")]
+    pub rlm_max_parallel: usize,
+
+    /// Max RLM recursion depth
+    #[serde(default = "default_rlm_max_depth")]
+    pub rlm_max_depth: usize,
 }
 
 fn default_agent_model() -> String {
@@ -278,7 +290,15 @@ fn default_land() -> String {
 }
 
 fn default_summary_tokens() -> usize {
-    10000
+    5000
+}
+
+fn default_rlm_max_parallel() -> usize {
+    10
+}
+
+fn default_rlm_max_depth() -> usize {
+    3
 }
 
 impl Default for Config {
@@ -308,6 +328,9 @@ impl Default for Config {
             lint_check: None,
             autoprune: AutopruneConfig::default(),
             budgets: BudgetConfig::default(),
+            rlm_model: None,
+            rlm_max_parallel: default_rlm_max_parallel(),
+            rlm_max_depth: default_rlm_max_depth(),
         }
     }
 }

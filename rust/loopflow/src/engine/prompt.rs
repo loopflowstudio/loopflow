@@ -1073,13 +1073,21 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// These sections are common to both `format_prompt` (all-in-one) and
 /// `format_context_prompt` (system prompt file). Extracted to avoid duplication.
 ///
-/// Order: loopflow_doc, run_mode, wave, docs, summaries, area_docs, diff+diff_files.
+/// Order: loopflow_doc, rlm_doc, run_mode, wave, docs, summaries, area_docs, diff+diff_files.
 fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
     // System docs (loopflow)
     if let Some(ref doc) = components.loopflow_doc {
         parts.push(format!("<lf:loopflow>\n{}\n</lf:loopflow>", doc));
+    }
+
+    // RLM instructions (recursive processing capability)
+    if components.loopflow_doc.is_some() {
+        parts.push(format!(
+            "<lf:rlm>\n{}\n</lf:rlm>",
+            crate::engine::builtins::RLM_DOC
+        ));
     }
 
     // Run mode

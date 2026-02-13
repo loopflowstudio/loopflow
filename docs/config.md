@@ -375,3 +375,21 @@ lf sp:write-plan -m codex     # with a different model
 **Auto-detection:** If `~/.superpowers` exists, it's automatically registered with prefix `sp` even without explicit config.
 
 See [superpowers](https://github.com/obra/superpowers) for an example skill library.
+
+### RLM (Recursive Language Model)
+
+Configure recursive sub-agent behavior for processing large inputs.
+
+```yaml
+rlm_model: claude:sonnet    # model for sub-agents (default: same as agent_model)
+rlm_max_parallel: 10        # max concurrent sub-agents
+rlm_max_depth: 3            # max recursion depth
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `rlm_model` | (agent_model) | Model for RLM sub-agents |
+| `rlm_max_parallel` | 10 | Suggested max concurrent sub-agents |
+| `rlm_max_depth` | 3 | Maximum recursion depth |
+
+These values are propagated as environment variables (`RLM_MODEL`, `RLM_MAX_PARALLEL`, `RLM_MAX_DEPTH`) to sub-agents. See the bundled RLM instructions for usage patterns.

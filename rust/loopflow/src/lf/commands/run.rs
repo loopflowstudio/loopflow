@@ -1,8 +1,8 @@
 use crate::engine::{
     check_cli_available, drop_native_instruction_docs, format_context_prompt, format_prompt,
     format_task_prompt, gather_context, launch_agent, load_config_or_default, parse_model,
-    trim_context_with_breakdown, write_prompt_log, Config, ContextBreakdown, GatherContextOpts,
-    LaunchConfig, PromptComponents, StreamFormat, DEFAULT_CONTEXT_BUDGET,
+    seed_rlm_env, trim_context_with_breakdown, write_prompt_log, Config, ContextBreakdown,
+    GatherContextOpts, LaunchConfig, PromptComponents, StreamFormat, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -252,6 +252,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     };
     debug!(?launch_config, "launching agent");
 
+    seed_rlm_env(&built.config);
     info!(backend = built.backend, "launching agent");
     let launch_start = Instant::now();
     let result = launch_agent(&built.model, &task_prompt, &launch_config)?;

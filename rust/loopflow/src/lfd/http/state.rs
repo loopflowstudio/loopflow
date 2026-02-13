@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use time::OffsetDateTime;
+use tokio::sync::Mutex;
 
 use crate::lfd::auth::AuthContext;
+use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
@@ -21,4 +23,6 @@ pub struct HttpState {
     pub auth: AuthContext,
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
+    pub github: GitHubConfig,
+    pub ci_failure_cache: Arc<Mutex<std::collections::HashSet<String>>>,
 }

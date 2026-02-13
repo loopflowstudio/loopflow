@@ -52,6 +52,17 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
+    CiFailure {
+        wave_id: LfdId,
+        wave_run_id: LfdId,
+        pr_number: u32,
+        branch: String,
+        commit_sha: String,
+        check_name: String,
+        logs_url: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
 
     // Worktree
     WorktreeUpdated {
@@ -143,6 +154,27 @@ impl Event {
             wave_id,
             wave_run_id,
             step,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn ci_failure(
+        wave_id: LfdId,
+        wave_run_id: LfdId,
+        pr_number: u32,
+        branch: String,
+        commit_sha: String,
+        check_name: String,
+        logs_url: String,
+    ) -> Self {
+        Self::CiFailure {
+            wave_id,
+            wave_run_id,
+            pr_number,
+            branch,
+            commit_sha,
+            check_name,
+            logs_url,
             timestamp: Self::now(),
         }
     }

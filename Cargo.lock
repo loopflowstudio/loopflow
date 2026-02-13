@@ -1405,6 +1405,7 @@ dependencies = [
  "gethostname",
  "git2",
  "hex",
+ "hmac",
  "ignore",
  "loopflow-test-support",
  "once_cell",

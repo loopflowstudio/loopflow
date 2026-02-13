@@ -48,6 +48,10 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/waves/:wave_id/land", post(waves::land_wave_handler))
         .route("/waves/:wave_id/next", post(waves::next_wave_handler))
+        .route(
+            "/waves/:wave_id/check-ci",
+            post(waves::check_wave_ci_handler),
+        )
         .route("/waves/:wave_id/combine", post(waves::combine_wave_handler))
         .route(
             "/waves/:wave_id/runs",
@@ -76,6 +80,7 @@ pub fn router(state: HttpState) -> Router {
         .nest("/v0", api_routes)
         .merge(protected_routes)
         .route("/hooks/git", post(hooks::git_hook_handler))
+        .route("/v0/hooks/github", post(hooks::github_webhook_handler))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

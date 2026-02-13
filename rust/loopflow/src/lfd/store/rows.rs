@@ -1,8 +1,8 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Summary, Wave,
-    WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind,
+    Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -124,7 +124,8 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
 
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
-///        snapshot_direction, snapshot_area, snapshot_pr, flow_parents
+///        snapshot_direction, snapshot_area, snapshot_pr, flow_parents,
+///        run_kind, sidecar_kind
 pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let started_at = unix_to_datetime(row.bigint(7)?);
     let ended_at = row.opt_bigint(8)?;
@@ -132,6 +133,8 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let snapshot_area = parse_json_vec(&row.text(13)?)?;
     let snapshot_pr = parse_pr(row.opt_text(14)?)?;
     let flow_parents = parse_json_vec(&row.text(15)?)?;
+    let run_kind = WaveRunKind::from_i32(row.int(16)?);
+    let sidecar_kind = row.opt_int(17)?.and_then(SidecarKind::from_i32);
 
     let snapshot = WaveRunSnapshot {
         repo: row.text(10)?,
@@ -154,6 +157,8 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         ended_at: ended_at.map(unix_to_datetime),
         error: row.opt_text(9)?,
         flow_parents,
+        run_kind,
+        sidecar_kind,
     })
 }
 

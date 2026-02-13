@@ -87,6 +87,46 @@ impl WaveRunStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WaveRunKind {
+    #[default]
+    Main = 1,
+    Sidecar = 2,
+}
+
+impl WaveRunKind {
+    pub fn from_i32(value: i32) -> Self {
+        match value {
+            2 => Self::Sidecar,
+            _ => Self::Main,
+        }
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        *self as i32
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidecarKind {
+    CiFix = 1,
+}
+
+impl SidecarKind {
+    pub fn from_i32(value: i32) -> Option<Self> {
+        match value {
+            1 => Some(Self::CiFix),
+            _ => None,
+        }
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        *self as i32
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Wave {
     pub id: LfdId,
@@ -152,6 +192,9 @@ pub struct WaveRun {
     pub ended_at: Option<OffsetDateTime>,
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
+    #[serde(default)]
+    pub run_kind: WaveRunKind,
+    pub sidecar_kind: Option<SidecarKind>,
 }
 
 impl WaveRun {
@@ -170,6 +213,12 @@ impl WaveRun {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
         }
+    }
+
+    pub fn is_main(&self) -> bool {
+        self.run_kind == WaveRunKind::Main
     }
 }

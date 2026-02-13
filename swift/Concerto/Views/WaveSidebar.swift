@@ -22,7 +22,7 @@ struct WaveSidebar: View {
     }
 
     private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Image(systemName: icon)
                 .font(Typography.caption(9))
                 .foregroundStyle(.white.opacity(0.3))
@@ -36,9 +36,9 @@ struct WaveSidebar: View {
                     .foregroundStyle(.white.opacity(0.3))
             }
         }
-        .padding(.leading, 8)
+        .padding(.leading, Spacing.sm)
         .padding(.top, Spacing.sm)
-        .padding(.bottom, 4)
+        .padding(.bottom, Spacing.xs)
     }
 
     private func waveRows(_ waves: [WaveViewModel]) -> some View {
@@ -257,7 +257,7 @@ struct WaveSidebar: View {
     private var waveList: some View {
         @Bindable var repoState = repoState
         return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) {
+            LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                 if !waveGroups.blocked.isEmpty {
                     sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", count: waveGroups.blocked.count)
                     waveRows(waveGroups.blocked)
@@ -283,7 +283,7 @@ struct WaveSidebar: View {
                     waveRows(waveGroups.idle)
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, Spacing.sm)
         }
         .focusable()
         .focused($isSidebarFocused)

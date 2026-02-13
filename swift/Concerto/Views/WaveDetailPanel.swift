@@ -430,13 +430,17 @@ struct WaveDetailPanel: View {
         }
     }
 
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(Typography.caption(10))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
+            .tracking(0.5)
+    }
+
     private var liveOutputSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text(wave.status == .running ? "Live Output" : "Output")
-                .font(Typography.caption(10))
-                .foregroundStyle(.tertiary)
-                .textCase(.uppercase)
-                .tracking(0.5)
+            sectionLabel(wave.status == .running ? "Live Output" : "Output")
 
             let output = outputBuffer.output(for: wave.id)
             if output.isEmpty {
@@ -458,11 +462,7 @@ struct WaveDetailPanel: View {
 
     private var commitLogSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Commits")
-                .font(Typography.caption(10))
-                .foregroundStyle(.tertiary)
-                .textCase(.uppercase)
-                .tracking(0.5)
+            sectionLabel("Commits")
 
             VStack(spacing: 0) {
                 ForEach(wave.commits) { entry in
@@ -494,11 +494,7 @@ struct WaveDetailPanel: View {
 
     private func diffStatSection(_ stat: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Diff")
-                .font(Typography.caption(10))
-                .foregroundStyle(.tertiary)
-                .textCase(.uppercase)
-                .tracking(0.5)
+            sectionLabel("Diff")
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(stat.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in

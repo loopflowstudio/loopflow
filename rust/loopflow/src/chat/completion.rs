@@ -1,12 +1,19 @@
 use crate::chat::contract::{AgentEvent, UserMessagePhase};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompletionError {
     MissingFinalMessage,
     MultipleFinalMessages,
 }
 
 /// Validate that a successful turn emitted exactly one final message.
+///
+/// # Errors
+///
+/// Returns [`CompletionError::MissingFinalMessage`] when no final message was
+/// emitted, or [`CompletionError::MultipleFinalMessages`] when more than one
+/// final message was emitted.
 pub fn validate_turn_completion(events: &[AgentEvent]) -> Result<(), CompletionError> {
     match final_message_count(events) {
         1 => Ok(()),

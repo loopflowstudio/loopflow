@@ -62,7 +62,7 @@ Fork execution diverges between CLI and daemon:
 
 - **CLI vs daemon fork parity**: CLI supports only `ForkSelect::All` while the daemon supports all three modes. The CLI returns a hard error for One/Prompt. This is a deliberate constraint, not a bug — One/Prompt require interactive state or user prompting that the CLI's synchronous model doesn't support well. But it means flows that use `select: one` or `select: prompt` can only run via `lfd`.
 
-- **Docker CLI shelling vs Bollard API**: Image builds shell out to `docker build` instead of using the Bollard API that's already a dependency for container management. This creates a runtime dependency on Docker CLI being in PATH. The Bollard crate supports image builds, so there's a split between managed (containers via API) and unmanaged (builds via CLI). This is an acknowledged open question in `scratch/questions.md`.
+- **Docker CLI shelling vs Bollard API**: Image builds shell out to `docker build` instead of using the Bollard API that's already a dependency for container management. This creates a runtime dependency on Docker CLI being in PATH. The Bollard crate supports image builds, so there's a split between managed (containers via API) and unmanaged (builds via CLI).
 
 - **executor.rs size**: At 3700+ lines, this file combines volume management, container lifecycle, image fingerprinting, credential resolution, startup recovery, wave orchestration, fork execution, PR creation, branch advancement, and summary management. These are related but distinct responsibilities.
 
@@ -104,12 +104,50 @@ Fork execution diverges between CLI and daemon:
 
 **Sequential → parallel cleanup**: Both CLI and daemon remove fork worktrees sequentially. These operations are independent and could run concurrently.
 
+## 01C closeout status
+
+### Shipped
+
+- **Docker restart durability**: Persisted `agents.container_id`, daemon startup recovery (reattach, fail missing, remove orphans).
+- **Fork isolation in Docker**: Parallel containers with per-fork worktree isolation, shared clone mutation serialized.
+- **Credential mount hardening**: Typed named mounts with allowlist (`claude`, `codex`, `gemini`, `gitconfig`, `ssh`, `gnupg`). Unknown names fail config parsing. Read-only.
+- **Image lifecycle hardening**: Repo-scoped tags (`lfd-agent-<repo-key>:latest`), fingerprint-based rebuild triggers, default Dockerfile generation, per-image build coordination.
+- **CLI fork execution**: `fork(select: all)` runs directly in CLI with sibling worktrees, parallel subprocesses, manifest tracking, fail-late policy, and cleanup after synthesis.
+
+### Remaining
+
+1. **Docker CI coverage** — PR smoke tests (daemon connectivity, helper container, volume lifecycle, mount resolution) and nightly e2e (parallel waves, fork fanout, cancel/cleanup, image rebuild triggers). Tests exist but aren't wired into CI.
+2. **Build backend decision** — Keep `docker build` CLI as runtime dependency, or move to Docker API/BuildKit via Bollard.
+
+### Known limits (accepted)
+
+- No full flow-state checkpoint/restore across daemon restarts.
+- No downtime log replay/backfill.
+- No per-wave credential scoping.
+- No Docker network policy redesign.
+
+### Validation
+
+```bash
+cargo fmt --all
+cargo clippy --all -- -D warnings
+cargo test --all
+uv run pytest python/tests/
+tests/e2e/test_smoke.sh
+
+# Docker-specific (to wire into CI)
+cargo test -- --ignored
+./tests/e2e/test_docker_smoke.sh
+```
+
 ## Open questions
 
-- No timeout mechanism exists for agent execution (containers or processes). How should runaway agents be handled? Is this an acceptable risk at this stage, or should a configurable timeout be added?
-- The `prepared_runs` cache in DockerExecutor tracks which workspaces have been prepared for a given run. If a run is interrupted and restarted, the cache prevents re-fetching. Is stale code an acceptable trade-off, or should workspace preparation always re-fetch?
-- Fork task abort in the daemon (`handle.abort()`) can leak scheduler slots if the task hasn't reached its cleanup code. Should tasks use `CancellationToken` checks instead of hard aborts?
-- executor.rs at 3700+ lines could be split into focused modules (volume management, container lifecycle, wave orchestration, recovery). Is this worth the churn now, or should it wait until the next major feature addition?
+- No timeout mechanism for agent execution (containers or processes). Acceptable risk at this stage, or add configurable timeout?
+- `prepared_runs` cache in DockerExecutor has no TTL/invalidation. Stale code acceptable, or always re-fetch?
+- Fork task abort in daemon (`handle.abort()`) can leak scheduler slots. Use `CancellationToken` checks instead?
+- executor.rs at 3700+ lines — split now, or wait until next executor backend?
+- Docker image builds: keep `docker build` CLI dependency, or move to Docker API/BuildKit?
+- CLI fork execution: add `fork.select: one` and `fork.select: prompt`, or keep `select: all` only?
 
 ## Recommendations
 
@@ -120,7 +158,7 @@ Fork execution diverges between CLI and daemon:
 **Verdict**: Worth it. The existing test infrastructure supports this. Focus on: (1) successful fork with 2+ branches, (2) partial failure with cleanup, (3) direction merging through the fork path.
 
 ### 2. Add Docker CI coverage
-**Observation**: Already identified in `scratch/remote-01c-hardening.md` as remaining work for 01C closeout. Docker-specific tests (`cargo test -- --ignored`, `test_docker_smoke.sh`) exist but aren't wired into CI.
+**Observation**: Docker-specific tests (`cargo test -- --ignored`, `test_docker_smoke.sh`) exist but aren't wired into CI.
 **Cost**: Low — the tests exist; the CI config just needs updating. Nightly schedule for the heavier Docker e2e suite.
 **Benefit**: High — Docker executor changes have no automated regression coverage in CI.
 **Verdict**: Worth it. This is blocking 01C closeout.

@@ -12,6 +12,7 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
+use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
     stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
@@ -185,23 +186,25 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    // Create worktree eagerly so it exists immediately.
-    let repo_for_wt = wave.repo.clone();
-    let name_for_wt = wave.name.clone();
-    let wt_result = tokio::task::spawn_blocking(move || {
-        ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
-    })
-    .await
-    .map_err(|err| err.to_string())
-    .and_then(|r| r.map_err(|err| err.to_string()));
+    if state.executor.executor_type() == ExecutorType::Local {
+        // Create worktree eagerly so it exists immediately for local execution.
+        let repo_for_wt = wave.repo.clone();
+        let name_for_wt = wave.name.clone();
+        let wt_result = tokio::task::spawn_blocking(move || {
+            ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|r| r.map_err(|err| err.to_string()));
 
-    if let Err(err) = wt_result {
-        let wave_id = wave.id.clone();
-        let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
-        return Err(api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to create worktree: {err}"),
-        ));
+        if let Err(err) = wt_result {
+            let wave_id = wave.id.clone();
+            let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
+            return Err(api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create worktree: {err}"),
+            ));
+        }
     }
 
     state
@@ -348,6 +351,16 @@ pub async fn delete_wave_handler(
     })
     .await
     .map_err(map_store_error)?;
+
+    if state.executor.executor_type() == ExecutorType::Docker {
+        if let Err(err) = state.executor.cleanup_wave_workspace(&wave).await {
+            warn!(
+                wave_id = %wave.id,
+                error = %err,
+                "failed to remove docker-backed wave workspace"
+            );
+        }
+    }
 
     // Clean up the worktree on disk.
     let repo = wave.repo.clone();

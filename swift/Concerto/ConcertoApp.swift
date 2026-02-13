@@ -21,6 +21,16 @@ struct ConcertoApp: App {
         }
     }
 
+    private static var fontBundle: Bundle {
+        // SPM executable targets use Bundle.module for copied resources.
+        // Xcode app targets use Bundle.main (Fonts copied into app bundle).
+        #if SWIFT_PACKAGE
+        return Bundle.module
+        #else
+        return Bundle.main
+        #endif
+    }
+
     private static func registerBundledFonts() {
         let fontFiles = [
             "CormorantGaramond-Regular.otf",
@@ -31,7 +41,7 @@ struct ConcertoApp: App {
             "JetBrainsMono-Regular.ttf",
         ]
         for file in fontFiles {
-            guard let url = Bundle.module.url(forResource: file, withExtension: nil, subdirectory: "Fonts") else {
+            guard let url = fontBundle.url(forResource: file, withExtension: nil, subdirectory: "Fonts") else {
                 continue
             }
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)

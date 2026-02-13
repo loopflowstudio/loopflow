@@ -18,7 +18,7 @@ Neither CLI nor daemon imports the other. Both consume the same `engine::` types
 
 **lf/commands/flow.rs** — CLI flow runner. Synchronous, thread-based. Creates sibling worktrees for fork branches, spawns OS threads for parallel execution, writes a manifest to `.lf/fork-manifest.json`, and cleans up after synthesis. Only supports `ForkSelect::All`.
 
-**lfd/executor.rs** — Daemon flow executor. Async (tokio), supports Docker and local process backends. Manages Docker volumes, shared clones, per-wave worktrees, image fingerprinting, container lifecycle, credential mounts, and startup recovery. Supports all three `ForkSelect` modes.
+**lfd/executor/** — Daemon flow executor, split into modules: `mod.rs` (trait + startup recovery), `docker.rs` (container lifecycle, volumes, images, credentials), `wave.rs` (wave/fork orchestration), `helpers.rs` (prompt building, branch ops), `local.rs` (direct subprocess backend). Async (tokio), supports all three `ForkSelect` modes.
 
 **lfd/config.rs** — Daemon-specific config. Loads from `~/.lf/lfd.yaml`, supports `local` and `docker` executor types, enforces an allowlist for credential mounts (claude, codex, gemini, gitconfig, ssh, gnupg).
 
@@ -62,19 +62,19 @@ Fork execution diverges between CLI and daemon:
 
 - **Docker CLI shelling vs Bollard API**: Image builds shell out to `docker build` instead of using the Bollard API that's already a dependency for container management. This creates a runtime dependency on Docker CLI being in PATH. The Bollard crate supports image builds, so there's a split between managed (containers via API) and unmanaged (builds via CLI).
 
-- **executor.rs size**: At 3700+ lines, this file combines volume management, container lifecycle, image fingerprinting, credential resolution, startup recovery, wave orchestration, fork execution, PR creation, branch advancement, and summary management. These are related but distinct responsibilities.
+- **executor.rs size**: Resolved. Split into `mod.rs`, `docker.rs`, `wave.rs`, `helpers.rs`, and `local.rs` with clear responsibility boundaries.
 
-- **Synchronous context gathering in daemon**: `build_step_prompt()` calls `gather_context()` synchronously, blocking the executor thread. For large repos, this delays step launches. The rest of the daemon is fully async.
+- **Synchronous context gathering in daemon**: Resolved. `build_step_prompt()` now runs via `spawn_blocking`, keeping the executor thread free.
 
-- **Fork cleanup is sequential**: Both CLI (`cleanup_fork_artifacts`) and daemon (`cleanup_fork`) remove worktrees one at a time. With many fork branches, this is unnecessarily slow.
+- **Fork cleanup is sequential**: Resolved in CLI. `cleanup_fork_worktrees()` uses `std::thread::scope` for parallel worktree removal. Daemon fork cleanup runs tasks concurrently.
 
 ## Complexity Observations
 
-**executor.rs `prepare_workspace`** — The workspace preparation pipeline has 5 stages (ensure volume, shared clone, fetch, worktree, hygiene) with a mutation lock around the first three. The `prepared_key` tracking prevents redundant fetches but has no TTL or invalidation — a restarted run could use stale code if the remote changed between preparation and restart.
+**executor `prepare_workspace`** — The workspace preparation pipeline has 5 stages (ensure volume, shared clone, fetch, worktree, hygiene) with a mutation lock around the first three. The `prepared_key` tracking prevents redundant fetches and now includes a 5-minute TTL, so restarts re-fetch if enough time has passed.
 
-**executor.rs `plan_rehydration`** — Daemon restart recovery inspects every running agent, checks container state via Docker API, and classifies each as reattachable or lost. The logic is sound but the cascading state updates (agent → wave_run → wave) across multiple store calls make it hard to reason about consistency if any individual update fails. Current approach: warn and continue, which is correct for recovery.
+**executor `plan_rehydration`** — Daemon restart recovery inspects every running agent, checks container state via Docker API, and classifies each as reattachable or lost. The logic is sound but the cascading state updates (agent → wave_run → wave) across multiple store calls make it hard to reason about consistency if any individual update fails. Current approach: warn and continue, which is correct for recovery.
 
-**executor.rs `run_fork` (WaveExecutor)** — Fork execution spawns concurrent tasks with scheduler-gated slot acquisition. On failure, it calls `cancel.cancel()` then `handle.abort()` on all tasks. The abort is not graceful — if a task is mid-execution, its `scheduler.release()` call in the task body may not run, potentially leaking a scheduler slot.
+**executor `run_fork` (WaveExecutor)** — Fork execution spawns concurrent tasks with scheduler-gated slot acquisition. On failure, it sets a `CancellationToken` and tasks check it before acquiring slots, preventing slot leaks. Tasks that are mid-execution release their slots in their cleanup path.
 
 **lf/commands/flow.rs `run_fork` (CLI)** — The CLI fork runner creates worktrees, spawns threads, and collects results through a channel. The fail-late policy (wait for all branches, then report aggregate errors) is good, but there's no mechanism to cancel running branches if one fails catastrophically.
 
@@ -96,4 +96,4 @@ Fork execution diverges between CLI and daemon:
 
 **Image fingerprint as cache key**: The SHA256-based fingerprint for Dockerfile + env-setup + base image is a good foundation for more sophisticated caching — e.g., caching intermediate build layers across repos that share the same base image.
 
-**Sequential → parallel cleanup**: Both CLI and daemon remove fork worktrees sequentially. These operations are independent and could run concurrently.
+**Sequential → parallel cleanup**: Resolved. CLI uses `std::thread::scope` for parallel worktree removal. Daemon runs cleanup tasks concurrently.

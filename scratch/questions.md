@@ -1,7 +1,5 @@
 # Open questions
 
-- `MemoryEditLog`, `ToolCallLog`, and `ContextSnapshot` were referenced but not fully specified in the first-commit contract doc. I implemented the minimal shapes below to keep the contract moving:
-  - `MemoryEditLog { op, block, detail }`
-  - `ToolCallLog { tool, args, result_summary }`
-  - `ContextSnapshot { memory_tokens, history_tokens, total_tokens }`
-  If these should match a different wire schema, update these structs before persistence/API integration.
+1. Do `MemoryEditLog`, `ToolCallLog`, and `ContextSnapshot` need schema changes before persistence/API layers lock wire format?
+2. If a turn fails before a final message, should lfd emit a synthetic final error message or only stream terminal failure events?
+3. Should memory-edit persistence be committed per tool call or batched per turn with recovery semantics?

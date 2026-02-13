@@ -14,9 +14,9 @@ use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    stimulus_dto, stimulus_kind_str, AbsorbResponse, AbsorbResponseResult, CollapseResponse,
-    CollapseResponseResult, ContinueWaveResponse, DeletedResourceResponse, ErrorResponse,
-    LandWaveResponse, ListResponse, NextWaveResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
+    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
+    RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
@@ -120,11 +120,6 @@ pub struct LandWaveRequest {
     create_pr: Option<bool>,
     worktree: Option<String>,
     lint: Option<bool>,
-}
-
-#[derive(Deserialize)]
-pub struct AbsorbWaveRequest {
-    pr_number: u64,
 }
 
 pub async fn list_waves_handler(
@@ -583,6 +578,20 @@ pub async fn stop_wave_handler(
     .await
     .map_err(map_store_error)?;
 
+    // Check if the wave has auto stimuli — if so, stop should pause.
+    let has_auto_stimulus = {
+        let wid = wave_id.clone();
+        let stimuli = run_store(&state.store, move |store| store.list_stimuli(Some(&wid)))
+            .await
+            .unwrap_or_default();
+        stimuli.iter().any(|s| {
+            matches!(
+                s.kind,
+                StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
+            )
+        })
+    };
+
     if let Some(mut run) = run {
         run.status = WaveRunStatus::Failed;
         run.error = Some("stopped".to_string());
@@ -594,7 +603,11 @@ pub async fn stop_wave_handler(
         let wave_id = run.wave_id.clone();
         run_store(&state.store, move |store| {
             if let Some(mut wave) = store.get_wave(&wave_id)? {
-                wave.status = WaveStatus::Failed;
+                wave.status = if has_auto_stimulus {
+                    WaveStatus::Paused
+                } else {
+                    WaveStatus::Failed
+                };
                 store.update_wave(&wave)?;
             }
             // Mark agents as ended in the store.
@@ -603,6 +616,18 @@ pub async fn stop_wave_handler(
                 AgentStatus::Failed.as_i32(),
                 OffsetDateTime::now_utc().unix_timestamp(),
             );
+            Ok(())
+        })
+        .await
+        .map_err(map_store_error)?;
+    } else if has_auto_stimulus {
+        // No active run, but still pause the wave so the auto stimulus doesn't restart it.
+        let wid = wave_id.clone();
+        run_store(&state.store, move |store| {
+            if let Some(mut wave) = store.get_wave(&wid)? {
+                wave.status = WaveStatus::Paused;
+                store.update_wave(&wave)?;
+            }
             Ok(())
         })
         .await
@@ -758,27 +783,7 @@ pub async fn next_wave_handler(
     Path(wave_id): Path<String>,
 ) -> ApiResult<NextWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let wave = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    let latest_run = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_latest_wave_run(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
-
-    let worktree = latest_run
-        .as_ref()
-        .map(|run| run.worktree.clone())
-        .filter(|value| !value.is_empty());
-    let work_dir =
-        resolve_wave_work_dir_for_api(wave.repo.clone(), wave.name.clone(), worktree).await?;
+    let (wave, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
 
     let wave_name = wave.name.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -804,18 +809,18 @@ pub async fn next_wave_handler(
     }))
 }
 
-pub async fn collapse_wave_handler(
+pub async fn combine_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> ApiResult<CollapseResponse> {
+) -> ApiResult<CombineResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let (wave, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
     let wave_name = wave.name.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        crate::ops::collapse_prs(
+        crate::ops::combine_prs(
             std::path::Path::new(&work_dir),
-            &crate::ops::CollapseOptions {
+            &crate::ops::CombineOptions {
                 wave_name: Some(wave_name),
             },
             &crate::ops::NullProgress,
@@ -827,43 +832,11 @@ pub async fn collapse_wave_handler(
 
     state.event_hub.send(Event::wave_updated(wave_id));
 
-    Ok(Json(CollapseResponse {
+    Ok(Json(CombineResponse {
         ok: true,
-        result: CollapseResponseResult {
+        result: CombineResponseResult {
             new_pr_url: result.new_pr_url,
             closed_prs: result.closed_prs,
-        },
-    }))
-}
-
-pub async fn absorb_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-    Json(payload): Json<AbsorbWaveRequest>,
-) -> ApiResult<AbsorbResponse> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let (_, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
-
-    let result = tokio::task::spawn_blocking(move || {
-        crate::ops::absorb_into_pr(
-            std::path::Path::new(&work_dir),
-            &crate::ops::AbsorbOptions {
-                target_pr_number: payload.pr_number,
-            },
-            &crate::ops::NullProgress,
-        )
-    })
-    .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
-
-    state.event_hub.send(Event::wave_updated(wave_id));
-
-    Ok(Json(AbsorbResponse {
-        ok: true,
-        result: AbsorbResponseResult {
-            target_branch: result.target_branch,
-            commits_absorbed: result.commits_absorbed,
         },
     }))
 }

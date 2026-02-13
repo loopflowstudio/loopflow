@@ -82,8 +82,7 @@ Wave detail now has two tabs:
 
 - **Current** — active run state, output, commit/diff context, and run actions (`Land`, `Next`)
 - **Runs** — historical run list with PR state, plus:
-  - **Collapse**: combine multiple open PRs into one
-  - **Absorb**: fold unpublished local commits into an existing open PR
+  - **Combine**: merge multiple open PRs into one
 
 ## Communication with lfd
 

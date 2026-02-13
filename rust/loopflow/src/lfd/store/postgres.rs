@@ -411,6 +411,29 @@ impl RunStore for PostgresStore {
         })
     }
 
+    fn fail_orphaned_runs(&self) -> StoreResult<u32> {
+        self.with_client(|client| async move {
+            let statuses = [
+                WaveRunStatus::Pending.as_i32(),
+                WaveRunStatus::Running.as_i32(),
+                WaveRunStatus::Waiting.as_i32(),
+            ];
+            let updated = client
+                .execute(
+                    "UPDATE wave_runs SET status = $1, error = $2, ended_at = $3
+                     WHERE status = ANY($4)",
+                    &[
+                        &WaveRunStatus::Failed.as_i32(),
+                        &"orphaned: lfd restarted".to_string(),
+                        &now_unix(),
+                        &&statuses[..],
+                    ],
+                )
+                .await?;
+            Ok(updated as u32)
+        })
+    }
+
     fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
         self.with_client(|client| async move {
             let rows = if let Some(wave_id) = wave_id {

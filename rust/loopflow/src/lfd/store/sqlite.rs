@@ -323,6 +323,23 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
+    fn fail_orphaned_runs(&self) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE wave_runs SET status = ?1, error = ?2, ended_at = ?3
+             WHERE status IN (?4, ?5, ?6)",
+            params![
+                WaveRunStatus::Failed.as_i32() as i64,
+                "orphaned: lfd restarted",
+                now_unix(),
+                WaveRunStatus::Pending.as_i32() as i64,
+                WaveRunStatus::Running.as_i32() as i64,
+                WaveRunStatus::Waiting.as_i32() as i64,
+            ],
+        )?;
+        Ok(updated as u32)
+    }
+
     fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (query, params): (&str, Vec<Box<dyn ToSql>>) = if let Some(wave_id) = wave_id {

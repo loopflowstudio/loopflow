@@ -11,25 +11,14 @@ use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
 
 #[derive(Debug, Clone, Default)]
-pub struct CollapseOptions {
+pub struct CombineOptions {
     pub wave_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct CollapseResult {
+pub struct CombineResult {
     pub new_pr_url: Option<String>,
     pub closed_prs: Vec<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AbsorbOptions {
-    pub target_pr_number: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct AbsorbResult {
-    pub target_branch: String,
-    pub commits_absorbed: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -39,16 +28,16 @@ struct GhOpenPr {
     head_ref_name: String,
 }
 
-pub fn collapse_prs(
+pub fn combine_prs(
     repo: &Path,
-    options: &CollapseOptions,
+    options: &CombineOptions,
     progress: &impl Progress,
-) -> OpsResult<CollapseResult> {
+) -> OpsResult<CombineResult> {
     ensure_gh_available()?;
 
     if !is_clean(repo)? {
         return Err(OpsError::Message(
-            "uncommitted changes; commit or stash before collapsing PRs".to_string(),
+            "uncommitted changes; commit or stash before combining PRs".to_string(),
         ));
     }
 
@@ -57,7 +46,7 @@ pub fn collapse_prs(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| OpsError::Message("wave name is required for collapse".to_string()))?;
+        .ok_or_else(|| OpsError::Message("wave name is required for combine".to_string()))?;
 
     let base_branch = get_default_branch(repo)?;
     run_git(repo, ["fetch", "origin", &base_branch])?;
@@ -72,7 +61,7 @@ pub fn collapse_prs(
 
     if open_prs.len() < 2 {
         return Err(OpsError::Message(
-            "need at least 2 open PRs to collapse".to_string(),
+            "need at least 2 open PRs to combine".to_string(),
         ));
     }
 
@@ -97,37 +86,37 @@ pub fn collapse_prs(
         ));
     }
 
-    let branch_base = format!("{}-collapsed", sanitize_for_branch(wave_name));
-    let collapsed_branch = unique_branch_name(repo, &branch_base)?;
+    let branch_base = format!("{}-combined", sanitize_for_branch(wave_name));
+    let combined_branch = unique_branch_name(repo, &branch_base)?;
     let original_branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
 
     progress.status(&format!(
-        "Creating {collapsed_branch} from origin/{base_branch}..."
+        "Creating {combined_branch} from origin/{base_branch}..."
     ));
     run_git(
         repo,
         [
             "checkout",
             "-b",
-            &collapsed_branch,
+            &combined_branch,
             &format!("origin/{base_branch}"),
         ],
     )?;
 
     if let Err(err) = cherry_pick_commits(repo, &commits) {
         let _ = run_git(repo, ["checkout", &original_branch]);
-        let _ = delete_local_branch(repo, &collapsed_branch);
+        let _ = delete_local_branch(repo, &combined_branch);
         return Err(err);
     }
 
-    progress.status("Pushing collapsed branch...");
-    run_git(repo, ["push", "-u", "origin", &collapsed_branch])?;
+    progress.status("Pushing combined branch...");
+    run_git(repo, ["push", "-u", "origin", &combined_branch])?;
 
-    let title = format!("Collapse PR stack for {wave_name}");
-    let body = collapse_pr_body(&open_prs);
+    let title = format!("Combine PRs for {wave_name}");
+    let body = combine_pr_body(&open_prs);
 
-    progress.status("Creating collapsed PR...");
+    progress.status("Creating combined PR...");
     let pr_output = run_gh(
         repo,
         [
@@ -140,7 +129,7 @@ pub fn collapse_prs(
             "--base",
             &base_branch,
             "--head",
-            &collapsed_branch,
+            &combined_branch,
         ],
     )?;
     let pr_url = output_stdout(&pr_output);
@@ -150,6 +139,9 @@ pub fn collapse_prs(
         Some(pr_url)
     };
 
+    // Update the combined PR with an LLM-generated title and description.
+    update_combined_pr_message(repo, progress);
+
     progress.status("Closing previous PRs...");
     let mut closed_prs = Vec::new();
     for pr in &open_prs {
@@ -157,49 +149,9 @@ pub fn collapse_prs(
         closed_prs.push(pr.number);
     }
 
-    Ok(CollapseResult {
+    Ok(CombineResult {
         new_pr_url,
         closed_prs,
-    })
-}
-
-pub fn absorb_into_pr(
-    repo: &Path,
-    options: &AbsorbOptions,
-    progress: &impl Progress,
-) -> OpsResult<AbsorbResult> {
-    ensure_gh_available()?;
-
-    if !is_clean(repo)? {
-        return Err(OpsError::Message(
-            "uncommitted changes; commit or stash before absorbing".to_string(),
-        ));
-    }
-
-    let original_branch =
-        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    let target_branch = pr_head_branch(repo, options.target_pr_number)?;
-
-    progress.status(&format!("Fetching target branch origin/{target_branch}..."));
-    run_git(repo, ["fetch", "origin", &target_branch])?;
-
-    let commits = commit_range_from_ref(repo, &format!("origin/{target_branch}"), "HEAD")?;
-
-    checkout_target_branch(repo, &target_branch)?;
-
-    if let Err(err) = cherry_pick_commits(repo, &commits) {
-        let _ = run_git(repo, ["checkout", &original_branch]);
-        return Err(err);
-    }
-
-    if !commits.is_empty() {
-        progress.status("Pushing absorbed commits...");
-        run_git(repo, ["push", "origin", &target_branch])?;
-    }
-
-    Ok(AbsorbResult {
-        target_branch,
-        commits_absorbed: commits.len(),
     })
 }
 
@@ -316,64 +268,12 @@ fn close_pr(repo: &Path, number: u64) -> OpsResult<()> {
     })
 }
 
-fn collapse_pr_body(prs: &[GhOpenPr]) -> String {
-    let mut body = String::from("This PR collapses the following open PR stack:\n");
+fn combine_pr_body(prs: &[GhOpenPr]) -> String {
+    let mut body = String::from("This PR combines the following open PRs:\n");
     for pr in prs {
         body.push_str(&format!("- #{} ({})\n", pr.number, pr.head_ref_name));
     }
     body
-}
-
-fn pr_head_branch(repo: &Path, pr_number: u64) -> OpsResult<String> {
-    let output = run_gh(
-        repo,
-        [
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "headRefName",
-            "-q",
-            ".headRefName",
-        ],
-    )?;
-
-    let branch = output_stdout(&output);
-    if branch.is_empty() {
-        return Err(OpsError::Message(format!(
-            "no head branch found for PR #{}",
-            pr_number
-        )));
-    }
-
-    Ok(branch)
-}
-
-fn checkout_target_branch(repo: &Path, target_branch: &str) -> OpsResult<()> {
-    let remote_ref = format!("origin/{target_branch}");
-    let checkout_existing = Command::new("git")
-        .args(["checkout", target_branch])
-        .current_dir(repo)
-        .output()?;
-    if checkout_existing.status.success() {
-        let ff_output = Command::new("git")
-            .args(["merge", "--ff-only", &remote_ref])
-            .current_dir(repo)
-            .output()?;
-        if ff_output.status.success() {
-            return Ok(());
-        }
-
-        let stderr = String::from_utf8_lossy(&ff_output.stderr)
-            .trim()
-            .to_string();
-        return Err(OpsError::Message(format!(
-            "local branch {target_branch} diverged from {remote_ref}; sync it before absorbing ({stderr})"
-        )));
-    }
-
-    run_git(repo, ["checkout", "-b", target_branch, &remote_ref])?;
-    Ok(())
 }
 
 fn run_git<const N: usize>(repo: &Path, args: [&str; N]) -> OpsResult<Output> {
@@ -396,6 +296,38 @@ fn run_command<const N: usize>(repo: &Path, program: &str, args: [&str; N]) -> O
             command: format!("{program} {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         })
+    }
+}
+
+fn update_combined_pr_message(repo: &Path, progress: &impl Progress) {
+    progress.status("Generating PR title...");
+    match crate::ops::generate_pr_message(repo) {
+        Ok(message) => {
+            let result = Command::new("gh")
+                .args([
+                    "pr",
+                    "edit",
+                    "--title",
+                    &message.title,
+                    "--body",
+                    &message.body,
+                ])
+                .current_dir(repo)
+                .output();
+            match result {
+                Ok(output) if output.status.success() => {}
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    progress.status(&format!("Warning: failed to update PR title: {stderr}"));
+                }
+                Err(err) => {
+                    progress.status(&format!("Warning: failed to update PR title: {err}"));
+                }
+            }
+        }
+        Err(err) => {
+            progress.status(&format!("Warning: failed to generate PR message: {err}"));
+        }
     }
 }
 

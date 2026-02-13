@@ -224,7 +224,7 @@ fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
     Ok(())
 }
 
-fn mark_ready(repo: &Path) -> OpsResult<()> {
+pub fn mark_ready(repo: &Path) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("ready").current_dir(repo);
     let _ = run_command(&mut cmd);

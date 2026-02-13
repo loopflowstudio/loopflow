@@ -80,6 +80,9 @@ pub trait RunStore: Send + Sync {
     fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
     fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
     fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
+    /// Mark all Running/Pending/Waiting runs as Failed. Called on startup to
+    /// clean up orphaned runs from a previous lfd process.
+    fn fail_orphaned_runs(&self) -> StoreResult<u32>;
 
     // Stimulus management (many:1 with waves)
     fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;

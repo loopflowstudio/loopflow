@@ -399,14 +399,8 @@ final class RepoState {
         }
     }
 
-    func collapsePRs(_ waveId: String) async throws -> CollapsePRsResult {
-        let result = try await waveService.collapsePRs(waveId)
-        loadRuns(for: waveId)
-        return result
-    }
-
-    func absorbIntoPR(_ waveId: String, prNumber: Int) async throws -> AbsorbIntoPRResult {
-        let result = try await waveService.absorbIntoPR(waveId, prNumber: prNumber)
+    func combinePRs(_ waveId: String) async throws -> CombinePRsResult {
+        let result = try await waveService.combinePRs(waveId)
         loadRuns(for: waveId)
         return result
     }

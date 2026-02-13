@@ -1,5 +1,5 @@
 mod abandon;
-mod collapse;
+mod combine;
 mod commit;
 mod error;
 mod land;
@@ -13,12 +13,10 @@ pub mod trace;
 mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub use collapse::{
-    absorb_into_pr, collapse_prs, AbsorbOptions, AbsorbResult, CollapseOptions, CollapseResult,
-};
+pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use error::{OpsError, OpsResult};
-pub use land::{land, LandOptions, LandResult};
+pub use land::{land, mark_ready, LandOptions, LandResult};
 pub use lint::ensure_lint_passes;
 pub use messages::{generate_commit_message, generate_pr_message, Message};
 pub use next::{next_branch, NextOptions, NextResult};

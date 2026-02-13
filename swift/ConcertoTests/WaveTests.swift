@@ -359,12 +359,12 @@ struct WaitingReasonTests {
     }
 }
 
-@Suite("CollapsePRsResult")
-struct CollapsePRsResultTests {
+@Suite("CombinePRsResult")
+struct CombinePRsResultTests {
 
     @Test("initializes with URL and closed PRs")
     func initializesWithUrlAndClosedPRs() {
-        let result = CollapsePRsResult(
+        let result = CombinePRsResult(
             newPRUrl: "https://github.com/owner/repo/pull/100",
             closedPRs: [1, 2, 3]
         )
@@ -375,22 +375,10 @@ struct CollapsePRsResultTests {
 
     @Test("initializes with nil URL")
     func initializesWithNilUrl() {
-        let result = CollapsePRsResult(newPRUrl: nil, closedPRs: [])
+        let result = CombinePRsResult(newPRUrl: nil, closedPRs: [])
 
         #expect(result.newPRUrl == nil)
         #expect(result.closedPRs.isEmpty)
-    }
-}
-
-@Suite("AbsorbIntoPRResult")
-struct AbsorbIntoPRResultTests {
-
-    @Test("initializes with target branch and absorbed commit count")
-    func initializesWithBranchAndCount() {
-        let result = AbsorbIntoPRResult(targetBranch: "wave-b", commitsAbsorbed: 3)
-
-        #expect(result.targetBranch == "wave-b")
-        #expect(result.commitsAbsorbed == 3)
     }
 }
 

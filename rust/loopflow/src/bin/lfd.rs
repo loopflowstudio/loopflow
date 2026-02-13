@@ -22,18 +22,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut args = std::env::args();
     if let Some(command) = args.nth(1) {
-        if command == "migrate" {
-            let status_only = args.any(|arg| arg == "--status");
-            let database_url = std::env::var("LFD_DATABASE_URL")
-                .expect("LFD_DATABASE_URL required for postgres migrations");
-            if status_only {
-                let version = PostgresStore::migrate_status_async(&database_url).await?;
-                println!("schema_version={version}");
-            } else {
-                let version = PostgresStore::migrate_async(&database_url).await?;
-                println!("migrated schema to version {version}");
+        match command.as_str() {
+            "migrate" => {
+                let status_only = args.any(|arg| arg == "--status");
+                let database_url = std::env::var("LFD_DATABASE_URL")
+                    .expect("LFD_DATABASE_URL required for postgres migrations");
+                if status_only {
+                    let version = PostgresStore::migrate_status_async(&database_url).await?;
+                    println!("schema_version={version}");
+                } else {
+                    let version = PostgresStore::migrate_async(&database_url).await?;
+                    println!("migrated schema to version {version}");
+                }
+                return Ok(());
             }
-            return Ok(());
+            "install" => {
+                install_launchd_plist()?;
+                return Ok(());
+            }
+            _ => {} // fall through to serve
         }
     }
 
@@ -69,6 +76,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
     };
+    // Clean up orphaned runs from a previous lfd process.
+    match store.fail_orphaned_runs() {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(count = n, "cleaned up orphaned runs from previous lfd"),
+        Err(err) => tracing::warn!(error = %err, "failed to clean up orphaned runs"),
+    }
+
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
     let event_hub = EventHub::new(1024);
@@ -125,6 +139,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cancel.cancel();
     for handle in loop_handles {
         let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+fn install_launchd_plist() -> Result<(), Box<dyn std::error::Error>> {
+    let home = std::env::var("HOME")?;
+    let lfd_path = std::env::current_exe()?
+        .canonicalize()?
+        .to_string_lossy()
+        .to_string();
+    let path_env = std::env::var("PATH").unwrap_or_default();
+    let log_dir = format!("{home}/.lf/logs");
+    std::fs::create_dir_all(&log_dir)?;
+
+    let plist_dir = PathBuf::from(&home).join("Library/LaunchAgents");
+    std::fs::create_dir_all(&plist_dir)?;
+    let plist_path = plist_dir.join("com.loopflow.lfd.plist");
+    let plist_arg = plist_path.to_string_lossy().into_owned();
+
+    let content = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.loopflow.lfd</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{lfd_path}</string>
+        <string>serve</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>{log_dir}/lfd.log</string>
+    <key>StandardErrorPath</key>
+    <string>{log_dir}/lfd.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{path_env}</string>
+    </dict>
+</dict>
+</plist>
+"#
+    );
+
+    // Unload existing service before overwriting.
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", plist_arg.as_str()])
+        .output();
+
+    std::fs::write(&plist_path, &content)?;
+    println!("Installed {}", plist_path.display());
+
+    // Load the service.
+    let status = std::process::Command::new("launchctl")
+        .args(["load", plist_arg.as_str()])
+        .status()?;
+    if status.success() {
+        println!("lfd service loaded");
+    } else {
+        eprintln!("Warning: launchctl load failed (exit {})", status);
     }
 
     Ok(())

@@ -24,23 +24,42 @@ lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes
 - **Workspace hygiene per run**: `git fetch`, `git reset --hard`, `git clean -fdx`
 - **Concurrency**: fine-grained locking around shared clone mutations; isolated worktree execution stays concurrent
 - **No broad host path mounts** for repo workspaces
-
-**In progress (→ scratch/remote-container-durability.md):**
-
 - **Durability**: persist container metadata in run state; rehydrate across daemon restart
 - **Recovery**: aggressive startup cleanup, but only for loopflow-labeled containers
 
-### Stage 01C (hardening + validation)
+### Stage 01C (shipped)
 
-- **Fork isolation**: isolated per-branch Docker workspaces so `fork(select: all)` can safely run parallel branch execution
-- **Credentials**: typed mount config with hard allowlist and read-only semantics
-- **Image pipeline**:
-  - explicit rebuild triggers (`.lf/.docker-stale`, `.lf/Dockerfile` hash, `.lf/env-setup.sh` hash, base image ref change, image missing)
-  - `_docker-gen` writes `.lf/Dockerfile` to repo when missing
-  - per-image build lock + waiters for concurrent waves
-- **Tests**:
-  - PR CI: Docker smoke coverage
-  - Nightly: full Docker e2e coverage (run, logs, cancel, cleanup, concurrent waves)
+- **Docker restart durability**: Persisted `agents.container_id`, daemon startup recovery (reattach, fail missing, remove orphans)
+- **Fork isolation in Docker**: Parallel containers with per-fork worktree isolation, shared clone mutation serialized
+- **Credential mount hardening**: Typed named mounts with allowlist (`claude`, `codex`, `gemini`, `gitconfig`, `ssh`, `gnupg`). Unknown names fail config parsing. Read-only
+- **Image lifecycle hardening**: Repo-scoped tags (`lfd-agent-<repo-key>:latest`), fingerprint-based rebuild triggers, default Dockerfile generation, per-image build coordination
+- **CLI fork execution**: `fork(select: all)` runs directly in CLI with sibling worktrees, parallel subprocesses, manifest tracking, fail-late policy, and cleanup after synthesis
+
+#### Remaining
+
+1. **Docker CI coverage** — Wire existing Docker tests into CI: PR smoke tests and nightly e2e suite
+2. **Fork execution integration tests** — End-to-end tests for parallel fork execution (successful fork, partial failure with cleanup, direction merging). Existing `TestRepo` harness provides the foundation
+3. **Build backend decision** — Keep `docker build` CLI dependency, or move to Docker API/BuildKit via Bollard
+4. **CLI fork select modes** — Add `ForkSelect::One` and `ForkSelect::Prompt` support in CLI mode. Infrastructure is in place; currently only `ForkSelect::All` works outside the daemon
+5. **Fork log prefixing** — Parallel fork subprocess logs share stdio and interleave. Capture and prefix per-branch output for readability
+6. **Fork abort slot leak** — `handle.abort()` on fork failure can skip `scheduler.release()`. Use `CancellationToken` checks instead of hard aborts
+7. **Orphaned fork worktree cleanup** — Detect and clean orphaned fork worktrees on daemon startup when previous cleanup partially failed. Needs new store query across sqlite/postgres
+8. **Agent execution timeout** — No timeout mechanism for agent execution (containers or processes). Add configurable timeout
+
+#### Done (this branch)
+
+- ~~**Split executor.rs**~~ — Split into `executor/{mod, docker, wave, helpers, local}.rs`
+- ~~**Config parse error surfacing**~~ — `LfdConfig::load()` returns `Result`, parse errors surface at startup
+- ~~**`prepared_key` staleness**~~ — 5-minute TTL on workspace preparation cache
+- ~~**Async context gathering**~~ — `build_step_prompt` wrapped in `spawn_blocking`
+- ~~**Parallel fork cleanup**~~ — CLI uses `thread::scope`, daemon uses `JoinSet`
+
+#### Known limits (accepted)
+
+- No full flow-state checkpoint/restore across daemon restarts
+- No downtime log replay/backfill
+- No per-wave credential scoping
+- No Docker network policy redesign
 
 ## Why containerize
 

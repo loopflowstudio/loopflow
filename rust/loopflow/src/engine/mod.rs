@@ -6,6 +6,7 @@ pub mod config;
 pub mod error;
 pub mod event;
 pub mod flow;
+pub mod fork;
 pub mod git;
 pub mod naming;
 pub mod platform;

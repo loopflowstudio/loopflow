@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(loopflow::lfd::default_max_slots);
 
     // Load config and set up auth.
-    let lfd_config = LfdConfig::load();
+    let lfd_config = LfdConfig::load().expect("failed to load lfd config");
     let requires_auth = !http_addr.ip().is_loopback();
     let cancel = CancellationToken::new();
 

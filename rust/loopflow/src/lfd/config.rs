@@ -1,5 +1,8 @@
+use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::io::ErrorKind;
 use std::path::PathBuf;
+use tracing::warn;
 
 const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
@@ -36,14 +39,24 @@ pub struct LfdConfig {
 }
 
 impl LfdConfig {
-    pub fn load() -> Self {
-        let mut config: Self = std::fs::read_to_string(config_path())
-            .ok()
-            .and_then(|content| serde_yaml::from_str(&content).ok())
-            .unwrap_or_default();
+    pub fn load() -> Result<Self> {
+        let path = config_path();
+        let mut config: Self = match std::fs::read_to_string(&path) {
+            Ok(content) => serde_yaml::from_str(&content)
+                .with_context(|| format!("invalid lfd config at {}", path.display()))?,
+            Err(err) if err.kind() == ErrorKind::NotFound => Self::default(),
+            Err(err) => {
+                warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "failed reading lfd config, using defaults"
+                );
+                Self::default()
+            }
+        };
 
         config.apply_env_overrides();
-        config
+        Ok(config)
     }
 
     fn apply_env_overrides(&mut self) {
@@ -84,7 +97,38 @@ pub struct ExecutorCredentialsConfig {
     #[serde(default)]
     pub env: Vec<String>,
     #[serde(default)]
-    pub mounts: Vec<String>,
+    pub mounts: Vec<CredentialMount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct CredentialMount(String);
+
+impl CredentialMount {
+    pub fn name(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl TryFrom<String> for CredentialMount {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let name = value.trim();
+        if name.is_empty() {
+            return Err("credential mount name must not be empty".to_string());
+        }
+        if name.contains(':') {
+            return Err(
+                "credential mounts no longer accept host:container paths; use named mounts"
+                    .to_string(),
+            );
+        }
+        if name.starts_with('/') {
+            return Err("credential mount name must not be an absolute path".to_string());
+        }
+        Ok(Self(name.to_string()))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,6 +166,7 @@ fn config_path() -> PathBuf {
 mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -138,7 +183,7 @@ executor:
     env:
       - ANTHROPIC_API_KEY
     mounts:
-      - ~/.claude:/home/agent/.claude
+      - claude
 "#;
         let config: LfdConfig = serde_yaml::from_str(raw).expect("yaml should parse");
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
@@ -149,8 +194,20 @@ executor:
         );
         assert_eq!(
             config.executor.credentials.mounts,
-            vec!["~/.claude:/home/agent/.claude".to_string()]
+            vec![CredentialMount::try_from("claude".to_string()).expect("valid mount")]
         );
+    }
+
+    #[test]
+    fn raw_credential_mount_paths_are_rejected() {
+        let raw = r#"
+executor:
+  credentials:
+    mounts:
+      - ~/.claude:/home/agent/.claude
+"#;
+        let result = serde_yaml::from_str::<LfdConfig>(raw);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -181,5 +238,24 @@ executor:
         std::env::remove_var("LFD_EXECUTOR_TYPE");
 
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
+    }
+
+    #[test]
+    fn load_invalid_yaml_returns_error() {
+        let _guard = env_lock().lock().expect("env lock");
+        let tmp = tempdir().expect("tempdir");
+        let lf_dir = tmp.path().join(".lf");
+        std::fs::create_dir_all(&lf_dir).expect("lf dir");
+        std::fs::write(lf_dir.join("lfd.yaml"), "executor: [").expect("write config");
+
+        let original_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", tmp.path());
+        let result = LfdConfig::load();
+        match original_home {
+            Some(home) => std::env::set_var("HOME", home),
+            None => std::env::remove_var("HOME"),
+        }
+
+        assert!(result.is_err());
     }
 }

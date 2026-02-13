@@ -143,7 +143,6 @@ def flow():
             {"direction": "product-engineer"},
             {"direction": "designer"},
             step="implement",
-            synthesize={},
         ),
     )
 ```

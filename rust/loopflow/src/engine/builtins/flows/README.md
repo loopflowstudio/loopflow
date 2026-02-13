@@ -42,7 +42,7 @@ Plan flows use forks to get multiple perspectives:
 - publish
 ```
 
-The fork runs `reduce` three times with different directions, synthesizes results using the wave's direction, then publishes to roadmap.
+The fork runs `reduce` three times with different directions, then automatically synthesizes the results before publishing to roadmap.
 
 ## Adding a flow
 

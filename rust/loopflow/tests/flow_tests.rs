@@ -71,7 +71,6 @@ fn golden_flows() {
       - step: { name: implement }
       - step: { name: polish }
     select: all
-    synthesize: consolidate
 - fork:
     branches:
       - step: { name: quick }
@@ -85,14 +84,9 @@ fn golden_flows() {
     let flow = load_flow("forked", repo).unwrap();
     assert_eq!(flow.items.len(), 3);
     match &flow.items[0] {
-        FlowItem::Fork {
-            branches,
-            select,
-            synthesize,
-        } => {
+        FlowItem::Fork { branches, select } => {
             assert_eq!(branches.len(), 2);
             assert_eq!(select, &ForkSelect::All);
-            assert_eq!(synthesize.as_deref(), Some("consolidate"));
         }
         _ => panic!("expected fork"),
     }

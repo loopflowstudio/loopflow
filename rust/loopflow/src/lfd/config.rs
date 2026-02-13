@@ -37,17 +37,13 @@ pub struct LfdConfig {
 
 impl LfdConfig {
     pub fn load() -> Self {
-        let config: Self = std::fs::read_to_string(config_path())
+        let mut config: Self = std::fs::read_to_string(config_path())
             .ok()
             .and_then(|content| serde_yaml::from_str(&content).ok())
             .unwrap_or_default();
 
-        config.with_env_overrides()
-    }
-
-    fn with_env_overrides(mut self) -> Self {
-        self.apply_env_overrides();
-        self
+        config.apply_env_overrides();
+        config
     }
 
     fn apply_env_overrides(&mut self) {

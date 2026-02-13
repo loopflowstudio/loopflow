@@ -267,10 +267,9 @@ struct RepoVolumeIdentity {
 }
 
 impl RepoVolumeIdentity {
-    fn from_repo(repo: &Path) -> Self {
-        let identity = canonical_repo_identity(repo);
-        let repo_hash = short_hash(&identity, 16);
-        let mut slug = sanitize_token(&identity);
+    fn from_identity(identity: &RepoIdentity) -> Self {
+        let repo_hash = short_hash(&identity.canonical, 16);
+        let mut slug = sanitize_token(&identity.canonical);
         if slug.is_empty() {
             slug = "repo".to_string();
         }
@@ -279,7 +278,34 @@ impl RepoVolumeIdentity {
         }
         Self {
             repo_key: format!("{slug}-{repo_hash}"),
-            volume_name: format!("lfd-repo-{}", short_hash(&identity, 32)),
+            volume_name: format!("lfd-repo-{}", short_hash(&identity.canonical, 32)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepoIdentity {
+    canonical: String,
+    has_remote: bool,
+}
+
+impl RepoIdentity {
+    fn from_repo(repo: &Path) -> Self {
+        if let Some(remote) = canonical_repo_url(repo) {
+            return Self {
+                canonical: remote,
+                has_remote: true,
+            };
+        }
+
+        let absolute = repo
+            .canonicalize()
+            .unwrap_or_else(|_| repo.to_path_buf())
+            .to_string_lossy()
+            .to_string();
+        Self {
+            canonical: format!("local:{}", short_hash(&absolute, 32)),
+            has_remote: false,
         }
     }
 }
@@ -353,18 +379,6 @@ fn canonical_repo_url(repo: &Path) -> Option<String> {
         return None;
     }
     Some(normalize_repo_url(&raw))
-}
-
-fn canonical_repo_identity(repo: &Path) -> String {
-    if let Some(remote) = canonical_repo_url(repo) {
-        return remote;
-    }
-    let absolute = repo
-        .canonicalize()
-        .unwrap_or_else(|_| repo.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    format!("local:{}", short_hash(&absolute, 32))
 }
 
 impl DockerExecutor {
@@ -695,7 +709,8 @@ impl DockerExecutor {
         wave_name: &str,
         branch: &str,
     ) -> DockerWorkspace {
-        let volume = RepoVolumeIdentity::from_repo(repo_source);
+        let repo_identity = RepoIdentity::from_repo(repo_source);
+        let volume = RepoVolumeIdentity::from_identity(&repo_identity);
         let wave_slug = {
             let slug = sanitize_token(wave_name);
             if slug.is_empty() {
@@ -704,7 +719,6 @@ impl DockerExecutor {
                 slug
             }
         };
-        let has_remote = canonical_repo_url(repo_source).is_some();
         DockerWorkspace {
             container_shared_clone: format!("{CONTAINER_REPOS_ROOT}/{}/main", volume.repo_key),
             container_worktree: format!(
@@ -714,7 +728,7 @@ impl DockerExecutor {
             volume,
             repo_source: repo_source.to_path_buf(),
             branch: branch.to_string(),
-            has_remote,
+            has_remote: repo_identity.has_remote,
         }
     }
 
@@ -2401,8 +2415,8 @@ mod tests {
     #[test]
     fn repo_volume_identity_is_deterministic_and_safe() {
         let repo = tempdir().expect("tempdir");
-        let first = RepoVolumeIdentity::from_repo(repo.path());
-        let second = RepoVolumeIdentity::from_repo(repo.path());
+        let first = RepoVolumeIdentity::from_identity(&RepoIdentity::from_repo(repo.path()));
+        let second = RepoVolumeIdentity::from_identity(&RepoIdentity::from_repo(repo.path()));
 
         assert_eq!(first, second);
         assert!(first.volume_name.starts_with("lfd-repo-"));
@@ -2413,12 +2427,13 @@ mod tests {
     }
 
     #[test]
-    fn canonical_repo_identity_falls_back_to_path_hash() {
+    fn repo_identity_falls_back_to_path_hash() {
         let repo = tempdir().expect("tempdir");
-        let identity_a = canonical_repo_identity(repo.path());
-        let identity_b = canonical_repo_identity(repo.path());
+        let identity_a = RepoIdentity::from_repo(repo.path());
+        let identity_b = RepoIdentity::from_repo(repo.path());
         assert_eq!(identity_a, identity_b);
-        assert!(identity_a.starts_with("local:"));
+        assert!(!identity_a.has_remote);
+        assert!(identity_a.canonical.starts_with("local:"));
     }
 
     #[test]

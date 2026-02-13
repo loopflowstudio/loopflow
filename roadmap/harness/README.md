@@ -78,7 +78,7 @@ No traits, no abstractions. Just the working thing.
 **Checkpoint:** Run `lf-agent` with a prompt, get a response, see a tool call dispatched and result fed back.
 
 **Try it:**
-- Verification: `cargo run -p lf-agent -- "what's 2+2?"` produces a response
+- Verification: `cargo run --bin lf-agent -- "what's 2+2?"` produces a response
 - Feel: read the code. Is the turn loop obvious? Could you add a new tool in 5 minutes?
 
 #### B2 — Real tools
@@ -93,7 +93,7 @@ No traits, no abstractions. Just the working thing.
 **Checkpoint:** Agent runs a multi-turn session with real tools. Events stream as JSONL.
 
 **Try it:**
-- Verification: `cargo test -p lf-agent tools turn_loop` — all pass
+- Verification: `cargo test -p loopflow agent` — all pass
 - Feel: run the agent against a real prompt with real files. Does `send_message(progress)` vs `send_message(final)` make sense?
 
 #### B3 — Wave integration

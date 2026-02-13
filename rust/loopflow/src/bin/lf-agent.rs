@@ -1,8 +1,5 @@
-use anyhow::Result;
 use clap::Parser;
-use loopflow::agent::turn::{
-    self, TurnConfig, TurnError, DEFAULT_MAX_ITERATIONS, DEFAULT_TIMEOUT_SECS,
-};
+use loopflow::agent::turn::{self, TurnConfig, DEFAULT_MAX_ITERATIONS, DEFAULT_TIMEOUT_SECS};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -27,7 +24,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let args = Args::parse();
 
     let config = TurnConfig {
@@ -44,19 +41,9 @@ async fn main() -> Result<()> {
                 result.iterations, result.input_tokens, result.output_tokens
             );
         }
-        Err(TurnError::MaxIterations(n)) => {
-            eprintln!("[lf-agent] error: max iterations ({n}) exceeded");
-            std::process::exit(1);
-        }
-        Err(TurnError::Timeout(d)) => {
-            eprintln!("[lf-agent] error: timeout ({d:?}) exceeded");
-            std::process::exit(1);
-        }
         Err(e) => {
             eprintln!("[lf-agent] error: {e}");
             std::process::exit(1);
         }
     }
-
-    Ok(())
 }

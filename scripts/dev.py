@@ -36,7 +36,7 @@ SWIFT_DIR = REPO_ROOT / "swift"
 GHOSTTY_DIR = REPO_ROOT / "vendor" / "ghostty"
 DEV_APP = Path.home() / "Applications" / "Concerto Dev.app"
 R2_URL = "https://bin.loopflow.studio"
-ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
+DEV_ENV_SETUP = REPO_ROOT / ".lf" / "dev-env-setup.sh"
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -52,14 +52,14 @@ def run_capture(cmd: list[str], cwd: Path | None = None) -> subprocess.Completed
 # --- Swift commands ---
 
 
-def cmd_setup(profile: str = "maintainer", install: bool = False, dry_run: bool = False) -> int:
+def cmd_setup(install: bool = False, dry_run: bool = False) -> int:
     """Install or check idempotent repo dev environment tooling."""
-    if not ENV_SETUP.exists():
-        print(f"Error: missing {ENV_SETUP}")
+    if not DEV_ENV_SETUP.exists():
+        print(f"Error: missing {DEV_ENV_SETUP}")
         return 1
 
     mode = "--install" if install else "--check"
-    cmd = [str(ENV_SETUP), "--profile", profile, mode]
+    cmd = [str(DEV_ENV_SETUP), mode]
     if dry_run:
         cmd.append("--dry-run")
     return run(cmd, cwd=REPO_ROOT, check=False).returncode
@@ -416,12 +416,6 @@ def main() -> int:
             sub.add_argument("--docker", action="store_true", help="Use Docker executor")
         if name == "setup":
             sub.add_argument(
-                "--profile",
-                choices=["core", "maintainer"],
-                default="maintainer",
-                help="tool profile to check/install",
-            )
-            sub.add_argument(
                 "--install",
                 action="store_true",
                 help="install missing tools (default is check-only)",
@@ -442,7 +436,7 @@ def main() -> int:
     if args.command == "lfd":
         return func(docker=args.docker)
     if args.command == "setup":
-        return func(profile=args.profile, install=args.install, dry_run=args.dry_run)
+        return func(install=args.install, dry_run=args.dry_run)
     return func()
 
 

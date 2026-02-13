@@ -19,9 +19,9 @@ Prioritized by visual impact per line changed. Full details in `reports/viz/desi
 
 ### ~~Tier 4: Token cleanup~~ (done — cornerRadius and padding literals replaced with design tokens)
 
-### Tier 5: Sidebar section header weight (in progress)
+### ~~Tier 5: Sidebar section header weight~~ (done — subdued headers, uniform icons, uppercase+tracking)
 
-### Tier 6: Detail view density and hierarchy (in progress)
+### ~~Tier 6: Detail view density and hierarchy~~ (done — section labels, variable spacing, config card)
 
 ### Tier 7: Empty state refinement (in progress)
 

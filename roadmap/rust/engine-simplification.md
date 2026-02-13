@@ -31,3 +31,12 @@ Config fields that parse but never execute:
 - **Step/flow auto-wrapping**: Design change, not simplification. Needs own design doc.
 - **Direction parse-time validation**: Additive. Bundle with `merge_directions()` move.
 - **Fork worktree path unification**: Cosmetic divergence. Unify when adding next executor backend.
+
+## Done (this branch)
+
+- ~~**`AutopruneConfig` custom deserializer**~~: Replaced 54-line custom Visitor with `#[serde(untagged)]` enum.
+- ~~**Sequential-to-parallel fork cleanup**~~: CLI uses `thread::scope`, daemon uses `tokio::task::JoinSet`.
+
+## Design decisions
+
+- **Hardcoded synthesize step name**: Forks always run `"synthesize"` after branches complete. Previously configurable via `fork.synthesize` field — removed to simplify the fork data model. Flows needing custom post-fork steps should use explicit step sequencing instead.

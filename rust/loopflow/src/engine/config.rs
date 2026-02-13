@@ -88,59 +88,37 @@ fn default_poll_interval() -> u64 {
     60
 }
 
-// Custom deserializer to handle both `autoprune: true` and `autoprune: { enabled: true }`
+/// Intermediate representation for deserializing `autoprune: true` or `autoprune: { ... }`.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AutopruneRaw {
+    Bool(bool),
+    Config {
+        #[serde(default)]
+        enabled: bool,
+        #[serde(default = "default_poll_interval")]
+        poll_interval_seconds: u64,
+    },
+}
+
 impl<'de> Deserialize<'de> for AutopruneConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::{self, MapAccess, Visitor};
-
-        struct AutopruneVisitor;
-
-        impl<'de> Visitor<'de> for AutopruneVisitor {
-            type Value = AutopruneConfig;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("bool or autoprune config object")
-            }
-
-            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(AutopruneConfig {
-                    enabled: v,
-                    poll_interval_seconds: default_poll_interval(),
-                })
-            }
-
-            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-            where
-                M: MapAccess<'de>,
-            {
-                let mut enabled = None;
-                let mut poll_interval_seconds = None;
-
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "enabled" => enabled = Some(map.next_value()?),
-                        "poll_interval_seconds" => poll_interval_seconds = Some(map.next_value()?),
-                        _ => {
-                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                Ok(AutopruneConfig {
-                    enabled: enabled.unwrap_or(false),
-                    poll_interval_seconds: poll_interval_seconds
-                        .unwrap_or_else(default_poll_interval),
-                })
-            }
+        match AutopruneRaw::deserialize(deserializer)? {
+            AutopruneRaw::Bool(enabled) => Ok(Self {
+                enabled,
+                poll_interval_seconds: default_poll_interval(),
+            }),
+            AutopruneRaw::Config {
+                enabled,
+                poll_interval_seconds,
+            } => Ok(Self {
+                enabled,
+                poll_interval_seconds,
+            }),
         }
-
-        deserializer.deserialize_any(AutopruneVisitor)
     }
 }
 

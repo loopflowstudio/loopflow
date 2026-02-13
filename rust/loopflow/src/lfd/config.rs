@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -38,20 +39,11 @@ pub struct LfdConfig {
 }
 
 impl LfdConfig {
-    pub fn load() -> Self {
+    pub fn load() -> Result<Self> {
         let path = config_path();
         let mut config: Self = match std::fs::read_to_string(&path) {
-            Ok(content) => match serde_yaml::from_str(&content) {
-                Ok(config) => config,
-                Err(err) => {
-                    warn!(
-                        path = %path.display(),
-                        error = %err,
-                        "invalid lfd config, using defaults"
-                    );
-                    Self::default()
-                }
-            },
+            Ok(content) => serde_yaml::from_str(&content)
+                .with_context(|| format!("invalid lfd config at {}", path.display()))?,
             Err(err) if err.kind() == ErrorKind::NotFound => Self::default(),
             Err(err) => {
                 warn!(
@@ -64,7 +56,7 @@ impl LfdConfig {
         };
 
         config.apply_env_overrides();
-        config
+        Ok(config)
     }
 
     fn apply_env_overrides(&mut self) {
@@ -249,7 +241,7 @@ executor:
     }
 
     #[test]
-    fn load_invalid_yaml_falls_back_to_defaults() {
+    fn load_invalid_yaml_returns_error() {
         let _guard = env_lock().lock().expect("env lock");
         let tmp = tempdir().expect("tempdir");
         let lf_dir = tmp.path().join(".lf");
@@ -258,13 +250,12 @@ executor:
 
         let original_home = std::env::var_os("HOME");
         std::env::set_var("HOME", tmp.path());
-        let config = LfdConfig::load();
+        let result = LfdConfig::load();
         match original_home {
             Some(home) => std::env::set_var("HOME", home),
             None => std::env::remove_var("HOME"),
         }
 
-        assert_eq!(config.executor.r#type, ExecutorType::Local);
-        assert_eq!(config.executor.image, DEFAULT_EXECUTOR_IMAGE);
+        assert!(result.is_err());
     }
 }

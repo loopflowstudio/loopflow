@@ -1,14 +1,15 @@
-# Viz Phases 1-3 + Typography — Review
+# Viz Phases 1-3 + Polish Tiers 2-3 — Review
 
-Branch: `jack-heart.viz.20260212_1509`
+Branch: `viz-collapsed`
 
 ## What was implemented
 
-Phases 1-3 of the viz roadmap plus the first Phase 4 polish item (typography tokens). The branch transforms Concerto from system fonts and scattered color references to a fully tokenized design system.
+Phases 1-3 of the viz roadmap plus Phase 4 polish tiers 2 and 3. The branch transforms Concerto from system fonts, scattered color references, and uniform button styles into a fully tokenized design system with visual hierarchy.
 
 ### Phase 1: Screenshot workflow
 - Decoupled screenshot generation from publish (`lf screenshots` step)
-- Screenshot coverage: `directions` tags, `--direction`/`--mock-config`/`--tab` flags, 3 new states
+- Screenshot coverage: `directions` tags, `--direction`/`--mock-config`/`--tab` flags
+- 3 new screenshot states: empty, failed wave, runs tab
 
 ### Phase 2: Research & audit
 - Docs inventory in `reports/viz/`, stale reports deleted
@@ -21,12 +22,19 @@ Phases 1-3 of the viz roadmap plus the first Phase 4 polish item (typography tok
 - Three palette variants: light, dark, deep wine
 - `ThemePreview` for side-by-side comparison in Xcode previews
 - Compress pass inlined palette hex values, deleted dead `make(for:)` factory
+- Deduplicated `Color.init(hex:)` — single definition in LoopflowCore, made `public`
 
-### Phase 4: Typography tokens (Tier 2)
+### Phase 4, Tier 2: Typography tokens
 - 6 font files bundled (~2MB): Cormorant Garamond (Regular/Medium/SemiBold), Lato (Regular/Bold), JetBrains Mono (Regular)
 - Runtime registration via `CTFontManagerRegisterFontsForURL(.process)` — works for both SPM and xcodegen
 - All ~160 system font calls replaced with 5 Typography tokens across 26 files
 - Compress pass collapsed `codeSmall()` into `code(size:)`, removed unused `bodyBold()`
+
+### Phase 4, Tier 3: Button hierarchy
+- `GhostButtonStyle`: text-only accent color, hover surface fill — for secondary actions (Warp, Cursor, View PR)
+- `DestructiveButtonStyle`: outline with statusError color — for destructive actions (Stop, Archive, Cancel)
+- `DarkButtonStyle` (existing): filled burgundy — remains for primary actions (Land, Next, Retry)
+- 6 button restyle points across WaveDetailPanel, NextActionsBar, InteractiveSessionView
 
 ## Key choices
 
@@ -40,29 +48,31 @@ Phases 1-3 of the viz roadmap plus the first Phase 4 polish item (typography tok
 
 **Five typography tokens.** `heroTitle`, `sectionTitle`, `body`, `caption`, `code` — each with parameterized size. Weight variants via SwiftUI's `.weight()` modifier. `.monospacedDigit()` stays as chained modifier.
 
-**One-pass migrations.** Both palette and typography migrated all views in single commits. Incremental migration creates half-migrated codebases.
+**Three button tiers by intent.** Primary (filled), secondary (ghost), destructive (outlined). Maps directly to VISUAL_DESIGN.md button hierarchy. No configuration needed — pick the right style for the action's intent.
+
+**One-pass migrations.** Palette, typography, and buttons each migrated all views in single commits. Incremental migration creates half-migrated codebases.
 
 **Inline hex values.** Compress pass removed intermediate named colors (`loopflowCreamElevated`, etc.) that added indirection without value.
 
 ## How it fits together
 
-**Color flow**: `VISUAL_DESIGN.md` → `StatusColors.swift` → model files → views via `@Environment(\.palette)`
+**Color flow**: `VISUAL_DESIGN.md` -> `StatusColors.swift` -> model files -> views via `@Environment(\.palette)`
 
-**Font flow**: Font files in `Concerto/Fonts/` → `registerBundledFonts()` at app launch → `Typography` enum → all views
+**Font flow**: Font files in `Concerto/Fonts/` -> `registerBundledFonts()` at app launch -> `Typography` enum -> all views
 
-**Token hierarchy**: `heroTitle` (serif, 32pt) → `sectionTitle` (serif, 20pt) → `body` (sans, 14pt) → `caption` (sans, 12pt) → `code` (mono, 13pt)
+**Token hierarchy**: `heroTitle` (serif, 32pt) -> `sectionTitle` (serif, 20pt) -> `body` (sans, 14pt) -> `caption` (sans, 12pt) -> `code` (mono, 13pt)
 
-**Fast iteration**: Change hex in `BrandColors.swift` → all views update. Use `ThemePreview` for side-by-side comparison.
+**Button hierarchy**: `DarkButtonStyle` (primary) -> `GhostButtonStyle` (secondary) -> `DestructiveButtonStyle` (destructive)
+
+**Fast iteration**: Change hex in `BrandColors.swift` -> all views update. Use `ThemePreview` for side-by-side comparison.
 
 ## Risks
 
 - **Deep wine contrast untested with real data.** Secondary text (`#C8B0A8`) on deep wine surfaces needs verification.
 - **Font registration failure is silent.** Falls back to system fonts — degraded but functional.
 - **Custom fonts + `.weight()` may synthesize weights.** SwiftUI limitation when exact weight file isn't found.
-- **Duplicate `Color.init(hex:)` across modules.** Pre-existing; compiles because separate modules.
 
-## What's next (Phase 4 remaining)
+## What's not included
 
-- Tier 3: Button hierarchy — `GhostButtonStyle`, `DestructiveButtonStyle` (~60 lines)
-- Tier 4: Corner radius / spacing token cleanup (~25 lines)
-- Detail view density, empty states, sidebar headers, flow badge density
+- Tier 4: Corner radius / spacing token cleanup (~25 lines) — intentionally deferred
+- Detail view density, empty states, sidebar headers, flow badge density — future polish items

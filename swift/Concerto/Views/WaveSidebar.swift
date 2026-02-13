@@ -22,22 +22,22 @@ struct WaveSidebar: View {
     }
 
     private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Image(systemName: icon)
                 .font(Typography.caption(9))
-                .foregroundStyle(color)
-            Text(title)
-                .font(Typography.caption(10))
-                .fontWeight(.medium)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.white.opacity(0.3))
+            Text(title.uppercased())
+                .font(Typography.caption(9))
+                .foregroundStyle(.white.opacity(0.4))
+                .tracking(0.5)
             if count > 0 {
-                Text("(\(count))")
-                    .font(Typography.caption(10))
-                    .foregroundStyle(.white.opacity(0.4))
+                Text("\(count)")
+                    .font(Typography.caption(9))
+                    .foregroundStyle(.white.opacity(0.3))
             }
         }
         .padding(.leading, 8)
-        .padding(.top, 12)
+        .padding(.top, Spacing.sm)
         .padding(.bottom, 4)
     }
 

@@ -15,11 +15,7 @@ struct ContentView: View {
 
     @State private var showingError = false
     @State private var showCommandPalette = false
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var palette: LoopflowPalette {
-        LoopflowPalette.make(for: colorScheme)
-    }
+    @Environment(\.palette) private var palette
 
     var body: some View {
         @Bindable var repoState = repoState

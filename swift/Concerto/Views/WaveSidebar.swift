@@ -24,15 +24,15 @@ struct WaveSidebar: View {
     private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 9))
+                .font(Typography.caption(9))
                 .foregroundStyle(color)
             Text(title)
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.6))
             if count > 0 {
                 Text("(\(count))")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .foregroundStyle(.white.opacity(0.4))
             }
         }
@@ -101,7 +101,7 @@ struct WaveSidebar: View {
     private var header: some View {
         HStack {
             Text("Waves")
-                .font(.caption)
+                .font(Typography.caption())
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.7))
                 .help("Waves are autonomous AI workers that run flows on your codebase")
@@ -112,7 +112,7 @@ struct WaveSidebar: View {
                         .fill(Color.statusWarning)
                         .frame(width: 6, height: 6)
                     Text("\(waveGroups.attentionCount)")
-                        .font(.caption2)
+                        .font(Typography.caption(10))
                         .fontWeight(.medium)
                         .foregroundStyle(Color.statusWarning)
                 }
@@ -130,7 +130,7 @@ struct WaveSidebar: View {
                 createWaveDirectly()
             } label: {
                 Image(systemName: "plus")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.white.opacity(isCreatingWave || !repoState.lfdConnected ? 0.3 : 0.7))
             }
             .buttonStyle(.plain)
@@ -143,7 +143,7 @@ struct WaveSidebar: View {
                 showingDiagnostics = true
             } label: {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.7))
             }
             .buttonStyle(.plain)
@@ -162,7 +162,7 @@ struct WaveSidebar: View {
 
             VStack(spacing: 12) {
                 Image(systemName: "link.circle")
-                    .font(.system(size: 28))
+                    .font(Typography.heroTitle(28))
                     .foregroundStyle(.white.opacity(0.3))
 
                 VStack(spacing: 4) {
@@ -170,7 +170,7 @@ struct WaveSidebar: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
                     Text("Start the daemon to manage waves.")
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
@@ -187,7 +187,7 @@ struct WaveSidebar: View {
                     }
                 } label: {
                     Label("Connect lfd", systemImage: "link")
-                        .font(.caption)
+                        .font(Typography.caption())
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -224,7 +224,7 @@ struct WaveSidebar: View {
                         createWaveDirectly()
                     } label: {
                         Label("Create Wave", systemImage: "plus")
-                            .font(.caption)
+                            .font(Typography.caption())
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -259,7 +259,7 @@ struct WaveSidebar: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
                 if !waveGroups.blocked.isEmpty {
-                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange, count: waveGroups.blocked.count)
+                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .statusWarning, count: waveGroups.blocked.count)
                     waveRows(waveGroups.blocked)
                 }
 
@@ -269,12 +269,12 @@ struct WaveSidebar: View {
                 }
 
                 if !waveGroups.recentActivity.isEmpty {
-                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .cyan, count: waveGroups.recentActivity.count)
+                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .statusInfo, count: waveGroups.recentActivity.count)
                     waveRows(waveGroups.recentActivity)
                 }
 
                 if !waveGroups.active.isEmpty {
-                    sectionHeader("Active", icon: "circle.fill", color: .blue, count: waveGroups.active.count)
+                    sectionHeader("Active", icon: "circle.fill", color: .statusSuccess, count: waveGroups.active.count)
                     waveRows(waveGroups.active)
                 }
 

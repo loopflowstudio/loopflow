@@ -448,27 +448,17 @@ def _ensure_released(version: str) -> None:
 # --- Release helpers ---
 
 
-def _release(bump_type: str, dry_run: bool, skip_dmg: bool, skip_screenshots: bool) -> None:
+def _release(bump_type: str, dry_run: bool, skip_dmg: bool) -> None:
     _check_on_main()
     version = _get_version()
     new_version = _bump_version(version, bump_type)
 
     if dry_run:
-        if not skip_screenshots:
-            typer.echo("Would generate screenshots")
         if not skip_dmg:
             typer.echo("Would build and upload DMG")
         typer.echo(f"Would tag v{new_version} (current: v{version})")
         typer.echo("Would push tag to trigger CI release")
         return
-
-    if not skip_screenshots:
-        typer.echo("Generating screenshots...")
-        ok, output = _generate_screenshots()
-        if not ok:
-            typer.echo(f"Screenshot generation failed (continuing):\n{output}", err=True)
-        else:
-            typer.echo("Screenshots generated.")
 
     if not skip_dmg:
         typer.echo("Building Concerto DMG...")
@@ -532,30 +522,27 @@ def publish(
 def patch(
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
     skip_dmg: bool = typer.Option(False, "--skip-dmg", help="Skip DMG build/upload"),
-    skip_screenshots: bool = typer.Option(False, "--skip-screenshots", help="Skip screenshot generation"),
 ):
     """Bump patch version and publish."""
-    _release("patch", dry_run, skip_dmg, skip_screenshots)
+    _release("patch", dry_run, skip_dmg)
 
 
 @app.command()
 def minor(
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
     skip_dmg: bool = typer.Option(False, "--skip-dmg", help="Skip DMG build/upload"),
-    skip_screenshots: bool = typer.Option(False, "--skip-screenshots", help="Skip screenshot generation"),
 ):
     """Bump minor version and publish."""
-    _release("minor", dry_run, skip_dmg, skip_screenshots)
+    _release("minor", dry_run, skip_dmg)
 
 
 @app.command()
 def major(
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
     skip_dmg: bool = typer.Option(False, "--skip-dmg", help="Skip DMG build/upload"),
-    skip_screenshots: bool = typer.Option(False, "--skip-screenshots", help="Skip screenshot generation"),
 ):
     """Bump major version and publish."""
-    _release("major", dry_run, skip_dmg, skip_screenshots)
+    _release("major", dry_run, skip_dmg)
 
 
 @app.command()

@@ -9,13 +9,11 @@ struct FlowTypeahead: View {
     let onSelect: (String) -> Void
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var inputText = ""
     @State private var selectedFlow: String = ""
     @State private var isFieldFocused = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var flows: [Flow] {
         repoState.flows.filter { $0.type == .flow }
@@ -43,7 +41,7 @@ struct FlowTypeahead: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Flow")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             // Selected flow chip + input
@@ -73,7 +71,7 @@ struct FlowTypeahead: View {
                flow.type == .flow, !flow.steps.isEmpty {
                 let chain = flow.steps.map(\.prompt).joined(separator: " \u{2192} ")
                 Text(chain)
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -105,7 +103,7 @@ struct FlowTypeahead: View {
     private func flowSection(_ title: String, items: [Flow], icon: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(title)
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .foregroundStyle(.tertiary)
 
             WrappingHStack(spacing: Spacing.xs) {
@@ -115,10 +113,10 @@ struct FlowTypeahead: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: icon)
-                                .font(.system(size: 10))
+                                .font(Typography.caption(10))
                                 .foregroundStyle(.secondary)
                             Text(item.name)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(Typography.code(12))
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)

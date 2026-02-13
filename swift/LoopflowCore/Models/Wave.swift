@@ -57,9 +57,9 @@ public enum WaveStatus: String, Sendable, Codable {
         switch self {
         case .running: return .statusSuccess
         case .waiting: return .statusWarning
-        case .idle: return .gray
+        case .idle: return .statusNeutral
         case .failed: return .statusError
-        case .paused: return .gray
+        case .paused: return .statusNeutral
         }
     }
 

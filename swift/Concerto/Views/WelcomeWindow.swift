@@ -7,22 +7,18 @@ struct WelcomeWindow: View {
     let recentsService: RecentsService
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var palette: LoopflowPalette {
-        LoopflowPalette.make(for: colorScheme)
-    }
+    @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(spacing: 32) {
             // Header
             VStack(spacing: 12) {
                 Image(systemName: "wand.and.sparkles")
-                    .font(.system(size: 48))
+                    .font(Typography.heroTitle(48))
                     .foregroundStyle(.tint)
 
                 Text("Loopflow Concerto")
-                    .font(.title)
+                    .font(Typography.heroTitle())
                     .fontWeight(.semibold)
 
                 Text("Tell it what to build. It writes the code.")
@@ -33,7 +29,7 @@ struct WelcomeWindow: View {
             if !recentsService.recentRepos.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Repositories")
-                        .font(.headline)
+                        .font(Typography.sectionTitle())
                         .padding(.horizontal, 4)
 
                     VStack(spacing: 4) {
@@ -48,7 +44,7 @@ struct WelcomeWindow: View {
                                         Text(recent.displayName)
                                             .fontWeight(.medium)
                                         Text(recent.path)
-                                            .font(.caption)
+                                            .font(Typography.caption())
                                             .foregroundStyle(.tertiary)
                                             .lineLimit(1)
                                             .truncationMode(.middle)
@@ -63,7 +59,7 @@ struct WelcomeWindow: View {
                             }
                             .buttonStyle(.plain)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
+                                RoundedRectangle(cornerRadius: CornerRadius.sm)
                                     .fill(palette.surface)
                             )
                         }
@@ -81,7 +77,7 @@ struct WelcomeWindow: View {
             .buttonStyle(.borderedProminent)
             .keyboardShortcut("o", modifiers: .command)
         }
-        .padding(40)
+        .padding(Spacing.xxxl + Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
     }

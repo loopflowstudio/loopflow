@@ -32,23 +32,17 @@ struct IterationTimeline: View {
         if let pr = run.pr {
             switch pr.state {
             case .merged:
-                return .statusSuccess
-            case .open, .draft:
                 return .statusInfo
+            case .open, .draft:
+                return .statusSuccess
             case .closed:
                 return .statusError
             case .none:
-                return .gray
+                return .statusNeutral
             }
         }
 
-        switch run.status {
-        case .failed:
-            return .statusError
-        case .completed:
-            return .gray
-        default:
-            return .gray
-        }
+        if run.status == .failed { return .statusError }
+        return .statusNeutral
     }
 }

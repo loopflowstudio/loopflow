@@ -7,6 +7,18 @@ import os.log
 
 private let logger = Logger(subsystem: "com.loopflow.concerto", category: "screenshot")
 
+// Environment key to override initial tab in WaveDetailPanel for screenshots
+struct ScreenshotTabKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
+extension EnvironmentValues {
+    var screenshotTab: String? {
+        get { self[ScreenshotTabKey.self] }
+        set { self[ScreenshotTabKey.self] = newValue }
+    }
+}
+
 struct ScreenshotWindow: View {
     let mode: RepoState.ScreenshotMode
     let recentsService: RecentsService
@@ -20,6 +32,7 @@ struct ScreenshotWindow: View {
         ScreenshotLayout()
             .environment(repoState)
             .environment(outputBuffer)
+            .environment(\.screenshotTab, mode.selectTab)
             .task {
                 await setupState()
             }
@@ -43,7 +56,11 @@ struct ScreenshotWindow: View {
 
         // Configure mock waves if requested
         if mode.mockLoops {
-            repoState.configureMockWaves()
+            if mode.mockConfig == "empty" {
+                repoState.configureMockWavesEmpty()
+            } else {
+                repoState.configureMockWaves()
+            }
         }
 
         // Select a specific wave if requested
@@ -104,11 +121,7 @@ struct ScreenshotWindow: View {
 private struct ScreenshotLayout: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var palette: LoopflowPalette {
-        LoopflowPalette.make(for: colorScheme)
-    }
+    @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 0) {
@@ -118,7 +131,7 @@ private struct ScreenshotLayout: View {
 
             // Divider
             Rectangle()
-                .fill(Color.gray.opacity(0.2))
+                .fill(palette.border)
                 .frame(width: 1)
 
             // Detail

@@ -25,11 +25,11 @@ struct SetupView: View {
             // Header
             VStack(spacing: 8) {
                 Text("Loopflow Concerto")
-                    .font(.largeTitle)
+                    .font(Typography.heroTitle())
                     .fontWeight(.bold)
 
                 Text("First-time setup")
-                    .font(.title3)
+                    .font(Typography.sectionTitle())
                     .foregroundStyle(.secondary)
             }
 
@@ -44,27 +44,27 @@ struct SetupView: View {
                         .foregroundStyle(.secondary)
                 } else if installStep == .complete {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 48))
+                        .font(Typography.heroTitle(48))
                         .foregroundStyle(Color.statusSuccess)
                     Text("Ready to go")
-                        .font(.headline)
+                        .font(Typography.sectionTitle())
                 } else if let path = status?.lfPath {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 48))
+                        .font(Typography.heroTitle(48))
                         .foregroundStyle(Color.statusSuccess)
                     VStack(spacing: 4) {
                         Text("Loopflow installed")
-                            .font(.headline)
+                            .font(Typography.sectionTitle())
                         Text(path)
-                            .font(.caption)
+                            .font(Typography.caption())
                             .foregroundStyle(.tertiary)
                     }
                 } else if installStep != .checking {
                     Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 48))
+                        .font(Typography.heroTitle(48))
                         .foregroundStyle(.secondary)
                     Text("Loopflow CLI not found")
-                        .font(.headline)
+                        .font(Typography.sectionTitle())
                 }
             }
 
@@ -73,7 +73,7 @@ struct SetupView: View {
             // Error message
             if let error = errorMessage {
                 Text(error)
-                    .font(.callout)
+                    .font(Typography.body())
                     .foregroundStyle(Color.statusError)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
@@ -88,12 +88,12 @@ struct SetupView: View {
                         isComplete = true
                     }
                     .buttonStyle(.plain)
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(40)
+        .padding(Spacing.xxxl + Spacing.sm)
         .frame(width: 500, height: 400)
         .onAppear {
             checkStatus()

@@ -192,11 +192,11 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
             return ("xmark.circle.fill", .statusError)
         case .idle:
             if stimulus?.kind == .cron {
-                return ("clock", .gray)
+                return ("clock", .statusNeutral)
             }
-            return ("circle", .gray)
+            return ("circle", .statusNeutral)
         case .paused:
-            return ("pause.circle", .gray)
+            return ("pause.circle", .statusNeutral)
         }
     }
 

@@ -15,10 +15,10 @@ public enum WaveRunStatus: String, Sendable, Codable {
         switch self {
         case .running: return .statusSuccess
         case .waiting: return .statusWarning
-        case .pending: return .blue
-        case .completed: return .gray
+        case .pending: return .statusInfo
+        case .completed: return .statusNeutral
         case .failed: return .statusError
-        case .cancelled: return .orange
+        case .cancelled: return .statusWarning
         }
     }
 }

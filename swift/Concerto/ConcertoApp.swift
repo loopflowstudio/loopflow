@@ -2,19 +2,57 @@
 // macOS 15+ native app for managing waves and launching LLM coding sessions.
 
 import SwiftUI
+import CoreText
 import LoopflowCore
 
 @main
 struct ConcertoApp: App {
     @State private var recentsService = RecentsService()
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
+        Self.registerBundledFonts()
         Task {
             try? await NotificationService.shared.requestAuthorization()
+        }
+    }
+
+    private static var fontBundle: Bundle {
+        // SPM executable targets use Bundle.module for copied resources.
+        // Xcode app targets use Bundle.main (Fonts copied into app bundle).
+        #if SWIFT_PACKAGE
+        return Bundle.module
+        #else
+        return Bundle.main
+        #endif
+    }
+
+    private static func registerBundledFonts() {
+        let fontFiles = [
+            "CormorantGaramond-Regular.otf",
+            "CormorantGaramond-Medium.otf",
+            "CormorantGaramond-SemiBold.otf",
+            "Lato-Regular.ttf",
+            "Lato-Bold.ttf",
+            "JetBrainsMono-Regular.ttf",
+        ]
+        for file in fontFiles {
+            guard let url = fontBundle.url(forResource: file, withExtension: nil, subdirectory: "Fonts") else {
+                continue
+            }
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+    }
+
+    private var resolvedPalette: LoopflowPalette {
+        switch AppearanceMode(rawValue: appearanceMode) {
+        case .light: return .light
+        case .dark: return .dark
+        case .system, .none: return systemScheme == .dark ? .dark : .light
         }
     }
 
@@ -25,22 +63,21 @@ struct ConcertoApp: App {
 
         // Welcome/main window - shown on launch
         WindowGroup {
-            if let screenshot = screenshotMode {
-                ScreenshotWindow(mode: screenshot, recentsService: recentsService)
-                    .tint(.loopflowBurgundy)
-                    .preferredColorScheme(preferredScheme)
-            } else if uiTestMode != nil {
-                RepoWindow(
-                    repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
-                    recentsService: recentsService
-                )
-                .tint(.loopflowBurgundy)
-                .preferredColorScheme(preferredScheme)
-            } else {
-                WelcomeWindow(recentsService: recentsService)
-                    .tint(.loopflowBurgundy)
-                    .preferredColorScheme(preferredScheme)
+            Group {
+                if let screenshot = screenshotMode {
+                    ScreenshotWindow(mode: screenshot, recentsService: recentsService)
+                } else if uiTestMode != nil {
+                    RepoWindow(
+                        repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
+                        recentsService: recentsService
+                    )
+                } else {
+                    WelcomeWindow(recentsService: recentsService)
+                }
             }
+            .tint(.loopflowBurgundy)
+            .preferredColorScheme(preferredScheme)
+            .environment(\.palette, resolvedPalette)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 500, height: 400)
@@ -50,6 +87,7 @@ struct ConcertoApp: App {
             RepoWindow(repoURL: repoURL, recentsService: recentsService)
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(preferredScheme)
+                .environment(\.palette, resolvedPalette)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
@@ -58,6 +96,7 @@ struct ConcertoApp: App {
         Window("Terminal Test", id: "terminal-test") {
             TerminalTestWindow()
                 .preferredColorScheme(preferredScheme)
+                .environment(\.palette, resolvedPalette)
         }
         .defaultSize(width: 800, height: 600)
 

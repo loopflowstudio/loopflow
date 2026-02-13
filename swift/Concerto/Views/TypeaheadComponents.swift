@@ -119,26 +119,24 @@ struct TypeaheadChip: View {
     let helpText: String
     let onRemove: () -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
     @State private var isHovered = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(Typography.caption(10))
                 .foregroundStyle(palette.accent)
 
             Text(label)
-                .font(.system(size: 12, design: .monospaced))
+                .font(Typography.code(12))
                 .lineLimit(1)
 
             Button {
                 onRemove()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.caption(9)).fontWeight(.semibold)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
@@ -147,7 +145,7 @@ struct TypeaheadChip: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(palette.accent.opacity(0.15))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .onHover { isHovered = $0 }
         .help(helpText)
     }

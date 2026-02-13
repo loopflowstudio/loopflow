@@ -59,7 +59,7 @@ struct CommandPalette: View {
 
                 TextField("Search actions...", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 16))
+                    .font(Typography.body(16))
                     .focused($isSearchFocused)
                     .onSubmit {
                         guard selectedIndex < filteredActions.count else { return }
@@ -77,12 +77,12 @@ struct CommandPalette: View {
                 }
 
                 Text("⌘K")
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.secondary.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -93,13 +93,13 @@ struct CommandPalette: View {
             if filteredActions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .font(.title2)
+                        .font(Typography.sectionTitle())
                         .foregroundStyle(.tertiary)
                     Text("No matching actions")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 40)
+                .padding(.vertical, Spacing.xxxl + Spacing.sm)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -132,12 +132,12 @@ struct CommandPalette: View {
                 Label("select", systemImage: "return")
                 Label("close", systemImage: "escape")
             }
-            .font(.caption2)
+            .font(Typography.caption(10))
             .foregroundStyle(.tertiary)
             .padding(.vertical, 8)
         }
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
         .frame(width: 500)
         .onAppear {
@@ -190,18 +190,18 @@ private struct ActionRow: View {
 
             if let shortcut = action.shortcut {
                 Text(shortcut)
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? .white.opacity(0.7) : .gray)
+                    .font(Typography.caption())
+                    .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(isSelected ? Color.white.opacity(0.2) : Color.gray.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .background(isSelected ? Color.white.opacity(0.2) : Color.secondary.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: CornerRadius.md)
                 .fill(isSelected ? Color.accentColor : Color.clear)
         )
         .contentShape(Rectangle())
@@ -221,6 +221,6 @@ private struct ActionRow: View {
             PaletteAction("Focus Prompt", icon: "text.cursor", shortcut: "⌘L") {},
         ]
     )
-    .padding(40)
+    .padding(Spacing.xxxl + Spacing.sm)
     .background(Color.gray.opacity(0.3))
 }

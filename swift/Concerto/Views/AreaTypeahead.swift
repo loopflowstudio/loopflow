@@ -8,19 +8,17 @@ struct AreaTypeahead: View {
     let onSelect: ([String]) -> Void
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var inputText = ""
     @State private var selectedAreas: [String] = []
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private let excludePatterns = ["node_modules", "__pycache__", "build", "dist", ".build", "target", "vendor", ".git"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Area")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 4) {

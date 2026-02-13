@@ -67,19 +67,11 @@ enum Typography {
         .custom(sansFamily, size: size)
     }
 
-    static func bodyBold(_ size: CGFloat = 14) -> Font {
-        .custom(sansFamily, size: size).weight(.bold)
-    }
-
     static func caption(_ size: CGFloat = 12) -> Font {
         .custom(sansFamily, size: size)
     }
 
     static func code(_ size: CGFloat = 13) -> Font {
-        .custom(monoFamily, size: size)
-    }
-
-    static func codeSmall(_ size: CGFloat = 11) -> Font {
         .custom(monoFamily, size: size)
     }
 }
@@ -134,19 +126,49 @@ extension View {
 // MARK: - Button Styles
 
 struct DarkButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     func makeBody(configuration: Configuration) -> some View {
-        let palette = LoopflowPalette.make(for: colorScheme)
-
         configuration.label
-            .font(.subheadline)
+            .font(Typography.body())
             .foregroundStyle(Color.loopflowCream)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(configuration.isPressed ? palette.accentHover : palette.accent)
+            )
+    }
+}
+
+struct GhostButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Typography.body())
+            .foregroundStyle(palette.accent)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .fill(configuration.isPressed ? palette.surfaceMuted : Color.clear)
+            )
+    }
+}
+
+struct DestructiveButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Typography.body())
+            .foregroundStyle(Color.statusError)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .strokeBorder(Color.statusError.opacity(configuration.isPressed ? 0.8 : 0.5), lineWidth: 1)
             )
     }
 }

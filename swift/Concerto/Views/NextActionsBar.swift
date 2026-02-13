@@ -7,13 +7,11 @@ struct NextActionsBar: View {
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var isArchiving = false
     @State private var errorMessage: String?
     @State private var showingError = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var stepsRunCount: Int {
         wave.recentSteps.count
@@ -27,7 +25,7 @@ struct NextActionsBar: View {
                     .foregroundStyle(Color.statusSuccess)
 
                 Text("\(stepsRunCount) step\(stepsRunCount == 1 ? "" : "s") run")
-                    .font(.subheadline)
+                    .font(Typography.body())
                     .foregroundStyle(.secondary)
             }
 
@@ -43,12 +41,12 @@ struct NextActionsBar: View {
                             .scaleEffect(0.6)
                     } else {
                         Image(systemName: "archivebox")
-                            .font(.caption)
+                            .font(Typography.caption())
                     }
                     Text("Archive")
                 }
             }
-            .buttonStyle(DarkButtonStyle())
+            .buttonStyle(DestructiveButtonStyle())
             .disabled(isArchiving)
         }
         .padding(.horizontal, Spacing.xl)

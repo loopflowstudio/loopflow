@@ -8,10 +8,8 @@ struct FlowProgressPills: View {
     let currentIndex: Int
     let startedAt: Date?
 
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
     @State private var elapsedSeconds: Int = 0
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -20,7 +18,7 @@ struct FlowProgressPills: View {
             ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                 if index > 0 {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(Typography.caption(8)).fontWeight(.semibold)
                         .foregroundStyle(.tertiary)
                         .accessibilityHidden(true)
                 }
@@ -52,15 +50,15 @@ struct FlowProgressPills: View {
         HStack(spacing: Spacing.xs) {
             if isCompleted {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.caption(9)).fontWeight(.semibold)
             }
 
             Text(formatStepName(step))
-                .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
+                .font(Typography.body(11)).fontWeight(isCurrent ? .semibold : .regular)
 
             if isCurrent, let elapsed = formattedElapsedTime {
                 Text(elapsed)
-                    .font(.system(size: 10))
+                    .font(Typography.caption(10))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -101,12 +99,14 @@ struct FlowProgressPills: View {
 }
 
 #Preview("Running - Step 2 of 4") {
-    FlowProgressPills(
-        steps: ["implement", "compress", "gate", "consolidate"],
-        currentIndex: 1,
-        startedAt: Date().addingTimeInterval(-125) // 2m 5s ago
-    )
-    .padding()
+    ThemePreview {
+        FlowProgressPills(
+            steps: ["implement", "compress", "gate", "consolidate"],
+            currentIndex: 1,
+            startedAt: Date().addingTimeInterval(-125)
+        )
+        .padding()
+    }
 }
 
 #Preview("Running - First Step") {

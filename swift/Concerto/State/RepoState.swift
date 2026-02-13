@@ -19,46 +19,35 @@ final class RepoState {
         let windowSize: (Int, Int)?
         let selectBranch: String?
         let mockLoops: Bool
+        let mockConfig: String?
+        let selectTab: String?
 
         static func fromArgs() -> ScreenshotMode? {
             let args = ProcessInfo.processInfo.arguments
-            guard let snapshotIndex = args.firstIndex(of: "--snapshot"),
-                  args.count > snapshotIndex + 1 else {
-                return nil
+
+            func arg(_ flag: String) -> String? {
+                guard let i = args.firstIndex(of: flag), args.count > i + 1 else { return nil }
+                return args[i + 1]
             }
 
-            let outputPath = args[snapshotIndex + 1]
-            var repoPath: String?
+            guard let outputPath = arg("--snapshot") else { return nil }
+
             var windowSize: (Int, Int)?
-            var selectBranch: String?
-            var mockLoops = false
-
-            if let repoIndex = args.firstIndex(of: "--repo"), args.count > repoIndex + 1 {
-                repoPath = args[repoIndex + 1]
-            }
-
-            if let sizeIndex = args.firstIndex(of: "--size"), args.count > sizeIndex + 1 {
-                let sizeStr = args[sizeIndex + 1]
+            if let sizeStr = arg("--size") {
                 let parts = sizeStr.split(separator: "x")
                 if parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]) {
                     windowSize = (w, h)
                 }
             }
 
-            if let selectIndex = args.firstIndex(of: "--select"), args.count > selectIndex + 1 {
-                selectBranch = args[selectIndex + 1]
-            }
-
-            if args.contains("--mock-loops") {
-                mockLoops = true
-            }
-
             return ScreenshotMode(
                 outputPath: outputPath,
-                repoPath: repoPath,
+                repoPath: arg("--repo"),
                 windowSize: windowSize,
-                selectBranch: selectBranch,
-                mockLoops: mockLoops
+                selectBranch: arg("--select"),
+                mockLoops: args.contains("--mock-loops"),
+                mockConfig: arg("--mock-config"),
+                selectTab: arg("--tab")
             )
         }
     }
@@ -140,12 +129,13 @@ final class RepoState {
 
     func configureMockWaves() {
         lfdConnected = true
+        let repo = currentRepo?.path ?? "/tmp/demo"
         waveStore.setAll([
             WaveViewModel(
                 api: Wave(
                     id: "mock-wave-1",
                     name: "swift-falcon",
-                    repo: currentRepo?.path ?? "/tmp/demo",
+                    repo: repo,
                     flow: "ship",
                     direction: [],
                     area: ["src/auth"],
@@ -162,7 +152,7 @@ final class RepoState {
                 api: Wave(
                     id: "mock-wave-2",
                     name: "crystal-melody",
-                    repo: currentRepo?.path ?? "/tmp/demo",
+                    repo: repo,
                     flow: "ship",
                     direction: ["product-engineer"],
                     area: ["src/api"],
@@ -178,7 +168,7 @@ final class RepoState {
                 api: Wave(
                     id: "mock-wave-3",
                     name: "Quick fix",
-                    repo: currentRepo?.path ?? "/tmp/demo",
+                    repo: repo,
                     flow: "debug",
                     direction: [],
                     area: ["."],
@@ -193,7 +183,7 @@ final class RepoState {
                 api: Wave(
                     id: "mock-wave-4",
                     name: "Nightly polish",
-                    repo: currentRepo?.path ?? "/tmp/demo",
+                    repo: repo,
                     flow: "polish",
                     direction: [],
                     area: ["."],
@@ -203,8 +193,92 @@ final class RepoState {
                 ),
                 prLimit: 5,
                 mergeMode: .pr
+            ),
+            WaveViewModel(
+                api: Wave(
+                    id: "mock-wave-5",
+                    name: "broken-deploy",
+                    repo: repo,
+                    flow: "ship",
+                    direction: ["product-engineer"],
+                    area: ["src/deploy"],
+                    stimuli: [],
+                    status: .failed,
+                    iteration: 2,
+                    activeRun: WaveRun(
+                        id: "run-failed-1",
+                        waveId: "mock-wave-5",
+                        flow: "ship",
+                        area: "src/deploy",
+                        repo: repo,
+                        direction: ["product-engineer"],
+                        status: .failed,
+                        currentStep: "implement",
+                        error: "Build failed: missing dependency 'libcrypto'",
+                        createdAt: Date().addingTimeInterval(-3600)
+                    )
+                ),
+                branch: "wave-deploy-fix",
+                prLimit: 5,
+                mergeMode: .pr
             )
         ])
+
+        // Populate mock runs for waves with history
+        let mockRuns: [WaveRun] = [
+            WaveRun(
+                id: "run-1",
+                waveId: "mock-wave-1",
+                flow: "ship",
+                area: "src/auth",
+                repo: repo,
+                direction: [],
+                status: .completed,
+                iteration: 1,
+                branch: "wave-auth-feature",
+                currentStep: "gate",
+                pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/42")!, number: 42, state: .merged, title: "Add auth middleware"),
+                startedAt: Date().addingTimeInterval(-7200),
+                endedAt: Date().addingTimeInterval(-6600),
+                createdAt: Date().addingTimeInterval(-7200)
+            ),
+            WaveRun(
+                id: "run-2",
+                waveId: "mock-wave-1",
+                flow: "ship",
+                area: "src/auth",
+                repo: repo,
+                direction: [],
+                status: .completed,
+                iteration: 2,
+                branch: "wave-auth-feature",
+                currentStep: "gate",
+                pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/45")!, number: 45, state: .open, title: "Add OAuth token refresh"),
+                startedAt: Date().addingTimeInterval(-3600),
+                endedAt: Date().addingTimeInterval(-3000),
+                createdAt: Date().addingTimeInterval(-3600)
+            ),
+            WaveRun(
+                id: "run-3",
+                waveId: "mock-wave-1",
+                flow: "ship",
+                area: "src/auth",
+                repo: repo,
+                direction: [],
+                status: .running,
+                iteration: 3,
+                branch: "wave-auth-feature",
+                currentStep: "implement",
+                startedAt: Date().addingTimeInterval(-300),
+                createdAt: Date().addingTimeInterval(-300)
+            ),
+        ]
+        runStore.setRuns(for: "mock-wave-1", mockRuns)
+    }
+
+    func configureMockWavesEmpty() {
+        lfdConnected = true
+        waveStore.removeAll()
     }
 
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {

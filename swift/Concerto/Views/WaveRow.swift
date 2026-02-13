@@ -54,7 +54,7 @@ struct WaveRow: View {
                             }
                         } label: {
                             Text("PR #\(pr.number)")
-                                .font(.caption2)
+                                .font(Typography.caption(10))
                                 .fontWeight(.medium)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -65,7 +65,7 @@ struct WaveRow: View {
                         .buttonStyle(.plain)
                     } else if !wave.flow.isEmpty {
                         Text(wave.flow)
-                            .font(.caption2)
+                            .font(Typography.caption(10))
                             .fontWeight(.medium)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -77,7 +77,7 @@ struct WaveRow: View {
 
                     if wave.effectiveOpenPRCount > 1 {
                         Text("\(wave.effectiveOpenPRCount) open")
-                            .font(.caption2)
+                            .font(Typography.caption(10))
                             .fontWeight(.medium)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -94,16 +94,16 @@ struct WaveRow: View {
             // Secondary info line
             HStack(spacing: 4) {
                 Text(wave.areaDisplay)
-                    .font(.caption)
+                    .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.5))
                     .accessibilityIdentifier("wave-area")
 
                 if !wave.iterationText.isEmpty {
                     Text("•")
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.3))
                     Text(wave.iterationText)
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.5))
                         .accessibilityIdentifier("wave-iteration")
                 }
@@ -111,10 +111,10 @@ struct WaveRow: View {
                 // Activity timestamp (italic serif per VISUAL_DESIGN.md)
                 if let activity = wave.lastActivityDescription {
                     Text("•")
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.3))
                     Text(activity)
-                        .font(.custom("Cormorant Garamond", size: 11))
+                        .font(Typography.caption(11))
                         .italic()
                         .foregroundStyle(.white.opacity(0.4))
                         .accessibilityLabel(activityAccessibilityLabel)
@@ -123,20 +123,20 @@ struct WaveRow: View {
 
                 if wave.status == .waiting {
                     Text("•")
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.3))
                     Text("PR limit")
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(Color.statusWarning.opacity(0.7))
                         .accessibilityIdentifier("wave-pr-limit")
                 }
 
                 if let stimulusLabel {
                     Text("•")
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.3))
                     Text(stimulusLabel)
-                        .font(.caption)
+                        .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.5))
                         .accessibilityIdentifier("wave-stimulus")
                 }
@@ -150,11 +150,11 @@ struct WaveRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: CornerRadius.md)
                 .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: CornerRadius.md)
                 .stroke(Color.accentColor, lineWidth: 2)
                 .opacity(isKeyboardFocused && !isSelected ? 1 : 0)
         )

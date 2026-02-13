@@ -6,10 +6,10 @@ Improve Concerto's visual design through the feedback loop defined in VISUAL_DES
 
 | Phase | Focus | Status |
 |-------|-------|--------|
-| 1 | Screenshot workflow | Todo |
-| 2 | Research & audit | Future |
-| 3 | Theming & tooling | Future |
-| 4 | Polish | Future |
+| 1 | Screenshot workflow | Done |
+| 2 | Research & audit | Done |
+| 3 | Theming & tooling | Done |
+| 4 | Polish | In progress |
 
 ## Phase 1: Screenshot workflow
 
@@ -17,8 +17,8 @@ Fix the feedback loop. Screenshots are generated during publish but publishing n
 
 | Item | What it does |
 |------|--------------|
-| [01-decouple-screenshots](01-decouple-screenshots.md) | Separate screenshot generation from publish |
-| [02-screenshot-coverage](02-screenshot-coverage.md) | Add missing states, subdivide by persona |
+| ~~01-decouple-screenshots~~ | Separate screenshot generation from publish |
+| ~~02-screenshot-coverage~~ | Add missing states, subdivide by persona |
 
 ## Phase 2: Research & audit
 
@@ -26,9 +26,9 @@ Understand what great looks like, find gaps between VISUAL_DESIGN.md and the app
 
 | Item | What it does |
 |------|--------------|
-| [03-visual-research](03-visual-research.md) | Research patterns from Notion, Figma, Linear, Arc |
-| [04-design-audit](04-design-audit.md) | Audit current design against VISUAL_DESIGN.md |
-| [05-docs-inventory](05-docs-inventory.md) | Consolidate existing design docs |
+| ~~03-visual-research~~ | Research patterns from Notion, Figma, Linear, Arc |
+| ~~04-design-audit~~ | Audit current design against VISUAL_DESIGN.md |
+| ~~05-docs-inventory~~ | Consolidate existing design docs |
 
 ## Phase 3: Theming & tooling
 
@@ -36,7 +36,7 @@ Fast iteration on visual changes. Approach TBD based on phase 2 findings.
 
 | Item | What it does |
 |------|--------------|
-| [06-theming-system](06-theming-system.md) | Theme switching for quick visual iteration |
+| ~~06-theming-system~~ | Theme switching for quick visual iteration |
 
 ## Phase 4: Polish
 

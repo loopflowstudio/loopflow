@@ -7,7 +7,7 @@ struct StepRunner: View {
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.palette) private var palette
 
     @State private var selectedFlow: String = ""
     @State private var autoMode: Stimulus.Kind = .loop
@@ -17,8 +17,6 @@ struct StepRunner: View {
     @State private var isSendingAuto = false
     @State private var errorMessage: String?
     @State private var showingError = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xl) {
@@ -99,7 +97,7 @@ struct StepRunner: View {
     private var promptField: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Additional context (optional)")
-                .font(.caption)
+                .font(Typography.caption())
                 .foregroundStyle(.secondary)
 
             TextField("e.g. focus on error handling", text: $prompt, axis: .vertical)
@@ -115,14 +113,14 @@ struct StepRunner: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             TextField("0 9 * * *", text: $cronExpression)
                 .textFieldStyle(.plain)
-                .font(.system(.caption, design: .monospaced))
+                .font(Typography.code(11))
                 .padding(Spacing.sm)
                 .background(palette.surface)
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
                 .accessibilityLabel("Cron expression")
 
             Text("Examples: 0 9 * * * (daily 9am), */30 * * * * (every 30 min)")
-                .font(.caption2)
+                .font(Typography.caption(10))
                 .foregroundStyle(.tertiary)
         }
     }
@@ -138,7 +136,7 @@ struct StepRunner: View {
                         .fontWeight(.semibold)
                     if let cron = s.cron {
                         Text(cron)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(Typography.code(11))
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -188,7 +186,7 @@ struct StepRunner: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Spacing.lg)
-            .background(runDisabled ? Color.gray : palette.accent)
+            .background(runDisabled ? Color.statusNeutral : palette.accent)
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         }
@@ -230,14 +228,14 @@ struct StepRunner: View {
                 }
             } label: {
                 Image(systemName: "chevron.down")
-                    .font(.caption2)
+                    .font(Typography.caption(10))
                     .padding(.vertical, Spacing.lg)
                     .padding(.horizontal, Spacing.sm)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Change auto mode")
         }
-        .background(autoDisabled ? Color.gray : palette.surface)
+        .background(autoDisabled ? Color.statusNeutral : palette.surface)
         .foregroundStyle(autoDisabled ? .white : palette.text)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         .disabled(autoDisabled)

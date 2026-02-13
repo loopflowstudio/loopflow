@@ -88,13 +88,13 @@ struct WaveModelTests {
         #expect(indicator.color == .statusWarning)
     }
 
-    @Test("statusIndicator returns gray circle for idle")
+    @Test("statusIndicator returns neutral circle for idle")
     func statusIndicatorIdle() {
         let wave = makeWave(id: "test", repo: "/tmp", status: .idle)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle")
-        #expect(indicator.color == .gray)
+        #expect(indicator.color == .statusNeutral)
     }
 
     @Test("statusIndicator returns clock for idle cron wave")
@@ -108,7 +108,7 @@ struct WaveModelTests {
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "clock")
-        #expect(indicator.color == .gray)
+        #expect(indicator.color == .statusNeutral)
     }
 
     @Test("statusIndicator returns burnt orange X for failed")
@@ -649,7 +649,7 @@ struct WaveStatusTests {
     func colorForStatus() {
         #expect(WaveStatus.running.color == .statusSuccess)
         #expect(WaveStatus.waiting.color == .statusWarning)
-        #expect(WaveStatus.idle.color == .gray)
+        #expect(WaveStatus.idle.color == .statusNeutral)
         #expect(WaveStatus.failed.color == .statusError)
     }
 

@@ -1,43 +1,60 @@
 # Screenshot manifest for Loopflow documentation and UX review
 # Run: python scripts/generate_screenshots.py
 # Output: docs/screenshots/
+#
+# Filter by persona: python scripts/generate_screenshots.py --direction conductor
 
 repo: https://github.com/loopflowstudio/loopflow-demos
 local: ~/src/loopflow-demos
 
 screenshots:
   # Main dashboard - shows sidebar with grouped waves
-  # Conductor: Can I see what needs attention without drilling in?
   - name: concerto-main
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
+    directions: [conductor, listener]
 
   # Running wave selected - detail view
-  # Conductor: How many clicks from "I see a problem" to "I'm acting on it"?
   - name: concerto-wave-running
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
     select_branch: wave-auth-feature
+    directions: [conductor, improviser]
 
   # Waiting wave selected - needs interaction
-  # Conductor: Is urgency visually obvious?
-  # Listener: Is "needs me" vs "fine" instant to distinguish?
   - name: concerto-wave-waiting
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
     select_branch: wave-api-refactor
+    directions: [conductor, listener]
 
-  # Improvise mode - launcher expanded (requires beta flag)
-  # Improviser: How fast from intent to action?
-  # Improviser: Am I configuring things I don't care about yet?
-  # - name: concerto-improvise
-  #   type: snapshot
-  #   window_size: [1200, 800]
-  #   mock_loops: true
-  #   show_launcher: true  # TODO: add flag support
+  # Empty state - no waves, Quick Experiment visible
+  - name: concerto-empty
+    type: snapshot
+    window_size: [1200, 800]
+    mock_loops: true
+    mock_config: empty
+    directions: [improviser]
+
+  # Failed wave selected - error state
+  - name: concerto-wave-failed
+    type: snapshot
+    window_size: [1200, 800]
+    mock_loops: true
+    select_branch: wave-deploy-fix
+    directions: [conductor, listener]
+
+  # Runs tab - wave history with PRs
+  - name: concerto-wave-runs
+    type: snapshot
+    window_size: [1200, 800]
+    mock_loops: true
+    select_branch: wave-auth-feature
+    select_tab: runs
+    directions: [conductor, listener]
 
   # UI test captures (flow-focused, slower)
   - name: concerto-main-uitest

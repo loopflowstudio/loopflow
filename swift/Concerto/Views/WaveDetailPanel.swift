@@ -222,11 +222,7 @@ struct WaveDetailPanel: View {
                 Button {
                     showingStopConfirmation = true
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "stop.fill")
-                            .font(Typography.caption())
-                        Text("Stop")
-                    }
+                    Label("Stop", systemImage: "stop.fill")
                 }
                 .buttonStyle(DestructiveButtonStyle())
             }
@@ -251,22 +247,16 @@ struct WaveDetailPanel: View {
         }
 
         return Button {
-            if let url {
-                terminalLauncher.openURL(url)
-            }
+            if let url { terminalLauncher.openURL(url) }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.up.right.square")
-                    .font(Typography.caption(10))
-                Text("PR #\(number)")
-                    .font(Typography.caption())
-                    .fontWeight(.medium)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.15))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
+            Label("PR #\(number)", systemImage: "arrow.up.right.square")
+                .font(Typography.caption())
+                .fontWeight(.medium)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, 3)
+                .background(color.opacity(0.15))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
         }
         .buttonStyle(.plain)
         .help("View PR on GitHub")
@@ -287,41 +277,19 @@ struct WaveDetailPanel: View {
     // MARK: - Wave Config Summary (read-only, shown when running)
 
     private var waveConfigSummary: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.lg) {
-                if !wave.areaDisplay.isEmpty {
-                    Label {
-                        Text(wave.areaDisplay)
-                            .font(Typography.caption())
-                    } icon: {
-                        Image(systemName: "folder")
-                            .font(Typography.caption(10))
-                    }
-                    .foregroundStyle(.secondary)
-                }
+        HStack(spacing: Spacing.lg) {
+            configLabel("folder", wave.areaDisplay)
+            configLabel("target", wave.directionDisplay)
+            configLabel("arrow.triangle.branch", wave.flow)
+        }
+    }
 
-                if !wave.directionDisplay.isEmpty {
-                    Label {
-                        Text(wave.directionDisplay)
-                            .font(Typography.caption())
-                    } icon: {
-                        Image(systemName: "target")
-                            .font(Typography.caption(10))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-
-                if !wave.flow.isEmpty {
-                    Label {
-                        Text(wave.flow)
-                            .font(Typography.caption())
-                    } icon: {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(Typography.caption(10))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-            }
+    @ViewBuilder
+    private func configLabel(_ icon: String, _ text: String) -> some View {
+        if !text.isEmpty {
+            Label(text, systemImage: icon)
+                .font(Typography.caption())
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -659,29 +627,27 @@ struct WaveDetailPanel: View {
 
     // MARK: - Actions
 
-    private func landWave() {
+    private func perform(_ label: String, _ action: @escaping () async throws -> Void) {
         Task {
             do {
-                try await repoState.landWave(wave)
+                try await action()
             } catch {
                 await MainActor.run {
-                    actionError = "Failed to land: \(error.localizedDescription)"
+                    actionError = "Failed to \(label): \(error.localizedDescription)"
                     showingActionError = true
                 }
             }
         }
     }
 
-    private func nextWave() {
-        Task {
-            do {
-                try await repoState.nextWave(wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to start next: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
+    private func landWave() { perform("land") { try await repoState.landWave(wave) } }
+    private func nextWave() { perform("start next") { try await repoState.nextWave(wave) } }
+    private func stopWave() { perform("stop wave") { try await repoState.stopWave(wave) } }
+
+    private func retryWave() {
+        perform("retry wave") {
+            outputBuffer.clearOutput(for: wave.id)
+            try await repoState.runWave(wave: wave)
         }
     }
 
@@ -700,33 +666,6 @@ struct WaveDetailPanel: View {
         } catch {
             actionError = "Failed to open \(ideApp.displayName): \(error.localizedDescription)"
             showingActionError = true
-        }
-    }
-
-    private func stopWave() {
-        Task {
-            do {
-                try await repoState.stopWave(wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to stop wave: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
-        }
-    }
-
-    private func retryWave() {
-        Task {
-            do {
-                outputBuffer.clearOutput(for: wave.id)
-                try await repoState.runWave(wave: wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to retry wave: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
         }
     }
 

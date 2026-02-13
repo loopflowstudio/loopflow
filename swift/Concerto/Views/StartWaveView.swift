@@ -36,7 +36,7 @@ struct StartWaveView: View {
                 if let errorMessage {
                     Text(errorMessage)
                         .font(Typography.caption())
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.statusError)
                 }
             }
 

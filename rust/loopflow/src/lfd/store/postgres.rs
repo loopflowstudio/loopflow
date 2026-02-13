@@ -697,7 +697,7 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let mut query = String::from(
                 "SELECT id, step, repo, worktree, wave_run_id, status,
-                        started_at, ended_at, pid, model, run_mode
+                        started_at, ended_at, pid, container_id, model, run_mode
                  FROM agents",
             );
             let mut params: Vec<Box<dyn ToSql + Sync>> = Vec::new();
@@ -732,7 +732,7 @@ impl RunStore for PostgresStore {
             let row = client
                 .query_opt(
                     "SELECT id, step, repo, worktree, wave_run_id, status,
-                            started_at, ended_at, pid, model, run_mode
+                            started_at, ended_at, pid, container_id, model, run_mode
                      FROM agents WHERE id = $1",
                     &[&agent_id],
                 )
@@ -746,7 +746,7 @@ impl RunStore for PostgresStore {
             let row = client
                 .query_opt(
                     "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
-                            a.started_at, a.ended_at, a.pid, a.model, a.run_mode
+                            a.started_at, a.ended_at, a.pid, a.container_id, a.model, a.run_mode
                      FROM agents a JOIN wave_runs r ON a.wave_run_id = r.id
                      WHERE r.wave_id = $1 AND a.status = $2
                      ORDER BY a.started_at DESC LIMIT 1",
@@ -765,12 +765,13 @@ impl RunStore for PostgresStore {
                 .unwrap_or_else(now_unix);
             let ended_at = agent.ended_at.map(|dt| dt.unix_timestamp());
             let pid = agent.pid.map(|v| v as i32);
+            let container_id = agent.container_id.as_deref();
             client
                 .execute(
                     "INSERT INTO agents (
                         id, step, repo, worktree, wave_run_id, status, started_at,
-                        ended_at, pid, model, run_mode
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                        ended_at, pid, container_id, model, run_mode
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                     &[
                         &agent.id,
                         &agent.step,
@@ -781,6 +782,7 @@ impl RunStore for PostgresStore {
                         &started_at,
                         &ended_at,
                         &pid,
+                        &container_id,
                         &agent.model,
                         &agent.run_mode,
                     ],
@@ -795,13 +797,19 @@ impl RunStore for PostgresStore {
         agent_id: &LfdId,
         status: i32,
         pid: Option<u32>,
+        container_id: Option<&str>,
     ) -> StoreResult<()> {
         self.with_client(|client| async move {
             let pid = pid.map(|v| v as i32);
+            let container_id = container_id.map(str::to_string);
             let updated = client
                 .execute(
-                    "UPDATE agents SET status = $1, pid = COALESCE($2, pid) WHERE id = $3",
-                    &[&status, &pid, &agent_id],
+                    "UPDATE agents
+                     SET status = $1,
+                         pid = COALESCE($2, pid),
+                         container_id = COALESCE($3, container_id)
+                     WHERE id = $4",
+                    &[&status, &pid, &container_id, &agent_id],
                 )
                 .await?;
             if updated == 0 {
@@ -831,7 +839,7 @@ impl RunStore for PostgresStore {
             let rows = client
                 .query(
                     "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
-                            a.started_at, a.ended_at, a.pid, a.model, a.run_mode
+                            a.started_at, a.ended_at, a.pid, a.container_id, a.model, a.run_mode
                      FROM agents a JOIN wave_runs r ON a.wave_run_id = r.id
                      WHERE r.wave_id = $1 AND a.ended_at IS NULL
                      ORDER BY a.started_at DESC",
@@ -870,7 +878,7 @@ impl RunStore for PostgresStore {
             let rows = client
                 .query(
                     "SELECT id, step, repo, worktree, wave_run_id, status,
-                            started_at, ended_at, pid, model, run_mode
+                            started_at, ended_at, pid, container_id, model, run_mode
                      FROM agents WHERE ended_at IS NULL AND started_at <= $1
                      ORDER BY started_at ASC",
                     &[&cutoff],

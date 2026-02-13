@@ -23,6 +23,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "002_stimulus_enabled",
         sql: include_str!("migrations/002_stimulus_enabled.sql"),
     },
+    Migration {
+        version: "003_agent_container_id",
+        sql: include_str!("migrations/003_agent_container_id.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

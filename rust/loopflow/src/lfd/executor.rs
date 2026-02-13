@@ -5,10 +5,12 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bollard::container::{
-    Config as DockerContainerConfig, CreateContainerOptions, LogOutput, LogsOptions,
-    RemoveContainerOptions, StartContainerOptions, StopContainerOptions, WaitContainerOptions,
+    Config as DockerContainerConfig, CreateContainerOptions, InspectContainerOptions,
+    ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions, StartContainerOptions,
+    StopContainerOptions, WaitContainerOptions,
 };
-use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::errors::Error as DockerError;
+use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
 use bollard::volume::CreateVolumeOptions;
 use bollard::Docker;
 use futures_util::StreamExt;
@@ -66,9 +68,20 @@ pub trait AgentExecutor: Send + Sync {
         output: &OutputHub,
     ) -> Result<i32>;
     async fn terminate(&self, agent_id: &str) -> Result<()>;
+    async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
+        Ok(StartupRecovery::default())
+    }
     async fn cleanup_wave(&self, _wave: &Wave) -> Result<()> {
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StartupRecovery {
+    pub orphaned_runs_failed: u32,
+    pub rehydrated_agents: u32,
+    pub lost_agents_failed: u32,
+    pub orphaned_containers_removed: u32,
 }
 
 pub struct LocalProcessExecutor {
@@ -122,6 +135,7 @@ impl AgentExecutor for LocalProcessExecutor {
                 &agent_lfd_id,
                 AgentStatus::Running.as_i32(),
                 Some(pid),
+                None,
             );
             self.active
                 .lock()
@@ -167,6 +181,14 @@ impl AgentExecutor for LocalProcessExecutor {
             kill_process(pid);
         }
         Ok(())
+    }
+
+    async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
+        let orphaned_runs_failed = self.store.fail_orphaned_runs()?;
+        Ok(StartupRecovery {
+            orphaned_runs_failed,
+            ..Default::default()
+        })
     }
 }
 
@@ -320,6 +342,110 @@ struct DockerWorkspace {
     has_remote: bool,
 }
 
+#[derive(Debug, Clone)]
+struct ReattachTarget {
+    agent: Agent,
+    wave_id: LfdId,
+    wave_run_id: LfdId,
+    container_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct RehydrationPlan {
+    reattach: Vec<ReattachTarget>,
+    lost: Vec<Agent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InspectedContainer {
+    id: String,
+    running: bool,
+}
+
+#[async_trait]
+trait DockerRecoveryBackend: Send + Sync {
+    async fn inspect_container(&self, container_ref: &str) -> Result<Option<InspectedContainer>>;
+    async fn list_managed_containers(&self) -> Result<Vec<String>>;
+    async fn stop_container(&self, container_id: &str) -> Result<()>;
+    async fn remove_container(&self, container_id: &str) -> Result<()>;
+}
+
+#[derive(Debug, Clone)]
+struct BollardRecoveryBackend {
+    docker: Docker,
+}
+
+impl BollardRecoveryBackend {
+    fn new(docker: Docker) -> Self {
+        Self { docker }
+    }
+}
+
+#[async_trait]
+impl DockerRecoveryBackend for BollardRecoveryBackend {
+    async fn inspect_container(&self, container_ref: &str) -> Result<Option<InspectedContainer>> {
+        match self
+            .docker
+            .inspect_container(container_ref, None::<InspectContainerOptions>)
+            .await
+        {
+            Ok(details) => Ok(inspected_container(details)),
+            Err(err) if is_container_not_found(&err) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    async fn list_managed_containers(&self) -> Result<Vec<String>> {
+        let mut filters = HashMap::new();
+        filters.insert(
+            "label".to_string(),
+            vec!["io.loopflow.managed=true".to_string()],
+        );
+
+        let containers = self
+            .docker
+            .list_containers(Some(ListContainersOptions::<String> {
+                all: true,
+                filters,
+                ..Default::default()
+            }))
+            .await?;
+        Ok(containers
+            .into_iter()
+            .filter_map(|container| container.id)
+            .collect())
+    }
+
+    async fn stop_container(&self, container_id: &str) -> Result<()> {
+        match self
+            .docker
+            .stop_container(container_id, Some(StopContainerOptions { t: 1 }))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(err) if is_container_not_found(&err) => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    async fn remove_container(&self, container_id: &str) -> Result<()> {
+        let options = RemoveContainerOptions {
+            force: true,
+            v: true,
+            link: false,
+        };
+        match self
+            .docker
+            .remove_container(container_id, Some(options))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(err) if is_container_not_found(&err) => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+}
+
 fn short_hash(value: &str, chars: usize) -> String {
     let digest = Sha256::digest(value.as_bytes());
     let mut hash = hex::encode(digest);
@@ -425,6 +551,22 @@ impl DockerExecutor {
         )
     }
 
+    fn build_agent_labels(
+        agent_id: &str,
+        wave_id: &str,
+        wave_run_id: &str,
+    ) -> HashMap<String, String> {
+        HashMap::from([
+            ("io.loopflow.managed".to_string(), "true".to_string()),
+            ("io.loopflow.agent-id".to_string(), agent_id.to_string()),
+            ("io.loopflow.wave-id".to_string(), wave_id.to_string()),
+            (
+                "io.loopflow.wave-run-id".to_string(),
+                wave_run_id.to_string(),
+            ),
+        ])
+    }
+
     fn rewrite_command_paths(
         cmd: Vec<String>,
         host_root: &Path,
@@ -439,6 +581,304 @@ impl DockerExecutor {
         cmd.into_iter()
             .map(|arg| Self::rewrite_command_arg_path(&arg, &host_root, container_root))
             .collect()
+    }
+
+    async fn active_container_ids(&self) -> HashSet<String> {
+        self.active
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect::<HashSet<_>>()
+    }
+
+    async fn find_running_container(
+        &self,
+        backend: &dyn DockerRecoveryBackend,
+        agent: &Agent,
+    ) -> Result<Option<String>> {
+        let mut references = Vec::new();
+        if let Some(container_id) = &agent.container_id {
+            if !container_id.trim().is_empty() {
+                references.push(container_id.clone());
+            }
+        }
+        references.push(Self::build_container_name(agent.id.as_str()));
+
+        for container_ref in references {
+            match backend.inspect_container(&container_ref).await {
+                Ok(Some(container)) if container.running => return Ok(Some(container.id)),
+                Ok(Some(_)) => {}
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(
+                        agent_id = %agent.id,
+                        container_ref,
+                        error = %err,
+                        "failed inspecting container during startup recovery"
+                    );
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn plan_rehydration(
+        &self,
+        backend: &dyn DockerRecoveryBackend,
+    ) -> Result<RehydrationPlan> {
+        let agents = self.store.list_agents()?;
+        let mut plan = RehydrationPlan {
+            reattach: Vec::new(),
+            lost: Vec::new(),
+        };
+
+        for agent in agents
+            .into_iter()
+            .filter(|agent| agent.status == AgentStatus::Running && agent.ended_at.is_none())
+        {
+            let Some(wave_run_id) = agent.wave_run_id.clone() else {
+                plan.lost.push(agent);
+                continue;
+            };
+
+            let Some(run) = self.store.get_wave_run(&wave_run_id)? else {
+                plan.lost.push(agent);
+                continue;
+            };
+
+            match self.find_running_container(backend, &agent).await? {
+                Some(container_id) => plan.reattach.push(ReattachTarget {
+                    agent,
+                    wave_id: run.wave_id.clone(),
+                    wave_run_id,
+                    container_id,
+                }),
+                None => plan.lost.push(agent),
+            }
+        }
+
+        Ok(plan)
+    }
+
+    fn spawn_reattach_task(
+        &self,
+        output: OutputHub,
+        target: ReattachTarget,
+    ) -> tokio::task::JoinHandle<()> {
+        let executor = self.clone();
+        tokio::spawn(async move {
+            let result = executor
+                .reattach_agent(&output, &target.agent, &target.wave_id, &target.wave_run_id)
+                .await;
+            if let Err(err) = executor
+                .finalize_reattached_agent(
+                    &target.agent,
+                    &target.wave_id,
+                    &target.wave_run_id,
+                    result,
+                )
+                .await
+            {
+                warn!(
+                    agent_id = %target.agent.id,
+                    wave_run_id = %target.wave_run_id,
+                    error = %err,
+                    "failed finalizing reattached container"
+                );
+            }
+        })
+    }
+
+    async fn reattach_agent(
+        &self,
+        output: &OutputHub,
+        agent: &Agent,
+        wave_id: &LfdId,
+        wave_run_id: &LfdId,
+    ) -> Result<i32> {
+        let container_id = self
+            .active
+            .lock()
+            .await
+            .get(agent.id.as_str())
+            .cloned()
+            .ok_or_else(|| anyhow!("active container missing for reattach"))?;
+
+        let workspace = self.resolve_workspace(wave_id.as_str(), wave_run_id.as_str())?;
+
+        let logs_task = tokio::spawn(Self::stream_logs(
+            self.docker.clone(),
+            container_id.clone(),
+            output.clone(),
+            wave_id.to_string(),
+            wave_run_id.to_string(),
+            agent.id.to_string(),
+        ));
+
+        let mut wait_stream = self
+            .docker
+            .wait_container(&container_id, None::<WaitContainerOptions<String>>);
+        let wait_result = wait_stream.next().await;
+
+        let _ = logs_task.await;
+        self.active.lock().await.remove(agent.id.as_str());
+
+        let sync_result = self
+            .sync_to_host_worktree(&workspace, Path::new(&agent.worktree))
+            .await;
+        self.remove_container(&container_id).await;
+        sync_result?;
+
+        let status =
+            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
+        Ok(status.status_code as i32)
+    }
+
+    async fn finalize_reattached_agent(
+        &self,
+        agent: &Agent,
+        wave_id: &LfdId,
+        wave_run_id: &LfdId,
+        result: Result<i32>,
+    ) -> Result<()> {
+        let ended_at = OffsetDateTime::now_utc().unix_timestamp();
+        let (agent_status, run_status, run_error) = match result {
+            Ok(0) => (AgentStatus::Completed, WaveRunStatus::Completed, None),
+            Ok(code) => (
+                AgentStatus::Failed,
+                WaveRunStatus::Failed,
+                Some(format!("reattached agent exited with code {code}")),
+            ),
+            Err(err) => (
+                AgentStatus::Failed,
+                WaveRunStatus::Failed,
+                Some(format!("reattached agent failed: {err}")),
+            ),
+        };
+
+        let _ = self
+            .store
+            .end_agent(&agent.id, agent_status.as_i32(), ended_at);
+
+        let mut next_wave_status = None;
+        if let Some(mut run) = self.store.get_wave_run(wave_run_id)? {
+            if !matches!(run.status, WaveRunStatus::Completed | WaveRunStatus::Failed) {
+                run.status = run_status;
+                run.ended_at = Some(OffsetDateTime::now_utc());
+                run.error = run_error;
+                self.store.update_wave_run(&run)?;
+                next_wave_status = Some(if run_status == WaveRunStatus::Completed {
+                    WaveStatus::Idle
+                } else {
+                    WaveStatus::Failed
+                });
+            }
+        }
+
+        if let Some(wave_status) = next_wave_status {
+            if let Some(mut wave) = self.store.get_wave(wave_id)? {
+                wave.status = wave_status;
+                let _ = self.store.update_wave(&wave);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn mark_agent_lost(&self, agent: &Agent) -> Result<()> {
+        let ended_at = OffsetDateTime::now_utc().unix_timestamp();
+        let _ = self
+            .store
+            .end_agent(&agent.id, AgentStatus::Failed.as_i32(), ended_at);
+
+        if let Some(wave_run_id) = &agent.wave_run_id {
+            if let Some(mut run) = self.store.get_wave_run(wave_run_id)? {
+                if !matches!(run.status, WaveRunStatus::Completed | WaveRunStatus::Failed) {
+                    run.status = WaveRunStatus::Failed;
+                    run.error = Some("container lost during lfd restart.".to_string());
+                    run.ended_at = Some(OffsetDateTime::now_utc());
+                    self.store.update_wave_run(&run)?;
+                }
+
+                if let Some(mut wave) = self.store.get_wave(&run.wave_id)? {
+                    wave.status = WaveStatus::Failed;
+                    let _ = self.store.update_wave(&wave);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn cleanup_orphaned_containers(
+        &self,
+        backend: &dyn DockerRecoveryBackend,
+    ) -> Result<u32> {
+        let active_ids = self.active_container_ids().await;
+        let mut removed = 0u32;
+        let containers = backend.list_managed_containers().await?;
+        for container_id in containers {
+            if active_ids.contains(&container_id) {
+                continue;
+            }
+            if let Err(err) = backend.stop_container(&container_id).await {
+                warn!(
+                    container_id,
+                    error = %err,
+                    "failed stopping orphaned managed container"
+                );
+            }
+            if let Err(err) = backend.remove_container(&container_id).await {
+                warn!(
+                    container_id,
+                    error = %err,
+                    "failed removing orphaned managed container"
+                );
+                continue;
+            }
+            info!(container_id, "removed orphaned managed container");
+            removed += 1;
+        }
+        Ok(removed)
+    }
+
+    async fn recover_startup_with_backend(
+        &self,
+        backend: &dyn DockerRecoveryBackend,
+        output: &OutputHub,
+        spawn_reattach: bool,
+    ) -> Result<StartupRecovery> {
+        let plan = self.plan_rehydration(backend).await?;
+
+        for lost in &plan.lost {
+            if let Err(err) = self.mark_agent_lost(lost).await {
+                warn!(
+                    agent_id = %lost.id,
+                    error = %err,
+                    "failed marking lost container state"
+                );
+            }
+        }
+
+        for target in plan.reattach.iter().cloned() {
+            self.active
+                .lock()
+                .await
+                .insert(target.agent.id.to_string(), target.container_id.clone());
+            if spawn_reattach {
+                std::mem::drop(self.spawn_reattach_task(output.clone(), target));
+            }
+        }
+
+        let orphaned_containers_removed = self.cleanup_orphaned_containers(backend).await?;
+        Ok(StartupRecovery {
+            orphaned_runs_failed: 0,
+            rehydrated_agents: plan.reattach.len() as u32,
+            lost_agents_failed: plan.lost.len() as u32,
+            orphaned_containers_removed,
+        })
     }
 
     fn rewrite_command_arg_path(arg: &str, host_root: &str, container_root: &str) -> String {
@@ -1057,6 +1497,26 @@ impl DockerExecutor {
     }
 }
 
+fn inspected_container(details: ContainerInspectResponse) -> Option<InspectedContainer> {
+    let id = details.id?;
+    let running = details
+        .state
+        .as_ref()
+        .and_then(|state| state.running)
+        .unwrap_or(false);
+    Some(InspectedContainer { id, running })
+}
+
+fn is_container_not_found(err: &DockerError) -> bool {
+    matches!(
+        err,
+        DockerError::DockerResponseServerError {
+            status_code: 404,
+            ..
+        }
+    )
+}
+
 #[async_trait]
 impl AgentExecutor for DockerExecutor {
     async fn run(
@@ -1079,6 +1539,7 @@ impl AgentExecutor for DockerExecutor {
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
         let env = self.collect_env();
         let mounts = self.build_mounts(&workspace.volume.volume_name);
+        let labels = Self::build_agent_labels(agent_id, wave_id, wave_run_id);
 
         let host_config = HostConfig {
             mounts: Some(mounts),
@@ -1103,10 +1564,7 @@ impl AgentExecutor for DockerExecutor {
                     env: Some(env),
                     user: Some("root".to_string()),
                     host_config: Some(host_config),
-                    labels: Some(HashMap::from([(
-                        "io.loopflow.managed".to_string(),
-                        "true".to_string(),
-                    )])),
+                    labels: Some(labels),
                     attach_stdout: Some(true),
                     attach_stderr: Some(true),
                     ..Default::default()
@@ -1115,6 +1573,13 @@ impl AgentExecutor for DockerExecutor {
             .await?;
 
         let container_id = container.id;
+        let agent_lfd_id = LfdId::from_raw(agent_id);
+        let _ = self.store.update_agent_status(
+            &agent_lfd_id,
+            AgentStatus::Running.as_i32(),
+            None,
+            Some(&container_id),
+        );
         self.active
             .lock()
             .await
@@ -1165,6 +1630,12 @@ impl AgentExecutor for DockerExecutor {
             self.remove_container(&container_id).await;
         }
         Ok(())
+    }
+
+    async fn recover_startup(&self, output: &OutputHub) -> Result<StartupRecovery> {
+        let backend = BollardRecoveryBackend::new(self.docker.clone());
+        self.recover_startup_with_backend(&backend, output, true)
+            .await
     }
 
     async fn cleanup_wave(&self, wave: &Wave) -> Result<()> {
@@ -1319,6 +1790,10 @@ impl WaveExecutor {
 
     pub fn executor_type(&self) -> ExecutorType {
         self.executor_type
+    }
+
+    pub async fn recover_startup(&self) -> Result<StartupRecovery> {
+        self.runner.recover_startup(&self.output).await
     }
 
     pub async fn cleanup_wave_workspace(&self, wave: &Wave) -> Result<()> {
@@ -2200,6 +2675,7 @@ fn build_agent_for_step(
         started_at: Some(OffsetDateTime::now_utc()),
         ended_at: None,
         pid: None,
+        container_id: None,
         model: model.to_string(),
         run_mode: "auto".to_string(),
     }
@@ -2493,6 +2969,247 @@ mod tests {
             events.lock().expect("events").as_slice(),
             ["first-start", "first-end", "second"]
         );
+    }
+
+    #[derive(Debug, Clone)]
+    struct MockDockerRecoveryBackend {
+        inspected: Arc<StdMutex<HashMap<String, InspectedContainer>>>,
+        managed: Arc<StdMutex<Vec<String>>>,
+        stopped: Arc<StdMutex<Vec<String>>>,
+        removed: Arc<StdMutex<Vec<String>>>,
+    }
+
+    impl MockDockerRecoveryBackend {
+        fn new(inspected: HashMap<String, InspectedContainer>, managed: Vec<String>) -> Self {
+            Self {
+                inspected: Arc::new(StdMutex::new(inspected)),
+                managed: Arc::new(StdMutex::new(managed)),
+                stopped: Arc::new(StdMutex::new(Vec::new())),
+                removed: Arc::new(StdMutex::new(Vec::new())),
+            }
+        }
+
+        fn stopped(&self) -> Vec<String> {
+            self.stopped.lock().expect("stopped lock").clone()
+        }
+
+        fn removed(&self) -> Vec<String> {
+            self.removed.lock().expect("removed lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl DockerRecoveryBackend for MockDockerRecoveryBackend {
+        async fn inspect_container(
+            &self,
+            container_ref: &str,
+        ) -> Result<Option<InspectedContainer>> {
+            Ok(self
+                .inspected
+                .lock()
+                .expect("inspected lock")
+                .get(container_ref)
+                .cloned())
+        }
+
+        async fn list_managed_containers(&self) -> Result<Vec<String>> {
+            Ok(self.managed.lock().expect("managed lock").clone())
+        }
+
+        async fn stop_container(&self, container_id: &str) -> Result<()> {
+            self.stopped
+                .lock()
+                .expect("stopped lock")
+                .push(container_id.to_string());
+            Ok(())
+        }
+
+        async fn remove_container(&self, container_id: &str) -> Result<()> {
+            self.removed
+                .lock()
+                .expect("removed lock")
+                .push(container_id.to_string());
+            Ok(())
+        }
+    }
+
+    fn create_running_wave_and_run(
+        store: &SharedStore,
+        repo: &Path,
+        name: &str,
+    ) -> (Wave, WaveRun) {
+        let wave = Wave {
+            id: LfdId::new(),
+            name: name.to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: "test-flow".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Running,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.create_wave(&wave).expect("wave should be created");
+
+        let run = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: repo.to_string_lossy().to_string(),
+                flow: "test-flow".to_string(),
+                direction: vec![],
+                area: vec![],
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: repo.to_string_lossy().to_string(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+        };
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created");
+        (wave, run)
+    }
+
+    fn make_running_agent(run: &WaveRun, container_id: Option<&str>, name: &str) -> Agent {
+        Agent {
+            id: LfdId::new(),
+            step: name.to_string(),
+            repo: run.snapshot.repo.clone(),
+            worktree: run.worktree.clone(),
+            wave_run_id: Some(run.id.clone()),
+            status: AgentStatus::Running,
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            pid: None,
+            container_id: container_id.map(str::to_string),
+            model: "claude-code".to_string(),
+            run_mode: "auto".to_string(),
+        }
+    }
+
+    #[test]
+    fn docker_agent_labels_include_rehydration_metadata() {
+        let labels = DockerExecutor::build_agent_labels("agent-1", "wave-1", "run-1");
+        assert_eq!(
+            labels.get("io.loopflow.managed").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            labels.get("io.loopflow.agent-id").map(String::as_str),
+            Some("agent-1")
+        );
+        assert_eq!(
+            labels.get("io.loopflow.wave-id").map(String::as_str),
+            Some("wave-1")
+        );
+        assert_eq!(
+            labels.get("io.loopflow.wave-run-id").map(String::as_str),
+            Some("run-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn docker_startup_rehydrates_running_agents_and_cleans_orphans() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db"));
+
+        let (rehydrated_wave, rehydrated_run) =
+            create_running_wave_and_run(&store, tmp.path(), "rehydrated-wave");
+        let (lost_wave, lost_run) = create_running_wave_and_run(&store, tmp.path(), "lost-wave");
+
+        let rehydrated_agent =
+            make_running_agent(&rehydrated_run, Some("container-live"), "step-a");
+        let lost_agent = make_running_agent(&lost_run, Some("container-missing"), "step-b");
+        store
+            .start_agent(&rehydrated_agent)
+            .expect("rehydrated agent should start");
+        store
+            .start_agent(&lost_agent)
+            .expect("lost agent should start");
+
+        let config = ExecutorConfig {
+            r#type: ExecutorType::Docker,
+            image: "loopflow/agent:test".to_string(),
+            credentials: Default::default(),
+        };
+        let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
+        let output_dir = tmp.path().join("output");
+        std::fs::create_dir_all(&output_dir).expect("output dir");
+        let output = OutputHub::new(16, output_dir);
+
+        let backend = MockDockerRecoveryBackend::new(
+            HashMap::from([(
+                "container-live".to_string(),
+                InspectedContainer {
+                    id: "container-live".to_string(),
+                    running: true,
+                },
+            )]),
+            vec!["container-live".to_string(), "container-orphan".to_string()],
+        );
+
+        let recovery = executor
+            .recover_startup_with_backend(&backend, &output, false)
+            .await
+            .expect("startup recovery should succeed");
+
+        assert_eq!(recovery.rehydrated_agents, 1);
+        assert_eq!(recovery.lost_agents_failed, 1);
+        assert_eq!(recovery.orphaned_containers_removed, 1);
+
+        let active = executor.active.lock().await;
+        assert_eq!(
+            active.get(rehydrated_agent.id.as_str()).map(String::as_str),
+            Some("container-live")
+        );
+        assert!(active.get(lost_agent.id.as_str()).is_none());
+        drop(active);
+
+        let lost_agent_after = store
+            .get_agent(&lost_agent.id)
+            .expect("get lost agent")
+            .expect("lost agent exists");
+        assert_eq!(lost_agent_after.status, AgentStatus::Failed);
+        assert!(lost_agent_after.ended_at.is_some());
+
+        let lost_run_after = store
+            .get_wave_run(&lost_run.id)
+            .expect("get lost run")
+            .expect("lost run exists");
+        assert_eq!(lost_run_after.status, WaveRunStatus::Failed);
+        assert_eq!(
+            lost_run_after.error.as_deref(),
+            Some("container lost during lfd restart.")
+        );
+
+        let lost_wave_after = store
+            .get_wave(&lost_wave.id)
+            .expect("get lost wave")
+            .expect("lost wave exists");
+        assert_eq!(lost_wave_after.status, WaveStatus::Failed);
+
+        let rehydrated_run_after = store
+            .get_wave_run(&rehydrated_run.id)
+            .expect("get rehydrated run")
+            .expect("rehydrated run exists");
+        assert_eq!(rehydrated_run_after.status, WaveRunStatus::Running);
+
+        let rehydrated_wave_after = store
+            .get_wave(&rehydrated_wave.id)
+            .expect("get rehydrated wave")
+            .expect("rehydrated wave exists");
+        assert_eq!(rehydrated_wave_after.status, WaveStatus::Running);
+
+        assert_eq!(backend.stopped(), vec!["container-orphan".to_string()]);
+        assert_eq!(backend.removed(), vec!["container-orphan".to_string()]);
     }
 
     struct MockRunner;

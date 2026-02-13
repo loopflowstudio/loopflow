@@ -11,6 +11,10 @@ swift/
 │   │   ├── Flow.swift
 │   │   ├── Step.swift
 │   │   ├── PullRequest.swift
+│   │   ├── Wave.swift
+│   │   ├── WaveRun.swift
+│   │   ├── WaveViewModel.swift
+│   │   ├── StatusColors.swift
 │   │   ├── AppPreferences.swift
 │   │   └── AppearanceMode.swift
 │   └── Services/
@@ -39,6 +43,7 @@ swift/
 │   │   ├── AppIconProvider.swift
 │   │   └── Ghostty/
 │   │       ├── GhosttyManager.swift
+│   │       ├── GhosttyTerminalView.swift
 │   │       └── GhosttyTypes.swift
 │   ├── State/
 │   │   ├── RepoState.swift    # Main observable state
@@ -48,16 +53,30 @@ swift/
 │   └── Views/
 │       ├── RepoWindow.swift
 │       ├── ContentView.swift           # NavigationSplitView layout
+│       ├── WelcomeWindow.swift         # Repo picker on launch
 │       ├── WaveSidebar.swift           # Grouped wave list
 │       ├── WaveRow.swift               # Sidebar row
 │       ├── WaveDetailPanel.swift       # Detail: config, output, actions
 │       ├── StepRunner.swift            # Step execution config
+│       ├── FlowProgressPills.swift     # Step-by-step progress indicator
+│       ├── IterationTimeline.swift     # Horizontal run timeline
+│       ├── NextActionsBar.swift        # Completed-step footer bar
+│       ├── WaitingStateCard.swift      # PR-limit blocked card
+│       ├── LiveOutput.swift            # Streaming agent output
 │       ├── InteractiveSessionView.swift # Embedded Ghostty terminal
+│       ├── EmbeddedTerminalPanel.swift # Collapsible terminal panel
 │       ├── WaveRunsTab.swift           # Historical runs + PR management
 │       ├── CommandPalette.swift        # ⌘K fuzzy search
+│       ├── QuickExperimentView.swift   # Empty-state / onboarding
+│       ├── TypeaheadComponents.swift   # GhostTextField, TypeaheadChip, WrappingHStack
 │       ├── AreaTypeahead.swift
 │       ├── DirectionTypeahead.swift
-│       └── FlowTypeahead.swift
+│       ├── FlowTypeahead.swift
+│       ├── SetupView.swift             # lf installation flow
+│       ├── DiagnosticsView.swift       # Log viewer modal
+│       ├── ThemePreview.swift          # Side-by-side palette preview
+│       ├── ScreenshotWindow.swift      # Screenshot automation
+│       └── TerminalTestWindow.swift    # Ghostty dev sandbox
 ├── Symphonia/             # Teams product — placeholder
 ├── ConcertoTests/
 ├── ConcertoUITests/
@@ -124,6 +143,12 @@ public struct Stimulus: Sendable, Hashable, Codable, Identifiable {
 public struct CommitEntry: Sendable, Hashable, Identifiable {
     public let sha: String
     public let message: String
+}
+
+public enum MergeMode: String, Sendable, Codable { case pr, land }
+
+public enum WaitingReason: Sendable, Hashable {
+    case prLimitReached(open: Int, limit: Int)
 }
 
 public struct InteractiveSession: Sendable, Identifiable {
@@ -323,11 +348,11 @@ public struct ConnectionInfo: Sendable {
     public let stepIndex: Int
 }
 
-public struct CollapsePRsResult: Sendable { ... }
-public struct AbsorbIntoPRResult: Sendable { ... }
+public struct CollapsePRsResult: Sendable { let newPRUrl: String?; let closedPRs: [Int] }
+public struct AbsorbIntoPRResult: Sendable { let targetBranch: String; let commitsAbsorbed: Int }
 
-public struct LocalWaveService: WaveServiceProtocol {
-    public init(tokenProvider: TokenProvider = NoAuthProvider())
+public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
+    public init()
 
     // CRUD
     func listWaves(repo: URL) async throws -> [Wave]
@@ -526,11 +551,19 @@ final class RepoState {
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async
     func refreshWaves() async
     func refreshFlowsAsync() async
-    func createWave(name: String?, flow: String, area: [String], direction: [String], stimulus: Stimulus?) async
-    func deleteWave(_ id: String) async
-    func landWave(_ id: String) async
-    func nextIteration(_ id: String) async
-    func stopWave(_ id: String) async
+    func createWave(name: String) async throws       // generates name if empty
+    func runWave(wave:, area:, direction:, flow:) async throws
+    func stopWave(_ wave: WaveViewModel) async throws
+    func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel
+    func deleteWave(_ wave: WaveViewModel) async throws
+    func renameWave(_ wave:, to: String) async throws
+    func updateWave(_ wave:, area:, direction:, flow:, status:) async throws
+    func landWave(_ wave: WaveViewModel) async throws
+    func nextWave(_ wave: WaveViewModel) async throws
+    func addStimulus(wave:, kind:, cron:) async throws
+    func removeStimulus(wave:, stimulusId:) async throws
+    func collapsePRs(_ waveId: String) async throws -> CollapsePRsResult
+    func absorbIntoPR(_ waveId:, prNumber: Int) async throws -> AbsorbIntoPRResult
     func loadRuns(for waveId: String)
 }
 ```
@@ -741,18 +774,28 @@ struct RecentRepo: Codable, Identifiable {
 
 ```
 ConcertoApp
-└── RepoWindow(repoURL:)
-    ├── SetupView (if lf not installed)
-    └── ContentView
-        └── NavigationSplitView
-            ├── sidebar: WaveSidebar
-            │   └── ForEach(waveGroups) → WaveRow
-            ├── detail:
-            │   ├── WaveDetailPanel(wave:)  (when wave selected)
-            │   │   ├── .current tab → StepRunner + commit log + live output
-            │   │   └── .runs tab → WaveRunsTab
-            │   └── QuickExperimentDetailView  (when no selection)
-            └── overlay: CommandPalette (⌘K)
+├── WelcomeWindow (repo picker on launch)
+├── RepoWindow(repoURL:)
+│   ├── SetupView (if lf not installed)
+│   └── ContentView
+│       └── NavigationSplitView
+│           ├── sidebar: WaveSidebar
+│           │   ├── ForEach(waveGroups) → WaveRow
+│           │   └── QuickExperimentSidebar (empty state)
+│           ├── detail:
+│           │   ├── WaveDetailPanel(wave:)  (when wave selected)
+│           │   │   ├── .current tab:
+│           │   │   │   ├── StepRunner (flow/area/direction config)
+│           │   │   │   ├── FlowProgressPills (step progress)
+│           │   │   │   ├── WaitingStateCard (if PR-blocked)
+│           │   │   │   ├── IterationTimeline (run history)
+│           │   │   │   ├── LiveOutput (streaming agent output)
+│           │   │   │   └── NextActionsBar (footer)
+│           │   │   └── .runs tab → WaveRunsTab
+│           │   └── QuickExperimentDetailView  (when no selection)
+│           ├── bottom: EmbeddedTerminalPanel (collapsible Ghostty)
+│           └── overlay: CommandPalette (⌘K)
+└── ScreenshotWindow (automation for docs)
 ```
 
 ### Key Views
@@ -804,9 +847,40 @@ struct CommandPalette: View { @Binding var isPresented: Bool; let actions: [Pale
 // Fuzzy search, arrow key navigation, ⌘K toggle
 ```
 
+### Detail Sub-Views
+
+```swift
+// Views/FlowProgressPills.swift
+// Horizontal step indicators: completed ✓ / current (pulsing) / upcoming
+// Timer-driven elapsed time display for active step
+
+// Views/IterationTimeline.swift
+// Horizontal timeline of WaveRun iterations as colored circles
+// Colors reflect PR state (merged/open/draft) or run status
+
+// Views/NextActionsBar.swift
+// Sticky footer: completed step count + Archive (pause) button
+
+// Views/WaitingStateCard.swift
+// Shows blocking reason (e.g. "2/3 PRs open") with "Review PRs" link
+
+// Views/LiveOutput.swift
+// Last 20 lines of streaming agent output, color-coded prefixes
+// Auto-scrolls, monospace font
+
+// Views/EmbeddedTerminalPanel.swift
+// Collapsible Ghostty terminal at bottom of detail view
+// Drag-to-resize, shows wave status, manages init/cleanup
+```
+
 ### Typeahead Components
 
 ```swift
+// Views/TypeaheadComponents.swift — shared building blocks:
+//   GhostTextField: NSViewRepresentable with fish-style ghost text completion
+//   TypeaheadChip: removable tag badge
+//   WrappingHStack: custom Layout for wrapping items
+
 // Views/AreaTypeahead.swift — file/directory picker with suggestions
 // Views/DirectionTypeahead.swift — direction suggestions from availableDirections
 // Views/FlowTypeahead.swift — flow/step picker from loaded flows
@@ -843,15 +917,23 @@ enum Typography {
     static func code(_ size: CGFloat = 13) -> Font
 }
 
-// Views/BrandColors.swift
+// BrandColors.swift
+extension Color {
+    static let loopflowBurgundy = Color(hex: 0x722F37)
+    static let loopflowBurgundyHover = Color(hex: 0x8B3D47)
+    static let loopflowCream = Color(hex: 0xFAF8F5)
+}
+
 struct LoopflowPalette {
     let background, surface, surfaceMuted, border: Color
     let text, textSecondary: Color
     let accent: Color           // Burgundy #722F37
     let accentHover: Color
-    static let light: LoopflowPalette
-    static let dark: LoopflowPalette
+    static let light: LoopflowPalette     // Cream backgrounds
+    static let dark: LoopflowPalette      // Slate backgrounds (#2B3036)
+    static let deepWine: LoopflowPalette  // Burgundy backgrounds (#1E1215)
 }
+// Injected via EnvironmentValues.palette, resolved from AppStorage("appearanceMode")
 
 // Status colors (in LoopflowCore)
 extension Color {
@@ -870,9 +952,9 @@ struct DestructiveButtonStyle: ButtonStyle // Delete, Stop
 
 ### Bundled Fonts
 
-Registered in `ConcertoApp.swift`:
-- Cormorant Garamond (Regular, Medium, SemiBold, Bold, Italic)
-- Lato (Regular, Bold, Italic, BoldItalic)
+Registered via `CTFontManagerRegisterFontsForURL` in `ConcertoApp.swift`:
+- Cormorant Garamond (Regular, Medium, SemiBold)
+- Lato (Regular, Bold)
 - JetBrains Mono (Regular)
 
 ---
@@ -930,7 +1012,8 @@ ConcertoTests/
 ├── GhosttyTests.swift
 ├── RunStoreTests.swift
 ├── WaveRowTests.swift
-└── WaveStoreTests.swift
+├── WaveStoreTests.swift
+└── WaveTests.swift
 
 ConcertoUITests/
 └── ScreenshotPipelineTests.swift  # UI test modes: empty/sample/mock-waves

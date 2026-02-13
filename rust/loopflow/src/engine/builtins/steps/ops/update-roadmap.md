@@ -1,0 +1,50 @@
+---
+requires: diff vs main, roadmap/<wave>/
+produces: roadmap/<wave>/ (updated)
+---
+Revise the roadmap based on what we just shipped.
+
+## Goal
+
+After shipping a roadmap item, the plan should reflect what we learned. A roadmap written before building is a hypothesis. This step updates the hypothesis with evidence.
+
+## Workflow
+
+1. Read the diff — what was actually built?
+2. Read the remaining roadmap items in `roadmap/<wave>/`
+3. Read `roadmap/<wave>/README.md` for strategic context
+4. Compare what was built to what was planned. Note surprises — things that were harder, easier, or different than expected.
+5. Update the roadmap.
+
+## What to look for
+
+**Assumptions that broke.** The plan assumed X, but building revealed Y. Does this change what comes next?
+
+**Scope that shifted.** Did the shipped item end up bigger or smaller than planned? Does that compress or expand later phases?
+
+**New questions.** Did building this surface questions we didn't have before? Add them to the relevant phase.
+
+**Resolved questions.** Did building this answer open questions from later phases? Update them.
+
+**Sequence changes.** Given what we know now, is the ordering still right? Should something move earlier because it's more uncertain than we thought? Should something be dropped because building this made it unnecessary?
+
+## What to update
+
+- **Phase descriptions** — revise scope and approach based on what we learned
+- **Open questions** — add new ones, resolve answered ones
+- **Checkpoints** — update if the definition of "done" changed
+- **Try it** — update if we now know better how to test the feel
+- **What might change** — update with new information about where the plan is fragile
+- **README.md** — update north star or invariants if they've evolved
+
+## What not to do
+
+- Don't rewrite phases that are still far out. Update the next 1-2 phases; leave distant ones alone.
+- Don't remove open questions just because they're uncomfortable. If we still don't know, say so.
+- Don't add items just because you see opportunities. This step maintains the plan, it doesn't expand scope.
+
+## Output
+
+Updated files in `roadmap/<wave>/`. Commit the changes with a message describing what shifted and why.
+
+If nothing changed — the plan still holds — write a brief note in the commit: "roadmap: reviewed after <item>, no changes needed."

@@ -23,6 +23,10 @@ path = "src/bin/lfd.rs"
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 
+[[bin]]
+name = "lf-agent"
+path = "src/bin/lf-agent.rs"
+
 # --- Dependencies from loopflow-engine ---
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }

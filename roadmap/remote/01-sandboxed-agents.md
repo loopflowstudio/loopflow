@@ -17,9 +17,7 @@ lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes
 - Explicit credential injection (env + configured mounts) in Docker mode
 - Local execution remains default
 
-### Stage 01B (next)
-
-**First commit scope (now):**
+### Stage 01B (shipped)
 
 - **Repo volumes**: persistent per-repo Docker volume keyed by canonical repo URL (fallback: local path hash)
 - **Git layout**: one shared clone + per-wave/branch git worktrees inside that volume
@@ -27,7 +25,7 @@ lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes
 - **Concurrency**: fine-grained locking around shared clone mutations; isolated worktree execution stays concurrent
 - **No broad host path mounts** for repo workspaces
 
-**Follow-up in Stage 01B:**
+**In progress (→ scratch/remote-container-durability.md):**
 
 - **Durability**: persist container metadata in run state; rehydrate across daemon restart
 - **Recovery**: aggressive startup cleanup, but only for loopflow-labeled containers

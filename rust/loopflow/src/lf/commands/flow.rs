@@ -79,7 +79,7 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
 struct ForkBranchTask {
     index: usize,
     step_name: String,
-    step_directions: Vec<String>,
+    directions: Vec<String>,
     worktree: PathBuf,
     branch_name: String,
 }
@@ -118,6 +118,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     for (index, branch) in fork.branches.iter().enumerate() {
         let worktree = fork_worktree_path(repo, index);
         let branch_name = format!("{base_branch}-fork-{index}");
+        let directions = merge_directions(&cli.direction, &branch.step.directions);
         if let Err(err) = create_worktree(repo, &worktree, &branch_name).with_context(|| {
             format!(
                 "failed to create fork worktree {} for branch {}",
@@ -132,7 +133,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         tasks.push(ForkBranchTask {
             index,
             step_name: branch.step.name.clone(),
-            step_directions: branch.step.directions.clone(),
+            directions,
             worktree,
             branch_name,
         });
@@ -142,8 +143,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     for task in tasks.iter().cloned() {
         let worktree = task.worktree.clone();
         let step_name = task.step_name.clone();
-        let mut directions = cli.direction.clone();
-        directions.extend(task.step_directions.iter().cloned());
+        let directions = task.directions.clone();
         let msg = message.map(|value| value.to_string());
         let handle = std::thread::spawn(move || {
             run_fork_branch(&worktree, &step_name, &directions, msg.as_deref())
@@ -167,13 +167,18 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
                     "fork branch {} failed ({}): {}",
                     task.index, task.branch_name, err
                 );
+            } else {
+                eprintln!(
+                    "fork branch {} failed ({}): exited with {}",
+                    task.index, task.branch_name, exit_code
+                );
             }
         }
 
         manifest_branches.push(ForkManifestBranch {
             index: task.index,
             step: task.step_name.clone(),
-            direction: task.step_directions.join(","),
+            direction: task.directions.join(","),
             worktree: task.worktree.to_string_lossy().to_string(),
             branch: task.branch_name.clone(),
             exit_code,
@@ -283,9 +288,24 @@ fn fork_worktree_path(repo: &Path, index: usize) -> PathBuf {
         .join(format!("{name}.fork-{index}"))
 }
 
+fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
+    if extra.is_empty() {
+        return base.to_vec();
+    }
+    let mut combined = base.to_vec();
+    for direction in extra {
+        if !combined.contains(direction) {
+            combined.push(direction.clone());
+        }
+    }
+    combined
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{fork_worktree_path, write_fork_manifest, ForkManifest, ForkManifestBranch};
+    use super::{
+        fork_worktree_path, merge_directions, write_fork_manifest, ForkManifest, ForkManifestBranch,
+    };
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -313,5 +333,21 @@ mod tests {
         let manifest: ForkManifest = serde_json::from_str(&raw).expect("parse manifest");
 
         assert_eq!(manifest.branches, branches);
+    }
+
+    #[test]
+    fn merge_directions_preserves_order_and_deduplicates() {
+        let merged = merge_directions(
+            &["designer".to_string(), "ceo".to_string()],
+            &["ceo".to_string(), "product-engineer".to_string()],
+        );
+        assert_eq!(
+            merged,
+            vec![
+                "designer".to_string(),
+                "ceo".to_string(),
+                "product-engineer".to_string()
+            ]
+        );
     }
 }

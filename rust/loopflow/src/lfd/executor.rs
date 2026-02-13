@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use bollard::container::{
     Config as DockerContainerConfig, CreateContainerOptions, InspectContainerOptions,
@@ -1018,7 +1018,12 @@ impl DockerExecutor {
             .arg(dockerfile_path)
             .arg(repo_source)
             .output()
-            .await?;
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to run `docker build` for {image_tag}; ensure Docker CLI is installed and available in PATH"
+                )
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

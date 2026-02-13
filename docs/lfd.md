@@ -91,4 +91,5 @@ Docker mode also:
 
 - supports `fork` steps with `select: all` by creating isolated fork worktrees
 - builds a repo-specific image tag (`lfd-agent-<repo-key>:latest`) from `.lf/Dockerfile`
+- requires the `docker` CLI in `PATH` for repo image builds (`docker build`)
 - reattaches to running agent containers after daemon restart

@@ -11,7 +11,8 @@ use tokio::sync::Mutex;
 
 use crate::lfd::events::EventHub;
 use crate::lfd::github::{
-    github_repo_from_local, poll_check_runs, verify_webhook_signature, GitHubCheckRunEvent,
+    github_repo_from_local, poll_check_runs, verify_webhook_signature, CheckRun,
+    GitHubCheckRunEvent,
 };
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, run_store, ApiResult};
@@ -77,8 +78,10 @@ pub async fn github_webhook_handler(
         .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
 
     if event.action != "completed"
-        || event.check_run.status != "completed"
-        || event.check_run.conclusion.as_deref() != Some("failure")
+        || !is_failed_check_run(
+            &event.check_run.status,
+            event.check_run.conclusion.as_deref(),
+        )
     {
         return Ok(Json(
             serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
@@ -93,22 +96,14 @@ pub async fn github_webhook_handler(
             &pr.head.branch,
             Some(pr.number),
         )
-        .await?;
+        .await
+        .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
 
         for target in targets {
-            let wave_run_id = target.wave_run_id.clone();
             let emitted = emit_ci_failure(
                 &state.event_hub,
                 &state.ci_failure_cache,
-                Event::ci_failure(
-                    target.wave_id.clone(),
-                    wave_run_id,
-                    pr.number,
-                    pr.head.branch.clone(),
-                    event.check_run.head_sha.clone(),
-                    event.check_run.name.clone(),
-                    event.check_run.html_url.clone(),
-                ),
+                build_ci_failure_event(&target, &event.check_run),
             )
             .await;
             if emitted {
@@ -117,7 +112,7 @@ pub async fn github_webhook_handler(
                     wave_id = %target.wave_id,
                     wave_run_id = %target.wave_run_id,
                     repo = %event.repository.full_name,
-                    branch = %pr.head.branch,
+                    branch = %target.branch,
                     commit_sha = %event.check_run.head_sha,
                     check_id = event.check_run.id,
                     check_name = %event.check_run.name,
@@ -162,20 +157,11 @@ async fn emit_ci_failures_for_targets(
     for target in targets {
         let check_runs = poll_check_runs(&target.repo_full_name, &target.branch, token).await?;
         for check_run in check_runs {
-            if check_run.status != "completed" || check_run.conclusion.as_deref() != Some("failure")
-            {
+            if !is_failed_check_run(&check_run.status, check_run.conclusion.as_deref()) {
                 continue;
             }
 
-            let event = Event::ci_failure(
-                target.wave_id.clone(),
-                target.wave_run_id.clone(),
-                target.pr_number,
-                target.branch.clone(),
-                check_run.head_sha.clone(),
-                check_run.name.clone(),
-                check_run.html_url.clone(),
-            );
+            let event = build_ci_failure_event(&target, &check_run);
             if emit_ci_failure(event_hub, cache, event).await {
                 emitted += 1;
             }
@@ -204,27 +190,17 @@ async fn list_wave_ci_targets(
             let Some(repo_full_name) = github_repo_from_local(Path::new(&wave.repo)) else {
                 continue;
             };
-            let runs = store.list_wave_runs(Some(&wave.id), None)?;
-            let Some(run) = select_run_with_open_pr(runs) else {
+            let Some(run) = store
+                .list_wave_runs(Some(&wave.id), None)?
+                .into_iter()
+                .find(|run| run_matches_ci_target(run, None, None))
+            else {
                 continue;
             };
-            let Some(pr) = run.snapshot.pr.as_ref() else {
+            let Some(target) = wave_ci_target(&wave.id, &repo_full_name, &run) else {
                 continue;
             };
-            let Some(branch) = pr.branch.clone() else {
-                continue;
-            };
-            let Some(pr_number) = pr.number else {
-                continue;
-            };
-
-            targets.push(WaveCiTarget {
-                wave_id: wave.id.clone(),
-                wave_run_id: run.id.clone(),
-                repo_full_name,
-                branch,
-                pr_number,
-            });
+            targets.push(target);
         }
         Ok(targets)
     })
@@ -237,7 +213,7 @@ async fn find_wave_ci_targets(
     repo_full_name: &str,
     branch: &str,
     pr_number: Option<u32>,
-) -> Result<Vec<WaveCiTarget>, (StatusCode, Json<crate::lfd::http::dto::ErrorResponse>)> {
+) -> Result<Vec<WaveCiTarget>, String> {
     let repo_full_name = repo_full_name.to_string();
     let branch = branch.to_string();
     run_store(store, move |store| {
@@ -252,48 +228,48 @@ async fn find_wave_ci_targets(
                 continue;
             }
 
-            let runs = store.list_wave_runs(Some(&wave.id), None)?;
-            let Some(run) = runs.into_iter().find(|run| {
-                run.is_main()
-                    && run.snapshot.pr.as_ref().is_some_and(|pr| {
-                        pr.branch.as_deref() == Some(branch.as_str())
-                            && pr_number.is_none_or(|number| pr.number == Some(number))
-                            && is_open_pr_state(pr.state.as_deref())
-                    })
-            }) else {
+            let Some(run) = store
+                .list_wave_runs(Some(&wave.id), None)?
+                .into_iter()
+                .find(|run| run_matches_ci_target(run, Some(branch.as_str()), pr_number))
+            else {
                 continue;
             };
-
-            let Some(pr) = run.snapshot.pr.as_ref() else {
+            let Some(target) = wave_ci_target(&wave.id, &wave_repo, &run) else {
                 continue;
             };
-            let Some(target_pr_number) = pr.number else {
-                continue;
-            };
-            targets.push(WaveCiTarget {
-                wave_id: wave.id.clone(),
-                wave_run_id: run.id.clone(),
-                repo_full_name: wave_repo,
-                branch: branch.clone(),
-                pr_number: target_pr_number,
-            });
+            targets.push(target);
         }
 
         Ok(targets)
     })
     .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+    .map_err(|err| err.to_string())
 }
 
-fn select_run_with_open_pr(runs: Vec<WaveRun>) -> Option<WaveRun> {
-    runs.into_iter().find(|run| {
-        run.is_main()
-            && run
-                .snapshot
-                .pr
-                .as_ref()
-                .is_some_and(|pr| is_open_pr_state(pr.state.as_deref()))
-    })
+fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<u32>) -> bool {
+    if !run.is_main() {
+        return false;
+    }
+
+    let Some(pr) = run.snapshot.pr.as_ref() else {
+        return false;
+    };
+    if !is_open_pr_state(pr.state.as_deref()) {
+        return false;
+    }
+    if let Some(branch) = branch {
+        if pr.branch.as_deref() != Some(branch) {
+            return false;
+        }
+    }
+    if let Some(pr_number) = pr_number {
+        if pr.number != Some(pr_number) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn is_open_pr_state(state: Option<&str>) -> bool {
@@ -301,6 +277,33 @@ fn is_open_pr_state(state: Option<&str>) -> bool {
         Some(value) => value.eq_ignore_ascii_case("open") || value.eq_ignore_ascii_case("draft"),
         None => true,
     }
+}
+
+fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {
+    status == "completed" && conclusion == Some("failure")
+}
+
+fn wave_ci_target(wave_id: &LfdId, repo_full_name: &str, run: &WaveRun) -> Option<WaveCiTarget> {
+    let pr = run.snapshot.pr.as_ref()?;
+    Some(WaveCiTarget {
+        wave_id: wave_id.clone(),
+        wave_run_id: run.id.clone(),
+        repo_full_name: repo_full_name.to_string(),
+        branch: pr.branch.clone()?,
+        pr_number: pr.number?,
+    })
+}
+
+fn build_ci_failure_event(target: &WaveCiTarget, check_run: &CheckRun) -> Event {
+    Event::ci_failure(
+        target.wave_id.clone(),
+        target.wave_run_id.clone(),
+        target.pr_number,
+        target.branch.clone(),
+        check_run.head_sha.clone(),
+        check_run.name.clone(),
+        check_run.html_url.clone(),
+    )
 }
 
 async fn emit_ci_failure(

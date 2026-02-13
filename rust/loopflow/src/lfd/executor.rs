@@ -788,16 +788,20 @@ impl DockerExecutor {
 
         if let Some(wave_run_id) = &agent.wave_run_id {
             if let Some(mut run) = self.store.get_wave_run(wave_run_id)? {
+                let mut should_fail_wave = false;
                 if !matches!(run.status, WaveRunStatus::Completed | WaveRunStatus::Failed) {
                     run.status = WaveRunStatus::Failed;
                     run.error = Some("container lost during lfd restart.".to_string());
                     run.ended_at = Some(OffsetDateTime::now_utc());
                     self.store.update_wave_run(&run)?;
+                    should_fail_wave = true;
                 }
 
-                if let Some(mut wave) = self.store.get_wave(&run.wave_id)? {
-                    wave.status = WaveStatus::Failed;
-                    let _ = self.store.update_wave(&wave);
+                if should_fail_wave {
+                    if let Some(mut wave) = self.store.get_wave(&run.wave_id)? {
+                        wave.status = WaveStatus::Failed;
+                        let _ = self.store.update_wave(&wave);
+                    }
                 }
             }
         }
@@ -3217,6 +3221,95 @@ mod tests {
 
         assert_eq!(backend.stopped(), vec!["container-orphan".to_string()]);
         assert_eq!(backend.removed(), vec!["container-orphan".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db"));
+
+        let wave = Wave {
+            id: LfdId::new(),
+            name: "completed-wave".to_string(),
+            repo: tmp.path().to_string_lossy().to_string(),
+            flow: "test-flow".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Idle,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.create_wave(&wave).expect("wave should be created");
+
+        let run = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: tmp.path().to_string_lossy().to_string(),
+                flow: "test-flow".to_string(),
+                direction: vec![],
+                area: vec![],
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Completed,
+            worktree: tmp.path().to_string_lossy().to_string(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: Some(OffsetDateTime::now_utc()),
+            error: None,
+            flow_parents: vec![],
+        };
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created");
+
+        let stale_agent = make_running_agent(&run, Some("container-missing"), "step-a");
+        store
+            .start_agent(&stale_agent)
+            .expect("stale agent should start");
+
+        let config = ExecutorConfig {
+            r#type: ExecutorType::Docker,
+            image: "loopflow/agent:test".to_string(),
+            credentials: Default::default(),
+        };
+        let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
+        let output_dir = tmp.path().join("output");
+        std::fs::create_dir_all(&output_dir).expect("output dir");
+        let output = OutputHub::new(16, output_dir);
+
+        let backend = MockDockerRecoveryBackend::new(HashMap::new(), Vec::new());
+
+        let recovery = executor
+            .recover_startup_with_backend(&backend, &output, false)
+            .await
+            .expect("startup recovery should succeed");
+
+        assert_eq!(recovery.rehydrated_agents, 0);
+        assert_eq!(recovery.lost_agents_failed, 1);
+        assert_eq!(recovery.orphaned_containers_removed, 0);
+
+        let agent_after = store
+            .get_agent(&stale_agent.id)
+            .expect("get agent")
+            .expect("agent exists");
+        assert_eq!(agent_after.status, AgentStatus::Failed);
+        assert!(agent_after.ended_at.is_some());
+
+        let run_after = store
+            .get_wave_run(&run.id)
+            .expect("get run")
+            .expect("run exists");
+        assert_eq!(run_after.status, WaveRunStatus::Completed);
+
+        let wave_after = store
+            .get_wave(&wave.id)
+            .expect("get wave")
+            .expect("wave exists");
+        assert_eq!(wave_after.status, WaveStatus::Idle);
     }
 
     struct MockRunner;

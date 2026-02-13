@@ -52,10 +52,9 @@ impl LfdConfig {
 
     fn apply_env_overrides(&mut self) {
         if let Ok(value) = std::env::var("LFD_EXECUTOR_TYPE") {
-            self.executor.r#type = match value.as_str() {
-                "docker" => ExecutorType::Docker,
-                _ => ExecutorType::Local,
-            };
+            if let Some(r#type) = ExecutorType::from_env(&value) {
+                self.executor.r#type = r#type;
+            }
         }
 
         if let Ok(value) = std::env::var("LFD_EXECUTOR_IMAGE") {
@@ -72,6 +71,16 @@ pub enum ExecutorType {
     #[default]
     Local,
     Docker,
+}
+
+impl ExecutorType {
+    fn from_env(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Some(Self::Local),
+            "docker" => Some(Self::Docker),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -162,5 +171,19 @@ executor:
 
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
         assert_eq!(config.executor.image, "loopflow/agent:env");
+    }
+
+    #[test]
+    fn invalid_executor_type_env_value_does_not_override_config() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var("LFD_EXECUTOR_TYPE", "unknown");
+
+        let mut config = LfdConfig::default();
+        config.executor.r#type = ExecutorType::Docker;
+        config.apply_env_overrides();
+
+        std::env::remove_var("LFD_EXECUTOR_TYPE");
+
+        assert_eq!(config.executor.r#type, ExecutorType::Docker);
     }
 }

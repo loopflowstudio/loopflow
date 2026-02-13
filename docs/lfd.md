@@ -66,6 +66,8 @@ executor:
       - ~/.codex/auth.json:/home/agent/.codex/auth.json
 ```
 
+`credentials.mounts` uses `host_path:container_path`. `~/...` is expanded to your home directory, and `container_path` must be absolute.
+
 Environment overrides:
 
 ```bash

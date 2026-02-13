@@ -181,17 +181,46 @@ struct DockerCredentialMount {
 }
 
 impl DockerCredentialMount {
-    fn from_spec(spec: &str) -> Option<Self> {
+    fn from_spec(spec: &str) -> std::result::Result<Self, String> {
         let mut parts = spec.splitn(2, ':');
-        let host_path = parts.next()?.trim();
-        let container_path = parts.next()?.trim();
+        let host_path = parts
+            .next()
+            .ok_or_else(|| "missing host path".to_string())?
+            .trim();
+        let container_path = parts
+            .next()
+            .ok_or_else(|| "missing container path".to_string())?
+            .trim();
         if host_path.is_empty() || container_path.is_empty() {
-            return None;
+            return Err("mount paths must be non-empty".to_string());
         }
-        Some(Self {
-            host_path: PathBuf::from(host_path),
+        if !container_path.starts_with('/') {
+            return Err("container path must be absolute".to_string());
+        }
+
+        let host_path = Self::expand_host_path(host_path);
+        if !host_path.is_absolute() {
+            return Err("host path must be absolute or use ~/...".to_string());
+        }
+
+        Ok(Self {
+            host_path,
             container_path: container_path.to_string(),
         })
+    }
+
+    fn expand_host_path(path: &str) -> PathBuf {
+        if path == "~" {
+            if let Some(home) = dirs::home_dir() {
+                return home;
+            }
+        }
+        if let Some(rest) = path.strip_prefix("~/") {
+            if let Some(home) = dirs::home_dir() {
+                return home.join(rest);
+            }
+        }
+        PathBuf::from(path)
     }
 }
 
@@ -204,12 +233,16 @@ impl DockerExecutor {
             .credentials
             .mounts
             .iter()
-            .filter_map(|spec| {
-                let mount = DockerCredentialMount::from_spec(spec);
-                if mount.is_none() {
-                    warn!(mount = %spec, "invalid docker credential mount; expected host:container");
+            .filter_map(|spec| match DockerCredentialMount::from_spec(spec) {
+                Ok(mount) => Some(mount),
+                Err(err) => {
+                    warn!(
+                        mount = %spec,
+                        error = %err,
+                        "invalid docker credential mount; expected host:container"
+                    );
+                    None
                 }
-                mount
             })
             .collect();
 
@@ -227,16 +260,28 @@ impl DockerExecutor {
     }
 
     fn rewrite_command_paths(cmd: Vec<String>, host_root: &Path) -> Vec<String> {
-        let host_root = host_root.to_string_lossy().to_string();
+        let host_root = host_root.to_string_lossy();
+        let host_root = if host_root == "/" {
+            "/".to_string()
+        } else {
+            host_root.trim_end_matches('/').to_string()
+        };
         cmd.into_iter()
-            .map(|arg| {
-                if arg.starts_with(&host_root) {
-                    arg.replacen(&host_root, CONTAINER_WORKSPACE, 1)
-                } else {
-                    arg
-                }
-            })
+            .map(|arg| Self::rewrite_command_arg_path(&arg, &host_root))
             .collect()
+    }
+
+    fn rewrite_command_arg_path(arg: &str, host_root: &str) -> String {
+        if arg == host_root {
+            return CONTAINER_WORKSPACE.to_string();
+        }
+
+        match arg.strip_prefix(host_root) {
+            Some(suffix) if suffix.starts_with('/') => {
+                format!("{CONTAINER_WORKSPACE}{suffix}")
+            }
+            _ => arg.to_string(),
+        }
     }
 
     fn collect_env(&self) -> Vec<String> {
@@ -1599,12 +1644,15 @@ mod tests {
 
     #[test]
     fn docker_mount_spec_requires_host_and_container_paths() {
+        let home = dirs::home_dir().expect("home directory should be available");
         let mount = DockerCredentialMount::from_spec("~/.claude:/home/agent/.claude")
             .expect("mount spec should parse");
-        assert_eq!(mount.host_path, PathBuf::from("~/.claude"));
+        assert_eq!(mount.host_path, home.join(".claude"));
         assert_eq!(mount.container_path, "/home/agent/.claude");
-        assert!(DockerCredentialMount::from_spec("missing-colon").is_none());
-        assert!(DockerCredentialMount::from_spec(":/home/agent/.claude").is_none());
+        assert!(DockerCredentialMount::from_spec("missing-colon").is_err());
+        assert!(DockerCredentialMount::from_spec(":/home/agent/.claude").is_err());
+        assert!(DockerCredentialMount::from_spec("relative:/home/agent/.claude").is_err());
+        assert!(DockerCredentialMount::from_spec("/tmp/claude:relative").is_err());
     }
 
     #[test]
@@ -1615,6 +1663,8 @@ mod tests {
             "/tmp/worktree/.lf/prompt.md".to_string(),
             "-C".to_string(),
             "/tmp/worktree".to_string(),
+            "--danger".to_string(),
+            "/tmp/worktree-copy".to_string(),
         ];
         let rewritten = DockerExecutor::rewrite_command_paths(cmd, Path::new("/tmp/worktree"));
         assert_eq!(
@@ -1625,6 +1675,8 @@ mod tests {
                 "/workspace/.lf/prompt.md".to_string(),
                 "-C".to_string(),
                 "/workspace".to_string(),
+                "--danger".to_string(),
+                "/tmp/worktree-copy".to_string(),
             ]
         );
     }

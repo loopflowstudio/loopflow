@@ -14,6 +14,7 @@ Commands:
     xcode           Open in Xcode
     logs            Tail the app logs
     lfd             Stop installed lfd and run from this branch
+    agent-image     Build the Docker agent image
 
     ghostty-build   Build GhosttyKit xcframework locally
     ghostty-update  Build, upload to R2, and update Package.swift
@@ -173,7 +174,7 @@ def cmd_logs() -> int:
     return 1
 
 
-def cmd_lfd() -> int:
+def cmd_lfd(docker: bool = False) -> int:
     """Stop installed lfd and run from this branch."""
     plist = Path.home() / "Library" / "LaunchAgents" / "com.loopflow.lfd.plist"
 
@@ -204,6 +205,11 @@ def cmd_lfd() -> int:
     if result.returncode != 0:
         return result.returncode
 
+    # Docker executor mode
+    if docker:
+        os.environ["LFD_EXECUTOR_TYPE"] = "docker"
+        print("Docker executor enabled")
+
     # Enable verbose logging
     os.environ["RUST_LOG"] = "loopflow=debug,tower_http=debug"
 
@@ -211,6 +217,16 @@ def cmd_lfd() -> int:
     lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
     print("Starting lfd from this branch (debug logging enabled)...")
     os.execv(lfd_bin, [lfd_bin, "serve"])
+
+
+def cmd_agent_image() -> int:
+    """Build the Docker agent image."""
+    print("Building loopflow/agent:latest...")
+    return run(
+        ["docker", "build", "-t", "loopflow/agent:latest", "docker/agent"],
+        cwd=REPO_ROOT,
+        check=False,
+    ).returncode
 
 
 def _install_dev_app() -> None:
@@ -365,6 +381,7 @@ COMMANDS = {
     "xcode": (cmd_xcode, "Open in Xcode"),
     "logs": (cmd_logs, "Tail the app logs"),
     "lfd": (cmd_lfd, "Stop installed lfd and run from this branch"),
+    "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
     "ghostty-update": (cmd_ghostty_update, "Build, upload to R2, update Package.swift"),
 }
@@ -378,7 +395,9 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", metavar="command")
 
     for name, (func, help_text) in COMMANDS.items():
-        subparsers.add_parser(name, help=help_text)
+        sub = subparsers.add_parser(name, help=help_text)
+        if name == "lfd":
+            sub.add_argument("--docker", action="store_true", help="Use Docker executor")
 
     args = parser.parse_args()
 
@@ -387,6 +406,8 @@ def main() -> int:
         return 0
 
     func, _ = COMMANDS[args.command]
+    if args.command == "lfd":
+        return func(docker=args.docker)
     return func()
 
 

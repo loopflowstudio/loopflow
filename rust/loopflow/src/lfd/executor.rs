@@ -423,13 +423,8 @@ impl AgentExecutor for DockerExecutor {
             mounts: Some(mounts),
             network_mode: Some("bridge".to_string()),
             privileged: Some(false),
-            readonly_rootfs: Some(true),
             cap_drop: Some(vec!["ALL".to_string()]),
             auto_remove: Some(false),
-            tmpfs: Some(HashMap::from([(
-                "/tmp".to_string(),
-                "rw,noexec,nosuid".to_string(),
-            )])),
             ..Default::default()
         };
 
@@ -445,7 +440,7 @@ impl AgentExecutor for DockerExecutor {
                     cmd: Some(cmd),
                     working_dir: Some(CONTAINER_WORKSPACE.to_string()),
                     env: Some(env),
-                    user: Some("agent".to_string()),
+                    user: Some("root".to_string()),
                     host_config: Some(host_config),
                     attach_stdout: Some(true),
                     attach_stderr: Some(true),

@@ -58,23 +58,37 @@ LFD_MAX_SLOTS     # concurrent run slots
 ```yaml
 executor:
   type: local # or docker
-  image: loopflow/agent:latest
+  image: loopflow/agent:latest # base image for generated .lf/Dockerfile
   credentials:
     env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
     mounts:
-      - ~/.claude:/home/agent/.claude
-      - ~/.codex/auth.json:/home/agent/.codex/auth.json
+      - claude
+      - codex
+      - ssh
 ```
 
-`credentials.mounts` uses `host_path:container_path`. `~/...` is expanded to your home directory, and `container_path` must be absolute.
+`credentials.mounts` uses named allowlisted mounts only:
+
+- `claude` → `~/.claude`
+- `codex` → `~/.codex`
+- `gemini` → `~/.config/gemini`
+- `gitconfig` → `~/.gitconfig`
+- `ssh` → `~/.ssh`
+- `gnupg` → `~/.gnupg`
+
+Names are mounted read-only into `/home/agent/...`. Raw `host:container` mount strings are rejected.
 
 Environment overrides:
 
 ```bash
 LFD_EXECUTOR_TYPE=docker
-LFD_EXECUTOR_IMAGE=loopflow/agent:latest
+LFD_EXECUTOR_IMAGE=loopflow/agent:latest # base image for generated Dockerfiles
 ```
 
 When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 
-Current limitation: `fork` steps with `select: all` are not supported by the Docker executor yet.
+Docker mode also:
+
+- supports `fork` steps with `select: all` by creating isolated fork worktrees
+- builds a repo-specific image tag (`lfd-agent-<repo-key>:latest`) from `.lf/Dockerfile`
+- reattaches to running agent containers after daemon restart

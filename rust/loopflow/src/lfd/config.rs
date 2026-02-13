@@ -1,5 +1,7 @@
 use serde::Deserialize;
+use std::io::ErrorKind;
 use std::path::PathBuf;
+use tracing::warn;
 
 const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
@@ -37,10 +39,29 @@ pub struct LfdConfig {
 
 impl LfdConfig {
     pub fn load() -> Self {
-        let mut config: Self = std::fs::read_to_string(config_path())
-            .ok()
-            .and_then(|content| serde_yaml::from_str(&content).ok())
-            .unwrap_or_default();
+        let path = config_path();
+        let mut config: Self = match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_yaml::from_str(&content) {
+                Ok(config) => config,
+                Err(err) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %err,
+                        "invalid lfd config, using defaults"
+                    );
+                    Self::default()
+                }
+            },
+            Err(err) if err.kind() == ErrorKind::NotFound => Self::default(),
+            Err(err) => {
+                warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "failed reading lfd config, using defaults"
+                );
+                Self::default()
+            }
+        };
 
         config.apply_env_overrides();
         config
@@ -153,6 +174,7 @@ fn config_path() -> PathBuf {
 mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -224,5 +246,25 @@ executor:
         std::env::remove_var("LFD_EXECUTOR_TYPE");
 
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
+    }
+
+    #[test]
+    fn load_invalid_yaml_falls_back_to_defaults() {
+        let _guard = env_lock().lock().expect("env lock");
+        let tmp = tempdir().expect("tempdir");
+        let lf_dir = tmp.path().join(".lf");
+        std::fs::create_dir_all(&lf_dir).expect("lf dir");
+        std::fs::write(lf_dir.join("lfd.yaml"), "executor: [").expect("write config");
+
+        let original_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", tmp.path());
+        let config = LfdConfig::load();
+        match original_home {
+            Some(home) => std::env::set_var("HOME", home),
+            None => std::env::remove_var("HOME"),
+        }
+
+        assert_eq!(config.executor.r#type, ExecutorType::Local);
+        assert_eq!(config.executor.image, DEFAULT_EXECUTOR_IMAGE);
     }
 }

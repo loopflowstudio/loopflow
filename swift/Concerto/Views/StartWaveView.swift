@@ -52,22 +52,22 @@ struct StartWaveView: View {
         errorMessage = nil
 
         Task {
+            defer { isCreating = false }
+
             do {
                 if !repoState.lfdConnected {
                     try await repoState.connectLfd(outputBuffer: outputBuffer)
                     try await Task.sleep(for: .milliseconds(500))
                 }
 
-                try await repoState.createWave(name: waveName)
+                let name = waveName.trimmingCharacters(in: .whitespacesAndNewlines)
+                try await repoState.createWave(name: name)
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
-                if !repoState.lfdConnected {
-                    errorMessage = "lfd daemon not running. Run 'lfd install' in terminal."
-                } else {
-                    errorMessage = error.localizedDescription
-                }
+                errorMessage = repoState.lfdConnected
+                    ? error.localizedDescription
+                    : "lfd daemon not running. Run 'lfd install' in terminal."
             }
-            isCreating = false
         }
     }
 }

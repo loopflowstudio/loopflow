@@ -298,41 +298,26 @@ struct WaveSidebar: View {
     }
 
     private func createWaveDirectly() {
-        LoggingService.ui("createWave: button clicked, lfdConnected=\(repoState.lfdConnected)")
-        guard !isCreatingWave else {
-            LoggingService.ui("createWave: already in progress, ignoring")
-            return
-        }
+        guard !isCreatingWave else { return }
         isCreatingWave = true
 
         Task {
+            defer { isCreatingWave = false }
+
             do {
-                // Ensure lfd is connected before creating wave
                 if !repoState.lfdConnected {
-                    LoggingService.ui("createWave: lfd not connected, attempting connect")
                     try await repoState.connectLfd(outputBuffer: outputBuffer)
-                    // Brief delay to let the daemon start
                     try await Task.sleep(for: .milliseconds(500))
-                    LoggingService.ui("createWave: connect completed, lfdConnected=\(repoState.lfdConnected)")
                 }
 
-                // Create with auto-generated name, then select it
-                LoggingService.ui("createWave: calling repoState.createWave")
                 try await repoState.createWave(name: "")
-                LoggingService.ui("createWave: success, triggering name edit")
-                // The wave is selected in createWave, trigger name edit
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
-                LoggingService.ui("createWave: error=\(error.localizedDescription)")
-                // Provide clearer error message for daemon issues
-                if !repoState.lfdConnected {
-                    actionError = "lfd daemon not running. Run 'lfd install' in terminal."
-                } else {
-                    actionError = error.localizedDescription
-                }
+                actionError = repoState.lfdConnected
+                    ? error.localizedDescription
+                    : "lfd daemon not running. Run 'lfd install' in terminal."
                 showingActionError = true
             }
-            isCreatingWave = false
         }
     }
 }

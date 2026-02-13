@@ -120,7 +120,6 @@ struct ScreenshotWindow: View {
 /// NavigationSplitView's sidebar doesn't capture properly with bitmapImageRepForCachingDisplay.
 private struct ScreenshotLayout: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
 
     var body: some View {

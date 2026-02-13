@@ -45,7 +45,7 @@ use crate::engine::worktrees::{
 
 use time::OffsetDateTime;
 
-use crate::lfd::config::{ExecutorConfig, ExecutorType};
+use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorType};
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
@@ -196,18 +196,19 @@ impl AgentExecutor for LocalProcessExecutor {
 pub struct DockerExecutor {
     store: SharedStore,
     docker: Docker,
-    image: String,
+    base_image: String,
     credential_env: Vec<String>,
     credential_mounts: Vec<DockerCredentialMount>,
     active: Arc<Mutex<HashMap<String, String>>>,
     mutation_locks: RepoMutationLocks,
+    image_build_locks: ImageBuildLocks,
     prepared_runs: Arc<Mutex<HashSet<String>>>,
 }
 
 impl std::fmt::Debug for DockerExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DockerExecutor")
-            .field("image", &self.image)
+            .field("base_image", &self.base_image)
             .finish()
     }
 }
@@ -227,6 +228,21 @@ impl RepoMutationLocks {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ImageBuildLocks {
+    inner: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+}
+
+impl ImageBuildLocks {
+    async fn for_tag(&self, tag: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.inner.lock().await;
+        locks
+            .entry(tag.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DockerCredentialMount {
     host_path: PathBuf,
@@ -234,46 +250,29 @@ struct DockerCredentialMount {
 }
 
 impl DockerCredentialMount {
-    fn from_spec(spec: &str) -> std::result::Result<Self, String> {
-        let mut parts = spec.splitn(2, ':');
-        let host_path = parts
-            .next()
-            .ok_or_else(|| "missing host path".to_string())?
-            .trim();
-        let container_path = parts
-            .next()
-            .ok_or_else(|| "missing container path".to_string())?
-            .trim();
-        if host_path.is_empty() || container_path.is_empty() {
-            return Err("mount paths must be non-empty".to_string());
-        }
-        if !container_path.starts_with('/') {
-            return Err("container path must be absolute".to_string());
-        }
-
-        let host_path = Self::expand_host_path(host_path);
-        if !host_path.is_absolute() {
-            return Err("host path must be absolute or use ~/...".to_string());
-        }
-
+    fn from_config(mount: &CredentialMount) -> std::result::Result<Self, String> {
+        let relative = resolve_credential_mount(mount.name())?;
+        let home = dirs::home_dir().ok_or_else(|| "home directory not available".to_string())?;
         Ok(Self {
-            host_path,
-            container_path: container_path.to_string(),
+            host_path: home.join(relative),
+            container_path: format!("/home/agent/{relative}"),
         })
     }
+}
 
-    fn expand_host_path(path: &str) -> PathBuf {
-        if path == "~" {
-            if let Some(home) = dirs::home_dir() {
-                return home;
-            }
-        }
-        if let Some(rest) = path.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                return home.join(rest);
-            }
-        }
-        PathBuf::from(path)
+fn resolve_credential_mount(name: &str) -> std::result::Result<&'static str, String> {
+    let normalized = name.trim().to_ascii_lowercase();
+    let key = normalized.strip_prefix("~/").unwrap_or(&normalized);
+    match key {
+        "claude" | ".claude" => Ok(".claude"),
+        "codex" | ".codex" => Ok(".codex"),
+        "gemini" | ".config/gemini" => Ok(".config/gemini"),
+        "gitconfig" | ".gitconfig" => Ok(".gitconfig"),
+        "ssh" | ".ssh" => Ok(".ssh"),
+        "gnupg" | ".gnupg" => Ok(".gnupg"),
+        _ => Err(format!(
+            "unknown credential mount '{name}'. allowed mounts: claude, codex, gemini, gitconfig, ssh, gnupg"
+        )),
     }
 }
 
@@ -514,27 +513,19 @@ impl DockerExecutor {
             .credentials
             .mounts
             .iter()
-            .filter_map(|spec| match DockerCredentialMount::from_spec(spec) {
-                Ok(mount) => Some(mount),
-                Err(err) => {
-                    warn!(
-                        mount = %spec,
-                        error = %err,
-                        "invalid docker credential mount; expected host:container"
-                    );
-                    None
-                }
-            })
-            .collect();
+            .map(DockerCredentialMount::from_config)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|err| anyhow!("invalid docker credential mount: {err}"))?;
 
         Ok(Self {
             store,
             docker,
-            image: config.image.clone(),
+            base_image: config.image.clone(),
             credential_env: config.credentials.env.clone(),
             credential_mounts,
             active: Arc::new(Mutex::new(HashMap::new())),
             mutation_locks: RepoMutationLocks::default(),
+            image_build_locks: ImageBuildLocks::default(),
             prepared_runs: Arc::new(Mutex::new(HashSet::new())),
         })
     }
@@ -945,6 +936,160 @@ impl DockerExecutor {
         mounts
     }
 
+    fn repo_image_tag(&self, workspace: &DockerWorkspace) -> String {
+        format!("lfd-agent-{}:latest", workspace.volume.repo_key)
+    }
+
+    fn dockerfile_path(repo_source: &Path) -> PathBuf {
+        repo_source.join(".lf").join("Dockerfile")
+    }
+
+    fn env_setup_path(repo_source: &Path) -> PathBuf {
+        repo_source.join(".lf").join("env-setup.sh")
+    }
+
+    fn stale_sentinel_path(repo_source: &Path) -> PathBuf {
+        repo_source.join(".lf").join(".docker-stale")
+    }
+
+    fn default_dockerfile(&self) -> String {
+        format!(
+            "FROM {}\n\n# Project-specific setup\nCOPY .lf/env-setup.sh /tmp/env-setup.sh\nRUN if [ -f /tmp/env-setup.sh ]; then sh /tmp/env-setup.sh; fi\n\nWORKDIR /workspace\n",
+            self.base_image
+        )
+    }
+
+    fn ensure_repo_dockerfile(&self, repo_source: &Path) -> Result<PathBuf> {
+        let dockerfile_path = Self::dockerfile_path(repo_source);
+        if dockerfile_path.exists() {
+            return Ok(dockerfile_path);
+        }
+
+        let lf_dir = repo_source.join(".lf");
+        std::fs::create_dir_all(&lf_dir)?;
+        std::fs::write(&dockerfile_path, self.default_dockerfile())?;
+        info!(
+            path = %dockerfile_path.display(),
+            "generated default .lf/Dockerfile for docker executor"
+        );
+        Ok(dockerfile_path)
+    }
+
+    fn parse_from_ref(dockerfile: &str) -> Option<String> {
+        dockerfile.lines().map(str::trim).find_map(|line| {
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let mut parts = line.split_whitespace();
+            let keyword = parts.next()?;
+            if !keyword.eq_ignore_ascii_case("from") {
+                return None;
+            }
+            parts.next().map(str::to_string)
+        })
+    }
+
+    fn build_fingerprint(dockerfile: &str, env_setup: &str, from_ref: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(dockerfile.as_bytes());
+        hasher.update(b"\n--env-setup--\n");
+        hasher.update(env_setup.as_bytes());
+        hasher.update(b"\n--from--\n");
+        hasher.update(from_ref.as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    async fn inspect_image_fingerprint(&self, image_tag: &str) -> Result<Option<String>> {
+        match self.docker.inspect_image(image_tag).await {
+            Ok(details) => Ok(details
+                .config
+                .and_then(|config| config.labels)
+                .and_then(|labels| labels.get("io.loopflow.build-fingerprint").cloned())),
+            Err(DockerError::DockerResponseServerError {
+                status_code: 404, ..
+            }) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    async fn build_repo_image(
+        &self,
+        image_tag: &str,
+        dockerfile_path: &Path,
+        repo_source: &Path,
+        fingerprint: &str,
+    ) -> Result<()> {
+        let output = Command::new("docker")
+            .arg("build")
+            .arg("-t")
+            .arg(image_tag)
+            .arg("--label")
+            .arg(format!("io.loopflow.build-fingerprint={fingerprint}"))
+            .arg("-f")
+            .arg(dockerfile_path)
+            .arg(repo_source)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(anyhow!(
+                "docker build failed for {image_tag}: {}\n{}",
+                stderr.trim(),
+                stdout.trim()
+            ));
+        }
+        Ok(())
+    }
+
+    async fn ensure_repo_image(&self, workspace: &DockerWorkspace) -> Result<String> {
+        let image_tag = self.repo_image_tag(workspace);
+        let lock = self.image_build_locks.for_tag(&image_tag).await;
+        let _guard = lock.lock().await;
+
+        let dockerfile_path = self.ensure_repo_dockerfile(&workspace.repo_source)?;
+        let dockerfile = std::fs::read_to_string(&dockerfile_path)?;
+        let env_setup_path = Self::env_setup_path(&workspace.repo_source);
+        let env_setup = if env_setup_path.exists() {
+            std::fs::read_to_string(env_setup_path)?
+        } else {
+            String::new()
+        };
+
+        let from_ref = Self::parse_from_ref(&dockerfile).unwrap_or_else(|| self.base_image.clone());
+        let fingerprint = Self::build_fingerprint(&dockerfile, &env_setup, &from_ref);
+        let stale_sentinel = Self::stale_sentinel_path(&workspace.repo_source);
+        let stale_requested = stale_sentinel.exists();
+        let existing_fingerprint = self.inspect_image_fingerprint(&image_tag).await?;
+
+        let should_rebuild = stale_requested
+            || existing_fingerprint
+                .as_deref()
+                .map(|existing| existing != fingerprint)
+                .unwrap_or(true);
+
+        if should_rebuild {
+            info!(
+                image = %image_tag,
+                stale_requested,
+                "building docker agent image for repo"
+            );
+            self.build_repo_image(
+                &image_tag,
+                &dockerfile_path,
+                &workspace.repo_source,
+                &fingerprint,
+            )
+            .await?;
+            if stale_requested {
+                let _ = std::fs::remove_file(&stale_sentinel);
+            }
+        }
+
+        Ok(image_tag)
+    }
+
     async fn remove_container(&self, container_id: &str) {
         let options = RemoveContainerOptions {
             force: true,
@@ -1069,7 +1214,7 @@ impl DockerExecutor {
                     platform: None,
                 }),
                 DockerContainerConfig {
-                    image: Some(self.image.clone()),
+                    image: Some(self.base_image.clone()),
                     cmd: Some(cmd),
                     working_dir,
                     env: Some(self.collect_env()),
@@ -1214,7 +1359,12 @@ impl DockerExecutor {
         crate::engine::worktrees::main_repo_root(&repo_path).unwrap_or(repo_path)
     }
 
-    fn resolve_workspace(&self, wave_id: &str, wave_run_id: &str) -> Result<DockerWorkspace> {
+    fn resolve_workspace_for_cwd(
+        &self,
+        wave_id: &str,
+        wave_run_id: &str,
+        cwd: &Path,
+    ) -> Result<DockerWorkspace> {
         let wave_id = LfdId::from_raw(wave_id);
         let wave = self
             .store
@@ -1227,11 +1377,34 @@ impl DockerExecutor {
             .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
         let repo_source = Self::resolve_host_repo(&wave.repo);
         let branch = Self::resolve_wave_run_branch(&run, &wave);
-        Ok(Self::docker_workspace_for_wave(
-            &repo_source,
-            &wave.name,
-            &branch,
-        ))
+        let mut workspace = Self::docker_workspace_for_wave(&repo_source, &wave.name, &branch);
+
+        let run_worktree = run.worktree.trim_end_matches('/');
+        let cwd_string = cwd.to_string_lossy();
+        let cwd_trimmed = cwd_string.trim_end_matches('/');
+        if let Some(suffix) = cwd_trimmed.strip_prefix(run_worktree) {
+            if !suffix.is_empty() {
+                workspace.container_worktree =
+                    format!("{}{}", workspace.container_worktree, suffix);
+                if let Some(index) = suffix
+                    .strip_prefix("-fork-")
+                    .and_then(|value| value.parse::<u32>().ok())
+                {
+                    workspace.branch = format!("{}-fork-{index}", run.id);
+                }
+            }
+        }
+
+        Ok(workspace)
+    }
+
+    fn resolve_workspace(&self, wave_id: &str, wave_run_id: &str) -> Result<DockerWorkspace> {
+        let run_id = LfdId::from_raw(wave_run_id);
+        let run = self
+            .store
+            .get_wave_run(&run_id)?
+            .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
+        self.resolve_workspace_for_cwd(wave_id, wave_run_id, Path::new(&run.worktree))
     }
 
     async fn git_command(
@@ -1494,9 +1667,10 @@ impl DockerExecutor {
     ) -> Result<()> {
         self.ensure_volume(&workspace.volume.volume_name).await?;
 
+        let prepared_key = format!("{wave_run_id}:{}", workspace.container_worktree);
         let should_hygiene = {
             let mut prepared = self.prepared_runs.lock().await;
-            prepared.insert(wave_run_id.to_string())
+            prepared.insert(prepared_key)
         };
 
         let lock = self
@@ -1557,8 +1731,9 @@ impl AgentExecutor for DockerExecutor {
             return Err(anyhow!("empty agent command"));
         }
 
-        let workspace = self.resolve_workspace(wave_id, wave_run_id)?;
+        let workspace = self.resolve_workspace_for_cwd(wave_id, wave_run_id, cwd)?;
         self.prepare_workspace(&workspace, wave_run_id, cwd).await?;
+        let image_tag = self.ensure_repo_image(&workspace).await?;
 
         let container_name = Self::build_container_name(agent_id);
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
@@ -1583,7 +1758,7 @@ impl AgentExecutor for DockerExecutor {
                     platform: None,
                 }),
                 DockerContainerConfig {
-                    image: Some(self.image.clone()),
+                    image: Some(image_tag),
                     cmd: Some(cmd),
                     working_dir: Some(workspace.container_worktree.clone()),
                     env: Some(env),
@@ -2253,15 +2428,6 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
-        if self.executor_type == ExecutorType::Docker {
-            self.fail_run(
-                run,
-                wave,
-                "fork(select=all) is not supported by the docker executor yet".to_string(),
-            )?;
-            return Ok(());
-        }
-
         let mut fork_runs = Vec::new();
         for (index, branch) in fork.branches.iter().enumerate() {
             if branch.step.interactive.unwrap_or(false) {
@@ -2864,16 +3030,17 @@ mod tests {
     }
 
     #[test]
-    fn docker_mount_spec_requires_host_and_container_paths() {
+    fn docker_mount_spec_resolves_allowlisted_credentials() {
         let home = dirs::home_dir().expect("home directory should be available");
-        let mount = DockerCredentialMount::from_spec("~/.claude:/home/agent/.claude")
-            .expect("mount spec should parse");
+        let mount =
+            DockerCredentialMount::from_config(&CredentialMount::Named("claude".to_string()))
+                .expect("mount spec should parse");
         assert_eq!(mount.host_path, home.join(".claude"));
         assert_eq!(mount.container_path, "/home/agent/.claude");
-        assert!(DockerCredentialMount::from_spec("missing-colon").is_err());
-        assert!(DockerCredentialMount::from_spec(":/home/agent/.claude").is_err());
-        assert!(DockerCredentialMount::from_spec("relative:/home/agent/.claude").is_err());
-        assert!(DockerCredentialMount::from_spec("/tmp/claude:relative").is_err());
+        assert!(
+            DockerCredentialMount::from_config(&CredentialMount::Named("unknown".to_string()))
+                .is_err()
+        );
     }
 
     #[test]
@@ -3429,9 +3596,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_fails_fork_all_with_docker_executor() {
+    async fn execute_runs_fork_all_with_docker_executor() {
         let tmp = tempdir().expect("tempdir");
-        let repo = tmp.path();
+        let repo = tmp.path().canonicalize().expect("canonical repo path");
+
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .arg("init")
+            .status()
+            .expect("git init should run");
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["config", "user.email", "test@example.com"])
+            .status()
+            .expect("git config email should run");
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["config", "user.name", "Test User"])
+            .status()
+            .expect("git config name should run");
+        std::fs::write(repo.join("README.md"), "# test\n").expect("seed file should be written");
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "."])
+            .status()
+            .expect("git add should run");
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["commit", "-m", "initial"])
+            .status()
+            .expect("git commit should run");
 
         let flow_dir = repo.join(".lf/flows");
         std::fs::create_dir_all(&flow_dir).expect("flow dir should exist");
@@ -3516,8 +3715,7 @@ mod tests {
             .get_wave_run(&run_id)
             .expect("run fetch should succeed")
             .expect("run should exist");
-        assert_eq!(updated_run.status, WaveRunStatus::Failed);
-        assert_eq!(
+        assert_ne!(
             updated_run.error.as_deref(),
             Some("fork(select=all) is not supported by the docker executor yet")
         );

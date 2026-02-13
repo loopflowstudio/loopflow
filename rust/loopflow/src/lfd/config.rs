@@ -84,7 +84,51 @@ pub struct ExecutorCredentialsConfig {
     #[serde(default)]
     pub env: Vec<String>,
     #[serde(default)]
-    pub mounts: Vec<String>,
+    pub mounts: Vec<CredentialMount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CredentialMount {
+    Named(String),
+}
+
+impl CredentialMount {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Named(name) => name.as_str(),
+        }
+    }
+}
+
+impl TryFrom<String> for CredentialMount {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let name = value.trim();
+        if name.is_empty() {
+            return Err("credential mount name must not be empty".to_string());
+        }
+        if name.contains(':') {
+            return Err(
+                "credential mounts no longer accept host:container paths; use named mounts"
+                    .to_string(),
+            );
+        }
+        if name.starts_with('/') {
+            return Err("credential mount name must not be an absolute path".to_string());
+        }
+        Ok(Self::Named(name.to_string()))
+    }
+}
+
+impl<'de> Deserialize<'de> for CredentialMount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::try_from(value).map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,7 +182,7 @@ executor:
     env:
       - ANTHROPIC_API_KEY
     mounts:
-      - ~/.claude:/home/agent/.claude
+      - claude
 "#;
         let config: LfdConfig = serde_yaml::from_str(raw).expect("yaml should parse");
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
@@ -149,8 +193,20 @@ executor:
         );
         assert_eq!(
             config.executor.credentials.mounts,
-            vec!["~/.claude:/home/agent/.claude".to_string()]
+            vec![CredentialMount::Named("claude".to_string())]
         );
+    }
+
+    #[test]
+    fn raw_credential_mount_paths_are_rejected() {
+        let raw = r#"
+executor:
+  credentials:
+    mounts:
+      - ~/.claude:/home/agent/.claude
+"#;
+        let result = serde_yaml::from_str::<LfdConfig>(raw);
+        assert!(result.is_err());
     }
 
     #[test]

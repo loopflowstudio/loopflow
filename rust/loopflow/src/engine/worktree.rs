@@ -39,20 +39,23 @@ pub fn remove_worktree(worktree: &Path, force_delete_branch: bool) -> Result<(),
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
 
-    // Get the main repo path for branch deletion
+    // Get the main repo path for worktree removal and branch deletion
     let main_repo = Command::new("git")
         .arg("-C")
         .arg(worktree)
         .arg("rev-parse")
-        .arg("--path-format=absolute")
-        .arg("--git-common-dir")
+        .arg("--show-toplevel")
         .output()
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
 
     // Remove the worktree
-    let status = Command::new("git")
+    let mut remove_cmd = Command::new("git");
+    if let Some(repo) = &main_repo {
+        remove_cmd.arg("-C").arg(repo);
+    }
+    let status = remove_cmd
         .arg("worktree")
         .arg("remove")
         .arg("--force")

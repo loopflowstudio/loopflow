@@ -9,6 +9,9 @@ use std::sync::LazyLock;
 /// Bundled LOOPFLOW.md system documentation.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
+/// Bundled RLM.md — recursive language model instructions for agents.
+pub const RLM_DOC: &str = include_str!("builtins/RLM.md");
+
 /// Returns the content of a built-in step, if it exists.
 pub fn get_builtin_step(name: &str) -> Option<&'static str> {
     BUILTIN_STEPS.get(name).copied()

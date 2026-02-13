@@ -18,6 +18,7 @@ use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParse
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
 /// to this process before exiting so the agent doesn't survive as an orphan.
 static CHILD_PID: AtomicU32 = AtomicU32::new(0);
+const RLM_PASSTHROUGH_VARS: &[&str] = &["RLM_MAX_DEPTH", "RLM_MAX_PARALLEL", "RLM_MODEL"];
 
 /// Tracks the active agent PID and clears it even on early returns.
 struct ChildPidGuard;
@@ -310,6 +311,8 @@ pub fn launch_agent(
         }
     }
 
+    propagate_rlm_env(&mut cmd);
+
     if config.auto && config.stream {
         // Stream mode: capture stdout line by line
         launch_streaming(&mut cmd, config.stream_format)
@@ -319,6 +322,22 @@ pub fn launch_agent(
     } else {
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd)
+    }
+}
+
+fn propagate_rlm_env(cmd: &mut Command) {
+    // RLM_DEPTH auto-increments so sub-agents don't need to manage it.
+    let next_depth = std::env::var("RLM_DEPTH")
+        .ok()
+        .and_then(|depth| depth.parse::<usize>().ok())
+        .unwrap_or(0)
+        + 1;
+    cmd.env("RLM_DEPTH", next_depth.to_string());
+
+    for var in RLM_PASSTHROUGH_VARS {
+        if let Ok(val) = std::env::var(var) {
+            cmd.env(var, val);
+        }
     }
 }
 

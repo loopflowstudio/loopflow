@@ -427,18 +427,7 @@ pub async fn run_wave_handler(
         .map_err(map_store_error)?;
 
     // Re-enable all stimuli (they may have been disabled by a previous stop).
-    let wid = wave.id.clone();
-    let _ = run_store(&state.store, move |store| {
-        let stimuli = store.list_stimuli(Some(&wid))?;
-        for mut s in stimuli {
-            if !s.enabled {
-                s.enabled = true;
-                store.update_stimulus(&s)?;
-            }
-        }
-        Ok(())
-    })
-    .await;
+    let _ = set_wave_stimuli_enabled(&state, &wave.id, true, false).await;
 
     let run_id = LfdId::new();
     let (acquired, _) = state.scheduler.acquire(run_id.as_str()).await;
@@ -594,33 +583,7 @@ pub async fn stop_wave_handler(
     .map_err(map_store_error)?;
 
     // Disable all auto stimuli so tickers won't restart the wave.
-    let has_auto_stimulus = {
-        let wid = wave_id.clone();
-        let stimuli = run_store(&state.store, move |store| store.list_stimuli(Some(&wid)))
-            .await
-            .unwrap_or_default();
-        let has_auto = stimuli.iter().any(|s| {
-            matches!(
-                s.kind,
-                StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
-            )
-        });
-        if has_auto {
-            let wid = wave_id.clone();
-            let _ = run_store(&state.store, move |store| {
-                let stimuli = store.list_stimuli(Some(&wid))?;
-                for mut s in stimuli {
-                    if s.enabled {
-                        s.enabled = false;
-                        store.update_stimulus(&s)?;
-                    }
-                }
-                Ok(())
-            })
-            .await;
-        }
-        has_auto
-    };
+    let has_auto_stimulus = set_wave_stimuli_enabled(&state, &wave_id, false, true).await;
 
     if let Some(mut run) = run {
         run.status = WaveRunStatus::Failed;
@@ -932,6 +895,39 @@ fn resolve_wave_work_dir(
     let (worktree, _) =
         ensure_wave_worktree(FsPath::new(repo_path), wave_name).map_err(|err| err.to_string())?;
     Ok(worktree)
+}
+
+fn is_auto_stimulus(kind: StimulusKind) -> bool {
+    matches!(
+        kind,
+        StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
+    )
+}
+
+async fn set_wave_stimuli_enabled(
+    state: &HttpState,
+    wave_id: &LfdId,
+    enabled: bool,
+    auto_only: bool,
+) -> bool {
+    let wave_id = wave_id.clone();
+    run_store(&state.store, move |store| {
+        let stimuli = store.list_stimuli(Some(&wave_id))?;
+        let mut matched = false;
+        for mut stimulus in stimuli {
+            if auto_only && !is_auto_stimulus(stimulus.kind) {
+                continue;
+            }
+            matched = true;
+            if stimulus.enabled != enabled {
+                stimulus.enabled = enabled;
+                store.update_stimulus(&stimulus)?;
+            }
+        }
+        Ok(matched)
+    })
+    .await
+    .unwrap_or(false)
 }
 
 fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {

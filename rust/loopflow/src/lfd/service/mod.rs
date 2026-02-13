@@ -2,58 +2,56 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+mod unsupported {
+    fn unsupported() -> Result<(), Box<dyn std::error::Error>> {
+        Err("service management is only supported on macOS and Linux".into())
+    }
+
+    pub fn install() -> Result<(), Box<dyn std::error::Error>> {
+        unsupported()
+    }
+
+    pub fn uninstall() -> Result<(), Box<dyn std::error::Error>> {
+        unsupported()
+    }
+
+    pub fn start() -> Result<(), Box<dyn std::error::Error>> {
+        unsupported()
+    }
+
+    pub fn stop() -> Result<(), Box<dyn std::error::Error>> {
+        unsupported()
+    }
+
+    pub fn status() -> Result<(), Box<dyn std::error::Error>> {
+        unsupported()
+    }
+}
+
+#[cfg(target_os = "linux")]
+use linux as platform;
+#[cfg(target_os = "macos")]
+use macos as platform;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+use unsupported as platform;
 
 pub fn install() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    return macos::install();
-
-    #[cfg(target_os = "linux")]
-    return linux::install();
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err("service installation is only supported on macOS and Linux".into())
+    platform::install()
 }
 
 pub fn uninstall() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    return macos::uninstall();
-
-    #[cfg(target_os = "linux")]
-    return linux::uninstall();
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err("service management is only supported on macOS and Linux".into())
+    platform::uninstall()
 }
 
 pub fn start() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    return macos::start();
-
-    #[cfg(target_os = "linux")]
-    return linux::start();
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err("service management is only supported on macOS and Linux".into())
+    platform::start()
 }
 
 pub fn stop() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    return macos::stop();
-
-    #[cfg(target_os = "linux")]
-    return linux::stop();
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err("service management is only supported on macOS and Linux".into())
+    platform::stop()
 }
 
 pub fn status() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    return macos::status();
-
-    #[cfg(target_os = "linux")]
-    return linux::status();
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err("service management is only supported on macOS and Linux".into())
+    platform::status()
 }

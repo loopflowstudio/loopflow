@@ -201,19 +201,16 @@ fn commit_range_from_ref(repo: &Path, base_ref: &str, head_ref: &str) -> OpsResu
 
 fn cherry_pick_commits(repo: &Path, commits: &[String]) -> OpsResult<()> {
     for sha in commits {
-        let output = Command::new("git")
-            .args(["cherry-pick", sha])
-            .current_dir(repo)
-            .output()?;
-        if !output.status.success() {
-            let _ = Command::new("git")
-                .args(["cherry-pick", "--abort"])
-                .current_dir(repo)
-                .output();
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(OpsError::Message(format!(
-                "cherry-pick conflict while applying {sha}: {stderr}"
-            )));
+        if let Err(err) = run_git(repo, ["cherry-pick", sha]) {
+            let _ = run_git(repo, ["cherry-pick", "--abort"]);
+            match err {
+                OpsError::CommandFailed { stderr, .. } => {
+                    return Err(OpsError::Message(format!(
+                        "cherry-pick conflict while applying {sha}: {stderr}"
+                    )));
+                }
+                other => return Err(other),
+            }
         }
     }
     Ok(())
@@ -247,25 +244,19 @@ fn ref_exists(repo: &Path, reference: &str) -> OpsResult<bool> {
 }
 
 fn close_pr(repo: &Path, number: u64) -> OpsResult<()> {
-    let output = Command::new("gh")
-        .args(["pr", "close", &number.to_string(), "--delete-branch"])
-        .current_dir(repo)
-        .output()?;
-
-    if output.status.success() {
-        return Ok(());
+    let number = number.to_string();
+    match run_gh(repo, ["pr", "close", &number, "--delete-branch"]) {
+        Ok(_) => Ok(()),
+        Err(OpsError::CommandFailed { command, stderr }) => {
+            let lowered = stderr.to_lowercase();
+            if lowered.contains("already closed") || lowered.contains("pull request is closed") {
+                Ok(())
+            } else {
+                Err(OpsError::CommandFailed { command, stderr })
+            }
+        }
+        Err(err) => Err(err),
     }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let lowered = stderr.to_lowercase();
-    if lowered.contains("already closed") || lowered.contains("pull request is closed") {
-        return Ok(());
-    }
-
-    Err(OpsError::CommandFailed {
-        command: format!("gh pr close {} --delete-branch", number),
-        stderr,
-    })
 }
 
 fn combine_pr_body(prs: &[GhOpenPr]) -> String {
@@ -303,26 +294,18 @@ fn update_combined_pr_message(repo: &Path, progress: &impl Progress) {
     progress.status("Generating PR title...");
     match crate::ops::generate_pr_message(repo) {
         Ok(message) => {
-            let result = Command::new("gh")
-                .args([
+            if let Err(err) = run_gh(
+                repo,
+                [
                     "pr",
                     "edit",
                     "--title",
                     &message.title,
                     "--body",
                     &message.body,
-                ])
-                .current_dir(repo)
-                .output();
-            match result {
-                Ok(output) if output.status.success() => {}
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    progress.status(&format!("Warning: failed to update PR title: {stderr}"));
-                }
-                Err(err) => {
-                    progress.status(&format!("Warning: failed to update PR title: {err}"));
-                }
+                ],
+            ) {
+                progress.status(&format!("Warning: failed to update PR title: {err}"));
             }
         }
         Err(err) => {

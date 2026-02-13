@@ -209,6 +209,12 @@ pub enum WtCommand {
         #[arg(long)]
         debug: bool,
     },
+    #[command(alias = "rm")]
+    Remove {
+        name: String,
+        #[arg(short = 'f', long = "force")]
+        force: bool,
+    },
     Ci {
         #[arg(short = 'w', long = "watch")]
         watch: bool,

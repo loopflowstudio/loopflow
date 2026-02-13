@@ -508,7 +508,13 @@ fn truncate(s: &str, max: usize) -> String {
 /// `use_color` controls whether ANSI escape codes are included.
 pub fn render_event(event: &StreamEvent, use_color: bool) -> (String, String) {
     match event {
-        StreamEvent::Text(text) => (text.clone(), String::new()),
+        StreamEvent::Text(text) => {
+            if text.ends_with('\n') {
+                (text.clone(), String::new())
+            } else {
+                (format!("{text}\n"), String::new())
+            }
+        }
         StreamEvent::ToolUse { name, summary } => {
             let line = if summary.is_empty() {
                 format!("-> {name}")
@@ -936,7 +942,7 @@ mod tests {
     #[test]
     fn render_text_event() {
         let (stdout, stderr) = render_event(&StreamEvent::Text("hello".to_string()), false);
-        assert_eq!(stdout, "hello");
+        assert_eq!(stdout, "hello\n");
         assert!(stderr.is_empty());
     }
 

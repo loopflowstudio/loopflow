@@ -325,6 +325,25 @@ pub fn launch_agent(
     }
 }
 
+/// Seed RLM environment variables from config.
+///
+/// Sets process-level env vars so `propagate_rlm_env` can forward them
+/// to child agents. Only sets vars that aren't already present (a parent
+/// `lf` process may have already set them).
+pub fn seed_rlm_env(config: &crate::engine::config::Config) {
+    if std::env::var("RLM_MAX_DEPTH").is_err() {
+        std::env::set_var("RLM_MAX_DEPTH", config.rlm_max_depth.to_string());
+    }
+    if std::env::var("RLM_MAX_PARALLEL").is_err() {
+        std::env::set_var("RLM_MAX_PARALLEL", config.rlm_max_parallel.to_string());
+    }
+    if std::env::var("RLM_MODEL").is_err() {
+        if let Some(ref model) = config.rlm_model {
+            std::env::set_var("RLM_MODEL", model);
+        }
+    }
+}
+
 fn propagate_rlm_env(cmd: &mut Command) {
     // RLM_DEPTH auto-increments so sub-agents don't need to manage it.
     let next_depth = std::env::var("RLM_DEPTH")

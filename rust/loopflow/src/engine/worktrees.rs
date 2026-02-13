@@ -1,8 +1,11 @@
 use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
-use crate::engine::git::{get_default_branch, is_ancestor, rev_parse, worktree_add, worktree_move};
+use crate::engine::git::{
+    get_default_branch, is_ancestor, is_squash_merged, rev_parse, worktree_add, worktree_move,
+};
 use crate::engine::naming::format_branch_name;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -159,12 +162,115 @@ fn upstream_branch(worktree: &Path) -> Option<String> {
     Some(branch)
 }
 
+/// Parse GitHub owner/repo from the origin remote URL.
+fn github_repo_nwo(repo: &Path) -> Option<(String, String)> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // Handle SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git)
+    let path = url
+        .strip_prefix("git@github.com:")
+        .or_else(|| url.strip_prefix("https://github.com/"))?;
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (owner, name) = path.split_once('/')?;
+    Some((owner.to_string(), name.to_string()))
+}
+
+/// Check which branches have merged PRs using a single GitHub GraphQL call.
+fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
+    if branches.is_empty() {
+        return HashSet::new();
+    }
+    let (owner, name) = match github_repo_nwo(repo) {
+        Some(nwo) => nwo,
+        None => return HashSet::new(),
+    };
+
+    // Build aliased GraphQL query: one field per branch
+    let mut fields = String::new();
+    for (i, branch) in branches.iter().enumerate() {
+        // GraphQL aliases must be alphanumeric + underscore
+        fields.push_str(&format!(
+            "b{i}: pullRequests(first: 1, headRefName: \"{branch}\", states: MERGED) {{ nodes {{ headRefName }} }}\n"
+        ));
+    }
+    let query =
+        format!("query {{ repository(owner: \"{owner}\", name: \"{name}\") {{ {fields} }} }}");
+
+    let output = Command::new("gh")
+        .current_dir(repo)
+        .args(["api", "graphql", "-f", &format!("query={query}")])
+        .output();
+
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return HashSet::new(),
+    };
+
+    // Parse: any headRefName in a non-empty nodes array is a merged branch
+    // Simple string scan — avoids adding a JSON parsing dep to this module
+    let mut result = HashSet::new();
+    for branch in branches {
+        if stdout.contains(&format!("\"headRefName\":\"{branch}\"")) {
+            result.insert(branch.clone());
+        }
+    }
+    result
+}
+
 pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     let default_branch = get_default_branch(repo)?;
     let merge_target = format!("origin/{default_branch}");
     let items = list_porcelain(repo)?;
-    let mut results = Vec::new();
 
+    // Collect branches that need merge checks (skip default branch and detached)
+    let branches_to_check: Vec<String> = items
+        .iter()
+        .filter_map(|(_, branch)| branch.as_ref())
+        .filter(|b| *b != &default_branch)
+        .cloned()
+        .collect();
+
+    // Run squash-merge checks (per-branch threads) and PR check (single GraphQL call) in parallel
+    let squash_branches = branches_to_check.clone();
+    let repo_for_squash = repo.to_path_buf();
+    let target_for_squash = merge_target.clone();
+    let squash_handle = thread::spawn(move || {
+        let handles: Vec<_> = squash_branches
+            .into_iter()
+            .map(|branch| {
+                let r = repo_for_squash.clone();
+                let t = target_for_squash.clone();
+                thread::spawn(move || {
+                    if is_squash_merged(&r, &branch, &t).unwrap_or(false) {
+                        Some(branch)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|h| h.join().ok().flatten())
+            .collect::<HashSet<String>>()
+    });
+
+    let pr_branches = branches_to_check;
+    let repo_for_pr = repo.to_path_buf();
+    let pr_handle = thread::spawn(move || merged_pr_branches(&repo_for_pr, &pr_branches));
+
+    let squash_merged = squash_handle.join().unwrap_or_default();
+    let pr_merged = pr_handle.join().unwrap_or_default();
+
+    let mut results = Vec::new();
     for (path, branch) in items {
         let base = upstream_branch(&path);
         let base_branch = base.filter(|b| b != &default_branch);
@@ -173,6 +279,8 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
                 false
             } else {
                 is_ancestor(repo, branch, &merge_target).unwrap_or(false)
+                    || squash_merged.contains(branch)
+                    || pr_merged.contains(branch)
             }
         } else {
             false

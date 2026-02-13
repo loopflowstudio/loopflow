@@ -5,6 +5,7 @@ pub struct Colors {
     pub dim: &'static str,
     pub yellow: &'static str,
     pub green: &'static str,
+    pub red: &'static str,
     pub reset: &'static str,
 }
 
@@ -18,6 +19,7 @@ impl Colors {
                 dim: "\x1b[90m",
                 yellow: "\x1b[33m",
                 green: "\x1b[32m",
+                red: "\x1b[31m",
                 reset: "\x1b[0m",
             }
         } else {
@@ -27,6 +29,7 @@ impl Colors {
                 dim: "",
                 yellow: "",
                 green: "",
+                red: "",
                 reset: "",
             }
         }

@@ -1,6 +1,9 @@
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, is_clean};
-use crate::engine::worktrees::{create_with_schema, list_worktrees, main_repo_root, worktree_path};
+use crate::engine::worktrees::{
+    create_with_schema, list_worktrees, main_repo_root, worktree_path, worktree_short_name,
+};
 use crate::lf::commands::util::find_repo_root;
+use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
@@ -281,18 +284,150 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    for wt in worktrees {
-        let branch = wt.branch.unwrap_or_else(|| "detached".to_string());
-        let merged = if wt.merged { "merged" } else { "active" };
-        println!("{}  {}  {}", branch, wt.path.display(), merged);
+    let c = Colors::new();
+    let default_branch = get_default_branch(&main_repo)?;
+
+    // Collect display info for all worktrees
+    struct Row {
+        name: String,
+        is_current: bool,
+        is_main: bool,
+        merged: bool,
+        dirty: bool,
+        diff_stat: String,
+    }
+
+    let rows: Vec<Row> = worktrees
+        .iter()
+        .map(|wt| {
+            let is_main = wt.branch.as_deref() == Some(&default_branch);
+            let name = if is_main {
+                default_branch.clone()
+            } else {
+                worktree_short_name(&wt.path).unwrap_or_else(|| {
+                    wt.path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "?".to_string())
+                })
+            };
+            let is_current = wt.path == repo_root;
+            let dirty = !is_clean(&wt.path).unwrap_or(true);
+            let diff_stat = if is_main {
+                String::new()
+            } else {
+                wt_diff_stat(&main_repo, wt.branch.as_deref(), &default_branch)
+            };
+            Row {
+                name,
+                is_current,
+                is_main,
+                merged: wt.merged,
+                dirty,
+                diff_stat,
+            }
+        })
+        .collect();
+
+    let max_name = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
+
+    for row in &rows {
+        let marker = if row.is_current { "*" } else { " " };
+
+        let name_color = if row.is_main || row.merged {
+            c.dim
+        } else {
+            c.bold
+        };
+
+        let status = if row.merged {
+            format!("{}merged{}", c.green, c.reset)
+        } else {
+            format!("{}active{}", c.cyan, c.reset)
+        };
+
+        let dirty_flag = if row.dirty {
+            format!(" {}dirty{}", c.yellow, c.reset)
+        } else {
+            String::new()
+        };
+
+        let diff = if row.diff_stat.is_empty() {
+            String::new()
+        } else {
+            format!("  {}{}{}", c.dim, row.diff_stat, c.reset)
+        };
+
+        println!(
+            "{marker} {name_color}{:<width$}{reset}  {status}{dirty_flag}{diff}",
+            row.name,
+            width = max_name,
+            marker = marker,
+            name_color = name_color,
+            reset = c.reset,
+            status = status,
+            dirty_flag = dirty_flag,
+            diff = diff,
+        );
     }
     Ok(())
+}
+
+/// Get a compact diff stat for a branch vs default branch.
+fn wt_diff_stat(repo: &std::path::Path, branch: Option<&str>, default_branch: &str) -> String {
+    let branch = match branch {
+        Some(b) => b,
+        None => return String::new(),
+    };
+    let target = format!("origin/{default_branch}");
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["diff", "--shortstat", &format!("{target}...{branch}")])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            // "3 files changed, 10 insertions(+), 5 deletions(-)" → "+10 -5 (3 files)"
+            parse_shortstat(&raw)
+        }
+        _ => String::new(),
+    }
+}
+
+fn parse_shortstat(raw: &str) -> String {
+    if raw.is_empty() {
+        return String::new();
+    }
+    let mut files = "";
+    let mut insertions = "";
+    let mut deletions = "";
+    for part in raw.split(", ") {
+        let part = part.trim();
+        if part.contains("file") {
+            files = part.split_whitespace().next().unwrap_or("0");
+        } else if part.contains("insertion") {
+            insertions = part.split_whitespace().next().unwrap_or("0");
+        } else if part.contains("deletion") {
+            deletions = part.split_whitespace().next().unwrap_or("0");
+        }
+    }
+    let ins = if insertions.is_empty() {
+        "0"
+    } else {
+        insertions
+    };
+    let del = if deletions.is_empty() { "0" } else { deletions };
+    format!("+{ins} -{del} ({files} files)")
 }
 
 fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let current_path = repo_root;
+
+    let default_branch = get_default_branch(&main_repo)?;
+    let _ = crate::engine::git::fetch(&main_repo, "origin", &default_branch);
 
     let worktrees = list_worktrees(&main_repo)?;
     let mut prunable = worktrees

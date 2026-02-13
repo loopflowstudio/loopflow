@@ -342,6 +342,21 @@ pub fn rev_parse(repo: &Path, refspec: &str) -> Result<String, GitError> {
     Ok(sha)
 }
 
+/// Check if a branch has been squash-merged into target.
+///
+/// Simulates merging branch into target and checks if the resulting tree
+/// is identical to target's tree (meaning branch adds nothing new).
+pub fn is_squash_merged(repo: &Path, branch: &str, target: &str) -> Result<bool, GitError> {
+    let output = run_git(repo, &["merge-tree", "--write-tree", target, branch])?;
+    if !output.status.success() {
+        // Conflicts mean it's not cleanly merged
+        return Ok(false);
+    }
+    let result_tree = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let target_tree = rev_parse(repo, &format!("{target}^{{tree}}"))?;
+    Ok(result_tree == target_tree)
+}
+
 pub fn rebase(
     worktree: &Path,
     onto: &str,

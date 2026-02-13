@@ -516,6 +516,7 @@ pub async fn add_stimulus_handler(
         last_main_sha: None,
         last_triggered_at: None,
         created_at: Some(OffsetDateTime::now_utc()),
+        enabled: true,
     };
 
     let stimulus_clone = stimulus.clone();

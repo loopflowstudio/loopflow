@@ -179,6 +179,7 @@ mod tests {
             last_main_sha: Some("abc123".to_string()),
             last_triggered_at: Some(100),
             created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
         }
     }
 

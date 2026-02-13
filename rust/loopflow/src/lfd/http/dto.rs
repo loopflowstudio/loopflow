@@ -146,6 +146,7 @@ pub struct RunWaveResponse {
 pub struct StimulusDto {
     pub id: String,
     pub kind: String,
+    pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -245,6 +246,7 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     StimulusDto {
         id: s.id.to_string(),
         kind: stimulus_kind_str(s.kind).to_string(),
+        enabled: s.enabled,
         cron: if s.cron.is_empty() {
             None
         } else {

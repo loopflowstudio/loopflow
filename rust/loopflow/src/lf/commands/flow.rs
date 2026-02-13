@@ -99,6 +99,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     let base_branch = current_branch(repo)?
         .ok_or_else(|| anyhow!("fork execution requires an active branch (detached HEAD)"))?;
     let mut tasks = Vec::new();
+    let mut worktrees = Vec::new();
 
     for (index, branch) in fork.branches.iter().enumerate() {
         let worktree = fork_worktree_path(repo, index);
@@ -111,14 +112,11 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
                 branch_name
             )
         }) {
-            let worktrees: Vec<PathBuf> = tasks
-                .iter()
-                .map(|t: &ForkBranchTask| t.worktree.clone())
-                .collect();
             cleanup_fork_worktrees(None, &worktrees);
             return Err(err);
         }
 
+        worktrees.push(worktree.clone());
         tasks.push(ForkBranchTask {
             index,
             step_name: branch.step.name.clone(),
@@ -173,8 +171,6 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             exit_code,
         });
     }
-
-    let worktrees: Vec<PathBuf> = tasks.iter().map(|t| t.worktree.clone()).collect();
 
     let manifest_path = match write_fork_manifest(repo, &manifest_branches) {
         Ok(path) => path,

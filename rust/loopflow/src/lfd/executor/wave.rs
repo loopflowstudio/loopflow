@@ -139,11 +139,7 @@ impl WaveExecutor {
                     info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
                     let exit_code = self.run_step(&wave, &mut run, &step).await?;
                     if exit_code == 0 {
-                        run.step_index += 1;
-                        run.status = WaveRunStatus::Running;
-                        run.flow_parents = flow_parents_for_index(&plan, run.step_index);
-                        self.store.update_wave_run(&run)?;
-                        self.event_hub.send(Event::wave_updated(wave.id.clone()));
+                        self.advance_run(&wave.id, &mut run, &plan)?;
                     } else {
                         self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))?;
                         return Ok(());
@@ -295,6 +291,23 @@ impl WaveExecutor {
         Ok(())
     }
 
+    fn advance_run(&self, wave_id: &LfdId, run: &mut WaveRun, plan: &[ConcreteItem]) -> Result<()> {
+        run.step_index += 1;
+        run.status = WaveRunStatus::Running;
+        run.flow_parents = flow_parents_for_index(plan, run.step_index);
+        self.store.update_wave_run(run)?;
+        self.event_hub.send(Event::wave_updated(wave_id.clone()));
+        Ok(())
+    }
+
+    fn agent_status_for_exit_code(exit_code: i32) -> AgentStatus {
+        if exit_code == 0 {
+            AgentStatus::Completed
+        } else {
+            AgentStatus::Failed
+        }
+    }
+
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
         let worktree = run.worktree.clone();
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
@@ -349,11 +362,7 @@ impl WaveExecutor {
             .await?;
 
         let ended_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        let status = if exit_code == 0 {
-            AgentStatus::Completed
-        } else {
-            AgentStatus::Failed
-        };
+        let status = Self::agent_status_for_exit_code(exit_code);
         self.store.end_agent(&agent_id, status.as_i32(), ended_at)?;
         self.event_hub.send(Event::agent_ended(agent_id, status));
 
@@ -462,11 +471,7 @@ impl WaveExecutor {
             .await?;
 
         let ended_at = OffsetDateTime::now_utc().unix_timestamp();
-        let status = if exit_code == 0 {
-            AgentStatus::Completed
-        } else {
-            AgentStatus::Failed
-        };
+        let status = Self::agent_status_for_exit_code(exit_code);
         self.store.end_agent(&agent_id, status.as_i32(), ended_at)?;
 
         if exit_code != 0 {
@@ -538,11 +543,7 @@ impl WaveExecutor {
             return Ok(());
         }
 
-        run.step_index += 1;
-        run.status = WaveRunStatus::Running;
-        run.flow_parents = flow_parents_for_index(plan, run.step_index);
-        self.store.update_wave_run(run)?;
-        self.event_hub.send(Event::wave_updated(wave.id.clone()));
+        self.advance_run(&wave.id, run, plan)?;
         Ok(())
     }
 
@@ -786,11 +787,7 @@ impl WaveExecutor {
         }
 
         self.cleanup_fork(run, &fork_runs).await;
-        run.step_index += 1;
-        run.status = WaveRunStatus::Running;
-        run.flow_parents = flow_parents_for_index(plan, run.step_index);
-        self.store.update_wave_run(run)?;
-        self.event_hub.send(Event::wave_updated(wave.id.clone()));
+        self.advance_run(&wave.id, run, plan)?;
         Ok(())
     }
 

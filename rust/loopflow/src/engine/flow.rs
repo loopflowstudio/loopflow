@@ -39,8 +39,6 @@ pub enum FlowItem {
         branches: Vec<FlowItem>,
         #[serde(default)]
         select: ForkSelect,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        synthesize: Option<String>,
     },
     FlowRef(String),
 }
@@ -94,7 +92,6 @@ impl ConcreteStep {
 pub struct ConcreteFork {
     pub branches: Vec<ConcreteStep>,
     pub select: ForkSelect,
-    pub synthesize: Option<String>,
     pub flow_parents: Vec<String>,
 }
 
@@ -442,16 +439,8 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         ));
     };
 
-    let synthesize = map
-        .get(key("synthesize"))
-        .and_then(|val| val.as_str())
-        .map(|val| val.to_string());
     let select = parse_fork_select(map)?;
-    Ok(FlowItem::Fork {
-        branches,
-        select,
-        synthesize,
-    })
+    Ok(FlowItem::Fork { branches, select })
 }
 
 fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
@@ -556,12 +545,8 @@ fn expand_with_chain(
                 nested_chain.push(name.clone());
                 items.extend(expand_with_chain(&nested, repo, nested_chain, depth + 1)?);
             }
-            FlowItem::Fork {
-                branches,
-                select,
-                synthesize,
-            } => {
-                let fork = expand_fork(branches, select, synthesize, repo, &chain, depth)?;
+            FlowItem::Fork { branches, select } => {
+                let fork = expand_fork(branches, select, repo, &chain, depth)?;
                 items.push(ConcreteItem::Fork(fork));
             }
         }
@@ -573,7 +558,6 @@ fn expand_with_chain(
 fn expand_fork(
     branches: &[FlowItem],
     select: &ForkSelect,
-    synthesize: &Option<String>,
     repo: &Path,
     chain: &[String],
     depth: usize,
@@ -609,7 +593,6 @@ fn expand_fork(
     Ok(ConcreteFork {
         branches: expanded_branches,
         select: select.clone(),
-        synthesize: synthesize.clone(),
         flow_parents: chain.to_vec(),
     })
 }

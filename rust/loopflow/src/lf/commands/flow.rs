@@ -1,17 +1,17 @@
+use crate::engine::fork::{
+    cleanup_fork_worktrees, fork_worktree_path, merge_directions, write_fork_manifest,
+    ForkManifestBranch,
+};
 use crate::engine::git::current_branch;
-use crate::engine::worktree::{create_worktree, remove_worktree};
+use crate::engine::worktree::create_worktree;
 use crate::engine::{
     expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction, ForkSelect,
 };
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use anyhow::{anyhow, Context, Result};
-use serde::{Deserialize, Serialize};
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-const FORK_MANIFEST_FILE: &str = ".lf/fork-manifest.json";
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
@@ -84,21 +84,6 @@ struct ForkBranchTask {
     branch_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct ForkManifest {
-    branches: Vec<ForkManifestBranch>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct ForkManifestBranch {
-    index: usize,
-    step: String,
-    direction: String,
-    worktree: String,
-    branch: String,
-    exit_code: i32,
-}
-
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     if !matches!(fork.select, ForkSelect::All) {
         return Err(anyhow!(
@@ -126,7 +111,11 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
                 branch_name
             )
         }) {
-            cleanup_fork_artifacts(None, &tasks);
+            let worktrees: Vec<PathBuf> = tasks
+                .iter()
+                .map(|t: &ForkBranchTask| t.worktree.clone())
+                .collect();
+            cleanup_fork_worktrees(None, &worktrees);
             return Err(err);
         }
 
@@ -185,19 +174,17 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         });
     }
 
+    let worktrees: Vec<PathBuf> = tasks.iter().map(|t| t.worktree.clone()).collect();
+
     let manifest_path = match write_fork_manifest(repo, &manifest_branches) {
         Ok(path) => path,
         Err(err) => {
-            cleanup_fork_artifacts(None, &tasks);
-            return Err(err);
+            cleanup_fork_worktrees(None, &worktrees);
+            return Err(err.into());
         }
     };
-    let synthesize_result = if let Some(step_name) = fork.synthesize.as_deref() {
-        crate::lf::commands::run::run(Some(step_name), message, cli)
-    } else {
-        Ok(())
-    };
-    cleanup_fork_artifacts(Some(&manifest_path), &tasks);
+    let synthesize_result = crate::lf::commands::run::run(Some("synthesize"), message, cli);
+    cleanup_fork_worktrees(Some(&manifest_path), &worktrees);
 
     synthesize_result?;
 
@@ -237,117 +224,4 @@ fn build_lf_command() -> Command {
         return Command::new(path);
     }
     Command::new("lf")
-}
-
-fn write_fork_manifest(repo: &Path, branches: &[ForkManifestBranch]) -> Result<PathBuf> {
-    let manifest_path = repo.join(FORK_MANIFEST_FILE);
-    if let Some(parent) = manifest_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let manifest = ForkManifest {
-        branches: branches.to_vec(),
-    };
-    let json = serde_json::to_string_pretty(&manifest)?;
-    std::fs::write(&manifest_path, json)?;
-    Ok(manifest_path)
-}
-
-fn cleanup_fork_artifacts(manifest_path: Option<&Path>, tasks: &[ForkBranchTask]) {
-    if let Some(manifest_path) = manifest_path {
-        if let Err(err) = std::fs::remove_file(manifest_path) {
-            if err.kind() != ErrorKind::NotFound {
-                eprintln!(
-                    "failed to remove fork manifest {}: {}",
-                    manifest_path.display(),
-                    err
-                );
-            }
-        }
-    }
-
-    for task in tasks {
-        if let Err(err) = remove_worktree(&task.worktree, true) {
-            eprintln!(
-                "failed to clean up fork worktree {}: {}",
-                task.worktree.display(),
-                err
-            );
-        }
-    }
-}
-
-fn fork_worktree_path(repo: &Path, index: usize) -> PathBuf {
-    let name = repo
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    repo.parent()
-        .unwrap_or(repo)
-        .join(format!("{name}.fork-{index}"))
-}
-
-fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
-    if extra.is_empty() {
-        return base.to_vec();
-    }
-    let mut combined = base.to_vec();
-    for direction in extra {
-        if !combined.contains(direction) {
-            combined.push(direction.clone());
-        }
-    }
-    combined
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        fork_worktree_path, merge_directions, write_fork_manifest, ForkManifest, ForkManifestBranch,
-    };
-    use std::path::PathBuf;
-    use tempfile::tempdir;
-
-    #[test]
-    fn fork_worktree_path_uses_dotted_sibling_convention() {
-        let repo = PathBuf::from("/tmp/loopflow.remote.feature");
-        let fork = fork_worktree_path(&repo, 2);
-        assert_eq!(fork, PathBuf::from("/tmp/loopflow.remote.feature.fork-2"));
-    }
-
-    #[test]
-    fn write_fork_manifest_persists_branch_results() {
-        let tmp = tempdir().expect("tempdir");
-        let branches = vec![ForkManifestBranch {
-            index: 1,
-            step: "reduce".to_string(),
-            direction: "designer".to_string(),
-            worktree: "/tmp/repo.fork-1".to_string(),
-            branch: "feature-fork-1".to_string(),
-            exit_code: 0,
-        }];
-
-        let path = write_fork_manifest(tmp.path(), &branches).expect("write manifest");
-        let raw = std::fs::read_to_string(path).expect("read manifest");
-        let manifest: ForkManifest = serde_json::from_str(&raw).expect("parse manifest");
-
-        assert_eq!(manifest.branches, branches);
-    }
-
-    #[test]
-    fn merge_directions_preserves_order_and_deduplicates() {
-        let merged = merge_directions(
-            &["designer".to_string(), "ceo".to_string()],
-            &["ceo".to_string(), "product-engineer".to_string()],
-        );
-        assert_eq!(
-            merged,
-            vec![
-                "designer".to_string(),
-                "ceo".to_string(),
-                "product-engineer".to_string()
-            ]
-        );
-    }
 }

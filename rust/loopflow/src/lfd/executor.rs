@@ -47,7 +47,7 @@ use crate::engine::worktrees::{
 
 use time::OffsetDateTime;
 
-use crate::lfd::config::{ExecutorConfig, ExecutorType};
+use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorType};
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
@@ -267,46 +267,29 @@ struct DockerCredentialMount {
 }
 
 impl DockerCredentialMount {
-    fn from_spec(spec: &str) -> std::result::Result<Self, String> {
-        let mut parts = spec.splitn(2, ':');
-        let host_path = parts
-            .next()
-            .ok_or_else(|| "missing host path".to_string())?
-            .trim();
-        let container_path = parts
-            .next()
-            .ok_or_else(|| "missing container path".to_string())?
-            .trim();
-        if host_path.is_empty() || container_path.is_empty() {
-            return Err("mount paths must be non-empty".to_string());
-        }
-        if !container_path.starts_with('/') {
-            return Err("container path must be absolute".to_string());
-        }
-
-        let host_path = Self::expand_host_path(host_path);
-        if !host_path.is_absolute() {
-            return Err("host path must be absolute or use ~/...".to_string());
-        }
-
+    fn from_config(mount: &CredentialMount) -> std::result::Result<Self, String> {
+        let relative = resolve_credential_mount(mount.name())?;
+        let home = dirs::home_dir().ok_or_else(|| "home directory not available".to_string())?;
         Ok(Self {
-            host_path,
-            container_path: container_path.to_string(),
+            host_path: home.join(relative),
+            container_path: format!("/home/agent/{relative}"),
         })
     }
+}
 
-    fn expand_host_path(path: &str) -> PathBuf {
-        if path == "~" {
-            if let Some(home) = dirs::home_dir() {
-                return home;
-            }
-        }
-        if let Some(rest) = path.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                return home.join(rest);
-            }
-        }
-        PathBuf::from(path)
+fn resolve_credential_mount(name: &str) -> std::result::Result<&'static str, String> {
+    let normalized = name.trim().to_ascii_lowercase();
+    let key = normalized.strip_prefix("~/").unwrap_or(&normalized);
+    match key {
+        "claude" | ".claude" => Ok(".claude"),
+        "codex" | ".codex" => Ok(".codex"),
+        "gemini" | ".config/gemini" => Ok(".config/gemini"),
+        "gitconfig" | ".gitconfig" => Ok(".gitconfig"),
+        "ssh" | ".ssh" => Ok(".ssh"),
+        "gnupg" | ".gnupg" => Ok(".gnupg"),
+        _ => Err(format!(
+            "unknown credential mount '{name}'. allowed mounts: claude, codex, gemini, gitconfig, ssh, gnupg"
+        )),
     }
 }
 
@@ -547,13 +530,13 @@ impl DockerExecutor {
             .credentials
             .mounts
             .iter()
-            .filter_map(|spec| match DockerCredentialMount::from_spec(spec) {
+            .filter_map(|spec| match DockerCredentialMount::from_config(spec) {
                 Ok(mount) => Some(mount),
                 Err(err) => {
                     warn!(
-                        mount = %spec,
+                        mount = %spec.name(),
                         error = %err,
-                        "invalid docker credential mount; expected host:container"
+                        "invalid docker credential mount; skipping"
                     );
                     None
                 }
@@ -2174,7 +2157,6 @@ impl WaveExecutor {
                             run_id = %run.id,
                             branches = fork.branches.len(),
                             step_index = run.step_index,
-                            synthesize = ?fork.synthesize,
                             "running fork (all branches)"
                         );
                         self.run_fork(&wave, &mut run, &plan, &fork).await?;
@@ -2755,19 +2737,6 @@ impl WaveExecutor {
             return Ok(());
         }
 
-        if let Some(step_name) = fork.synthesize.as_deref() {
-            let synth_step = ConcreteStep {
-                step: Step::named(step_name),
-                flow_parents: fork.flow_parents.clone(),
-            };
-            let exit_code = self.run_step(wave, run, &synth_step).await?;
-            if exit_code != 0 {
-                self.cleanup_fork(run, &fork_runs).await;
-                self.fail_run(run, wave, format!("synthesize {} failed", step_name))?;
-                return Ok(());
-            }
-        }
-
         self.cleanup_fork(run, &fork_runs).await;
         run.step_index += 1;
         run.status = WaveRunStatus::Running;
@@ -3269,16 +3238,19 @@ mod tests {
     }
 
     #[test]
-    fn docker_mount_spec_requires_host_and_container_paths() {
+    fn docker_mount_spec_resolves_allowlisted_credentials() {
         let home = dirs::home_dir().expect("home directory should be available");
-        let mount = DockerCredentialMount::from_spec("~/.claude:/home/agent/.claude")
-            .expect("mount spec should parse");
+        let mount = DockerCredentialMount::from_config(
+            &CredentialMount::try_from("claude".to_string()).expect("claude mount should parse"),
+        )
+        .expect("mount spec should parse");
         assert_eq!(mount.host_path, home.join(".claude"));
         assert_eq!(mount.container_path, "/home/agent/.claude");
-        assert!(DockerCredentialMount::from_spec("missing-colon").is_err());
-        assert!(DockerCredentialMount::from_spec(":/home/agent/.claude").is_err());
-        assert!(DockerCredentialMount::from_spec("relative:/home/agent/.claude").is_err());
-        assert!(DockerCredentialMount::from_spec("/tmp/claude:relative").is_err());
+        assert!(DockerCredentialMount::from_config(
+            &CredentialMount::try_from("unknown".to_string())
+                .expect("unknown mount name is still valid syntax"),
+        )
+        .is_err());
     }
 
     #[test]

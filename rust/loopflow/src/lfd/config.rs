@@ -36,6 +36,8 @@ pub struct LfdConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub executor: ExecutorConfig,
+    #[serde(default)]
+    pub github: GitHubConfig,
 }
 
 impl LfdConfig {
@@ -71,7 +73,27 @@ impl LfdConfig {
                 self.executor.image = value;
             }
         }
+
+        if let Ok(value) = std::env::var("LFD_GITHUB_WEBHOOK_SECRET") {
+            self.github.webhook_secret = value;
+        }
+
+        if let Ok(value) = std::env::var("LFD_GITHUB_TOKEN") {
+            let token = value.trim();
+            self.github.token = if token.is_empty() {
+                None
+            } else {
+                Some(token.to_string())
+            };
+        }
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GitHubConfig {
+    #[serde(default)]
+    pub webhook_secret: String,
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]

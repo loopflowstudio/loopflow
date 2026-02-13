@@ -1,19 +1,12 @@
 use crate::chat::contract::{AgentEvent, UserMessagePhase};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum CompletionError {
     MissingFinalMessage,
     MultipleFinalMessages,
 }
 
 /// Validate that a successful turn emitted exactly one final message.
-///
-/// # Errors
-///
-/// Returns [`CompletionError::MissingFinalMessage`] when no final message was
-/// emitted, or [`CompletionError::MultipleFinalMessages`] when more than one
-/// final message was emitted.
 pub fn validate_turn_completion(events: &[AgentEvent]) -> Result<(), CompletionError> {
     match final_message_count(events) {
         1 => Ok(()),
@@ -31,27 +24,25 @@ pub fn is_user_message(event: &AgentEvent) -> bool {
 pub fn final_message_count(events: &[AgentEvent]) -> usize {
     events
         .iter()
-        .filter(|event| is_final_message(event))
+        .filter(|event| {
+            matches!(
+                event,
+                AgentEvent::Message {
+                    phase: UserMessagePhase::Final,
+                    ..
+                }
+            )
+        })
         .count()
-}
-
-fn is_final_message(event: &AgentEvent) -> bool {
-    matches!(
-        event,
-        AgentEvent::Message {
-            phase: UserMessagePhase::Final,
-            ..
-        }
-    )
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::chat::completion::{final_message_count, is_user_message};
+    use crate::chat::completion::{final_message_count, validate_turn_completion, CompletionError};
     use crate::chat::contract::{AgentEvent, ContextSnapshot, UserMessagePhase};
 
     #[test]
-    fn message_helpers_classify_events() {
+    fn one_final_message_is_valid_completion() {
         let events = vec![
             AgentEvent::Message {
                 content: "working".to_string(),
@@ -66,9 +57,46 @@ mod tests {
             },
         ];
 
-        assert!(is_user_message(&events[0]));
-        assert!(!is_user_message(&events[1]));
-        assert!(is_user_message(&events[2]));
         assert_eq!(final_message_count(&events), 1);
+        assert_eq!(validate_turn_completion(&events), Ok(()));
+    }
+
+    #[test]
+    fn no_final_message_is_invalid_completion() {
+        let events = vec![
+            AgentEvent::Message {
+                content: "working".to_string(),
+                phase: UserMessagePhase::Progress,
+            },
+            AgentEvent::Done {
+                context: ContextSnapshot::default(),
+            },
+        ];
+
+        assert_eq!(final_message_count(&events), 0);
+        assert_eq!(
+            validate_turn_completion(&events),
+            Err(CompletionError::MissingFinalMessage)
+        );
+    }
+
+    #[test]
+    fn two_final_messages_is_invalid_completion() {
+        let events = vec![
+            AgentEvent::Message {
+                content: "done".to_string(),
+                phase: UserMessagePhase::Final,
+            },
+            AgentEvent::Message {
+                content: "actually done".to_string(),
+                phase: UserMessagePhase::Final,
+            },
+        ];
+
+        assert_eq!(final_message_count(&events), 2);
+        assert_eq!(
+            validate_turn_completion(&events),
+            Err(CompletionError::MultipleFinalMessages)
+        );
     }
 }

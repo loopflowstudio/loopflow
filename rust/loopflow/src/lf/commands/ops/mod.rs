@@ -200,6 +200,7 @@ fn run_worktree(cmd: &WtCommand) -> Result<()> {
         WtCommand::Create { name, base, stack } => wt_create(name, base.as_deref(), *stack),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, .. } => wt_list(format.as_deref()),
+        WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune { dry_run, force, .. } => wt_prune(*dry_run, *force),
         WtCommand::Ci { watch, logs } => wt_ci(*watch, *logs),
     }
@@ -370,6 +371,50 @@ fn wt_list(format: Option<&str>) -> Result<()> {
             diff = diff,
         );
     }
+    Ok(())
+}
+
+fn wt_remove(name: &str, force: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let main_repo = main_repo_root(&repo_root)?;
+
+    // Find the worktree by short name or directory name
+    let worktrees = list_worktrees(&main_repo)?;
+    let target = worktrees.iter().find(|wt| {
+        worktree_short_name(&wt.path).as_deref() == Some(name)
+            || wt
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy() == name)
+                .unwrap_or(false)
+    });
+
+    let wt = match target {
+        Some(wt) => wt,
+        None => return Err(anyhow!("no worktree found for '{}'", name)),
+    };
+
+    if wt.path == repo_root {
+        return Err(anyhow!("cannot remove the current worktree"));
+    }
+
+    let default_branch = get_default_branch(&main_repo)?;
+    if wt.branch.as_deref() == Some(&default_branch) {
+        return Err(anyhow!("cannot remove the main worktree"));
+    }
+
+    if !force && !is_clean(&wt.path).unwrap_or(false) {
+        return Err(anyhow!(
+            "worktree has uncommitted changes (use --force to override)"
+        ));
+    }
+
+    let branch = wt.branch.clone();
+    crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
+    if let Some(branch) = branch {
+        let _ = delete_local_branch(&main_repo, &branch);
+    }
+    println!("Removed {}", name);
     Ok(())
 }
 

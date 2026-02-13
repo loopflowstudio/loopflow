@@ -1,4 +1,6 @@
-# Open questions / follow-ups
+# Open questions
 
-- Keep image builds as `docker build` CLI dependency, or move builds to Docker API/BuildKit to remove CLI runtime requirements?
-- Should CLI fork execution also support `fork.select: one/prompt`, or is `select: all` sufficient for now?
+## Branch follow-ups
+
+- Should Docker image builds continue to require `docker build` CLI at runtime, or move to Docker API/BuildKit?
+- Should CLI fork execution add support for `fork.select: one` and `fork.select: prompt`, or keep `select: all` only for now?

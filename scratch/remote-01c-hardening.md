@@ -1,73 +1,67 @@
 # 01C: Sandboxed Agent Hardening (Current State)
 
-Close Docker executor hardening for production usage. This file is the single source of truth for what already landed and what is still open.
+This doc tracks closeout status for 01C and the remaining production hardening work.
 
 ## Landed on this branch
 
 ### Docker restart durability
 
-- Persisted `agents.container_id` so Docker identity survives daemon restarts.
-- Startup recovery now runs before scheduler/background loops:
-  - rehydrates running Docker agents into in-memory tracking
-  - reattaches log/exit/sync tail for recovered containers
-  - fails runs when expected containers are missing
-  - removes orphaned loopflow-managed containers
+- Persisted `agents.container_id` so Docker-backed agents survive daemon restarts.
+- Daemon startup now recovers running containers before scheduler/background loops.
+- Recovery rehydrates in-memory tracking, reattaches lifecycle/log tailing, fails runs when expected containers are missing, and removes loopflow-managed orphan containers.
 
 ### Fork isolation in Docker
 
 - Removed Docker-only rejection for `fork(select: all)`.
-- Fork branches now run in parallel containers with per-fork worktrees inside the same repo volume.
-- Shared clone mutations stay lock-guarded; fork execution stays concurrent.
+- Fork branches now execute in parallel containers with per-fork worktree isolation.
+- Shared clone mutation remains serialized while fork execution remains concurrent.
 
 ### Credential mount hardening
 
-- Replaced raw `host:container` mount strings with typed, named mounts.
-- Enforced fixed allowlist (`claude`, `codex`, `gemini`, `gitconfig`, `ssh`, `gnupg`).
+- Replaced raw `host:container` mount strings with typed named mounts.
+- Enforced allowlist: `claude`, `codex`, `gemini`, `gitconfig`, `ssh`, `gnupg`.
 - Unknown mount names now fail config parsing.
-- All credential mounts remain read-only.
+- Credential mounts remain read-only.
 
 ### Image lifecycle hardening
 
-- Added repo-scoped image tags (`lfd-agent-<repo-key>:latest`) to avoid cross-repo collisions.
-- Added fingerprint-based rebuild checks for `.lf/Dockerfile`, `.lf/env-setup.sh`, and base image ref.
-- Added stale sentinel support (`.lf/.docker-stale`).
+- Added repo-scoped image tags (`lfd-agent-<repo-key>:latest`) to prevent cross-repo collisions.
+- Added fingerprint-based rebuild triggers for `.lf/Dockerfile`, `.lf/env-setup.sh`, base `FROM`, and `.lf/.docker-stale`.
 - Added default `.lf/Dockerfile` generation when missing.
-- Added per-image build coordination so concurrent waves do not duplicate builds.
+- Added per-image build coordination to prevent duplicate concurrent builds.
 
 ## Remaining to close 01C
 
-### 1) Docker CI coverage
+### 1) Add Docker CI coverage
 
-Add automated coverage for Docker paths still missing in CI:
-
-- PR smoke job (daemon connectivity, helper container run, volume lifecycle, mount resolution)
-- Nightly Docker e2e (parallel waves, fork fanout, cancel/cleanup, image rebuild trigger paths)
+- PR smoke coverage for daemon connectivity, helper container run, volume lifecycle, and mount resolution.
+- Nightly Docker e2e for parallel waves, fork fanout, cancel/cleanup, and image rebuild triggers.
 
 ### 2) Decide build backend policy
 
-Current image build path shells out to `docker build` CLI. Decide whether to:
+Current implementation shells out to `docker build`.
 
-- keep CLI dependency and document it as required runtime tooling, or
-- move image builds fully to Docker API/BuildKit integration.
+Decision needed:
+- Keep Docker CLI as explicit runtime dependency, or
+- Move image builds to Docker API/BuildKit.
 
-## Non-goals (unchanged)
+## Known limits (accepted in this stage)
 
-- Full flow-state checkpoint/restore across daemon restarts
-- Docker log replay/backfill for downtime windows
-- Per-wave credential scoping
-- Docker network policy redesign
+- No full flow-state checkpoint/restore across daemon restarts.
+- No downtime log replay/backfill.
+- No per-wave credential scoping.
+- No Docker network policy redesign.
 
-## Stage-close checklist
+## Validation checklist
 
 ```bash
-# Existing broad suites
 cargo fmt --all
 cargo clippy --all -- -D warnings
 cargo test --all
 uv run pytest python/tests/
 tests/e2e/test_smoke.sh
 
-# Docker-specific coverage (to add to CI)
-cargo test -- --ignored                 # Docker smoke tests
-./tests/e2e/test_docker_smoke.sh        # Docker e2e smoke
+# Docker-specific suites (to wire into CI)
+cargo test -- --ignored
+./tests/e2e/test_docker_smoke.sh
 ```

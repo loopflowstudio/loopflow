@@ -107,40 +107,49 @@ struct WaveDetailPanel: View {
             Divider()
 
             ScrollView {
-                VStack(spacing: Spacing.lg) {
+                VStack(spacing: 0) {
                     if selectedTab == .current {
                         if wave.status == .idle || wave.status == .failed {
                             if wave.status == .failed {
                                 failedRunDetail
+                                    .padding(.bottom, Spacing.lg)
                             }
 
                             StepRunner(wave: wave)
 
                             if !wave.commits.isEmpty {
                                 commitLogSection
+                                    .padding(.top, Spacing.lg)
                             }
 
                             if let stat = wave.diffStat {
                                 diffStatSection(stat)
+                                    .padding(.top, Spacing.sm)
                             }
 
                             if !wave.commits.isEmpty || wave.prURL != nil {
                                 opsActionsBar
+                                    .padding(.top, Spacing.xl)
                             } else if wave.status == .idle && !wave.recentSteps.isEmpty {
                                 Divider()
+                                    .padding(.top, Spacing.lg)
                                 NextActionsBar(wave: wave)
+                                    .padding(.top, Spacing.lg)
                             }
 
                             if wave.status == .failed && !outputBuffer.output(for: wave.id).isEmpty {
                                 liveOutputSection
+                                    .padding(.top, Spacing.lg)
                             }
                         } else {
                             waveConfigSummary
                             runProgressSection
+                                .padding(.top, Spacing.lg)
                         }
 
                         if wave.worktreePath != nil {
                             quickActionsBar
+                                .padding(.top, Spacing.lg)
                         }
                     } else {
                         WaveRunsTab(
@@ -282,6 +291,9 @@ struct WaveDetailPanel: View {
             configLabel("target", wave.directionDisplay)
             configLabel("arrow.triangle.branch", wave.flow)
         }
+        .padding(Spacing.md)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
 
     @ViewBuilder
@@ -421,9 +433,10 @@ struct WaveDetailPanel: View {
     private var liveOutputSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(wave.status == .running ? "Live Output" : "Output")
-                .font(Typography.caption())
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .font(Typography.caption(10))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+                .tracking(0.5)
 
             let output = outputBuffer.output(for: wave.id)
             if output.isEmpty {
@@ -446,9 +459,10 @@ struct WaveDetailPanel: View {
     private var commitLogSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Commits")
-                .font(Typography.caption())
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .font(Typography.caption(10))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+                .tracking(0.5)
 
             VStack(spacing: 0) {
                 ForEach(wave.commits) { entry in
@@ -481,9 +495,10 @@ struct WaveDetailPanel: View {
     private func diffStatSection(_ stat: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Diff")
-                .font(Typography.caption())
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .font(Typography.caption(10))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+                .tracking(0.5)
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(stat.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in

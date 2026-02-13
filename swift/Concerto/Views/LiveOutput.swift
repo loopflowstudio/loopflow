@@ -25,7 +25,7 @@ struct LiveOutput: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(Color.black.opacity(0.3))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             .onChange(of: lines.count) { _, _ in
                 if let lastLine = lines.last {
                     withAnimation(DesignAnimation.fast(reduceMotion)) {

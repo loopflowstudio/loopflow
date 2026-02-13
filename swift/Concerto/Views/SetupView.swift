@@ -93,7 +93,7 @@ struct SetupView: View {
                 }
             }
         }
-        .padding(40)
+        .padding(Spacing.xxxl + Spacing.sm)
         .frame(width: 500, height: 400)
         .onAppear {
             checkStatus()

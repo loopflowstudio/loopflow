@@ -59,7 +59,7 @@ struct WelcomeWindow: View {
                             }
                             .buttonStyle(.plain)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
+                                RoundedRectangle(cornerRadius: CornerRadius.sm)
                                     .fill(palette.surface)
                             )
                         }
@@ -77,7 +77,7 @@ struct WelcomeWindow: View {
             .buttonStyle(.borderedProminent)
             .keyboardShortcut("o", modifiers: .command)
         }
-        .padding(40)
+        .padding(Spacing.xxxl + Spacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
     }

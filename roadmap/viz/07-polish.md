@@ -15,13 +15,9 @@ Prioritized by visual impact per line changed. Full details in `reports/viz/desi
 
 ### ~~Tier 2: Typography tokens~~ (done — fonts bundled, 160 system font calls replaced)
 
-### Tier 3: Button hierarchy (~60 lines)
-- Add `GhostButtonStyle` and `DestructiveButtonStyle` to `DesignSystem.swift`
-- Restyle secondary actions (Clone, Next, View PR) as ghost, destructive actions (Stop, Archive) as outline
+### ~~Tier 3: Button hierarchy~~ (done — ghost, destructive, primary styles applied across 6 restyle points)
 
-### Tier 4: Token cleanup (~25 lines)
-- Replace hardcoded `cornerRadius:` literals with `CornerRadius` tokens
-- Replace hardcoded padding literals with `Spacing` tokens
+### ~~Tier 4: Token cleanup~~ (done — cornerRadius and padding literals replaced with design tokens)
 
 ### Other candidates
 - Detail view density and hierarchy

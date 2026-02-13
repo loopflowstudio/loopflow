@@ -145,7 +145,7 @@ struct TypeaheadChip: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(palette.accent.opacity(0.15))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .onHover { isHovered = $0 }
         .help(helpText)
     }

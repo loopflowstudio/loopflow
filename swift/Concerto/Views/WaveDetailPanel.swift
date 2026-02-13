@@ -151,7 +151,7 @@ struct WaveDetailPanel: View {
                         )
                     }
                 }
-                .padding(20)
+                .padding(Spacing.xl)
             }
         }
     }
@@ -240,8 +240,8 @@ struct WaveDetailPanel: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 220)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.lg)
     }
 
     private func prBadge(number: Int, state: PRState, url: URL?) -> some View {
@@ -405,7 +405,7 @@ struct WaveDetailPanel: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(palette.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
                 }
 
                 // Commits and diff while running
@@ -422,9 +422,9 @@ struct WaveDetailPanel: View {
                     liveOutputSection
                 }
             }
-            .padding(16)
+            .padding(Spacing.lg)
             .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         }
     }
 
@@ -441,10 +441,10 @@ struct WaveDetailPanel: View {
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                 }
-                .padding(12)
+                .padding(Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.statusError.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
             } else {
                 Text("No error details available.")
                     .font(Typography.caption())
@@ -485,9 +485,9 @@ struct WaveDetailPanel: View {
                     .font(Typography.caption())
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
+                    .padding(Spacing.md)
                     .background(palette.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
             } else {
                 LiveOutput(lines: output)
                     .frame(minHeight: 120, maxHeight: 300)

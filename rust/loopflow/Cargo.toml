@@ -73,7 +73,7 @@ tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_j
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tower-http = { version = "0.5", features = ["trace"] }
+tempfile = "3.9"
 
 [dev-dependencies]
-tempfile = "3.9"
 loopflow-test-support = { path = "../loopflow-test-support" }

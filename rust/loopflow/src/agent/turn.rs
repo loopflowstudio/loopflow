@@ -1,5 +1,6 @@
 use crate::agent::anthropic::{self, ContentBlock, Message, MessageContent};
 use crate::agent::registry::ToolRegistry;
+use crate::chat::AgentEvent;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_MAX_ITERATIONS: u32 = 200;
@@ -28,6 +29,7 @@ pub struct TurnResult {
     pub iterations: u32,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    pub events: Vec<AgentEvent>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +60,7 @@ pub async fn run(
 
     let mut total_input_tokens: u32 = 0;
     let mut total_output_tokens: u32 = 0;
+    let mut all_events: Vec<AgentEvent> = Vec::new();
 
     for iteration in 1..=config.max_iterations {
         // Check timeout
@@ -87,12 +90,14 @@ pub async fn run(
                     iterations: iteration,
                     input_tokens: total_input_tokens,
                     output_tokens: total_output_tokens,
+                    events: all_events,
                 })
                 .ok_or(TurnError::NoTextResponse);
         }
 
         // Model wants to use tools — dispatch them through the registry
-        let tool_results = make_tool_results(&response.content, registry);
+        let (tool_results, events) = make_tool_results(&response.content, registry);
+        all_events.extend(events);
 
         for block in &response.content {
             if let ContentBlock::ToolUse { name, input, .. } = block {
@@ -128,23 +133,35 @@ pub async fn run(
 fn make_tool_results(
     assistant_content: &[ContentBlock],
     registry: &ToolRegistry,
-) -> Vec<ContentBlock> {
-    assistant_content
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::ToolUse { id, name, input } => {
-                let output = match registry.dispatch(name, input) {
-                    Some(result) => result.output,
-                    None => format!("unknown tool: {name}"),
-                };
-                Some(ContentBlock::ToolResult {
-                    tool_use_id: id.clone(),
-                    content: output,
-                })
+) -> (Vec<ContentBlock>, Vec<AgentEvent>) {
+    let mut blocks = Vec::new();
+    let mut events = Vec::new();
+
+    for block in assistant_content {
+        if let ContentBlock::ToolUse { id, name, input } = block {
+            let (output, event) = match registry.dispatch(name, input) {
+                Some(result) => (result.output, result.event),
+                None => (format!("unknown tool: {name}"), None),
+            };
+            blocks.push(ContentBlock::ToolResult {
+                tool_use_id: id.clone(),
+                content: output,
+            });
+            if let Some(ev) = event {
+                events.push(ev);
             }
-            _ => None,
-        })
-        .collect()
+        }
+    }
+
+    (blocks, events)
+}
+
+/// Exposed for integration testing: dispatch tool calls and collect events.
+pub fn dispatch_tool_results(
+    assistant_content: &[ContentBlock],
+    registry: &ToolRegistry,
+) -> (Vec<ContentBlock>, Vec<AgentEvent>) {
+    make_tool_results(assistant_content, registry)
 }
 
 fn extract_text(content: &[ContentBlock]) -> Option<String> {
@@ -159,5 +176,140 @@ fn extract_text(content: &[ContentBlock]) -> Option<String> {
         None
     } else {
         Some(texts.join("\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::tools;
+    use crate::chat::{validate_turn_completion, UserMessagePhase};
+
+    #[test]
+    fn make_tool_results_collects_events_from_boundary_tools() {
+        let registry = tools::default_registry();
+
+        // Simulate assistant response with two tool_use blocks
+        let assistant_content = vec![
+            ContentBlock::ToolUse {
+                id: "t1".to_string(),
+                name: "send_message".to_string(),
+                input: serde_json::json!({
+                    "content": "Working on it...",
+                    "phase": "progress"
+                }),
+            },
+            ContentBlock::ToolUse {
+                id: "t2".to_string(),
+                name: "memory_edit".to_string(),
+                input: serde_json::json!({
+                    "op": "upsert",
+                    "block": "name",
+                    "detail": "Alice"
+                }),
+            },
+        ];
+
+        let (blocks, events) = make_tool_results(&assistant_content, &registry);
+
+        // Two tool results returned
+        assert_eq!(blocks.len(), 2);
+
+        // Two events collected
+        assert_eq!(events.len(), 2);
+
+        // First event is a progress message
+        assert!(matches!(
+            &events[0],
+            AgentEvent::Message {
+                phase: UserMessagePhase::Progress,
+                ..
+            }
+        ));
+
+        // Second event is a memory edit
+        assert!(matches!(&events[1], AgentEvent::MemoryEdit { .. }));
+    }
+
+    #[test]
+    fn make_tool_results_no_events_from_non_boundary_tools() {
+        let registry = tools::default_registry();
+
+        let assistant_content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "calculate".to_string(),
+            input: serde_json::json!({"expression": "2 + 2"}),
+        }];
+
+        let (blocks, events) = make_tool_results(&assistant_content, &registry);
+
+        assert_eq!(blocks.len(), 1);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn event_collection_with_final_message_passes_completion_validation() {
+        let registry = tools::default_registry();
+
+        let assistant_content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "send_message".to_string(),
+            input: serde_json::json!({
+                "content": "Here's your answer!",
+                "phase": "final"
+            }),
+        }];
+
+        let (_blocks, events) = make_tool_results(&assistant_content, &registry);
+        assert_eq!(events.len(), 1);
+
+        // This event stream should pass completion validation
+        assert!(validate_turn_completion(&events).is_ok());
+    }
+
+    #[test]
+    fn jsonl_serialization_of_events() {
+        let events = vec![
+            AgentEvent::Message {
+                content: "hello".to_string(),
+                phase: UserMessagePhase::Progress,
+            },
+            AgentEvent::MemoryEdit {
+                op: "upsert".to_string(),
+                block: "name".to_string(),
+                detail: "Alice".to_string(),
+            },
+        ];
+
+        // Each event serializes to a single JSON line
+        for event in &events {
+            let json = serde_json::to_string(event).unwrap();
+            assert!(
+                !json.contains('\n'),
+                "JSONL lines must not contain newlines"
+            );
+            // Round-trips
+            let reparsed: AgentEvent = serde_json::from_str(&json).unwrap();
+            assert_eq!(&reparsed, event);
+        }
+    }
+
+    #[test]
+    fn unknown_tool_produces_no_event() {
+        let registry = tools::default_registry();
+
+        let assistant_content = vec![ContentBlock::ToolUse {
+            id: "t1".to_string(),
+            name: "nonexistent_tool".to_string(),
+            input: serde_json::json!({}),
+        }];
+
+        let (blocks, events) = make_tool_results(&assistant_content, &registry);
+
+        assert_eq!(blocks.len(), 1);
+        if let ContentBlock::ToolResult { content, .. } = &blocks[0] {
+            assert!(content.contains("unknown tool"));
+        }
+        assert!(events.is_empty());
     }
 }

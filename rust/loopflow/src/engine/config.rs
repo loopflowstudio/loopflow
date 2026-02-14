@@ -194,7 +194,7 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub include_loopflow_doc: bool,
 
-    /// Include reports/, roadmap/, scratch/, and root .md files
+    /// Include reports/, wave/, scratch/, and root .md files
     #[serde(default = "default_true")]
     pub lfdocs: bool,
 

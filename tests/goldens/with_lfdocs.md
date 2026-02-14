@@ -41,7 +41,7 @@ Check the run mode at the top of the prompt.
 
 **Code**: The actual work. Tests, implementation, fixes.
 
-Don't modify `roadmap/` unless the step explicitly says to. It persists across PRs.
+Don't modify `wave/` unless the step explicitly says to. It persists across PRs.
 
 ---
 
@@ -180,7 +180,7 @@ Run mode is auto (headless). Proceed without pausing for questions. If you need 
 
 <lf:wave name="rust">
 You are building toward the rust program of work.
-Roadmap context is included in docs below.
+Wave context is included in docs below.
 </lf:wave>
 
 Repository documentation. Follow STYLE carefully. May include design artifacts (scratch/) and internal docs (reports/).

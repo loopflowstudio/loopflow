@@ -24,7 +24,7 @@ struct Args {
     #[arg(long = "direction")]
     directions: Vec<String>,
 
-    /// Include lfdocs (scratch/, roadmap/, root .md)
+    /// Include lfdocs (scratch/, wave/, root .md)
     #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     lfdocs: bool,
 

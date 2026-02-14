@@ -37,7 +37,7 @@ The design doc and style guides are in your context.
 
 ## Wave context
 
-If `<lf:wave>` is present, check `roadmap/<wave>/README.md` in docs:
+If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 
 - Follow the wave's principles during implementation
 - Check against compatibility matrix if mentioned

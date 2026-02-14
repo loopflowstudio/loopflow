@@ -1,12 +1,12 @@
 ---
 requires: scratch/ analysis
-produces: scratch/roadmap-proposal.md
+produces: scratch/wave-proposal.md
 ---
-Synthesize analysis into a roadmap — a sequenced plan for building something.
+Synthesize analysis into a wave plan — a sequenced plan for building something.
 
 ## Scope
 
-The included context defines your area. Propose items that belong to this area. When promoted via `add-to-roadmap`, actionable items go to `roadmap/<wave>/` and reference material goes to `reports/`.
+The included context defines your area. Propose items that belong to this area. When promoted via `add-to-wave`, actionable items go to `wave/<wave>/` and reference material goes to `reports/`.
 
 ## Workflow
 
@@ -16,7 +16,7 @@ The included context defines your area. Propose items that belong to this area. 
 4. Name the invariants, design decisions, and differentiators — what makes this system *this system* and not something generic
 5. Identify the highest-leverage work that emerges from the analysis
 6. Sequence it for learning — what do we need to build first to learn the most?
-7. Write `scratch/roadmap-proposal.md`
+7. Write `scratch/wave-proposal.md`
 
 ## Vision first
 
@@ -44,7 +44,7 @@ This section is the anchor. When phases shift and plans change, this stays. If y
 
 ## Output format
 
-Write `scratch/roadmap-proposal.md`:
+Write `scratch/wave-proposal.md`:
 
 ```markdown
 ---
@@ -100,5 +100,5 @@ Explicit acknowledgment of where the plan is likely wrong. What would cause phas
 - Focus on substantial work, not small fixes
 - Be honest about scope — what's in, what's out
 - Fewer phases with learning checkpoints beat many small items in a dependency graph
-- If the analysis doesn't clearly point to a proposal, write `scratch/roadmap-proposal.md` explaining why and what's missing
-- A roadmap is a hypothesis about sequencing, not a contract. It should expect to be revised. But the vision and invariants at the top should be stable.
+- If the analysis doesn't clearly point to a proposal, write `scratch/wave-proposal.md` explaining why and what's missing
+- A wave plan is a hypothesis about sequencing, not a contract. It should expect to be revised. But the vision and invariants at the top should be stable.

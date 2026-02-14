@@ -40,7 +40,7 @@ Check the run mode at the top of the prompt.
 
 **Code**: The actual work. Tests, implementation, fixes.
 
-Don't modify `roadmap/` unless the step explicitly says to. It persists across PRs.
+Don't modify `wave/` unless the step explicitly says to. It persists across PRs.
 
 ---
 

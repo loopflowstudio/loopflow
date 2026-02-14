@@ -168,7 +168,7 @@ fn expand_flow_tracks_parents() {
 
 /// Plain string items in flow YAML that match a sub-flow name should be
 /// expanded as sub-flows, not treated as step names. This was the root
-/// cause of `step not found: publish` in roadmap-reduce.
+/// cause of `step not found: publish` in wave-reduce.
 #[test]
 fn expand_flow_resolves_plain_string_as_subflow() {
     let temp = TempDir::new().unwrap();
@@ -229,21 +229,21 @@ fn expand_flow_prefers_step_over_single_step_flow() {
     }
 }
 
-/// The builtin roadmap-reduce flow should expand to 4 items:
-/// review, fork(reduce×3), consolidate, add-to-roadmap.
+/// The builtin wave-reduce flow should expand to 4 items:
+/// review, fork(reduce×3), consolidate, add-to-wave.
 #[test]
-fn builtin_roadmap_reduce_expands_publish_subflow() {
+fn builtin_wave_reduce_expands_publish_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    let flow = load_flow("roadmap-reduce", repo).unwrap();
+    let flow = load_flow("wave-reduce", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
 
-    // review + fork + consolidate + add-to-roadmap = 4
+    // review + fork + consolidate + add-to-wave = 4
     assert_eq!(
         items.len(),
         4,
-        "roadmap-reduce should expand publish into consolidate + add-to-roadmap"
+        "wave-reduce should expand publish into consolidate + add-to-wave"
     );
 
     // Step 0: review
@@ -261,9 +261,9 @@ fn builtin_roadmap_reduce_expands_publish_subflow() {
         ConcreteItem::Step(s) => assert_eq!(s.step.name, "consolidate"),
         _ => panic!("expected consolidate step"),
     }
-    // Step 3: add-to-roadmap (from publish sub-flow)
+    // Step 3: add-to-wave (from publish sub-flow)
     match &items[3] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "add-to-roadmap"),
-        _ => panic!("expected add-to-roadmap step"),
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "add-to-wave"),
+        _ => panic!("expected add-to-wave step"),
     }
 }

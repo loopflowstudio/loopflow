@@ -1,6 +1,6 @@
 ---
 requires: screenshot(s) in area
-produces: roadmap/concerto/<date>-<direction>-<order>-<slug>.md
+produces: wave/concerto/<date>-<direction>-<order>-<slug>.md
 interactive: true
 ---
 
@@ -25,10 +25,10 @@ For each screenshot in the area:
 
 ## Output format
 
-For each issue found, write a backlog item file in `roadmap/<wave>/`:
+For each issue found, write a backlog item file in `wave/<wave>/`:
 
 - Use `--wave` if provided; otherwise infer from the worktree name.
-- If no wave can be determined, default to `roadmap/concerto/`.
+- If no wave can be determined, default to `wave/concerto/`.
 - Filename: `<date>-<direction>-<order>-<slug>.md`
   - `date`: `YYYYMMDD`
   - `direction`: the persona name

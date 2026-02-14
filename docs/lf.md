@@ -53,7 +53,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 |------|-------------|
 | `--area PATH` | Area scope (paths to include in context) |
 | `-w, --worktree NAME` | Create worktree and run step there |
-| `--lfdocs / --no-lfdocs` | Include roadmap/, scratch/, and root .md files (default: on) |
+| `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root .md files (default: on) |
 | `--diff-files / --no-diff-files` | Include files touched by branch (default: on) |
 | `--diff / --no-diff` | Include raw `git diff` output |
 
@@ -122,7 +122,7 @@ Every step automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
-| **lfdocs** (roadmap/, scratch/, root .md files) | ✓ included | `--no-lfdocs` |
+| **lfdocs** (wave/, scratch/, root .md files) | ✓ included | `--no-lfdocs` |
 | **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
 
 ## What's Opt-In

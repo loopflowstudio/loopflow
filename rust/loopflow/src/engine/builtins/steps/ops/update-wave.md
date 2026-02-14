@@ -1,20 +1,20 @@
 ---
-requires: diff vs main, roadmap/<wave>/
-produces: roadmap/<wave>/ (updated)
+requires: diff vs main, wave/<wave>/
+produces: wave/<wave>/ (updated)
 ---
-Revise the roadmap based on what we just shipped.
+Revise the wave plan based on what we just shipped.
 
 ## Goal
 
-After shipping a roadmap item, the plan should reflect what we learned. A roadmap written before building is a hypothesis. This step updates the hypothesis with evidence.
+After shipping a wave item, the plan should reflect what we learned. A wave plan written before building is a hypothesis. This step updates the hypothesis with evidence.
 
 ## Workflow
 
 1. Read the diff — what was actually built?
-2. Read the remaining roadmap items in `roadmap/<wave>/`
-3. Read `roadmap/<wave>/README.md` for strategic context
+2. Read the remaining wave items in `wave/<wave>/`
+3. Read `wave/<wave>/README.md` for strategic context
 4. Compare what was built to what was planned. Note surprises — things that were harder, easier, or different than expected.
-5. Update the roadmap.
+5. Update the wave plan.
 
 ## What to look for
 
@@ -45,6 +45,6 @@ After shipping a roadmap item, the plan should reflect what we learned. A roadma
 
 ## Output
 
-Updated files in `roadmap/<wave>/`. Commit the changes with a message describing what shifted and why.
+Updated files in `wave/<wave>/`. Commit the changes with a message describing what shifted and why.
 
-If nothing changed — the plan still holds — write a brief note in the commit: "roadmap: reviewed after <item>, no changes needed."
+If nothing changed — the plan still holds — write a brief note in the commit: "wave: reviewed after <item>, no changes needed."

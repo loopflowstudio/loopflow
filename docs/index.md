@@ -206,27 +206,27 @@ PY
   flows/                  # Flow definitions
 .claude/commands/         # Steps (Claude Code compatible)
 scratch/                  # PR scratchpad (cleared on merge)
-roadmap/                  # Internal docs (persists)
+wave/                     # Wave plans (persists)
 ~/.lf/                    # Global config and steps
 ```
 
-### scratch/ vs roadmap/
+### scratch/ vs wave/
 
-| | scratch/ | roadmap/ |
+| | scratch/ | wave/ |
 |---|---|---|
 | **Lifespan** | Dies with the PR | Lives forever |
 | **Purpose** | Current work | Forward-looking plans |
 | **Location** | Root only | Root + per-folder |
 | **Example** | "Add auth" spec | "How auth should work long-term" |
 
-`roadmap/` can exist at any level:
-- Root `roadmap/` is auto-included (part of lfdocs)
-- `src/api/roadmap/` holds API-specific plans
-- Including an area via `--area` auto-includes its nested `roadmap/` folders
+`wave/` can exist at any level:
+- Root `wave/` is auto-included (part of lfdocs)
+- `src/api/wave/` holds API-specific plans
+- Including an area via `--area` auto-includes its nested `wave/` folders
 
 ### What's Auto-Included
 
-Every step sees: `README.md`, `STYLE.md`, `CLAUDE.md`, `scratch/`, `roadmap/`, and files touched by your branch.
+Every step sees: `README.md`, `STYLE.md`, `CLAUDE.md`, `scratch/`, `wave/`, and files touched by your branch.
 
 ---
 

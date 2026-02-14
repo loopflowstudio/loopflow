@@ -12,7 +12,9 @@ Concerto talks to lfd via `LocalWaveService` (HTTP) and `LocalEventService` (Web
 
 `WaveServiceProtocol` already abstracts wave operations. Adding a remote connection is configuration, not architecture.
 
-**From Phase 03:** lfd accepts `Authorization: Bearer <token>` on all non-loopback requests when `auth.provider=static`. The Python client already implements this (`token=` kwarg, `LFD_TOKEN` env). Concerto needs the same pattern — inject the token into HTTP requests and WebSocket upgrade headers.
+**From Phase 03 (shipped):** lfd accepts `Authorization: Bearer <token>` on all non-loopback requests when `auth.provider=static`. The Python client already implements this (`token=` kwarg, `LFD_TOKEN` env). Concerto needs the same pattern — inject the token into HTTP requests and WebSocket upgrade headers.
+
+**From Phase 04 (shipped):** Remote deployment uses Caddy on :443 for TLS termination, proxying to lfd:2486 internally. Concerto connects to `https://<host>:443`, not `http://<host>:2486`. Caddy uses `tls internal` (self-signed certs) — Concerto must handle certificate trust (TOFU: trust on first use, pin the cert fingerprint).
 
 ## Implementation
 
@@ -23,7 +25,7 @@ Concerto talks to lfd via `LocalWaveService` (HTTP) and `LocalEventService` (Web
 
 public struct ServerConnection: Codable, Sendable {
     public let host: String        // "127.0.0.1" or "ec2-host"
-    public let port: Int           // 2486
+    public let port: Int           // 2486 local, 443 remote (Caddy TLS)
     public let token: String?      // bearer token (nil for local)
     public let useTLS: Bool        // false for local, true for remote
 

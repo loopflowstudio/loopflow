@@ -136,7 +136,9 @@ Add JWT signature validation to the auth middleware. 7-day JWTs validated locall
 4. Check `sub` or `email` against `allowed_users` in config
 5. No per-request roundtrip to auth.loopflow.studio
 
-The `setup_auth()` function in `lfd/mod.rs` already dispatches on `config.auth.provider` — the `"loopflow.studio"` branch calls `setup_studio_registration()`. JWKS validation extends this path.
+**From Phase 03 (shipped):** `setup_auth()` in `lfd/mod.rs` dispatches on `config.auth.provider` — the `"loopflow.studio"` branch calls `setup_studio_registration()`. The middleware in `auth.rs` already matches on `AuthProvider::Studio { validator }` and calls `validator.validate()`. The upgrade path: replace `ConnectionValidator` (per-request API call) with a `JwksValidator` (local signature check). Middleware dispatch stays the same.
+
+**Note:** `setup_studio_registration()` uses a daemon-level JWT from `~/.lf/credentials.json` for registration/heartbeat. This is separate from user auth tokens validated per request. Phase 07 adds the user-facing JWT validation; the daemon registration flow is already shipped.
 
 ```yaml
 # ~/.lf/lfd.yaml

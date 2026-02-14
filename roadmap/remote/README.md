@@ -13,7 +13,7 @@ lfd runs on a remote Linux machine (containerized). Concerto connects from your 
 | 01 | Sandboxed Agents | Agents in Docker containers, controlled credentials | None | Shipped |
 | 02 | Compose Stack | Full stack in Docker (lfd + postgres), test locally | 01 | Shipped |
 | 03 | Pre-shared Token Auth | lfd accepts remote connections | None | Shipped |
-| 04 | EC2 Infrastructure | A box to deploy on (Docker + compose) | 02 | In Progress |
+| 04 | EC2 Infrastructure | A box to deploy on (Docker + compose) | 02 | Shipped |
 | 05 | Concerto Remote Connection | Wave CRUD, events, logs over WAN | 03, 04 |  |
 | 06 | Remote File Access | One-click "Open in Cursor" per wave | 05 |
 | 07 | Studio Auth | Real JWT auth via auth.loopflow.studio (server built, client wiring remaining) | 05 |

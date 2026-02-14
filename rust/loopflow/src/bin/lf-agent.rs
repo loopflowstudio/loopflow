@@ -1,6 +1,9 @@
 use clap::Parser;
+use loopflow::agent::context::ContextStore;
 use loopflow::agent::tools;
 use loopflow::agent::turn::{self, TurnConfig, DEFAULT_MAX_ITERATIONS, DEFAULT_TIMEOUT_SECS};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -22,6 +25,10 @@ struct Args {
     /// System prompt
     #[arg(long)]
     system: Option<String>,
+
+    /// Workspace directory for file tools (defaults to a temporary directory)
+    #[arg(long)]
+    workspace: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -34,14 +41,35 @@ async fn main() {
         system: args.system,
     };
 
-    let registry = tools::default_registry();
+    let store = Arc::new(Mutex::new(ContextStore::new()));
+
+    // Use provided workspace or create a temporary one
+    let _tempdir;
+    let workspace = match args.workspace {
+        Some(path) => path,
+        None => {
+            _tempdir = tempfile::tempdir().expect("failed to create temp workspace");
+            _tempdir.path().to_path_buf()
+        }
+    };
+
+    let registry = tools::full_registry(store, workspace);
 
     match turn::run(&args.prompt, &config, &registry).await {
         Ok(result) => {
-            println!("{}", result.response);
+            // Emit each event as a JSONL line to stdout
+            for event in &result.events {
+                let json =
+                    serde_json::to_string(event).expect("AgentEvent should always serialize");
+                println!("{json}");
+            }
+
             eprintln!(
-                "[lf-agent] done: {} iterations, {} input tokens, {} output tokens",
-                result.iterations, result.input_tokens, result.output_tokens
+                "[lf-agent] done: {} iterations, {} input tokens, {} output tokens, {} events",
+                result.iterations,
+                result.input_tokens,
+                result.output_tokens,
+                result.events.len()
             );
         }
         Err(e) => {

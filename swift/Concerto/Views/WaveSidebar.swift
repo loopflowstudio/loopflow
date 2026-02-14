@@ -218,7 +218,6 @@ struct WaveSidebar: View {
     }
 
     private var waveList: some View {
-        @Bindable var repoState = repoState
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                 if !waveGroups.active.isEmpty {

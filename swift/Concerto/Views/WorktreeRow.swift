@@ -15,6 +15,10 @@ struct WorktreeRow: View {
         worktree.branch ?? worktree.shortName ?? "detached"
     }
 
+    private var worktreeURL: URL {
+        URL(fileURLWithPath: worktree.path)
+    }
+
     var body: some View {
         HStack(spacing: Spacing.sm) {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -65,13 +69,13 @@ struct WorktreeRow: View {
         .opacity(worktree.merged ? 0.6 : 1.0)
         .contextMenu {
             Button {
-                launcher.openInFinder(at: URL(fileURLWithPath: worktree.path))
+                launcher.openInFinder(at: worktreeURL)
             } label: {
                 Label("Open in Finder", systemImage: "folder")
             }
 
             Button {
-                try? launcher.launchTerminal(.warp, at: URL(fileURLWithPath: worktree.path))
+                try? launcher.launchTerminal(.warp, at: worktreeURL)
             } label: {
                 Label("Open in Warp", systemImage: "terminal")
             }

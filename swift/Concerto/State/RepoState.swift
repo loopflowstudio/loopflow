@@ -320,7 +320,7 @@ final class RepoState {
                         case .connected(let connected):
                             self.lfdConnected = true
                             self.waveStore.setAll(connected.waves.map { WaveViewModel(api: $0) })
-                            self.refreshWorktrees()
+                            await self.refreshWorktrees()
                             await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
                             await self.handleWaveEvent(waveEvent)
@@ -359,7 +359,7 @@ final class RepoState {
             }
             // New wave may adopt a worktree
             if event.type == .created {
-                refreshWorktrees()
+                await refreshWorktrees()
             }
         case .deleted:
             waveStore.remove(event.waveId)
@@ -368,7 +368,7 @@ final class RepoState {
                 selectedWaveId = nil
             }
             // Deleted wave may orphan a worktree
-            refreshWorktrees()
+            await refreshWorktrees()
         }
     }
 
@@ -408,11 +408,9 @@ final class RepoState {
         }
     }
 
-    func refreshWorktrees() {
-        Task {
-            guard let repo = currentRepo else { return }
-            worktreeStore.setAll((try? await waveService.listWorktrees(repo: repo)) ?? [])
-        }
+    func refreshWorktrees() async {
+        guard let repo = currentRepo else { return }
+        worktreeStore.setAll((try? await waveService.listWorktrees(repo: repo)) ?? [])
     }
 
     func combinePRs(_ waveId: String) async throws -> CombinePRsResult {

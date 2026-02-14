@@ -8,7 +8,7 @@ use crate::lfd::http::dto::{ListResponse, WorktreeDto};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ListWorktreesQuery {
     repo: String,
 }

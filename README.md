@@ -93,7 +93,7 @@ Steps chain into flows. Flows feed into waves.
 | `grind` | review → iterate → ship → gate |
 | `incident` | debug → 5whys → ship |
 | `start` | ingest → kickoff |
-| `ship-wave` | start → ship |
+| `ship-wave` | start → ship → update-wave |
 
 ### Plan flows (`plan/`)
 

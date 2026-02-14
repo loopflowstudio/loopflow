@@ -13,7 +13,7 @@ Flows that produce code changes.
 | `grind` | review → iterate → ship → gate | Review-driven iteration |
 | `incident` | debug → 5whys → ship | Fix bug, analyze root cause, ship fixes |
 | `start` | ingest → kickoff | Pick wave item, elaborate design |
-| `ship-wave` | start → ship | Pick wave item, elaborate, build |
+| `ship-wave` | start → ship → update-wave | Pick wave item, elaborate, build, then update wave plan |
 
 ## Plan flows (`plan/`)
 

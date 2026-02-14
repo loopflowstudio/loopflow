@@ -789,6 +789,32 @@ Be careful.
                 name,
                 expanded.err()
             );
+            for item in expanded.unwrap() {
+                match item {
+                    ConcreteItem::Step(step) => {
+                        let result = load_step(&step.step.name, tmp.path());
+                        assert!(
+                            result.is_ok(),
+                            "builtin flow '{}' references missing step '{}': {:?}",
+                            name,
+                            step.step.name,
+                            result.err()
+                        );
+                    }
+                    ConcreteItem::Fork(fork) => {
+                        for branch in fork.branches {
+                            let result = load_step(&branch.step.name, tmp.path());
+                            assert!(
+                                result.is_ok(),
+                                "builtin flow '{}' fork references missing step '{}': {:?}",
+                                name,
+                                branch.step.name,
+                                result.err()
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 

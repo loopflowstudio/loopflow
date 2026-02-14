@@ -4,13 +4,13 @@ Design review for `jack-heart.remote.20260213_1642`. Phases 02 and 03 of the rem
 
 ## What was implemented
 
-**Phase 03: Pre-shared Token Auth.** Replaced `AuthContext` (two booleans encoding four states) with `AuthProvider` enum (`Local`, `Static`, `Studio`). Static token auth validates a pre-shared bearer token via constant-time comparison. Python client gains `token=` kwarg and `LFD_TOKEN` env var.
+**Phase 03: Pre-shared Token Auth.** Replaced `AuthContext` (two booleans encoding four states) with `AuthProvider` enum (`Local`, `Static`, `Studio`). Static token auth validates a pre-shared bearer token via constant-time comparison (`subtle::ConstantTimeEq`). Python client gains `token=` kwarg and `LFD_TOKEN` env var.
 
 **Phase 02: Docker Compose Stack.** `docker-compose.yml` packages lfd + postgres into a single deployment artifact. Multi-stage Dockerfile builds minimal Debian image with `lfd` and `lf` binaries. Postgres auto-migrates on startup. Docker socket mounted for agent container creation.
 
 **Cleanup.** Removed unused `builtin_ops_prompt_names()`. Moved completed roadmap phases from `roadmap/remote/` to `scratch/`.
 
-## Key choices
+## Key decisions
 
 **`AuthProvider` enum over `AuthContext` booleans.** The old struct had `active` and `registered` booleans encoding a state machine with invalid states. The enum makes each variant explicit and `#[non_exhaustive]` for future extensibility.
 
@@ -18,11 +18,17 @@ Design review for `jack-heart.remote.20260213_1642`. Phases 02 and 03 of the rem
 
 **Loopback bypass is unconditional.** All providers skip auth for 127.0.0.1 connections. Local dev never broken by auth config.
 
+**Non-loopback + `provider: local` warns, doesn't crash.** Remote connections get 403 but the server stays up.
+
 **Run as root in container.** The Docker socket grants root-equivalent access regardless of UID. Non-root user with Docker socket access would be complexity without security benefit. Agent containers (Phase 01) are the real security boundary.
 
-**Auto-migrate on startup.** When `LFD_STORAGE=postgres`, lfd runs migrations before serving. Idempotent — no-op if schema is current. Eliminates separate `lfd migrate` step for compose deployments.
+**Docker-out-of-Docker.** Mount host Docker socket. Agent containers are siblings, not nested. DinD adds complexity (privileged mode, storage drivers) for no benefit.
+
+**Auto-migrate on startup.** When `LFD_STORAGE=postgres`, lfd runs migrations before serving. Idempotent — no-op if schema is current. Eliminates separate `lfd migrate` step.
 
 **No `repos:` volume in compose.** DockerExecutor creates per-repo volumes dynamically via the Docker API. A shared compose volume would conflict.
+
+**Bind address in compose, not Dockerfile.** `LFD_HTTP_ADDR=0.0.0.0:2486` set by compose for container networking. Native lfd still defaults to `127.0.0.1:2486`.
 
 ## How it fits together
 
@@ -41,17 +47,17 @@ docker-compose.yml
     -> agent containers created as siblings via Docker API
 ```
 
-## Risks and bottlenecks
+## Risks
 
 **Token in plaintext config.** Static token stored in `lfd.yaml` or `LFD_AUTH_TOKEN` env. Acceptable for dev; Phase 04 restricts access via security groups. Phase 07 replaces with JWT.
 
 **Cargo build time in Docker.** Clean builds take 5-10 minutes. No dependency caching (`cargo-chef`) yet. Incremental builds use Docker layer cache.
 
-**`process::exit(1)` on config errors.** Used in `setup_auth()` for missing token, unknown provider, registration failure. Consistent with other startup-fatal paths in the codebase (`lf-agent.rs`). These only fire during startup, before the server serves any requests.
+**`process::exit(1)` on config errors.** Used in `setup_auth()` for missing token, unknown provider, registration failure. Consistent with other startup-fatal paths. These only fire during startup.
 
-**Postgres data loss on `docker compose down -v`.** Named volumes persist across `down` but destroyed by `down -v`. Dev-appropriate; noted in `.env.example` comments.
+**Postgres data loss on `docker compose down -v`.** Named volumes persist across `down` but destroyed by `down -v`. Dev-appropriate.
 
-## What's not included
+## Not included
 
 - TLS termination (Phase 04 adds Caddy)
 - Concerto token support (Phase 05)

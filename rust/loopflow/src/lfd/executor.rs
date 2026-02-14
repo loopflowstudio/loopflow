@@ -10,6 +10,7 @@ use bollard::container::{
     StopContainerOptions, WaitContainerOptions,
 };
 use bollard::errors::Error as DockerError;
+use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
 use bollard::volume::CreateVolumeOptions;
 use bollard::Docker;
@@ -234,6 +235,7 @@ pub struct DockerExecutor {
     credential_mounts: Vec<DockerCredentialMount>,
     active: Arc<Mutex<HashMap<String, String>>>,
     mutation_locks: RepoMutationLocks,
+    image_build_locks: RepoMutationLocks,
     prepared_runs: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -551,6 +553,7 @@ impl DockerExecutor {
             credential_mounts,
             active: Arc::new(Mutex::new(HashMap::new())),
             mutation_locks: RepoMutationLocks::default(),
+            image_build_locks: RepoMutationLocks::default(),
             prepared_runs: Arc::new(Mutex::new(HashSet::new())),
         })
     }
@@ -1185,6 +1188,123 @@ impl DockerExecutor {
         Ok(())
     }
 
+    // -- Image lifecycle ---------------------------------------------------------
+
+    async fn image_exists(&self, image: &str) -> bool {
+        self.docker.inspect_image(image).await.is_ok()
+    }
+
+    async fn pull_image(&self, image: &str) -> Result<()> {
+        let options = CreateImageOptions {
+            from_image: image,
+            ..Default::default()
+        };
+        let mut stream = self.docker.create_image(Some(options), None, None);
+        while let Some(result) = stream.next().await {
+            result?;
+        }
+        Ok(())
+    }
+
+    async fn ensure_base_image(&self) -> Result<()> {
+        if self.image_exists(&self.image).await {
+            return Ok(());
+        }
+
+        info!(image = %self.image, "base image not found locally, pulling");
+        match self.pull_image(&self.image).await {
+            Ok(()) => {
+                info!(image = %self.image, "base image pulled");
+                Ok(())
+            }
+            Err(err) => Err(anyhow!(
+                "base image '{}' not found and pull failed: {}. \
+                 Build it with: docker build -t {} docker/agent/",
+                self.image,
+                err,
+                self.image
+            )),
+        }
+    }
+
+    async fn build_repo_image(&self, repo_source: &Path, tag: &str) -> Result<()> {
+        let output = Command::new("docker")
+            .args(["build", "-t", tag, "-f", ".lf/Dockerfile", "."])
+            .current_dir(repo_source)
+            .output()
+            .await
+            .map_err(|err| {
+                anyhow!(
+                    "failed to run 'docker build': {}. Is docker CLI in PATH?",
+                    err
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!(
+                "docker build for '{}' failed (exit {}): {}",
+                tag,
+                output.status.code().unwrap_or(-1),
+                stderr.trim()
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_repo_image(&self, repo_source: &Path) -> Result<String> {
+        self.ensure_base_image().await?;
+
+        let dockerfile_path = repo_source.join(".lf/Dockerfile");
+        if !dockerfile_path.exists() {
+            return Ok(self.image.clone());
+        }
+
+        let identity = RepoIdentity::from_repo(repo_source);
+        let volume_id = RepoVolumeIdentity::from_identity(&identity);
+        let repo_image = format!("lfd-agent-{}:latest", volume_id.repo_key);
+
+        let needs_build =
+            !self.image_exists(&repo_image).await || repo_source.join(".lf/.docker-stale").exists();
+
+        if !needs_build {
+            return Ok(repo_image);
+        }
+
+        // Serialize concurrent builds for the same repo image.
+        let lock = self.image_build_locks.for_key(&repo_image).await;
+        let _guard = lock.lock().await;
+
+        // Re-check after acquiring lock — another wave may have built it.
+        let needs_build =
+            !self.image_exists(&repo_image).await || repo_source.join(".lf/.docker-stale").exists();
+        if !needs_build {
+            return Ok(repo_image);
+        }
+
+        info!(
+            image = %repo_image,
+            repo = %repo_source.display(),
+            "building per-repo agent image"
+        );
+        self.build_repo_image(repo_source, &repo_image).await?;
+
+        // Remove stale marker after successful build.
+        let stale_marker = repo_source.join(".lf/.docker-stale");
+        if stale_marker.exists() {
+            if let Err(err) = std::fs::remove_file(&stale_marker) {
+                warn!(
+                    path = %stale_marker.display(),
+                    error = %err,
+                    "failed to remove .docker-stale marker"
+                );
+            }
+        }
+
+        Ok(repo_image)
+    }
+
     fn docker_workspace_for_wave(
         repo_source: &Path,
         wave_name: &str,
@@ -1574,6 +1694,7 @@ impl AgentExecutor for DockerExecutor {
         }
 
         let workspace = self.resolve_workspace(wave_id, wave_run_id)?;
+        let agent_image = self.ensure_repo_image(&workspace.repo_source).await?;
         self.prepare_workspace(&workspace, wave_run_id, cwd).await?;
 
         let container_name = Self::build_container_name(agent_id);
@@ -1599,7 +1720,7 @@ impl AgentExecutor for DockerExecutor {
                     platform: None,
                 }),
                 DockerContainerConfig {
-                    image: Some(self.image.clone()),
+                    image: Some(agent_image),
                     cmd: Some(cmd),
                     working_dir: Some(workspace.container_worktree.clone()),
                     env: Some(env),

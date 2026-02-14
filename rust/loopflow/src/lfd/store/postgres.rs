@@ -272,7 +272,7 @@ impl RunStore for PostgresStore {
             query.push_str(" ORDER BY started_at DESC");
             if let Some(limit) = limit {
                 query.push_str(&format!(" LIMIT ${}", params.len() + 1));
-                params.push(Box::new(limit as i32));
+                params.push(Box::new(limit as i64));
             }
 
             let params_ref: Vec<&(dyn ToSql + Sync)> =
@@ -723,7 +723,7 @@ impl RunStore for PostgresStore {
             query.push_str(" ORDER BY started_at DESC");
             if let Some(limit) = limit {
                 query.push_str(&format!(" LIMIT ${}", params.len() + 1));
-                params.push(Box::new(limit as i32));
+                params.push(Box::new(limit as i64));
             }
 
             let params_ref: Vec<&(dyn ToSql + Sync)> = params.iter().map(|v| v.as_ref()).collect();

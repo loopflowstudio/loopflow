@@ -7,9 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let manifest_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let builtins_dir = manifest_dir.join("src/engine/builtins");
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
     generate_map(
         &builtins_dir.join("steps"),
@@ -56,21 +57,27 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
         code,
         "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(|| {{"
     )
-    .unwrap();
-    writeln!(code, "    let mut m = std::collections::HashMap::new();").unwrap();
+    .expect("write to String");
+    writeln!(code, "    let mut m = std::collections::HashMap::new();").expect("write to String");
 
     for (name, path) in &entries {
-        // include_str! in generated code needs absolute paths since it's
-        // evaluated relative to the generated file in OUT_DIR.
-        let abs = path.canonicalize().unwrap();
+        // include_str! needs absolute paths — generated code lives in OUT_DIR,
+        // not the source tree.
+        let abs = path
+            .canonicalize()
+            .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
         let abs_str = abs.to_string_lossy().replace('\\', "/");
-        writeln!(code, "    m.insert(\"{name}\", include_str!(\"{abs_str}\"));").unwrap();
+        writeln!(
+            code,
+            "    m.insert(\"{name}\", include_str!(\"{abs_str}\"));"
+        )
+        .expect("write to String");
     }
 
-    writeln!(code, "    m").unwrap();
-    writeln!(code, "}});").unwrap();
+    writeln!(code, "    m").expect("write to String");
+    writeln!(code, "}});").expect("write to String");
 
-    fs::write(out_path, code).unwrap();
+    fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
 }
 
 /// Recursively collect files with the given extension. The key is the file stem.
@@ -84,7 +91,11 @@ fn collect_files(dir: &Path, extension: &str, entries: &mut Vec<(String, PathBuf
         if path.is_dir() {
             collect_files(&path, extension, entries);
         } else if path.extension().is_some_and(|e| e == extension) {
-            let name = path.file_stem().unwrap().to_string_lossy().to_string();
+            let name = path
+                .file_stem()
+                .expect("file has no stem")
+                .to_string_lossy()
+                .to_string();
             entries.push((name, path));
         }
     }

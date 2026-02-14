@@ -2,8 +2,8 @@ use crate::agent::anthropic::{self, ContentBlock, Message, MessageContent};
 use crate::agent::registry::ToolRegistry;
 use std::time::{Duration, Instant};
 
-pub const DEFAULT_MAX_ITERATIONS: u32 = 20;
-pub const DEFAULT_TIMEOUT_SECS: u64 = 300;
+pub const DEFAULT_MAX_ITERATIONS: u32 = 200;
+pub const DEFAULT_TIMEOUT_SECS: u64 = 3000;
 
 #[derive(Debug)]
 pub struct TurnConfig {

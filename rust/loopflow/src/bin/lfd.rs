@@ -84,6 +84,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "postgres" => {
             let database_url = std::env::var("LFD_DATABASE_URL")
                 .expect("LFD_DATABASE_URL required for postgres storage");
+            let version = PostgresStore::migrate_async(&database_url).await?;
+            tracing::info!(schema_version = %version, "postgres schema up to date");
             Arc::new(PostgresStore::connect_async(&database_url).await?) as SharedStore
         }
         _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,

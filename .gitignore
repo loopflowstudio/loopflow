@@ -21,3 +21,6 @@ swift/dist/
 *.actual.md
 .DS_Store
 target/
+
+# Environment (secrets)
+.env

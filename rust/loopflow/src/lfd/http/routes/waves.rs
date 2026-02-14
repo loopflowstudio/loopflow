@@ -19,7 +19,7 @@ use crate::lfd::http::dto::{
     DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
     RunWaveResponse, StopWaveResponse, WaveDto,
 };
-use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
+use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
@@ -479,6 +479,34 @@ pub async fn run_wave_handler(
         wave_id: wave.id.to_string(),
         wave_run_id: Some(run.id.to_string()),
     }))
+}
+
+pub async fn check_wave_ci_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<serde_json::Value> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let token = state
+        .github
+        .token
+        .clone()
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "github token is not configured"))?;
+
+    let emitted = hooks::poll_wave_ci(
+        &state.store,
+        &state.event_hub,
+        &state.ci_failure_cache,
+        &wave_id,
+        &token,
+    )
+    .await
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "wave_id": wave_id.to_string(),
+        "emitted": emitted
+    })))
 }
 
 // Stimulus CRUD handlers

@@ -36,6 +36,8 @@ pub struct LfdConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub executor: ExecutorConfig,
+    #[serde(default)]
+    pub github: GitHubConfig,
 }
 
 impl LfdConfig {
@@ -71,7 +73,27 @@ impl LfdConfig {
                 self.executor.image = value;
             }
         }
+
+        if let Ok(value) = std::env::var("LFD_GITHUB_WEBHOOK_SECRET") {
+            self.github.webhook_secret = value;
+        }
+
+        if let Ok(value) = std::env::var("LFD_GITHUB_TOKEN") {
+            let token = value.trim();
+            self.github.token = if token.is_empty() {
+                None
+            } else {
+                Some(token.to_string())
+            };
+        }
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct GitHubConfig {
+    #[serde(default)]
+    pub webhook_secret: String,
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
@@ -184,10 +206,15 @@ executor:
       - ANTHROPIC_API_KEY
     mounts:
       - claude
+github:
+  webhook_secret: hook-secret
+  token: ghp_test
 "#;
         let config: LfdConfig = serde_yaml::from_str(raw).expect("yaml should parse");
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
         assert_eq!(config.executor.image, "loopflow/agent:test");
+        assert_eq!(config.github.webhook_secret, "hook-secret");
+        assert_eq!(config.github.token, Some("ghp_test".to_string()));
         assert_eq!(
             config.executor.credentials.env,
             vec!["ANTHROPIC_API_KEY".to_string()]
@@ -215,15 +242,21 @@ executor:
         let _guard = env_lock().lock().expect("env lock");
         std::env::set_var("LFD_EXECUTOR_TYPE", "docker");
         std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
+        std::env::set_var("LFD_GITHUB_WEBHOOK_SECRET", "env-secret");
+        std::env::set_var("LFD_GITHUB_TOKEN", "ghp_env");
 
         let mut config = LfdConfig::default();
         config.apply_env_overrides();
 
         std::env::remove_var("LFD_EXECUTOR_TYPE");
         std::env::remove_var("LFD_EXECUTOR_IMAGE");
+        std::env::remove_var("LFD_GITHUB_WEBHOOK_SECRET");
+        std::env::remove_var("LFD_GITHUB_TOKEN");
 
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
         assert_eq!(config.executor.image, "loopflow/agent:env");
+        assert_eq!(config.github.webhook_secret, "env-secret");
+        assert_eq!(config.github.token, Some("ghp_env".to_string()));
     }
 
     #[test]

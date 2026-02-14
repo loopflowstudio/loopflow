@@ -149,8 +149,8 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, RunStore};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Summary, Wave, WaveRun,
-        WaveRunSnapshot, WaveRunStatus, WaveStatus,
+        Agent, AgentStatus, PendingActivation, SidecarKind, Stimulus, StimulusKind, Summary, Wave,
+        WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -261,6 +261,8 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
         };
         store.create_wave_run(&run).unwrap();
         let loaded_run = store.get_wave_run(&run.id).unwrap().unwrap();
@@ -389,6 +391,8 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
         };
         store.create_wave_run(&run).unwrap();
 
@@ -412,6 +416,36 @@ mod tests {
         let latest = latest.unwrap();
         assert_eq!(latest.status, WaveRunStatus::Failed);
         assert_eq!(latest.error.as_deref(), Some("step reduce failed"));
+
+        // Sidecar runs should not count as active main runs.
+        let sidecar = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo.clone(),
+                flow: "debug".to_string(),
+                direction: wave.direction.clone(),
+                area: wave.area.clone(),
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: "/repo.sidecar".to_string(),
+            branch: "ci-fix-temp".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Sidecar,
+            sidecar_kind: Some(SidecarKind::CiFix),
+        };
+        store.create_wave_run(&sidecar).unwrap();
+        let active = store.get_active_wave_run(&wave.id).unwrap();
+        assert!(
+            active.is_none(),
+            "sidecar run should not be returned as active main run"
+        );
 
         store.delete_wave(&wave.id).unwrap();
     }

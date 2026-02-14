@@ -3,6 +3,7 @@ pub mod config;
 pub mod credentials;
 pub mod events;
 pub mod executor;
+pub mod github;
 pub mod http;
 pub mod id;
 pub mod machine_id;

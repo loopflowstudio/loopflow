@@ -174,7 +174,7 @@ impl RunStore for SqliteStore {
         let mut query = String::from(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
              FROM wave_runs",
         );
         let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
@@ -206,7 +206,7 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
              FROM wave_runs WHERE id = ?1",
         )?;
         let run = stmt
@@ -220,9 +220,9 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
              FROM wave_runs
-             WHERE wave_id = ?1 AND status IN (?2, ?3, ?4)
+             WHERE wave_id = ?1 AND status IN (?2, ?3, ?4) AND run_kind = ?5
              ORDER BY started_at DESC LIMIT 1",
         )?;
         let run = stmt
@@ -232,6 +232,7 @@ impl RunStore for SqliteStore {
                     WaveRunStatus::Pending.as_i32() as i64,
                     WaveRunStatus::Running.as_i32() as i64,
                     WaveRunStatus::Waiting.as_i32() as i64,
+                    crate::lfd::types::WaveRunKind::Main.as_i32() as i64,
                 ],
                 |row| Ok(map_wave_run_row(row)),
             )
@@ -244,12 +245,18 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents
-             FROM wave_runs WHERE wave_id = ?1
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+             FROM wave_runs WHERE wave_id = ?1 AND run_kind = ?2
              ORDER BY started_at DESC LIMIT 1",
         )?;
         let run = stmt
-            .query_row(params![wave_id], |row| Ok(map_wave_run_row(row)))
+            .query_row(
+                params![
+                    wave_id,
+                    crate::lfd::types::WaveRunKind::Main.as_i32() as i64
+                ],
+                |row| Ok(map_wave_run_row(row)),
+            )
             .optional()?;
         run.transpose()
     }
@@ -265,8 +272,8 @@ impl RunStore for SqliteStore {
             "INSERT INTO wave_runs (
                 id, wave_id, iteration, step_index, status, worktree, branch,
                 started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                snapshot_area, snapshot_pr, flow_parents
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 run.id,
                 run.wave_id,
@@ -284,6 +291,8 @@ impl RunStore for SqliteStore {
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.snapshot.pr)?,
                 flow_parents_json,
+                run.run_kind.as_i32() as i64,
+                run.sidecar_kind.map(|kind| kind.as_i32() as i64),
             ],
         )?;
         Ok(())
@@ -297,8 +306,9 @@ impl RunStore for SqliteStore {
              SET iteration = ?1, step_index = ?2, status = ?3, worktree = ?4,
                  branch = ?5, started_at = ?6, ended_at = ?7, error = ?8,
                  snapshot_repo = ?9, snapshot_flow = ?10, snapshot_direction = ?11,
-                 snapshot_area = ?12, snapshot_pr = ?13, flow_parents = ?14
-             WHERE id = ?15",
+                 snapshot_area = ?12, snapshot_pr = ?13, flow_parents = ?14,
+                 run_kind = ?15, sidecar_kind = ?16
+             WHERE id = ?17",
             params![
                 run.iteration as i64,
                 run.step_index as i64,
@@ -314,6 +324,8 @@ impl RunStore for SqliteStore {
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.snapshot.pr)?,
                 flow_parents_json,
+                run.run_kind.as_i32() as i64,
+                run.sidecar_kind.map(|kind| kind.as_i32() as i64),
                 run.id,
             ],
         )?;

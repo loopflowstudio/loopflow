@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::signal;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::auth::AuthContext;
@@ -81,6 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
     let event_hub = EventHub::new(1024);
+    let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let executor = WaveExecutor::new(
         store.clone(),
         scheduler.clone(),
@@ -126,6 +128,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cancel.clone(),
     );
 
+    let repo_roots = store
+        .list_waves(None)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|wave| PathBuf::from(wave.repo))
+        .collect::<Vec<_>>();
+    match executor.run_worktree_janitor(&repo_roots).await {
+        Ok(report) => {
+            if report.removed > 0 || report.errors > 0 {
+                tracing::info!(
+                    removed = report.removed,
+                    active = report.active,
+                    errors = report.errors,
+                    "startup worktree janitor finished"
+                );
+            }
+        }
+        Err(err) => tracing::warn!(error = %err, "startup worktree janitor failed"),
+    }
+
+    if let Some(token) = lfd_config.github.token.clone() {
+        if let Err(err) = loopflow::lfd::http::routes::hooks::poll_all_waves_ci(
+            &store,
+            &event_hub,
+            &token,
+            &ci_failure_cache,
+        )
+        .await
+        {
+            tracing::warn!(error = %err, "startup CI poll failed");
+        }
+    } else {
+        tracing::warn!("LFD_GITHUB_TOKEN not set; skipping startup CI poll");
+    }
+
     let http_state = HttpState {
         store: store.clone(),
         scheduler: scheduler.clone(),
@@ -135,6 +172,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth: auth_context,
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
+        github: lfd_config.github,
+        ci_failure_cache,
     };
     let http_router = loopflow::lfd::http::router(http_state);
 

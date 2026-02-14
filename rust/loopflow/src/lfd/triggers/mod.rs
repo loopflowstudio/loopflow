@@ -1,3 +1,4 @@
+mod ci_failure;
 mod common;
 mod cron;
 mod loop_ticker;
@@ -5,6 +6,7 @@ mod recovery;
 mod summary_refresh;
 mod watch;
 
+pub use ci_failure::spawn_ci_failure_handler;
 pub use common::spawn_run_task_with_slot;
 pub use cron::spawn_cron_poller;
 pub use loop_ticker::spawn_loop_ticker;

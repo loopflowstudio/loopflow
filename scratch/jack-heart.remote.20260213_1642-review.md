@@ -28,6 +28,8 @@ Design review for `jack-heart.remote.20260213_1642`. Phases 02, 03, and 04 (depl
 
 **Docker-out-of-Docker.** Mount host Docker socket. Agent containers are siblings, not nested. DinD adds complexity (privileged mode, storage drivers) for no benefit.
 
+**Ship Docker CLI in lfd container.** The Docker executor now builds per-repo images from `.lf/Dockerfile` using `docker build`. The `docker/lfd/Dockerfile` installs `docker.io` so that path works in compose deployments.
+
 **Auto-migrate on startup.** When `LFD_STORAGE=postgres`, lfd runs migrations before serving. Idempotent — no-op if schema is current. Eliminates separate `lfd migrate` step.
 
 **Compose override for prod, not a separate file.** `docker-compose.prod.yml` adds Caddy and sets `LFD_AUTH_PROVIDER=static`. The base `docker-compose.yml` works standalone for local dev. The host port mapping on lfd is kept in prod (harmless behind security group) rather than using `!reset` — simpler, less compose magic.
@@ -36,7 +38,7 @@ Design review for `jack-heart.remote.20260213_1642`. Phases 02, 03, and 04 (depl
 
 **Deploy via git pull, not scp.** `deploy.sh` does `git pull` on the remote host then `docker compose up --build`. Only `.env` is copied via scp (secrets stay out of git). Simpler than copying individual files, and the remote always matches the repo.
 
-**Build on the instance.** The Dockerfile uses multi-arch base images (`rust:1.82-bookworm`, `debian:bookworm-slim`). Building on ARM EC2 produces native images without cross-compilation.
+**Build on the instance.** The Dockerfile uses multi-arch base images (`rust:1.88-bookworm`, `debian:bookworm-slim`). Building on ARM EC2 produces native images without cross-compilation.
 
 ## How it fits together
 

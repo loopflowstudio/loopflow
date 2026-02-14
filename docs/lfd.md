@@ -51,6 +51,8 @@ LFD_STORAGE       # sqlite (default) or postgres
 LFD_DB_PATH       # sqlite path override
 LFD_DATABASE_URL  # required when LFD_STORAGE=postgres
 LFD_MAX_SLOTS     # concurrent run slots
+LFD_AUTH_PROVIDER # local (default), static, or loopflow.studio
+LFD_AUTH_TOKEN    # required when LFD_AUTH_PROVIDER=static
 LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
 LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 ```
@@ -58,6 +60,10 @@ LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 `lfd` also reads `~/.lf/lfd.yaml` for daemon settings:
 
 ```yaml
+auth:
+  provider: local # local (default), static, or loopflow.studio
+  token: your-static-token # required when provider=static
+  base_url: https://auth.loopflow.studio # used by loopflow.studio provider
 executor:
   type: local # or docker
   image: loopflow/agent:latest # base image for generated .lf/Dockerfile
@@ -86,11 +92,19 @@ Names are mounted read-only into `/home/agent/...`. Raw `host:container` mount s
 Environment overrides:
 
 ```bash
+LFD_AUTH_PROVIDER=static
+LFD_AUTH_TOKEN=your-static-token
 LFD_EXECUTOR_TYPE=docker
 LFD_EXECUTOR_IMAGE=loopflow/agent:latest # base image for generated Dockerfiles
 LFD_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 LFD_GITHUB_TOKEN=ghp_xxx
 ```
+
+Auth behavior:
+
+- Loopback clients (`127.0.0.1`) always bypass auth.
+- `auth.provider=local` rejects non-loopback requests with `403`.
+- `auth.provider=static` and `auth.provider=loopflow.studio` require `Authorization: Bearer <token>` on non-loopback requests.
 
 When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 

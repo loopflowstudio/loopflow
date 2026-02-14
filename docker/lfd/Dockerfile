@@ -6,7 +6,7 @@ RUN cargo build -p loopflow --release
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl libssl3 git \
+      ca-certificates curl libssl3 git docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/lf /usr/local/bin/lf

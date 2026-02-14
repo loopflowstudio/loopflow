@@ -1,0 +1,55 @@
+services:
+  lfd:
+    build:
+      context: ..
+      dockerfile: docker/lfd/Dockerfile
+    ports:
+      - "${LFD_PORT:-2486}:2486"
+    environment:
+      LFD_HTTP_ADDR: "0.0.0.0:2486"
+      LFD_STORAGE: postgres
+      LFD_DATABASE_URL: "postgres://lfd:lfd@postgres:5432/lfd"
+      LFD_EXECUTOR_TYPE: docker
+      LFD_EXECUTOR_IMAGE: "${LFD_EXECUTOR_IMAGE:-loopflow/agent:latest}"
+      LFD_AUTH_PROVIDER: "${LFD_AUTH_PROVIDER:-local}"
+      LFD_AUTH_TOKEN: "${LFD_AUTH_TOKEN:-}"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - lfd-data:/root/.lf
+      # Uncomment to mount subscription credentials:
+      # - ${HOME}/.claude:/root/.claude:ro
+      # - ${HOME}/.codex:/root/.codex:ro
+      # - ${HOME}/.ssh:/root/.ssh:ro
+      # - ${HOME}/.gitconfig:/root/.gitconfig:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:2486/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lfd
+      POSTGRES_PASSWORD: lfd
+      POSTGRES_DB: lfd
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lfd"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  lfd-data:

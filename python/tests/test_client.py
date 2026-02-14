@@ -128,6 +128,51 @@ class TestClientResponses:
         client.close()
 
 
+def _mock_token_client(token=None):
+    """Create a Client with a mock transport that captures request headers."""
+    received_headers = {}
+
+    def handler(request):
+        received_headers.update(dict(request.headers))
+        return httpx.Response(200, json={"status": "ok"})
+
+    transport = httpx.MockTransport(handler)
+    client = Client(base_url="http://test", token=token)
+    client._client = httpx.Client(
+        base_url="http://test", transport=transport, headers=client._client.headers,
+    )
+    return client, received_headers
+
+
+class TestClientToken:
+    def test_token_kwarg_sends_bearer_header(self):
+        client, headers = _mock_token_client(token="my-secret-token")
+        client.health()
+        assert headers.get("authorization") == "Bearer my-secret-token"
+        client.close()
+
+    def test_lfd_token_env_sends_bearer_header(self, monkeypatch):
+        monkeypatch.setenv("LFD_TOKEN", "env-token-123")
+        client, headers = _mock_token_client()
+        client.health()
+        assert headers.get("authorization") == "Bearer env-token-123"
+        client.close()
+
+    def test_token_kwarg_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("LFD_TOKEN", "env-token")
+        client, headers = _mock_token_client(token="kwarg-token")
+        client.health()
+        assert headers.get("authorization") == "Bearer kwarg-token"
+        client.close()
+
+    def test_no_token_sends_no_auth_header(self, monkeypatch):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        client, headers = _mock_token_client()
+        client.health()
+        assert "authorization" not in headers
+        client.close()
+
+
 class TestExtractErrorMessage:
     def test_nested_error_message(self):
         resp = httpx.Response(400, json={"error": {"message": "bad request"}})

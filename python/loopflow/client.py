@@ -21,10 +21,21 @@ def _resolve_base_url() -> str:
 
 
 class Client:
-    def __init__(self, base_url: Optional[str] = None, timeout: float = 10.0) -> None:
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        timeout: float = 10.0,
+        token: Optional[str] = None,
+    ) -> None:
         resolved = base_url.rstrip("/") if base_url else _resolve_base_url()
         self._base_url = resolved
-        self._client = httpx.Client(base_url=resolved, timeout=timeout)
+        resolved_token = token or os.environ.get("LFD_TOKEN")
+        headers = {}
+        if resolved_token:
+            headers["Authorization"] = f"Bearer {resolved_token}"
+        self._client = httpx.Client(
+            base_url=resolved, timeout=timeout, headers=headers,
+        )
 
     def close(self) -> None:
         self._client.close()

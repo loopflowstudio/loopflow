@@ -4,41 +4,28 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use std::net::SocketAddr;
+use subtle::ConstantTimeEq;
 
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::registration::ConnectionValidator;
 
-/// Auth context held in HttpState.
+/// Auth provider for lfd connections.
 ///
-/// When `active` is true (non-loopback bind), all non-exempt routes require
-/// a valid connection token from loopflow.studio.
+/// Selected from config (`auth.provider`). Determines how non-loopback
+/// requests are authenticated.
 #[derive(Debug, Clone)]
-pub struct AuthContext {
-    pub active: bool,
-    pub registered: bool,
-    pub validator: Option<ConnectionValidator>,
+#[non_exhaustive]
+pub enum AuthProvider {
+    /// Loopback connections only. Non-loopback requests get 403.
+    Local,
+    /// Validate against a pre-shared static token.
+    Static { token: String },
+    /// Validate via loopflow.studio registration.
+    Studio { validator: ConnectionValidator },
 }
 
-impl AuthContext {
-    pub fn new(registered: bool, validator: ConnectionValidator) -> Self {
-        Self {
-            active: true,
-            registered,
-            validator: Some(validator),
-        }
-    }
-
-    pub fn inactive() -> Self {
-        Self {
-            active: false,
-            registered: false,
-            validator: None,
-        }
-    }
-}
-
-/// Axum middleware that enforces connection-token auth on non-loopback requests.
+/// Axum middleware that enforces auth on non-loopback requests.
 pub async fn auth_middleware(
     State(state): State<HttpState>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
@@ -46,74 +33,50 @@ pub async fn auth_middleware(
     request: Request,
     next: Next,
 ) -> Response {
-    // Loopback connections bypass auth entirely.
+    // Loopback connections bypass auth entirely, regardless of provider.
     if let Some(ConnectInfo(addr)) = connect_info {
         if addr.ip().is_loopback() {
             return next.run(request).await;
         }
     }
 
-    // Auth not active (localhost bind) — pass through.
-    if !state.auth.active {
-        return next.run(request).await;
-    }
-
-    // Auth active but registration failed — reject.
-    if !state.auth.registered {
-        return auth_error(
+    match &state.auth {
+        AuthProvider::Local => auth_error(
             StatusCode::FORBIDDEN,
-            "remote access requires successful loopflow.studio registration",
-        );
-    }
+            "remote access requires auth configuration",
+        ),
+        AuthProvider::Static { token } => match extract_token(&headers) {
+            Some(provided) if constant_time_eq(provided, token) => next.run(request).await,
+            Some(_) => auth_error(StatusCode::UNAUTHORIZED, "invalid token"),
+            None => auth_error(StatusCode::UNAUTHORIZED, "missing token"),
+        },
+        AuthProvider::Studio { validator } => {
+            let token = match extract_token(&headers) {
+                Some(t) => t,
+                None => {
+                    return auth_error(StatusCode::UNAUTHORIZED, "missing connection token");
+                }
+            };
 
-    // Extract token from headers.
-    let token = match extract_token(&headers) {
-        Some(t) => t,
-        None => {
-            return auth_error(StatusCode::UNAUTHORIZED, "missing connection token");
-        }
-    };
-
-    // Validate token.
-    let Some(validator) = &state.auth.validator else {
-        return next.run(request).await;
-    };
-
-    if validator.validate(&token).await {
-        next.run(request).await
-    } else {
-        auth_error(StatusCode::UNAUTHORIZED, "invalid connection token")
-    }
-}
-
-fn extract_token(headers: &HeaderMap) -> Option<String> {
-    // x-loopflow-connection-token header (preferred).
-    if let Some(value) = headers.get("x-loopflow-connection-token") {
-        if let Ok(token) = value.to_str() {
-            return Some(token.to_string());
-        }
-    }
-
-    // connection-token header (legacy).
-    if let Some(value) = headers.get("connection-token") {
-        if let Ok(token) = value.to_str() {
-            return Some(token.to_string());
-        }
-    }
-
-    // Authorization: Bearer <token>.
-    if let Some(value) = headers.get("authorization") {
-        if let Ok(auth) = value.to_str() {
-            if let Some(token) = auth
-                .strip_prefix("Bearer ")
-                .or_else(|| auth.strip_prefix("bearer "))
-            {
-                return Some(token.trim().to_string());
+            if validator.validate(token).await {
+                next.run(request).await
+            } else {
+                auth_error(StatusCode::UNAUTHORIZED, "invalid connection token")
             }
         }
     }
+}
 
-    None
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    a.as_bytes().ct_eq(b.as_bytes()).into()
+}
+
+fn extract_token(headers: &HeaderMap) -> Option<&str> {
+    let auth = headers.get("authorization")?.to_str().ok()?;
+    let token = auth
+        .strip_prefix("Bearer ")
+        .or_else(|| auth.strip_prefix("bearer "))?;
+    Some(token.trim())
 }
 
 fn auth_error(status: StatusCode, message: &str) -> Response {
@@ -128,4 +91,38 @@ fn auth_error(status: StatusCode, message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constant_time_eq_matches() {
+        assert!(constant_time_eq("abc", "abc"));
+        assert!(!constant_time_eq("abc", "def"));
+        assert!(!constant_time_eq("abc", "ab"));
+        assert!(!constant_time_eq("", "a"));
+        assert!(constant_time_eq("", ""));
+    }
+
+    #[test]
+    fn extract_token_from_bearer_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer test-token-123".parse().unwrap());
+        assert_eq!(extract_token(&headers), Some("test-token-123"));
+    }
+
+    #[test]
+    fn extract_token_from_bearer_lowercase() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "bearer test-token".parse().unwrap());
+        assert_eq!(extract_token(&headers), Some("test-token"));
+    }
+
+    #[test]
+    fn extract_token_missing() {
+        let headers = HeaderMap::new();
+        assert_eq!(extract_token(&headers), None);
+    }
 }

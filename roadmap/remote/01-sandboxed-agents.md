@@ -46,13 +46,13 @@ lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes
 7. **Orphaned fork worktree cleanup** — Detect and clean orphaned fork worktrees on daemon startup when previous cleanup partially failed. Needs new store query across sqlite/postgres
 8. **Agent execution timeout** — No timeout mechanism for agent execution (containers or processes). Add configurable timeout
 
-#### Done (this branch)
+#### Also shipped (01C cleanup)
 
-- ~~**Split executor.rs**~~ — Split into `executor/{mod, docker, wave, helpers, local}.rs`
-- ~~**Config parse error surfacing**~~ — `LfdConfig::load()` returns `Result`, parse errors surface at startup
-- ~~**`prepared_key` staleness**~~ — 5-minute TTL on workspace preparation cache
-- ~~**Async context gathering**~~ — `build_step_prompt` wrapped in `spawn_blocking`
-- ~~**Parallel fork cleanup**~~ — CLI uses `thread::scope`, daemon uses `JoinSet`
+- Executor split into `executor/{mod, docker, wave, helpers, local}.rs`
+- `LfdConfig::load()` returns `Result`, parse errors surface at startup
+- 5-minute TTL on workspace preparation cache (`prepared_key` staleness)
+- `build_step_prompt` wrapped in `spawn_blocking`
+- Parallel fork cleanup: CLI uses `thread::scope`, daemon uses `JoinSet`
 
 #### Known limits (accepted)
 

@@ -18,7 +18,7 @@ Users sign in via WorkOS (GitHub/Google/Apple) through auth.loopflow.studio. lfd
 | Auth state | `AuthState.swift` | Done — observable, tracks `isAuthenticated`/`isExpired`/`needsRefresh`, auto-refresh monitor (hourly, 24h before expiry) |
 | Token provider protocol | `TokenProvider.swift` | Done — `KeychainTokenProvider` and `NoAuthProvider` defined |
 | lfd registration | `registration.rs` | Done — registers with studio on startup, heartbeats every 60s |
-| lfd auth middleware | `auth.rs` | Done — distinguishes loopback vs non-loopback, validates bearer tokens |
+| lfd auth middleware | `auth.rs` | Done — `AuthProvider` enum (`Local`, `Static`, `Studio`), loopback bypass, constant-time token comparison |
 
 ### Server-side (auth.loopflow.studio)
 
@@ -136,6 +136,10 @@ Add JWT signature validation to the auth middleware. 7-day JWTs validated locall
 4. Check `sub` or `email` against `allowed_users` in config
 5. No per-request roundtrip to auth.loopflow.studio
 
+**From Phase 03 (shipped):** `setup_auth()` in `lfd/mod.rs` dispatches on `config.auth.provider` — the `"loopflow.studio"` branch calls `setup_studio_registration()`. The middleware in `auth.rs` already matches on `AuthProvider::Studio { validator }` and calls `validator.validate()`. The upgrade path: replace `ConnectionValidator` (per-request API call) with a `JwksValidator` (local signature check). Middleware dispatch stays the same.
+
+**Note:** `setup_studio_registration()` uses a daemon-level JWT from `~/.lf/credentials.json` for registration/heartbeat. This is separate from user auth tokens validated per request. Phase 07 adds the user-facing JWT validation; the daemon registration flow is already shipped.
+
 ```yaml
 # ~/.lf/lfd.yaml
 auth:
@@ -224,11 +228,13 @@ Wire the device code flow into `lf` for CLI-based authentication:
 
 ## Deployment scenarios
 
-| Scenario | Auth | Who validates |
-|----------|------|--------------|
-| Local (default) | None | lfd skips auth for loopback |
-| Remote + static token | Bearer token | lfd checks against config |
-| Remote + studio auth | JWT | lfd validates signature locally via JWKS |
+Maps to `AuthProvider` enum variants:
+
+| Scenario | `auth.provider` | `AuthProvider` variant | Who validates |
+|----------|----------------|----------------------|--------------|
+| Local (default) | `local` | `Local` | Loopback bypass; non-loopback gets 403 |
+| Remote + static token | `static` | `Static { token }` | Constant-time comparison against config token |
+| Remote + studio auth | `loopflow.studio` | `Studio { validator }` | JWKS validation (this phase) |
 
 ## Done when
 

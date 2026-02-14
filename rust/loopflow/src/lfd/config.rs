@@ -9,11 +9,15 @@ const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
-/// loopflow.studio is hard-coded as the auth provider. Auth is required
-/// automatically when binding to a non-loopback address — there's no toggle.
-/// `base_url` exists only for dev/staging overrides.
+/// `provider` selects the auth strategy:
+/// - `"local"` (default): loopback only, no auth for local connections
+/// - `"static"`: validate against a pre-shared token
+/// - `"loopflow.studio"`: register with loopflow.studio, validate via API
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthConfig {
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    pub token: Option<String>,
     #[serde(default = "default_base_url")]
     pub base_url: String,
 }
@@ -21,9 +25,15 @@ pub struct AuthConfig {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
+            provider: default_provider(),
+            token: None,
             base_url: default_base_url(),
         }
     }
+}
+
+fn default_provider() -> String {
+    "local".to_string()
 }
 
 fn default_base_url() -> String {
@@ -62,6 +72,20 @@ impl LfdConfig {
     }
 
     fn apply_env_overrides(&mut self) {
+        if let Ok(value) = std::env::var("LFD_AUTH_PROVIDER") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.auth.provider = trimmed.to_string();
+            }
+        }
+
+        if let Ok(value) = std::env::var("LFD_AUTH_TOKEN") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.auth.token = Some(trimmed.to_string());
+            }
+        }
+
         if let Ok(value) = std::env::var("LFD_EXECUTOR_TYPE") {
             if let Some(r#type) = ExecutorType::from_env(&value) {
                 self.executor.r#type = r#type;
@@ -271,6 +295,41 @@ executor:
         std::env::remove_var("LFD_EXECUTOR_TYPE");
 
         assert_eq!(config.executor.r#type, ExecutorType::Docker);
+    }
+
+    #[test]
+    fn static_auth_config_parses() {
+        let raw = r#"
+auth:
+  provider: static
+  token: my-secret-token-123
+"#;
+        let config: LfdConfig = serde_yaml::from_str(raw).expect("yaml should parse");
+        assert_eq!(config.auth.provider, "static");
+        assert_eq!(config.auth.token, Some("my-secret-token-123".to_string()));
+    }
+
+    #[test]
+    fn auth_config_defaults_to_local() {
+        let config: LfdConfig = serde_yaml::from_str("{}").expect("yaml should parse");
+        assert_eq!(config.auth.provider, "local");
+        assert!(config.auth.token.is_none());
+    }
+
+    #[test]
+    fn env_overrides_auth_provider_and_token() {
+        let _guard = env_lock().lock().expect("env lock");
+        std::env::set_var("LFD_AUTH_PROVIDER", "static");
+        std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
+
+        let mut config = LfdConfig::default();
+        config.apply_env_overrides();
+
+        std::env::remove_var("LFD_AUTH_PROVIDER");
+        std::env::remove_var("LFD_AUTH_TOKEN");
+
+        assert_eq!(config.auth.provider, "static");
+        assert_eq!(config.auth.token, Some("env-token-456".to_string()));
     }
 
     #[test]

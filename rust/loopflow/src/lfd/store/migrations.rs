@@ -96,7 +96,7 @@ pub async fn apply_postgres(transaction: &tokio_postgres::Transaction<'_>) -> St
         .batch_execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations (
                 version TEXT PRIMARY KEY,
-                applied_at INTEGER NOT NULL
+                applied_at BIGINT NOT NULL
             )",
         )
         .await?;

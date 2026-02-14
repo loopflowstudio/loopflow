@@ -1,0 +1,4 @@
+:443 {
+	tls internal
+	reverse_proxy lfd:2486
+}

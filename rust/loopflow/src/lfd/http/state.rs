@@ -3,7 +3,7 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 
-use crate::lfd::auth::AuthContext;
+use crate::lfd::auth::AuthProvider;
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
@@ -20,7 +20,7 @@ pub struct HttpState {
     pub event_hub: EventHub,
     #[allow(dead_code)] // Reserved for output streaming endpoints.
     pub output_hub: OutputHub,
-    pub auth: AuthContext,
+    pub auth: AuthProvider,
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
     pub github: GitHubConfig,

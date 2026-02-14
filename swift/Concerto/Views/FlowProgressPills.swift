@@ -64,15 +64,14 @@ struct FlowProgressPills: View {
                     .monospacedDigit()
             }
 
-            if isCurrent, onRestartStep != nil {
-                Button {
-                    onRestartStep?()
-                } label: {
+            if isCurrent, let onRestartStep {
+                Button(action: onRestartStep) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(Typography.caption(9))
                         .foregroundStyle(.white.opacity(0.7))
                 }
                 .buttonStyle(.plain)
+                .minHitTarget()
                 .accessibilityLabel("Restart step")
             }
         }

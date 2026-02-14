@@ -612,9 +612,9 @@ pub async fn stop_wave_handler(
         run_store(&state.store, move |store| store.update_wave_run(&run_clone))
             .await
             .map_err(map_store_error)?;
-        let wave_id = run.wave_id.clone();
+        let wave_id_for_update = run.wave_id.clone();
         run_store(&state.store, move |store| {
-            if let Some(mut wave) = store.get_wave(&wave_id)? {
+            if let Some(mut wave) = store.get_wave(&wave_id_for_update)? {
                 wave.status = if has_auto_stimulus {
                     WaveStatus::Paused
                 } else {
@@ -622,16 +622,11 @@ pub async fn stop_wave_handler(
                 };
                 store.update_wave(&wave)?;
             }
-            // Mark agents as ended in the store.
-            let _ = store.end_active_agent_for_wave(
-                &wave_id,
-                AgentStatus::Failed.as_i32(),
-                OffsetDateTime::now_utc().unix_timestamp(),
-            );
             Ok(())
         })
         .await
         .map_err(map_store_error)?;
+        mark_active_agents_failed(&state, &wave_id).await?;
     } else if has_auto_stimulus {
         // No active run, but still pause the wave so the auto stimulus doesn't restart it.
         let wid = wave_id.clone();
@@ -674,44 +669,20 @@ pub async fn restart_step_handler(
 
     // Kill running agents.
     terminate_active_agents(&state, &wave_id).await?;
-
-    // Mark agents as ended in the store.
-    let wave_id_for_agents = wave_id.clone();
-    run_store(&state.store, move |store| {
-        let _ = store.end_active_agent_for_wave(
-            &wave_id_for_agents,
-            AgentStatus::Failed.as_i32(),
-            OffsetDateTime::now_utc().unix_timestamp(),
-        );
-        Ok(())
-    })
-    .await
-    .map_err(map_store_error)?;
+    mark_active_agents_failed(&state, &wave_id).await?;
 
     // Re-acquire scheduler slot and relaunch.
-    let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;
-    if !acquired {
-        return Err(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no scheduler slots available",
-        ));
-    }
-
-    spawn_run_task_with_slot(
-        state.store.clone(),
-        (*state.executor).clone(),
-        state.scheduler.clone(),
-        state.event_hub.clone(),
-        run.clone(),
-    );
+    let wave_run_id = run.id.to_string();
+    let step_index = run.step_index;
+    respawn_run_task(&state, run).await?;
 
     state.event_hub.send(Event::wave_updated(wave_id.clone()));
 
     Ok(Json(RestartStepResponse {
         restarted: true,
         wave_id: wave_id.to_string(),
-        wave_run_id: run.id.to_string(),
-        step_index: run.step_index,
+        wave_run_id,
+        step_index,
     }))
 }
 
@@ -734,6 +705,48 @@ async fn terminate_active_agents(
             kill_process(pid);
         }
     }
+
+    Ok(())
+}
+
+async fn mark_active_agents_failed(
+    state: &HttpState,
+    wave_id: &LfdId,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let wave_id_for_agents = wave_id.clone();
+    run_store(&state.store, move |store| {
+        let _ = store.end_active_agent_for_wave(
+            &wave_id_for_agents,
+            AgentStatus::Failed.as_i32(),
+            OffsetDateTime::now_utc().unix_timestamp(),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    Ok(())
+}
+
+async fn respawn_run_task(
+    state: &HttpState,
+    run: WaveRun,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;
+    if !acquired {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no scheduler slots available",
+        ));
+    }
+
+    spawn_run_task_with_slot(
+        state.store.clone(),
+        (*state.executor).clone(),
+        state.scheduler.clone(),
+        state.event_hub.clone(),
+        run,
+    );
 
     Ok(())
 }
@@ -797,26 +810,13 @@ pub async fn continue_wave_handler(
     state.event_hub.send(Event::wave_updated(wave_id.clone()));
 
     // Re-acquire scheduler slot (idempotent for same run_id).
-    let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;
-    if !acquired {
-        return Err(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no scheduler slots available",
-        ));
-    }
-
-    spawn_run_task_with_slot(
-        state.store.clone(),
-        (*state.executor).clone(),
-        state.scheduler.clone(),
-        state.event_hub.clone(),
-        run.clone(),
-    );
+    let wave_run_id = run.id.to_string();
+    respawn_run_task(&state, run).await?;
 
     Ok(Json(ContinueWaveResponse {
         continued: true,
         wave_id: wave_id.to_string(),
-        wave_run_id: run.id.to_string(),
+        wave_run_id,
     }))
 }
 

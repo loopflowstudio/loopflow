@@ -120,7 +120,6 @@ struct WaveRow: View {
                         .accessibilityIdentifier("wave-stimulus")
                 }
             }
-
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

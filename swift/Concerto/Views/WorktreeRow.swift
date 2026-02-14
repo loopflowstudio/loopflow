@@ -1,7 +1,6 @@
 // Row view for an orphan worktree in the "On Disk" sidebar section.
 
 import SwiftUI
-import AppKit
 import LoopflowCore
 
 struct WorktreeRow: View {
@@ -9,6 +8,8 @@ struct WorktreeRow: View {
     let onUpgrade: () -> Void
 
     @State private var isHovering = false
+
+    private let launcher = TerminalLauncher()
 
     private var displayName: String {
         worktree.branch ?? worktree.shortName ?? "detached"
@@ -64,27 +65,18 @@ struct WorktreeRow: View {
         .opacity(worktree.merged ? 0.6 : 1.0)
         .contextMenu {
             Button {
-                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: worktree.path)
+                launcher.openInFinder(at: URL(fileURLWithPath: worktree.path))
             } label: {
                 Label("Open in Finder", systemImage: "folder")
             }
 
             Button {
-                openInTerminal(worktree.path)
+                try? launcher.launchTerminal(.terminal, at: URL(fileURLWithPath: worktree.path))
             } label: {
                 Label("Open in Terminal", systemImage: "terminal")
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Worktree: \(displayName)")
-    }
-
-    private func openInTerminal(_ path: String) {
-        let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.open(
-            [url],
-            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-            configuration: NSWorkspace.OpenConfiguration()
-        )
     }
 }

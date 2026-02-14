@@ -1,5 +1,5 @@
 use crate::agent::anthropic::{self, ContentBlock, Message, MessageContent};
-use crate::agent::registry::ToolRegistry;
+use crate::agent::tools::ToolRegistry;
 use crate::chat::AgentEvent;
 use std::time::{Duration, Instant};
 
@@ -154,14 +154,6 @@ fn make_tool_results(
     }
 
     (blocks, events)
-}
-
-/// Exposed for integration testing: dispatch tool calls and collect events.
-pub fn dispatch_tool_results(
-    assistant_content: &[ContentBlock],
-    registry: &ToolRegistry,
-) -> (Vec<ContentBlock>, Vec<AgentEvent>) {
-    make_tool_results(assistant_content, registry)
 }
 
 fn extract_text(content: &[ContentBlock]) -> Option<String> {

@@ -1,10 +1,61 @@
 use crate::agent::anthropic::ToolDefinition;
 use crate::agent::context::ContextStore;
-use crate::agent::registry::{Tool, ToolRegistry, ToolResult};
 use crate::chat::{AgentEvent, UserMessagePhase};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+// --- Registry ---
+
+/// Result of a tool invocation, returned to the turn loop.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolResult {
+    /// Text result sent back to the model.
+    pub output: String,
+    /// Optional event emitted to consumers (e.g. for boundary tools like send_message).
+    pub event: Option<AgentEvent>,
+}
+
+/// A tool the agent can invoke during a turn.
+pub trait Tool: Send + Sync {
+    fn name(&self) -> &str;
+    fn definition(&self) -> ToolDefinition;
+    fn call(&self, input: &serde_json::Value) -> ToolResult;
+}
+
+impl std::fmt::Debug for dyn Tool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Tool({})", self.name())
+    }
+}
+
+/// Registry of tools available to the agent during a turn.
+#[derive(Debug, Default)]
+pub struct ToolRegistry {
+    tools: Vec<Box<dyn Tool>>,
+}
+
+impl ToolRegistry {
+    pub fn new() -> Self {
+        Self { tools: Vec::new() }
+    }
+
+    pub fn register(&mut self, tool: Box<dyn Tool>) {
+        self.tools.push(tool);
+    }
+
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        self.tools.iter().map(|t| t.definition()).collect()
+    }
+
+    /// Dispatch a tool call by name. Returns `None` if the tool is not registered.
+    pub fn dispatch(&self, name: &str, input: &serde_json::Value) -> Option<ToolResult> {
+        self.tools
+            .iter()
+            .find(|t| t.name() == name)
+            .map(|t| t.call(input))
+    }
+}
 
 // --- Tool implementations ---
 
@@ -644,49 +695,32 @@ fn run_shell_command(
         .spawn()
         .map_err(|e| format!("spawn error: {e}"))?;
 
-    // Wait with timeout using a polling approach
+    // Poll with timeout
     let start = std::time::Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let stdout = child.stdout.take().map_or_else(Vec::new, |mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).unwrap_or(0);
-                    buf
-                });
-                let stderr = child.stderr.take().map_or_else(Vec::new, |mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).unwrap_or(0);
-                    buf
-                });
+                let output = child
+                    .wait_with_output()
+                    .map_err(|e| format!("output error: {e}"))?;
 
-                let mut combined = String::new();
-                if !stdout.is_empty() {
-                    combined.push_str(&String::from_utf8_lossy(&stdout));
-                }
-                if !stderr.is_empty() {
+                let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+                if !output.stderr.is_empty() {
                     if !combined.is_empty() {
                         combined.push('\n');
                     }
-                    combined.push_str(&String::from_utf8_lossy(&stderr));
+                    combined.push_str(&String::from_utf8_lossy(&output.stderr));
                 }
 
-                // Truncate if needed
-                let truncated = if combined.len() > SHELL_OUTPUT_MAX_BYTES {
-                    let mut s = combined[..SHELL_OUTPUT_MAX_BYTES].to_string();
-                    s.push_str("\n[truncated]");
-                    s
-                } else {
-                    combined
-                };
+                if combined.len() > SHELL_OUTPUT_MAX_BYTES {
+                    combined.truncate(SHELL_OUTPUT_MAX_BYTES);
+                    combined.push_str("\n[truncated]");
+                }
+                if !status.success() {
+                    combined.push_str(&format!("\n[exit code: {}]", status.code().unwrap_or(-1)));
+                }
 
-                let exit_info = if status.success() {
-                    String::new()
-                } else {
-                    format!("\n[exit code: {}]", status.code().unwrap_or(-1))
-                };
-
-                return Ok(format!("{truncated}{exit_info}"));
+                return Ok(combined);
             }
             Ok(None) => {
                 if start.elapsed() > timeout {
@@ -1114,5 +1148,25 @@ mod tests {
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"write_file"));
         assert!(names.contains(&"shell"));
+    }
+
+    // --- Registry tests ---
+
+    #[test]
+    fn registry_dispatches_registered_tool() {
+        let registry = default_registry();
+        let result = registry
+            .dispatch("calculate", &serde_json::json!({"expression": "1 + 1"}))
+            .expect("tool should be found");
+        assert_eq!(result.output, "2");
+        assert!(result.event.is_none());
+    }
+
+    #[test]
+    fn registry_returns_none_for_unknown_tool() {
+        let registry = ToolRegistry::new();
+        assert!(registry
+            .dispatch("nonexistent", &serde_json::json!({}))
+            .is_none());
     }
 }

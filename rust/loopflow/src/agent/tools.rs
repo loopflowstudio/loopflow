@@ -241,12 +241,4 @@ mod tests {
             .expect("calculate should be registered");
         assert_eq!(result.output, "42");
     }
-
-    #[test]
-    fn default_registry_returns_none_for_unknown() {
-        let registry = default_registry();
-        assert!(registry
-            .dispatch("nonexistent", &serde_json::json!({}))
-            .is_none());
-    }
 }

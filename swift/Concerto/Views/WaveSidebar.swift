@@ -226,6 +226,21 @@ struct WaveSidebar: View {
                     sectionHeader("Idle", icon: "circle", count: waveGroups.idle.count)
                     waveRows(waveGroups.idle)
                 }
+
+                // Orphan worktrees — on disk but not tracked by any wave
+                if !repoState.worktreeStore.orphans.isEmpty {
+                    Divider()
+                        .background(.white.opacity(0.15))
+                        .padding(.vertical, Spacing.xs)
+
+                    sectionHeader("On Disk", icon: "folder", count: repoState.worktreeStore.orphans.count)
+
+                    ForEach(repoState.worktreeStore.orphans) { worktree in
+                        WorktreeRow(worktree: worktree) {
+                            upgradeWorktree(worktree)
+                        }
+                    }
+                }
             }
             .padding(.horizontal, Spacing.sm)
         }
@@ -266,6 +281,18 @@ struct WaveSidebar: View {
     private func selectWave(_ waveId: String) {
         repoState.selectedWaveId = waveId
         keyboardFocusedId = waveId
+    }
+
+    private func upgradeWorktree(_ worktree: WorktreeInfo) {
+        guard let name = worktree.shortName else { return }
+        Task {
+            do {
+                try await repoState.createWave(name: name)
+            } catch {
+                actionError = error.localizedDescription
+                showingActionError = true
+            }
+        }
     }
 
     private func createWaveDirectly() {

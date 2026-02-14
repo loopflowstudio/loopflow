@@ -10,7 +10,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
-use crate::lfd::http::routes::{flows, hooks, system, wave_runs, waves, ws};
+use crate::lfd::http::routes::{flows, hooks, system, wave_runs, waves, worktrees, ws};
 use crate::lfd::store::{SharedStore, StoreError};
 
 pub use state::HttpState;
@@ -63,6 +63,7 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/waves/:wave_id/logs", get(wave_runs::wave_logs_handler))
         .route("/wave_runs", get(wave_runs::list_wave_runs_handler))
+        .route("/worktrees", get(worktrees::list_worktrees_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,

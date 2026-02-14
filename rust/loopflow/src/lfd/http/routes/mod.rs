@@ -3,6 +3,7 @@ pub mod hooks;
 pub mod system;
 pub mod wave_runs;
 pub mod waves;
+pub mod worktrees;
 pub mod ws;
 
 use crate::lfd::http::dto::{

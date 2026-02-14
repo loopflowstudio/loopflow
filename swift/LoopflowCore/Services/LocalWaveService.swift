@@ -675,6 +675,50 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    // MARK: - Worktrees
+
+    public func listWorktrees(repo: URL) async throws -> [WorktreeInfo] {
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("worktrees"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
+
+        guard let url = components.url else {
+            LoggingService.lfd("listWorktrees: invalid URL for repo=\(repo.path)")
+            return []
+        }
+
+        LoggingService.lfd("listWorktrees: GET \(url)")
+
+        do {
+            let (data, response) = try await longSession.data(from: url)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                LoggingService.lfd("listWorktrees: non-200 status")
+                return []
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = json["data"] as? [[String: Any]] else {
+                LoggingService.lfd("listWorktrees: invalid JSON response")
+                return []
+            }
+
+            let worktrees = items.map { dict -> WorktreeInfo in
+                WorktreeInfo(
+                    branch: dict["branch"] as? String,
+                    path: dict["path"] as? String ?? "",
+                    merged: dict["merged"] as? Bool ?? false,
+                    prunable: dict["prunable"] as? Bool ?? false,
+                    waveId: dict["wave_id"] as? String
+                )
+            }
+            LoggingService.lfd("listWorktrees: found \(worktrees.count) worktrees")
+            return worktrees
+        } catch {
+            LoggingService.lfd("listWorktrees: error=\(error.localizedDescription)")
+            return []
+        }
+    }
+
     // MARK: - Output Streaming
 
     /// Stream output for a wave (replay from disk + live follow).

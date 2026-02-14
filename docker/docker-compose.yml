@@ -1,7 +1,7 @@
 services:
   lfd:
     build:
-      context: .
+      context: ..
       dockerfile: docker/lfd/Dockerfile
     ports:
       - "${LFD_PORT:-2486}:2486"

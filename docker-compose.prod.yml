@@ -1,0 +1,25 @@
+# Production override for remote deployment.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Adds Caddy for TLS termination and sets auth to static token.
+# The base lfd port mapping is kept (harmless behind security group).
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      lfd:
+        condition: service_healthy
+    restart: unless-stopped
+
+  lfd:
+    environment:
+      LFD_AUTH_PROVIDER: static
+
+volumes:
+  caddy-data:

@@ -61,6 +61,23 @@ docker-compose.yml + docker-compose.prod.yml (remote)
     -> LFD_AUTH_PROVIDER=static forces token auth
 ```
 
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| ECS Fargate | Managed containers, no EC2 | Docker-in-Docker problem — lfd creates sibling containers via Docker socket. Fargate doesn't expose Docker socket. |
+| Fly.io | Simple deploys, built-in TLS | Same Docker socket issue. Also adds vendor dependency for a dev box. |
+| Lambda + container | Pay-per-use | Long-running daemon with WebSocket connections. Lambda's 15-min limit and cold starts are deal-breakers. |
+| Docker context (remote Docker API) | Build locally, deploy remotely | Exposes Docker API over the network. Security nightmare. And doesn't solve the "need a machine" problem. |
+| Lightsail | Simpler than EC2 | No ARM instances. More expensive for equivalent specs. Less control over security groups. |
+| Build on Mac, push to registry | Faster iteration | Requires a container registry (ECR/GHCR). Cross-arch images need buildx. Adds complexity for infrequent deploys. |
+
+The fundamental constraint: lfd creates agent containers as siblings via the host Docker socket. This rules out any deployment target that doesn't expose a Docker socket (Fargate, Lambda, Fly.io). EC2 with Docker installed is the simplest option that works.
+
+## Agent image on ARM
+
+`docker/agent/Dockerfile` uses `node:22-bookworm-slim` — multi-arch, works on ARM. Node-based agent tools (Claude Code, Codex, Gemini CLI) are npm packages that work anywhere Node runs. Go binaries (opencode) need ARM builds. The `install-loopflow.sh` script needs to pull ARM binaries.
+
 ## Risks
 
 **Token in plaintext config.** Static token stored in `LFD_AUTH_TOKEN` env var (in `.env` file, gitignored). Acceptable for dev; security group restricts network access. Phase 07 replaces with JWT.

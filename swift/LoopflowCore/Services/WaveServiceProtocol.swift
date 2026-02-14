@@ -23,6 +23,7 @@ public protocol WaveServiceProtocol: Sendable {
     func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus
     func removeStimulus(_ waveId: String, stimulusId: String) async throws
     func stop(_ id: String) async throws
+    func restartStep(_ id: String) async throws
     func landWave(_ id: String) async throws
     func nextWave(_ id: String) async throws -> String
     func listFlowsAndDirections(repo: URL) async throws -> WaveFlowsResult

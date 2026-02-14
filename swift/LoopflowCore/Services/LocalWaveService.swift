@@ -545,18 +545,11 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func stop(_ id: String) async throws {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/stop")
+        try await postWaveCommand(id, action: "stop")
+    }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
-        }
+    public func restartStep(_ id: String) async throws {
+        try await postWaveCommand(id, action: "restart-step")
     }
 
     /// Land a wave's current branch (merge via PR).
@@ -835,6 +828,21 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             return message
         }
         return nil
+    }
+
+    private func postWaveCommand(_ id: String, action: String) async throws {
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/\(action)")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
     }
 
     private func runShellCommand(_ args: [String]) async throws {

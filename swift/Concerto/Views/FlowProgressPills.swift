@@ -7,6 +7,7 @@ struct FlowProgressPills: View {
     let steps: [String]
     let currentIndex: Int
     let startedAt: Date?
+    var onRestartStep: (() -> Void)?
 
     @Environment(\.palette) private var palette
     @State private var elapsedSeconds: Int = 0
@@ -62,6 +63,17 @@ struct FlowProgressPills: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
+
+            if isCurrent, let onRestartStep {
+                Button(action: onRestartStep) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .minHitTarget()
+                .accessibilityLabel("Restart step")
+            }
         }
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs)
@@ -103,7 +115,8 @@ struct FlowProgressPills: View {
         FlowProgressPills(
             steps: ["implement", "compress", "gate", "consolidate"],
             currentIndex: 1,
-            startedAt: Date().addingTimeInterval(-125)
+            startedAt: Date().addingTimeInterval(-125),
+            onRestartStep: {}
         )
         .padding()
     }

@@ -341,7 +341,8 @@ struct WaveDetailPanel: View {
                     FlowProgressPills(
                         steps: wave.flowSteps.isEmpty ? [wave.flow] : wave.flowSteps,
                         currentIndex: wave.stepIndex,
-                        startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt
+                        startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt,
+                        onRestartStep: { restartStep() }
                     )
                     .font(Typography.body())
                 }
@@ -611,6 +612,8 @@ struct WaveDetailPanel: View {
     private func landWave() { perform("land") { try await repoState.landWave(wave) } }
     private func nextWave() { perform("start next") { try await repoState.nextWave(wave) } }
     private func stopWave() { perform("stop wave") { try await repoState.stopWave(wave) } }
+
+    private func restartStep() { perform("restart step") { try await repoState.restartStep(wave) } }
 
     private func retryWave() {
         perform("retry wave") {

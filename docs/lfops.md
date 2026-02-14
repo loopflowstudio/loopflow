@@ -24,7 +24,7 @@ Options:
 |------|-------------|
 | `-e, --exclude` | Exclude patterns |
 | `-c, --clipboard` | Include current clipboard content |
-| `--lfdocs / --no-lfdocs` | Include roadmap/, scratch/, and root .md files |
+| `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root .md files |
 | `--diff / --no-diff` | Include raw branch diff |
 | `--diff-files / --no-diff-files` | Include files touched by branch |
 | `--summaries / --no-summaries` | Include pre-generated codebase summaries |

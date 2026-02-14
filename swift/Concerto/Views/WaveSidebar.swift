@@ -21,6 +21,10 @@ struct WaveSidebar: View {
         repoState.waveGroups
     }
 
+    private var orphanWorktrees: [WorktreeInfo] {
+        repoState.worktreeStore.orphans
+    }
+
     private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: icon)
@@ -69,7 +73,7 @@ struct WaveSidebar: View {
 
             if repoState.waves.isEmpty && !repoState.lfdConnected {
                 disconnectedState
-            } else if repoState.waves.isEmpty {
+            } else if repoState.waves.isEmpty && orphanWorktrees.isEmpty {
                 emptyState
             } else {
                 waveList
@@ -214,7 +218,6 @@ struct WaveSidebar: View {
     }
 
     private var waveList: some View {
-        @Bindable var repoState = repoState
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                 if !waveGroups.active.isEmpty {
@@ -225,6 +228,21 @@ struct WaveSidebar: View {
                 if !waveGroups.idle.isEmpty {
                     sectionHeader("Idle", icon: "circle", count: waveGroups.idle.count)
                     waveRows(waveGroups.idle)
+                }
+
+                // Orphan worktrees — on disk but not tracked by any wave
+                if !orphanWorktrees.isEmpty {
+                    Divider()
+                        .background(.white.opacity(0.15))
+                        .padding(.vertical, Spacing.xs)
+
+                    sectionHeader("On Disk", icon: "folder", count: orphanWorktrees.count)
+
+                    ForEach(orphanWorktrees) { worktree in
+                        WorktreeRow(worktree: worktree) {
+                            upgradeWorktree(worktree)
+                        }
+                    }
                 }
             }
             .padding(.horizontal, Spacing.sm)
@@ -266,6 +284,18 @@ struct WaveSidebar: View {
     private func selectWave(_ waveId: String) {
         repoState.selectedWaveId = waveId
         keyboardFocusedId = waveId
+    }
+
+    private func upgradeWorktree(_ worktree: WorktreeInfo) {
+        guard let name = worktree.shortName else { return }
+        Task {
+            do {
+                try await repoState.createWave(name: name)
+            } catch {
+                actionError = error.localizedDescription
+                showingActionError = true
+            }
+        }
     }
 
     private func createWaveDirectly() {

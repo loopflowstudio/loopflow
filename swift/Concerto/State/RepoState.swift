@@ -59,6 +59,7 @@ final class RepoState {
     // Wave state — delegated to WaveStore
     let waveStore = WaveStore()
     let runStore = RunStore()
+    let worktreeStore = WorktreeStore()
 
     var waves: [WaveViewModel] { waveStore.ordered }
     var waveGroups: WaveGroups { waveStore.groups }
@@ -111,6 +112,7 @@ final class RepoState {
         currentRepo = repoURL
         flows = []
         waveStore.removeAll()
+        worktreeStore.removeAll()
         selectedWaveId = nil
         isLoading = false
         errorMessage = nil
@@ -318,6 +320,7 @@ final class RepoState {
                         case .connected(let connected):
                             self.lfdConnected = true
                             self.waveStore.setAll(connected.waves.map { WaveViewModel(api: $0) })
+                            await self.refreshWorktrees()
                             await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
                             await self.handleWaveEvent(waveEvent)
@@ -354,12 +357,18 @@ final class RepoState {
             if event.type == .started || event.type == .stopped || event.type == .updated {
                 loadRuns(for: event.waveId)
             }
+            // New wave may adopt a worktree
+            if event.type == .created {
+                await refreshWorktrees()
+            }
         case .deleted:
             waveStore.remove(event.waveId)
             runStore.clear(for: event.waveId)
             if selectedWaveId == event.waveId {
                 selectedWaveId = nil
             }
+            // Deleted wave may orphan a worktree
+            await refreshWorktrees()
         }
     }
 
@@ -397,6 +406,11 @@ final class RepoState {
             guard let runs = try? await waveService.listWaveRuns(waveId: waveId) else { return }
             runStore.setRuns(for: waveId, runs)
         }
+    }
+
+    func refreshWorktrees() async {
+        guard let repo = currentRepo else { return }
+        worktreeStore.setAll((try? await waveService.listWorktrees(repo: repo)) ?? [])
     }
 
     func combinePRs(_ waveId: String) async throws -> CombinePRsResult {

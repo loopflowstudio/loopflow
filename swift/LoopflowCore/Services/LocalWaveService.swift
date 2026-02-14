@@ -675,6 +675,42 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    // MARK: - Worktrees
+
+    public func listWorktrees(repo: URL) async throws -> [WorktreeInfo] {
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("worktrees"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
+
+        guard let url = components.url else {
+            LoggingService.lfd("listWorktrees: invalid URL for repo=\(repo.path)")
+            return []
+        }
+
+        LoggingService.lfd("listWorktrees: GET \(url)")
+
+        do {
+            let (data, response) = try await longSession.data(from: url)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                LoggingService.lfd("listWorktrees: non-200 status")
+                return []
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = json["data"] as? [[String: Any]] else {
+                LoggingService.lfd("listWorktrees: invalid JSON response")
+                return []
+            }
+
+            let worktrees = items.compactMap(Self.parseWorktreeFromJSON)
+            LoggingService.lfd("listWorktrees: found \(worktrees.count) worktrees")
+            return worktrees
+        } catch {
+            LoggingService.lfd("listWorktrees: error=\(error.localizedDescription)")
+            return []
+        }
+    }
+
     // MARK: - Output Streaming
 
     /// Stream output for a wave (replay from disk + live follow).
@@ -714,6 +750,18 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     // MARK: - Private helpers
+
+    private static func parseWorktreeFromJSON(_ json: [String: Any]) -> WorktreeInfo? {
+        guard let path = json["path"] as? String, !path.isEmpty else { return nil }
+
+        return WorktreeInfo(
+            branch: json["branch"] as? String,
+            path: path,
+            merged: json["merged"] as? Bool ?? false,
+            prunable: json["prunable"] as? Bool ?? false,
+            waveId: json["wave_id"] as? String
+        )
+    }
 
     private static func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
         guard let id = json["id"] as? String,

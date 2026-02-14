@@ -62,7 +62,7 @@ pub struct Cli {
     #[arg(long = "no-chrome", overrides_with = "chrome")]
     pub no_chrome: bool,
 
-    /// Wave name for roadmap scoping
+    /// Wave name for wave/ scoping
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
 }
@@ -111,7 +111,7 @@ pub enum OpsCommand {
         /// Patterns to exclude
         #[arg(short = 'e', long = "exclude")]
         exclude: Vec<String>,
-        /// Include lfdocs (scratch/, root .md, roadmap/)
+        /// Include lfdocs (scratch/, root .md, wave/)
         #[arg(long)]
         lfdocs: bool,
         /// Exclude lfdocs

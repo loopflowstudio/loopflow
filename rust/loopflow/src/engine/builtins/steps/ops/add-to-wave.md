@@ -1,14 +1,14 @@
 ---
 requires: scratch/ files to promote
-produces: roadmap/ or reports/ files
+produces: wave/ or reports/ files
 ---
-Route files from scratch/ to roadmap/ or reports/ based on content type.
+Route files from scratch/ to wave/ or reports/ based on content type.
 
 ## Two destinations
 
-**roadmap/<wave>/** — Actionable work items. Things to build next.
+**wave/<wave>/** — Actionable work items. Things to build next.
 ```
-roadmap/
+wave/
   lfflow/
     dynamic-budgets.md
     auth-redesign.md
@@ -28,7 +28,7 @@ For each file in scratch/, decide:
 **Is this actionable follow-up work?**
 - Has clear scope and next steps
 - Someone should build this
-- → `roadmap/<wave>/<slug>.md`
+- → `wave/<wave>/<slug>.md`
 
 **Is this reference/context?**
 - Research with lasting value
@@ -38,7 +38,7 @@ For each file in scratch/, decide:
 
 ## Determining the wave name
 
-For actionable items going to `roadmap/`:
+For actionable items going to `wave/`:
 
 1. Use explicit `--wave` flag if provided
 2. Use wave name from wave configuration (if running as a wave)
@@ -46,8 +46,8 @@ For actionable items going to `roadmap/`:
 
 **Examples:**
 ```
---wave lfflow + actionable item → roadmap/lfflow/<slug>.md
-(no flag, worktree=loopflow.lfflow) + actionable item → roadmap/lfflow/<slug>.md
+--wave lfflow + actionable item → wave/lfflow/<slug>.md
+(no flag, worktree=loopflow.lfflow) + actionable item → wave/lfflow/<slug>.md
 reference material → reports/<topic>.md
 ```
 
@@ -55,14 +55,14 @@ reference material → reports/<topic>.md
 
 1. Read everything in scratch/
 2. For each file worth promoting:
-   - Decide: actionable (roadmap/) or reference (reports/)
+   - Decide: actionable (wave/) or reference (reports/)
    - Determine destination path
    - Move content (don't just copy—remove from scratch/)
 3. Skip temporary analysis files that shouldn't persist
 
 ## What to promote
 
-**To roadmap/ (actionable):**
+**To wave/ (actionable):**
 - Proposals with clear scope
 - Follow-up work items from this diff
 - Bugs or issues discovered during work

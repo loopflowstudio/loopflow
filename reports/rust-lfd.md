@@ -210,7 +210,7 @@ lf ops (Python CLI)              lfd (Rust daemon)
 
 The shared code lives in `lf-core`, not in `lf ops`. `lf ops` is the "no daemon, stateless" interface. `lfd` adds wave state for stacking workflows.
 
-See `roadmap/rust/04-lf-client.md` for full design.
+See `wave/rust/04-lf-client.md` for full design.
 
 ## Open questions
 

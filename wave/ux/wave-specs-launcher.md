@@ -8,7 +8,7 @@ Each wave item declares its execution config in frontmatter. Concerto reads them
 
 ## What to build
 
-Wave items (currently `roadmap/`, eventually `wave/`) get frontmatter that describes how to run them. Concerto reads these specs and lets you pick subsets to launch. Recovery becomes: open Concerto, see what was planned vs running, reconcile.
+Wave items in `wave/` get frontmatter that describes how to run them. Concerto reads these specs and lets you pick subsets to launch. Recovery becomes: open Concerto, see what was planned vs running, reconcile.
 
 ## Wave spec format
 
@@ -45,8 +45,8 @@ Or folder-based: "launch everything `proposed` in `wave/rust/`".
 
 Prompts that generate wave items produce specs as part of their output:
 
-- `lf roadmap` — each item gets execution config in frontmatter
-- `lf add-to-roadmap` — includes wave spec when promoting from scratch/
+- `lf wave-plan` — each item gets execution config in frontmatter
+- `lf add-to-wave` — includes wave spec when promoting from scratch/
 - `lf iterate` — preserves/updates wave specs
 
 ### Rust: `GET /waves/launchable`

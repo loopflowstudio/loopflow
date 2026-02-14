@@ -1,22 +1,22 @@
 ---
-requires: roadmap items in persona waves
-produces: roadmap/concerto/<date>-<order>-<slug>.md
+requires: wave items in persona waves
+produces: wave/concerto/<date>-<order>-<slug>.md
 interactive: true
 ---
-Synthesize persona wave roadmaps into a single ordered Concerto backlog.
+Synthesize persona wave backlogs into a single ordered Concerto backlog.
 
 ## Inputs
 
 Read all items from these wave folders (if present):
-- `roadmap/conductor/`
-- `roadmap/improviser/`
-- `roadmap/listener/`
-- `roadmap/product-designer/`
-- `roadmap/ceo/`
+- `wave/conductor/`
+- `wave/improviser/`
+- `wave/listener/`
+- `wave/product-designer/`
+- `wave/ceo/`
 
 ## Goal
 
-Produce a single ordered set of backlog items in `roadmap/concerto/` that:
+Produce a single ordered set of backlog items in `wave/concerto/` that:
 - Deduplicates overlapping issues across personas
 - Preserves the most actionable framing
 - Prioritizes by user impact and clarity
@@ -26,7 +26,7 @@ Produce a single ordered set of backlog items in `roadmap/concerto/` that:
 1. Cluster related items across waves (same problem, different framing).
 2. Pick the strongest framing and concrete Build steps.
 3. Assign an overall order (01, 02, 03...) for the Concerto backlog.
-4. Write one file per item to `roadmap/concerto/`.
+4. Write one file per item to `wave/concerto/`.
 
 ## Output format
 

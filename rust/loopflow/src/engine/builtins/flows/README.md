@@ -12,20 +12,20 @@ Flows that produce code changes.
 | `pair` | design → ship | Interactive design then build |
 | `grind` | review → iterate → ship → gate | Review-driven iteration |
 | `incident` | debug → 5whys → ship | Fix bug, analyze root cause, ship fixes |
-| `start` | ingest → kickoff | Pick roadmap item, elaborate design |
-| `ship-roadmap` | start → ship | Pick roadmap item, elaborate, build |
+| `start` | ingest → kickoff | Pick wave item, elaborate design |
+| `ship-wave` | start → ship → update-wave | Pick wave item, elaborate, build, then update wave plan |
 
 ## Plan flows (`plan/`)
 
-Flows that produce roadmap items and analysis.
+Flows that produce wave items and analysis.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `roadmap-reduce` | review → fork(reduce×3) → publish | Find simplification opportunities |
-| `roadmap-polish` | review → fork(polish×3) → publish | Find polish priorities |
-| `roadmap-expand` | review → fork(expand×3) → publish | Find expansion opportunities |
+| `wave-reduce` | review → fork(reduce×3) → publish | Find simplification opportunities |
+| `wave-polish` | review → fork(polish×3) → publish | Find polish priorities |
+| `wave-expand` | review → fork(expand×3) → publish | Find expansion opportunities |
 | `research` | explore → review → publish | Investigate then propose |
-| `publish` | consolidate → add-to-roadmap | Promote scratch/ to roadmap/ |
+| `publish` | consolidate → add-to-wave | Promote scratch/ to wave/ |
 
 ## Fork pattern
 
@@ -42,7 +42,7 @@ Plan flows use forks to get multiple perspectives:
 - publish
 ```
 
-The fork runs `reduce` three times with different directions, then automatically synthesizes the results before publishing to roadmap.
+The fork runs `reduce` three times with different directions, then automatically synthesizes the results before publishing to wave/.
 
 ## Adding a flow
 

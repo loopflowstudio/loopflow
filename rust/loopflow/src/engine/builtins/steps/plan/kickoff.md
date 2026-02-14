@@ -57,7 +57,7 @@ Update `scratch/<slug>.md`:
 
 ## Wave alignment
 
-If `<lf:wave>` is present, check `roadmap/<wave>/README.md` in docs:
+If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 
 - Design must follow the wave's principles
 - Scope must exclude wave non-goals

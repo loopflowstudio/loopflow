@@ -10,4 +10,4 @@ This directory holds supporting material:
 - **Design audits** — gap analysis between current UI and `VISUAL_DESIGN.md`
 - **Polish priorities** — what to fix, in what order
 
-Reports here inform Phase 3 (theming) and Phase 4 (polish) work. See `roadmap/viz/README.md` for the full plan.
+Reports here inform Phase 3 (theming) and Phase 4 (polish) work. See `wave/viz/README.md` for the full plan.

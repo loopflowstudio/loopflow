@@ -226,12 +226,8 @@ fn gather_context_with_wave() {
     let repo = temp.path();
     init_repo(repo);
 
-    fs::create_dir_all(repo.join("roadmap/auth")).unwrap();
-    fs::write(
-        repo.join("roadmap/auth/README.md"),
-        "# Auth Wave\nBuild auth.",
-    )
-    .unwrap();
+    fs::create_dir_all(repo.join("wave/auth")).unwrap();
+    fs::write(repo.join("wave/auth/README.md"), "# Auth Wave\nBuild auth.").unwrap();
     write_step(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
@@ -400,9 +396,9 @@ fn format_prompt_includes_wave_context() {
     let repo = temp.path();
     init_repo(repo);
 
-    fs::create_dir_all(repo.join("roadmap/payments")).unwrap();
+    fs::create_dir_all(repo.join("wave/payments")).unwrap();
     fs::write(
-        repo.join("roadmap/payments/README.md"),
+        repo.join("wave/payments/README.md"),
         "# Payments\nStripe integration.",
     )
     .unwrap();
@@ -436,35 +432,35 @@ fn format_prompt_includes_wave_context() {
 /// Setup multiple wave directories for isolation tests
 fn setup_multi_wave_repo(repo: &Path) {
     // Create auth wave
-    fs::create_dir_all(repo.join("roadmap/auth")).unwrap();
+    fs::create_dir_all(repo.join("wave/auth")).unwrap();
     fs::write(
-        repo.join("roadmap/auth/README.md"),
+        repo.join("wave/auth/README.md"),
         "# Auth Wave\nAuthentication system.",
     )
     .unwrap();
     fs::write(
-        repo.join("roadmap/auth/oauth.md"),
+        repo.join("wave/auth/oauth.md"),
         "# OAuth\nOAuth provider setup.",
     )
     .unwrap();
 
     // Create payments wave
-    fs::create_dir_all(repo.join("roadmap/payments")).unwrap();
+    fs::create_dir_all(repo.join("wave/payments")).unwrap();
     fs::write(
-        repo.join("roadmap/payments/README.md"),
+        repo.join("wave/payments/README.md"),
         "# Payments Wave\nPayment processing.",
     )
     .unwrap();
     fs::write(
-        repo.join("roadmap/payments/stripe.md"),
+        repo.join("wave/payments/stripe.md"),
         "# Stripe\nStripe integration guide.",
     )
     .unwrap();
 
     // Create search wave
-    fs::create_dir_all(repo.join("roadmap/search")).unwrap();
+    fs::create_dir_all(repo.join("wave/search")).unwrap();
     fs::write(
-        repo.join("roadmap/search/README.md"),
+        repo.join("wave/search/README.md"),
         "# Search Wave\nElastic search setup.",
     )
     .unwrap();
@@ -528,7 +524,7 @@ fn wave_filtering_includes_only_specified_wave() {
 }
 
 #[test]
-fn wave_filtering_excludes_all_roadmap_when_no_wave() {
+fn wave_filtering_excludes_all_waves_when_no_wave() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -559,7 +555,7 @@ fn wave_filtering_excludes_all_roadmap_when_no_wave() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Should NOT include ANY roadmap content
+    // Should NOT include ANY wave content
     assert!(
         !docs_content.contains("Authentication system"),
         "Should NOT include auth wave"
@@ -607,7 +603,7 @@ fn wave_filtering_handles_nonexistent_wave() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Should NOT include ANY roadmap content (nonexistent wave)
+    // Should NOT include ANY wave content (nonexistent wave)
     assert!(
         !docs_content.contains("Authentication system"),
         "Should NOT include auth wave"
@@ -625,24 +621,24 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
     init_repo(repo);
 
     // Create wave with multiple files
-    fs::create_dir_all(repo.join("roadmap/features")).unwrap();
+    fs::create_dir_all(repo.join("wave/features")).unwrap();
     fs::write(
-        repo.join("roadmap/features/README.md"),
+        repo.join("wave/features/README.md"),
         "# Features Overview\nMain features doc.",
     )
     .unwrap();
     fs::write(
-        repo.join("roadmap/features/01-core.md"),
+        repo.join("wave/features/01-core.md"),
         "# Core Features\nCore feature list.",
     )
     .unwrap();
     fs::write(
-        repo.join("roadmap/features/02-advanced.md"),
+        repo.join("wave/features/02-advanced.md"),
         "# Advanced Features\nAdvanced feature list.",
     )
     .unwrap();
     fs::write(
-        repo.join("roadmap/features/03-experimental.md"),
+        repo.join("wave/features/03-experimental.md"),
         "# Experimental\nExperimental features.",
     )
     .unwrap();
@@ -666,20 +662,20 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
     })
     .unwrap();
 
-    // Count roadmap docs
-    let roadmap_docs: Vec<_> = components
+    // Count wave docs
+    let wave_docs: Vec<_> = components
         .docs
         .iter()
-        .filter(|d| d.category == "roadmap")
+        .filter(|d| d.category == "wave")
         .collect();
 
     assert_eq!(
-        roadmap_docs.len(),
+        wave_docs.len(),
         4,
         "Should include all 4 files from features wave"
     );
 
-    let docs_content: String = roadmap_docs.iter().map(|d| d.content.as_str()).collect();
+    let docs_content: String = wave_docs.iter().map(|d| d.content.as_str()).collect();
     assert!(docs_content.contains("Main features doc"));
     assert!(docs_content.contains("Core feature list"));
     assert!(docs_content.contains("Advanced feature list"));

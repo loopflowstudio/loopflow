@@ -1,9 +1,9 @@
 ---
 interactive: true
 requires: none
-produces: scratch/<branch>.md | scratch/roadmap-proposal.md
+produces: scratch/<branch>.md | scratch/wave-proposal.md
 ---
-Help the user dream big, detail the idea fully, then decide whether to implement or roadmap.
+Help the user dream big, detail the idea fully, then decide whether to implement or plan as a wave.
 
 **Start by asking what they want to build.** Don't start writing or exploring until you understand the goal. This is a conversation.
 
@@ -42,14 +42,14 @@ After the idea is fully detailed, evaluate two signals:
 1. **Design doc size** — is the spec exceeding ~1000 words? If the design itself is big, the implementation will be bigger.
 2. **Implementation size** — would this be ~1000+ LOC? That's generous for a single commit.
 
-Either signal suggests roadmapping. Bias toward "yes it fits" when it's close—single commits are preferable. But these are heuristics, not rules. The user can override.
+Either signal suggests breaking into a wave plan. Bias toward "yes it fits" when it's close—single commits are preferable. But these are heuristics, not rules. The user can override.
 
 ### Phase 4: Fork
 
-Present the size assessment to the user and ask explicitly: **implement or roadmap?**
+Present the size assessment to the user and ask explicitly: **implement or wave plan?**
 
 - "This looks like it fits in one commit—ready to implement?" or
-- "This is bigger than one commit—want me to break it into a roadmap?"
+- "This is bigger than one commit—want me to break it into a wave plan?"
 
 This is the natural session exit point. The user's answer determines what to run next.
 
@@ -57,10 +57,10 @@ This is the natural session exit point. The user's answer determines what to run
 
 1. Tighten the scratch doc into the standard design spec (see "Design doc sections" below)
 
-**If roadmap:**
+**If wave plan:**
 
-1. Break the idea into staged roadmap items
-2. Write `scratch/roadmap-proposal.md` using the roadmap output format:
+1. Break the idea into staged wave items
+2. Write `scratch/wave-proposal.md` using the wave plan output format:
    - `status: proposed`
    - `# Title`
    - `## Context`
@@ -73,7 +73,7 @@ Then:
 1. Run `git add scratch/ && git commit -m "design: <branch>"`
 2. End session and tell the user what to run next:
    - `lf implement` if they chose implement
-   - `lf add-to-roadmap` if they chose roadmap
+   - `lf add-to-wave` if they chose wave plan
 
 Once breaking things up, be aggressive about commit boundaries—each stage should be independently shippable.
 

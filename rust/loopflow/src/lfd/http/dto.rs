@@ -266,6 +266,18 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct WorktreeDto {
+    pub object: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub merged: bool,
+    pub prunable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave_id: Option<String>,
+}
+
 pub fn wave_run_status_str(status: WaveRunStatus) -> String {
     match status {
         WaveRunStatus::Pending => "pending",

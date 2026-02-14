@@ -44,7 +44,7 @@ The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | `roadmap/`, `scratch/`, root `.md` files | `lfdocs: true` (default) |
+| **files** | `wave/`, `scratch/`, root `.md` files | `lfdocs: true` (default) |
 | **diff_files** | Files changed on this branch | `diff_files: true` (default) |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
@@ -103,7 +103,7 @@ def flow():
 
 ### LF Docs (files)
 
-`roadmap/`, `scratch/`, and root markdown files.
+`wave/`, `scratch/`, and root markdown files.
 
 | | |
 |---|---|
@@ -111,7 +111,7 @@ def flow():
 | **Config** | `lfdocs: true` |
 | **Default** | `true` (included) |
 
-Includes README.md, STYLE.md, and similar guidance files. Also auto-includes `scratch/` (current PR scratchpad) and `roadmap/` (internal docs).
+Includes README.md, STYLE.md, and similar guidance files. Also auto-includes `scratch/` (current PR scratchpad) and `wave/` (wave plans).
 
 ### Branch Files (diff_files)
 

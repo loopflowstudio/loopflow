@@ -35,9 +35,9 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `polish` | Find polish priorities |
 | `expand` | Find expansion opportunities |
 | `iterate` | Read review, write design to address it |
-| `ingest` | Pick roadmap item, move to scratch/ |
+| `ingest` | Pick wave item, move to scratch/ |
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
-| `roadmap` | Synthesize analysis into a roadmap proposal |
+| `wave-plan` | Synthesize analysis into a wave plan proposal |
 | `5whys` | Root cause analysis on a bug fix |
 
 ### Code steps (`code/`)
@@ -69,8 +69,8 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
 | Step | What it does |
 |------|--------------|
-| `consolidate` | Reorganize scratch/ for roadmap |
-| `add-to-roadmap` | Promote from scratch/ to roadmap/ |
+| `consolidate` | Reorganize scratch/ for wave |
+| `add-to-wave` | Promote from scratch/ to wave/ |
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
 
@@ -93,17 +93,17 @@ Steps chain into flows. Flows feed into waves.
 | `grind` | review → iterate → ship → gate |
 | `incident` | debug → 5whys → ship |
 | `start` | ingest → kickoff |
-| `ship-roadmap` | start → ship |
+| `ship-wave` | start → ship → update-wave |
 
 ### Plan flows (`plan/`)
 
 | Flow | Steps |
 |------|-------|
-| `roadmap-reduce` | review → fork(reduce×3) → publish |
-| `roadmap-polish` | review → fork(polish×3) → publish |
-| `roadmap-expand` | review → fork(expand×3) → publish |
+| `wave-reduce` | review → fork(reduce×3) → publish |
+| `wave-polish` | review → fork(polish×3) → publish |
+| `wave-expand` | review → fork(expand×3) → publish |
 | `research` | explore → review → publish |
-| `publish` | consolidate → add-to-roadmap |
+| `publish` | consolidate → add-to-wave |
 
 ### Scan flows (`scan/`)
 
@@ -116,10 +116,10 @@ Steps chain into flows. Flows feed into waves.
 Forks run a step in parallel with different directions, then synthesize the results.
 
 ```bash
-lf flow roadmap-reduce    # runs reduce 3x with different perspectives
+lf flow wave-reduce    # runs reduce 3x with different perspectives
 ```
 
-`roadmap-reduce` forks `reduce` across infra-engineer, designer, and product-engineer directions, then synthesizes and publishes to roadmap.
+`wave-reduce` forks `reduce` across infra-engineer, designer, and product-engineer directions, then synthesizes and publishes to wave/.
 
 ## Playing in the Waves
 

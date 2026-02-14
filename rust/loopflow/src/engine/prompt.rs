@@ -83,7 +83,7 @@ pub struct GatherContextOpts {
     pub directions: Vec<String>,
     /// Specific files to include in context
     pub files: Vec<String>,
-    /// Include lfdocs (roadmap/, scratch/, root .md files)
+    /// Include lfdocs (wave/, scratch/, root .md files)
     pub lfdocs: bool,
     /// Include files changed on branch
     pub diff_files: bool,
@@ -93,7 +93,7 @@ pub struct GatherContextOpts {
     pub clipboard: bool,
     /// Area path for scoped context
     pub area: Option<String>,
-    /// Wave name for roadmap scoping
+    /// Wave name for wave/ scoping
     pub wave: Option<String>,
 }
 
@@ -436,11 +436,11 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     })
 }
 
-/// Gather docs from repo (scratch/, roadmap/<wave>/, root .md files).
+/// Gather docs from repo (scratch/, wave/<wave>/, root .md files).
 ///
 /// Matches Python's gather_lfdocs behavior:
 /// 1. scratch/ (design docs, ephemeral per-PR)
-/// 2. roadmap/<wave>/ (only if wave is set)
+/// 2. wave/<wave>/ (only if wave is set)
 /// 3. Root .md files
 fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
@@ -451,18 +451,18 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
         gather_md_files(&scratch_dir, &mut docs, "scratch")?;
     }
 
-    // 2. roadmap/<wave>/ (only if wave is set)
+    // 2. wave/<wave>/ (only if wave is set)
     if let Some(wave_name) = wave {
-        let wave_dir = repo_root.join("roadmap").join(wave_name);
+        let wave_dir = repo_root.join("wave").join(wave_name);
         if wave_dir.is_dir() {
             // README first
             let readme = wave_dir.join("README.md");
             if readme.is_file() {
                 if let Ok(content) = fs::read_to_string(&readme) {
                     docs.push(Document {
-                        path: format!("roadmap/{}/README.md", wave_name),
+                        path: format!("wave/{}/README.md", wave_name),
                         content,
-                        category: "roadmap".to_string(),
+                        category: "wave".to_string(),
                     });
                 }
             }
@@ -482,12 +482,12 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
                 if let Ok(content) = fs::read_to_string(&path) {
                     docs.push(Document {
                         path: format!(
-                            "roadmap/{}/{}",
+                            "wave/{}/{}",
                             wave_name,
                             path.file_name().unwrap_or_default().to_string_lossy()
                         ),
                         content,
-                        category: "roadmap".to_string(),
+                        category: "wave".to_string(),
                     });
                 }
             }
@@ -1111,7 +1111,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(format!(
             "<lf:wave name=\"{}\">\n\
              You are building toward the {} program of work.\n\
-             Roadmap context is included in docs below.\n\
+             Wave context is included in docs below.\n\
              </lf:wave>",
             wave, wave
         ));

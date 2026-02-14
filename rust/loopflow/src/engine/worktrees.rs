@@ -72,23 +72,23 @@ pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
 /// Returns `None` if not in a worktree (i.e., in the main repo).
 pub fn worktree_short_name(repo: &Path) -> Option<String> {
     let main_repo = main_repo_root(repo).ok()?;
+    worktree_short_name_for_main_repo(repo, &main_repo)
+}
+
+/// Extract the short name using an already-resolved main repo path.
+///
+/// Use this to avoid repeatedly shelling out to git when iterating many worktrees.
+pub fn worktree_short_name_for_main_repo(repo: &Path, main_repo: &Path) -> Option<String> {
     if repo == main_repo {
-        return None; // Not in a worktree
+        return None;
     }
 
-    // Worktree path is "{repo_name}.{short_name}", so strip the repo prefix
     let main_name = main_repo.file_name()?.to_str()?;
     let dir_name = repo.file_name()?.to_str()?;
-
-    // Strip "{repo_name}." prefix to get the short name
-    let prefix = format!("{}.", main_name);
+    let prefix = format!("{main_name}.");
     let short_name = dir_name.strip_prefix(&prefix)?;
 
-    if short_name.is_empty() {
-        None
-    } else {
-        Some(short_name.to_string())
-    }
+    (!short_name.is_empty()).then(|| short_name.to_string())
 }
 
 pub fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {

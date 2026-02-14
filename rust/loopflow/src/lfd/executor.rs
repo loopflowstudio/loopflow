@@ -1775,6 +1775,14 @@ pub struct WaveExecutor {
     executor_type: ExecutorType,
 }
 
+impl std::fmt::Debug for WaveExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WaveExecutor")
+            .field("executor_type", &self.executor_type)
+            .finish()
+    }
+}
+
 impl WaveExecutor {
     pub fn new(
         store: SharedStore,

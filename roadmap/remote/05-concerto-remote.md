@@ -152,10 +152,14 @@ let repos = try await service.listRepos()
 
 Concerto shows a repo picker when connecting to a new server. No manual path entry.
 
+### Daemon discovery (Phase 07)
+
+With studio auth, manual host/port entry is replaced by auto-discovery. After sign-in, Concerto queries `GET /api/v1/daemons/discover` which returns a list of the user's registered daemons (machine_id, machine_name, url, last_heartbeat_at). Concerto shows a daemon picker when multiple machines are available, then connects to the selected one.
+
 ## Constraints
 
 - **TLS required**: Remote connections use HTTPS/WSS. Self-signed certs (Phase 04 Caddy) trusted via cert pinning on first connect.
-- **Single server**: Concerto connects to one lfd at a time. Multi-server is future work.
+- **Single server**: Concerto connects to one lfd at a time. Multi-server is future work (daemon picker from Phase 07 discovery is the first step).
 - **No offline mode**: If the connection drops, show disconnected state. Don't cache stale data.
 
 ## Done when

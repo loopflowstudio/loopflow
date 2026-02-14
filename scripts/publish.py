@@ -209,6 +209,46 @@ def _install_binary(src: Path, dst: Path) -> None:
             tmp.unlink(missing_ok=True)
 
 
+def _install_concerto() -> tuple[bool, str]:
+    swift_dir = ROOT / "swift"
+    if not swift_dir.exists():
+        return False, f"swift directory not found: {swift_dir}"
+
+    result = subprocess.run(
+        ["swift", "build", "-c", "release"],
+        cwd=swift_dir,
+    )
+    if result.returncode != 0:
+        return False, "swift build -c release failed (see output above)"
+
+    app_name = "Loopflow Concerto"
+    app_path = Path("/Applications") / f"{app_name}.app"
+    app_dir = app_path / "Contents"
+
+    # Clean existing install
+    if app_path.exists():
+        shutil.rmtree(app_path)
+
+    (app_dir / "MacOS").mkdir(parents=True)
+    (app_dir / "Resources").mkdir(parents=True)
+
+    shutil.copy(swift_dir / ".build" / "release" / "Concerto", app_dir / "MacOS")
+    shutil.copy(swift_dir / "Concerto" / "Info.plist", app_dir)
+    shutil.copy(swift_dir / "Concerto" / "Concerto.sdef", app_dir / "Resources")
+    shutil.copy(swift_dir / "Concerto" / "AppIcon.icns", app_dir / "Resources")
+    (app_dir / "PkgInfo").write_text("APPL????")
+
+    result = subprocess.run(
+        ["codesign", "--force", "--deep", "--sign", "-", str(app_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False, f"codesign failed: {result.stderr}"
+
+    return True, f"Installed {app_path}"
+
+
 def _build_dmg() -> tuple[bool, str]:
     swift_dir = ROOT / "swift"
     if not swift_dir.exists():
@@ -568,6 +608,7 @@ def local(
         typer.echo("Would build wheel with maturin")
         typer.echo("Would install wheel with uv pip install")
         typer.echo("Would install lf/lfd binaries")
+        typer.echo("Would install Concerto to /Applications")
         typer.echo("Would restart lfd")
         return
 
@@ -605,6 +646,13 @@ def local(
                     f"Add {install_path} to PATH to use the freshly installed binary.",
                     err=True,
                 )
+
+    typer.echo("Building and installing Concerto...")
+    ok, output = _install_concerto()
+    if not ok:
+        typer.echo(f"Concerto install failed:\n{output}", err=True)
+    else:
+        typer.echo(output)
 
     _restart_lfd()
 

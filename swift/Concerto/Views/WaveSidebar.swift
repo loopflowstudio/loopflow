@@ -44,7 +44,6 @@ struct WaveSidebar: View {
             WaveRow(
                 wave: wave,
                 isSelected: repoState.selectedWaveId == wave.id,
-                isKeyboardFocused: keyboardFocusedId == wave.id,
                 onSelect: {
                     selectWave(wave.id)
                 },
@@ -103,19 +102,6 @@ struct WaveSidebar: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.7))
                 .help("Waves are autonomous AI workers that run flows on your codebase")
-
-            if waveGroups.attentionCount > 0 {
-                HStack(spacing: Spacing.xs) {
-                    Circle()
-                        .fill(Color.statusWarning)
-                        .frame(width: 6, height: 6)
-                    Text("\(waveGroups.attentionCount)")
-                        .font(Typography.caption(10))
-                        .fontWeight(.medium)
-                        .foregroundStyle(Color.statusWarning)
-                }
-                .help("\(waveGroups.attentionCount) wave\(waveGroups.attentionCount == 1 ? "" : "s") need\(waveGroups.attentionCount == 1 ? "s" : "") attention")
-            }
 
             Spacer()
 
@@ -231,21 +217,6 @@ struct WaveSidebar: View {
         @Bindable var repoState = repoState
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                if !waveGroups.blocked.isEmpty {
-                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", count: waveGroups.blocked.count)
-                    waveRows(waveGroups.blocked)
-                }
-
-                if !waveGroups.pr.isEmpty {
-                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", count: waveGroups.openPRCount)
-                    waveRows(waveGroups.pr)
-                }
-
-                if !waveGroups.recentActivity.isEmpty {
-                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", count: waveGroups.recentActivity.count)
-                    waveRows(waveGroups.recentActivity)
-                }
-
                 if !waveGroups.active.isEmpty {
                     sectionHeader("Active", icon: "circle.fill", count: waveGroups.active.count)
                     waveRows(waveGroups.active)

@@ -7,7 +7,6 @@ import LoopflowCore
 struct WaveRow: View {
     let wave: WaveViewModel
     let isSelected: Bool
-    var isKeyboardFocused: Bool = false
     let onSelect: () -> Void
     var onDelete: (() -> Void)? = nil
     var onRename: ((String) -> Void)? = nil
@@ -98,16 +97,6 @@ struct WaveRow: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .accessibilityIdentifier("wave-area")
 
-                if !wave.iterationText.isEmpty {
-                    Text("•")
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.3))
-                    Text(wave.iterationText)
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.5))
-                        .accessibilityIdentifier("wave-iteration")
-                }
-
                 // Activity timestamp (italic serif per VISUAL_DESIGN.md)
                 if let activity = wave.lastActivityDescription {
                     Text("•")
@@ -121,16 +110,6 @@ struct WaveRow: View {
                         .accessibilityIdentifier("wave-activity")
                 }
 
-                if wave.status == .waiting {
-                    Text("•")
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.3))
-                    Text("PR limit")
-                        .font(Typography.caption())
-                        .foregroundStyle(Color.statusWarning.opacity(0.7))
-                        .accessibilityIdentifier("wave-pr-limit")
-                }
-
                 if let stimulusLabel {
                     Text("•")
                         .font(Typography.caption())
@@ -141,22 +120,12 @@ struct WaveRow: View {
                         .accessibilityIdentifier("wave-stimulus")
                 }
             }
-
-            // Live output when selected (isolated observation scope)
-            if isSelected {
-                SidebarLiveOutput(waveId: wave.id)
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: CornerRadius.md)
                 .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .stroke(Color.accentColor, lineWidth: 2)
-                .opacity(isKeyboardFocused && !isSelected ? 1 : 0)
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -228,20 +197,6 @@ struct WaveRow: View {
         }
     }
 
-    private var statusHelpText: String {
-        switch wave.status {
-        case .running: return "Running"
-        case .waiting: return "Waiting (PR limit reached)"
-        case .idle:
-            if wave.stimulus?.kind == .cron {
-                return "Scheduled"
-            }
-            return "Idle"
-        case .failed: return "Failed"
-        case .paused: return "Paused"
-        }
-    }
-
     private func formatCron(_ cron: String) -> String {
         if cron.hasPrefix("0 9 * * *") {
             return "9am daily"
@@ -258,20 +213,5 @@ struct WaveRow: View {
         formatter.unitsStyle = .full
         let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
         return "\(step.step), \(time)"
-    }
-}
-
-/// Isolated view for sidebar live output. Has its own observation scope
-/// so output changes only re-render this view, not the entire sidebar.
-private struct SidebarLiveOutput: View {
-    let waveId: String
-    @Environment(OutputBuffer.self) private var outputBuffer
-
-    var body: some View {
-        let lines = outputBuffer.output(for: waveId)
-        if !lines.isEmpty {
-            LiveOutput(lines: lines)
-                .frame(height: 80)
-        }
     }
 }

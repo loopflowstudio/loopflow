@@ -13,8 +13,6 @@ struct WaveRowViewTests {
         name: String = "swift-falcon",
         area: [String] = ["src/"],
         flow: String = "ship",
-        status: WaveStatus = .idle,
-        iteration: Int = 0,
         stimuli: [Stimulus] = []
     ) -> WaveViewModel {
         WaveViewModel(
@@ -25,8 +23,8 @@ struct WaveRowViewTests {
                 flow: flow,
                 area: area,
                 stimuli: stimuli,
-                status: status,
-                iteration: iteration
+                status: .idle,
+                iteration: 0
             )
         )
     }
@@ -68,24 +66,6 @@ struct WaveRowViewTests {
 
         let areaText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-area").text()
         #expect(try areaText.string() == "lib/core")
-    }
-
-    @Test("Row shows iteration when positive")
-    func showsIteration() throws {
-        let wave = makeWave(iteration: 3)
-        let row = makeRow(wave: wave)
-
-        let iterText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-iteration").text()
-        #expect(try iterText.string() == "iter 3")
-    }
-
-    @Test("Row shows PR limit text when waiting")
-    func showsPRLimitWhenWaiting() throws {
-        let wave = makeWave(status: .waiting)
-        let row = makeRow(wave: wave)
-
-        let prLimitText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-pr-limit").text()
-        #expect(try prLimitText.string() == "PR limit")
     }
 
     @Test("Row shows cron schedule for cron waves")

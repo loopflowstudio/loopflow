@@ -59,9 +59,9 @@ async fn main() {
         Ok(result) => {
             // Emit each event as a JSONL line to stdout
             for event in &result.events {
-                if let Ok(json) = serde_json::to_string(event) {
-                    println!("{json}");
-                }
+                let json =
+                    serde_json::to_string(event).expect("AgentEvent should always serialize");
+                println!("{json}");
             }
 
             eprintln!(

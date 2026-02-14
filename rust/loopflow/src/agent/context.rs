@@ -1,4 +1,6 @@
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use tiktoken_rs::CoreBPE;
 
 /// In-memory key-value store for agent working state during a session.
 ///
@@ -39,9 +41,11 @@ impl ContextStore {
 
 /// Approximate token count using tiktoken-rs (cl100k_base).
 fn estimate_tokens(text: &str) -> usize {
-    tiktoken_rs::cl100k_base()
-        .map(|bpe| bpe.encode_with_special_tokens(text).len())
-        .unwrap_or(text.len() / 4)
+    static BPE: Lazy<Option<CoreBPE>> = Lazy::new(|| tiktoken_rs::cl100k_base().ok());
+    if let Some(bpe) = BPE.as_ref() {
+        return bpe.encode_with_special_tokens(text).len();
+    }
+    text.len() / 4
 }
 
 #[cfg(test)]

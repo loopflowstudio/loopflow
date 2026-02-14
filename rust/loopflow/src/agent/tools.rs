@@ -736,7 +736,7 @@ fn run_shell_command(
 
 const DEFAULT_SHELL_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Build a registry with all 9 tools.
+/// Build a registry with all tools (base + context + file/shell).
 pub fn full_registry(store: Arc<Mutex<ContextStore>>, workspace: PathBuf) -> ToolRegistry {
     let mut registry = registry_with_context(store);
     registry.register(Box::new(ReadFile::new(workspace.clone())));
@@ -1083,11 +1083,20 @@ mod tests {
     }
 
     #[test]
-    fn path_traversal_rejected() {
+    fn path_traversal_relative_rejected() {
         let ws = temp_workspace();
         let read = ReadFile::new(ws.path().to_path_buf());
 
         let result = read.call(&serde_json::json!({"path": "../../../etc/passwd"}));
+        assert!(result.output.contains("error"));
+    }
+
+    #[test]
+    fn path_traversal_absolute_rejected() {
+        let ws = temp_workspace();
+        let read = ReadFile::new(ws.path().to_path_buf());
+
+        let result = read.call(&serde_json::json!({"path": "/etc/passwd"}));
         assert!(result.output.contains("error"));
     }
 

@@ -46,7 +46,7 @@ pub async fn auth_middleware(
             "remote access requires auth configuration",
         ),
         AuthProvider::Static { token } => match extract_token(&headers) {
-            Some(provided) if constant_time_eq(&provided, token) => next.run(request).await,
+            Some(provided) if constant_time_eq(provided, token) => next.run(request).await,
             Some(_) => auth_error(StatusCode::UNAUTHORIZED, "invalid token"),
             None => auth_error(StatusCode::UNAUTHORIZED, "missing token"),
         },
@@ -58,7 +58,7 @@ pub async fn auth_middleware(
                 }
             };
 
-            if validator.validate(&token).await {
+            if validator.validate(token).await {
                 next.run(request).await
             } else {
                 auth_error(StatusCode::UNAUTHORIZED, "invalid connection token")
@@ -71,12 +71,12 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
-fn extract_token(headers: &HeaderMap) -> Option<String> {
+fn extract_token(headers: &HeaderMap) -> Option<&str> {
     let auth = headers.get("authorization")?.to_str().ok()?;
     let token = auth
         .strip_prefix("Bearer ")
         .or_else(|| auth.strip_prefix("bearer "))?;
-    Some(token.trim().to_string())
+    Some(token.trim())
 }
 
 fn auth_error(status: StatusCode, message: &str) -> Response {
@@ -110,14 +110,14 @@ mod tests {
     fn extract_token_from_bearer_header() {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "Bearer test-token-123".parse().unwrap());
-        assert_eq!(extract_token(&headers), Some("test-token-123".to_string()));
+        assert_eq!(extract_token(&headers), Some("test-token-123"));
     }
 
     #[test]
     fn extract_token_from_bearer_lowercase() {
         let mut headers = HeaderMap::new();
         headers.insert("authorization", "bearer test-token".parse().unwrap());
-        assert_eq!(extract_token(&headers), Some("test-token".to_string()));
+        assert_eq!(extract_token(&headers), Some("test-token"));
     }
 
     #[test]

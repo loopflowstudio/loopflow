@@ -1227,6 +1227,10 @@ impl DockerExecutor {
         }
     }
 
+    async fn repo_image_needs_build(&self, image: &str, stale_marker: &Path) -> bool {
+        !self.image_exists(image).await || stale_marker.exists()
+    }
+
     async fn build_repo_image(&self, repo_source: &Path, tag: &str) -> Result<()> {
         let output = Command::new("docker")
             .args(["build", "-t", tag, "-f", ".lf/Dockerfile", "."])
@@ -1264,11 +1268,11 @@ impl DockerExecutor {
         let identity = RepoIdentity::from_repo(repo_source);
         let volume_id = RepoVolumeIdentity::from_identity(&identity);
         let repo_image = format!("lfd-agent-{}:latest", volume_id.repo_key);
-
-        let needs_build =
-            !self.image_exists(&repo_image).await || repo_source.join(".lf/.docker-stale").exists();
-
-        if !needs_build {
+        let stale_marker = repo_source.join(".lf/.docker-stale");
+        if !self
+            .repo_image_needs_build(&repo_image, &stale_marker)
+            .await
+        {
             return Ok(repo_image);
         }
 
@@ -1277,9 +1281,10 @@ impl DockerExecutor {
         let _guard = lock.lock().await;
 
         // Re-check after acquiring lock — another wave may have built it.
-        let needs_build =
-            !self.image_exists(&repo_image).await || repo_source.join(".lf/.docker-stale").exists();
-        if !needs_build {
+        if !self
+            .repo_image_needs_build(&repo_image, &stale_marker)
+            .await
+        {
             return Ok(repo_image);
         }
 
@@ -1291,7 +1296,6 @@ impl DockerExecutor {
         self.build_repo_image(repo_source, &repo_image).await?;
 
         // Remove stale marker after successful build.
-        let stale_marker = repo_source.join(".lf/.docker-stale");
         if stale_marker.exists() {
             if let Err(err) = std::fs::remove_file(&stale_marker) {
                 warn!(

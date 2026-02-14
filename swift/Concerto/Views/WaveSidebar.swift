@@ -69,7 +69,7 @@ struct WaveSidebar: View {
 
             if repoState.waves.isEmpty && !repoState.lfdConnected {
                 disconnectedState
-            } else if repoState.waves.isEmpty {
+            } else if repoState.waves.isEmpty && repoState.worktreeStore.orphans.isEmpty {
                 emptyState
             } else {
                 waveList

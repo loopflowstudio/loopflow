@@ -16,8 +16,8 @@ struct WorktreeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(displayName)
                     .fontWeight(.medium)
                     .foregroundStyle(.white.opacity(worktree.merged ? 0.4 : 1.0))
@@ -52,7 +52,7 @@ struct WorktreeRow: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Spacing.md)
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: CornerRadius.md)
@@ -71,9 +71,9 @@ struct WorktreeRow: View {
             }
 
             Button {
-                try? launcher.launchTerminal(.terminal, at: URL(fileURLWithPath: worktree.path))
+                try? launcher.launchTerminal(.warp, at: URL(fileURLWithPath: worktree.path))
             } label: {
-                Label("Open in Terminal", systemImage: "terminal")
+                Label("Open in Warp", systemImage: "terminal")
             }
         }
         .accessibilityElement(children: .combine)

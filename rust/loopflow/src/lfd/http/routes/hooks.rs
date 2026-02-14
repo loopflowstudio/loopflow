@@ -17,8 +17,8 @@ use crate::lfd::github::{
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::store::SharedStore;
-use crate::lfd::types::{Event, WaveRun};
+use crate::lfd::store::{RunStore, SharedStore, StoreResult};
+use crate::lfd::types::{Event, Wave, WaveRun};
 
 #[derive(Deserialize)]
 pub struct GitHookRequest {
@@ -194,25 +194,7 @@ async fn list_wave_ci_targets(
         } else {
             store.list_waves(None)?
         };
-
-        let mut targets = Vec::new();
-        for wave in waves {
-            let Some(repo_full_name) = github_repo_from_local(Path::new(&wave.repo)) else {
-                continue;
-            };
-            let Some(run) = store
-                .list_wave_runs(Some(&wave.id), None)?
-                .into_iter()
-                .find(|run| run_matches_ci_target(run, None, None))
-            else {
-                continue;
-            };
-            let Some(target) = wave_ci_target(&wave.id, &repo_full_name, &run) else {
-                continue;
-            };
-            targets.push(target);
-        }
-        Ok(targets)
+        collect_wave_ci_targets(store, waves, None, None, None)
     })
     .await
     .map_err(|err| err.to_string())
@@ -228,33 +210,58 @@ async fn find_wave_ci_targets(
     let branch = branch.to_string();
     run_store(store, move |store| {
         let waves = store.list_waves(None)?;
-        let mut targets = Vec::new();
-
-        for wave in waves {
-            let Some(wave_repo) = github_repo_from_local(Path::new(&wave.repo)) else {
-                continue;
-            };
-            if wave_repo != repo_full_name {
-                continue;
-            }
-
-            let Some(run) = store
-                .list_wave_runs(Some(&wave.id), None)?
-                .into_iter()
-                .find(|run| run_matches_ci_target(run, Some(branch.as_str()), pr_number))
-            else {
-                continue;
-            };
-            let Some(target) = wave_ci_target(&wave.id, &wave_repo, &run) else {
-                continue;
-            };
-            targets.push(target);
-        }
-
-        Ok(targets)
+        collect_wave_ci_targets(
+            store,
+            waves,
+            Some(repo_full_name.as_str()),
+            Some(branch.as_str()),
+            pr_number,
+        )
     })
     .await
     .map_err(|err| err.to_string())
+}
+
+fn collect_wave_ci_targets(
+    store: &dyn RunStore,
+    waves: Vec<Wave>,
+    repo_filter: Option<&str>,
+    branch: Option<&str>,
+    pr_number: Option<u32>,
+) -> StoreResult<Vec<WaveCiTarget>> {
+    let mut targets = Vec::new();
+
+    for wave in waves {
+        let Some(repo_full_name) = github_repo_from_local(Path::new(&wave.repo)) else {
+            continue;
+        };
+        if repo_filter.is_some_and(|repo| repo != repo_full_name) {
+            continue;
+        }
+
+        let Some(target) = find_wave_ci_target(store, &wave, &repo_full_name, branch, pr_number)?
+        else {
+            continue;
+        };
+        targets.push(target);
+    }
+
+    Ok(targets)
+}
+
+fn find_wave_ci_target(
+    store: &dyn RunStore,
+    wave: &Wave,
+    repo_full_name: &str,
+    branch: Option<&str>,
+    pr_number: Option<u32>,
+) -> StoreResult<Option<WaveCiTarget>> {
+    let run = store
+        .list_wave_runs(Some(&wave.id), None)?
+        .into_iter()
+        .find(|run| run_matches_ci_target(run, branch, pr_number));
+
+    Ok(run.and_then(|run| wave_ci_target(&wave.id, repo_full_name, &run)))
 }
 
 fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<u32>) -> bool {

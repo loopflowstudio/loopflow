@@ -1,192 +1,198 @@
 # B2: Real Tools
 
-B1 proved the turn loop works. B2 makes it useful — real tools, event collection, JSONL output.
+## Problem
 
-## What's done
+B1 proved the turn loop works: prompt in, API call, tool dispatch, loop, response out. But the only tools are `get_current_time` and `calculate` — toys. The harness can't communicate with consumers, can't remember anything, can't read or write files, can't run commands.
 
-**Foundation contract** (shipped): `AgentEvent` enum (Message, ToolCall, ToolResult, MemoryEdit, Done, Failed), `ChatTurnRequest`, `ChatTurnResult`, completion validation (`validate_turn_completion`). 22 tests. Lives in `chat/`.
+Without real tools, the harness is a demo. With them, it's a runtime that can power waves.
 
-**Tool registry** (C1, shipped): `Tool` trait + `ToolRegistry` in `agent/registry.rs`. `GetCurrentTime` and `Calculate` migrated to trait impls. Turn loop accepts `&ToolRegistry`. `ToolResult { output, event }` — internal tools return `event: None`, boundary tools will emit `AgentEvent`s.
-
-Key design: events ride on tool results. The turn loop collects `ToolResult::event` without knowing which tools are boundary tools.
-
-```
-ChatTurnRequest ──> [turn loop] ──> ChatTurnResult
-                        │
-                   ToolRegistry
-                   ├── GetCurrentTime (internal, event: None)
-                   ├── Calculate      (internal, event: None)
-                   └── send_message   (boundary, event: Some(AgentEvent::Message))  ← C2
-                        │
-                   Vec<AgentEvent> ──> validate_turn_completion()
-```
-
-Known risks:
-- `make_tool_results` in `turn.rs` currently discards `ToolResult::event` — C2 fixes this
-- Linear tool lookup in registry — fine for 10 tools, switch to HashMap at 50+
-
-## What's left
-
-C2-C5 add the remaining tools and wire up event collection:
-- `send_message`, `memory_edit` (boundary tools that emit events)
-- Context tools (in-memory named blocks with token counting)
-- File + shell tools (ephemeral workspace)
-- JSONL output + integration tests
+The people who benefit are wave authors — they need an agent that can talk to users (`send_message`), persist knowledge across sessions (`memory_edit`), manage working state during a session (`context_*`), and interact with the filesystem (`read_file`, `write_file`, `shell`).
 
 ## Approach
 
-### Event collection (C2)
+Nine tools across three tiers. Event collection in the turn loop. JSONL output from `lf-agent`. Four commit slices.
 
-The turn loop collects `AgentEvent`s from `ToolResult::event` during execution. `TurnResult` gains `events: Vec<AgentEvent>`. Callers validate with `validate_turn_completion`, serialize to JSONL, or pass to the chat system.
+### Tier 1: Boundary tools (C2)
+
+`send_message` and `memory_edit` cross the harness→consumer boundary. They return simple confirmation to the model but emit `AgentEvent`s that the consumer (chat system, JSONL logger, test harness) acts on.
+
+The turn loop collects events from `ToolResult::event` during dispatch. `TurnResult` gains `events: Vec<AgentEvent>`. This is the key change — tool execution becomes observable.
+
+### Tier 2: Context tools (C3)
+
+`context_read`, `context_write`, `context_delete`, `context_list`. An in-memory `HashMap<String, String>` with token counting per block. The agent's working scratchpad during a session.
+
+Context tools need shared mutable state. The `Tool::call` signature is `&self`, so the `ContextStore` lives behind `Arc<Mutex<ContextStore>>` and is injected into each context tool at construction. The tools close over the shared store.
+
+### Tier 3: File + shell tools (C4)
+
+`read_file`, `write_file`, `shell`. Scoped to an ephemeral workspace (tempdir). Path traversal is rejected — all paths must resolve within the workspace root.
+
+Shell runs commands via `std::process::Command` with a 30s timeout and working directory set to the workspace. Output is truncated to a token budget (roughly 8K tokens ≈ 32KB).
 
 ### JSONL output (C5)
 
-`lf-agent` emits events as JSONL to stdout, one event per line. stderr for diagnostics.
+`lf-agent` serializes each `AgentEvent` as a JSONL line to stdout. One event per line. stderr for diagnostics. Integration test verifies the full pipeline.
 
-### The tools
+## Tool state injection
 
-#### send_message (boundary)
+The central design question: how do tools that need shared state (context store, workspace path) get it?
 
-```
-send_message({ content: "...", phase: "progress" | "final" })
-```
+**Decision: Constructor injection with `Arc<Mutex<T>>` for mutable state, `PathBuf` for immutable config.**
 
-Returns "message sent" to the model. Emits `AgentEvent::Message`. The completion contract (exactly one final) is validated post-hoc by the caller, not enforced inside the tool — the tool doesn't know if the turn will succeed or fail.
+Each tool struct holds what it needs:
 
-#### memory_edit (boundary)
+```rust
+struct ContextRead {
+    store: Arc<Mutex<ContextStore>>,
+}
 
-```
-memory_edit({ op: "upsert" | "delete", block: "block_name", detail: "..." })
-```
+struct ReadFile {
+    workspace: PathBuf,
+}
 
-Returns "edit recorded" to the model. Emits `AgentEvent::MemoryEdit`. The harness doesn't apply the edit — it records the request. The consumer decides what to do with it.
-
-#### context_read (internal)
-
-```
-context_read({ block: "block_name" })
-```
-
-Reads a named block from the harness's in-memory context. Returns the block content or "not found".
-
-Context blocks are a flat `HashMap<String, String>`. They're seeded from memory at session start and modified during the session. They're not persisted — they're the agent's working scratchpad.
-
-#### context_write (internal)
-
-```
-context_write({ block: "block_name", content: "..." })
+struct Shell {
+    workspace: PathBuf,
+    timeout: Duration,
+}
 ```
 
-Writes/overwrites a named context block. Returns "written".
+The `Tool::call(&self, input)` signature stays unchanged. No trait modification needed. Tools that need shared state hold an `Arc` to it. Tools that need config hold a copy.
 
-#### context_delete (internal)
+This is the simplest approach that works. The alternative — adding a `&dyn ToolContext` parameter to `call()` — would touch every tool impl and the trait itself for a problem only 7 of 9 tools have. The other alternative — a single `ToolEnvironment` struct on the registry — couples tools that shouldn't know about each other.
 
-```
-context_delete({ block: "block_name" })
-```
+## Alternatives considered
 
-Deletes a context block. Returns "deleted" or "not found".
-
-#### context_list (internal)
-
-```
-context_list({})
-```
-
-Returns a list of block names and their token counts.
-
-#### read_file (internal)
-
-```
-read_file({ path: "relative/path.txt" })
-```
-
-Reads a file from the ephemeral workspace. Paths are relative to workspace root. Returns file content or error. No access outside the workspace.
-
-#### write_file (internal)
-
-```
-write_file({ path: "relative/path.txt", content: "..." })
-```
-
-Writes a file to the ephemeral workspace. Creates parent directories. Returns "written".
-
-#### shell (internal)
-
-```
-shell({ command: "cargo test" })
-```
-
-Runs a command in the ephemeral workspace. Returns stdout+stderr, truncated to a token budget. Times out after 30s.
-
-### Workspace isolation
-
-The ephemeral workspace is a temp directory. Files created during a session live there. The harness doesn't touch the real repo.
-
-For B2, the workspace is a `tempdir()`. B3 will use git worktrees for real isolation. Don't over-engineer this now.
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| `call(&self, input, ctx: &dyn ToolContext)` | Clean DI, but forces every tool to accept context it ignores | Modifies the trait for a minority concern. GetCurrentTime doesn't need a workspace. |
+| Single `ToolEnvironment` on registry | One place for all state | Couples unrelated tools. Context store and workspace path have nothing to do with each other. |
+| Builder pattern on registry with typed state | Type-safe, no `Arc<Mutex>` | Over-engineered for 9 tools. Adds generic parameters to `ToolRegistry`. |
+| Event bus / channel for event collection | Decoupled from tool results | Unnecessary indirection. Events already ride on `ToolResult::event`. |
 
 ## Key decisions
 
-**Context is a HashMap, not a Vec.** Named blocks with O(1) lookup. Token counting per block. The agent manages its own working memory without knowing about the chat system's memory format.
+**Events ride on tool results.** The `ToolResult { output, event }` design from C1 pays off. The turn loop collects `event` from each tool call result during `make_tool_results`. No event bus, no channels, no separate collection mechanism. The existing plumbing just needs to stop discarding `event`.
 
-**Sync tools for B2.** Shell commands block with a 30s timeout. The turn loop is async for the API call; tool dispatch is sync within the loop. Add async tool dispatch in B3 if needed.
+**Context store behind `Arc<Mutex>`.** The turn loop is single-threaded today (async for API call, sync tool dispatch), so the mutex is uncontended. But `Arc<Mutex>` is the right abstraction because: (1) `Tool: Send + Sync` requires it, (2) it's trivially correct, (3) async tool dispatch in B3 won't require a redesign.
 
-**JSONL to stdout, diagnostics to stderr.** Clean separation. Consumers pipe stdout. Humans read stderr.
+**Token counting is approximate.** `ContextStore` counts tokens per block using `tiktoken-rs` (already a dependency). This is an estimate — the model's actual tokenizer may differ slightly. Good enough for budget decisions. Not good enough for exact context window math (that's a B3 concern).
 
-**Workspace is a tempdir.** B3 will use git worktrees. Don't over-engineer now.
+**Path traversal rejection is strict.** `read_file` and `write_file` canonicalize the resolved path and verify it starts with the workspace root. `..` that escapes the workspace returns an error, not a truncated path. Shell doesn't prevent filesystem access outside the workspace — it just sets the working directory. Real sandboxing is a B3 concern (git worktrees, seccomp, etc.).
+
+**Shell output truncation is byte-based.** Truncate stdout+stderr to 32KB (roughly 8K tokens), append "[truncated]". The model sees enough output to act on. Token-precise truncation would require running tiktoken on potentially huge output — not worth it.
+
+**`TurnResult` gains `events: Vec<AgentEvent>`.** This is a breaking change to the return type. Callers that destructure `TurnResult` will need to handle the new field. The lf-agent binary is the only caller today, so this is safe.
 
 ## Scope
 
-Remaining:
-- 9 tools: send_message, memory_edit, context_read/write/delete/list, read_file, write_file, shell
-- Event collection in turn loop
-- JSONL output in lf-agent
-- Ephemeral workspace (tempdir)
-- Tests for each tool + integration test
+In scope:
+- 9 tools: `send_message`, `memory_edit`, `context_read`, `context_write`, `context_delete`, `context_list`, `read_file`, `write_file`, `shell`
+- `ContextStore` (HashMap + token counting)
+- Event collection in turn loop (`make_tool_results` returns events)
+- `TurnResult.events: Vec<AgentEvent>`
+- JSONL event output in `lf-agent`
+- Ephemeral workspace via `tempdir()`
+- Unit tests for each tool, integration test for the full pipeline
 
 Out of scope:
-- Model abstraction (Later)
+- Model abstraction (extract when second provider arrives)
 - Persistent workspace / git worktrees (B3)
-- Context compaction / summarization (Later)
-- Streaming events during turn execution (Later)
-- Chat system integration (A2/B3)
+- Context compaction / summarization (later — when sessions exceed context window)
+- Streaming events during turn execution (later — JSONL after turn is fine for now)
+- Chat system integration (A2/B3 — the chat system consumes events, doesn't produce them)
+- Shell sandboxing beyond workspace working directory (B3)
+- Async tool dispatch (B3 — sync is fine when shell timeout is 30s)
 
 ## Commit slices
 
-### C1 — Tool registry + trait ✓
+### C2 — Boundary tools + event collection
 
-Shipped. `agent/registry.rs` with `Tool` trait, `ToolRegistry`, `ToolResult`. Existing tools migrated. Turn loop uses registry.
+**What:** `send_message` and `memory_edit` tools. Turn loop collects events.
 
-### C2 — Boundary tools + event collection (~250-350 LOC)
+**Changes:**
 
-- `send_message` tool (emits `AgentEvent::Message`)
-- `memory_edit` tool (emits `AgentEvent::MemoryEdit`)
-- Turn loop collects events from tool results
-- `TurnResult` includes `events: Vec<AgentEvent>`
+`agent/tools.rs` — Add `SendMessage` and `MemoryEdit` structs implementing `Tool`. `send_message` parses `SendMessageArgs` (already exists in `chat/contract.rs`) and returns `ToolResult { output: "message sent", event: Some(AgentEvent::Message { .. }) }`. `memory_edit` returns `ToolResult { output: "edit recorded", event: Some(AgentEvent::MemoryEdit { .. }) }`.
 
-### C3 — Context tools (~200-300 LOC)
+`agent/turn.rs` — `make_tool_results` returns `(Vec<ContentBlock>, Vec<AgentEvent>)` instead of `Vec<ContentBlock>`. The turn loop accumulates events across iterations. `TurnResult` gains `events: Vec<AgentEvent>`.
 
-- `agent/context.rs`: `ContextStore` (HashMap wrapper with token counting)
-- `context_read`, `context_write`, `context_delete`, `context_list` tools
-- `TurnConfig` accepts initial context blocks
+`agent/tools.rs` — `default_registry()` registers the boundary tools alongside the existing ones.
 
-### C4 — File + shell tools (~200-300 LOC)
+`bin/lf-agent.rs` — Print events count to stderr for now. Full JSONL in C5.
 
-- `read_file`, `write_file` tools (workspace-scoped)
-- `shell` tool (workspace-scoped, 30s timeout, output truncation)
-- Workspace path in `TurnConfig`
+**Tests:** Boundary tools return correct output + event. Turn loop collects events from multi-tool responses. `default_registry` includes all 4 tools.
 
-### C5 — JSONL output + integration (~150-250 LOC)
+~250-350 LOC.
 
-- `lf-agent` emits JSONL events to stdout
-- Integration test: turn loop with all tools, verify event stream
-- Completion validation on the collected event stream
+### C3 — Context tools
+
+**What:** `ContextStore` and 4 context tools.
+
+**Changes:**
+
+`agent/context.rs` (new) — `ContextStore` wraps `HashMap<String, String>` with `read`, `write`, `delete`, `list` methods. `list` returns `Vec<(String, usize)>` (name, token count). Token counting via `tiktoken-rs`.
+
+`agent/tools.rs` — Add `ContextRead`, `ContextWrite`, `ContextDelete`, `ContextList` structs. Each holds `Arc<Mutex<ContextStore>>`. Constructor: `fn new(store: Arc<Mutex<ContextStore>>) -> Self`.
+
+`agent/tools.rs` — New factory `fn registry_with_context(store: Arc<Mutex<ContextStore>>) -> ToolRegistry` that registers all 6 tools (2 original + 2 boundary + 4 context). `default_registry` still exists for backward compat (no context tools).
+
+`agent/mod.rs` — Export `context`.
+
+**Tests:** ContextStore CRUD. Token counting smoke test. Context tools via registry dispatch. Shared state across tools (write then read through registry).
+
+~200-300 LOC.
+
+### C4 — File + shell tools
+
+**What:** `read_file`, `write_file`, `shell` tools.
+
+**Changes:**
+
+`agent/tools.rs` — Add `ReadFile`, `WriteFile`, `Shell` structs. Each holds `workspace: PathBuf`. `Shell` also holds `timeout: Duration`.
+
+Path validation: `fn validate_path(workspace: &Path, relative: &str) -> Result<PathBuf, String>` — joins, canonicalizes, checks prefix. Reused by `ReadFile` and `WriteFile`.
+
+Shell: `std::process::Command::new("sh").arg("-c").arg(command).current_dir(&workspace)`. Capture stdout+stderr with timeout via `wait_with_output` + spawn/kill pattern. Truncate combined output to 32KB.
+
+`agent/tools.rs` — New factory `fn full_registry(store: Arc<Mutex<ContextStore>>, workspace: PathBuf) -> ToolRegistry` that registers all 9 tools.
+
+**Tests:** read_file round-trip. write_file creates parent dirs. Path traversal rejection. Shell runs, captures output. Shell timeout. Shell output truncation. Full registry has all 9 tools.
+
+~200-300 LOC.
+
+### C5 — JSONL output + integration
+
+**What:** `lf-agent` emits JSONL. Integration test.
+
+**Changes:**
+
+`bin/lf-agent.rs` — After turn completes, serialize each event as JSONL to stdout. Response text goes to stderr (or is part of the `Message(final)` event — the response text is redundant when events are the primary output). Add `--workspace` flag (defaults to tempdir). Wire up `full_registry`.
+
+Integration test (unit test with mock, not live API):
+
+```rust
+#[test]
+fn turn_with_boundary_tools_collects_events() {
+    // Build registry with send_message + memory_edit
+    // Simulate a tool_use response from the "API"
+    // Verify TurnResult.events contains the expected AgentEvent variants
+    // Verify validate_turn_completion passes
+}
+```
+
+This test doesn't call the real API. It tests the plumbing: registry → dispatch → event collection → validation.
+
+**Tests:** JSONL serialization of events. Integration test with mock API response. Completion validation on collected events.
+
+~150-250 LOC.
 
 ## Done when
 
 ```bash
 cargo test -p loopflow agent
 cargo test -p loopflow chat
+cargo fmt --check
+cargo clippy -- -D warnings
 ```
 
 All pass. Plus:

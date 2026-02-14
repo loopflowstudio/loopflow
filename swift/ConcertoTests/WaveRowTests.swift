@@ -70,24 +70,6 @@ struct WaveRowViewTests {
         #expect(try areaText.string() == "lib/core")
     }
 
-    @Test("Row shows iteration when positive")
-    func showsIteration() throws {
-        let wave = makeWave(iteration: 3)
-        let row = makeRow(wave: wave)
-
-        let iterText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-iteration").text()
-        #expect(try iterText.string() == "iter 3")
-    }
-
-    @Test("Row shows PR limit text when waiting")
-    func showsPRLimitWhenWaiting() throws {
-        let wave = makeWave(status: .waiting)
-        let row = makeRow(wave: wave)
-
-        let prLimitText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-pr-limit").text()
-        #expect(try prLimitText.string() == "PR limit")
-    }
-
     @Test("Row shows cron schedule for cron waves")
     func showsCronSchedule() throws {
         let wave = makeWave(stimuli: [Stimulus(kind: .cron, cron: "0 9 * * *")])

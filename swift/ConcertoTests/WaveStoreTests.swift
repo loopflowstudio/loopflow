@@ -222,8 +222,8 @@ struct WaveStoreOptimisticTests {
         #expect(store.wave(for: "wave-2")?.name == "other-updated")
     }
 
-    @Test("PR grouping uses backend count and pending PR fallback")
-    func prGroupingUsesEffectiveCount() {
+    @Test("waves with open PRs appear in idle group when idle")
+    func wavesWithOpenPRsGroupedByStatus() {
         let store = WaveStore()
         store.setAll([
             makeWave(id: "wave-1", openPRCount: 2),
@@ -231,8 +231,9 @@ struct WaveStoreOptimisticTests {
             makeWave(id: "wave-3"),
         ])
 
-        #expect(store.groups.pr.count == 2)
-        #expect(store.groups.openPRCount == 3)
+        // All three are idle status, so all land in idle group
+        #expect(store.groups.idle.count == 3)
+        #expect(store.groups.active.count == 0)
     }
 
     // MARK: - insertPending / replacePending / removePending

@@ -72,33 +72,11 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 }
 
 fn extract_token(headers: &HeaderMap) -> Option<String> {
-    // x-loopflow-connection-token header (preferred).
-    if let Some(value) = headers.get("x-loopflow-connection-token") {
-        if let Ok(token) = value.to_str() {
-            return Some(token.to_string());
-        }
-    }
-
-    // connection-token header (legacy).
-    if let Some(value) = headers.get("connection-token") {
-        if let Ok(token) = value.to_str() {
-            return Some(token.to_string());
-        }
-    }
-
-    // Authorization: Bearer <token>.
-    if let Some(value) = headers.get("authorization") {
-        if let Ok(auth) = value.to_str() {
-            if let Some(token) = auth
-                .strip_prefix("Bearer ")
-                .or_else(|| auth.strip_prefix("bearer "))
-            {
-                return Some(token.trim().to_string());
-            }
-        }
-    }
-
-    None
+    let auth = headers.get("authorization")?.to_str().ok()?;
+    let token = auth
+        .strip_prefix("Bearer ")
+        .or_else(|| auth.strip_prefix("bearer "))?;
+    Some(token.trim().to_string())
 }
 
 fn auth_error(status: StatusCode, message: &str) -> Response {
@@ -143,23 +121,8 @@ mod tests {
     }
 
     #[test]
-    fn extract_token_from_connection_header() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-loopflow-connection-token", "conn-token".parse().unwrap());
-        assert_eq!(extract_token(&headers), Some("conn-token".to_string()));
-    }
-
-    #[test]
     fn extract_token_missing() {
         let headers = HeaderMap::new();
         assert_eq!(extract_token(&headers), None);
-    }
-
-    #[test]
-    fn extract_token_prefers_connection_header_over_bearer() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-loopflow-connection-token", "conn-token".parse().unwrap());
-        headers.insert("authorization", "Bearer bearer-token".parse().unwrap());
-        assert_eq!(extract_token(&headers), Some("conn-token".to_string()));
     }
 }

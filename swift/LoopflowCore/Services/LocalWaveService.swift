@@ -702,15 +702,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
                 return []
             }
 
-            let worktrees = items.map { dict -> WorktreeInfo in
-                WorktreeInfo(
-                    branch: dict["branch"] as? String,
-                    path: dict["path"] as? String ?? "",
-                    merged: dict["merged"] as? Bool ?? false,
-                    prunable: dict["prunable"] as? Bool ?? false,
-                    waveId: dict["wave_id"] as? String
-                )
-            }
+            let worktrees = items.compactMap(Self.parseWorktreeFromJSON)
             LoggingService.lfd("listWorktrees: found \(worktrees.count) worktrees")
             return worktrees
         } catch {
@@ -758,6 +750,18 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     // MARK: - Private helpers
+
+    private static func parseWorktreeFromJSON(_ json: [String: Any]) -> WorktreeInfo? {
+        guard let path = json["path"] as? String, !path.isEmpty else { return nil }
+
+        return WorktreeInfo(
+            branch: json["branch"] as? String,
+            path: path,
+            merged: json["merged"] as? Bool ?? false,
+            prunable: json["prunable"] as? Bool ?? false,
+            waveId: json["wave_id"] as? String
+        )
+    }
 
     private static func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
         guard let id = json["id"] as? String,

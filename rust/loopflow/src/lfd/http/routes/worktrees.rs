@@ -2,7 +2,7 @@ use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
 
-use crate::engine::worktrees::{list_worktrees, worktree_short_name};
+use crate::engine::worktrees::{list_worktrees, worktree_short_name_for_main_repo};
 use crate::lfd::http::dto::{ListResponse, WorktreeDto};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
@@ -51,8 +51,7 @@ pub async fn list_worktrees_handler(
                 return None;
             }
 
-            let short_name = worktree_short_name(&wt.path);
-            let wave_id = short_name
+            let wave_id = worktree_short_name_for_main_repo(&wt.path, &main_repo)
                 .as_deref()
                 .and_then(|name| wave_name_to_id.get(name))
                 .cloned();

@@ -411,8 +411,7 @@ final class RepoState {
     func refreshWorktrees() {
         Task {
             guard let repo = currentRepo else { return }
-            let items = try? await waveService.listWorktrees(repo: repo)
-            worktreeStore.setAll(items ?? [])
+            worktreeStore.setAll((try? await waveService.listWorktrees(repo: repo)) ?? [])
         }
     }
 

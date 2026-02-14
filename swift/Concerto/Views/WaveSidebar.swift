@@ -21,6 +21,10 @@ struct WaveSidebar: View {
         repoState.waveGroups
     }
 
+    private var orphanWorktrees: [WorktreeInfo] {
+        repoState.worktreeStore.orphans
+    }
+
     private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: icon)
@@ -69,7 +73,7 @@ struct WaveSidebar: View {
 
             if repoState.waves.isEmpty && !repoState.lfdConnected {
                 disconnectedState
-            } else if repoState.waves.isEmpty && repoState.worktreeStore.orphans.isEmpty {
+            } else if repoState.waves.isEmpty && orphanWorktrees.isEmpty {
                 emptyState
             } else {
                 waveList
@@ -228,14 +232,14 @@ struct WaveSidebar: View {
                 }
 
                 // Orphan worktrees — on disk but not tracked by any wave
-                if !repoState.worktreeStore.orphans.isEmpty {
+                if !orphanWorktrees.isEmpty {
                     Divider()
                         .background(.white.opacity(0.15))
                         .padding(.vertical, Spacing.xs)
 
-                    sectionHeader("On Disk", icon: "folder", count: repoState.worktreeStore.orphans.count)
+                    sectionHeader("On Disk", icon: "folder", count: orphanWorktrees.count)
 
-                    ForEach(repoState.worktreeStore.orphans) { worktree in
+                    ForEach(orphanWorktrees) { worktree in
                         WorktreeRow(worktree: worktree) {
                             upgradeWorktree(worktree)
                         }

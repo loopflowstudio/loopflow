@@ -20,10 +20,13 @@ public struct WorktreeInfo: Sendable, Identifiable, Hashable {
     /// Short name extracted from the directory name.
     /// Given "loopflow.feature-auth", returns "feature-auth".
     public var shortName: String? {
-        let dir = directoryName
-        guard let dotIndex = dir.firstIndex(of: ".") else { return nil }
-        let after = dir[dir.index(after: dotIndex)...]
-        return after.isEmpty ? nil : String(after)
+        let parts = directoryName.split(
+            separator: ".",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard parts.count == 2, !parts[1].isEmpty else { return nil }
+        return String(parts[1])
     }
 
     public init(

@@ -162,6 +162,14 @@ pub struct StopWaveResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RestartStepResponse {
+    pub restarted: bool,
+    pub wave_id: String,
+    pub wave_run_id: String,
+    pub step_index: u32,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ContinueWaveResponse {
     pub continued: bool,
     pub wave_id: String,

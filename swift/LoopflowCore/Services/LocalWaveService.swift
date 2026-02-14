@@ -559,6 +559,21 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    public func restartStep(_ id: String) async throws {
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/restart-step")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+    }
+
     /// Land a wave's current branch (merge via PR).
     public func landWave(_ id: String) async throws {
         let url = apiBaseURL.appendingPathComponent("waves/\(id)/land")

@@ -17,7 +17,7 @@ use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
     stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
     DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
-    RunWaveResponse, StopWaveResponse, WaveDto,
+    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
@@ -649,6 +649,70 @@ pub async fn stop_wave_handler(
     state.event_hub.send(Event::wave_stopped(wave_id));
 
     Ok(Json(StopWaveResponse { stopped: true }))
+}
+
+pub async fn restart_step_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<RestartStepResponse> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+
+    let run = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_active_wave_run(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
+
+    if run.status != WaveRunStatus::Running {
+        return Err(api_error(
+            StatusCode::PRECONDITION_FAILED,
+            "wave run is not running",
+        ));
+    }
+
+    // Kill running agents.
+    terminate_active_agents(&state, &wave_id).await?;
+
+    // Mark agents as ended in the store.
+    let wave_id_for_agents = wave_id.clone();
+    run_store(&state.store, move |store| {
+        let _ = store.end_active_agent_for_wave(
+            &wave_id_for_agents,
+            AgentStatus::Failed.as_i32(),
+            OffsetDateTime::now_utc().unix_timestamp(),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    // Re-acquire scheduler slot and relaunch.
+    let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;
+    if !acquired {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no scheduler slots available",
+        ));
+    }
+
+    spawn_run_task_with_slot(
+        state.store.clone(),
+        (*state.executor).clone(),
+        state.scheduler.clone(),
+        state.event_hub.clone(),
+        run.clone(),
+    );
+
+    state.event_hub.send(Event::wave_updated(wave_id.clone()));
+
+    Ok(Json(RestartStepResponse {
+        restarted: true,
+        wave_id: wave_id.to_string(),
+        wave_run_id: run.id.to_string(),
+        step_index: run.step_index,
+    }))
 }
 
 async fn terminate_active_agents(

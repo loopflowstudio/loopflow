@@ -497,6 +497,12 @@ final class RepoState {
         }
     }
 
+    func restartStep(_ wave: WaveViewModel) async throws {
+        try await optimisticAction(wave.id, mutation: { _ in }) {
+            try await self.waveService.restartStep(wave.id)
+        }
+    }
+
     func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
         let pendingId = "pending-\(UUID().uuidString)"
         let pendingWave = Wave(

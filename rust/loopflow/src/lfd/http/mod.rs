@@ -43,6 +43,10 @@ pub fn router(state: HttpState) -> Router {
         .route("/waves/:wave_id/stimuli", get(waves::list_stimuli_handler))
         .route("/waves/:wave_id/stop", post(waves::stop_wave_handler))
         .route(
+            "/waves/:wave_id/restart-step",
+            post(waves::restart_step_handler),
+        )
+        .route(
             "/waves/:wave_id/continue",
             post(waves::continue_wave_handler),
         )

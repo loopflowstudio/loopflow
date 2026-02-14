@@ -266,7 +266,7 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct WorktreeDto {
     pub object: String,
     pub path: String,

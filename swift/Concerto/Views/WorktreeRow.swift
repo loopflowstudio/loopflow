@@ -53,7 +53,7 @@ struct WorktreeRow: View {
             }
         }
         .padding(.horizontal, Spacing.md)
-        .padding(.vertical, 6)
+        .padding(.vertical, Spacing.sm)
         .background(
             RoundedRectangle(cornerRadius: CornerRadius.md)
                 .fill(isHovering ? Color.white.opacity(0.08) : Color.clear)

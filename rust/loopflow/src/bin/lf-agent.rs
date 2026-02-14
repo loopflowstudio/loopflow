@@ -1,4 +1,5 @@
 use clap::Parser;
+use loopflow::agent::tools;
 use loopflow::agent::turn::{self, TurnConfig, DEFAULT_MAX_ITERATIONS, DEFAULT_TIMEOUT_SECS};
 
 #[derive(Parser, Debug)]
@@ -33,7 +34,9 @@ async fn main() {
         system: args.system,
     };
 
-    match turn::run(&args.prompt, &config).await {
+    let registry = tools::default_registry();
+
+    match turn::run(&args.prompt, &config, &registry).await {
         Ok(result) => {
             println!("{}", result.response);
             eprintln!(

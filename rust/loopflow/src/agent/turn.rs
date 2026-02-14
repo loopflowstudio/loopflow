@@ -1,5 +1,5 @@
 use crate::agent::anthropic::{self, ContentBlock, Message, MessageContent};
-use crate::agent::tools;
+use crate::agent::registry::ToolRegistry;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_MAX_ITERATIONS: u32 = 20;
@@ -43,9 +43,13 @@ pub enum TurnError {
 }
 
 /// Run a single agent turn: prompt in, response out, with tool calls in between.
-pub async fn run(prompt: &str, config: &TurnConfig) -> Result<TurnResult, TurnError> {
+pub async fn run(
+    prompt: &str,
+    config: &TurnConfig,
+    registry: &ToolRegistry,
+) -> Result<TurnResult, TurnError> {
     let start = Instant::now();
-    let tool_defs = tools::definitions();
+    let tool_defs = registry.definitions();
 
     let mut messages: Vec<Message> = vec![Message {
         role: "user".to_string(),
@@ -87,8 +91,8 @@ pub async fn run(prompt: &str, config: &TurnConfig) -> Result<TurnResult, TurnEr
                 .ok_or(TurnError::NoTextResponse);
         }
 
-        // Model wants to use tools — dispatch them
-        let tool_results = tools::make_tool_results(&response.content);
+        // Model wants to use tools — dispatch them through the registry
+        let tool_results = make_tool_results(&response.content, registry);
 
         for block in &response.content {
             if let ContentBlock::ToolUse { name, input, .. } = block {
@@ -119,6 +123,28 @@ pub async fn run(prompt: &str, config: &TurnConfig) -> Result<TurnResult, TurnEr
     }
 
     Err(TurnError::MaxIterations(config.max_iterations))
+}
+
+fn make_tool_results(
+    assistant_content: &[ContentBlock],
+    registry: &ToolRegistry,
+) -> Vec<ContentBlock> {
+    assistant_content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolUse { id, name, input } => {
+                let output = match registry.dispatch(name, input) {
+                    Some(result) => result.output,
+                    None => format!("unknown tool: {name}"),
+                };
+                Some(ContentBlock::ToolResult {
+                    tool_use_id: id.clone(),
+                    content: output,
+                })
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn extract_text(content: &[ContentBlock]) -> Option<String> {

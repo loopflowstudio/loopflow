@@ -1,17 +1,16 @@
-use crate::agent::anthropic::{ContentBlock, ToolDefinition};
+use crate::agent::anthropic::ToolDefinition;
+use crate::agent::registry::{Tool, ToolRegistry, ToolResult};
 
-/// Dispatch a tool call by name. Returns the string result.
-pub fn dispatch(name: &str, input: &serde_json::Value) -> String {
-    match name {
-        "get_current_time" => tool_get_current_time(),
-        "calculate" => tool_calculate(input),
-        _ => format!("unknown tool: {name}"),
+// --- Tool implementations ---
+
+pub struct GetCurrentTime;
+
+impl Tool for GetCurrentTime {
+    fn name(&self) -> &str {
+        "get_current_time"
     }
-}
 
-/// Return tool definitions for all registered tools.
-pub fn definitions() -> Vec<ToolDefinition> {
-    vec![
+    fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "get_current_time".to_string(),
             description: "Get the current date and time in UTC.".to_string(),
@@ -20,7 +19,25 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 "properties": {},
                 "required": []
             }),
-        },
+        }
+    }
+
+    fn call(&self, _input: &serde_json::Value) -> ToolResult {
+        ToolResult {
+            output: chrono::Utc::now().to_rfc3339(),
+            event: None,
+        }
+    }
+}
+
+pub struct Calculate;
+
+impl Tool for Calculate {
+    fn name(&self) -> &str {
+        "calculate"
+    }
+
+    fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "calculate".to_string(),
             description: "Evaluate a simple arithmetic expression. Supports +, -, *, / with integers and floats.".to_string(),
@@ -34,39 +51,33 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 },
                 "required": ["expression"]
             }),
-        },
-    ]
-}
+        }
+    }
 
-/// Build tool result content blocks from dispatched results.
-pub fn make_tool_results(assistant_content: &[ContentBlock]) -> Vec<ContentBlock> {
-    assistant_content
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::ToolUse { id, name, input } => Some(ContentBlock::ToolResult {
-                tool_use_id: id.clone(),
-                content: dispatch(name, input),
-            }),
-            _ => None,
-        })
-        .collect()
-}
-
-fn tool_get_current_time() -> String {
-    chrono::Utc::now().to_rfc3339()
-}
-
-fn tool_calculate(input: &serde_json::Value) -> String {
-    let expr = match input.get("expression").and_then(|v| v.as_str()) {
-        Some(e) => e,
-        None => return "error: missing 'expression' field".to_string(),
-    };
-    // Simple tokenized arithmetic: supports +, -, *, / with operator precedence
-    match eval_expr(expr) {
-        Ok(result) => format!("{result}"),
-        Err(e) => format!("error: {e}"),
+    fn call(&self, input: &serde_json::Value) -> ToolResult {
+        let output = match input.get("expression").and_then(|v| v.as_str()) {
+            Some(expr) => match eval_expr(expr) {
+                Ok(result) => format!("{result}"),
+                Err(e) => format!("error: {e}"),
+            },
+            None => "error: missing 'expression' field".to_string(),
+        };
+        ToolResult {
+            output,
+            event: None,
+        }
     }
 }
+
+/// Build a registry with the default built-in tools.
+pub fn default_registry() -> ToolRegistry {
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(GetCurrentTime));
+    registry.register(Box::new(Calculate));
+    registry
+}
+
+// --- Arithmetic evaluation ---
 
 fn eval_expr(expr: &str) -> Result<f64, String> {
     let tokens = tokenize(expr)?;
@@ -167,42 +178,75 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_calculate_simple() {
-        let input = serde_json::json!({"expression": "2 + 3"});
-        assert_eq!(tool_calculate(&input), "5");
+    fn calculate_simple() {
+        let tool = Calculate;
+        let result = tool.call(&serde_json::json!({"expression": "2 + 3"}));
+        assert_eq!(result.output, "5");
+        assert!(result.event.is_none());
     }
 
     #[test]
-    fn test_calculate_precedence() {
-        let input = serde_json::json!({"expression": "2 + 3 * 4"});
-        assert_eq!(tool_calculate(&input), "14");
+    fn calculate_precedence() {
+        let tool = Calculate;
+        let result = tool.call(&serde_json::json!({"expression": "2 + 3 * 4"}));
+        assert_eq!(result.output, "14");
     }
 
     #[test]
-    fn test_calculate_division() {
-        let result: f64 = tool_calculate(&serde_json::json!({"expression": "10 / 3"}))
-            .parse()
-            .unwrap();
-        assert!((result - 3.3333333333333335).abs() < 1e-10);
+    fn calculate_division() {
+        let tool = Calculate;
+        let result = tool.call(&serde_json::json!({"expression": "10 / 3"}));
+        let val: f64 = result.output.parse().unwrap();
+        assert!((val - 3.3333333333333335).abs() < 1e-10);
     }
 
     #[test]
-    fn test_calculate_division_by_zero() {
-        let input = serde_json::json!({"expression": "5 / 0"});
-        assert!(tool_calculate(&input).contains("division by zero"));
+    fn calculate_division_by_zero() {
+        let tool = Calculate;
+        let result = tool.call(&serde_json::json!({"expression": "5 / 0"}));
+        assert!(result.output.contains("division by zero"));
     }
 
     #[test]
-    fn test_dispatch_unknown_tool() {
-        let result = dispatch("nonexistent", &serde_json::json!({}));
-        assert!(result.contains("unknown tool"));
+    fn calculate_missing_expression() {
+        let tool = Calculate;
+        let result = tool.call(&serde_json::json!({}));
+        assert!(result.output.contains("missing 'expression' field"));
     }
 
     #[test]
-    fn test_get_current_time_is_rfc3339() {
-        let result = tool_get_current_time();
-        // Should be parseable as a datetime
-        assert!(result.contains('T'));
-        assert!(result.ends_with("+00:00") || result.ends_with('Z'));
+    fn get_current_time_is_rfc3339() {
+        let tool = GetCurrentTime;
+        let result = tool.call(&serde_json::json!({}));
+        assert!(result.output.contains('T'));
+        assert!(result.output.ends_with("+00:00") || result.output.ends_with('Z'));
+    }
+
+    #[test]
+    fn default_registry_has_both_tools() {
+        let registry = default_registry();
+        let defs = registry.definitions();
+        assert_eq!(defs.len(), 2);
+
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"get_current_time"));
+        assert!(names.contains(&"calculate"));
+    }
+
+    #[test]
+    fn default_registry_dispatches_calculate() {
+        let registry = default_registry();
+        let result = registry
+            .dispatch("calculate", &serde_json::json!({"expression": "7 * 6"}))
+            .expect("calculate should be registered");
+        assert_eq!(result.output, "42");
+    }
+
+    #[test]
+    fn default_registry_returns_none_for_unknown() {
+        let registry = default_registry();
+        assert!(registry
+            .dispatch("nonexistent", &serde_json::json!({}))
+            .is_none());
     }
 }

@@ -254,7 +254,7 @@ def _build_dmg() -> tuple[bool, str]:
     if not swift_dir.exists():
         return False, f"swift directory not found: {swift_dir}"
     result = subprocess.run(
-        [sys.executable, "scripts/dev.py", "release"],
+        [sys.executable, str(ROOT / "scripts" / "dev.py"), "release"],
         cwd=swift_dir,
         capture_output=True,
         text=True,

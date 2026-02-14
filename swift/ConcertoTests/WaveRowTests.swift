@@ -13,8 +13,6 @@ struct WaveRowViewTests {
         name: String = "swift-falcon",
         area: [String] = ["src/"],
         flow: String = "ship",
-        status: WaveStatus = .idle,
-        iteration: Int = 0,
         stimuli: [Stimulus] = []
     ) -> WaveViewModel {
         WaveViewModel(
@@ -25,8 +23,8 @@ struct WaveRowViewTests {
                 flow: flow,
                 area: area,
                 stimuli: stimuli,
-                status: status,
-                iteration: iteration
+                status: .idle,
+                iteration: 0
             )
         )
     }

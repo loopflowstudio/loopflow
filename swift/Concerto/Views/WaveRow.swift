@@ -198,20 +198,6 @@ struct WaveRow: View {
         }
     }
 
-    private var statusHelpText: String {
-        switch wave.status {
-        case .running: return "Running"
-        case .waiting: return "Waiting (PR limit reached)"
-        case .idle:
-            if wave.stimulus?.kind == .cron {
-                return "Scheduled"
-            }
-            return "Idle"
-        case .failed: return "Failed"
-        case .paused: return "Paused"
-        }
-    }
-
     private func formatCron(_ cron: String) -> String {
         if cron.hasPrefix("0 9 * * *") {
             return "9am daily"

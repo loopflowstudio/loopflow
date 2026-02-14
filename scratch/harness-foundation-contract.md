@@ -47,3 +47,11 @@ cargo test -p loopflow chat_contract
 ```
 
 Expected: all contract tests pass.
+
+## Current state
+
+`chat/contract.rs` already has C1 types: `UserMessagePhase`, `SendMessageArgs`, `WorkspaceSnapshot`, `ChatTurnRequest`, `ChatTurnResult`, `AgentEvent`, `ContextSnapshot`, `MemoryEditLog`, `ToolCallLog`, and `parse_send_message_args`.
+
+Remaining work:
+- **C2**: `validate_turn_completion(events) -> Result<()>` — enforce exactly one `Message { phase: Final }` among events, enforce no `Final` on failed turns
+- **C3**: serde round-trip tests, completion rule tests, invalid payload coverage

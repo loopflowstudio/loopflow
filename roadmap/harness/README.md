@@ -67,34 +67,29 @@ Replace the direct LLM call with the agent harness. The chat system receives `se
 
 The runtime that runs LLM turn loops with tool dispatch.
 
-#### B1 — A single turn, end to end
+#### B1 — A single turn, end to end ✓
 
-Call Anthropic Messages API directly. Handle a tool call: model requests a tool, harness dispatches it, feeds the result back, model responds. One concrete tool for testing. In-memory message vec. Guardrails (max iterations, timeout).
+Shipped. Turn loop calls Anthropic Messages API, dispatches tool calls via `ToolRegistry`, feeds results back, loops until text response or limit. `lf-agent` binary runs prompts from the CLI. Guardrails (max iterations, timeout) from day one.
 
-No traits, no abstractions. Just the working thing.
+**What we learned:** The turn loop is straightforward — async for the API call, sync tool dispatch within the loop. The foundation contract types (`AgentEvent`, `ChatTurnResult`, completion validation) fit cleanly as the event vocabulary. Adding a new tool takes ~30 LOC (implement `Tool` trait, register it). The `ToolResult { output, event }` design — where boundary tools emit events and internal tools return `None` — keeps the registry generic.
 
-**What we'll learn:** What the turn loop actually needs. Whether the foundation contract types fit or need revision.
+#### B2 — Real tools (in progress)
 
-**Checkpoint:** Run `lf-agent` with a prompt, get a response, see a tool call dispatched and result fed back.
-
-**Try it:**
-- Verification: `cargo run --bin lf-agent -- "what's 2+2?"` produces a response
-- Feel: read the code. Is the turn loop obvious? Could you add a new tool in 5 minutes?
-
-#### B2 — Real tools
+C1 (tool registry + trait) shipped. Remaining: boundary tools, context tools, file/shell tools, JSONL output. See `scratch/harness-b2-real-tools.md` for the full design and commit slices (C2-C5).
 
 - `send_message` (progress/final phases) — the harness→consumer output channel
-- Context tools (read/edit/delete blocks, in-memory)
-- File + shell tools (ephemeral workspace)
-- Event emission (JSONL to stdout)
+- `memory_edit` — boundary tool that emits edit requests
+- Context tools (read/edit/delete blocks, in-memory HashMap with token counting)
+- File + shell tools (ephemeral workspace via tempdir)
+- Event collection in turn loop + JSONL output
 
 **What we'll learn:** Whether `send_message` as a tool is the right interface. What context management actually needs. How ephemeral workspace isolation works.
 
 **Checkpoint:** Agent runs a multi-turn session with real tools. Events stream as JSONL.
 
 **Try it:**
-- Verification: `cargo test -p loopflow agent` — all pass
-- Feel: run the agent against a real prompt with real files. Does `send_message(progress)` vs `send_message(final)` make sense?
+- Verification: `cargo test -p loopflow agent` and `cargo test -p loopflow chat` — all pass
+- Feel: `cargo run --bin lf-agent -- "Tell me hello, then remember my name is Alice"` produces JSONL with `send_message` and `memory_edit` events
 
 #### B3 — Wave integration
 
@@ -104,9 +99,9 @@ The two tracks converge:
 - lfd spawns and monitors agent processes
 - Events stream to consumers
 
-**Open questions (resolve during B2):**
-- What exactly crosses the invocation boundary? Memory blocks only? Or also a summary?
-- Does the harness need to know it's in a wave, or is it always just "run this prompt with these tools and this memory"?
+**Open questions (resolve during B2 C2-C3):**
+- What exactly crosses the invocation boundary? Memory blocks only? Or also a summary? (Building context tools in C3 will make this concrete — the `ContextStore` seeded from memory is the interface.)
+- Does the harness need to know it's in a wave, or is it always just "run this prompt with these tools and this memory"? (So far: the harness doesn't know. `TurnConfig` takes a prompt, tools, and config. This feels right.)
 
 **Checkpoint:** A wave runs multiple agent invocations. Memory carries forward via the chat system. lfd orchestrates it.
 
@@ -120,7 +115,8 @@ The two tracks converge:
 
 ## What might change
 
-- **`send_message` as a tool call** might feel wrong once we build A2. If the chat UX needs streaming tokens, the tool-call-only model breaks.
+- **`send_message` as a tool call** might feel wrong once we build A2. If the chat UX needs streaming tokens, the tool-call-only model breaks. (Still untested — C2 will implement it, but the real test is A2 when a UI consumes these events.)
 - **Memory ownership** (chat system vs harness) might need to shift if the agent needs to update memory autonomously.
-- **Track A and Track B sequencing** will depend on which surface is fastest to iterate on.
+- **Track A and Track B sequencing** will depend on which surface is fastest to iterate on. (So far: Track B is moving faster because it's pure Rust with no UI surface. Track A is blocked on B2 finishing.)
 - **The two-track approach itself** might collapse into one track if we discover the boundary is in the wrong place.
+- **Sync tool dispatch** works for B2 but shell commands that block for 30s may need async dispatch in B3. The `Tool` trait is sync (`fn call`) — changing to async would touch every tool impl.

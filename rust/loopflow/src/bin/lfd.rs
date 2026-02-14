@@ -6,7 +6,7 @@ use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use loopflow::lfd::auth::AuthContext;
+use loopflow::lfd::auth::AuthProvider;
 use loopflow::lfd::config::LfdConfig;
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
@@ -61,13 +61,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load config and set up auth.
     let lfd_config = LfdConfig::load().expect("failed to load lfd config");
-    let requires_auth = !http_addr.ip().is_loopback();
     let cancel = CancellationToken::new();
 
-    let (registration_client, auth_context, registration_creds) = if requires_auth {
-        loopflow::lfd::setup_registration(&lfd_config, cancel.clone()).await
+    let is_loopback = http_addr.ip().is_loopback();
+    let (auth_provider, registration_client, registration_creds) = if is_loopback {
+        // Loopback bind — local provider, no registration needed.
+        (AuthProvider::Local, None, None)
     } else {
-        (None, AuthContext::inactive(), None)
+        let (provider, client, creds) =
+            loopflow::lfd::setup_auth(&lfd_config, cancel.clone()).await;
+        if matches!(provider, AuthProvider::Local) {
+            tracing::warn!(
+                addr = %http_addr,
+                "binding to non-loopback address with auth.provider=local; \
+                 remote connections will be rejected"
+            );
+        }
+        (provider, client, creds)
     };
 
     let store = match storage.as_str() {
@@ -169,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         executor: Arc::new(executor),
         event_hub,
         output_hub: output,
-        auth: auth_context,
+        auth: auth_provider,
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
         github: lfd_config.github,

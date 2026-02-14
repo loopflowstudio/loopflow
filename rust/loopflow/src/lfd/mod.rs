@@ -21,28 +21,57 @@ use std::path::PathBuf;
 
 use tokio_util::sync::CancellationToken;
 
-use self::auth::AuthContext;
+use self::auth::AuthProvider;
 use self::config::LfdConfig;
 use self::registration::{ConnectionValidator, RegistrationClient};
 
-/// Set up registration with auth.loopflow.studio.
+/// Set up auth provider based on config.
 ///
-/// Requires a JWT in `~/.lf/credentials.json`. If the JWT is missing or
-/// registration fails, lfd exits — you can't serve on a public address
-/// without auth.
-pub async fn setup_registration(
+/// Returns the auth provider, an optional registration client (for Studio
+/// provider status/deregistration), and optional credentials for deregistration.
+pub async fn setup_auth(
     config: &LfdConfig,
     cancel: CancellationToken,
 ) -> (
+    AuthProvider,
     Option<RegistrationClient>,
-    AuthContext,
+    Option<(String, String)>,
+) {
+    match config.auth.provider.as_str() {
+        "local" => (AuthProvider::Local, None, None),
+        "static" => {
+            let token = config
+                .auth
+                .token
+                .as_ref()
+                .unwrap_or_else(|| {
+                    tracing::error!(
+                        "auth.provider=static requires auth.token in config or LFD_AUTH_TOKEN env"
+                    );
+                    std::process::exit(1);
+                })
+                .clone();
+            tracing::info!("static token auth configured");
+            (AuthProvider::Static { token }, None, None)
+        }
+        "loopflow.studio" => setup_studio_registration(config, cancel).await,
+        other => {
+            tracing::error!(provider = other, "unknown auth provider");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn setup_studio_registration(
+    config: &LfdConfig,
+    cancel: CancellationToken,
+) -> (
+    AuthProvider,
+    Option<RegistrationClient>,
     Option<(String, String)>,
 ) {
     let Some(jwt) = self::credentials::load_jwt() else {
-        tracing::error!(
-            "non-loopback bind address requires auth — \
-             add your JWT to ~/.lf/credentials.json"
-        );
+        tracing::error!("auth.provider=loopflow.studio requires a JWT in ~/.lf/credentials.json");
         std::process::exit(1);
     };
 
@@ -56,9 +85,9 @@ pub async fn setup_registration(
     match client.register(&jwt, &mid, &machine_name).await {
         Ok(_token) => {
             tracing::info!(machine_name = %machine_name, "registered with loopflow.studio");
-            let auth = AuthContext::new(true, validator);
+            let auth = AuthProvider::Studio { validator };
             client.start_heartbeat(jwt.clone(), mid.clone(), cancel);
-            (Some(client), auth, Some((jwt, mid)))
+            (auth, Some(client), Some((jwt, mid)))
         }
         Err(e) => {
             tracing::error!(error = %e, "registration with loopflow.studio failed");

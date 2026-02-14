@@ -12,6 +12,8 @@ Concerto talks to lfd via `LocalWaveService` (HTTP) and `LocalEventService` (Web
 
 `WaveServiceProtocol` already abstracts wave operations. Adding a remote connection is configuration, not architecture.
 
+**From Phase 03:** lfd accepts `Authorization: Bearer <token>` on all non-loopback requests when `auth.provider=static`. The Python client already implements this (`token=` kwarg, `LFD_TOKEN` env). Concerto needs the same pattern — inject the token into HTTP requests and WebSocket upgrade headers.
+
 ## Implementation
 
 ### Connection configuration

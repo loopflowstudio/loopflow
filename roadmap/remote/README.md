@@ -8,13 +8,13 @@ lfd runs on a remote Linux machine (containerized). Concerto connects from your 
 
 ## Phases
 
-| # | Phase | What it unlocks | Pre-work |
-|---|-------|----------------|----------|
-| 01 | Sandboxed Agents | Agents in Docker containers, controlled credentials | None |
-| 02 | Compose Stack | Full stack in Docker (lfd + postgres), test locally | 01 |
-| 03 | Pre-shared Token Auth | lfd accepts remote connections | None |
-| 04 | EC2 Infrastructure | A box to deploy on (Docker + compose) | 02 |
-| 05 | Concerto Remote Connection | Wave CRUD, events, logs over WAN | 03, 04 |
+| # | Phase | What it unlocks | Pre-work | Status |
+|---|-------|----------------|----------|--------|
+| 01 | Sandboxed Agents | Agents in Docker containers, controlled credentials | None | Shipped |
+| 02 | Compose Stack | Full stack in Docker (lfd + postgres), test locally | 01 | Shipped |
+| 03 | Pre-shared Token Auth | lfd accepts remote connections | None | Shipped |
+| 04 | EC2 Infrastructure | A box to deploy on (Docker + compose) | 02 | Next |
+| 05 | Concerto Remote Connection | Wave CRUD, events, logs over WAN | 03, 04 |  |
 | 06 | Remote File Access | One-click "Open in Cursor" per wave | 05 |
 | 07 | Studio Auth | Real JWT auth via auth.loopflow.studio (server built, client wiring remaining) | 05 |
 | 08 | API Expansion | File browsing, step/flow/direction typeahead | 05 |
@@ -25,19 +25,19 @@ Phases 06, 07, and 08 can run in parallel after 05.
 ## Architecture
 
 ```
-Local (today):
+Local (native, default):
   Concerto ──HTTP/WS──▶ lfd (127.0.0.1:2486, native process)
+  lfd ──Docker API──▶ agent containers (sandboxed)   [Phase 01]
 
-Sandboxed local (Phase 01):
-  Concerto ──HTTP/WS──▶ lfd (127.0.0.1:2486, native process)
-  lfd ──Docker API──▶ agent containers (sandboxed)
-
-Containerized local (Phase 02):
-  Concerto ──HTTP/WS──▶ lfd (127.0.0.1:2486, Docker)
+Containerized local (docker compose up):
+  Concerto ──HTTP/WS──▶ lfd (127.0.0.1:2486, Docker)   [Phase 02]
+  lfd ──Docker API──▶ agent containers (siblings via socket)
+  postgres (container, auto-migrated on startup)
 
 Remote (Phase 04+):
-  Concerto ──HTTPS/WSS──▶ lfd (ec2-host:2486, Docker)
+  Concerto ──HTTPS/WSS──▶ lfd (ec2-host:2486, Docker + Caddy TLS)
   Cursor ──Remote SSH──▶ ec2-host:/path/to/worktree
+  Auth: static token (Phase 03) or JWT (Phase 07)
 ```
 
 lfd is already the remote server. Concerto is already a thin client. The protocol doesn't change — only the host and transport.
@@ -48,7 +48,7 @@ lfd is already the remote server. Concerto is already a thin client. The protoco
 
 **File access:** Use each editor's native remote support (Cursor Remote SSH, JetBrains Gateway, Zed Remote). Loopflow owns the orchestration (which host, which worktree) — editors own the transport.
 
-**Auth sequence:** Start with a pre-shared static token for dev testing (Phase 03). Replace with real JWT auth via loopflow.studio when studio endpoints are live (Phase 07).
+**Auth sequence:** Pre-shared static token for dev testing (Phase 03, shipped). `AuthProvider` enum (`Local`, `Static`, `Studio`) is extensible — Phase 07 adds JWT validation to the existing `Studio` variant.
 
 **No filesystem mounts.** lfd serves file data through API endpoints. Editors connect via their own remote protocols. No SSHFS, no Mutagen, no FUSE.
 

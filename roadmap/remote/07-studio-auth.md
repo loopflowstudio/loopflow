@@ -18,7 +18,7 @@ Users sign in via WorkOS (GitHub/Google/Apple) through auth.loopflow.studio. lfd
 | Auth state | `AuthState.swift` | Done — observable, tracks `isAuthenticated`/`isExpired`/`needsRefresh`, auto-refresh monitor (hourly, 24h before expiry) |
 | Token provider protocol | `TokenProvider.swift` | Done — `KeychainTokenProvider` and `NoAuthProvider` defined |
 | lfd registration | `registration.rs` | Done — registers with studio on startup, heartbeats every 60s |
-| lfd auth middleware | `auth.rs` | Done — distinguishes loopback vs non-loopback, validates bearer tokens |
+| lfd auth middleware | `auth.rs` | Done — `AuthProvider` enum (`Local`, `Static`, `Studio`), loopback bypass, constant-time token comparison |
 
 ### Server-side (auth.loopflow.studio)
 
@@ -136,6 +136,8 @@ Add JWT signature validation to the auth middleware. 7-day JWTs validated locall
 4. Check `sub` or `email` against `allowed_users` in config
 5. No per-request roundtrip to auth.loopflow.studio
 
+The `setup_auth()` function in `lfd/mod.rs` already dispatches on `config.auth.provider` — the `"loopflow.studio"` branch calls `setup_studio_registration()`. JWKS validation extends this path.
+
 ```yaml
 # ~/.lf/lfd.yaml
 auth:
@@ -224,11 +226,13 @@ Wire the device code flow into `lf` for CLI-based authentication:
 
 ## Deployment scenarios
 
-| Scenario | Auth | Who validates |
-|----------|------|--------------|
-| Local (default) | None | lfd skips auth for loopback |
-| Remote + static token | Bearer token | lfd checks against config |
-| Remote + studio auth | JWT | lfd validates signature locally via JWKS |
+Maps to `AuthProvider` enum variants:
+
+| Scenario | `auth.provider` | `AuthProvider` variant | Who validates |
+|----------|----------------|----------------------|--------------|
+| Local (default) | `local` | `Local` | Loopback bypass; non-loopback gets 403 |
+| Remote + static token | `static` | `Static { token }` | Constant-time comparison against config token |
+| Remote + studio auth | `loopflow.studio` | `Studio { validator }` | JWKS validation (this phase) |
 
 ## Done when
 

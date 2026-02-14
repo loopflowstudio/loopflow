@@ -57,6 +57,14 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `explore` | Investigate the codebase |
 | `refine` | Refine existing work |
 
+### Scan steps (`scan/`)
+
+| Step | What it does |
+|------|--------------|
+| `scan/cves` | Check dependencies for known vulnerabilities |
+| `scan/deps` | Check for major version bumps, deprecations |
+| `scan/upstream` | Check external APIs for breaking changes |
+
 ### Ops steps (`ops/`)
 
 | Step | What it does |
@@ -96,6 +104,12 @@ Steps chain into flows. Flows feed into waves.
 | `roadmap-expand` | review → fork(expand×3) → publish |
 | `research` | explore → review → publish |
 | `publish` | consolidate → add-to-roadmap |
+
+### Scan flows (`scan/`)
+
+| Flow | Steps |
+|------|-------|
+| `scan` | scan/cves → scan/deps → scan/upstream |
 
 ### Forks
 

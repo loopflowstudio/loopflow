@@ -1,67 +1,47 @@
 # B2: Real Tools
 
-## Problem
+B1 proved the turn loop works. B2 makes it useful — real tools, event collection, JSONL output.
 
-B1 proved the turn loop works: prompt → model → tool calls → dispatch → model → response. But the tools are toys (calculate, get_current_time). The harness can't do anything useful yet.
+## What's done
 
-B2 adds the tools that make the harness a real runtime:
-- `send_message` — the only way the agent talks to users
-- `memory_edit` — the agent requests changes to persistent knowledge
-- Context tools — the agent reads/writes its own in-memory context blocks
-- File + shell tools — the agent interacts with an ephemeral workspace
-- JSONL event emission — consumers see what happened
+**Foundation contract** (shipped): `AgentEvent` enum (Message, ToolCall, ToolResult, MemoryEdit, Done, Failed), `ChatTurnRequest`, `ChatTurnResult`, completion validation (`validate_turn_completion`). 22 tests. Lives in `chat/`.
 
-This is the step where the harness becomes useful to a consumer like the chat system.
+**Tool registry** (C1, shipped): `Tool` trait + `ToolRegistry` in `agent/registry.rs`. `GetCurrentTime` and `Calculate` migrated to trait impls. Turn loop accepts `&ToolRegistry`. `ToolResult { output, event }` — internal tools return `event: None`, boundary tools will emit `AgentEvent`s.
+
+Key design: events ride on tool results. The turn loop collects `ToolResult::event` without knowing which tools are boundary tools.
+
+```
+ChatTurnRequest ──> [turn loop] ──> ChatTurnResult
+                        │
+                   ToolRegistry
+                   ├── GetCurrentTime (internal, event: None)
+                   ├── Calculate      (internal, event: None)
+                   └── send_message   (boundary, event: Some(AgentEvent::Message))  ← C2
+                        │
+                   Vec<AgentEvent> ──> validate_turn_completion()
+```
+
+Known risks:
+- `make_tool_results` in `turn.rs` currently discards `ToolResult::event` — C2 fixes this
+- Linear tool lookup in registry — fine for 10 tools, switch to HashMap at 50+
+
+## What's left
+
+C2-C5 add the remaining tools and wire up event collection:
+- `send_message`, `memory_edit` (boundary tools that emit events)
+- Context tools (in-memory named blocks with token counting)
+- File + shell tools (ephemeral workspace)
+- JSONL output + integration tests
 
 ## Approach
 
-### Tool dispatch becomes extensible
+### Event collection (C2)
 
-B1 hardcoded two tools in `agent/tools.rs` with a `match` statement. B2 needs to support ~8-10 tools without the dispatch function becoming a mess. More importantly, some tools (send_message, memory_edit) cross the harness→consumer boundary — their results aren't computed locally, they're callbacks.
+The turn loop collects `AgentEvent`s from `ToolResult::event` during execution. `TurnResult` gains `events: Vec<AgentEvent>`. Callers validate with `validate_turn_completion`, serialize to JSONL, or pass to the chat system.
 
-Introduce a `ToolRegistry` that the turn loop queries for definitions and dispatches through. Internal tools (calculate, file ops) return results directly. Boundary tools (send_message, memory_edit) invoke callbacks provided by the consumer.
+### JSONL output (C5)
 
-```rust
-// agent/registry.rs
-pub struct ToolRegistry {
-    tools: Vec<Box<dyn Tool>>,
-}
-
-pub trait Tool: Send + Sync {
-    fn name(&self) -> &str;
-    fn definition(&self) -> ToolDefinition;
-    fn call(&self, input: &serde_json::Value) -> ToolResult;
-}
-
-pub struct ToolResult {
-    pub output: String,
-    pub event: Option<AgentEvent>,  // emitted to consumers
-}
-```
-
-The `event` field is the key design choice. When `send_message` is called, the tool returns a result to the model ("message sent") AND emits an `AgentEvent::Message` for consumers. This keeps the turn loop clean — it dispatches tools and collects events, without knowing which tools are boundary tools.
-
-### Event collector in the turn loop
-
-The turn loop currently returns a `TurnResult` with just the response text. Extend it to collect `AgentEvent`s during execution:
-
-```rust
-pub struct TurnResult {
-    pub response: String,
-    pub events: Vec<AgentEvent>,
-    pub iterations: u32,
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-}
-```
-
-Events accumulate as tools execute. At the end, the caller can validate the event stream with `validate_turn_completion`, serialize to JSONL, or pass to a chat system.
-
-### JSONL output
-
-`lf-agent` emits events as JSONL to stdout, one event per line. The final text response is the last event (a `Message { phase: Final }`). stderr remains for diagnostics.
-
-This is the wire format. Consumers parse JSONL, not the turn loop's internal state.
+`lf-agent` emits events as JSONL to stdout, one event per line. stderr for diagnostics.
 
 ### The tools
 
@@ -145,68 +125,37 @@ The ephemeral workspace is a temp directory. Files created during a session live
 
 For B2, the workspace is a `tempdir()`. B3 will use git worktrees for real isolation. Don't over-engineer this now.
 
-### Turn loop changes
-
-The turn loop gains a `ToolRegistry` parameter. The `TurnConfig` grows to include workspace path and initial context blocks. The loop dispatches through the registry instead of the hardcoded `tools::dispatch`.
-
-```rust
-pub async fn run(
-    prompt: &str,
-    config: &TurnConfig,
-    registry: &ToolRegistry,
-) -> Result<TurnResult, TurnError>
-```
-
-B1's direct `tools::definitions()` and `tools::make_tool_results()` calls are replaced by registry methods.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Async tool trait | Enables async file/shell ops | Adds complexity. B2 tools are fast enough sync. Add async when we need streaming or long-running tools. |
-| Tool middleware (pre/post hooks) | Could log, rate-limit, etc. | YAGNI. Add when there's a second use case. |
-| Separate event channel (mpsc) | Decouples event emission from tool return | Over-engineering. The tool returning `Option<AgentEvent>` is simpler and sufficient. Events are collected synchronously in the turn loop. |
-| Skip context tools, use file-based scratchpad | Simpler — just files | Context blocks are token-counted and in-memory. Files aren't. The agent needs to know how much context budget it's using. |
-| Dynamic tool loading (plugins) | Extensible | Way too early. Hardcoded registry with trait objects is fine for 10 tools. |
-
 ## Key decisions
 
-**Tool trait, not function pointers.** The `Tool` trait lets boundary tools carry state (callback closures). Internal tools are stateless but implement the same interface. This follows the roadmap principle: "Tool calls as the harness→consumer boundary."
+**Context is a HashMap, not a Vec.** Named blocks with O(1) lookup. Token counting per block. The agent manages its own working memory without knowing about the chat system's memory format.
 
-**Events ride on tool results.** A tool returns both a model-facing result and an optional consumer-facing event. The turn loop collects both without knowing the difference. This keeps send_message and memory_edit from being special-cased in the loop.
-
-**Context is a HashMap, not a Vec.** Named blocks with O(1) lookup. Token counting per block. The agent can manage its own working memory without knowing about the chat system's memory format.
-
-**Sync tools for B2.** Shell commands block, but they have a 30s timeout and the turn loop is already async (for the API call). The tool dispatch itself is sync within the async loop. Add async tool dispatch in B3 if needed.
+**Sync tools for B2.** Shell commands block with a 30s timeout. The turn loop is async for the API call; tool dispatch is sync within the loop. Add async tool dispatch in B3 if needed.
 
 **JSONL to stdout, diagnostics to stderr.** Clean separation. Consumers pipe stdout. Humans read stderr.
 
+**Workspace is a tempdir.** B3 will use git worktrees. Don't over-engineer now.
+
 ## Scope
 
-In scope:
-- `ToolRegistry` + `Tool` trait
+Remaining:
 - 9 tools: send_message, memory_edit, context_read/write/delete/list, read_file, write_file, shell
 - Event collection in turn loop
 - JSONL output in lf-agent
 - Ephemeral workspace (tempdir)
-- Turn loop refactored to use registry
-- Tests for each tool + integration test for turn loop with real tools
+- Tests for each tool + integration test
 
 Out of scope:
 - Model abstraction (Later)
 - Persistent workspace / git worktrees (B3)
 - Context compaction / summarization (Later)
-- Streaming events during turn execution (Later — events are collected then emitted)
+- Streaming events during turn execution (Later)
 - Chat system integration (A2/B3)
 
 ## Commit slices
 
-### C1 — Tool registry + trait (~200-300 LOC)
+### C1 — Tool registry + trait ✓
 
-- `agent/registry.rs`: `Tool` trait, `ToolRegistry`, `ToolResult`
-- Migrate `get_current_time` and `calculate` to trait impls
-- Turn loop uses registry instead of hardcoded dispatch
-- Existing `lf-agent` binary still works
+Shipped. `agent/registry.rs` with `Tool` trait, `ToolRegistry`, `ToolResult`. Existing tools migrated. Turn loop uses registry.
 
 ### C2 — Boundary tools + event collection (~250-350 LOC)
 

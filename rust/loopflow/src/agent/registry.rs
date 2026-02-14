@@ -2,7 +2,7 @@ use crate::agent::anthropic::ToolDefinition;
 use crate::chat::AgentEvent;
 
 /// Result of a tool invocation, returned to the turn loop.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolResult {
     /// Text result sent back to the model.
     pub output: String,

@@ -1,8 +1,8 @@
 use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    get_default_branch, has_commits_beyond, is_ancestor, is_squash_merged, rev_parse,
-    worktree_add, worktree_move,
+    get_default_branch, has_commits_beyond, is_ancestor, is_squash_merged, rev_parse, worktree_add,
+    worktree_move,
 };
 use crate::engine::naming::format_branch_name;
 use serde::Serialize;

@@ -9,10 +9,10 @@ const POSTGRES_DATABASE_URL: &str = "postgres://lfd:lfd@postgres:5432/lfd";
 const POSTGRES_IMAGE: &str = "postgres:16-alpine";
 
 #[derive(Debug, Clone)]
-pub struct ComposeServiceStatus {
-    pub service: String,
-    pub state: String,
-    pub health: Option<String>,
+struct ComposeServiceStatus {
+    service: String,
+    state: String,
+    health: Option<String>,
 }
 
 pub fn ensure_docker_available() -> Result<()> {
@@ -40,7 +40,7 @@ pub fn managed_compose_path() -> Result<PathBuf> {
     Ok(home.join(".lf").join("docker-compose.yml"))
 }
 
-pub fn override_compose_path() -> Result<PathBuf> {
+fn override_compose_path() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
     Ok(home.join(".lf").join("docker-compose.override.yml"))
 }
@@ -93,7 +93,7 @@ pub fn down() -> Result<()> {
     Ok(())
 }
 
-pub fn service_status() -> Result<Vec<ComposeServiceStatus>> {
+fn service_status() -> Result<Vec<ComposeServiceStatus>> {
     let output = compose_output(&["ps", "--format", "json"])?;
     if !output.status.success() {
         bail!(
@@ -125,6 +125,28 @@ pub fn service_status() -> Result<Vec<ComposeServiceStatus>> {
     }
 
     Ok(rows)
+}
+
+pub fn teardown() -> Result<()> {
+    let _ = down();
+    let _ = remove_managed_compose_file();
+    Ok(())
+}
+
+pub fn print_service_status() {
+    match service_status() {
+        Ok(rows) if rows.is_empty() => println!("compose: no services"),
+        Ok(rows) => {
+            for row in rows {
+                let health = row.health.unwrap_or_else(|| "n/a".to_string());
+                println!(
+                    "service: {} state={} health={}",
+                    row.service, row.state, health
+                );
+            }
+        }
+        Err(err) => println!("compose: unhealthy ({err})"),
+    }
 }
 
 pub fn compose_program_args() -> Result<Vec<String>> {

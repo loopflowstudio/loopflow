@@ -113,8 +113,7 @@ pub fn uninstall(_config: &LfdConfig) -> Result<()> {
     println!("Uninstalled lfd");
 
     if let Some(RuntimeBackend::Compose) = backend {
-        let _ = compose::down();
-        let _ = compose::remove_managed_compose_file();
+        let _ = compose::teardown();
     }
 
     Ok(())
@@ -201,19 +200,7 @@ pub fn status(config: &LfdConfig) -> Result<()> {
     println!("backend: {}", backend.as_str());
 
     if backend == RuntimeBackend::Compose {
-        match compose::service_status() {
-            Ok(rows) if rows.is_empty() => println!("compose: no services"),
-            Ok(rows) => {
-                for row in rows {
-                    let health = row.health.unwrap_or_else(|| "n/a".to_string());
-                    println!(
-                        "service: {} state={} health={}",
-                        row.service, row.state, health
-                    );
-                }
-            }
-            Err(err) => println!("compose: unhealthy ({err})"),
-        }
+        compose::print_service_status();
     }
 
     Ok(())
@@ -250,8 +237,7 @@ fn detect_backend_from_unit(content: &str) -> RuntimeBackend {
 
 fn teardown_backend(backend: RuntimeBackend) -> Result<()> {
     if backend == RuntimeBackend::Compose {
-        let _ = compose::down();
-        let _ = compose::remove_managed_compose_file();
+        compose::teardown()?;
     }
     Ok(())
 }

@@ -77,10 +77,6 @@ impl LfdConfig {
         config.apply_env_overrides()?;
         config.resolve()
     }
-
-    pub fn storage_env(&self) -> &'static str {
-        self.storage.as_env_value()
-    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -279,15 +275,6 @@ pub enum StorageType {
     #[default]
     Sqlite,
     Postgres,
-}
-
-impl StorageType {
-    pub fn as_env_value(&self) -> &'static str {
-        match self {
-            Self::Sqlite => "sqlite",
-            Self::Postgres => "postgres",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]

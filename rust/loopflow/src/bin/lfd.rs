@@ -13,9 +13,7 @@ use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::scheduler::Scheduler;
-use loopflow::lfd::store::postgres::PostgresStore;
-use loopflow::lfd::store::sqlite::SqliteStore;
-use loopflow::lfd::store::SharedStore;
+use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageBackend, StorageConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,13 +24,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match command.as_str() {
             "migrate" => {
                 let status_only = args.any(|arg| arg == "--status");
-                let database_url = std::env::var("LFD_DATABASE_URL")
-                    .expect("LFD_DATABASE_URL required for postgres migrations");
+                let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
+                let db_path = std::env::var("LFD_DB_PATH")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| loopflow::lfd::default_db_path());
+                let storage_config = storage_config(&storage, db_path)?;
+                let version = migrate_store(&storage_config, status_only).await?;
                 if status_only {
-                    let version = PostgresStore::migrate_status_async(&database_url).await?;
                     println!("schema_version={version}");
                 } else {
-                    let version = PostgresStore::migrate_async(&database_url).await?;
                     println!("migrated schema to version {version}");
                 }
                 return Ok(());
@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| loopflow::lfd::default_db_path());
     let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
+    let storage_config = storage_config(&storage, db_path)?;
 
     let max_slots = std::env::var("LFD_MAX_SLOTS")
         .ok()
@@ -80,16 +81,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         (provider, client, creds)
     };
 
-    let store = match storage.as_str() {
-        "postgres" => {
-            let database_url = std::env::var("LFD_DATABASE_URL")
-                .expect("LFD_DATABASE_URL required for postgres storage");
-            let version = PostgresStore::migrate_async(&database_url).await?;
-            tracing::info!(schema_version = %version, "postgres schema up to date");
-            Arc::new(PostgresStore::connect_async(&database_url).await?) as SharedStore
-        }
-        _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
-    };
+    if storage_config.backend == StorageBackend::Postgres {
+        let version = migrate_store(&storage_config, false).await?;
+        tracing::info!(schema_version = %version, "postgres schema up to date");
+    }
+
+    let store: SharedStore = open_store(&storage_config).await?.into_shared();
 
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
@@ -220,4 +217,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn storage_config(
+    storage: &str,
+    db_path: PathBuf,
+) -> Result<StorageConfig, Box<dyn std::error::Error>> {
+    if storage.eq_ignore_ascii_case("postgres") {
+        let database_url = std::env::var("LFD_DATABASE_URL").map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "LFD_DATABASE_URL required for postgres storage",
+            )
+        })?;
+        Ok(StorageConfig::postgres(database_url))
+    } else {
+        Ok(StorageConfig::sqlite(db_path))
+    }
 }

@@ -107,7 +107,7 @@ def flow():
 
 | | |
 |---|---|
-| **CLI** | Config only (no per-run flag) |
+| **CLI** | `--lfdocs` / `--no-lfdocs` |
 | **Config** | `lfdocs: true` |
 | **Default** | `true` (included) |
 
@@ -138,12 +138,12 @@ summaries:
     tokens: 5000
 ```
 
-Summaries give the coding agent codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
+Summaries are daemon-managed context (`lfd`) for wave runs, not direct `lf` flags.
 
 | | |
 |---|---|
-| **CLI** | `--summaries` / `--no-summaries` |
-| **Default** | included if configured |
+| **CLI (`lf`)** | none |
+| **Daemon (`lfd`)** | auto-refreshed for waves |
 
 ### Clipboard
 

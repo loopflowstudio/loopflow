@@ -91,6 +91,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     };
 
     let include_clipboard = cli.clipboard || config.paste;
+    let lfdocs = cli.lfdocs_setting().unwrap_or(config.lfdocs);
     let diff_files = cli.diff_files_setting().unwrap_or(config.diff_files);
     let diff = cli.diff_setting().unwrap_or(config.diff);
 
@@ -110,7 +111,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         ),
         directions,
         files: Vec::new(),
-        lfdocs: config.lfdocs,
+        lfdocs,
         diff_files,
         diff,
         clipboard: include_clipboard,

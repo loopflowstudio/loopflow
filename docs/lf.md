@@ -35,7 +35,7 @@ Steps are markdown files in these locations (searched in order):
 1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`, `sr:gog`)
 2. `.lf/steps/<step>.md` — repo steps
 3. `.claude/commands/<step>.md` — Claude Code compatible
-4. Built-in steps — run `lf --list` for the current built-in catalog
+4. Built-in steps — run `lf --list` for the current built-in catalog (e.g., `debug`, `review`, `implement`)
 
 ### Step Arguments
 
@@ -53,6 +53,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 |------|-------------|
 | `-a, --area PATH` | Area scope (paths to include in context) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
+| `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root `.md` files |
 | `--diff-files / --no-diff-files` | Include files touched by branch (default: on) |
 | `--diff / --no-diff` | Include raw `git diff` output |
 
@@ -61,12 +62,6 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 | Flag | Description |
 |------|-------------|
 | `-c, --clipboard` | Include clipboard content in prompt |
-
-### Summaries
-
-| Flag | Description |
-|------|-------------|
-| `--summaries / --no-summaries` | Include pre-generated codebase summaries |
 
 ## Run Mode Flags
 
@@ -100,7 +95,6 @@ Run a named flow (chains of steps):
 
 ```bash
 lf <flow>
-lf run <flow>
 lf ship -w feature-branch
 ```
 
@@ -119,7 +113,7 @@ Every step automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
-| **lfdocs** (wave/, scratch/, root .md files) | ✓ included | Set `lfdocs: false` in `.lf/config.yaml` |
+| **lfdocs** (wave/, scratch/, root .md files) | ✓ included | `--no-lfdocs` or `lfdocs: false` in `.lf/config.yaml` |
 | **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
 
 ## What's Opt-In
@@ -131,7 +125,6 @@ These require explicit flags or config:
 | **Raw diff** (line-by-line changes) | `--diff` |
 | **Clipboard** | `-c` / `--clipboard` |
 | **Area scope** | `--area PATH` |
-| **Summaries** | `--summaries` or configure in `.lf/config.yaml` |
 | **Chrome automation** | `--chrome` |
 
 See [Configuration](config.md) for setting defaults via config file.

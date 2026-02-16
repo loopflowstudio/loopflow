@@ -62,6 +62,14 @@ pub struct Cli {
     #[arg(long = "no-chrome", overrides_with = "chrome")]
     pub no_chrome: bool,
 
+    /// Include lfdocs (wave/, scratch/, root .md files)
+    #[arg(long = "lfdocs")]
+    pub lfdocs: bool,
+
+    /// Exclude lfdocs (wave/, scratch/, root .md files)
+    #[arg(long = "no-lfdocs", overrides_with = "lfdocs")]
+    pub no_lfdocs: bool,
+
     /// Include files changed on branch
     #[arg(long = "diff-files")]
     pub diff_files: bool,
@@ -77,14 +85,6 @@ pub struct Cli {
     /// Exclude raw git diff
     #[arg(long = "no-diff", overrides_with = "diff")]
     pub no_diff: bool,
-
-    /// Include codebase summaries
-    #[arg(long = "summaries")]
-    pub summaries: bool,
-
-    /// Exclude codebase summaries
-    #[arg(long = "no-summaries", overrides_with = "summaries")]
-    pub no_summaries: bool,
 
     /// Wave name for wave/ scoping
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
@@ -107,6 +107,11 @@ impl Cli {
         Self::toggle_setting(self.chrome, self.no_chrome)
     }
 
+    /// Get lfdocs setting: Some(true) if --lfdocs, Some(false) if --no-lfdocs, None if neither.
+    pub fn lfdocs_setting(&self) -> Option<bool> {
+        Self::toggle_setting(self.lfdocs, self.no_lfdocs)
+    }
+
     /// Get diff_files setting: Some(true) if --diff-files, Some(false) if --no-diff-files, None if neither.
     pub fn diff_files_setting(&self) -> Option<bool> {
         Self::toggle_setting(self.diff_files, self.no_diff_files)
@@ -116,21 +121,10 @@ impl Cli {
     pub fn diff_setting(&self) -> Option<bool> {
         Self::toggle_setting(self.diff, self.no_diff)
     }
-
-    /// Get summaries setting: Some(true) if --summaries, Some(false) if --no-summaries, None if neither.
-    pub fn summaries_setting(&self) -> Option<bool> {
-        Self::toggle_setting(self.summaries, self.no_summaries)
-    }
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Run a step or flow
-    Run {
-        name: String,
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
-    },
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {

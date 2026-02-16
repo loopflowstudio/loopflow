@@ -30,12 +30,12 @@ const BOOL_FLAGS: &[&str] = &[
     "--web",
     "--chrome",
     "--no-chrome",
+    "--lfdocs",
+    "--no-lfdocs",
     "--diff-files",
     "--no-diff-files",
     "--diff",
     "--no-diff",
-    "--summaries",
-    "--no-summaries",
     "-h",
     "--help",
     "-V",
@@ -43,7 +43,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 
 /// Known subcommands that should not be treated as step names.
-const KNOWN_COMMANDS: &[&str] = &["run", ":", "ops", "help"];
+const KNOWN_COMMANDS: &[&str] = &[":", "ops", "help"];
 
 fn is_value_flag(arg: &str) -> bool {
     VALUE_FLAGS.contains(&arg)
@@ -177,10 +177,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     match &cli.command {
-        Some(Commands::Run { name, args }) => {
-            let message = join_args(args);
-            run_target(name, message.as_deref(), &cli)
-        }
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
             loopflow::lf::commands::run::run(None, Some(&text), &cli)

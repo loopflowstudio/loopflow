@@ -114,7 +114,7 @@ To customize the compose stack, create `~/.lf/docker-compose.override.yml`:
 ```yaml
 # ~/.lf/docker-compose.override.yml
 services:
-  gateway:
+  lfd:
     ports:
       - "3000:2486"   # expose on a different host port
     environment:

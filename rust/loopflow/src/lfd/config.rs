@@ -243,20 +243,18 @@ impl ServiceManager {
             Self::Launchd
         }
     }
-}
 
-impl Default for ServiceManager {
-    fn default() -> Self {
-        Self::default_for_os()
-    }
-}
-
-impl ServiceManager {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Launchd => "launchd",
             Self::Systemd => "systemd",
         }
+    }
+}
+
+impl Default for ServiceManager {
+    fn default() -> Self {
+        Self::default_for_os()
     }
 }
 

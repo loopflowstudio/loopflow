@@ -272,7 +272,7 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
     let Some(pr) = run.snapshot.pr.as_ref() else {
         return false;
     };
-    if !is_open_pr_state(pr.state.as_deref()) {
+    if !super::is_open_pr_state(pr.state.as_deref()) {
         return false;
     }
     if let Some(branch) = branch {
@@ -287,13 +287,6 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
     }
 
     true
-}
-
-fn is_open_pr_state(state: Option<&str>) -> bool {
-    match state {
-        Some(value) => value.eq_ignore_ascii_case("open") || value.eq_ignore_ascii_case("draft"),
-        None => false,
-    }
 }
 
 fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {

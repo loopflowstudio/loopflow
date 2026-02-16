@@ -15,6 +15,7 @@ use crate::lfd::store::{SharedStore, StoreError};
 use crate::lfd::types::{Wave, WaveRun};
 use axum::http::StatusCode;
 use axum::Json;
+use std::collections::HashSet;
 
 pub async fn resolve_wave_id(
     state: &crate::lfd::http::HttpState,
@@ -52,10 +53,10 @@ pub async fn build_wave_dto(
     let wave_id = wave.id.clone();
     let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
     let wave_id = wave.id.clone();
-    // Count unique open/draft PRs across runs (dedup by PR number).
     let open_pr_count = run_store(store, move |store| {
-        let runs = store.list_wave_runs(Some(&wave_id), None)?;
-        Ok(count_unique_open_prs(runs))
+        Ok(count_unique_open_prs(
+            store.list_wave_runs(Some(&wave_id), None)?,
+        ))
     })
     .await?;
     let repo = wave.repo.clone();
@@ -187,15 +188,25 @@ fn is_open_pr_state(state: Option<&str>) -> bool {
 }
 
 fn count_unique_open_prs(runs: Vec<WaveRun>) -> u32 {
-    let mut seen_pr_numbers = std::collections::HashSet::new();
-    runs.into_iter()
-        .filter_map(|run| run.snapshot.pr)
-        .filter(|pr| is_open_pr_state(pr.state.as_deref()))
-        .filter(|pr| {
-            pr.number
-                .is_none_or(|number| seen_pr_numbers.insert(number))
-        })
-        .count() as u32
+    let mut seen_pr_numbers = HashSet::new();
+    let mut count = 0;
+
+    for run in runs {
+        let Some(pr) = run.snapshot.pr else {
+            continue;
+        };
+        if !is_open_pr_state(pr.state.as_deref()) {
+            continue;
+        }
+        if let Some(number) = pr.number {
+            if !seen_pr_numbers.insert(number) {
+                continue;
+            }
+        }
+        count += 1;
+    }
+
+    count
 }
 
 /// Find the nearest ancestor branch for diff comparison.

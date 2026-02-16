@@ -1,7 +1,8 @@
 use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    get_default_branch, is_ancestor, is_squash_merged, rev_parse, worktree_add, worktree_move,
+    get_default_branch, has_commits_beyond, is_ancestor, is_squash_merged, rev_parse,
+    worktree_add, worktree_move,
 };
 use crate::engine::naming::format_branch_name;
 use serde::Serialize;
@@ -274,8 +275,17 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     for (path, branch) in items {
         let base = upstream_branch(&path);
         let base_branch = base.filter(|b| b != &default_branch);
+        let is_default = branch.as_deref() == Some(&default_branch);
+        let has_commits = if is_default {
+            true
+        } else {
+            branch
+                .as_deref()
+                .map(|b| has_commits_beyond(repo, b, &merge_target).unwrap_or(true))
+                .unwrap_or(false)
+        };
         let merged = if let Some(branch) = &branch {
-            if branch == &default_branch {
+            if is_default || !has_commits {
                 false
             } else {
                 is_ancestor(repo, branch, &merge_target).unwrap_or(false)
@@ -285,7 +295,7 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
         } else {
             false
         };
-        let prunable = merged && branch.as_deref() != Some(&default_branch);
+        let prunable = !is_default && (merged || !has_commits);
         results.push(WorktreeState {
             branch,
             path,

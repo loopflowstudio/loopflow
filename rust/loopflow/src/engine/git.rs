@@ -342,6 +342,13 @@ pub fn rev_parse(repo: &Path, refspec: &str) -> Result<String, GitError> {
     Ok(sha)
 }
 
+/// Check if a branch has any commits not in target.
+pub fn has_commits_beyond(repo: &Path, branch: &str, target: &str) -> Result<bool, GitError> {
+    let branch_sha = rev_parse(repo, branch)?;
+    let base_sha = merge_base(repo, branch, target)?;
+    Ok(branch_sha != base_sha)
+}
+
 /// Check if a branch has been squash-merged into target.
 ///
 /// Simulates merging branch into target and checks if the resulting tree

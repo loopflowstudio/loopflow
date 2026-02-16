@@ -335,7 +335,8 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     for row in &rows {
         let marker = if row.is_current { "*" } else { " " };
 
-        let name_color = if row.is_main || row.merged {
+        let fresh = !row.is_main && !row.merged && row.diff_stat.is_empty() && !row.dirty;
+        let name_color = if row.is_main || row.merged || fresh {
             c.dim
         } else {
             c.bold
@@ -343,6 +344,8 @@ fn wt_list(format: Option<&str>) -> Result<()> {
 
         let status = if row.merged {
             format!("{}merged{}", c.green, c.reset)
+        } else if fresh {
+            format!("{}fresh{}", c.dim, c.reset)
         } else {
             format!("{}active{}", c.cyan, c.reset)
         };

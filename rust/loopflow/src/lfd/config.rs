@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -40,38 +40,63 @@ fn default_base_url() -> String {
     DEFAULT_AUTH_BASE_URL.to_string()
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct LfdConfig {
-    #[serde(default)]
+    pub mode: Mode,
+    pub service_manager: ServiceManager,
+    pub runtime_backend: RuntimeBackend,
+    pub storage: StorageType,
     pub auth: AuthConfig,
-    #[serde(default)]
     pub executor: ExecutorConfig,
-    #[serde(default)]
     pub github: GitHubConfig,
 }
 
 impl LfdConfig {
     pub fn load() -> Result<Self> {
         let path = config_path();
-        let mut config: Self = match std::fs::read_to_string(&path) {
+        let mut config: RawLfdConfig = match std::fs::read_to_string(&path) {
             Ok(content) => serde_yaml::from_str(&content)
                 .with_context(|| format!("invalid lfd config at {}", path.display()))?,
-            Err(err) if err.kind() == ErrorKind::NotFound => Self::default(),
+            Err(err) if err.kind() == ErrorKind::NotFound => RawLfdConfig::default(),
             Err(err) => {
                 warn!(
                     path = %path.display(),
                     error = %err,
                     "failed reading lfd config, using defaults"
                 );
-                Self::default()
+                RawLfdConfig::default()
             }
         };
 
-        config.apply_env_overrides();
-        Ok(config)
+        config.apply_env_overrides()?;
+        config.resolve()
     }
+}
 
-    fn apply_env_overrides(&mut self) {
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RawLfdConfig {
+    #[serde(default)]
+    mode: Mode,
+    service_manager: Option<ServiceManager>,
+    runtime_backend: Option<RuntimeBackend>,
+    storage: Option<StorageType>,
+    #[serde(default)]
+    auth: AuthConfig,
+    #[serde(default)]
+    executor: RawExecutorConfig,
+    #[serde(default)]
+    github: GitHubConfig,
+}
+
+impl RawLfdConfig {
+    fn apply_env_overrides(&mut self) -> Result<()> {
+        if let Ok(value) = std::env::var("LFD_MODE") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.mode = Mode::parse(trimmed)?;
+            }
+        }
+
         if let Ok(value) = std::env::var("LFD_AUTH_PROVIDER") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
@@ -83,12 +108,6 @@ impl LfdConfig {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 self.auth.token = Some(trimmed.to_string());
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_TYPE") {
-            if let Some(r#type) = ExecutorType::from_env(&value) {
-                self.executor.r#type = r#type;
             }
         }
 
@@ -110,6 +129,66 @@ impl LfdConfig {
                 Some(token.to_string())
             };
         }
+
+        Ok(())
+    }
+
+    fn resolve(self) -> Result<LfdConfig> {
+        if self.service_manager.is_some() {
+            bail!("`service_manager` is managed by `mode`; remove this key");
+        }
+        if self.runtime_backend.is_some() {
+            bail!("`runtime_backend` is managed by `mode`; remove this key");
+        }
+        if self.storage.is_some() {
+            bail!("`storage` is managed by `mode`; remove this key");
+        }
+        if self.executor.r#type.is_some() {
+            bail!("`executor.type` is managed by `mode`; remove this key");
+        }
+
+        let profile = ModeProfile::for_mode(self.mode);
+
+        Ok(LfdConfig {
+            mode: self.mode,
+            service_manager: profile.service_manager,
+            runtime_backend: profile.runtime_backend,
+            storage: profile.storage,
+            auth: self.auth,
+            executor: ExecutorConfig {
+                r#type: profile.executor_type,
+                image: self.executor.image,
+                credentials: self.executor.credentials,
+            },
+            github: self.github,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ModeProfile {
+    service_manager: ServiceManager,
+    runtime_backend: RuntimeBackend,
+    storage: StorageType,
+    executor_type: ExecutorType,
+}
+
+impl ModeProfile {
+    fn for_mode(mode: Mode) -> Self {
+        match mode {
+            Mode::Native => Self {
+                service_manager: ServiceManager::default_for_os(),
+                runtime_backend: RuntimeBackend::Native,
+                storage: StorageType::Sqlite,
+                executor_type: ExecutorType::Local,
+            },
+            Mode::Container => Self {
+                service_manager: ServiceManager::default_for_os(),
+                runtime_backend: RuntimeBackend::Compose,
+                storage: StorageType::Postgres,
+                executor_type: ExecutorType::Docker,
+            },
+        }
     }
 }
 
@@ -122,20 +201,94 @@ pub struct GitHubConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    Native,
+    Container,
+}
+
+impl Mode {
+    fn parse(raw: &str) -> Result<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "native" => Ok(Self::Native),
+            "container" => Ok(Self::Container),
+            _ => bail!("invalid LFD_MODE value '{raw}'; expected 'native' or 'container'"),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Container => "container",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceManager {
+    Launchd,
+    Systemd,
+}
+
+impl ServiceManager {
+    fn default_for_os() -> Self {
+        #[cfg(target_os = "linux")]
+        {
+            Self::Systemd
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            Self::Launchd
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Launchd => "launchd",
+            Self::Systemd => "systemd",
+        }
+    }
+}
+
+impl Default for ServiceManager {
+    fn default() -> Self {
+        Self::default_for_os()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBackend {
+    #[default]
+    Native,
+    Compose,
+}
+
+impl RuntimeBackend {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Compose => "compose",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageType {
+    #[default]
+    Sqlite,
+    Postgres,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum ExecutorType {
     #[default]
     Local,
     Docker,
-}
-
-impl ExecutorType {
-    fn from_env(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "local" => Some(Self::Local),
-            "docker" => Some(Self::Docker),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -177,13 +330,10 @@ impl TryFrom<String> for CredentialMount {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ExecutorConfig {
-    #[serde(default)]
     pub r#type: ExecutorType,
-    #[serde(default = "default_executor_image")]
     pub image: String,
-    #[serde(default)]
     pub credentials: ExecutorCredentialsConfig,
 }
 
@@ -191,6 +341,25 @@ impl Default for ExecutorConfig {
     fn default() -> Self {
         Self {
             r#type: ExecutorType::Local,
+            image: default_executor_image(),
+            credentials: ExecutorCredentialsConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawExecutorConfig {
+    r#type: Option<ExecutorType>,
+    #[serde(default = "default_executor_image")]
+    image: String,
+    #[serde(default)]
+    credentials: ExecutorCredentialsConfig,
+}
+
+impl Default for RawExecutorConfig {
+    fn default() -> Self {
+        Self {
+            r#type: None,
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
         }
@@ -211,6 +380,7 @@ fn config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
@@ -219,33 +389,80 @@ mod tests {
         ENV_LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn snapshot(vars: &[&'static str]) -> Self {
+            Self {
+                vars: vars
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.vars {
+                if let Some(value) = value {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
     #[test]
-    fn deserialize_executor_config_from_yaml() {
+    fn mode_native_is_default() {
+        let config = RawLfdConfig::default().resolve().expect("default resolves");
+        assert_eq!(config.mode, Mode::Native);
+        assert_eq!(config.runtime_backend, RuntimeBackend::Native);
+        assert_eq!(config.storage, StorageType::Sqlite);
+        assert_eq!(config.executor.r#type, ExecutorType::Local);
+    }
+
+    #[test]
+    fn mode_container_sets_container_profile() {
+        let config: RawLfdConfig = serde_yaml::from_str("mode: container").expect("yaml parses");
+        let resolved = config.resolve().expect("container resolves");
+
+        assert_eq!(resolved.mode, Mode::Container);
+        assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
+        assert_eq!(resolved.storage, StorageType::Postgres);
+        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+    }
+
+    #[test]
+    fn explicit_runtime_override_in_yaml_is_rejected() {
+        let raw = r#"
+mode: container
+runtime_backend: native
+"#;
+        let config: RawLfdConfig = serde_yaml::from_str(raw).expect("yaml parses");
+        let err = config.resolve().expect_err("override should fail");
+        assert_eq!(
+            err.to_string(),
+            "`runtime_backend` is managed by `mode`; remove this key"
+        );
+    }
+
+    #[test]
+    fn explicit_executor_type_in_yaml_is_rejected() {
         let raw = r#"
 executor:
   type: docker
-  image: loopflow/agent:test
-  credentials:
-    env:
-      - ANTHROPIC_API_KEY
-    mounts:
-      - claude
-github:
-  webhook_secret: hook-secret
-  token: ghp_test
 "#;
-        let config: LfdConfig = serde_yaml::from_str(raw).expect("yaml should parse");
-        assert_eq!(config.executor.r#type, ExecutorType::Docker);
-        assert_eq!(config.executor.image, "loopflow/agent:test");
-        assert_eq!(config.github.webhook_secret, "hook-secret");
-        assert_eq!(config.github.token, Some("ghp_test".to_string()));
+        let config: RawLfdConfig = serde_yaml::from_str(raw).expect("yaml parses");
+        let err = config
+            .resolve()
+            .expect_err("executor type override should fail");
         assert_eq!(
-            config.executor.credentials.env,
-            vec!["ANTHROPIC_API_KEY".to_string()]
-        );
-        assert_eq!(
-            config.executor.credentials.mounts,
-            vec![CredentialMount::try_from("claude".to_string()).expect("valid mount")]
+            err.to_string(),
+            "`executor.type` is managed by `mode`; remove this key"
         );
     }
 
@@ -257,84 +474,70 @@ executor:
     mounts:
       - ~/.claude:/home/agent/.claude
 "#;
-        let result = serde_yaml::from_str::<LfdConfig>(raw);
+        let result = serde_yaml::from_str::<RawLfdConfig>(raw);
         assert!(result.is_err());
     }
 
     #[test]
-    fn env_overrides_executor_settings() {
-        let _guard = env_lock().lock().expect("env lock");
-        std::env::set_var("LFD_EXECUTOR_TYPE", "docker");
+    fn env_overrides_allowed_fields() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&[
+            "LFD_MODE",
+            "LFD_AUTH_PROVIDER",
+            "LFD_AUTH_TOKEN",
+            "LFD_EXECUTOR_IMAGE",
+            "LFD_GITHUB_WEBHOOK_SECRET",
+            "LFD_GITHUB_TOKEN",
+        ]);
+        std::env::set_var("LFD_MODE", "container");
+        std::env::set_var("LFD_AUTH_PROVIDER", "static");
+        std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
         std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
         std::env::set_var("LFD_GITHUB_WEBHOOK_SECRET", "env-secret");
         std::env::set_var("LFD_GITHUB_TOKEN", "ghp_env");
 
-        let mut config = LfdConfig::default();
-        config.apply_env_overrides();
+        let mut config = RawLfdConfig::default();
+        config.apply_env_overrides().expect("overrides apply");
+        let resolved = config.resolve().expect("resolved");
 
-        std::env::remove_var("LFD_EXECUTOR_TYPE");
-        std::env::remove_var("LFD_EXECUTOR_IMAGE");
-        std::env::remove_var("LFD_GITHUB_WEBHOOK_SECRET");
-        std::env::remove_var("LFD_GITHUB_TOKEN");
-
-        assert_eq!(config.executor.r#type, ExecutorType::Docker);
-        assert_eq!(config.executor.image, "loopflow/agent:env");
-        assert_eq!(config.github.webhook_secret, "env-secret");
-        assert_eq!(config.github.token, Some("ghp_env".to_string()));
+        assert_eq!(resolved.mode, Mode::Container);
+        assert_eq!(resolved.storage, StorageType::Postgres);
+        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+        assert_eq!(resolved.auth.provider, "static");
+        assert_eq!(resolved.auth.token, Some("env-token-456".to_string()));
+        assert_eq!(resolved.executor.image, "loopflow/agent:env");
+        assert_eq!(resolved.github.webhook_secret, "env-secret");
+        assert_eq!(resolved.github.token, Some("ghp_env".to_string()));
     }
 
     #[test]
-    fn invalid_executor_type_env_value_does_not_override_config() {
-        let _guard = env_lock().lock().expect("env lock");
-        std::env::set_var("LFD_EXECUTOR_TYPE", "unknown");
+    fn invalid_mode_env_override_is_rejected() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&["LFD_MODE"]);
+        std::env::set_var("LFD_MODE", "invalid");
 
-        let mut config = LfdConfig::default();
-        config.executor.r#type = ExecutorType::Docker;
-        config.apply_env_overrides();
+        let mut config = RawLfdConfig::default();
+        let err = config
+            .apply_env_overrides()
+            .expect_err("invalid mode should fail");
 
-        std::env::remove_var("LFD_EXECUTOR_TYPE");
-
-        assert_eq!(config.executor.r#type, ExecutorType::Docker);
-    }
-
-    #[test]
-    fn static_auth_config_parses() {
-        let raw = r#"
-auth:
-  provider: static
-  token: my-secret-token-123
-"#;
-        let config: LfdConfig = serde_yaml::from_str(raw).expect("yaml should parse");
-        assert_eq!(config.auth.provider, "static");
-        assert_eq!(config.auth.token, Some("my-secret-token-123".to_string()));
-    }
-
-    #[test]
-    fn auth_config_defaults_to_local() {
-        let config: LfdConfig = serde_yaml::from_str("{}").expect("yaml should parse");
-        assert_eq!(config.auth.provider, "local");
-        assert!(config.auth.token.is_none());
-    }
-
-    #[test]
-    fn env_overrides_auth_provider_and_token() {
-        let _guard = env_lock().lock().expect("env lock");
-        std::env::set_var("LFD_AUTH_PROVIDER", "static");
-        std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
-
-        let mut config = LfdConfig::default();
-        config.apply_env_overrides();
-
-        std::env::remove_var("LFD_AUTH_PROVIDER");
-        std::env::remove_var("LFD_AUTH_TOKEN");
-
-        assert_eq!(config.auth.provider, "static");
-        assert_eq!(config.auth.token, Some("env-token-456".to_string()));
+        assert_eq!(
+            err.to_string(),
+            "invalid LFD_MODE value 'invalid'; expected 'native' or 'container'"
+        );
     }
 
     #[test]
     fn load_invalid_yaml_returns_error() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&[
+            "LFD_MODE",
+            "LFD_AUTH_PROVIDER",
+            "LFD_AUTH_TOKEN",
+            "LFD_EXECUTOR_IMAGE",
+            "LFD_GITHUB_WEBHOOK_SECRET",
+            "LFD_GITHUB_TOKEN",
+        ]);
         let tmp = tempdir().expect("tempdir");
         let lf_dir = tmp.path().join(".lf");
         std::fs::create_dir_all(&lf_dir).expect("lf dir");

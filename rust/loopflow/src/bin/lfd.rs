@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::auth::AuthProvider;
-use loopflow::lfd::config::LfdConfig;
+use loopflow::lfd::config::{LfdConfig, StorageType};
 use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
@@ -19,12 +19,14 @@ use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loopflow::lfd::obs::init_tracing();
 
-    let mut args = std::env::args();
-    if let Some(command) = args.nth(1) {
-        match command.as_str() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(command) = args.get(1).map(String::as_str) {
+        let force = args[2..].iter().any(|arg| arg == "--force");
+        match command {
             "migrate" => {
-                let status_only = args.any(|arg| arg == "--status");
-                let storage_config = storage_config_from_env()?;
+                let status_only = args[2..].iter().any(|arg| arg == "--status");
+                let lfd_config = LfdConfig::load().expect("failed to load lfd config");
+                let storage_config = storage_config_from_config(&lfd_config)?;
                 let version = migrate_store(&storage_config, status_only).await?;
                 if status_only {
                     println!("schema_version={version}");
@@ -33,27 +35,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            "install" => return loopflow::lfd::service::install(),
+            "install" => return loopflow::lfd::service::install(force),
             "uninstall" => return loopflow::lfd::service::uninstall(),
-            "start" => return loopflow::lfd::service::start(),
+            "start" => return loopflow::lfd::service::start(force),
             "stop" => return loopflow::lfd::service::stop(),
             "status" => return loopflow::lfd::service::status(),
             _ => {} // fall through to serve
         }
     }
 
+    let lfd_config = LfdConfig::load().expect("failed to load lfd config");
+
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:2486".to_string())
         .parse()?;
-    let storage_config = storage_config_from_env()?;
+    let storage_config = storage_config_from_config(&lfd_config)?;
 
     let max_slots = std::env::var("LFD_MAX_SLOTS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or_else(loopflow::lfd::default_max_slots);
 
-    // Load config and set up auth.
-    let lfd_config = LfdConfig::load().expect("failed to load lfd config");
     let cancel = CancellationToken::new();
 
     let is_loopback = http_addr.ip().is_loopback();
@@ -211,36 +213,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn storage_config_from_env() -> Result<StorageConfig, Box<dyn std::error::Error>> {
-    let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
-    if storage.eq_ignore_ascii_case("postgres") {
-        let database_url = std::env::var("LFD_DATABASE_URL").map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "LFD_DATABASE_URL required for postgres storage",
-            )
-        })?;
-        return Ok(StorageConfig::postgres(database_url));
+fn storage_config_from_config(
+    config: &LfdConfig,
+) -> Result<StorageConfig, Box<dyn std::error::Error>> {
+    match config.storage {
+        StorageType::Sqlite => {
+            let db_path = std::env::var("LFD_DB_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| loopflow::lfd::default_db_path());
+            Ok(StorageConfig::sqlite(db_path))
+        }
+        StorageType::Postgres => {
+            let database_url = std::env::var("LFD_DATABASE_URL").map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "LFD_DATABASE_URL required for postgres storage",
+                )
+            })?;
+            Ok(StorageConfig::postgres(database_url))
+        }
     }
-
-    if storage.eq_ignore_ascii_case("sqlite") {
-        let db_path = std::env::var("LFD_DB_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| loopflow::lfd::default_db_path());
-        return Ok(StorageConfig::sqlite(db_path));
-    }
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("invalid LFD_STORAGE value `{storage}`; expected `sqlite` or `postgres`"),
-    )
-    .into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{storage_config_from_env, StorageConfig};
+    use super::{storage_config_from_config, LfdConfig, StorageConfig, StorageType};
     use std::ffi::OsString;
+    use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
@@ -278,39 +277,46 @@ mod tests {
     #[test]
     fn storage_config_defaults_to_sqlite() {
         let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::snapshot(&["LFD_STORAGE", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
-        std::env::remove_var("LFD_STORAGE");
+        let _guard = EnvGuard::snapshot(&["LFD_DB_PATH", "LFD_DATABASE_URL"]);
         std::env::remove_var("LFD_DB_PATH");
         std::env::remove_var("LFD_DATABASE_URL");
 
-        let config = storage_config_from_env().expect("sqlite default should parse");
+        let config =
+            storage_config_from_config(&LfdConfig::default()).expect("sqlite default should parse");
         assert!(matches!(config, StorageConfig::Sqlite { .. }));
     }
 
     #[test]
-    fn storage_config_rejects_unknown_storage() {
+    fn storage_config_honors_db_path_override_for_sqlite() {
         let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::snapshot(&["LFD_STORAGE", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
-        std::env::set_var("LFD_STORAGE", "mysql");
+        let _guard = EnvGuard::snapshot(&["LFD_DB_PATH", "LFD_DATABASE_URL"]);
         std::env::remove_var("LFD_DB_PATH");
         std::env::remove_var("LFD_DATABASE_URL");
+        std::env::set_var("LFD_DB_PATH", "/tmp/custom.db");
 
-        let err = storage_config_from_env().expect_err("unknown storage should error");
-        assert_eq!(
-            err.to_string(),
-            "invalid LFD_STORAGE value `mysql`; expected `sqlite` or `postgres`"
-        );
+        let config =
+            storage_config_from_config(&LfdConfig::default()).expect("sqlite config should parse");
+        match config {
+            StorageConfig::Sqlite { path, .. } => {
+                assert_eq!(path, PathBuf::from("/tmp/custom.db"))
+            }
+            StorageConfig::Postgres { .. } => panic!("expected sqlite storage"),
+        }
     }
 
     #[test]
     fn storage_config_requires_database_url_for_postgres() {
         let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::snapshot(&["LFD_STORAGE", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
-        std::env::set_var("LFD_STORAGE", "postgres");
+        let _guard = EnvGuard::snapshot(&["LFD_DB_PATH", "LFD_DATABASE_URL"]);
         std::env::remove_var("LFD_DB_PATH");
         std::env::remove_var("LFD_DATABASE_URL");
 
-        let err = storage_config_from_env().expect_err("postgres should require database url");
+        let config = LfdConfig {
+            storage: StorageType::Postgres,
+            ..LfdConfig::default()
+        };
+        let err =
+            storage_config_from_config(&config).expect_err("postgres should require database url");
         assert_eq!(
             err.to_string(),
             "LFD_DATABASE_URL required for postgres storage"

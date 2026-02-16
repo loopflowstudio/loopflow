@@ -44,5 +44,4 @@ The binary entry point (`lfd.rs`) loads config once, then either dispatches to s
 
 - **Port conflict probing.** The design doc mentions probing port 2486 before start. This PR relies on backend conflict detection (plist/unit inspection) but doesn't probe the port directly.
 - **`lfd uninstall` does not remove postgres data volumes.** This is intentional per the design doc — explicit `docker volume rm` is a separate action.
-- **No `docker-compose.override.yml` documentation.** The override file is supported in `compose_files()` but not documented yet.
-- **Async store traits** (`WaveStateStore`, `ExecutionStore`, `StoreAdmin`). These are defined on `Store` but the HTTP layer still uses the sync `RunStore` trait via `SharedStore`. Migration to async traits is a separate effort.
+- **Async store traits** (`WaveStateStore`, `ExecutionStore`, `StoreAdmin`). These are defined on `Store` but the HTTP layer still uses the sync `RunStore` trait via `SharedStore`. Migration to async traits is a separate effort — pre-existing on main, not introduced by this branch.

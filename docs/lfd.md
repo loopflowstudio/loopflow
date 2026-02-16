@@ -107,6 +107,26 @@ github:
 
 Names are mounted read-only into the container. Raw `host:container` mount strings are rejected.
 
+### Compose overrides
+
+`lfd install` generates `~/.lf/docker-compose.yml` — don't edit it directly, it's regenerated on every install.
+
+To customize the compose stack, create `~/.lf/docker-compose.override.yml`:
+
+```yaml
+# ~/.lf/docker-compose.override.yml
+services:
+  gateway:
+    ports:
+      - "3000:2486"   # expose on a different host port
+    environment:
+      - EXTRA_VAR=value
+  postgres:
+    command: postgres -c log_statement=all
+```
+
+Standard Docker Compose merge rules apply — the override file is layered on top of the managed file. `lfd` passes both files via `-f` flags when the override exists.
+
 Environment overrides (non-identity fields only):
 
 ```bash

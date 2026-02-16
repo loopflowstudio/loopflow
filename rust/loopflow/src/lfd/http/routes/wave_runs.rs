@@ -9,7 +9,9 @@ use serde::Deserialize;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
 use crate::lfd::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
-use crate::lfd::http::routes::resolve_wave_id;
+use crate::lfd::http::routes::{
+    build_wave_live_pr_projection, live_pr_for_run, resolve_wave_id, run_live_pr_key,
+};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
@@ -22,6 +24,14 @@ pub struct ListWaveRunsQuery {
     limit: Option<u32>,
     starting_after: Option<String>,
     ending_before: Option<String>,
+    order: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum RunOrder {
+    #[default]
+    NewestFirst,
+    OldestFirst,
 }
 
 pub async fn list_wave_runs_handler(
@@ -158,15 +168,27 @@ async fn list_wave_runs(
         None => None,
     };
     let wave_id = path_wave_id.or(query_wave_id);
+    let order = parse_run_order(query.order.as_deref());
 
     let runs = run_store(&state.store, {
         let wave_id = wave_id.clone();
-        move |store| store.list_wave_runs(wave_id.as_ref(), None)
+        move |store| {
+            if let Some(wave_id) = wave_id.as_ref() {
+                if order == RunOrder::OldestFirst {
+                    return store.list_stack_runs(wave_id);
+                }
+                return store.list_wave_runs(Some(wave_id), None);
+            }
+            store.list_wave_runs(None, None)
+        }
     })
     .await
     .map_err(map_store_error)?;
 
     let mut filtered = runs;
+    if wave_id.is_none() && order == RunOrder::OldestFirst {
+        filtered.sort_by(|left, right| left.started_at.cmp(&right.started_at));
+    }
 
     if let Some(repo) = query.repo.as_deref() {
         filtered.retain(|run| run.snapshot.repo == repo);
@@ -180,10 +202,66 @@ async fn list_wave_runs(
         |r| &r.id,
     );
 
+    let live_projection = if let Some(wave_id) = wave_id.as_ref() {
+        let wave_id_for_wave = wave_id.clone();
+        let wave = run_store(&state.store, move |store| store.get_wave(&wave_id_for_wave))
+            .await
+            .map_err(map_store_error)?;
+        if let Some(wave) = wave {
+            let wave_id_for_stack = wave_id.clone();
+            let stack_runs = run_store(&state.store, move |store| {
+                store.list_stack_runs(&wave_id_for_stack)
+            })
+            .await
+            .map_err(map_store_error)?;
+            Some(
+                build_wave_live_pr_projection(&state.store, &state.github, &wave, &stack_runs)
+                    .await
+                    .map_err(map_store_error)?,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let mut data = Vec::with_capacity(runs.len());
     for run in runs {
-        data.push(wave_run_dto(run));
+        if let Some(projection) = live_projection.as_ref() {
+            let (live_pr_state, pr_state_stale) = live_pr_for_run(projection, &run);
+            data.push(wave_run_dto(run, live_pr_state, pr_state_stale));
+            continue;
+        }
+
+        let mut live_pr_state = None;
+        let mut pr_state_stale = false;
+        if let Some(key) = run_live_pr_key(&run) {
+            let repo_id = key.repo_id.clone();
+            let pr_number = key.pr_number;
+            live_pr_state = run_store(&state.store, move |store| {
+                store.get_live_pr_state(&repo_id, pr_number)
+            })
+            .await
+            .map_err(map_store_error)?;
+            pr_state_stale = live_pr_state.is_none();
+        }
+
+        data.push(wave_run_dto(run, live_pr_state.as_ref(), pr_state_stale));
     }
 
     Ok(Json(ListResponse::new(data, has_more)))
+}
+
+fn parse_run_order(value: Option<&str>) -> RunOrder {
+    match value {
+        Some(value)
+            if value.eq_ignore_ascii_case("oldest")
+                || value.eq_ignore_ascii_case("asc")
+                || value.eq_ignore_ascii_case("stack") =>
+        {
+            RunOrder::OldestFirst
+        }
+        _ => RunOrder::NewestFirst,
+    }
 }

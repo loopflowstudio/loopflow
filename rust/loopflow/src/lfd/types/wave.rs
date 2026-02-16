@@ -108,6 +108,63 @@ impl WaveRunKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WaveRunStackStatus {
+    #[default]
+    Active = 1,
+    Superseded = 2,
+    Merged = 3,
+}
+
+impl WaveRunStackStatus {
+    pub fn from_i32(value: i32) -> Self {
+        match value {
+            2 => Self::Superseded,
+            3 => Self::Merged,
+            _ => Self::Active,
+        }
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        *self as i32
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LivePrState {
+    #[default]
+    Unknown = 0,
+    Open = 1,
+    Closed = 2,
+    Merged = 3,
+}
+
+impl LivePrState {
+    pub fn from_i32(value: i32) -> Self {
+        match value {
+            1 => Self::Open,
+            2 => Self::Closed,
+            3 => Self::Merged,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        *self as i32
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::Merged => "merged",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SidecarKind {
@@ -195,11 +252,37 @@ pub struct WaveRun {
     #[serde(default)]
     pub run_kind: WaveRunKind,
     pub sidecar_kind: Option<SidecarKind>,
+    pub parent_run_id: Option<LfdId>,
+    pub parent_pr_number: Option<u32>,
+    pub stack_position: u32,
+    pub stack_group_id: String,
+    #[serde(default)]
+    pub stack_status: WaveRunStackStatus,
+    #[serde(default)]
+    pub lineage_inferred: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LivePullRequestState {
+    pub repo_id: String,
+    pub pr_number: u32,
+    pub state: LivePrState,
+    pub is_draft: bool,
+    pub head_ref: String,
+    pub head_sha: String,
+    pub base_ref: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub merged_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub synced_at: OffsetDateTime,
 }
 
 impl WaveRun {
     #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, wave_id: LfdId) -> Self {
+        let stack_group_id = wave_id.to_string();
         Self {
             id,
             wave_id,
@@ -215,6 +298,12 @@ impl WaveRun {
             flow_parents: Vec::new(),
             run_kind: WaveRunKind::Main,
             sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id,
+            stack_status: WaveRunStackStatus::Active,
+            lineage_inferred: false,
         }
     }
 

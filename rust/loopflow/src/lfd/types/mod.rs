@@ -14,6 +14,6 @@ pub use event::Event;
 pub use stimulus::{PendingActivation, Stimulus, StimulusKind};
 pub use summary::Summary;
 pub use wave::{
-    PullRequest, SidecarKind, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus,
-    WaveStatus,
+    LivePrState, LivePullRequestState, PullRequest, SidecarKind, Wave, WaveRun, WaveRunKind,
+    WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };

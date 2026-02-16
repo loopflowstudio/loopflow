@@ -140,9 +140,14 @@ pub async fn list_waves_handler(
         query.ending_before.as_deref(),
         |w| &w.id,
     );
-    let views = crate::lfd::http::routes::build_wave_dtos(&state.store, waves, include_active_run)
-        .await
-        .map_err(map_store_error)?;
+    let views = crate::lfd::http::routes::build_wave_dtos(
+        &state.store,
+        &state.github,
+        waves,
+        include_active_run,
+    )
+    .await
+    .map_err(map_store_error)?;
     Ok(Json(ListResponse::new(views, has_more)))
 }
 
@@ -211,7 +216,7 @@ pub async fn create_wave_handler(
         .event_hub
         .send(Event::wave_created(wave.id.clone(), wave.name.clone()));
 
-    let view = build_wave_dto(&state.store, wave, false)
+    let view = build_wave_dto(&state.store, &state.github, wave, false)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
@@ -228,7 +233,7 @@ pub async fn get_wave_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
     let include_active_run = query.expand.contains("active_run");
-    let view = build_wave_dto(&state.store, wave, include_active_run)
+    let view = build_wave_dto(&state.store, &state.github, wave, include_active_run)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
@@ -321,7 +326,7 @@ pub async fn update_wave_handler(
 
     state.event_hub.send(Event::wave_updated(wave.id.clone()));
 
-    let view = build_wave_dto(&state.store, wave, false)
+    let view = build_wave_dto(&state.store, &state.github, wave, false)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))

@@ -7,13 +7,13 @@ use tokio_postgres::NoTls;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::store::rows::{
-    map_agent_row, map_fork_run_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
-    map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_agent_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
+    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, RunStore, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, PendingActivation, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
-    WaveStatus,
+    Agent, AgentStatus, LivePrState, LivePullRequestState, PendingActivation, Stimulus, Summary,
+    Wave, WaveRun, WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -261,7 +261,9 @@ impl RunStore for PostgresStore {
             let mut query = String::from(
                 "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                         started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                        snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                        snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                        parent_run_id, parent_pr_number, stack_position, stack_group_id,
+                        stack_status, lineage_inferred
                  FROM wave_runs",
             );
             let mut params: Vec<Box<dyn ToSql + Sync>> = Vec::new();
@@ -288,7 +290,9 @@ impl RunStore for PostgresStore {
                 .query_opt(
                     "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                             started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
+                            stack_status, lineage_inferred
                      FROM wave_runs WHERE id = $1",
                     &[&wave_run_id],
                 )
@@ -308,7 +312,9 @@ impl RunStore for PostgresStore {
                 .query_opt(
                     "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                             started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
+                            stack_status, lineage_inferred
                      FROM wave_runs
                      WHERE wave_id = $1 AND status = ANY($2) AND run_kind = $3
                      ORDER BY started_at DESC LIMIT 1",
@@ -325,7 +331,9 @@ impl RunStore for PostgresStore {
                 .query_opt(
                     "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                             started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
+                            stack_status, lineage_inferred
                      FROM wave_runs WHERE wave_id = $1 AND run_kind = $2
                      ORDER BY started_at DESC LIMIT 1",
                     &[&wave_id, &crate::lfd::types::WaveRunKind::Main.as_i32()],
@@ -348,8 +356,10 @@ impl RunStore for PostgresStore {
                     "INSERT INTO wave_runs (
                         id, wave_id, iteration, step_index, status, worktree, branch,
                         started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                        snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
+                        snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                        parent_run_id, parent_pr_number, stack_position, stack_group_id,
+                        stack_status, lineage_inferred
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)",
                     &[
                         &run.id,
                         &run.wave_id,
@@ -369,6 +379,12 @@ impl RunStore for PostgresStore {
                         &flow_parents_json,
                         &run.run_kind.as_i32(),
                         &run.sidecar_kind.map(|kind| kind.as_i32()),
+                        &run.parent_run_id,
+                        &run.parent_pr_number.map(|value| value as i64),
+                        &(run.stack_position as i32),
+                        &run.stack_group_id,
+                        &run.stack_status.as_i32(),
+                        &(if run.lineage_inferred { 1i32 } else { 0i32 }),
                     ],
                 )
                 .await?;
@@ -386,8 +402,10 @@ impl RunStore for PostgresStore {
                          branch = $5, started_at = $6, ended_at = $7, error = $8,
                          snapshot_repo = $9, snapshot_flow = $10, snapshot_direction = $11,
                          snapshot_area = $12, snapshot_pr = $13, flow_parents = $14,
-                         run_kind = $15, sidecar_kind = $16
-                     WHERE id = $17",
+                         run_kind = $15, sidecar_kind = $16, parent_run_id = $17,
+                         parent_pr_number = $18, stack_position = $19, stack_group_id = $20,
+                         stack_status = $21, lineage_inferred = $22
+                     WHERE id = $23",
                     &[
                         &(run.iteration as i32),
                         &(run.step_index as i32),
@@ -405,6 +423,12 @@ impl RunStore for PostgresStore {
                         &flow_parents_json,
                         &run.run_kind.as_i32(),
                         &run.sidecar_kind.map(|kind| kind.as_i32()),
+                        &run.parent_run_id,
+                        &run.parent_pr_number.map(|value| value as i64),
+                        &(run.stack_position as i32),
+                        &run.stack_group_id,
+                        &run.stack_status.as_i32(),
+                        &(if run.lineage_inferred { 1i32 } else { 0i32 }),
                         &run.id,
                     ],
                 )
@@ -412,6 +436,120 @@ impl RunStore for PostgresStore {
             if updated == 0 {
                 return Err(StoreError::NotFound);
             }
+            Ok(())
+        })
+    }
+
+    fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+                            started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
+                            stack_status, lineage_inferred
+                     FROM wave_runs
+                     WHERE wave_id = $1 AND run_kind = $2
+                     ORDER BY stack_position ASC, started_at ASC, id ASC",
+                    &[&wave_id, &crate::lfd::types::WaveRunKind::Main.as_i32()],
+                )
+                .await?;
+            rows.iter().map(map_wave_run_row).collect()
+        })
+    }
+
+    fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        let runs = self.list_stack_runs(wave_id)?;
+        for run in runs {
+            if run.stack_status == WaveRunStackStatus::Merged
+                || run.stack_status == WaveRunStackStatus::Superseded
+            {
+                continue;
+            }
+
+            let pr_number = run.snapshot.pr.as_ref().and_then(|pr| pr.number);
+            let Some(pr_number) = pr_number else {
+                return Ok(Some(run));
+            };
+
+            let Some(live_state) = self.get_live_pr_state(&run.snapshot.repo, pr_number)? else {
+                return Ok(Some(run));
+            };
+            if live_state.state != LivePrState::Merged {
+                return Ok(Some(run));
+            }
+        }
+        Ok(None)
+    }
+
+    fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+        let Some(parent) = self.get_wave_run(run_id)? else {
+            return Ok(Vec::new());
+        };
+        let descendants = self
+            .list_stack_runs(&parent.wave_id)?
+            .into_iter()
+            .filter(|run| {
+                run.stack_group_id == parent.stack_group_id
+                    && run.stack_position > parent.stack_position
+            })
+            .collect();
+        Ok(descendants)
+    }
+
+    fn get_live_pr_state(
+        &self,
+        repo_id: &str,
+        pr_number: u32,
+    ) -> StoreResult<Option<LivePullRequestState>> {
+        let repo_id = repo_id.to_string();
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "SELECT repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
+                            updated_at, merged_at, synced_at
+                     FROM live_pr_states
+                     WHERE repo_id = $1 AND pr_number = $2",
+                    &[&repo_id, &(pr_number as i64)],
+                )
+                .await?;
+            row.as_ref().map(map_live_pr_state_row).transpose()
+        })
+    }
+
+    fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
+        let state = state.clone();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "INSERT INTO live_pr_states (
+                        repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
+                        updated_at, merged_at, synced_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT(repo_id, pr_number) DO UPDATE SET
+                        state = excluded.state,
+                        is_draft = excluded.is_draft,
+                        head_ref = excluded.head_ref,
+                        head_sha = excluded.head_sha,
+                        base_ref = excluded.base_ref,
+                        updated_at = excluded.updated_at,
+                        merged_at = excluded.merged_at,
+                        synced_at = excluded.synced_at",
+                    &[
+                        &state.repo_id,
+                        &(state.pr_number as i64),
+                        &state.state.as_i32(),
+                        &(if state.is_draft { 1i32 } else { 0i32 }),
+                        &state.head_ref,
+                        &state.head_sha,
+                        &state.base_ref,
+                        &state.updated_at.unix_timestamp(),
+                        &state.merged_at.map(|value| value.unix_timestamp()),
+                        &state.synced_at.unix_timestamp(),
+                    ],
+                )
+                .await?;
             Ok(())
         })
     }

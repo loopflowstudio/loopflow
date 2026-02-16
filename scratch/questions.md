@@ -1,1 +1,2 @@
 - Policy: when `snapshot.pr.number` is `None` but state is `open`/`draft`, should `open_pr_count` include it or ignore it until live PR sync is in place?
+- Step 01 implementation assumes wave/read endpoints run on-demand live PR sync; periodic background sync is deferred and should be added if stale rates stay high.

@@ -78,6 +78,12 @@ impl WaveExecutor {
             flow_parents: Vec::new(),
             run_kind: WaveRunKind::Sidecar,
             sidecar_kind: Some(SidecarKind::CiFix),
+            parent_run_id: Some(source_run.id.clone()),
+            parent_pr_number: source_run.snapshot.pr.as_ref().and_then(|pr| pr.number),
+            stack_position: source_run.stack_position,
+            stack_group_id: source_run.stack_group_id.clone(),
+            stack_status: source_run.stack_status,
+            lineage_inferred: false,
         };
         if let Err(err) = self.store.create_wave_run(&run) {
             if let Err(cleanup_err) = cleanup_ci_fix_worktree(&worktree_path) {

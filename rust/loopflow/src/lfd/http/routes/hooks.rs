@@ -376,6 +376,12 @@ mod tests {
             flow_parents: Vec::new(),
             run_kind,
             sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: "wave-group".to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
         }
     }
 

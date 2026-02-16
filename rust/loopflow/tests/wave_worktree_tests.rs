@@ -109,6 +109,22 @@ fn wave_run_reuses_existing_worktree() {
 }
 
 #[test]
+fn wave_run_records_parent_lineage() {
+    let repo = TestRepo::new();
+    let store = make_store();
+    let wave = make_wave(&repo.path().to_string_lossy(), "lineage");
+    store.create_wave(&wave).unwrap();
+
+    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new()).unwrap();
+    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new()).unwrap();
+
+    assert_eq!(run1.stack_position, 0);
+    assert_eq!(run2.stack_position, 1);
+    assert_eq!(run2.parent_run_id, Some(run1.id.clone()));
+    assert_eq!(run2.parent_pr_number, None);
+}
+
+#[test]
 fn ensure_wave_worktree_creates_directory() {
     let repo = TestRepo::new();
     let (wt_path, branch) = ensure_wave_worktree(repo.path(), "debug").unwrap();

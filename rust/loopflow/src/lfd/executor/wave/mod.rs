@@ -515,6 +515,12 @@ mod tests {
             flow_parents: vec![],
             run_kind: WaveRunKind::Main,
             sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave_id.to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
         };
         store.create_wave_run(&run).unwrap();
 
@@ -617,6 +623,12 @@ mod tests {
             flow_parents: vec![],
             run_kind: WaveRunKind::Main,
             sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave_id.to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
         };
         store
             .create_wave_run(&run)

@@ -26,7 +26,8 @@ use crate::engine::worktrees::{
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    Agent, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
+    WaveRunStatus, WaveStatus,
 };
 
 use super::CiFailure;
@@ -37,11 +38,22 @@ pub fn create_wave_run_with_id(
     wave: &Wave,
     run_id: &LfdId,
 ) -> anyhow::Result<WaveRun> {
-    let last_run = store
-        .list_wave_runs(Some(&wave.id), Some(1))?
-        .into_iter()
-        .next();
-    let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
+    let stack_runs = store.list_stack_runs(&wave.id)?;
+    let last_run = stack_runs.last().cloned();
+    let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
+    let stack_position = last_run
+        .as_ref()
+        .map(|run| run.stack_position + 1)
+        .unwrap_or(0);
+    let parent_run_id = last_run.as_ref().map(|run| run.id.clone());
+    let parent_pr_number = last_run
+        .as_ref()
+        .and_then(|run| run.snapshot.pr.as_ref())
+        .and_then(|pr| pr.number);
+    let stack_group_id = last_run
+        .as_ref()
+        .map(|run| run.stack_group_id.clone())
+        .unwrap_or_else(|| wave.id.to_string());
 
     let main_repo = Path::new(&wave.repo);
     let (wt_path, branch) = ensure_wave_worktree(main_repo, &wave.name)?;
@@ -67,6 +79,12 @@ pub fn create_wave_run_with_id(
         flow_parents: Vec::new(),
         run_kind: WaveRunKind::Main,
         sidecar_kind: None,
+        parent_run_id,
+        parent_pr_number,
+        stack_position,
+        stack_group_id,
+        stack_status: WaveRunStackStatus::Active,
+        lineage_inferred: false,
     };
     store.create_wave_run(&run)?;
     if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {

@@ -69,8 +69,8 @@ pub struct GitHubPullRequestState {
 struct PullRequestResponse {
     number: u32,
     state: String,
-    #[serde(default, rename = "isDraft")]
-    is_draft: bool,
+    #[serde(default)]
+    draft: bool,
     head: PullRequestRef,
     base: PullRequestRef,
     updated_at: String,
@@ -239,7 +239,7 @@ pub async fn fetch_pull_request(
     Ok(Some(GitHubPullRequestState {
         number: payload.number,
         state,
-        is_draft: payload.is_draft,
+        is_draft: payload.draft,
         head_ref: payload.head.branch,
         head_sha: payload.head.sha,
         base_ref: payload.base.branch,

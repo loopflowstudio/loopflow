@@ -13,7 +13,7 @@ use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::scheduler::Scheduler;
-use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageBackend, StorageConfig};
+use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,11 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match command.as_str() {
             "migrate" => {
                 let status_only = args.any(|arg| arg == "--status");
-                let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
-                let db_path = std::env::var("LFD_DB_PATH")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| loopflow::lfd::default_db_path());
-                let storage_config = storage_config(&storage, db_path)?;
+                let storage_config = storage_config_from_env()?;
                 let version = migrate_store(&storage_config, status_only).await?;
                 if status_only {
                     println!("schema_version={version}");
@@ -49,11 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:2486".to_string())
         .parse()?;
-    let db_path = std::env::var("LFD_DB_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| loopflow::lfd::default_db_path());
-    let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
-    let storage_config = storage_config(&storage, db_path)?;
+    let storage_config = storage_config_from_env()?;
 
     let max_slots = std::env::var("LFD_MAX_SLOTS")
         .ok()
@@ -81,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         (provider, client, creds)
     };
 
-    if storage_config.backend == StorageBackend::Postgres {
+    if matches!(&storage_config, StorageConfig::Postgres { .. }) {
         let version = migrate_store(&storage_config, false).await?;
         tracing::info!(schema_version = %version, "postgres schema up to date");
     }
@@ -219,10 +211,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn storage_config(
-    storage: &str,
-    db_path: PathBuf,
-) -> Result<StorageConfig, Box<dyn std::error::Error>> {
+fn storage_config_from_env() -> Result<StorageConfig, Box<dyn std::error::Error>> {
+    let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
     if storage.eq_ignore_ascii_case("postgres") {
         let database_url = std::env::var("LFD_DATABASE_URL").map_err(|_| {
             std::io::Error::new(
@@ -232,6 +222,9 @@ fn storage_config(
         })?;
         Ok(StorageConfig::postgres(database_url))
     } else {
+        let db_path = std::env::var("LFD_DB_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| loopflow::lfd::default_db_path());
         Ok(StorageConfig::sqlite(db_path))
     }
 }

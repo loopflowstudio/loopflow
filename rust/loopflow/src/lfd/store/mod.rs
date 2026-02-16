@@ -57,46 +57,21 @@ pub enum StoreError {
 
 pub type StoreResult<T> = Result<T, StoreError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StorageBackend {
-    Sqlite,
-    Postgres,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StorageConfig {
-    pub backend: StorageBackend,
-    pub sqlite_path: Option<PathBuf>,
-    pub postgres_url: Option<String>,
+pub enum StorageConfig {
+    Sqlite { path: PathBuf },
+    Postgres { database_url: String },
 }
 
 impl StorageConfig {
     pub fn sqlite(path: PathBuf) -> Self {
-        Self {
-            backend: StorageBackend::Sqlite,
-            sqlite_path: Some(path),
-            postgres_url: None,
-        }
+        Self::Sqlite { path }
     }
 
     pub fn postgres(database_url: impl Into<String>) -> Self {
-        Self {
-            backend: StorageBackend::Postgres,
-            sqlite_path: None,
-            postgres_url: Some(database_url.into()),
+        Self::Postgres {
+            database_url: database_url.into(),
         }
-    }
-
-    fn sqlite_path(&self) -> StoreResult<&PathBuf> {
-        self.sqlite_path.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("sqlite backend requires sqlite_path".to_string())
-        })
-    }
-
-    fn postgres_url(&self) -> StoreResult<&str> {
-        self.postgres_url.as_deref().ok_or_else(|| {
-            StoreError::InvalidData("postgres backend requires postgres_url".to_string())
-        })
     }
 }
 
@@ -112,13 +87,6 @@ enum StoreBackend {
 }
 
 impl Store {
-    pub fn backend(&self) -> StorageBackend {
-        match self.backend {
-            StoreBackend::Sqlite(_) => StorageBackend::Sqlite,
-            StoreBackend::Postgres(_) => StorageBackend::Postgres,
-        }
-    }
-
     pub fn into_shared(self) -> SharedStore {
         match self.backend {
             StoreBackend::Sqlite(store) => Arc::new(store) as SharedStore,
@@ -439,22 +407,21 @@ impl StoreAdmin for Store {
 }
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
-    match cfg.backend {
-        StorageBackend::Sqlite => Ok(Store {
-            backend: StoreBackend::Sqlite(sqlite::SqliteStore::new(cfg.sqlite_path()?)?),
+    match cfg {
+        StorageConfig::Sqlite { path } => Ok(Store {
+            backend: StoreBackend::Sqlite(sqlite::SqliteStore::new(path)?),
         }),
-        StorageBackend::Postgres => Ok(Store {
+        StorageConfig::Postgres { database_url } => Ok(Store {
             backend: StoreBackend::Postgres(
-                postgres::PostgresStore::connect_async(cfg.postgres_url()?).await?,
+                postgres::PostgresStore::connect_async(database_url).await?,
             ),
         }),
     }
 }
 
 pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResult<String> {
-    match cfg.backend {
-        StorageBackend::Sqlite => {
-            let path = cfg.sqlite_path()?;
+    match cfg {
+        StorageConfig::Sqlite { path } => {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|err| {
                     StoreError::InvalidData(format!("failed to create db dir: {err}"))
@@ -466,12 +433,11 @@ pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResul
             }
             migrations::latest_version_sqlite(&conn)
         }
-        StorageBackend::Postgres => {
-            let url = cfg.postgres_url()?;
+        StorageConfig::Postgres { database_url } => {
             if status_only {
-                postgres::PostgresStore::migrate_status_async(url).await
+                postgres::PostgresStore::migrate_status_async(database_url).await
             } else {
-                postgres::PostgresStore::migrate_async(url).await
+                postgres::PostgresStore::migrate_async(database_url).await
             }
         }
     }
@@ -879,7 +845,6 @@ mod tests {
             .build()
             .unwrap();
         let store = runtime.block_on(super::open_store(&config)).unwrap();
-        assert_eq!(store.backend(), super::StorageBackend::Sqlite);
 
         let shared = store.into_shared();
         run_store_suite(shared.as_ref());

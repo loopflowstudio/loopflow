@@ -6,12 +6,6 @@ use tracing::warn;
 
 const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
-const PROFILE_LOCKED_ENV_VARS: &[&str] = &[
-    "LFD_STORAGE",
-    "LFD_EXECUTOR_TYPE",
-    "LFD_RUNTIME_BACKEND",
-    "LFD_SERVICE_MANAGER",
-];
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
@@ -96,13 +90,10 @@ struct RawLfdConfig {
 
 impl RawLfdConfig {
     fn apply_env_overrides(&mut self) -> Result<()> {
-        for var in PROFILE_LOCKED_ENV_VARS {
-            if let Ok(value) = std::env::var(var) {
-                if !value.trim().is_empty() {
-                    bail!(
-                        "{var} is managed by `mode`; unset {var} or change mode in ~/.lf/lfd.yaml"
-                    );
-                }
+        if let Ok(value) = std::env::var("LFD_MODE") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.mode = Mode::parse(trimmed)?;
             }
         }
 
@@ -214,6 +205,23 @@ pub enum Mode {
     #[default]
     Native,
     Container,
+}
+
+impl Mode {
+    fn parse(raw: &str) -> Result<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "native" => Ok(Self::Native),
+            "container" => Ok(Self::Container),
+            _ => bail!("invalid LFD_MODE value '{raw}'; expected 'native' or 'container'"),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Container => "container",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -476,26 +484,27 @@ executor:
     fn env_overrides_allowed_fields() {
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
+            "LFD_MODE",
             "LFD_AUTH_PROVIDER",
             "LFD_AUTH_TOKEN",
             "LFD_EXECUTOR_IMAGE",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
-            "LFD_STORAGE",
-            "LFD_EXECUTOR_TYPE",
         ]);
+        std::env::set_var("LFD_MODE", "container");
         std::env::set_var("LFD_AUTH_PROVIDER", "static");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
         std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
         std::env::set_var("LFD_GITHUB_WEBHOOK_SECRET", "env-secret");
         std::env::set_var("LFD_GITHUB_TOKEN", "ghp_env");
-        std::env::remove_var("LFD_STORAGE");
-        std::env::remove_var("LFD_EXECUTOR_TYPE");
 
         let mut config = RawLfdConfig::default();
         config.apply_env_overrides().expect("overrides apply");
         let resolved = config.resolve().expect("resolved");
 
+        assert_eq!(resolved.mode, Mode::Container);
+        assert_eq!(resolved.storage, StorageType::Postgres);
+        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
         assert_eq!(resolved.auth.provider, "static");
         assert_eq!(resolved.auth.token, Some("env-token-456".to_string()));
         assert_eq!(resolved.executor.image, "loopflow/agent:env");
@@ -504,26 +513,33 @@ executor:
     }
 
     #[test]
-    fn env_override_for_profile_owned_field_is_rejected() {
+    fn invalid_mode_env_override_is_rejected() {
         let _lock = env_lock().lock().expect("env lock");
-        let _guard = EnvGuard::snapshot(&["LFD_STORAGE"]);
-        std::env::set_var("LFD_STORAGE", "postgres");
+        let _guard = EnvGuard::snapshot(&["LFD_MODE"]);
+        std::env::set_var("LFD_MODE", "invalid");
 
         let mut config = RawLfdConfig::default();
         let err = config
             .apply_env_overrides()
-            .expect_err("profile env override should fail");
+            .expect_err("invalid mode should fail");
 
         assert_eq!(
             err.to_string(),
-            "LFD_STORAGE is managed by `mode`; unset LFD_STORAGE or change mode in ~/.lf/lfd.yaml"
+            "invalid LFD_MODE value 'invalid'; expected 'native' or 'container'"
         );
     }
 
     #[test]
     fn load_invalid_yaml_returns_error() {
         let _lock = env_lock().lock().expect("env lock");
-        let _guard = EnvGuard::snapshot(PROFILE_LOCKED_ENV_VARS);
+        let _guard = EnvGuard::snapshot(&[
+            "LFD_MODE",
+            "LFD_AUTH_PROVIDER",
+            "LFD_AUTH_TOKEN",
+            "LFD_EXECUTOR_IMAGE",
+            "LFD_GITHUB_WEBHOOK_SECRET",
+            "LFD_GITHUB_TOKEN",
+        ]);
         let tmp = tempdir().expect("tempdir");
         let lf_dir = tmp.path().join(".lf");
         std::fs::create_dir_all(&lf_dir).expect("lf dir");

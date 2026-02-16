@@ -222,8 +222,8 @@ def cmd_lfd(docker: bool = False) -> int:
 
     # Docker executor mode
     if docker:
-        os.environ["LFD_EXECUTOR_TYPE"] = "docker"
-        print("Docker executor enabled")
+        os.environ["LFD_MODE"] = "container"
+        print("Container mode enabled (requires postgres + LFD_DATABASE_URL)")
 
     # Enable verbose logging
     os.environ["RUST_LOG"] = "loopflow=debug,tower_http=debug"

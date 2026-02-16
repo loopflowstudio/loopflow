@@ -7,9 +7,8 @@ services:
       - "${LFD_PORT:-2486}:2486"
     environment:
       LFD_HTTP_ADDR: "0.0.0.0:2486"
-      LFD_STORAGE: postgres
+      LFD_MODE: container
       LFD_DATABASE_URL: "postgres://lfd:lfd@postgres:5432/lfd"
-      LFD_EXECUTOR_TYPE: docker
       LFD_EXECUTOR_IMAGE: "${LFD_EXECUTOR_IMAGE:-loopflow/agent:latest}"
       LFD_AUTH_PROVIDER: "${LFD_AUTH_PROVIDER:-local}"
       LFD_AUTH_TOKEN: "${LFD_AUTH_TOKEN:-}"

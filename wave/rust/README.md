@@ -23,7 +23,7 @@ Stage 04 is independent of the store work and can run in parallel with 02/03. Ea
 - `Store` wrapper + `StoreBackend` enum centralizing backend selection
 - Grouped capability traits: `WaveStateStore`, `ExecutionStore`, `StoreAdmin`
 - `open_store()` / `migrate_store()` helpers for startup and migration
-- Config UX: invalid `LFD_STORAGE` returns a clear error
+- Config UX: strict mode profiles select storage/executor/backend together
 - `RunStore` kept so executor/http compile unchanged (Stage 02 deletes it)
 
 ## Architecture (current → target)

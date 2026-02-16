@@ -57,6 +57,7 @@ loopflow.run_wave("engbot")
 Environment variables:
 
 ```
+LFD_MODE          # optional mode override: native or container
 LFD_HTTP_ADDR     # daemon listen address (default 127.0.0.1:2486)
 LFD_DB_PATH       # sqlite path override (native mode)
 LFD_DATABASE_URL  # required for container mode (postgres)
@@ -67,9 +68,6 @@ LFD_EXECUTOR_IMAGE # override agent image (default loopflow/agent:latest)
 LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
 LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 ```
-
-Profile-owned env vars (`LFD_STORAGE`, `LFD_EXECUTOR_TYPE`, `LFD_RUNTIME_BACKEND`,
-`LFD_SERVICE_MANAGER`) are rejected — use `mode` in `lfd.yaml` instead.
 
 `lfd` reads `~/.lf/lfd.yaml` for daemon settings:
 
@@ -93,7 +91,7 @@ github:
   token: ghp_xxx # optional, used for startup /check-ci polling
 ```
 
-`mode` selects a strict profile — `executor.type`, `storage`, `runtime_backend`, and
+`mode` (or `LFD_MODE`) selects a strict profile — `executor.type`, `storage`, `runtime_backend`, and
 `service_manager` are all determined by the mode and cannot be overridden.
 
 `credentials.mounts` uses named allowlisted mounts only:

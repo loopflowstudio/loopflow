@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
+use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
 use time::OffsetDateTime;
@@ -430,7 +431,6 @@ pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result
 }
 
 pub(crate) fn short_hash(value: &str, chars: usize) -> String {
-    use sha2::{Digest, Sha256};
     let digest = Sha256::digest(value.as_bytes());
     let mut hash = hex::encode(digest);
     hash.truncate(chars);

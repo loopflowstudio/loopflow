@@ -57,7 +57,6 @@ impl WaveExecutor {
         let config = load_config_or_default(Some(Path::new(&run.worktree)));
         let token_budget = config.summary_tokens;
 
-        // Build the prompt with area paths as content guidance
         let area_list = wave.area.join(", ");
         let prompt = template
             .replace("{token_budget}", &token_budget.to_string())
@@ -109,7 +108,6 @@ impl WaveExecutor {
             return Ok(());
         }
 
-        // Read the summary file the agent wrote
         let summary_path = Path::new(&run.worktree).join(".lf/summary.md");
         match std::fs::read_to_string(&summary_path) {
             Ok(content) if !content.trim().is_empty() => {

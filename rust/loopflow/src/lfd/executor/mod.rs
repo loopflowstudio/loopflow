@@ -46,6 +46,7 @@ pub struct StartupRecovery {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EphemeralOwnerKind {
     Fork,
     Sidecar,
@@ -65,7 +66,7 @@ pub struct JanitorReport {
     pub errors: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CiFailure {
     pub wave_id: LfdId,
     pub wave_run_id: LfdId,

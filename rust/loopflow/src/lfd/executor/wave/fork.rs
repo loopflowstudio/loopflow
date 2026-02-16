@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -25,16 +25,10 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
-        if fork.branches.is_empty() {
+        let Some(selected) = fork.branches.first().cloned() else {
             self.fail_run(run, wave, "fork has no branches".to_string())?;
             return Ok(());
-        }
-
-        let selected = fork
-            .branches
-            .first()
-            .ok_or_else(|| anyhow!("fork has no branches"))?
-            .clone();
+        };
 
         if selected.step.interactive.unwrap_or(false) {
             self.fail_run(

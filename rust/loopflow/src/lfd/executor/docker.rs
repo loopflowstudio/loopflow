@@ -15,7 +15,6 @@ use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum
 use bollard::volume::CreateVolumeOptions;
 use bollard::Docker;
 use futures_util::StreamExt;
-use sha2::{Digest, Sha256};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -270,10 +269,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
 }
 
 fn short_hash(value: &str, chars: usize) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    let mut hash = hex::encode(digest);
-    hash.truncate(chars);
-    hash
+    super::helpers::short_hash(value, chars)
 }
 
 fn sanitize_token(value: &str) -> String {

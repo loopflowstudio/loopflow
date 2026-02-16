@@ -1,0 +1,2 @@
+- Scope assumption: this implement pass focused on immediate wave/open-PR correctness issues in the current diff (deduping open PR counts and treating unknown PR state as not-open), not the full multi-phase foundations plan in `scratch/loop-stack-pr-workflow-foundations.md`.
+- Open policy question: when `snapshot.pr.number` is `None` but state is `open`/`draft`, should `open_pr_count` treat it as countable, or ignore it as unknown to avoid overcount drift?

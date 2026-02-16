@@ -1,178 +1,164 @@
 # 05: Concerto Remote Connection
 
-Point Concerto at a remote lfd. Same protocol, different host.
+## Problem
 
-## What exists after this
+Concerto is hardcoded to `127.0.0.1:2486`, so it cannot control a remote lfd even though the protocol is already HTTP + WebSocket and lfd auth for remote is shipped.
 
-Concerto connects to an lfd running on a remote machine. Wave list, detail, create, run, stop, land, logs — all work over the network. WebSocket events update the UI in real time.
+Who benefits:
+- Developers running lfd on a remote Linux box (EC2, homelab, always-on machine)
+- Teams who want one daemon with persistent waves and logs
+- Anyone who wants Concerto as a thin control plane, not a local-process UI
 
-## Context
+Why now: Phase 03 (static token auth) and Phase 04 (TLS via Caddy on `:443`) already unlocked server-side prerequisites. Phase 05 is the client wiring that makes remote real.
 
-Concerto talks to lfd via `LocalWaveService` (HTTP) and `LocalEventService` (WebSocket), both hardcoded to `http://127.0.0.1:2486`. The protocol is already network-ready — JSON over HTTP, events over WebSocket. Nothing reads the local filesystem.
+## Approach
 
-`WaveServiceProtocol` already abstracts wave operations. Adding a remote connection is configuration, not architecture.
+Ship a **connection stack** in Concerto with one active target (local or remote), auth-aware HTTP/WS clients, TOFU certificate pinning, and resilient reconnect behavior.
 
-**From Phase 03 (shipped):** lfd accepts `Authorization: Bearer <token>` on all non-loopback requests when `auth.provider=static`. The Python client already implements this (`token=` kwarg, `LFD_TOKEN` env). Concerto needs the same pattern — inject the token into HTTP requests and WebSocket upgrade headers.
+### 1) Add a first-class connection model
 
-**From Phase 04 (shipped):** Remote deployment uses Caddy on :443 for TLS termination, proxying to lfd:2486 internally. Concerto connects to `https://<host>:443`, not `http://<host>:2486`. Caddy uses `tls internal` (self-signed certs) — Concerto must handle certificate trust (TOFU: trust on first use, pin the cert fingerprint).
+Create `ServerConnection` in `LoopflowCore`:
+- `host`, `port`, `useTLS`, `authMode`, `staticToken` (optional)
+- Computed `httpBaseURL`, `wsBaseURL`, `isLocal`
+- `.local` default (`127.0.0.1:2486`, no auth, no TLS)
 
-## Implementation
+Persist non-secret fields in `UserDefaults`. Store `staticToken` in Keychain keyed by `host:port`.
 
-### Connection configuration
+### 2) Parameterize services by connection
 
-```swift
-// LoopflowCore/Models/ServerConnection.swift
+Refactor:
+- `LocalWaveService(connection:tokenProvider:sessionFactory:)`
+- `LocalEventService(connection:tokenProvider:sessionFactory:)`
 
-public struct ServerConnection: Codable, Sendable {
-    public let host: String        // "127.0.0.1" or "ec2-host"
-    public let port: Int           // 2486 local, 443 remote (Caddy TLS)
-    public let token: String?      // bearer token (nil for local)
-    public let useTLS: Bool        // false for local, true for remote
+Both services must:
+- Build requests from `connection`
+- Inject `Authorization: Bearer <token>` when non-local auth is configured
+- Use timeout tiers:
+  - Local: request 3s / resource 10s
+  - Remote: request 10s / resource 30s
 
-    public var httpBaseURL: URL {
-        let scheme = useTLS ? "https" : "http"
-        return URL(string: "\(scheme)://\(host):\(port)")!
-    }
+`RepoState` becomes connection-driven: rebuilding wave/event services when the active connection changes.
 
-    public var wsBaseURL: URL {
-        let scheme = useTLS ? "wss" : "ws"
-        return URL(string: "\(scheme)://\(host):\(port)/ws")!
-    }
+### 3) Implement TOFU TLS pinning (fail closed on cert change)
 
-    public var isRemote: Bool { host != "127.0.0.1" }
+For remote TLS connections:
+- On first successful TLS handshake, store server certificate fingerprint (`SHA-256`) for `host:port`
+- On future connects, require exact fingerprint match
+- If fingerprint changes: mark connection `trustMismatch`, block requests/events, show “Trust New Certificate” flow
 
-    public static let local = ServerConnection(
-        host: "127.0.0.1", port: 2486, token: nil, useTLS: false
-    )
-}
-```
+This follows SSH known_hosts semantics (TOFU + pinning), but with explicit UI approval on mismatch.
 
-### Auth header injection
+### 4) Harden WebSocket reliability for WAN
 
-```swift
-// LocalWaveService — add token to requests
+Replace fixed reconnect loop with exponential backoff + jitter:
+- `1s, 2s, 4s, 8s, 16s, 30s cap`
+- Reset backoff on successful `connected`
+- Immediate retry when `NWPathMonitor` reports network restored
 
-private func makeRequest(_ url: URL, method: String = "GET") -> URLRequest {
-    var request = URLRequest(url: url)
-    request.httpMethod = method
-    if let token = connection.token {
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    }
-    return request
-}
-```
+Expose connection state to UI (`connecting`, `connected`, `reconnecting`, `authFailed`, `trustRequired`, `disconnected(error)`), not just a boolean.
 
-Same for WebSocket connection in `LocalEventService`:
-```swift
-var request = URLRequest(url: connection.wsBaseURL)
-if let token = connection.token {
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-}
-let task = session.webSocketTask(with: request)
-```
+### 5) Add connection settings UI
 
-### Parameterize services
+Add a `ConnectionSettingsView` (sheet/menu):
+- Host
+- Port
+- Use TLS toggle
+- Auth mode (`none`, `static token`) for Phase 05
+- Secure token field
+- Connect/Test button
 
-`LocalWaveService` and `LocalEventService` currently hardcode the URL. Change constructors to accept `ServerConnection`:
+UI behavior:
+- Show active server in sidebar header
+- Show explicit disconnected reason and retry
+- Keep one-click return to local mode
 
-```swift
-public init(connection: ServerConnection = .local) {
-    self.connection = connection
-    self.baseURL = connection.httpBaseURL.appendingPathComponent("v0")
-    // ... existing setup
-}
-```
+### 6) Add remote repo discovery endpoint (minimal lfd expansion)
 
-### Timeouts for WAN
+To avoid manual server path entry, add `GET /v0/repos` in lfd returning unique repo roots from stored waves:
+- `path`
+- `name` (basename)
+- `wave_count`
 
-Local defaults (3s request, 10s resource) are too tight for WAN. Scale by connection type:
+Concerto flow:
+1. Connect to server
+2. Fetch repos
+3. User picks repo
+4. Use selected **remote repo path** for all wave/worktree APIs
 
-```swift
-private var requestTimeout: TimeInterval {
-    connection.host == "127.0.0.1" ? 3 : 10
-}
-private var resourceTimeout: TimeInterval {
-    connection.host == "127.0.0.1" ? 10 : 30
-}
-```
+If zero repos exist, show a clear empty state with the exact command to bootstrap first remote wave (`lfq create <name> <repo>` on the server).
 
-### Reconnection
+## Alternatives considered
 
-WebSocket will drop more often over WAN. The existing reconnection logic in `LocalEventService` needs:
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep local-only services, add a single “remote URL override” string | Quick patch, low code churn | Too fragile: no auth abstraction, no TLS trust model, no room for Studio auth in Phase 07 |
+| Build full multi-server manager now (many concurrent daemons) | Future-proof and powerful | Too much scope for Phase 05; increases UI and state complexity before proving single-remote flow |
+| Skip TOFU and let users disable TLS validation | Easiest networking path | Unacceptable security posture; enables silent MITM and breaks trust model for remote control |
 
-- Exponential backoff (1s → 2s → 4s → 8s → 30s cap)
-- Visual indicator in Concerto when disconnected
-- Auto-reconnect on network change (NWPathMonitor)
+## Key decisions
 
-```swift
-import Network
+- **Decision: one active server at a time.**
+  - Matches remote roadmap constraint: single-server now, daemon picker later.
+  - Keeps state management tractable while shipping remote quickly.
 
-private let monitor = NWPathMonitor()
+- **Decision: TOFU pinning is mandatory for remote TLS.**
+  - We will not offer “insecure skip verify.”
+  - First connect stores trust; cert rotation requires explicit user re-trust.
 
-func startMonitoring() {
-    monitor.pathUpdateHandler = { [weak self] path in
-        if path.status == .satisfied {
-            self?.reconnectIfNeeded()
-        }
-    }
-    monitor.start(queue: .global())
-}
-```
+- **Decision: connection state is explicit, not boolean.**
+  - Avoids opaque “red dot” failures.
+  - Lets users distinguish auth failure vs network outage vs cert mismatch.
 
-### Settings UI
+- **Decision: repo selection uses server paths from lfd, never local filesystem paths.**
+  - Prevents subtle path mismatch bugs when client and daemon run on different machines.
 
-Minimal for now — a connection settings view where you enter host, port, and token:
+- **Principles followed from `wave/remote/README.md`:**
+  - “The protocol doesn't change — only the host and transport.”
+  - “Single server” for this phase.
 
-```swift
-struct ConnectionSettingsView: View {
-    @State private var host = "127.0.0.1"
-    @State private var port = "2486"
-    @State private var token = ""
-    @State private var useTLS = false
+- **Wild success rehearsal:**
+  - Users add a remote host once, then forget about transport details.
+  - Temporary network drops self-heal; logs/events resume without manual reconnect.
+  - Teams treat Concerto as a reliable dashboard for long-running remote waves.
 
-    var body: some View {
-        Form {
-            TextField("Host", text: $host)
-            TextField("Port", text: $port)
-            SecureField("Token", text: $token)
-            Toggle("Use TLS", isOn: $useTLS)
-            Button("Connect") { connect() }
-        }
-    }
-}
-```
+- **Wild failure rehearsal (and guardrails):**
+  - Failure: silent cert changes accepted -> security incident. Guardrail: fail-closed pin mismatch.
+  - Failure: reconnect storms under packet loss. Guardrail: bounded exponential backoff + jitter.
+  - Failure: users think daemon is broken when token expired. Guardrail: explicit auth error state and message.
 
-Store connection in UserDefaults or Keychain (token specifically in Keychain).
+## Scope
 
-### Repo discovery
+- In scope:
+  - `ServerConnection` model + persistence
+  - Auth header injection for HTTP + WebSocket
+  - TLS TOFU certificate pinning
+  - Reconnect/backoff/network restoration handling
+  - Connection settings UI (host/port/TLS/token)
+  - lfd `GET /v0/repos` + Concerto repo picker
+  - Clear disconnected/error states with retry
+  - Local mode remains default and fully functional
 
-lfd already knows its repos. Concerto queries for available repos on connect instead of requiring manual path entry:
-
-```swift
-// GET /v0/repos → list of repos lfd manages
-let repos = try await service.listRepos()
-// Each repo includes its path, name, and active waves
-```
-
-Concerto shows a repo picker when connecting to a new server. No manual path entry.
-
-### Daemon discovery (Phase 07)
-
-With studio auth, manual host/port entry is replaced by auto-discovery. After sign-in, Concerto queries `GET /api/v1/daemons/discover` which returns a list of the user's registered daemons (machine_id, machine_name, url, last_heartbeat_at). Concerto shows a daemon picker when multiple machines are available, then connects to the selected one.
-
-## Constraints
-
-- **TLS required**: Remote connections use HTTPS/WSS. Self-signed certs (Phase 04 Caddy) trusted via cert pinning on first connect.
-- **Single server**: Concerto connects to one lfd at a time. Multi-server is future work (daemon picker from Phase 07 discovery is the first step).
-- **No offline mode**: If the connection drops, show disconnected state. Don't cache stale data.
+- Out of scope:
+  - Studio sign-in UX and JWT lifecycle (Phase 07)
+  - Multi-server simultaneous monitoring
+  - Offline caching/sync of wave state
+  - Remote file browsing/editor integration (Phase 06/08)
 
 ## Done when
 
-- Concerto connects to a remote lfd via HTTP+WS
-- Wave list loads from remote
-- Creating, running, stopping, landing waves works
-- Log streaming works (may have higher latency)
-- WebSocket events update UI in real time
-- Connection settings UI exists (host, port, token)
-- Disconnection shows clear error state with retry
-- Local mode still works as default
+```bash
+# 1) Start remote stack with TLS proxy and static auth
+cd /Users/jack/src/loopflow.remote
+docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+
+# 2) Run Swift package tests after implementation
+swift test --package-path swift
+```
+
+Observable outcomes:
+1. Concerto connects to `https://<host>:443` with static token and shows connected state.
+2. Repo picker loads from `GET /v0/repos`; selecting a repo loads remote waves.
+3. Create/run/stop/land/next operations succeed against remote lfd.
+4. WebSocket events and log streaming update in real time after WAN reconnects.
+5. Cert fingerprint mismatch blocks connection until explicit re-trust.
+6. Switching back to `.local` works without restarting the app.

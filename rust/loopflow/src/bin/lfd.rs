@@ -311,8 +311,10 @@ mod tests {
         std::env::remove_var("LFD_DB_PATH");
         std::env::remove_var("LFD_DATABASE_URL");
 
-        let mut config = LfdConfig::default();
-        config.storage = StorageType::Postgres;
+        let config = LfdConfig {
+            storage: StorageType::Postgres,
+            ..LfdConfig::default()
+        };
         let err =
             storage_config_from_config(&config).expect_err("postgres should require database url");
         assert_eq!(

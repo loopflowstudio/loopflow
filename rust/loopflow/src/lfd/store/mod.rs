@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
@@ -55,6 +56,392 @@ pub enum StoreError {
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageConfig {
+    Sqlite { path: PathBuf },
+    Postgres { database_url: String },
+}
+
+impl StorageConfig {
+    pub fn sqlite(path: PathBuf) -> Self {
+        Self::Sqlite { path }
+    }
+
+    pub fn postgres(database_url: impl Into<String>) -> Self {
+        Self::Postgres {
+            database_url: database_url.into(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Store {
+    backend: StoreBackend,
+}
+
+#[derive(Debug)]
+enum StoreBackend {
+    Sqlite(sqlite::SqliteStore),
+    Postgres(postgres::PostgresStore),
+}
+
+impl Store {
+    pub fn into_shared(self) -> SharedStore {
+        match self.backend {
+            StoreBackend::Sqlite(store) => Arc::new(store) as SharedStore,
+            StoreBackend::Postgres(store) => Arc::new(store) as SharedStore,
+        }
+    }
+
+    fn as_run_store(&self) -> &dyn RunStore {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => store,
+            StoreBackend::Postgres(store) => store,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+pub trait WaveStateStore: Send + Sync {
+    async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
+    async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
+    async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
+    async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
+    async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
+    async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
+
+    async fn list_wave_runs(
+        &self,
+        wave_id: Option<&LfdId>,
+        limit: Option<u32>,
+    ) -> StoreResult<Vec<WaveRun>>;
+    async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>>;
+    async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
+    async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
+    async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
+    async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
+
+    async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
+    async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
+    async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>>;
+    async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
+    async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
+    async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()>;
+    async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32>;
+
+    async fn list_pending_activations(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<PendingActivation>>;
+    async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
+    async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
+    async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32>;
+    async fn get_pending_for_stimulus(
+        &self,
+        wave_id: &LfdId,
+        stimulus_id: &LfdId,
+    ) -> StoreResult<Option<PendingActivation>>;
+
+    async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
+    async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
+}
+
+#[async_trait::async_trait]
+pub trait ExecutionStore: Send + Sync {
+    async fn list_fork_runs(
+        &self,
+        wave_run_id: &LfdId,
+        step_index: u32,
+    ) -> StoreResult<Vec<ForkRun>>;
+    async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
+    async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
+
+    async fn list_agents(&self) -> StoreResult<Vec<Agent>>;
+    async fn list_agent_history(
+        &self,
+        worktree: Option<&str>,
+        repo: Option<&str>,
+        limit: Option<u32>,
+    ) -> StoreResult<Vec<Agent>>;
+    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>>;
+    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>>;
+    async fn start_agent(&self, agent: &Agent) -> StoreResult<()>;
+    async fn update_agent_status(
+        &self,
+        agent_id: &LfdId,
+        status: i32,
+        pid: Option<u32>,
+        container_id: Option<&str>,
+    ) -> StoreResult<()>;
+    async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
+    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>>;
+    async fn end_active_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+        status: i32,
+        ended_at: i64,
+    ) -> StoreResult<()>;
+    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>>;
+
+    async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
+}
+
+#[async_trait::async_trait]
+pub trait StoreAdmin: Send + Sync {
+    async fn health_check(&self) -> StoreResult<()>;
+    async fn schema_version(&self) -> StoreResult<String>;
+}
+
+#[async_trait::async_trait]
+impl WaveStateStore for Store {
+    async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
+        self.as_run_store().list_waves(repo)
+    }
+
+    async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+        self.as_run_store().get_wave(wave_id)
+    }
+
+    async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
+        self.as_run_store().get_wave_by_name(name)
+    }
+
+    async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
+        self.as_run_store().create_wave(wave)
+    }
+
+    async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
+        self.as_run_store().update_wave(wave)
+    }
+
+    async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+        self.as_run_store().delete_wave(wave_id)
+    }
+
+    async fn list_wave_runs(
+        &self,
+        wave_id: Option<&LfdId>,
+        limit: Option<u32>,
+    ) -> StoreResult<Vec<WaveRun>> {
+        self.as_run_store().list_wave_runs(wave_id, limit)
+    }
+
+    async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        self.as_run_store().get_wave_run(wave_run_id)
+    }
+
+    async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        self.as_run_store().get_active_wave_run(wave_id)
+    }
+
+    async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        self.as_run_store().get_latest_wave_run(wave_id)
+    }
+
+    async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+        self.as_run_store().create_wave_run(run)
+    }
+
+    async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+        self.as_run_store().update_wave_run(run)
+    }
+
+    async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
+        self.as_run_store().list_stimuli(wave_id)
+    }
+
+    async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+        self.as_run_store().list_stimuli_by_kind(kind)
+    }
+
+    async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
+        self.as_run_store().get_stimulus(stimulus_id)
+    }
+
+    async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+        self.as_run_store().create_stimulus(stimulus)
+    }
+
+    async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+        self.as_run_store().update_stimulus(stimulus)
+    }
+
+    async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
+        self.as_run_store().delete_stimulus(stimulus_id)
+    }
+
+    async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        self.as_run_store().delete_stimuli_for_wave(wave_id)
+    }
+
+    async fn list_pending_activations(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<PendingActivation>> {
+        self.as_run_store().list_pending_activations(wave_id)
+    }
+
+    async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
+        self.as_run_store().create_pending_activation(activation)
+    }
+
+    async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
+        self.as_run_store().update_pending_activation(activation)
+    }
+
+    async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        self.as_run_store().delete_pending_activations(wave_id)
+    }
+
+    async fn get_pending_for_stimulus(
+        &self,
+        wave_id: &LfdId,
+        stimulus_id: &LfdId,
+    ) -> StoreResult<Option<PendingActivation>> {
+        self.as_run_store()
+            .get_pending_for_stimulus(wave_id, stimulus_id)
+    }
+
+    async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
+        self.as_run_store().get_summary(wave_id)
+    }
+
+    async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
+        self.as_run_store().upsert_summary(summary)
+    }
+}
+
+#[async_trait::async_trait]
+impl ExecutionStore for Store {
+    async fn list_fork_runs(
+        &self,
+        wave_run_id: &LfdId,
+        step_index: u32,
+    ) -> StoreResult<Vec<ForkRun>> {
+        self.as_run_store().list_fork_runs(wave_run_id, step_index)
+    }
+
+    async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
+        self.as_run_store().upsert_fork_run(fork_run)
+    }
+
+    async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+        self.as_run_store()
+            .delete_fork_runs(wave_run_id, step_index)
+    }
+
+    async fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+        self.as_run_store().list_agents()
+    }
+
+    async fn list_agent_history(
+        &self,
+        worktree: Option<&str>,
+        repo: Option<&str>,
+        limit: Option<u32>,
+    ) -> StoreResult<Vec<Agent>> {
+        self.as_run_store()
+            .list_agent_history(worktree, repo, limit)
+    }
+
+    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+        self.as_run_store().get_agent(agent_id)
+    }
+
+    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+        self.as_run_store().get_waiting_agent_for_wave(wave_id)
+    }
+
+    async fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+        self.as_run_store().start_agent(agent)
+    }
+
+    async fn update_agent_status(
+        &self,
+        agent_id: &LfdId,
+        status: i32,
+        pid: Option<u32>,
+        container_id: Option<&str>,
+    ) -> StoreResult<()> {
+        self.as_run_store()
+            .update_agent_status(agent_id, status, pid, container_id)
+    }
+
+    async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
+        self.as_run_store().end_agent(agent_id, status, ended_at)
+    }
+
+    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+        self.as_run_store().get_active_agents_for_wave(wave_id)
+    }
+
+    async fn end_active_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+        status: i32,
+        ended_at: i64,
+    ) -> StoreResult<()> {
+        self.as_run_store()
+            .end_active_agent_for_wave(wave_id, status, ended_at)
+    }
+
+    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+        self.as_run_store().get_stuck_agents(older_than_secs)
+    }
+
+    async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
+        self.as_run_store().fail_orphaned_runs()
+    }
+}
+
+#[async_trait::async_trait]
+impl StoreAdmin for Store {
+    async fn health_check(&self) -> StoreResult<()> {
+        self.as_run_store().health_check()
+    }
+
+    async fn schema_version(&self) -> StoreResult<String> {
+        self.as_run_store().schema_version()
+    }
+}
+
+pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
+    match cfg {
+        StorageConfig::Sqlite { path } => Ok(Store {
+            backend: StoreBackend::Sqlite(sqlite::SqliteStore::new(path)?),
+        }),
+        StorageConfig::Postgres { database_url } => Ok(Store {
+            backend: StoreBackend::Postgres(
+                postgres::PostgresStore::connect_async(database_url).await?,
+            ),
+        }),
+    }
+}
+
+pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResult<String> {
+    match cfg {
+        StorageConfig::Sqlite { path } => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    StoreError::InvalidData(format!("failed to create db dir: {err}"))
+                })?;
+            }
+            let conn = rusqlite::Connection::open(path)?;
+            if !status_only {
+                migrations::apply_sqlite(&conn)?;
+            }
+            migrations::latest_version_sqlite(&conn)
+        }
+        StorageConfig::Postgres { database_url } => {
+            if status_only {
+                postgres::PostgresStore::migrate_status_async(database_url).await
+            } else {
+                postgres::PostgresStore::migrate_async(database_url).await
+            }
+        }
+    }
+}
 
 #[allow(dead_code)]
 pub trait RunStore: Send + Sync {
@@ -153,7 +540,6 @@ mod tests {
         WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
     use std::env;
-    use std::path::PathBuf;
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
@@ -368,7 +754,7 @@ mod tests {
     /// get_active_wave_run excludes failed runs (they're not active).
     /// get_latest_wave_run returns the most recent run regardless of status,
     /// so the UI can still display error details for failed waves.
-    fn run_active_excludes_failed_latest_includes(store: &dyn RunStore) {
+    fn run_active_excludes_failed_latest_includes_suite(store: &dyn RunStore) {
         let wave = make_wave("/repo-fail-test");
         store.create_wave(&wave).unwrap();
 
@@ -452,12 +838,23 @@ mod tests {
 
     #[test]
     fn sqlite_store_suite() {
-        let path = env::temp_dir()
-            .join(format!("lfd-test-{}.db", LfdId::new()))
-            .to_string_lossy()
-            .to_string();
-        let store = super::sqlite::SqliteStore::new(&PathBuf::from(path)).unwrap();
-        run_store_suite(&store);
-        run_active_excludes_failed_latest_includes(&store);
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = super::StorageConfig::sqlite(db_path);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let store = runtime.block_on(super::open_store(&config)).unwrap();
+
+        let shared = store.into_shared();
+        run_store_suite(shared.as_ref());
+        run_active_excludes_failed_latest_includes_suite(shared.as_ref());
+    }
+
+    #[test]
+    fn run_active_excludes_failed_latest_includes() {
+        let path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let store = super::sqlite::SqliteStore::new(&path).unwrap();
+        run_active_excludes_failed_latest_includes_suite(&store);
     }
 }

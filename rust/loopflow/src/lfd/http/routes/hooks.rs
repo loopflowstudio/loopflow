@@ -292,7 +292,7 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
 fn is_open_pr_state(state: Option<&str>) -> bool {
     match state {
         Some(value) => value.eq_ignore_ascii_case("open") || value.eq_ignore_ascii_case("draft"),
-        None => true,
+        None => false,
     }
 }
 
@@ -393,6 +393,13 @@ mod tests {
 
         let closed = wave_run_with_pr(WaveRunKind::Main, Some("closed"), Some("feature"));
         assert!(!run_matches_ci_target(&closed, Some("feature"), Some(1)));
+
+        let unknown_state = wave_run_with_pr(WaveRunKind::Main, None, Some("feature"));
+        assert!(!run_matches_ci_target(
+            &unknown_state,
+            Some("feature"),
+            Some(1)
+        ));
 
         let sidecar = wave_run_with_pr(WaveRunKind::Sidecar, Some("open"), Some("feature"));
         assert!(!run_matches_ci_target(&sidecar, Some("feature"), Some(1)));

@@ -1,4 +1,4 @@
-// Row view for an orphan worktree in the "On Disk" sidebar section.
+// Row view for an orphan worktree in the "Worktrees" sidebar section.
 
 import SwiftUI
 import LoopflowCore
@@ -12,7 +12,7 @@ struct WorktreeRow: View {
     private let launcher = TerminalLauncher()
 
     private var displayName: String {
-        worktree.branch ?? worktree.shortName ?? "detached"
+        worktree.shortName ?? worktree.branch ?? "detached"
     }
 
     private var worktreeURL: URL {

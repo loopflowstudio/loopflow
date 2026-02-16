@@ -12,7 +12,7 @@ use crate::lfd::http::dto::{
 use crate::lfd::http::run_store;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{SharedStore, StoreError};
-use crate::lfd::types::Wave;
+use crate::lfd::types::{Wave, WaveRun};
 use axum::http::StatusCode;
 use axum::Json;
 
@@ -52,18 +52,10 @@ pub async fn build_wave_dto(
     let wave_id = wave.id.clone();
     let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
     let wave_id = wave.id.clone();
+    // Count unique open/draft PRs across runs (dedup by PR number).
     let open_pr_count = run_store(store, move |store| {
         let runs = store.list_wave_runs(Some(&wave_id), None)?;
-        let count = runs
-            .into_iter()
-            .filter(|run| {
-                run.snapshot
-                    .pr
-                    .as_ref()
-                    .is_some_and(|pr| is_open_pr_state(pr.state.as_deref()))
-            })
-            .count();
-        Ok(count as u32)
+        Ok(count_unique_open_prs(runs))
     })
     .await?;
     let repo = wave.repo.clone();
@@ -190,8 +182,20 @@ fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
 fn is_open_pr_state(state: Option<&str>) -> bool {
     match state {
         Some(state) => state.eq_ignore_ascii_case("open") || state.eq_ignore_ascii_case("draft"),
-        None => true,
+        None => false,
     }
+}
+
+fn count_unique_open_prs(runs: Vec<WaveRun>) -> u32 {
+    let mut seen_pr_numbers = std::collections::HashSet::new();
+    runs.into_iter()
+        .filter_map(|run| run.snapshot.pr)
+        .filter(|pr| is_open_pr_state(pr.state.as_deref()))
+        .filter(|pr| {
+            pr.number
+                .is_none_or(|number| seen_pr_numbers.insert(number))
+        })
+        .count() as u32
 }
 
 /// Find the nearest ancestor branch for diff comparison.
@@ -328,6 +332,39 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::types::{PullRequest, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus};
+
+    fn wave_run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> WaveRun {
+        WaveRun {
+            id: LfdId::new(),
+            wave_id: LfdId::new(),
+            snapshot: WaveRunSnapshot {
+                repo: ".".to_string(),
+                flow: "ship".to_string(),
+                direction: Vec::new(),
+                area: Vec::new(),
+                pr: Some(PullRequest {
+                    url: "https://example.test/pr/1".to_string(),
+                    number: pr_number,
+                    state: pr_state.map(ToString::to_string),
+                    title: Some("test".to_string()),
+                    branch: Some("feature".to_string()),
+                }),
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: "/tmp/worktree".to_string(),
+            branch: "feature".to_string(),
+            started_at: None,
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
+        }
+    }
 
     #[test]
     fn current_tracking_branch_matches_local_branch_name() {
@@ -343,5 +380,27 @@ mod tests {
             "origin/jack.wave.20260209_1001",
             "jack.wave.20260209_1000"
         ));
+    }
+
+    #[test]
+    fn unknown_pr_state_is_not_open() {
+        assert!(!is_open_pr_state(None));
+        assert!(!is_open_pr_state(Some("closed")));
+        assert!(!is_open_pr_state(Some("merged")));
+        assert!(is_open_pr_state(Some("open")));
+        assert!(is_open_pr_state(Some("draft")));
+    }
+
+    #[test]
+    fn count_unique_open_prs_dedupes_by_pr_number() {
+        let runs = vec![
+            wave_run_with_pr(Some(101), Some("open")),
+            wave_run_with_pr(Some(101), Some("draft")),
+            wave_run_with_pr(Some(102), Some("open")),
+            wave_run_with_pr(Some(103), Some("closed")),
+            wave_run_with_pr(Some(104), None),
+        ];
+
+        assert_eq!(count_unique_open_prs(runs), 2);
     }
 }

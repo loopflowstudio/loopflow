@@ -21,7 +21,9 @@ pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
             Ok(flow) => Ok(Target::Flow(flow)),
             Err(_) => {
                 // Return the original step-not-found error for better messaging
-                Err(anyhow::anyhow!("step or flow not found: {name}"))
+                Err(anyhow::anyhow!(
+                    "step or flow not found: {name}. Run `lf --list` to see available steps."
+                ))
             }
         },
     }
@@ -33,14 +35,35 @@ pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
 
 pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
     ("Setup", &["init"]),
-    ("Planning & Design", &["design", "explore", "refine"]),
+    (
+        "Planning & Design",
+        &[
+            "design",
+            "explore",
+            "refine",
+            "kickoff",
+            "wave-plan",
+            "5whys",
+        ],
+    ),
     (
         "Implementation",
-        &["implement", "iterate", "expand", "reduce"],
+        &["implement", "iterate", "expand", "reduce", "compress"],
     ),
-    ("Quality", &["review", "polish", "lint", "debug"]),
+    ("Quality", &["review", "polish", "lint", "debug", "gate"]),
     ("Scan", &["scan/cves", "scan/deps", "scan/upstream"]),
     ("Git", &["commit", "rebase"]),
+    (
+        "Ops",
+        &[
+            "ingest",
+            "add-to-wave",
+            "update-wave",
+            "consolidate",
+            "synthesize",
+            "validate",
+        ],
+    ),
 ];
 
 pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
@@ -59,6 +82,17 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("commit", "Commit with generated message"),
         ("rebase", "Rebase onto main"),
         ("refine", "Iteratively refine text"),
+        ("compress", "Simplify touched code"),
+        ("gate", "Ship-ready check with reviewer docs"),
+        ("5whys", "Root cause analysis on a bug fix"),
+        ("kickoff", "Elaborate design with alternatives"),
+        ("wave-plan", "Synthesize analysis into wave plan"),
+        ("ingest", "Pick wave item, move to scratch/"),
+        ("add-to-wave", "Promote from scratch/ to wave/"),
+        ("update-wave", "Update wave status after work"),
+        ("consolidate", "Reorganize scratch/ for wave"),
+        ("synthesize", "Combine multiple perspectives"),
+        ("validate", "Validate flows, steps, and directions"),
         ("scan/cves", "Check dependencies for CVEs"),
         ("scan/deps", "Check for major version bumps"),
         ("scan/upstream", "Check external APIs for changes"),

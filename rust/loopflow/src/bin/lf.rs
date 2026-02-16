@@ -30,6 +30,12 @@ const BOOL_FLAGS: &[&str] = &[
     "--web",
     "--chrome",
     "--no-chrome",
+    "--diff-files",
+    "--no-diff-files",
+    "--diff",
+    "--no-diff",
+    "--summaries",
+    "--no-summaries",
     "-h",
     "--help",
     "-V",
@@ -38,6 +44,14 @@ const BOOL_FLAGS: &[&str] = &[
 
 /// Known subcommands that should not be treated as step names.
 const KNOWN_COMMANDS: &[&str] = &["run", ":", "ops", "help"];
+
+fn is_value_flag(arg: &str) -> bool {
+    VALUE_FLAGS.contains(&arg)
+}
+
+fn is_known_flag(arg: &str) -> bool {
+    BOOL_FLAGS.contains(&arg) || is_value_flag(arg)
+}
 
 /// Reorder args so flags come before the step/flow name.
 /// This allows `lf debug -c` to work like `lf -c debug`.
@@ -71,7 +85,7 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
             if arg.starts_with('-') {
                 // It's a flag before the step
                 flags_before.push(arg.clone());
-                if VALUE_FLAGS.contains(&arg.as_str()) && i + 1 < rest.len() {
+                if is_value_flag(arg) && i + 1 < rest.len() {
                     i += 1;
                     flags_before.push(rest[i].clone());
                 }
@@ -84,9 +98,9 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
             // After the step name
             if arg.starts_with('-') {
                 // Check if it's a known lf flag
-                if BOOL_FLAGS.contains(&arg.as_str()) || VALUE_FLAGS.contains(&arg.as_str()) {
+                if is_known_flag(arg) {
                     flags_after.push(arg.clone());
-                    if VALUE_FLAGS.contains(&arg.as_str()) && i + 1 < rest.len() {
+                    if is_value_flag(arg) && i + 1 < rest.len() {
                         i += 1;
                         flags_after.push(rest[i].clone());
                     }
@@ -108,6 +122,26 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
     result.extend(flags_after);
     result.extend(step_and_args);
     result
+}
+
+fn join_args(args: &[String]) -> Option<String> {
+    if args.is_empty() {
+        None
+    } else {
+        Some(args.join(" "))
+    }
+}
+
+fn run_target(name: &str, message: Option<&str>, cli: &Cli) -> anyhow::Result<()> {
+    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    match loopflow::lf::discovery::discover_target(&repo_root, name)? {
+        loopflow::lf::discovery::Target::Step(_) => {
+            loopflow::lf::commands::run::run(Some(name), message, cli)
+        }
+        loopflow::lf::discovery::Target::Flow(flow) => {
+            loopflow::lf::commands::flow::run(&flow, message, cli, &repo_root)
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -144,20 +178,8 @@ fn main() -> anyhow::Result<()> {
 
     match &cli.command {
         Some(Commands::Run { name, args }) => {
-            let message = if args.is_empty() {
-                None
-            } else {
-                Some(args.join(" "))
-            };
-            let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-            match loopflow::lf::discovery::discover_target(&repo_root, name)? {
-                loopflow::lf::discovery::Target::Step(_) => {
-                    loopflow::lf::commands::run::run(Some(name), message.as_deref(), &cli)
-                }
-                loopflow::lf::discovery::Target::Flow(flow) => {
-                    loopflow::lf::commands::flow::run(&flow, message.as_deref(), &cli, &repo_root)
-                }
-            }
+            let message = join_args(args);
+            run_target(name, message.as_deref(), &cli)
         }
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
@@ -166,20 +188,8 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Ops { op }) => loopflow::lf::commands::ops::run(op),
         Some(Commands::External(args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(args)?;
-            let message = if step_args.is_empty() {
-                None
-            } else {
-                Some(step_args.join(" "))
-            };
-            let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-            match loopflow::lf::discovery::discover_target(&repo_root, &name)? {
-                loopflow::lf::discovery::Target::Step(_) => {
-                    loopflow::lf::commands::run::run(Some(&name), message.as_deref(), &cli)
-                }
-                loopflow::lf::discovery::Target::Flow(flow) => {
-                    loopflow::lf::commands::flow::run(&flow, message.as_deref(), &cli, &repo_root)
-                }
-            }
+            let message = join_args(&step_args);
+            run_target(&name, message.as_deref(), &cli)
         }
         None => loopflow::lf::commands::run::run(None, None, &cli),
     }

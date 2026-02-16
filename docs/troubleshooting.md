@@ -90,16 +90,11 @@ The loop hit its PR limit. Options:
 Reduce context:
 
 ```bash
-lf review --no-lfdocs           # skip repo docs
 lf review --no-diff-files       # skip branch files
 lf review --area src/small/     # scope to specific area
 ```
 
-Use summaries for large codebases:
-
-```bash
-lf ops summarize src/
-```
+To skip lfdocs (`wave/`, `scratch/`, root `.md` files), set `lfdocs: false` in `.lf/config.yaml`.
 
 See [Configuration](config.md) for context options.
 

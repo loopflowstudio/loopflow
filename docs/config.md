@@ -107,7 +107,7 @@ def flow():
 
 | | |
 |---|---|
-| **CLI** | `--lfdocs` / `--no-lfdocs` |
+| **CLI** | Config only (no per-run flag) |
 | **Config** | `lfdocs: true` |
 | **Default** | `true` (included) |
 
@@ -138,11 +138,11 @@ summaries:
     tokens: 5000
 ```
 
-Generate with `lf ops summarize`. Summaries give the coding agent codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
+Summaries give the coding agent codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
 
 | | |
 |---|---|
-| **CLI** | `--no-summaries` |
+| **CLI** | `--summaries` / `--no-summaries` |
 | **Default** | included if configured |
 
 ### Clipboard
@@ -326,8 +326,6 @@ summaries:
   - path: lib
     tokens: 5000
 ```
-
-Generate with `lf ops summarize`.
 
 ### SkillRegistry
 

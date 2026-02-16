@@ -202,26 +202,12 @@ async fn list_wave_runs(
         |r| &r.id,
     );
 
-    let live_projection = if let Some(wave_id) = wave_id.as_ref() {
-        let wave_id_for_wave = wave_id.clone();
-        let wave = run_store(&state.store, move |store| store.get_wave(&wave_id_for_wave))
-            .await
-            .map_err(map_store_error)?;
-        if let Some(wave) = wave {
-            let wave_id_for_stack = wave_id.clone();
-            let stack_runs = run_store(&state.store, move |store| {
-                store.list_stack_runs(&wave_id_for_stack)
-            })
-            .await
-            .map_err(map_store_error)?;
-            Some(
-                build_wave_live_pr_projection(&state.store, &state.github, &wave, &stack_runs)
-                    .await
-                    .map_err(map_store_error)?,
-            )
-        } else {
-            None
-        }
+    let live_projection = if wave_id.is_some() {
+        Some(
+            build_wave_live_pr_projection(&state.store, &state.github, &runs)
+                .await
+                .map_err(map_store_error)?,
+        )
     } else {
         None
     };

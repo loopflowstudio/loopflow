@@ -59,7 +59,7 @@ pub async fn build_wave_dto(
     let wave_id = wave.id.clone();
     let stack_runs = run_store(store, move |store| store.list_stack_runs(&wave_id)).await?;
     let live_pr_projection =
-        build_wave_live_pr_projection(store, github_config, &wave, &stack_runs).await?;
+        build_wave_live_pr_projection(store, github_config, &stack_runs).await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
     let flow_name = wave.flow.clone();
@@ -166,15 +166,9 @@ pub(crate) fn live_pr_for_run<'a>(
 pub(crate) async fn build_wave_live_pr_projection(
     store: &SharedStore,
     github_config: &GitHubConfig,
-    _wave: &Wave,
-    stack_runs: &[WaveRun],
+    runs: &[WaveRun],
 ) -> Result<WaveLivePrProjection, StoreError> {
-    let mut targets: HashSet<LivePrKey> = HashSet::new();
-    for run in stack_runs {
-        if let Some(key) = run_live_pr_key(run) {
-            targets.insert(key);
-        }
-    }
+    let targets: HashSet<LivePrKey> = runs.iter().filter_map(run_live_pr_key).collect();
 
     let mut stale_keys: HashSet<LivePrKey> = HashSet::new();
     if !targets.is_empty() {
@@ -258,20 +252,17 @@ pub(crate) async fn build_wave_live_pr_projection(
         }
     }
 
-    let open_pr_count = targets
-        .iter()
-        .filter(|key| {
-            live_states
-                .get(*key)
-                .is_some_and(|state| state.state == LivePrState::Open)
-        })
+    let open_pr_count = live_states
+        .values()
+        .filter(|state| state.state == LivePrState::Open)
         .count() as u32;
+    let has_stale_pr_state = !stale_keys.is_empty();
 
     Ok(WaveLivePrProjection {
         live_states,
-        stale_keys: stale_keys.clone(),
+        stale_keys,
         open_pr_count,
-        has_stale_pr_state: !stale_keys.is_empty(),
+        has_stale_pr_state,
     })
 }
 

@@ -12,8 +12,8 @@ use crate::lfd::store::rows::{
 };
 use crate::lfd::store::{ForkRun, RunStore, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, LivePrState, LivePullRequestState, PendingActivation, Stimulus, Summary,
-    Wave, WaveRun, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, LivePullRequestState, PendingActivation, Stimulus, Summary, Wave, WaveRun,
+    WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -457,45 +457,6 @@ impl RunStore for PostgresStore {
                 .await?;
             rows.iter().map(map_wave_run_row).collect()
         })
-    }
-
-    fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        let runs = self.list_stack_runs(wave_id)?;
-        for run in runs {
-            if run.stack_status == WaveRunStackStatus::Merged
-                || run.stack_status == WaveRunStackStatus::Superseded
-            {
-                continue;
-            }
-
-            let pr_number = run.snapshot.pr.as_ref().and_then(|pr| pr.number);
-            let Some(pr_number) = pr_number else {
-                return Ok(Some(run));
-            };
-
-            let Some(live_state) = self.get_live_pr_state(&run.snapshot.repo, pr_number)? else {
-                return Ok(Some(run));
-            };
-            if live_state.state != LivePrState::Merged {
-                return Ok(Some(run));
-            }
-        }
-        Ok(None)
-    }
-
-    fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
-        let Some(parent) = self.get_wave_run(run_id)? else {
-            return Ok(Vec::new());
-        };
-        let descendants = self
-            .list_stack_runs(&parent.wave_id)?
-            .into_iter()
-            .filter(|run| {
-                run.stack_group_id == parent.stack_group_id
-                    && run.stack_position > parent.stack_position
-            })
-            .collect();
-        Ok(descendants)
     }
 
     fn get_live_pr_state(

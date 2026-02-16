@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    Agent, LivePullRequestState, PendingActivation, Stimulus, Summary, Wave, WaveRun,
+    Agent, LivePrState, LivePullRequestState, PendingActivation, Stimulus, Summary, Wave, WaveRun,
+    WaveRunStackStatus,
 };
 
 pub mod migrations;
@@ -503,8 +504,44 @@ pub trait RunStore: Send + Sync {
     fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
     fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
     fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>>;
-    fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>>;
+    fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        let runs = self.list_stack_runs(wave_id)?;
+        for run in runs {
+            if matches!(
+                run.stack_status,
+                WaveRunStackStatus::Merged | WaveRunStackStatus::Superseded
+            ) {
+                continue;
+            }
+
+            let Some(pr_number) = run.snapshot.pr.as_ref().and_then(|pr| pr.number) else {
+                return Ok(Some(run));
+            };
+
+            let Some(live_state) = self.get_live_pr_state(&run.snapshot.repo, pr_number)? else {
+                return Ok(Some(run));
+            };
+            if live_state.state != LivePrState::Merged {
+                return Ok(Some(run));
+            }
+        }
+        Ok(None)
+    }
+
+    fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+        let Some(parent) = self.get_wave_run(run_id)? else {
+            return Ok(Vec::new());
+        };
+        let descendants = self
+            .list_stack_runs(&parent.wave_id)?
+            .into_iter()
+            .filter(|run| {
+                run.stack_group_id == parent.stack_group_id
+                    && run.stack_position > parent.stack_position
+            })
+            .collect();
+        Ok(descendants)
+    }
     fn get_live_pr_state(
         &self,
         repo_id: &str,

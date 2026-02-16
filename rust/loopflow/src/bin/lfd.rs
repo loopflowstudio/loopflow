@@ -220,11 +220,100 @@ fn storage_config_from_env() -> Result<StorageConfig, Box<dyn std::error::Error>
                 "LFD_DATABASE_URL required for postgres storage",
             )
         })?;
-        Ok(StorageConfig::postgres(database_url))
-    } else {
+        return Ok(StorageConfig::postgres(database_url));
+    }
+
+    if storage.eq_ignore_ascii_case("sqlite") {
         let db_path = std::env::var("LFD_DB_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| loopflow::lfd::default_db_path());
-        Ok(StorageConfig::sqlite(db_path))
+        return Ok(StorageConfig::sqlite(db_path));
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("invalid LFD_STORAGE value `{storage}`; expected `sqlite` or `postgres`"),
+    )
+    .into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{storage_config_from_env, StorageConfig};
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn snapshot(vars: &[&'static str]) -> Self {
+            Self {
+                vars: vars
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.vars {
+                if let Some(value) = value {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn storage_config_defaults_to_sqlite() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::snapshot(&["LFD_STORAGE", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        std::env::remove_var("LFD_STORAGE");
+        std::env::remove_var("LFD_DB_PATH");
+        std::env::remove_var("LFD_DATABASE_URL");
+
+        let config = storage_config_from_env().expect("sqlite default should parse");
+        assert!(matches!(config, StorageConfig::Sqlite { .. }));
+    }
+
+    #[test]
+    fn storage_config_rejects_unknown_storage() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::snapshot(&["LFD_STORAGE", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        std::env::set_var("LFD_STORAGE", "mysql");
+        std::env::remove_var("LFD_DB_PATH");
+        std::env::remove_var("LFD_DATABASE_URL");
+
+        let err = storage_config_from_env().expect_err("unknown storage should error");
+        assert_eq!(
+            err.to_string(),
+            "invalid LFD_STORAGE value `mysql`; expected `sqlite` or `postgres`"
+        );
+    }
+
+    #[test]
+    fn storage_config_requires_database_url_for_postgres() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::snapshot(&["LFD_STORAGE", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        std::env::set_var("LFD_STORAGE", "postgres");
+        std::env::remove_var("LFD_DB_PATH");
+        std::env::remove_var("LFD_DATABASE_URL");
+
+        let err = storage_config_from_env().expect_err("postgres should require database url");
+        assert_eq!(
+            err.to_string(),
+            "LFD_DATABASE_URL required for postgres storage"
+        );
     }
 }

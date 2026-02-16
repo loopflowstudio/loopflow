@@ -13,6 +13,16 @@ title: lfd Daemon Reference
 lfd serve
 ```
 
+## Migrations
+
+```bash
+lfd migrate           # apply pending migrations for configured backend
+lfd migrate --status  # print schema_version=<version>
+```
+
+`lfd migrate` uses `LFD_STORAGE` to choose backend (`sqlite` by default, `postgres` when
+`LFD_STORAGE=postgres`). `LFD_DATABASE_URL` is required for postgres migrations.
+
 ## Install (launchd)
 
 ```bash

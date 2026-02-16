@@ -83,7 +83,7 @@ pub async fn run(
 
         // If the model is done (no more tool calls), extract text and return
         if response.stop_reason != "tool_use" {
-            let text = extract_text(&response.content);
+            let text = extract_text_or_final_event(&response.content, &all_events);
             return text
                 .map(|response| TurnResult {
                     response,
@@ -168,6 +168,29 @@ fn extract_text(content: &[ContentBlock]) -> Option<String> {
         None
     } else {
         Some(texts.join("\n"))
+    }
+}
+
+fn extract_text_or_final_event(content: &[ContentBlock], events: &[AgentEvent]) -> Option<String> {
+    extract_text(content).or_else(|| extract_single_final_message(events))
+}
+
+fn extract_single_final_message(events: &[AgentEvent]) -> Option<String> {
+    let finals: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::Message {
+                content,
+                phase: crate::chat::UserMessagePhase::Final,
+            } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    if finals.len() == 1 {
+        Some(finals[0].to_string())
+    } else {
+        None
     }
 }
 
@@ -303,5 +326,49 @@ mod tests {
             assert!(content.contains("unknown tool"));
         }
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn extract_text_or_final_event_prefers_text_when_present() {
+        let content = vec![ContentBlock::Text {
+            text: "assistant text".to_string(),
+        }];
+        let events = vec![AgentEvent::Message {
+            content: "final from event".to_string(),
+            phase: UserMessagePhase::Final,
+        }];
+
+        let extracted = extract_text_or_final_event(&content, &events);
+        assert_eq!(extracted.as_deref(), Some("assistant text"));
+    }
+
+    #[test]
+    fn extract_text_or_final_event_falls_back_to_single_final_event() {
+        let content: Vec<ContentBlock> = vec![];
+        let events = vec![AgentEvent::Message {
+            content: "final from event".to_string(),
+            phase: UserMessagePhase::Final,
+        }];
+
+        let extracted = extract_text_or_final_event(&content, &events);
+        assert_eq!(extracted.as_deref(), Some("final from event"));
+    }
+
+    #[test]
+    fn extract_text_or_final_event_requires_exactly_one_final_event() {
+        let content: Vec<ContentBlock> = vec![];
+        let events = vec![
+            AgentEvent::Message {
+                content: "first".to_string(),
+                phase: UserMessagePhase::Final,
+            },
+            AgentEvent::Message {
+                content: "second".to_string(),
+                phase: UserMessagePhase::Final,
+            },
+        ];
+
+        let extracted = extract_text_or_final_event(&content, &events);
+        assert_eq!(extracted, None);
     }
 }

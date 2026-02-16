@@ -20,13 +20,14 @@ lfd migrate           # apply pending migrations for configured backend
 lfd migrate --status  # print schema_version=<version>
 ```
 
-`lfd migrate` uses `LFD_STORAGE` to choose backend (`sqlite` by default, `postgres` when
-`LFD_STORAGE=postgres`). `LFD_DATABASE_URL` is required for postgres migrations.
+`lfd migrate` uses the `mode` setting in `~/.lf/lfd.yaml` to choose backend (`sqlite` for native,
+`postgres` for container). `LFD_DATABASE_URL` is required for postgres migrations.
 
-## Install (launchd)
+## Install
 
 ```bash
-lfd install
+lfd install          # install service for configured mode
+lfd install --force  # tear down conflicting backend and reinstall
 ```
 
 ## Uninstall
@@ -57,25 +58,29 @@ Environment variables:
 
 ```
 LFD_HTTP_ADDR     # daemon listen address (default 127.0.0.1:2486)
-LFD_STORAGE       # sqlite (default) or postgres
-LFD_DB_PATH       # sqlite path override
-LFD_DATABASE_URL  # required when LFD_STORAGE=postgres
+LFD_DB_PATH       # sqlite path override (native mode)
+LFD_DATABASE_URL  # required for container mode (postgres)
 LFD_MAX_SLOTS     # concurrent run slots
 LFD_AUTH_PROVIDER # local (default), static, or loopflow.studio
 LFD_AUTH_TOKEN    # required when LFD_AUTH_PROVIDER=static
+LFD_EXECUTOR_IMAGE # override agent image (default loopflow/agent:latest)
 LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
 LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 ```
 
-`lfd` also reads `~/.lf/lfd.yaml` for daemon settings:
+Profile-owned env vars (`LFD_STORAGE`, `LFD_EXECUTOR_TYPE`, `LFD_RUNTIME_BACKEND`,
+`LFD_SERVICE_MANAGER`) are rejected — use `mode` in `lfd.yaml` instead.
+
+`lfd` reads `~/.lf/lfd.yaml` for daemon settings:
 
 ```yaml
+mode: native  # native (default) or container
+
 auth:
   provider: local # local (default), static, or loopflow.studio
   token: your-static-token # required when provider=static
   base_url: https://auth.loopflow.studio # used by loopflow.studio provider
 executor:
-  type: local # or docker
   image: loopflow/agent:latest # base image for generated .lf/Dockerfile
   credentials:
     env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
@@ -88,6 +93,9 @@ github:
   token: ghp_xxx # optional, used for startup /check-ci polling
 ```
 
+`mode` selects a strict profile — `executor.type`, `storage`, `runtime_backend`, and
+`service_manager` are all determined by the mode and cannot be overridden.
+
 `credentials.mounts` uses named allowlisted mounts only:
 
 - `claude` → `~/.claude`
@@ -97,14 +105,13 @@ github:
 - `ssh` → `~/.ssh`
 - `gnupg` → `~/.gnupg`
 
-Names are mounted read-only into `/home/agent/...`. Raw `host:container` mount strings are rejected.
+Names are mounted read-only into the container. Raw `host:container` mount strings are rejected.
 
-Environment overrides:
+Environment overrides (non-identity fields only):
 
 ```bash
 LFD_AUTH_PROVIDER=static
 LFD_AUTH_TOKEN=your-static-token
-LFD_EXECUTOR_TYPE=docker
 LFD_EXECUTOR_IMAGE=loopflow/agent:latest # base image for generated Dockerfiles
 LFD_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 LFD_GITHUB_TOKEN=ghp_xxx

@@ -91,6 +91,9 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     };
 
     let include_clipboard = cli.clipboard || config.paste;
+    let lfdocs = cli.lfdocs_setting().unwrap_or(config.lfdocs);
+    let diff_files = cli.diff_files_setting().unwrap_or(config.diff_files);
+    let diff = cli.diff_setting().unwrap_or(config.diff);
 
     info!("gathering context");
     let gather_start = Instant::now();
@@ -108,9 +111,9 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         ),
         directions,
         files: Vec::new(),
-        lfdocs: config.lfdocs,
-        diff_files: config.diff_files,
-        diff: config.diff,
+        lfdocs,
+        diff_files,
+        diff,
         clipboard: include_clipboard,
         area: area.clone(),
         wave: cli.wave.clone(),
@@ -206,7 +209,10 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.backend) {
-        return Err(anyhow!("'{}' CLI not found", built.backend));
+        return Err(anyhow!(
+            "'{}' CLI not found. Run `lf ops doctor` to check dependencies.",
+            built.backend
+        ));
     }
     debug!(
         elapsed_ms = cli_check_start.elapsed().as_millis(),
@@ -264,7 +270,10 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     if result.exit_code == 0 {
         Ok(())
     } else {
-        Err(anyhow!("agent exited with code {}", result.exit_code))
+        Err(anyhow!(
+            "agent exited with code {}. Check .lf/logs/ for details.",
+            result.exit_code
+        ))
     }
 }
 

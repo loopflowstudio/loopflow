@@ -2,6 +2,11 @@
 (
   set -euo pipefail
 
+  # `lf` shell integration exports this so top-level commands can request
+  # parent-shell actions (like auto-cd). E2E tests spawn nested `lf` commands
+  # and should never mutate an outer shell session.
+  unset LOOPFLOW_DIRECTIVE_FILE
+
   ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
   origin_dir=$(mktemp -d)

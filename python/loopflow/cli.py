@@ -63,7 +63,7 @@ def main(ctx: typer.Context, json_output: bool = typer.Option(False, "--json", "
         console.print("no waves")
 
 
-@app.command("list")
+@app.command("list", help="List all waves.")
 def list_waves(
     repo: Optional[str] = None,
     json_output: bool = typer.Option(False, "--json", "-j"),
@@ -78,11 +78,11 @@ def list_waves(
         console.print("no waves")
 
 
-@app.command("show")
+@app.command("show", help="Show details for a wave.")
 def show_wave(name_or_id: str, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
     wave = api.wave(name_or_id)
     if wave is None:
-        typer.echo(f"wave not found: {name_or_id}", err=True)
+        typer.echo(f"wave not found: {name_or_id}. Run `lfq list` to see available waves.", err=True)
         raise typer.Exit(code=1)
     if json_output:
         typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))
@@ -102,7 +102,7 @@ def show_wave(name_or_id: str, json_output: bool = typer.Option(False, "--json",
         console.print(active)
 
 
-@app.command("create")
+@app.command("create", help="Create a new wave.")
 def create_wave(
     name: str,
     repo: str,
@@ -114,27 +114,27 @@ def create_wave(
     typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))
 
 
-@app.command("run")
+@app.command("run", help="Start a wave.")
 def run_wave(name_or_id: str) -> None:
     api.run_wave(name_or_id)
 
 
-@app.command("stop")
+@app.command("stop", help="Stop a running wave.")
 def stop_wave(name_or_id: str) -> None:
     api.stop_wave(name_or_id)
 
 
-@app.command("delete")
+@app.command("delete", help="Delete a wave.")
 def delete_wave(name_or_id: str) -> None:
     api.delete_wave(name_or_id)
 
 
-@app.command("land")
+@app.command("land", help="Land a wave's PR via merge queue.")
 def land_wave(name_or_id: str) -> None:
     api.land_wave(name_or_id)
 
 
-@app.command("logs")
+@app.command("logs", help="Tail agent output for a wave.")
 def logs_wave(name_or_id: str) -> None:
     try:
         for line in api.wave_logs(name_or_id):

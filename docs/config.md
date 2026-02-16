@@ -138,12 +138,12 @@ summaries:
     tokens: 5000
 ```
 
-Generate with `lf ops summarize`. Summaries give the coding agent codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
+Summaries are daemon-managed context (`lfd`) for wave runs, not direct `lf` flags.
 
 | | |
 |---|---|
-| **CLI** | `--no-summaries` |
-| **Default** | included if configured |
+| **CLI (`lf`)** | none |
+| **Daemon (`lfd`)** | auto-refreshed for waves |
 
 ### Clipboard
 
@@ -326,8 +326,6 @@ summaries:
   - path: lib
     tokens: 5000
 ```
-
-Generate with `lf ops summarize`.
 
 ### SkillRegistry
 

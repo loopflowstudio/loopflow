@@ -62,32 +62,69 @@ pub struct Cli {
     #[arg(long = "no-chrome", overrides_with = "chrome")]
     pub no_chrome: bool,
 
+    /// Include lfdocs (wave/, scratch/, root .md files)
+    #[arg(long = "lfdocs")]
+    pub lfdocs: bool,
+
+    /// Exclude lfdocs (wave/, scratch/, root .md files)
+    #[arg(long = "no-lfdocs", overrides_with = "lfdocs")]
+    pub no_lfdocs: bool,
+
+    /// Include files changed on branch
+    #[arg(long = "diff-files")]
+    pub diff_files: bool,
+
+    /// Exclude files changed on branch
+    #[arg(long = "no-diff-files", overrides_with = "diff_files")]
+    pub no_diff_files: bool,
+
+    /// Include raw git diff
+    #[arg(long = "diff")]
+    pub diff: bool,
+
+    /// Exclude raw git diff
+    #[arg(long = "no-diff", overrides_with = "diff")]
+    pub no_diff: bool,
+
     /// Wave name for wave/ scoping
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
 }
 
 impl Cli {
-    /// Get chrome setting: Some(true) if --chrome, Some(false) if --no-chrome, None if neither.
-    pub fn chrome_setting(&self) -> Option<bool> {
-        if self.chrome {
+    fn toggle_setting(enabled: bool, disabled: bool) -> Option<bool> {
+        if enabled {
             Some(true)
-        } else if self.no_chrome {
+        } else if disabled {
             Some(false)
         } else {
             None
         }
     }
+
+    /// Get chrome setting: Some(true) if --chrome, Some(false) if --no-chrome, None if neither.
+    pub fn chrome_setting(&self) -> Option<bool> {
+        Self::toggle_setting(self.chrome, self.no_chrome)
+    }
+
+    /// Get lfdocs setting: Some(true) if --lfdocs, Some(false) if --no-lfdocs, None if neither.
+    pub fn lfdocs_setting(&self) -> Option<bool> {
+        Self::toggle_setting(self.lfdocs, self.no_lfdocs)
+    }
+
+    /// Get diff_files setting: Some(true) if --diff-files, Some(false) if --no-diff-files, None if neither.
+    pub fn diff_files_setting(&self) -> Option<bool> {
+        Self::toggle_setting(self.diff_files, self.no_diff_files)
+    }
+
+    /// Get diff setting: Some(true) if --diff, Some(false) if --no-diff, None if neither.
+    pub fn diff_setting(&self) -> Option<bool> {
+        Self::toggle_setting(self.diff, self.no_diff)
+    }
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Run a step or flow
-    Run {
-        name: String,
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
-    },
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -122,13 +159,17 @@ pub enum OpsCommand {
     },
     /// Check loopflow dependencies
     Doctor,
+    /// Rebase current branch onto target (default: main)
     Rebase {
+        /// Branch to rebase onto
         onto: Option<String>,
     },
+    /// Push current branch to remote
     Push {
         #[arg(long)]
         force: bool,
     },
+    /// Submit PR to merge queue
     Land {
         #[arg(long)]
         strict: bool,
@@ -141,19 +182,23 @@ pub enum OpsCommand {
         #[arg(long = "no-lint")]
         no_lint: bool,
     },
+    /// Create or update a PR
     Pr {
         #[arg(short = 'r', long = "refresh")]
         refresh: bool,
         #[arg(long = "no-lint")]
         no_lint: bool,
     },
+    /// Update local main to match origin
     Sync,
+    /// Create next iteration branch
     Next {
         #[arg(short = 'c', long = "create-pr")]
         create_pr: bool,
         #[arg(long = "no-rebase")]
         no_rebase: bool,
     },
+    /// Generate commit message and commit
     Commit {
         #[arg(short = 'm', long = "message", short_alias = 'M')]
         message: Option<String>,
@@ -164,7 +209,9 @@ pub enum OpsCommand {
         #[arg(long = "no-lint")]
         no_lint: bool,
     },
+    /// Abandon branch: close PR, remove worktree, delete branch
     Abandon {
+        /// Branch to abandon (default: current)
         branch: Option<String>,
         #[arg(short = 'f', long)]
         force: bool,
@@ -183,16 +230,21 @@ pub enum OpsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WtCommand {
+    /// Create a new worktree
     Create {
+        /// Worktree name (creates ../NAME)
         name: String,
         #[arg(short = 'b', long = "base")]
         base: Option<String>,
         #[arg(short = 's', long = "stack")]
         stack: bool,
     },
+    /// Switch to a worktree
     Switch {
+        /// Worktree name to switch to
         name: String,
     },
+    /// List worktrees
     List {
         #[arg(long)]
         format: Option<String>,
@@ -201,6 +253,7 @@ pub enum WtCommand {
         #[arg(long)]
         sync: bool,
     },
+    /// Remove worktrees whose branches have been merged
     Prune {
         #[arg(long)]
         dry_run: bool,
@@ -209,12 +262,15 @@ pub enum WtCommand {
         #[arg(long)]
         debug: bool,
     },
+    /// Remove a worktree
     #[command(alias = "rm")]
     Remove {
+        /// Worktree name to remove
         name: String,
         #[arg(short = 'f', long = "force")]
         force: bool,
     },
+    /// Show CI status for current branch
     Ci {
         #[arg(short = 'w', long = "watch")]
         watch: bool,
@@ -225,12 +281,17 @@ pub enum WtCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ShellCommand {
+    /// Print shell integration code
     Init {
+        /// Shell to generate for (bash, zsh, fish)
         shell: Option<String>,
     },
+    /// Install shell integration to config file
     Install {
+        /// Shell to install for (bash, zsh, fish)
         shell: Option<String>,
     },
+    /// Run a shell directive
     Directive {
         #[arg(trailing_var_arg = true)]
         command: Vec<String>,

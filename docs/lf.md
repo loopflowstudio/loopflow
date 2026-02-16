@@ -35,7 +35,7 @@ Steps are markdown files in these locations (searched in order):
 1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`, `sr:gog`)
 2. `.lf/steps/<step>.md` — repo steps
 3. `.claude/commands/<step>.md` — Claude Code compatible
-4. Built-in steps — commit, debug, design, expand, explore, implement, init, iterate, lint, polish, rebase, reduce, refine, review
+4. Built-in steps — run `lf --list` for the current built-in catalog (e.g., `debug`, `review`, `implement`)
 
 ### Step Arguments
 
@@ -51,9 +51,9 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `--area PATH` | Area scope (paths to include in context) |
-| `-w, --worktree NAME` | Create worktree and run step there |
-| `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root .md files (default: on) |
+| `-a, --area PATH` | Area scope (paths to include in context) |
+| `-w, --wave NAME` | Wave name for wave/ scoping |
+| `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root `.md` files |
 | `--diff-files / --no-diff-files` | Include files touched by branch (default: on) |
 | `--diff / --no-diff` | Include raw `git diff` output |
 
@@ -63,19 +63,12 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 |------|-------------|
 | `-c, --clipboard` | Include clipboard content in prompt |
 
-### Summaries
-
-| Flag | Description |
-|------|-------------|
-| `--summaries` | Include pre-generated codebase summaries |
-| `--no-summaries` | Skip summaries |
-
 ## Run Mode Flags
 
 | Flag | Description |
 |------|-------------|
 | `-i, --interactive` | Run interactively (can interrupt, redirect) |
-| `-a, --auto` | Run in auto mode (default, runs to completion) |
+| `-b, --batch` | Run in batch/headless mode |
 
 ## Model Flags
 
@@ -101,17 +94,15 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 Run a named flow (chains of steps):
 
 ```bash
-lf flow <name>
-lf flow ship
-lf flow ship -w feature-branch
+lf <flow>
+lf ship -w feature-branch
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--area PATH` | Area scope (paths to include in context) |
-| `-w, --worktree NAME` | Create worktree and run flow there |
+| `-a, --area PATH` | Area scope (paths to include in context) |
+| `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
-| `--pr` | Open PR when done |
 | `--web` | Copy to clipboard and open web client |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
@@ -122,7 +113,7 @@ Every step automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
-| **lfdocs** (wave/, scratch/, root .md files) | ✓ included | `--no-lfdocs` |
+| **lfdocs** (wave/, scratch/, root .md files) | ✓ included | `--no-lfdocs` or `lfdocs: false` in `.lf/config.yaml` |
 | **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
 
 ## What's Opt-In
@@ -134,7 +125,6 @@ These require explicit flags or config:
 | **Raw diff** (line-by-line changes) | `--diff` |
 | **Clipboard** | `-c` / `--clipboard` |
 | **Area scope** | `--area PATH` |
-| **Summaries** | Configure in `.lf/config.yaml` |
 | **Chrome automation** | `--chrome` |
 
 See [Configuration](config.md) for setting defaults via config file.
@@ -157,7 +147,7 @@ lf review --area src/api/
 ### Use a different model
 
 ```bash
-lf implement -m codex: add caching
+lf implement: add caching -m codex
 ```
 
 ### Apply a direction
@@ -167,10 +157,10 @@ lf review -d designer
 lf implement -d product-engineer,designer
 ```
 
-### Copy prompt without running
+### Include clipboard content
 
 ```bash
-lf review -c    # shows token breakdown, copies to clipboard
+lf debug -c    # include current clipboard text in the prompt
 ```
 
 ### Use web client instead of CLI

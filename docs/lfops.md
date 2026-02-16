@@ -23,20 +23,7 @@ Options:
 | Flag | Description |
 |------|-------------|
 | `-e, --exclude` | Exclude patterns |
-| `-c, --clipboard` | Include current clipboard content |
 | `--lfdocs / --no-lfdocs` | Include wave/, scratch/, and root .md files |
-| `--diff / --no-diff` | Include raw branch diff |
-| `--diff-files / --no-diff-files` | Include files touched by branch |
-| `--summaries / --no-summaries` | Include pre-generated codebase summaries |
-
-## lf ops add
-
-Create a new prompt file.
-
-```bash
-lf ops add my-task            # creates .claude/commands/my-task.md
-lf ops add my-task -f         # overwrite if exists
-```
 
 ---
 
@@ -99,26 +86,6 @@ lf ops doctor
 ```
 
 Verifies that required tools are installed and working.
-
-## lf ops version
-
-Show loopflow version.
-
-```bash
-lf ops version
-```
-
-## lf ops summarize
-
-Generate codebase summaries.
-
-```bash
-lf ops summarize src/           # Generate summary for src/
-lf ops summarize -t 20000 src   # With specific token budget
-lf ops summarize -a             # Regenerate all configured summaries
-```
-
-Creates pre-generated LLM summaries for large codebases. Summaries are cached and included in context when configured.
 
 ## lf ops rebase
 
@@ -200,8 +167,8 @@ Finds worktrees where the branch is an ancestor of `origin/main` (handles squash
 
 | Flag | Description |
 |------|-------------|
-| `-n, --dry-run` | Show what would be pruned without removing |
-| `-f, --force` | Skip confirmation prompt |
+| `--dry-run` | Show what would be pruned without removing |
+| `--force` | Skip confirmation prompt |
 
 ## lf ops abandon
 

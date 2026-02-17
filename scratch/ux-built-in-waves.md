@@ -2,36 +2,29 @@
 status: design
 ---
 
-# Built-in Waves
+# Wave Schemas
 
 ## Problem
 
 Loopflow ships built-in steps and flows, but users still have to manually assemble waves from scratch. A user who wants "scan my dependencies daily" has to: create a wave, pick the `scan` flow, set area to `.`, then add a cron stimulus. That's four steps for something that should be one click.
 
-Built-in waves close this gap. They're pre-configured wave definitions — flow, area, and stimulus bundled together — that ship with the binary. Users browse them in Concerto and activate with one click. `lfd` only runs activated waves.
-
-The first built-in wave is `scan` (daily CVE/dependency/upstream checks). The infrastructure supports any number of future built-in waves and repo-local wave definitions in `.lf/waves/`.
+Wave schemas close this gap. They're pre-configured wave definitions — flow, area, stimulus, and direction bundled together. Users browse schemas in Concerto and instantiate them with one click. The first built-in schema is `scan` (daily CVE/dependency/upstream checks).
 
 ## Approach
 
-### Rust: embed wave definitions + new API endpoint
+### Core type: WaveSchema
 
-**1. Embed wave YAML in binary via `build.rs`**
-
-Add a fifth `generate_map` call in `build.rs` to scan `builtins/waves/` and produce `BUILTIN_WAVES`. Add `get_builtin_wave()` and `builtin_wave_names()` to `builtins.rs`, following the exact pattern of steps/flows/directions.
-
-**2. Wave definition type**
-
-New struct `WaveDefinition` in `engine/builtins.rs` (or a dedicated `wave_def.rs`):
+A schema that produces waves. Same type across Rust and Swift.
 
 ```rust
 #[derive(Debug, Deserialize, Serialize)]
-pub struct WaveDefinition {
+pub struct WaveSchema {
     pub name: String,
     pub flow: String,
     pub area: Vec<String>,
     pub stimulus: Option<StimulusDef>,
     pub direction: Option<Vec<String>>,
+    pub owner: Option<String>,
     pub description: Option<String>,
 }
 
@@ -42,171 +35,213 @@ pub struct StimulusDef {
 }
 ```
 
-Parse each YAML string from `BUILTIN_WAVES` into `WaveDefinition` on demand. Also scan `.lf/waves/*.yaml` in the repo for repo-local definitions.
+`owner` is preserved in the format for future use (filtering by owner, batch instantiation per-user). V1 ignores it — all schemas are shown and instantiable regardless of owner.
 
-**3. `GET /v0/waves/available` endpoint**
+### Two sources
 
-Returns all wave definitions (built-in + repo-local), cross-referenced with active waves to show activation status.
+| Source | Path | How |
+|--------|------|-----|
+| Built-in | `builtins/waves/*.yaml` | Embedded in binary via `build.rs` `generate_map` |
+| Wave directory | `wave/<name>/<name>.yaml` | Scanned from repo at request time |
+
+Built-in schemas work in any repo without setup. Wave directory schemas are the repo-local extension point — co-located with wave plans.
+
+Selectors support both unqualified and namespaced forms:
+- `scan` (unqualified, default resolution rules)
+- `local/scan`
+- `builtin/scan`
+
+### Rust: embed + parse
+
+**1. Embed built-in schemas via `build.rs`**
+
+Add a fifth `generate_map` call to scan `builtins/waves/` and produce `BUILTIN_WAVES`. Add `get_builtin_wave()` and `builtin_wave_names()` to `builtins.rs`, following the exact pattern of steps/flows/directions.
+
+**2. Scan wave directory schemas**
+
+At request time, scan `wave/*/` for `<name>.yaml` files matching the directory name. Parse into `WaveSchema`. Invalid YAML is skipped with a warning.
+
+### Rust: API
+
+**`GET /v0/wave/schemas`**
+
+Returns all schemas (built-in + wave directory), cross-referenced with active waves to show instantiation status.
 
 ```rust
 #[derive(Serialize)]
-struct AvailableWaveDto {
+struct WaveSchemaDto {
     name: String,
+    selector: String,            // "local/scan" or "builtin/scan"
     flow: String,
     area: Vec<String>,
     stimulus: Option<StimulusDefDto>,
     direction: Vec<String>,
+    owner: Option<String>,
     description: Option<String>,
-    source: String,              // "builtin" or "repo"
-    active_wave_id: Option<String>, // non-null if already activated
+    source: String,              // "builtin" or "local"
+    active_wave_id: Option<String>, // non-null if already instantiated
 }
 ```
 
 Logic:
-1. Collect all `WaveDefinition`s from builtins + `.lf/waves/*.yaml`
+1. Collect all `WaveSchema`s from builtins + `wave/<name>/<name>.yaml`
 2. Load active waves from the store
-3. Match by name — if an active wave has the same name as a definition, it's "activated"
+3. Match instantiated state by source-aware selector:
+   - `local/<name>` uses active wave named `<name>`
+   - `builtin/<name>` is marked instantiated only when no local schema with that name exists and an active wave named `<name>` exists
 4. Return the merged list
 
-**4. `POST /v0/waves/available/:name/activate` endpoint**
+**`POST /v0/waves` (extended)**
 
-Creates a real wave + stimulus from a definition. Reuses existing `create_wave` + `add_stimulus` logic internally.
+The existing wave creation endpoint gains an optional `schema` field:
 
-Request: `{ "repo": "/path/to/repo" }` (the only thing the definition doesn't know).
-
-Response: standard `WaveDto` of the newly created wave.
-
-Activation flow:
-1. Look up `WaveDefinition` by name (builtin first, then repo-local)
-2. Check no active wave with that name exists in this repo
-3. Create wave via store (name, flow, area, direction from definition)
-4. If definition has stimulus, create stimulus via store
-5. Emit `WaveCreated` event
-6. Return enriched `WaveDto`
-
-**5. Deactivation**
-
-No special endpoint needed — deleting the wave deactivates it. The existing `DELETE /v0/waves/:wave_id` handles this. The `GET /waves/available` response will show `active_wave_id: null` after deletion.
-
-### Swift: available waves section in sidebar
-
-**1. Add `listAvailableWaves` to `WaveServiceProtocol`**
-
-```swift
-func listAvailableWaves(repo: URL) async throws -> [AvailableWave]
+```rust
+pub struct CreateWaveRequest {
+    repo: String,
+    name: Option<String>,
+    flow: Option<String>,
+    direction: Option<Vec<String>>,
+    area: Option<Vec<String>>,
+    schema: Option<String>,      // new: instantiate from this schema
+}
 ```
 
-Model:
+When `schema` is present:
+1. Resolve schema selector:
+   - **Unqualified (`scan`)**: local wins over builtin
+   - **Namespaced (`local/scan`, `builtin/scan`)**: use explicit source
+2. Ensure exactly one matching schema candidate; return `409 Conflict` when ambiguous
+3. Return `404` when no matching schema is found
+4. Fill in flow, area, direction from the schema (request fields override if also provided)
+5. Create wave via store
+6. If schema has stimulus, create stimulus via store
+7. Emit `WaveCreated` event
+8. Return enriched `WaveDto`
+
+No separate instantiation endpoint. The schema just provides defaults for wave creation.
+
+### Collision and dedupe policy
+
+- **Local overrides builtin for unqualified lookups.**
+  - If both `local/scan` and `builtin/scan` exist, `schema: "scan"` resolves to `local/scan`.
+- **Error on ambiguous matches.**
+  - Multiple local schemas matching one selector (or any other ambiguous resolution) returns `409 Conflict` with candidate selectors.
+- **Use namespacing to dedupe explicitly.**
+  - `schema: "builtin/scan"` always picks builtin.
+  - `schema: "local/scan"` always picks local.
+- **Validation:**
+  - Duplicate local schema names are an error (include file paths in response/logs).
+  - Duplicate builtin names fail at build time.
+
+**Deinstantiation**
+
+No special endpoint — deleting the wave deinstantiates it. The existing `DELETE /v0/waves/:wave_id` handles this. `GET /v0/wave/schemas` will show `active_wave_id: null` after deletion.
+
+### Swift: model + service
+
 ```swift
-struct AvailableWave: Sendable, Identifiable {
+struct WaveSchema: Sendable, Identifiable {
     let name: String
     let flow: String
     let area: [String]
     let direction: [String]
+    let owner: String?
     let description: String?
-    let source: Source  // .builtin, .repo
+    let source: Source  // .builtin, .local
     let activeWaveId: String?
 
     var id: String { name }
-    var isActive: Bool { activeWaveId != nil }
+    var isInstantiated: Bool { activeWaveId != nil }
 
-    enum Source: String { case builtin, repo }
+    enum Source: String, Sendable { case builtin, local }
 }
 ```
 
-**2. RepoState integration**
+Add to `WaveServiceProtocol`:
 
-- New property: `availableWaves: [AvailableWave]`
-- Load on `refreshFlowsAsync()` (piggyback on existing startup call)
-- Refresh after wave create/delete (activation status changes)
-
-**3. Sidebar UI: "Available" section**
-
-Add a third section to `WaveSidebar` below Idle (above On Disk):
-
-```
-Active     (2)
-  engbot ● running
-  fixbot ● waiting
-
-Idle       (1)
-  design-wave
-
-Available  (1)
-  scan  [Activate]
-
-On Disk    (2)
-  feature-xyz
+```swift
+func listWaveSchemas(repo: URL) async throws -> [WaveSchema]
 ```
 
-Each available wave row shows:
-- Name (e.g., "scan")
-- Flow name as subtitle
-- Source badge: "Built-in" or "Local"
-- Activate button (or "Active" indicator if already activated)
+**RepoState integration:**
+- New property: `waveSchemas: [WaveSchema]`
+- Load on startup (piggyback on existing `refreshFlowsAsync()`)
+- Refresh after wave create/delete (instantiation status changes)
 
-Clicking Activate calls `POST /waves/available/:name/activate`, gets back a wave, inserts it into the store, and selects it. Uses the same optimistic pattern as wave creation.
+### Concerto UI
 
-If the wave is already active, the row shows a muted "Active" label and clicking selects the existing wave.
+Sidebar UI details deferred to a separate design pass. The key interaction:
 
-**4. No separate view or modal**
+- **Empty state**: show available schemas as quick-start options
+- **"+" button**: offer "New wave" + available schemas in a popover
+- **Batch instantiation**: one button to instantiate all uninstantiated schemas and start them
 
-Available waves live in the sidebar, not a modal or separate screen. This keeps discovery natural — you see what's available right where you see what's running. As the number of available waves grows, the section could become collapsible, but with 1-3 waves it should stay visible.
+"Instantiate all" is the primary UX goal — open Concerto, click one button, all your schemas become running waves.
 
-## Alternatives considered
+For safety, batch instantiation includes a confirm sheet showing:
+- Schemas that will be instantiated
+- Which schemas add `cron`, `watch`, or `loop` stimuli
+- Whether waves will start immediately
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Wave template modal | Separate discovery flow, more UI surface | Overkill for <10 available waves. A sidebar section is simpler and keeps everything in one place. |
-| Auto-activate all built-in waves on first run | Zero-click setup, but presumptuous | Users should opt in. A cron job scanning every day shouldn't start without consent. |
-| `POST /v0/waves` with `from_template: "scan"` | Reuse existing endpoint | Conflates creation with template instantiation. The available endpoint makes the catalog browsable. Separate activate endpoint keeps responsibilities clean. |
-| Store definitions in the database | Queryable, standard CRUD | Unnecessary persistence. Definitions are static — they ship with the binary. Database stores only activated instances. |
-| Repo-local definitions in `.lf/waves/` only | No binary embedding needed | Built-in waves should work in any repo without setup. Repo-local is the extension point, not the primary source. |
+Filters (source/owner) are a planned follow-up so "instantiate all" naturally means "instantiate all visible."
 
 ## Key decisions
 
-1. **Match by name, not a separate `template_id`.** A wave named "scan" is the activated form of the "scan" definition. Simple, no foreign keys, no mapping table. Tradeoff: users can't have two waves both named "scan" — but that's already enforced by the unique(name, repo) constraint.
+1. **WaveSchema, not WaveDefinition or AvailableWave.** One name for one concept, consistent across the stack.
 
-2. **`build.rs` handles wave embedding.** Same `generate_map` pattern as steps/flows/directions. Adding a new built-in wave is: drop a YAML file in `builtins/waves/`, rebuild. No manual registration.
+2. **`/v0/wave/schemas` namespace.** Singular `wave` separates schema meta-resources from the `/v0/waves` instance CRUD. Avoids ambiguity where `schemas` could look like a wave ID.
 
-3. **Available section in sidebar, not a separate view.** Discovery should be ambient. When you have zero waves, the available section is the first thing you see. When you have many waves, it's a quiet section you can ignore.
+3. **Extend `POST /v0/waves` instead of a separate instantiate endpoint.** The schema provides defaults for wave creation. No new write route needed.
 
-4. **Activation creates a real wave + stimulus atomically.** After activation, the wave is indistinguishable from one created manually. No special "built-in wave" status in the database. This keeps the execution engine simple.
+4. **Name-based instantiation with source-aware resolution.** A wave named "scan" is the instantiated form of schema `local/scan` or `builtin/scan`, with local taking precedence for unqualified lookup and namespaced selectors for explicit dedupe.
 
-5. **Deactivation = deletion.** No pause/disable state for the template relationship. Delete the wave and re-activate later if needed. The definition is always there.
+5. **`build.rs` handles embedding.** Same `generate_map` pattern as steps/flows/directions. Adding a new built-in schema: drop a YAML in `builtins/waves/`, rebuild.
+
+6. **Instantiation creates a real wave + stimulus.** After instantiation, the wave is indistinguishable from one created manually. No special status in the database. The execution engine stays untouched.
+
+7. **Deinstantiation = deletion.** No pause/disable state. Delete the wave and re-instantiate later. The schema is always there.
+
+8. **Owner field preserved but unused in v1.** The YAML format supports `owner` for future filtering/batch-per-user. V1 shows all schemas regardless.
+9. **`/v0/wave/schemas` stays singular by design.** Schema meta-resources live under `wave`; instantiated resource CRUD remains under `/v0/waves`.
 
 ## Scope
 
 **In scope:**
 - `build.rs` wave embedding (`BUILTIN_WAVES` HashMap)
-- `WaveDefinition` struct + YAML parsing
-- `GET /v0/waves/available` endpoint
-- `POST /v0/waves/available/:name/activate` endpoint
-- `AvailableWave` Swift model
-- `listAvailableWaves()` service method
-- Sidebar "Available" section with activate button
-- Repo-local `.lf/waves/*.yaml` scanning
+- `WaveSchema` struct + YAML parsing
+- `GET /v0/wave/schemas` endpoint
+- `POST /v0/waves` extended with `schema` field
+- `WaveSchema` Swift model
+- `listWaveSchemas()` service method
+- Wave directory scanning (`wave/<name>/<name>.yaml`)
+- Batch instantiation (instantiate all uninstantiated schemas)
+- Batch confirmation UI that previews created waves/stimuli/start behavior
+- Namespaced schema selection (`local/<name>`, `builtin/<name>`)
 
 **Out of scope:**
-- Wave definition editor (create/edit `.lf/waves/` files)
-- Wave marketplace or remote definition registry
-- Auto-activation or recommended waves
-- Wave definition versioning or migration
-- Description/documentation rendering for definitions (future: when we have more than `scan`)
+- Sidebar UI details (separate design pass)
+- Owner-based filtering (follow-up to make batch safer/targeted)
+- Wave schema editor
+- Schema marketplace or remote registry
+- Auto-instantiation or recommended schemas
+- Schema versioning or migration
 
 ## Implementation order
 
-1. **Rust: embed + parse** — `build.rs` wave map, `WaveDefinition` struct, `get_builtin_wave()` / `builtin_wave_names()`
-2. **Rust: API** — `GET /waves/available`, `POST /waves/available/:name/activate`
-3. **Swift: model + service** — `AvailableWave`, `listAvailableWaves()`, `activateAvailableWave()`
-4. **Swift: UI** — Sidebar "Available" section, activate button, state management
-5. **Tests** — Rust: definition parsing, available endpoint. Swift: `WaveStore` integration.
+1. **Rust: embed + parse** — `build.rs` wave map, `WaveSchema` struct, `get_builtin_wave()` / `builtin_wave_names()`, wave directory scanning
+2. **Rust: API** — `GET /v0/wave/schemas`, extend `POST /v0/waves` with `schema` field
+3. **Swift: model + service** — `WaveSchema`, `listWaveSchemas()`, `createWave(schema:)`
+4. **Swift: UI** — batch instantiation button, confirmation sheet, creation flow integration
+5. **Tests** — Rust: schema parsing, schemas endpoint, schema-based creation. Swift: store integration.
 
 ## Done when
 
-- `GET /v0/waves/available` returns `scan` (and any `.lf/waves/*.yaml` definitions)
-- Concerto sidebar shows "Available" section with `scan` wave
-- Clicking "Activate" on `scan` creates a wave + cron stimulus in the database
-- The activated wave appears in the Active/Idle section immediately
-- Deleting the wave makes it reappear in the Available section
-- `cargo test` and `swift test` pass with new tests covering definition parsing and activation
+- `GET /v0/wave/schemas` returns `scan` (and any `wave/<name>/<name>.yaml` schemas)
+- `POST /v0/waves` with `schema: "scan"` creates a wave + cron stimulus
+- `POST /v0/waves` supports `schema: "local/<name>"` and `schema: "builtin/<name>"` for explicit source selection
+- Local-vs-builtin collisions resolve as specified (local default; explicit namespacing; ambiguous => `409`)
+- Concerto can instantiate all uninstantiated schemas with one action
+- Concerto shows a confirmation preview before batch instantiation
+- The instantiated wave appears in Active/Idle immediately
+- Deleting the wave makes the schema show as uninstantiated again
+- `cargo test` and `swift test` pass with new tests

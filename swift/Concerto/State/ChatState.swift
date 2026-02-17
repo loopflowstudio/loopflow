@@ -28,10 +28,23 @@ struct MemoryStore {
         blocks = value.sorted { $0.position < $1.position }
     }
 
+    mutating func upsert(_ block: ChatMemoryBlock) {
+        if let index = blocks.firstIndex(where: { $0.name == block.name }) {
+            blocks[index] = block
+        } else {
+            blocks.append(block)
+        }
+        blocks.sort { $0.position < $1.position }
+    }
+
+    mutating func remove(named name: String) {
+        blocks.removeAll { $0.name == name }
+    }
+
     func systemPrompt() -> String {
         guard !blocks.isEmpty else { return "" }
         var lines: [String] = ["<memory>"]
-        for block in blocks.sorted(by: { $0.position < $1.position }) {
+        for block in blocks {
             lines.append("<block name=\"\(xmlEscape(block.name))\">")
             lines.append(xmlEscape(block.content))
             lines.append("</block>")
@@ -53,6 +66,9 @@ struct MemoryStore {
 @MainActor
 @Observable
 final class ChatState {
+    private static let missingAPIKeyMessage = "Set ANTHROPIC_API_KEY to enable chat."
+    private static let missingBlockNameMessage = "Memory block name is required."
+
     let waveId: String
 
     var messages: [ChatMessage] = []
@@ -106,7 +122,7 @@ final class ChatState {
         messages.append(ChatMessage(role: .user, content: text))
 
         guard anthropic.hasAPIKey else {
-            messages.append(ChatMessage(role: .error, content: "Set ANTHROPIC_API_KEY to enable chat."))
+            messages.append(ChatMessage(role: .error, content: Self.missingAPIKeyMessage))
             return
         }
 
@@ -125,11 +141,7 @@ final class ChatState {
     }
 
     func upsertMemoryBlock(name: String, content: String, position: Int?) async {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            memoryError = "Memory block name is required."
-            return
-        }
+        guard let trimmedName = validatedMemoryBlockName(name) else { return }
 
         do {
             let block = try await waveService.upsertMemoryBlock(
@@ -138,7 +150,7 @@ final class ChatState {
                 content: content,
                 position: position
             )
-            mergeMemoryBlock(block)
+            memory.upsert(block)
             memoryError = nil
         } catch {
             memoryError = error.localizedDescription
@@ -152,16 +164,12 @@ final class ChatState {
         position: Int
     ) async {
         let trimmedOld = oldName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedNew = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedNew.isEmpty else {
-            memoryError = "Memory block name is required."
-            return
-        }
+        guard let trimmedNew = validatedMemoryBlockName(newName) else { return }
 
         if trimmedOld != trimmedNew {
             do {
                 try await waveService.deleteMemoryBlock(waveId: waveId, name: trimmedOld)
-                memory.blocks.removeAll { $0.name == trimmedOld }
+                memory.remove(named: trimmedOld)
             } catch {
                 memoryError = error.localizedDescription
                 return
@@ -174,19 +182,19 @@ final class ChatState {
     func deleteMemoryBlock(name: String) async {
         do {
             try await waveService.deleteMemoryBlock(waveId: waveId, name: name)
-            memory.blocks.removeAll { $0.name == name }
+            memory.remove(named: name)
             memoryError = nil
         } catch {
             memoryError = error.localizedDescription
         }
     }
 
-    private func mergeMemoryBlock(_ block: ChatMemoryBlock) {
-        if let index = memory.blocks.firstIndex(where: { $0.name == block.name }) {
-            memory.blocks[index] = block
-        } else {
-            memory.blocks.append(block)
+    private func validatedMemoryBlockName(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            memoryError = Self.missingBlockNameMessage
+            return nil
         }
-        memory.blocks.sort { $0.position < $1.position }
+        return trimmed
     }
 }

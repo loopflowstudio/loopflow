@@ -15,9 +15,10 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    chat_memory_block_dto, stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult,
-    ContinueWaveResponse, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
-    NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    chat_memory_block_dto, stimulus_dto, stimulus_kind_str, ChatMemoryBlockDto, CombineResponse,
+    CombineResponseResult, ContinueWaveResponse, DeletedResourceResponse, ErrorResponse,
+    LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse, RunWaveResponse,
+    StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
@@ -707,7 +708,7 @@ pub async fn list_stimuli_handler(
 pub async fn list_memory_blocks_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> ApiResult<ListResponse<crate::lfd::http::dto::ChatMemoryBlockDto>> {
+) -> ApiResult<ListResponse<ChatMemoryBlockDto>> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
     let blocks = run_store(&state.store, move |store| {
@@ -724,33 +725,28 @@ pub async fn upsert_memory_block_handler(
     State(state): State<HttpState>,
     Path((wave_id, name)): Path<(String, String)>,
     Json(payload): Json<UpsertMemoryBlockRequest>,
-) -> ApiResult<crate::lfd::http::dto::ChatMemoryBlockDto> {
-    if name.trim().is_empty() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "memory block name cannot be empty",
-        ));
-    }
-
+) -> ApiResult<ChatMemoryBlockDto> {
+    let name = normalized_memory_block_name(name)?;
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let name = name.trim().to_string();
     let content = payload.content;
-    let requested_position = payload.position;
 
-    let existing = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.list_chat_memory_blocks(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    let position = match payload.position {
+        Some(position) => position,
+        None => {
+            let existing = run_store(&state.store, {
+                let wave_id = wave_id.clone();
+                move |store| store.list_chat_memory_blocks(&wave_id)
+            })
+            .await
+            .map_err(map_store_error)?;
 
-    let position = requested_position.unwrap_or_else(|| {
-        existing
-            .iter()
-            .find(|block| block.name == name)
-            .map(|block| block.position)
-            .unwrap_or(existing.len() as u32)
-    });
+            existing
+                .iter()
+                .find(|block| block.name == name)
+                .map(|block| block.position)
+                .unwrap_or(existing.len() as u32)
+        }
+    };
 
     let block = ChatMemoryBlock {
         wave_id: wave_id.clone(),
@@ -774,13 +770,7 @@ pub async fn delete_memory_block_handler(
     State(state): State<HttpState>,
     Path((wave_id, name)): Path<(String, String)>,
 ) -> ApiResult<DeletedResourceResponse> {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "memory block name cannot be empty",
-        ));
-    }
+    let name = normalized_memory_block_name(name)?;
 
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let name_for_delete = name.clone();
@@ -795,6 +785,18 @@ pub async fn delete_memory_block_handler(
         object: "memory_block".to_string(),
         deleted: true,
     }))
+}
+
+fn normalized_memory_block_name(name: String) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    let trimmed = name.trim().to_string();
+    if trimmed.is_empty() {
+        Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "memory block name cannot be empty",
+        ))
+    } else {
+        Ok(trimmed)
+    }
 }
 
 pub async fn stop_wave_handler(

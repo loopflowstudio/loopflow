@@ -118,10 +118,12 @@ struct KeyboardRouterTests {
             mode: .global
         ) { actions.append($0) }
 
-        // Wait well beyond the 40ms timeout, then yield to let the timer's
-        // MainActor continuation run.
-        try? await Task.sleep(for: .milliseconds(200))
-        await Task.yield()
+        // Poll until the timer's MainActor continuation clears the chord.
+        // A single sleep+yield is unreliable on loaded CI runners.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while router.chordPrefix != nil && ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
 
         #expect(router.chordPrefix == nil)
 

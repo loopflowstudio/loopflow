@@ -340,7 +340,7 @@ struct WaveSidebar: View {
     }
 
     private var waveList: some View {
-        return ScrollView {
+        ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                 if !waveGroups.active.isEmpty {
                     sectionHeader("Active", icon: "circle.fill", count: waveGroups.active.count)
@@ -436,15 +436,7 @@ struct WaveSidebar: View {
             defer { isCreatingWave = false }
 
             do {
-                try await ensureLfdConnected()
-
-                guard repoState.repoTarget != nil else {
-                    actionError = "Select a repository in Connection Settings first."
-                    showingActionError = true
-                    return
-                }
-
-
+                try await repoState.ensureReadyToCreateWave(outputBuffer: outputBuffer)
                 try await repoState.createWave(name: "")
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {

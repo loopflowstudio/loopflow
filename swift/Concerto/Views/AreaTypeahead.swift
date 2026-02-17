@@ -165,10 +165,8 @@ struct AreaTypeahead: View {
         let path = inputText.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard !path.isEmpty else { return }
 
-        let finalPath = path.isEmpty ? "." : path
-
-        if !selectedAreas.contains(finalPath) {
-            selectedAreas.append(finalPath)
+        if !selectedAreas.contains(path) {
+            selectedAreas.append(path)
             commitAreas()
         }
         inputText = ""

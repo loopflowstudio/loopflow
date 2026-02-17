@@ -7,6 +7,17 @@ import LoopflowCore
 @MainActor
 @Observable
 final class RepoState {
+    enum WaveCreationReadinessError: LocalizedError {
+        case missingRepo
+
+        var errorDescription: String? {
+            switch self {
+            case .missingRepo:
+                "Select a repository in Connection Settings first."
+            }
+        }
+    }
+
     enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
@@ -99,7 +110,6 @@ final class RepoState {
     init() {
         let connection = connectionStore.activeConnection
         waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
-        connectionState = connectionStore.state
 
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
             self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
@@ -649,12 +659,10 @@ final class RepoState {
             try? await waveService.connectLfd()
         }
 
-        try await runConnectionPhase(.tlsTrustCheck, connection: connection) {
-            try await waveService.checkConnection()
-        }
-
-        try await runConnectionPhase(.authCheck, connection: connection) {
-            try await waveService.checkConnection()
+        for phase in [ConnectionPhase.tlsTrustCheck, .authCheck] {
+            try await runConnectionPhase(phase, connection: connection) {
+                try await waveService.checkConnection()
+            }
         }
 
         let repos = try await runConnectionPhase(.repoDiscovery, connection: connection) {
@@ -662,7 +670,6 @@ final class RepoState {
         }
 
         availableRemoteRepos = repos
-        connectionStore.setDiscoveredRepos(repos)
         if connection.isLocal {
             if let currentRepo {
                 repoTarget = .local(currentRepo)
@@ -689,6 +696,17 @@ final class RepoState {
     func switchToLocal(outputBuffer: OutputBuffer) async throws {
         let connection = ServerConnection.local
         try await connect(to: connection, outputBuffer: outputBuffer)
+    }
+
+    func ensureReadyToCreateWave(outputBuffer: OutputBuffer) async throws {
+        if !lfdConnected {
+            try await connectLfd(outputBuffer: outputBuffer)
+            try await Task.sleep(for: .milliseconds(500))
+        }
+
+        guard repoTarget != nil else {
+            throw WaveCreationReadinessError.missingRepo
+        }
     }
 
     func selectRemoteRepo(path: String) {
@@ -809,7 +827,6 @@ final class RepoState {
 
     private func updateConnectionState(_ state: ConnectionState) {
         connectionState = state
-        connectionStore.state = state
         lfdConnected = state.isConnected
     }
 

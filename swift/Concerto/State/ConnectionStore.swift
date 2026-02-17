@@ -15,9 +15,6 @@ final class ConnectionStore {
         }
     }
 
-    var state: ConnectionState = .disconnected(nil)
-    var discoveredRepos: [RemoteRepo] = []
-
     init(
         secretStore: ConnectionSecretStore = .shared,
         pinStore: CertificatePinStore = .shared,
@@ -54,10 +51,6 @@ final class ConnectionStore {
 
     func token(for connection: ServerConnection) -> String? {
         connection.staticToken ?? secretStore.token(for: connection)
-    }
-
-    func setDiscoveredRepos(_ repos: [RemoteRepo]) {
-        discoveredRepos = repos
     }
 
     func clearPinnedCertificate(for connection: ServerConnection? = nil) {

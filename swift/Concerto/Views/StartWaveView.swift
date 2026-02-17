@@ -55,16 +55,7 @@ struct StartWaveView: View {
             defer { isCreating = false }
 
             do {
-                if !repoState.lfdConnected {
-                    try await repoState.connectLfd(outputBuffer: outputBuffer)
-                    try await Task.sleep(for: .milliseconds(500))
-                }
-
-                guard repoState.repoTarget != nil else {
-                    errorMessage = "Select a repository in Connection Settings first."
-                    return
-                }
-
+                try await repoState.ensureReadyToCreateWave(outputBuffer: outputBuffer)
                 let name = waveName.trimmingCharacters(in: .whitespacesAndNewlines)
                 try await repoState.createWave(name: name)
                 NotificationCenter.default.post(name: .editWaveName, object: nil)

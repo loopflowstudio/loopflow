@@ -160,7 +160,7 @@ Auth behavior:
 - Loopback reads (`GET`, `HEAD`, `OPTIONS`) on protected routes are allowed without a token.
 - Mutations (`POST`, `PATCH`, `DELETE`) on protected routes always require `Authorization: Bearer <token>`, including loopback requests.
 - In `auth.provider=local`, non-loopback requests also require the session token.
-- In `auth.provider=static` or `auth.provider=loopflow.studio`, protected routes require that provider's bearer token.
+- In `auth.provider=static` or `auth.provider=loopflow.studio`, any request that is not a loopback read requires that provider's bearer token.
 
 When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 

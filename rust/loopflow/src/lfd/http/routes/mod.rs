@@ -215,18 +215,11 @@ pub(crate) async fn build_wave_live_pr_projection(
                 for key in keys {
                     match github::fetch_pull_request(&repo_full_name, key.pr_number, token).await {
                         Ok(Some(pull_request)) => {
-                            let live_state = LivePullRequestState {
-                                repo_id: key.repo_id.clone(),
-                                pr_number: pull_request.number,
-                                state: pull_request.state,
-                                is_draft: pull_request.is_draft,
-                                head_ref: pull_request.head_ref,
-                                head_sha: pull_request.head_sha,
-                                base_ref: pull_request.base_ref,
-                                updated_at: pull_request.updated_at,
-                                merged_at: pull_request.merged_at,
-                                synced_at: OffsetDateTime::now_utc(),
-                            };
+                            let live_state = github::into_live_pull_request_state(
+                                key.repo_id.clone(),
+                                pull_request,
+                                OffsetDateTime::now_utc(),
+                            );
                             store.upsert_live_pr_state(&live_state).await?;
                         }
                         Ok(None) | Err(_) => {

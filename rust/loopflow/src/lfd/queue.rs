@@ -197,7 +197,7 @@ async fn reconcile_wave_queue_with_ops(
         let Some(live_state) = live_for_run(&live_states, run) else {
             continue;
         };
-        let inferred = inferred_stack_status(run.stack_status, Some(&live_state));
+        let inferred = inferred_stack_status(run.stack_status, Some(live_state));
         if inferred != run.stack_status {
             run.stack_status = inferred;
             store
@@ -242,7 +242,9 @@ async fn reconcile_wave_queue_with_ops(
             updated.is_draft = true;
             updated.synced_at = OffsetDateTime::now_utc();
             let _ = store.upsert_live_pr_state(&updated).await;
-            live_states.insert(run_pr_key(run), updated);
+            if let Some(key) = run_pr_key(run) {
+                live_states.insert(key, updated);
+            }
         }
     }
 
@@ -434,7 +436,7 @@ fn find_queue_head_index(
 ) -> Option<usize> {
     runs.iter().position(|run| {
         let live = live_for_run(live_states, run);
-        inferred_stack_status(run.stack_status, live.as_ref()) == WaveRunStackStatus::Active
+        inferred_stack_status(run.stack_status, live) == WaveRunStackStatus::Active
     })
 }
 
@@ -452,21 +454,21 @@ fn inferred_stack_status(
     }
 }
 
-fn run_pr_key(run: &WaveRun) -> String {
-    let repo = run.snapshot.repo.clone();
-    let pr = pr_number(run).unwrap_or_default();
-    format!("{repo}:{pr}")
+fn run_pr_key(run: &WaveRun) -> Option<String> {
+    let pr = pr_number(run)?;
+    Some(format!("{}:{pr}", run.snapshot.repo))
 }
 
 fn pr_number(run: &WaveRun) -> Option<u32> {
     run.snapshot.pr.as_ref()?.number
 }
 
-fn live_for_run(
-    live_states: &HashMap<String, LivePullRequestState>,
+fn live_for_run<'a>(
+    live_states: &'a HashMap<String, LivePullRequestState>,
     run: &WaveRun,
-) -> Option<LivePullRequestState> {
-    live_states.get(&run_pr_key(run)).cloned()
+) -> Option<&'a LivePullRequestState> {
+    let key = run_pr_key(run)?;
+    live_states.get(&key)
 }
 
 async fn load_live_states(
@@ -479,7 +481,9 @@ async fn load_live_states(
             continue;
         };
         if let Ok(Some(state)) = store.get_live_pr_state(&run.snapshot.repo, pr_number).await {
-            states.insert(run_pr_key(run), state);
+            if let Some(key) = run_pr_key(run) {
+                states.insert(key, state);
+            }
         }
     }
     states
@@ -543,18 +547,11 @@ async fn refresh_live_states(store: &SharedStore, github_config: &GitHubConfig, 
         let Ok(Some(pull_request)) = fetched else {
             continue;
         };
-        let live_state = LivePullRequestState {
-            repo_id: run.snapshot.repo.clone(),
-            pr_number: pull_request.number,
-            state: pull_request.state,
-            is_draft: pull_request.is_draft,
-            head_ref: pull_request.head_ref,
-            head_sha: pull_request.head_sha,
-            base_ref: pull_request.base_ref,
-            updated_at: pull_request.updated_at,
-            merged_at: pull_request.merged_at,
-            synced_at: OffsetDateTime::now_utc(),
-        };
+        let live_state = github::into_live_pull_request_state(
+            run.snapshot.repo.clone(),
+            pull_request,
+            OffsetDateTime::now_utc(),
+        );
         let _ = store.upsert_live_pr_state(&live_state).await;
     }
 }
@@ -730,7 +727,7 @@ mod tests {
         let live_states = load_live_states(&store, &runs).await;
         let projected = project_queue_views(
             &runs,
-            |run| live_for_run(&live_states, run),
+            |run| live_for_run(&live_states, run).cloned(),
             &blocks,
         );
         let ready_count = projected
@@ -806,7 +803,7 @@ mod tests {
         let live_states = load_live_states(&store, &[run.clone()]).await;
         let projection = project_queue_views(
             &[run.clone()],
-            |r| live_for_run(&live_states, r),
+            |r| live_for_run(&live_states, r).cloned(),
             &HashMap::from([(run.id.clone(), block)]),
         );
         assert_eq!(

@@ -343,21 +343,9 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
     let Some(pr) = run.snapshot.pr.as_ref() else {
         return false;
     };
-    if !super::is_open_pr_state(pr.state.as_deref()) {
-        return false;
-    }
-    if let Some(branch) = branch {
-        if pr.branch.as_deref() != Some(branch) {
-            return false;
-        }
-    }
-    if let Some(pr_number) = pr_number {
-        if pr.number != Some(pr_number) {
-            return false;
-        }
-    }
-
-    true
+    super::is_open_pr_state(pr.state.as_deref())
+        && branch.is_none_or(|branch| pr.branch.as_deref() == Some(branch))
+        && pr_number.is_none_or(|number| pr.number == Some(number))
 }
 
 fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {

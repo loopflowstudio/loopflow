@@ -1,2 +1,4 @@
-- A1 design called for `OrderedDictionary<String, String>` memory in Swift. I implemented ordered `[ChatMemoryBlock]` to avoid adding a new package dependency in this draft. Confirm whether we want to adopt `swift-collections` before A2.
-- Anthropic model default is `claude-3-5-sonnet-latest` (overridable via `ANTHROPIC_MODEL`). Confirm the preferred default model string for local Concerto usage.
+# Open questions
+
+1. Should A2 keep ordered `[ChatMemoryBlock]` in Swift or adopt `OrderedDictionary<String, String>` via `swift-collections`?
+2. What should the default Anthropic model string be when `ANTHROPIC_MODEL` is unset?

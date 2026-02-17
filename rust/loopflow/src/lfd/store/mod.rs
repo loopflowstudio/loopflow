@@ -257,11 +257,7 @@ impl Store {
         WaveStateStore::upsert_chat_memory_block(self, block).await
     }
 
-    pub async fn delete_chat_memory_block(
-        &self,
-        wave_id: &LfdId,
-        name: &str,
-    ) -> StoreResult<()> {
+    pub async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
         WaveStateStore::delete_chat_memory_block(self, wave_id, name).await
     }
 
@@ -403,10 +399,7 @@ pub trait WaveStateStore: Send + Sync {
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
 
-    async fn list_chat_memory_blocks(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<ChatMemoryBlock>>;
+    async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>>;
     async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()>;
     async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()>;
 }
@@ -827,10 +820,7 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_chat_memory_blocks(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<ChatMemoryBlock>> {
+    async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
@@ -1117,9 +1107,8 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation,
-        PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind,
-        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Agent, AgentStatus, ChatMemoryBlock, SidecarKind, Stimulus, StimulusKind, Summary, Wave,
+        WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;

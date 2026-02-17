@@ -1043,7 +1043,10 @@ impl PostgresStore {
         .await
     }
 
-    fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
+    pub async fn list_chat_memory_blocks(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<ChatMemoryBlock>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(
@@ -1056,9 +1059,10 @@ impl PostgresStore {
                 .await?;
             rows.iter().map(map_chat_memory_block_row).collect()
         })
+        .await
     }
 
-    fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+    pub async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
         self.with_client(|client| async move {
             let updated_at = block
                 .updated_at
@@ -1083,9 +1087,10 @@ impl PostgresStore {
                 .await?;
             Ok(())
         })
+        .await
     }
 
-    fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+    pub async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
         let name = name.to_string();
         self.with_client(|client| async move {
             client
@@ -1096,6 +1101,7 @@ impl PostgresStore {
                 .await?;
             Ok(())
         })
+        .await
     }
 }
 

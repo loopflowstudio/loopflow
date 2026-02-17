@@ -939,7 +939,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
+    pub fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT wave_id, name, content, position, updated_at
@@ -955,7 +955,7 @@ impl SqliteStore {
         Ok(blocks)
     }
 
-    fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+    pub fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated_at = block
             .updated_at
@@ -979,7 +979,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+    pub fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "DELETE FROM chat_memory_blocks WHERE wave_id = ?1 AND name = ?2",

@@ -180,6 +180,14 @@ pub struct ChatMemoryBlockDto {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ChatTurnDto {
+    pub id: String,
+    pub object: String,
+    pub wave_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct StopWaveResponse {
     pub stopped: bool,
 }

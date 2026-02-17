@@ -185,6 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         started_at: time::OffsetDateTime::now_utc(),
         github: lfd_config.github,
         ci_failure_cache,
+        chat_turns: loopflow::lfd::http::state::ChatTurnRegistry::new(),
     };
     let http_router = loopflow::lfd::http::router(http_state);
 

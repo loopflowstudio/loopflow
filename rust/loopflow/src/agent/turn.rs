@@ -50,6 +50,19 @@ pub async fn run(
     config: &TurnConfig,
     registry: &ToolRegistry,
 ) -> Result<TurnResult, TurnError> {
+    run_with_event_handler(prompt, config, registry, |_| {}).await
+}
+
+/// Run a single turn and invoke `on_event` for each boundary event in order.
+pub async fn run_with_event_handler<F>(
+    prompt: &str,
+    config: &TurnConfig,
+    registry: &ToolRegistry,
+    mut on_event: F,
+) -> Result<TurnResult, TurnError>
+where
+    F: FnMut(&AgentEvent),
+{
     let start = Instant::now();
     let tool_defs = registry.definitions();
 
@@ -97,7 +110,10 @@ pub async fn run(
 
         // Model wants to use tools — dispatch them through the registry
         let (tool_results, events) = make_tool_results(&response.content, registry);
-        all_events.extend(events);
+        for event in events {
+            on_event(&event);
+            all_events.push(event);
+        }
 
         for block in &response.content {
             if let ContentBlock::ToolUse { name, input, .. } = block {

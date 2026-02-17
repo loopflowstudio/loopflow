@@ -56,6 +56,14 @@ pub fn router(state: HttpState) -> Router {
             "/waves/:wave_id/memory-blocks/:name",
             put(waves::upsert_memory_block_handler).delete(waves::delete_memory_block_handler),
         )
+        .route(
+            "/waves/:wave_id/chat/turns",
+            post(waves::create_chat_turn_handler),
+        )
+        .route(
+            "/waves/:wave_id/chat/turns/:turn_id/events",
+            get(waves::stream_chat_turn_events_handler),
+        )
         .route("/waves/:wave_id/stop", post(waves::stop_wave_handler))
         .route(
             "/waves/:wave_id/restart-step",

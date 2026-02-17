@@ -759,6 +759,98 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    public func createChatTurn(
+        waveId: String,
+        message: String,
+        memoryBlocks: [ChatMemoryBlock]
+    ) async throws -> ChatTurn {
+        let url = apiBaseURL
+            .appendingPathComponent("waves")
+            .appendingPathComponent(waveId)
+            .appendingPathComponent("chat")
+            .appendingPathComponent("turns")
+
+        let body: [String: Any] = [
+            "message": message,
+            "memory_blocks": memoryBlocks.map { block in
+                [
+                    "name": block.name,
+                    "content": block.content,
+                    "position": block.position,
+                ]
+            },
+        ]
+
+        let request = try makeRequest(
+            url,
+            method: "POST",
+            body: body,
+            contentType: "application/json"
+        )
+
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = json["id"] as? String,
+              let turnWaveId = json["wave_id"] as? String else {
+            throw WaveServiceError.commandFailed("Invalid chat turn response")
+        }
+
+        let status = Self.parseChatTurnStatus(json["status"] as? String)
+        return ChatTurn(id: id, waveId: turnWaveId, status: status)
+    }
+
+    public func streamChatTurnEvents(
+        waveId: String,
+        turnId: String
+    ) -> AsyncThrowingStream<ChatTurnEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                let activeSession = longSession()
+                do {
+                    let url = apiBaseURL
+                        .appendingPathComponent("waves")
+                        .appendingPathComponent(waveId)
+                        .appendingPathComponent("chat")
+                        .appendingPathComponent("turns")
+                        .appendingPathComponent(turnId)
+                        .appendingPathComponent("events")
+                    let request = try makeRequest(url)
+                    let (bytes, response) = try await activeSession.session.bytes(for: request)
+
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        throw WaveServiceError.commandFailed("No response from lfd")
+                    }
+
+                    guard httpResponse.statusCode == 200 else {
+                        var data = Data()
+                        for try await byte in bytes {
+                            data.append(byte)
+                        }
+                        throw parseStatusCodeError(statusCode: httpResponse.statusCode, data: data)
+                    }
+
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data:") else { continue }
+                        let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                        guard !payload.isEmpty else { continue }
+                        let event = try Self.parseChatTurnEvent(payload)
+                        continuation.yield(event)
+                        if event.isTerminal {
+                            break
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: mapError(error, trustDelegate: activeSession.delegate))
+                }
+            }
+        }
+    }
+
     public func connect(_ id: String) async throws -> ConnectionInfo {
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves/\(id)/connect"),
@@ -1052,6 +1144,42 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             position: normalizeInt(json["position"]),
             updatedAt: parseDate(json["updated_at"])
         )
+    }
+
+    private static func parseChatTurnStatus(_ raw: String?) -> ChatTurnStatus {
+        guard let raw else { return .running }
+        return ChatTurnStatus(rawValue: raw) ?? .running
+    }
+
+    private static func parseChatTurnEvent(_ raw: String) throws -> ChatTurnEvent {
+        guard let data = raw.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else {
+            throw WaveServiceError.commandFailed("Invalid chat event payload")
+        }
+
+        switch type {
+        case "message":
+            let content = json["content"] as? String ?? ""
+            let phaseRaw = json["phase"] as? String
+            let phase = ChatTurnPhase(rawValue: phaseRaw ?? "") ?? .progress
+            return .message(content: content, phase: phase)
+        case "memory_edit":
+            return .memoryEdit(
+                op: json["op"] as? String ?? "upsert",
+                block: json["block"] as? String ?? "",
+                detail: json["detail"] as? String ?? ""
+            )
+        case "done":
+            return .done
+        case "failed":
+            return .failed(
+                code: json["code"] as? String ?? "failed",
+                message: json["message"] as? String ?? "Turn failed"
+            )
+        default:
+            throw WaveServiceError.commandFailed("Unknown chat event type: \(type)")
+        }
     }
 
     private static func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {

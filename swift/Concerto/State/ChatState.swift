@@ -5,6 +5,7 @@ enum ChatRole {
     case user
     case assistant
     case error
+    case memory
 }
 
 struct ChatMessage: Identifiable, Equatable {
@@ -86,7 +87,7 @@ struct MemoryStore {
     }
 }
 
-protocol ChatMemoryService: Sendable {
+protocol ChatService: Sendable {
     func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock]
     func upsertMemoryBlock(
         waveId: String,
@@ -95,44 +96,67 @@ protocol ChatMemoryService: Sendable {
         position: Int?
     ) async throws -> ChatMemoryBlock
     func deleteMemoryBlock(waveId: String, name: String) async throws
+    func createChatTurn(
+        waveId: String,
+        message: String,
+        memoryBlocks: [ChatMemoryBlock]
+    ) async throws -> ChatTurn
+    func streamChatTurnEvents(
+        waveId: String,
+        turnId: String
+    ) -> AsyncThrowingStream<ChatTurnEvent, Error>
 }
 
-extension LocalWaveService: ChatMemoryService {}
+extension LocalWaveService: ChatService {}
+
+enum ChatTurnState {
+    case idle
+    case running
+    case completed
+    case failed
+}
+
+private enum ChatStateError: LocalizedError {
+    case invalidMemoryEdit(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidMemoryEdit(let message):
+            return message
+        }
+    }
+}
 
 @MainActor
 @Observable
 final class ChatState {
-    private static let missingAPIKeyMessage = "Set ANTHROPIC_API_KEY to enable chat."
     private static let missingBlockNameMessage = "Memory block name is required."
+    private static let invalidCompletionContractMessage = "Turn failed: expected exactly one final message."
 
     let waveId: String
 
     var messages: [ChatMessage] = []
-    var isLoading = false
+    var turnState: ChatTurnState = .idle
     var memory = MemoryStore()
     var memoryError: String?
 
     private var hasLoadedMemory = false
-
-    private let waveService: any ChatMemoryService
-    private let anthropic: AnthropicClient
+    private let waveService: any ChatService
 
     init(
         waveId: String,
-        waveService: any ChatMemoryService = LocalWaveService(),
-        anthropic: AnthropicClient = AnthropicClient()
+        waveService: any ChatService = LocalWaveService()
     ) {
         self.waveId = waveId
         self.waveService = waveService
-        self.anthropic = anthropic
+    }
+
+    var isLoading: Bool {
+        turnState == .running
     }
 
     var canSend: Bool {
-        !isLoading && anthropic.hasAPIKey
-    }
-
-    var missingAPIKey: Bool {
-        !anthropic.hasAPIKey
+        turnState != .running
     }
 
     func loadMemoryIfNeeded() async {
@@ -154,27 +178,76 @@ final class ChatState {
     }
 
     func send(_ rawText: String) async {
+        guard turnState != .running else { return }
+
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
         messages.append(ChatMessage(role: .user, content: text))
-
-        guard anthropic.hasAPIKey else {
-            messages.append(ChatMessage(role: .error, content: Self.missingAPIKeyMessage))
-            return
-        }
-
-        isLoading = true
-        defer { isLoading = false }
+        turnState = .running
 
         do {
-            let reply = try await anthropic.complete(
+            let turn = try await waveService.createChatTurn(
+                waveId: waveId,
                 message: text,
-                system: memory.systemPrompt()
+                memoryBlocks: memory.blocks
             )
-            messages.append(ChatMessage(role: .assistant, content: reply))
+
+            var finalMessageCount = 0
+            var sawFailure = false
+            var sawTerminal = false
+
+            for try await event in waveService.streamChatTurnEvents(waveId: waveId, turnId: turn.id) {
+                switch event {
+                case .message(let content, let phase):
+                    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        messages.append(ChatMessage(role: .assistant, content: trimmed))
+                    }
+                    if phase == .final {
+                        finalMessageCount += 1
+                    }
+                case .memoryEdit(let op, let block, let detail):
+                    do {
+                        let badge = try await applyMemoryEdit(op: op, block: block, detail: detail)
+                        messages.append(ChatMessage(role: .memory, content: badge))
+                    } catch {
+                        memoryError = error.localizedDescription
+                        messages.append(ChatMessage(role: .error, content: error.localizedDescription))
+                        sawFailure = true
+                    }
+                case .done:
+                    sawTerminal = true
+                case .failed(_, let message):
+                    sawFailure = true
+                    sawTerminal = true
+                    let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let display = trimmed.isEmpty ? "Turn failed." : trimmed
+                    messages.append(ChatMessage(role: .error, content: display))
+                }
+            }
+
+            if sawFailure {
+                turnState = .failed
+                return
+            }
+
+            guard sawTerminal else {
+                messages.append(ChatMessage(role: .error, content: "Turn ended before completion."))
+                turnState = .failed
+                return
+            }
+
+            guard finalMessageCount == 1 else {
+                messages.append(ChatMessage(role: .error, content: Self.invalidCompletionContractMessage))
+                turnState = .failed
+                return
+            }
+
+            turnState = .completed
         } catch {
             messages.append(ChatMessage(role: .error, content: error.localizedDescription))
+            turnState = .failed
         }
     }
 
@@ -225,6 +298,31 @@ final class ChatState {
         } catch {
             memoryError = error.localizedDescription
         }
+    }
+
+    private func applyMemoryEdit(op: String, block: String, detail: String) async throws -> String {
+        let normalizedBlock = block.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedBlock.isEmpty else {
+            throw ChatStateError.invalidMemoryEdit("Agent memory edit missing block name.")
+        }
+
+        if op.lowercased() == "delete" {
+            try await waveService.deleteMemoryBlock(waveId: waveId, name: normalizedBlock)
+            memory.remove(named: normalizedBlock)
+            memoryError = nil
+            return "Agent updated memory: deleted \(normalizedBlock)"
+        }
+
+        let existingPosition = memory.blocks.first(where: { $0.name == normalizedBlock })?.position
+        let updated = try await waveService.upsertMemoryBlock(
+            waveId: waveId,
+            name: normalizedBlock,
+            content: detail,
+            position: existingPosition
+        )
+        memory.upsert(updated)
+        memoryError = nil
+        return "Agent updated memory: \(normalizedBlock)"
     }
 
     private func validatedMemoryBlockName(_ raw: String) -> String? {

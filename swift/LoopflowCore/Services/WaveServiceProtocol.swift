@@ -30,6 +30,15 @@ public protocol WaveServiceProtocol: Sendable {
         position: Int?
     ) async throws -> ChatMemoryBlock
     func deleteMemoryBlock(waveId: String, name: String) async throws
+    func createChatTurn(
+        waveId: String,
+        message: String,
+        memoryBlocks: [ChatMemoryBlock]
+    ) async throws -> ChatTurn
+    func streamChatTurnEvents(
+        waveId: String,
+        turnId: String
+    ) -> AsyncThrowingStream<ChatTurnEvent, Error>
     func stop(_ id: String) async throws
     func restartStep(_ id: String) async throws
     func landWave(_ id: String) async throws

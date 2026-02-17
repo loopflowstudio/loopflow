@@ -60,19 +60,11 @@ struct WaveChatView: View {
                 }
             }
 
-            if state.missingAPIKey {
-                Text("Set ANTHROPIC_API_KEY to enable chat.")
-                    .font(Typography.caption())
-                    .foregroundStyle(Color.statusWarning)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Spacing.lg)
-            }
-
             HStack(alignment: .bottom, spacing: Spacing.sm) {
                 TextField("Message", text: $composerText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...6)
-                    .disabled(state.missingAPIKey)
+                    .disabled(!state.canSend)
 
                 Button("Send") {
                     sendMessage()
@@ -191,7 +183,11 @@ private struct ChatBubble: View {
 
     @ViewBuilder
     private var content: some View {
-        if message.role == .assistant,
+        if message.role == .memory {
+            Label(message.content, systemImage: "brain")
+                .font(Typography.caption())
+                .foregroundStyle(Color.statusInfo)
+        } else if message.role == .assistant,
            let markdown = try? AttributedString(
                markdown: message.content,
                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
@@ -214,6 +210,8 @@ private struct ChatBubble: View {
             return palette.surface
         case .error:
             return Color.statusError.opacity(0.12)
+        case .memory:
+            return Color.statusInfo.opacity(0.12)
         }
     }
 }

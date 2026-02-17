@@ -22,7 +22,7 @@ use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::{ForkRunStatus, SharedStore};
+use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::types::{
     AgentStatus, Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun,
     WaveRunKind, WaveRunStatus, WaveStatus,
@@ -841,8 +841,12 @@ mod tests {
         );
 
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
-        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -859,6 +863,7 @@ mod tests {
 
         let updated_run = store
             .get_wave_run(&run_id)
+            .await
             .expect("run fetch should succeed")
             .expect("run should exist");
         assert_eq!(updated_run.status, WaveRunStatus::Failed);
@@ -881,8 +886,12 @@ mod tests {
         );
 
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
-        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -899,6 +908,7 @@ mod tests {
 
         let updated_run = store
             .get_wave_run(&run_id)
+            .await
             .expect("run fetch should succeed")
             .expect("run should exist");
         assert_eq!(updated_run.status, WaveRunStatus::Completed);
@@ -907,6 +917,7 @@ mod tests {
         assert_eq!(
             store
                 .list_fork_runs(&run_id, 0)
+                .await
                 .expect("fork runs should load")
                 .len(),
             0
@@ -930,8 +941,12 @@ mod tests {
         );
 
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
-        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -952,6 +967,7 @@ mod tests {
 
         let updated_run = store
             .get_wave_run(&run_id)
+            .await
             .expect("run fetch should succeed")
             .expect("run should exist");
         assert_eq!(updated_run.status, WaveRunStatus::Failed);
@@ -964,6 +980,7 @@ mod tests {
         assert_eq!(
             store
                 .list_fork_runs(&run_id, 0)
+                .await
                 .expect("fork runs should load")
                 .len(),
             0
@@ -992,21 +1009,30 @@ mod tests {
         repo.commit("add fork direction fixtures");
 
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
-        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
 
         let mut run = store
             .get_wave_run(&run_id)
+            .await
             .expect("run should load")
             .expect("run should exist");
         run.snapshot.direction = vec!["base".to_string()];
-        store.update_wave_run(&run).expect("run should update");
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run should update");
         let mut wave = store
             .get_wave(&wave_id)
+            .await
             .expect("wave should load")
             .expect("wave should exist");
         wave.direction = vec!["base".to_string()];
-        store.update_wave(&wave).expect("wave should update");
+        store.update_wave(&wave).await.expect("wave should update");
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -1035,15 +1061,23 @@ mod tests {
         let repo = TestRepo::new();
         let db_dir = tempdir().expect("tempdir");
         let db_path = db_dir.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
-        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
 
         let mut run = store
             .get_wave_run(&run_id)
+            .await
             .expect("run should load")
             .expect("run should exist");
         run.status = WaveRunStatus::Failed;
-        store.update_wave_run(&run).expect("run should update");
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run should update");
 
         let fork_worktree = format!("{}-fork-0", repo.path().to_string_lossy());
         create_worktree(
@@ -1062,6 +1096,7 @@ mod tests {
                 status: ForkRunStatus::Running,
                 worktree: fork_worktree.clone(),
             })
+            .await
             .expect("fork run should be stored");
 
         let scheduler = Arc::new(Scheduler::new(4));
@@ -1086,6 +1121,7 @@ mod tests {
         assert_eq!(
             store
                 .list_fork_runs(&run_id, 0)
+                .await
                 .expect("fork runs should load")
                 .len(),
             0

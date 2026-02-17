@@ -92,7 +92,8 @@ impl WaveExecutor {
         fork: &ConcreteFork,
     ) -> Result<()> {
         if fork.branches.is_empty() {
-            self.fail_run(run, wave, "fork has no branches".to_string())?;
+            self.fail_run(run, wave, "fork has no branches".to_string())
+                .await?;
             return Ok(());
         }
 

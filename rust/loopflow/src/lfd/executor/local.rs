@@ -144,7 +144,7 @@ impl AgentExecutor for LocalProcessExecutor {
 mod tests {
     use super::*;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::store::sqlite::SqliteStore;
+    use crate::lfd::store::{open_store, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -152,7 +152,11 @@ mod tests {
     async fn local_executor_times_out_long_running_agent() {
         let tmp = tempdir().expect("tempdir");
         let db = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db).expect("sqlite store"));
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db))
+                .await
+                .expect("sqlite store"),
+        );
         let executor = LocalProcessExecutor::new(store, Duration::from_millis(50));
         let output = OutputHub::new(16, tmp.path().join("output"));
 

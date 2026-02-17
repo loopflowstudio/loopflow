@@ -1210,7 +1210,7 @@ pub type SharedStore = Arc<Store>;
 
 #[cfg(test)]
 mod tests {
-    use super::{ForkRun, ForkRunStatus, StorageConfig};
+    use super::{ExecutionStore, ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,

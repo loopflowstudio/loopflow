@@ -1542,7 +1542,9 @@ impl AgentExecutor for DockerExecutor {
             return Err(anyhow!("empty agent command"));
         }
 
-        let workspace = self.resolve_workspace(context.wave_id, context.wave_run_id).await?;
+        let workspace = self
+            .resolve_workspace(context.wave_id, context.wave_run_id)
+            .await?;
         let agent_image = self.ensure_repo_image(&workspace.repo_source).await?;
         self.prepare_workspace(&workspace, context.wave_run_id, cwd)
             .await?;

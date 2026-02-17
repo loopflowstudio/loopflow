@@ -11,32 +11,39 @@ lfd keeps both SQLite and Postgres. Store operations are async end-to-end. Promp
 | # | Stage | What it unlocks | Pre-work | Status |
 |---|-------|----------------|----------|--------|
 | 01 | Store trait scope reset | Capability traits, `StorageConfig`, `open_store`/`migrate_store` | None | Shipped |
-| 02 | Async store boundary | Routes call store directly; no `spawn_blocking` for DB ops | 01 | In progress |
+| 02 | Async store boundary | Routes call store directly; no `spawn_blocking` for DB ops | 01 | Shipped |
 | 03 | Shared SQL catalog | One query per operation; dialect rendering for `?`/`$N` | 02 | |
 | 04 | Prompt pipeline | `DocumentSource` enum; `gather_documents(specs)` | None | |
 
-Stage 04 is independent of the store work and can run in parallel with 02/03. Each stage deletes what it replaces — no deferred cleanup.
+Stage 04 is independent of the store work and can run in parallel with 03. Each stage deletes what it replaces — no deferred cleanup.
 
-## What's shipped (Stage 01)
+## What's shipped
+
+### Stage 01 — Store trait scope reset
 
 - `StorageConfig` enum with `sqlite(path)` / `postgres(url)` constructors
 - `Store` wrapper + `StoreBackend` enum centralizing backend selection
 - Grouped capability traits: `WaveStateStore`, `ExecutionStore`, `StoreAdmin`
 - `open_store()` / `migrate_store()` helpers for startup and migration
-- Config UX: strict mode profiles select storage/executor/backend together
-- `RunStore` kept so executor/http compile unchanged (Stage 02 deletes it)
+
+### Stage 02 — Async store boundary
+
+- `SharedStore` is `Arc<Store>` (concrete type, not `Arc<dyn RunStore>`)
+- `RunStore` trait, `run_store()` helper, `Store::as_run_store()` all deleted
+- `Store` exposes `pub async fn` methods directly; callers `await` everywhere
+- SQLite blocking contained inside backend via `run_sqlite` + `spawn_blocking`
+- Postgres calls `tokio-postgres` directly; embedded runtime removed
+- HTTP routes, executor, triggers, and tests all migrated to async-first
 
 ## Architecture (current → target)
 
 ```
-Current (Stage 01 shipped):
-  HTTP routes ──spawn_blocking──▶ run_store(Arc<dyn RunStore>)
-  PostgresStore holds embedded tokio::Runtime for block_on
-  Store wrapper exposes async traits, delegates to sync RunStore
+Current (Stage 02 shipped):
+  HTTP routes ──await──▶ Arc<Store>
+  Store dispatches to SqliteStore (spawn_blocking) or PostgresStore (async)
+  ~45 SQL queries duplicated between sqlite.rs and postgres.rs
 
 Target (Stage 04 complete):
-  HTTP routes ──await──▶ Arc<dyn WaveStateStore + ExecutionStore + StoreAdmin>
-  Both backends implement async traits natively
   SQL defined once per query, rendered per dialect
   Documents typed by source, assembled declaratively
 ```

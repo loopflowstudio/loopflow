@@ -23,6 +23,22 @@ public struct FileTokenProvider: TokenProvider {
         return token.isEmpty ? nil : token
     }
 
+    static func resolveToken(
+        connection: ServerConnection,
+        tokenProvider: (@Sendable () -> String?)?
+    ) -> String? {
+        if let token = tokenProvider?(), !token.isEmpty {
+            return token
+        }
+        if let token = connection.staticToken, !token.isEmpty {
+            return token
+        }
+        guard connection.isLocal else {
+            return nil
+        }
+        return FileTokenProvider().readToken()
+    }
+
     public static var defaultTokenURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lf", isDirectory: true)

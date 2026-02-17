@@ -76,19 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let session_token = if matches!(&auth_provider, AuthProvider::Local) {
-        match loopflow::lfd::session_token::generate_and_write() {
-            Ok(token) => {
-                tracing::info!(
-                    path = %loopflow::lfd::session_token::token_path().display(),
-                    "session token written"
-                );
-                Some(token)
-            }
-            Err(err) => {
-                tracing::error!(error = %err, "failed to write session token");
-                std::process::exit(1);
-            }
-        }
+        Some(generate_session_token_or_exit())
     } else {
         None
     };
@@ -251,6 +239,22 @@ fn storage_config_from_config(
                 )
             })?;
             Ok(StorageConfig::postgres(database_url))
+        }
+    }
+}
+
+fn generate_session_token_or_exit() -> String {
+    match loopflow::lfd::session_token::generate_and_write() {
+        Ok(token) => {
+            tracing::info!(
+                path = %loopflow::lfd::session_token::token_path().display(),
+                "session token written"
+            );
+            token
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "failed to write session token");
+            std::process::exit(1);
         }
     }
 }

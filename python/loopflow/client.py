@@ -28,8 +28,8 @@ def _resolve_token() -> Optional[str]:
 
     token_path = Path.home() / ".lf" / "session-token"
     try:
-        return token_path.read_text().strip()
-    except (FileNotFoundError, PermissionError):
+        return token_path.read_text().strip() or None
+    except OSError:
         return None
 
 

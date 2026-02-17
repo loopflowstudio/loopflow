@@ -97,14 +97,18 @@ async fn setup_studio_registration(
     }
 }
 
+pub(crate) fn lf_home_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lf")
+}
+
 pub fn default_db_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".lf").join("lfd.db")
+    lf_home_dir().join("lfd.db")
 }
 
 pub fn default_output_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".lf").join("output")
+    lf_home_dir().join("output")
 }
 
 pub fn default_max_slots() -> usize {

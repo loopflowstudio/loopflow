@@ -89,18 +89,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         pinStore: CertificatePinStore = .shared
     ) {
         self.connection = connection
-        let fileTokenProvider = FileTokenProvider()
         self.tokenProvider = {
-            if let token = tokenProvider?(), !token.isEmpty {
-                return token
-            }
-            if let token = connection.staticToken, !token.isEmpty {
-                return token
-            }
-            guard connection.isLocal else {
-                return nil
-            }
-            return fileTokenProvider.readToken()
+            FileTokenProvider.resolveToken(
+                connection: connection,
+                tokenProvider: tokenProvider
+            )
         }
         self.sessionFactory = sessionFactory ?? { requestTimeout, resourceTimeout, delegate in
             let config = URLSessionConfiguration.default

@@ -40,7 +40,7 @@ pub async fn auth_middleware(
         .map(|ConnectInfo(addr)| addr.ip().is_loopback())
         .unwrap_or(false);
 
-    if should_bypass_auth(is_loopback, &request) {
+    if should_bypass_auth(is_loopback, request.method()) {
         return next.run(request).await;
     }
 
@@ -77,8 +77,8 @@ pub async fn auth_middleware(
     }
 }
 
-fn should_bypass_auth(is_loopback: bool, request: &Request) -> bool {
-    is_loopback && !is_mutation(request)
+fn should_bypass_auth(is_loopback: bool, method: &Method) -> bool {
+    is_loopback && !is_mutation(method)
 }
 
 fn authorize_local(
@@ -86,24 +86,26 @@ fn authorize_local(
     provided_token: Option<&str>,
     is_loopback: bool,
 ) -> Result<(), (StatusCode, &'static str)> {
-    match (session_token, provided_token) {
-        (Some(expected), Some(provided)) if constant_time_eq(provided, expected) => Ok(()),
-        (Some(_), Some(_)) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
-        (Some(_), None) if is_loopback => {
-            Err((StatusCode::FORBIDDEN, "mutations require session token"))
-        }
-        _ => Err((
+    let Some(expected) = session_token else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "remote access requires auth configuration",
+        ));
+    };
+
+    match provided_token {
+        Some(provided) if constant_time_eq(provided, expected) => Ok(()),
+        Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
+        None if is_loopback => Err((StatusCode::FORBIDDEN, "mutations require session token")),
+        None => Err((
             StatusCode::FORBIDDEN,
             "remote access requires auth configuration",
         )),
     }
 }
 
-fn is_mutation(request: &Request) -> bool {
-    !matches!(
-        request.method(),
-        &Method::GET | &Method::HEAD | &Method::OPTIONS
-    )
+fn is_mutation(method: &Method) -> bool {
+    !matches!(method, &Method::GET | &Method::HEAD | &Method::OPTIONS)
 }
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
@@ -135,7 +137,6 @@ fn auth_error(status: StatusCode, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
 
     #[test]
     fn constant_time_eq_matches() {
@@ -168,13 +169,7 @@ mod tests {
 
     #[test]
     fn loopback_get_bypasses_auth() {
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/v0/waves")
-            .body(Body::empty())
-            .unwrap();
-
-        assert!(should_bypass_auth(true, &request));
+        assert!(should_bypass_auth(true, &Method::GET));
     }
 
     #[test]
@@ -194,13 +189,7 @@ mod tests {
 
     #[test]
     fn remote_get_without_token_is_forbidden() {
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri("/v0/waves")
-            .body(Body::empty())
-            .unwrap();
-
-        assert!(!should_bypass_auth(false, &request));
+        assert!(!should_bypass_auth(false, &Method::GET));
 
         let result = authorize_local(Some("session-token"), None, false);
         assert_eq!(
@@ -220,13 +209,7 @@ mod tests {
 
     #[test]
     fn remote_post_with_valid_token_is_allowed() {
-        let request = Request::builder()
-            .method(Method::POST)
-            .uri("/v0/waves")
-            .body(Body::empty())
-            .unwrap();
-
-        assert!(!should_bypass_auth(true, &request));
+        assert!(!should_bypass_auth(true, &Method::POST));
 
         let result = authorize_local(Some("session-token"), Some("session-token"), false);
         assert_eq!(result, Ok(()));

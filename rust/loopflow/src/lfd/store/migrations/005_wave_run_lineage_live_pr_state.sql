@@ -23,7 +23,6 @@ WHERE stack_group_id = '';
 WITH ordered AS (
     SELECT
         id,
-        wave_id,
         LAG(id) OVER (PARTITION BY wave_id ORDER BY iteration, started_at, id) AS parent_id,
         ROW_NUMBER() OVER (PARTITION BY wave_id ORDER BY iteration, started_at, id) - 1 AS position
     FROM wave_runs
@@ -31,14 +30,11 @@ WITH ordered AS (
 )
 UPDATE wave_runs
 SET
-    parent_run_id = CASE
-        WHEN wave_runs.parent_run_id IS NULL THEN (
-            SELECT ordered.parent_id
-            FROM ordered
-            WHERE ordered.id = wave_runs.id
-        )
-        ELSE wave_runs.parent_run_id
-    END,
+    parent_run_id = COALESCE(wave_runs.parent_run_id, (
+        SELECT ordered.parent_id
+        FROM ordered
+        WHERE ordered.id = wave_runs.id
+    )),
     stack_position = CASE
         WHEN wave_runs.parent_run_id IS NULL THEN COALESCE((
             SELECT ordered.position

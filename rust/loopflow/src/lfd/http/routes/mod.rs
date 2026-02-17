@@ -525,7 +525,7 @@ mod tests {
         }
     }
 
-    fn make_wave_run(wave: &Wave, pr_number: u32, parent_run_id: Option<LfdId>) -> WaveRun {
+    fn make_wave_run(wave: &Wave, pr_number: u32) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
@@ -553,13 +553,32 @@ mod tests {
             flow_parents: Vec::new(),
             run_kind: WaveRunKind::Main,
             sidecar_kind: None,
-            parent_run_id,
+            parent_run_id: None,
             parent_pr_number: None,
             stack_position: pr_number,
             stack_group_id: wave.id.to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
         }
+    }
+
+    fn setup_wave_with_run(pr_number: u32) -> (SharedStore, tempfile::TempDir, Wave, WaveRun) {
+        let store = sqlite_store();
+        let repo_dir = tempfile::tempdir().expect("tempdir should be created");
+        let wave = make_wave(
+            repo_dir
+                .path()
+                .to_str()
+                .expect("tempdir path should be valid UTF-8"),
+        );
+        store
+            .create_wave(&wave)
+            .expect("wave should be created in store");
+        let run = make_wave_run(&wave, pr_number);
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created in store");
+        (store, repo_dir, wave, run)
     }
 
     fn live_state(repo_id: &str, pr_number: u32, state: LivePrState) -> LivePullRequestState {
@@ -634,22 +653,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_wave_dto_uses_live_pr_state_for_open_counts() {
-        let store = sqlite_store();
-        let repo_dir = tempfile::tempdir().expect("tempdir should be created");
-        let wave = make_wave(
-            repo_dir
-                .path()
-                .to_str()
-                .expect("tempdir path should be valid UTF-8"),
-        );
-        store
-            .create_wave(&wave)
-            .expect("wave should be created in store");
-
-        let run = make_wave_run(&wave, 17, None);
-        store
-            .create_wave_run(&run)
-            .expect("wave run should be created in store");
+        let (store, _repo_dir, wave, _) = setup_wave_with_run(17);
 
         store
             .upsert_live_pr_state(&live_state(&wave.repo, 17, LivePrState::Closed))
@@ -674,21 +678,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_projection_tracks_live_pr_state_transitions() {
-        let store = sqlite_store();
-        let repo_dir = tempfile::tempdir().expect("tempdir should be created");
-        let wave = make_wave(
-            repo_dir
-                .path()
-                .to_str()
-                .expect("tempdir path should be valid UTF-8"),
-        );
-        store
-            .create_wave(&wave)
-            .expect("wave should be created in store");
-        let run = make_wave_run(&wave, 21, None);
-        store
-            .create_wave_run(&run)
-            .expect("wave run should be created in store");
+        let (store, _repo_dir, wave, run) = setup_wave_with_run(21);
         let key = run_live_pr_key(&run).expect("run should have a live PR key");
 
         let github = crate::lfd::config::GitHubConfig::default();

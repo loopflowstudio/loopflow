@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, Optional
 
@@ -20,6 +21,18 @@ def _resolve_base_url() -> str:
     return f"http://{host}:{port}"
 
 
+def _resolve_token() -> Optional[str]:
+    token = os.environ.get("LFD_TOKEN")
+    if token:
+        return token
+
+    token_path = Path.home() / ".lf" / "session-token"
+    try:
+        return token_path.read_text().strip()
+    except (FileNotFoundError, PermissionError):
+        return None
+
+
 class Client:
     def __init__(
         self,
@@ -29,7 +42,7 @@ class Client:
     ) -> None:
         resolved = base_url.rstrip("/") if base_url else _resolve_base_url()
         self._base_url = resolved
-        resolved_token = token or os.environ.get("LFD_TOKEN")
+        resolved_token = token or _resolve_token()
         headers = {}
         if resolved_token:
             headers["Authorization"] = f"Bearer {resolved_token}"

@@ -9,7 +9,7 @@ import pytest
 
 from conftest import WAVE_MINIMAL, WAVE_RUN_MINIMAL
 
-from loopflow.client import Client, _extract_error_message, _resolve_base_url
+from loopflow.client import Client, _extract_error_message, _resolve_base_url, _resolve_token
 from loopflow.errors import LoopflowError, WaveAlreadyRunning
 
 
@@ -34,6 +34,34 @@ class TestUrlResolution:
         client = Client(base_url="http://localhost:2486/")
         assert client._base_url == "http://localhost:2486"
         client.close()
+
+
+class TestTokenResolution:
+    def test_env_token_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("LFD_TOKEN", "env-token")
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-token")
+
+        assert _resolve_token() == "env-token"
+
+    def test_reads_session_token_file(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text(" file-token\n")
+
+        assert _resolve_token() == "file-token"
+
+    def test_missing_session_token_file_returns_none(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        assert _resolve_token() is None
 
 
 def _mock_client(handler):
@@ -167,6 +195,7 @@ class TestClientToken:
 
     def test_no_token_sends_no_auth_header(self, monkeypatch):
         monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client._resolve_token", lambda: None)
         client, headers = _mock_token_client()
         client.health()
         assert "authorization" not in headers

@@ -12,6 +12,7 @@ pub mod output;
 pub mod registration;
 pub mod scheduler;
 pub mod service;
+pub mod session_token;
 pub mod sessions;
 pub mod store;
 pub mod triggers;

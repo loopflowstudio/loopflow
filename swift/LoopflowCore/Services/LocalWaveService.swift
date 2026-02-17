@@ -89,7 +89,19 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         pinStore: CertificatePinStore = .shared
     ) {
         self.connection = connection
-        self.tokenProvider = tokenProvider ?? { connection.staticToken }
+        let fileTokenProvider = FileTokenProvider()
+        self.tokenProvider = {
+            if let token = tokenProvider?(), !token.isEmpty {
+                return token
+            }
+            if let token = connection.staticToken, !token.isEmpty {
+                return token
+            }
+            guard connection.isLocal else {
+                return nil
+            }
+            return fileTokenProvider.readToken()
+        }
         self.sessionFactory = sessionFactory ?? { requestTimeout, resourceTimeout, delegate in
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = requestTimeout
@@ -155,6 +167,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             guard let token = tokenProvider(), !token.isEmpty else {
                 throw WaveServiceError.authRejected("Missing token")
             }
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if connection.isLocal,
+                  let token = tokenProvider(),
+                  !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 

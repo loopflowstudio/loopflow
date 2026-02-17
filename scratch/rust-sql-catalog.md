@@ -1,81 +1,64 @@
 # 03: Shared SQL Catalog
 
-Define each query once. Render per-dialect placeholder syntax at the edges.
+## Problem
 
-## What exists after this
+`lfd` currently duplicates the same query logic across `sqlite.rs` and `postgres.rs`, with only placeholder syntax and driver calls changing. That duplication slows every schema change, invites silent backend drift, and makes review harder because behavior lives in two files.
 
-One SQL string per query operation. A thin dialect layer converts `?` placeholders to `$1..$N` for Postgres. Row mapping already shared via `StoreRow` trait. Adding a new query means writing it once.
+Who benefits: maintainers shipping store changes, reviewers validating correctness, and users who rely on both SQLite and Postgres behaving identically.
 
-## Current state
-
-~45 SQL statements duplicated across `sqlite.rs` (940 lines) and `postgres.rs` (1074 lines). The SQL is nearly identical — same column lists, same WHERE clauses, same ORDER BY. Differences:
-
-- Placeholder syntax: `?1` (sqlite) vs `$1` (postgres)
-- Driver API: `conn.prepare().query_map()` vs `client.query()`
-- Parameter passing: `params![]` vs `&[]`
-
-Additionally, `store/mod.rs` (1284 lines) has ~226 lines of `pub async fn` forwarding methods on `Store` that dispatch to `SqliteStore` or `PostgresStore` by matching on `StoreBackend`. These are mechanical: match, call, return. The catalog may reduce some of this repetition if query dispatch can be generalized.
-
-Row mapping is already shared: `StoreRow` trait in `store/rows.rs` abstracts over `rusqlite::Row` and `tokio_postgres::Row`. Functions like `map_wave_row()` work for both backends.
+Why now: Stage 02 already unified call sites behind async `Store`; SQL duplication is now the largest remaining source of storage-layer complexity.
 
 ## Approach
 
-### Step 1 — SQL catalog module
+Build a single query catalog and make backends consume it, not author SQL inline.
 
-Create `lfd/store/catalog.rs`. Each query is a function returning the SQL string:
+1. Add `lfd/store/catalog.rs` with one `Query` entry per operation (wave CRUD, run status updates, schema/history reads, hooks, repos, etc.).
+2. Author SQL once in a dialect-neutral template with numbered placeholders (`{p1}`, `{p2}`, ...).
+3. Render templates into backend SQL via a tiny dialect adapter:
+   - SQLite: `{pN}` -> `?N`
+   - Postgres: `{pN}` -> `$N`
+4. Support true syntax differences explicitly with per-query overrides (rare, named, reviewed), not ad-hoc backend-local SQL strings.
+5. Cache rendered SQL once (lazy static) so queries do not pay replacement cost on hot paths.
+6. Add catalog parity tests that assert every `Query` renders for both dialects and that placeholder numbering is contiguous.
+7. Refactor `sqlite.rs` and `postgres.rs` to call catalog queries; delete duplicated inline SQL.
 
-```rust
-pub fn list_waves(repo_filter: bool) -> &'static str {
-    if repo_filter {
-        "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
-         FROM waves WHERE repo = {p1} ORDER BY created_at DESC"
-    } else {
-        "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
-         FROM waves ORDER BY created_at DESC"
-    }
-}
-```
+Wild success shape: adding a new store operation means touching one catalog entry plus backend binding code, and both backends ship together by default.
 
-Use `{p1}`, `{p2}` as dialect-neutral placeholders.
+Wild failure shape (to avoid): catalog becomes a hidden DSL with unreadable indirection. Keep it plain strings + tiny renderer + explicit overrides.
 
-### Step 2 — Dialect rendering
+## Alternatives considered
 
-```rust
-pub enum Dialect { Sqlite, Postgres }
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep SQL duplicated, enforce parity with reviewer discipline | Lowest migration effort | Fails at scale; drift is process debt, not design |
+| Adopt full query builder/ORM (Diesel, SeaQuery, SQLx macro-heavy rewrite) | Stronger compile-time modeling | Too disruptive for this stage; large rewrite risk and slower iteration |
+| Generate Rust constants from `.sql` files per backend | Better SQL ergonomics for editors | Still duplicates backend variants and adds build tooling complexity |
 
-pub fn render(sql: &str, dialect: Dialect) -> String {
-    // Replace {p1} with ?1 or $1, {p2} with ?2 or $2, etc.
-}
-```
+## Key decisions
 
-Keep it simple. No query builder, no ORM. Just string replacement at startup or compile time.
+- Keep **both** backends first-class, following wave north star: **"lfd keeps both SQLite and Postgres."**
+- Delete replaced patterns in the same stage, following wave rule: **"Each stage deletes what it replaces — no deferred cleanup."**
+- Implement exactly the Stage 03 contract from wave plan: **"One query per operation; dialect rendering for `?`/`$N`."**
+- Prefer explicit per-query dialect overrides over clever abstraction when SQL diverges (readability beats magic).
+- Treat catalog parity tests as a release gate for store changes.
 
-### Step 3 — Backend deduplication
+## Scope
 
-Each backend's trait impl calls `catalog::list_waves(true)`, renders for its dialect, and executes. The query logic shrinks to: get SQL, bind params, map rows.
-
-### Step 4 — Parity tests
-
-Snapshot tests that render each catalog query for both dialects and compare against golden files. If a query changes, both backends update together.
-
-## Key files
-
-| File | Lines | What changes |
-|------|-------|-------------|
-| `lfd/store/catalog.rs` | new (~200) | All SQL strings defined once |
-| `lfd/store/sqlite.rs` | ~940 → ~450 | Query bodies replaced with catalog + render |
-| `lfd/store/postgres.rs` | ~1074 → ~550 | Same reduction |
-| `lfd/store/mod.rs` | ~1284 | Forwarding methods unchanged; catalog reduces backend code they dispatch to |
-| `lfd/store/rows.rs` | unchanged | Already shared |
-
-## Risks
-
-- **Edge cases in SQL between backends**: SQLite and Postgres have minor syntax differences beyond placeholders (e.g., `UPSERT` syntax, type casting). The catalog needs to handle these — likely with per-dialect query variants for the ~5 queries that differ.
-- **mod.rs forwarding layer**: Stage 02 added ~226 lines of `pub async fn` on `Store` that match on backend and call the corresponding method. The catalog doesn't directly reduce this — it's a dispatch pattern, not SQL duplication. But it's worth noting that the store module is now 3298 lines across three files. The catalog should shrink it by ~1000 lines.
+- In scope:
+  - New shared SQL catalog module and placeholder renderer
+  - Refactor duplicated queries out of `sqlite.rs` and `postgres.rs`
+  - Catalog parity tests and regression coverage for store behavior
+- Out of scope:
+  - Replacing rusqlite/tokio-postgres drivers
+  - Changing wave/execution product semantics
+  - Splitting executor modules or redesigning `Store` dispatch API
 
 ## Done when
 
-- Each SQL query defined in one place
-- `sqlite.rs` and `postgres.rs` don't contain duplicated SQL strings
-- Snapshot tests verify both dialect renderings
-- No regression in store test suite
+- Every store operation SQL statement is defined once in `lfd/store/catalog.rs`.
+- `sqlite.rs` and `postgres.rs` no longer contain duplicated inline query bodies (except driver-specific transaction/plumbing code).
+- Catalog tests verify both dialect renderings and placeholder correctness.
+- Store + integration behavior still passes:
+  - `cargo test -p loopflow lfd::store`
+  - `cargo test -p loopflow lfd::http`
+  - `cargo test -p loopflow lfd::executor`

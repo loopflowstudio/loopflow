@@ -79,6 +79,7 @@ struct ConcertoApp: App {
             .tint(.loopflowBurgundy)
             .preferredColorScheme(preferredScheme)
             .environment(\.palette, resolvedPalette)
+            .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 500, height: 400)

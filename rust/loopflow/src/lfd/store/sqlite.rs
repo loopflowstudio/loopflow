@@ -16,7 +16,7 @@ use crate::lfd::store::rows::{
 use crate::lfd::store::{ForkRun, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
-    Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -348,6 +348,83 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT wave_id, run_id, reason, attempted_at, conflict_files, error
+             FROM wave_queue_blocks
+             WHERE wave_id = ?1
+             ORDER BY attempted_at DESC",
+        )?;
+        let rows = stmt.query_map(params![wave_id], |row| {
+            let conflict_files = row
+                .get::<_, String>(4)
+                .ok()
+                .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+                .unwrap_or_default();
+            Ok(QueueBlock {
+                wave_id: LfdId::from_raw(row.get::<_, String>(0)?),
+                run_id: LfdId::from_raw(row.get::<_, String>(1)?),
+                reason: row.get(2)?,
+                attempted_at: crate::lfd::store::rows::unix_to_datetime(row.get::<_, i64>(3)?),
+                conflict_files,
+                error: row.get(5)?,
+            })
+        })?;
+        let mut blocks = Vec::new();
+        for block in rows {
+            blocks.push(block?);
+        }
+        Ok(blocks)
+    }
+
+    pub fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO wave_queue_blocks (wave_id, run_id, reason, attempted_at, conflict_files, error)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(wave_id, run_id) DO UPDATE SET
+                reason = excluded.reason,
+                attempted_at = excluded.attempted_at,
+                conflict_files = excluded.conflict_files,
+                error = excluded.error",
+            params![
+                block.wave_id,
+                block.run_id,
+                block.reason,
+                block.attempted_at.unix_timestamp(),
+                serde_json::to_string(&block.conflict_files)?,
+                block.error,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let deleted = conn.execute(
+            "DELETE FROM wave_queue_blocks WHERE wave_id = ?1 AND run_id = ?2",
+            params![wave_id, run_id],
+        )?;
+        Ok(deleted as u32)
+    }
+
+    pub fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let inserted = conn.execute(
+            "INSERT INTO wave_pr_merge_events (wave_id, pr_number, merged_at, processed_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(wave_id, pr_number, merged_at) DO NOTHING",
+            params![
+                event.wave_id,
+                event.pr_number as i64,
+                event.merged_at.unix_timestamp(),
+                event.processed_at.unix_timestamp(),
+            ],
+        )?;
+        Ok(inserted > 0)
     }
 
     pub fn fail_orphaned_runs(&self) -> StoreResult<u32> {

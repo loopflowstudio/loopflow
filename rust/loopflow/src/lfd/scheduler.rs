@@ -5,6 +5,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::store::SharedStore;
@@ -81,6 +82,7 @@ impl Scheduler {
         store: SharedStore,
         executor: WaveExecutor,
         event_hub: EventHub,
+        github: GitHubConfig,
         cancel: CancellationToken,
     ) -> Vec<JoinHandle<()>> {
         vec![
@@ -106,6 +108,7 @@ impl Scheduler {
                 event_hub.clone(),
                 cancel.clone(),
             ),
+            triggers::spawn_queue_reconciler(store.clone(), github, cancel.clone()),
             triggers::spawn_recovery_loop(store.clone(), executor.clone(), cancel.clone()),
             triggers::spawn_summary_refresh(store, executor, event_hub, cancel),
         ]

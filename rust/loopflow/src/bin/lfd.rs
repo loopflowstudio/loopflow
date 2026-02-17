@@ -134,6 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         store.clone(),
         executor.clone(),
         event_hub.clone(),
+        lfd_config.github.clone(),
         cancel.clone(),
     );
 

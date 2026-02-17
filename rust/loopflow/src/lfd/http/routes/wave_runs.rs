@@ -10,7 +10,8 @@ use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
 use crate::lfd::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
 use crate::lfd::http::routes::{
-    build_wave_live_pr_projection, live_pr_for_run, resolve_wave_id, run_live_pr_key,
+    build_wave_live_pr_projection, build_wave_queue_views, live_pr_for_run, resolve_wave_id,
+    run_live_pr_key,
 };
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, ApiResult};
@@ -216,12 +217,26 @@ async fn list_wave_runs(
     } else {
         None
     };
+    let queue_projection = if let (Some(wave_id), Some(live_projection)) =
+        (wave_id.as_ref(), live_projection.as_ref())
+    {
+        Some(
+            build_wave_queue_views(&state.store, wave_id, &runs, live_projection)
+                .await
+                .map_err(map_store_error)?,
+        )
+    } else {
+        None
+    };
 
     let mut data = Vec::with_capacity(runs.len());
     for run in runs {
         if let Some(projection) = live_projection.as_ref() {
             let (live_pr_state, pr_state_stale) = live_pr_for_run(projection, &run);
-            data.push(wave_run_dto(run, live_pr_state, pr_state_stale));
+            let queue_view = queue_projection
+                .as_ref()
+                .and_then(|projection| projection.get(&run.id));
+            data.push(wave_run_dto(run, live_pr_state, pr_state_stale, queue_view));
             continue;
         }
 
@@ -238,7 +253,12 @@ async fn list_wave_runs(
             pr_state_stale = live_pr_state.is_none();
         }
 
-        data.push(wave_run_dto(run, live_pr_state.as_ref(), pr_state_stale));
+        data.push(wave_run_dto(
+            run,
+            live_pr_state.as_ref(),
+            pr_state_stale,
+            None,
+        ));
     }
 
     Ok(Json(ListResponse::new(data, has_more)))

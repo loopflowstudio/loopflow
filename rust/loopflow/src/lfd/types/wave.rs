@@ -283,6 +283,27 @@ pub struct LivePullRequestState {
     pub synced_at: OffsetDateTime,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueBlock {
+    pub wave_id: LfdId,
+    pub run_id: LfdId,
+    pub reason: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub attempted_at: OffsetDateTime,
+    pub conflict_files: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueMergeEvent {
+    pub wave_id: LfdId,
+    pub pr_number: u32,
+    #[serde(with = "time::serde::rfc3339")]
+    pub merged_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub processed_at: OffsetDateTime,
+}
+
 impl WaveRun {
     #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, wave_id: LfdId) -> Self {

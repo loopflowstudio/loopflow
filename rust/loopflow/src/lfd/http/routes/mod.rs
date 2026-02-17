@@ -13,6 +13,7 @@ use crate::lfd::http::dto::{
     format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
 };
 use crate::lfd::id::LfdId;
+use crate::lfd::queue::{project_queue_views, QueueRunView};
 use crate::lfd::store::{SharedStore, StoreError};
 use crate::lfd::types::{LivePrState, LivePullRequestState, Wave, WaveRun};
 use crate::lfd::{config::GitHubConfig, github};
@@ -64,6 +65,8 @@ pub async fn build_wave_dto(
     let stack_runs = store.list_stack_runs(&wave.id).await?;
     let live_pr_projection =
         build_wave_live_pr_projection(store, github_config, &stack_runs).await?;
+    let queue_views =
+        build_wave_queue_views(store, &wave.id, &stack_runs, &live_pr_projection).await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
     let flow_name = wave.flow.clone();
@@ -91,7 +94,8 @@ pub async fn build_wave_dto(
     let active_run = if include_active_run {
         latest.map(|run| {
             let (live_pr_state, pr_state_stale) = live_pr_for_run(&live_pr_projection, &run);
-            wave_run_dto(run, live_pr_state, pr_state_stale)
+            let queue_view = queue_views.get(&run.id);
+            wave_run_dto(run, live_pr_state, pr_state_stale, queue_view)
         })
     } else {
         None
@@ -256,6 +260,26 @@ pub(crate) async fn build_wave_live_pr_projection(
         open_pr_count,
         has_stale_pr_state,
     })
+}
+
+pub(crate) async fn build_wave_queue_views(
+    store: &SharedStore,
+    wave_id: &LfdId,
+    runs: &[WaveRun],
+    live_pr_projection: &WaveLivePrProjection,
+) -> Result<HashMap<LfdId, QueueRunView>, StoreError> {
+    let blocks = store.list_queue_blocks(wave_id).await?;
+    let blocks_by_run = blocks
+        .into_iter()
+        .map(|block| (block.run_id.clone(), block))
+        .collect::<HashMap<_, _>>();
+    Ok(project_queue_views(
+        runs,
+        |run| {
+            run_live_pr_key(run).and_then(|key| live_pr_projection.live_states.get(&key).cloned())
+        },
+        &blocks_by_run,
+    ))
 }
 
 /// Cursor-based pagination over a list of items with an `id: LfdId` field.

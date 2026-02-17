@@ -20,6 +20,21 @@ pub struct GitHubCheckRunEvent {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct GitHubPullRequestEvent {
+    pub action: String,
+    pub pull_request: GitHubWebhookPullRequest,
+    pub repository: GitHubRepository,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubWebhookPullRequest {
+    pub number: u32,
+    #[serde(default)]
+    pub merged: bool,
+    pub merged_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct CheckRun {
     pub id: u64,
     pub name: String,

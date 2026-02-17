@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     Agent, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PendingActivation,
-    Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
+    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -176,6 +176,26 @@ impl Store {
 
     pub async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
         WaveStateStore::upsert_live_pr_state(self, state).await
+    }
+
+    pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        WaveStateStore::list_queue_blocks(self, wave_id).await
+    }
+
+    pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+        WaveStateStore::upsert_queue_block(self, block).await
+    }
+
+    pub async fn delete_queue_block(
+        &self,
+        wave_id: &LfdId,
+        run_id: &LfdId,
+    ) -> StoreResult<u32> {
+        WaveStateStore::delete_queue_block(self, wave_id, run_id).await
+    }
+
+    pub async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
+        WaveStateStore::record_merge_event(self, event).await
     }
 
     pub async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
@@ -383,6 +403,10 @@ pub trait WaveStateStore: Send + Sync {
         pr_number: u32,
     ) -> StoreResult<Option<LivePullRequestState>>;
     async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()>;
+    async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>>;
+    async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()>;
+    async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32>;
+    async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool>;
 
     async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
     async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
@@ -668,6 +692,50 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.upsert_live_pr_state(&state)).await
             }
             StoreBackend::Postgres(store) => store.upsert_live_pr_state(state).await,
+        }
+    }
+
+    async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.list_queue_blocks(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.list_queue_blocks(wave_id).await,
+        }
+    }
+
+    async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let block = block.clone();
+                run_sqlite(store, move |store| store.upsert_queue_block(&block)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_queue_block(block).await,
+        }
+    }
+
+    async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                let run_id = run_id.clone();
+                run_sqlite(store, move |store| {
+                    store.delete_queue_block(&wave_id, &run_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.delete_queue_block(wave_id, run_id).await,
+        }
+    }
+
+    async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let event = event.clone();
+                run_sqlite(store, move |store| store.record_merge_event(&event)).await
+            }
+            StoreBackend::Postgres(store) => store.record_merge_event(event).await,
         }
     }
 
@@ -1139,8 +1207,9 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, ChatMemoryBlock, SidecarKind, Stimulus, StimulusKind, Summary, Wave,
-        WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation,
+        PullRequest, QueueBlock, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind, Summary,
+        Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1558,6 +1627,70 @@ mod tests {
                 .expect("find unmerged");
             assert_eq!(pending.map(|run| run.id), expected);
         }
+
+        store.delete_wave(&wave.id).await.expect("delete wave");
+    }
+
+    #[tokio::test]
+    async fn queue_block_and_merge_event_crud() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let wave = make_wave("/repo-queue");
+        store.create_wave(&wave).await.expect("create wave");
+
+        let mut run = make_run(&wave, WaveRunStatus::Completed, WaveRunKind::Main);
+        run.snapshot.pr = Some(PullRequest {
+            url: "https://example.test/pr/42".to_string(),
+            number: Some(42),
+            state: Some("open".to_string()),
+            title: Some("feature".to_string()),
+            branch: Some("feature-42".to_string()),
+        });
+        run.parent_pr_number = Some(42);
+        store.create_wave_run(&run).await.expect("create run");
+
+        let block = QueueBlock {
+            wave_id: wave.id.clone(),
+            run_id: run.id.clone(),
+            reason: "rebase_conflict".to_string(),
+            attempted_at: OffsetDateTime::now_utc(),
+            conflict_files: vec!["src/lib.rs".to_string()],
+            error: Some("merge failed".to_string()),
+        };
+        store
+            .upsert_queue_block(&block)
+            .await
+            .expect("upsert block");
+        let blocks = store
+            .list_queue_blocks(&wave.id)
+            .await
+            .expect("list blocks");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].reason, "rebase_conflict");
+        let deleted = store
+            .delete_queue_block(&wave.id, &run.id)
+            .await
+            .expect("delete block");
+        assert_eq!(deleted, 1);
+
+        let merge_event = QueueMergeEvent {
+            wave_id: wave.id.clone(),
+            pr_number: 42,
+            merged_at: OffsetDateTime::now_utc(),
+            processed_at: OffsetDateTime::now_utc(),
+        };
+        let first = store
+            .record_merge_event(&merge_event)
+            .await
+            .expect("record first");
+        let second = store
+            .record_merge_event(&merge_event)
+            .await
+            .expect("record second");
+        assert!(first);
+        assert!(!second);
 
         store.delete_wave(&wave.id).await.expect("delete wave");
     }

@@ -363,12 +363,8 @@ pub(crate) fn build_agent_for_step(
 }
 
 /// Commit any remaining changes, push, and create a draft PR.
-/// When `mark_ready` is true (auto-stimulus waves), converts the draft to a real PR.
 /// Returns the PR info if successful, None if skipped or failed.
-pub(crate) fn auto_create_pr(
-    worktree: &Path,
-    mark_ready: bool,
-) -> Option<crate::lfd::types::PullRequest> {
+pub(crate) fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
     use crate::ops::{
         commit_workflow, current_pr, generate_pr_message, update_pr, CommitOptions, NullProgress,
     };
@@ -403,13 +399,6 @@ pub(crate) fn auto_create_pr(
                 }
                 Err(err) => {
                     warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to generate PR message");
-                }
-            }
-
-            // Auto-stimulus waves get their draft promoted to a real PR.
-            if mark_ready {
-                if let Err(err) = crate::ops::mark_ready(worktree) {
-                    warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to mark PR ready");
                 }
             }
 

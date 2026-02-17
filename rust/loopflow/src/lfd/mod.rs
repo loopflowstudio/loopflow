@@ -9,6 +9,7 @@ pub mod id;
 pub mod machine_id;
 pub mod obs;
 pub mod output;
+pub mod queue;
 pub mod registration;
 pub mod scheduler;
 pub mod service;

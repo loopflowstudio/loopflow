@@ -17,14 +17,15 @@ use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction, ForkSelect,
 };
 use crate::engine::worktree::remove_worktree;
-use crate::lfd::config::{ExecutorConfig, ExecutorType};
+use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ForkRunStatus, SharedStore};
 use crate::lfd::types::{
-    AgentStatus, Event, StimulusKind, Wave, WaveRun, WaveRunKind, WaveRunStatus, WaveStatus,
+    AgentStatus, Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun,
+    WaveRunKind, WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
@@ -301,12 +302,10 @@ impl WaveExecutor {
                         })
                         .unwrap_or(false);
 
-                    // Auto-create PR (draft for manual, ready for auto stimulus).
+                    // Auto-create PR as draft; queue reconciliation promotes the queue head.
                     let worktree = run.worktree.clone();
-                    match tokio::task::spawn_blocking(move || {
-                        auto_create_pr(Path::new(&worktree), is_recurring)
-                    })
-                    .await
+                    match tokio::task::spawn_blocking(move || auto_create_pr(Path::new(&worktree)))
+                        .await
                     {
                         Ok(Some(pr)) => {
                             info!(run_id = %run.id, url = %pr.url, "auto-created PR");
@@ -315,6 +314,33 @@ impl WaveExecutor {
                         Ok(None) => {}
                         Err(err) => {
                             warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                        }
+                    }
+
+                    if let Some(pr) = run.snapshot.pr.as_ref() {
+                        if let Some(pr_number) = pr.number {
+                            let live_state = LivePullRequestState {
+                                repo_id: run.snapshot.repo.clone(),
+                                pr_number,
+                                state: LivePrState::Open,
+                                is_draft: pr
+                                    .state
+                                    .as_deref()
+                                    .is_some_and(|value| value.eq_ignore_ascii_case("draft")),
+                                head_ref: run.branch.clone(),
+                                head_sha: String::new(),
+                                base_ref: "main".to_string(),
+                                updated_at: OffsetDateTime::now_utc(),
+                                merged_at: None,
+                                synced_at: OffsetDateTime::now_utc(),
+                            };
+                            if let Err(err) = self.store.upsert_live_pr_state(&live_state) {
+                                warn!(
+                                    run_id = %run.id,
+                                    error = %err,
+                                    "failed to upsert live PR state after PR creation"
+                                );
+                            }
                         }
                     }
 
@@ -353,6 +379,18 @@ impl WaveExecutor {
                     }
 
                     self.store.update_wave_run(&run).await?;
+                    if run.snapshot.pr.is_some() {
+                        if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
+                            &self.store,
+                            &GitHubConfig::default(),
+                            &wave.id,
+                            crate::lfd::queue::QueueTrigger::RunCompleted,
+                        )
+                        .await
+                        {
+                            warn!(wave_id = %wave.id, error = %err, "queue reconcile failed after run completion");
+                        }
+                    }
                     // Wave goes back to Idle after a run completes — the run
                     // is done, but the wave is ready for its next iteration.
                     self.set_wave_status(&wave.id, WaveStatus::Idle).await;

@@ -1,69 +1,45 @@
-# A2 — Multi-turn with harness events
+# A2 — Multi-turn with harness events (current state)
 
-## Problem
+## Objective
 
-A1 proved the chat surface and manual memory UX. The next risk is architecture: can Concerto run chat through the harness boundary without regressing UX? We need to replace direct Swift→Anthropic calls with harness turns so the product validates the real contract (`send_message`, `memory_edit`, completion events) before B3 wave orchestration expands it.
+Route Concerto chat turns through the harness boundary so chat UX is driven by semantic harness events (`send_message`, `memory_edit`, completion), not direct model output.
 
-Who benefits: users get the same chat feel with better reliability and memory continuity, and the team gets hard evidence that the harness/chat boundary is viable.
+## Final architecture
 
-Why now: A1 is shipped and the harness already supports turn loops, tools, and memory-edit events.
+- `lfd` starts chat turns with `POST /waves/:wave_id/chat/turns`.
+- `lfd` streams turn events with `GET /waves/:wave_id/chat/turns/:turn_id/events` (SSE).
+- `ChatState` in Concerto is an event consumer/state machine (`idle -> running -> completed|failed`).
+- Assistant text is rendered only from harness `send_message` events.
+- `memory_edit` events are applied by chat APIs and persisted as wave-scoped memory blocks.
 
-## Approach
+## Shipped behavior
 
-Route all chat turns through lfd-managed harness sessions and consume semantic events in real time.
+- Added wave-scoped chat memory block APIs:
+  - `GET /waves/:wave_id/memory-blocks`
+  - `PUT /waves/:wave_id/memory-blocks/:name`
+  - `DELETE /waves/:wave_id/memory-blocks/:name`
+- Added harness-backed chat turn APIs:
+  - `POST /waves/:wave_id/chat/turns`
+  - `GET /waves/:wave_id/chat/turns/:turn_id/events`
+- Added `turn::run_with_event_handler(...)` so harness `AgentEvent`s are emitted live during turn execution.
+- Added persistent chat memory storage in SQLite/Postgres (`007_chat_memory_blocks.sql`).
+- Added chat UI integration in Concerto (`WaveDetailPanel` chat tab, event-driven chat timeline, inline memory update indicators).
 
-1. Add a wave-scoped "chat turn" API in lfd:
-   - `POST /waves/{wave}/chat/turns` starts a harness turn with user message + current memory blocks.
-   - `GET /waves/{wave}/chat/turns/{id}/events` streams `AgentEvent` frames (SSE).
-2. Keep the boundary strict:
-   - UI text only comes from `send_message` events.
-   - Turn success requires exactly one `send_message(phase="final")`; otherwise show an error state.
-3. Memory flow:
-   - `memory_edit` events are applied by the chat system (not harness) and persisted immediately to wave-scoped chat memory blocks.
-   - UI shows "Agent updated memory" inline badges so edits are visible.
-4. Swift `ChatState` becomes an event consumer/state machine (`idle -> running -> completed|failed`) and never parses model raw output.
-5. Preserve A1 UX shape (message list, input, memory panel), but assistant messages now arrive as progress/final events.
+## Contract decisions
 
-## Alternatives considered
+- Success requires exactly one `send_message(phase="final")`.
+- Invalid completion sequences surface explicit failure in UI.
+- Memory ownership stays in the chat system (harness requests edits, chat persists/display them).
+- SSE is used for real-time event semantics (not polling).
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Keep direct Swift→Anthropic calls and emulate events in client code | Faster to wire, less backend work | Fails the core goal: we would not test real harness boundaries or completion invariants. |
-| One-shot lfd endpoint returning only final text | Simpler transport, no stream handling | Hides progress semantics, prevents debugging tool/memory events, and makes A2 too different from B3 runtime behavior. |
-| Embed harness in Swift (FFI/local process from app) | Lower network overhead | High integration complexity and couples UI runtime to harness internals; violates clean runtime boundary. |
+## Related branch work
 
-## Key decisions
+- Gate command plumbing now reads lint/test commands from `.lf/config.yaml`.
+- Added `lf ops lint` and `lf ops test` commands.
 
-1. **Event-stream transport (SSE), not polling.** A2 must prove real-time harness semantics, not "request/response with extras."
-2. **`send_message` remains the only UI output channel.** Following wave invariant: **"`send_message` is the only user-output mechanism."**
-3. **Hard completion contract in product path.** Turn considered successful only when invariant holds: **"Exactly one `send_message(phase=\"final\")` on successful turns."**
-4. **Memory ownership stays with chat system.** Harness can request edits; chat persists and displays them, matching: **"Memory is durable across invocations"** and **"Memory belongs to the chat system, not the harness."**
-5. **Harness stays UI-agnostic.** lfd and Concerto consume events; harness gets prompt/tools/memory only, aligned with: **"The harness doesn't know about the chat system."**
+## Known limits / follow-ups
 
-## Scope
-
-- In scope:
-  - lfd endpoints to start chat turns and stream per-turn events
-  - Wave-scoped memory block read/write APIs used by A2 flow
-  - Swift `ChatState` event-driven turn lifecycle
-  - UI rendering of progress/final assistant messages and memory-edit indicators
-  - Error states for timeout, failed turn, or invalid completion contract
-- Out of scope:
-  - Token streaming of raw model deltas
-  - Human approval workflow for memory edits
-  - Multi-conversation/thread management
-  - Model/provider selection UI
-  - B3 wave-level multi-invocation orchestration
-
-## Done when
-
-- Manual:
-  1. Launch Concerto, open chat, send a prompt.
-  2. Assistant reply appears via harness `send_message` events (not direct Anthropic client path).
-  3. A harness-issued `memory_edit` updates the memory panel and persists.
-  4. Relaunch app; memory remains for that wave.
-- Observable contract:
-  - Every successful turn emits exactly one `final` message event; invalid sequences surface explicit UI error.
-- Verification commands:
-  - `cargo test -p loopflow lfd::http::routes::waves`
-  - `swift test --package-path swift --filter ChatStateTests`
+- Chat turn streams are currently in-memory (`HttpState.chat_turns`) with no TTL/cleanup policy.
+- SSE reconnect semantics are limited to replaying retained history for an existing turn ID.
+- No approval flow yet for `memory_edit` events.
+- No cross-restart persistence/replay for chat turn event streams.

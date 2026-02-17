@@ -8,6 +8,7 @@ struct WaveSidebar: View {
     @Environment(OutputBuffer.self) private var outputBuffer
 
     @State private var showingDiagnostics = false
+    @State private var showingConnectionSettings = false
     @State private var actionError: String?
     @State private var showingActionError = false
     @State private var isCreatingWave = false
@@ -88,6 +89,11 @@ struct WaveSidebar: View {
         .sheet(isPresented: $showingDiagnostics) {
             DiagnosticsView()
         }
+        .sheet(isPresented: $showingConnectionSettings) {
+            ConnectionSettingsView()
+                .environment(repoState)
+                .environment(outputBuffer)
+        }
         .alert("Error", isPresented: $showingActionError) {
             Button("OK") { actionError = nil }
         } message: {
@@ -140,18 +146,36 @@ struct WaveSidebar: View {
 
     private var header: some View {
         HStack {
-            Text("Waves")
-                .font(Typography.caption())
-                .fontWeight(.medium)
-                .foregroundStyle(.white.opacity(0.7))
-                .help("Waves are autonomous AI workers that run flows on your codebase")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Waves")
+                    .font(Typography.caption())
+                    .fontWeight(.medium)
+                    .foregroundStyle(.white.opacity(0.7))
+
+                Text(repoState.connectionStore.activeConnection.displayName)
+                    .font(Typography.caption(10))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+            .help("Waves are autonomous AI workers that run flows on your codebase")
 
             Spacer()
 
             Circle()
                 .fill(repoState.lfdConnected ? Color.statusSuccess : Color.white.opacity(0.3))
                 .frame(width: 6, height: 6)
-                .help(repoState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
+                .help(repoState.connectionSummary)
+
+            Button {
+                showingConnectionSettings = true
+            } label: {
+                Image(systemName: "network")
+                    .font(Typography.caption())
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .help("Connection settings")
+            .accessibleButton("Open connection settings")
+            .minHitTarget()
 
             Menu {
                 Button {
@@ -183,11 +207,11 @@ struct WaveSidebar: View {
             } label: {
                 Image(systemName: "plus")
                     .font(Typography.caption())
-                    .foregroundStyle(.white.opacity(isCreatingWave || !repoState.lfdConnected ? 0.3 : 0.7))
+                    .foregroundStyle(.white.opacity(isCreatingWave || !repoState.isConnected || repoState.repoTarget == nil ? 0.3 : 0.7))
             }
             .menuStyle(.borderlessButton)
-            .disabled(isCreatingWave || !repoState.lfdConnected)
-            .help(repoState.lfdConnected ? "Create or instantiate waves (C)" : "Connect to lfd first")
+            .disabled(isCreatingWave || !repoState.isConnected || repoState.repoTarget == nil)
+            .help(repoState.isConnected ? "Create or instantiate waves (C)" : repoState.connectionSummary)
             .accessibleButton("Create or instantiate wave")
             .minHitTarget()
 
@@ -218,10 +242,10 @@ struct WaveSidebar: View {
                     .foregroundStyle(.white.opacity(0.3))
 
                 VStack(spacing: Spacing.xs) {
-                    Text("Connect to lfd")
+                    Text("Connect to server")
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
-                    Text("Start the daemon to manage waves.")
+                    Text(repoState.connectionSummary)
                         .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
@@ -243,6 +267,11 @@ struct WaveSidebar: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+
+                Button("Settings") {
+                    showingConnectionSettings = true
+                }
+                .font(Typography.caption())
             }
 
             Spacer()
@@ -311,7 +340,7 @@ struct WaveSidebar: View {
     }
 
     private var waveList: some View {
-        return ScrollView {
+        ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
                 if !waveGroups.active.isEmpty {
                     sectionHeader("Active", icon: "circle.fill", count: waveGroups.active.count)
@@ -407,13 +436,13 @@ struct WaveSidebar: View {
             defer { isCreatingWave = false }
 
             do {
-                try await ensureLfdConnected()
+                try await repoState.ensureReadyToCreateWave(outputBuffer: outputBuffer)
                 try await repoState.createWave(name: "")
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
-                actionError = repoState.lfdConnected
+                actionError = repoState.isConnected
                     ? error.localizedDescription
-                    : "lfd daemon not running. Run 'lfd install' in terminal."
+                    : repoState.connectionSummary
                 showingActionError = true
             }
         }

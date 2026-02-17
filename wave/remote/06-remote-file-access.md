@@ -12,6 +12,15 @@ Concerto already has "Open in IDE" buttons per wave (`WaveDetailPanel.swift` lin
 
 Cursor supports `--remote ssh-remote+<host> <path>` to open a remote folder via its built-in Remote SSH. VS Code has the same flag. JetBrains Gateway uses a different mechanism.
 
+## Carryover from Phase 05 scope cut
+
+Phase 05 adds only correctness-critical capability gating for remote mode. The following are intentionally deferred here:
+
+- Remote editor launch variants (`cursor/code --remote ...`)
+- Remote terminal launch (`ssh -t host 'cd path && exec $SHELL -l'`)
+- Replacing hidden local-only actions with remote alternatives (`Copy Path`, `Copy SSH Command`)
+- Wider capability matrix polish across secondary UI surfaces
+
 ## Implementation
 
 ### Remote editor launch

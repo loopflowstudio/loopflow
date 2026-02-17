@@ -12,6 +12,14 @@ lfd already serves wave data, logs, and events. Adding file and metadata endpoin
 
 These endpoints serve both Concerto (macOS) and future mobile clients.
 
+## Carryover from Phase 05 scope cut
+
+Phase 05 ships with minimal remote-safe guards but does not replace local filesystem-backed UX. The following roll into this phase:
+
+- API-backed replacement for local `AreaTypeahead` filesystem reads in remote mode
+- Remote file browsing and content/diff endpoints for worktree inspection
+- Remote-first typeahead parity where local disk access is currently assumed
+
 ## File browsing endpoints
 
 ```

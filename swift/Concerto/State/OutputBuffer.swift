@@ -24,7 +24,16 @@ final class OutputBuffer {
     var interactiveSession: InteractiveSession?
 
     private let maxLines = 2000
-    private let waveService = LocalWaveService()
+    private var waveService = WaveService()
+
+    func configureConnection(_ connection: ServerConnection) {
+        waveService = WaveService(
+            connection: connection,
+            tokenProvider: {
+                ConnectionSecretStore.shared.token(for: connection)
+            }
+        )
+    }
 
     // MARK: - Output
 

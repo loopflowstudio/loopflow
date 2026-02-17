@@ -55,18 +55,14 @@ struct StartWaveView: View {
             defer { isCreating = false }
 
             do {
-                if !repoState.lfdConnected {
-                    try await repoState.connectLfd(outputBuffer: outputBuffer)
-                    try await Task.sleep(for: .milliseconds(500))
-                }
-
+                try await repoState.ensureReadyToCreateWave(outputBuffer: outputBuffer)
                 let name = waveName.trimmingCharacters(in: .whitespacesAndNewlines)
                 try await repoState.createWave(name: name)
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
-                errorMessage = repoState.lfdConnected
+                errorMessage = repoState.isConnected
                     ? error.localizedDescription
-                    : "lfd daemon not running. Run 'lfd install' in terminal."
+                    : repoState.connectionSummary
             }
         }
     }

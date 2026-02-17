@@ -542,7 +542,7 @@ struct ParseWaveFromJSONTests {
             ] as [String: Any]
         ]
 
-        let wave = LocalWaveService.parseWaveFromJSON(json)
+        let wave = WaveService.parseWaveFromJSON(json)
 
         #expect(wave.flowSteps == ["ingest", "kickoff"])
         #expect(wave.openPRCount == 3)
@@ -564,7 +564,7 @@ struct ParseWaveFromJSONTests {
             "open_pr_count": 0
         ]
 
-        let wave = LocalWaveService.parseWaveFromJSON(json)
+        let wave = WaveService.parseWaveFromJSON(json)
         let vm = WaveViewModel(api: wave)
 
         #expect(vm.stepIndex == 0)

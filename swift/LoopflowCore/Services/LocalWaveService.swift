@@ -65,73 +65,208 @@ public struct ConnectionInfo: Sendable {
     }
 }
 
-public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
-    public init() {}
-    private let baseURL = lfdBaseURL
-    private let apiBaseURL = lfdApiBaseURL
+public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
+    public typealias SessionFactory = @Sendable (
+        _ requestTimeout: TimeInterval,
+        _ resourceTimeout: TimeInterval,
+        _ delegate: URLSessionDelegate?
+    ) -> URLSession
 
-    private var session: URLSession {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 3  // Fast fail if daemon not running
-        config.timeoutIntervalForResource = 10
-        return URLSession(configuration: config)
+    private let connection: ServerConnection
+    private let tokenProvider: @Sendable () -> String?
+    private let sessionFactory: SessionFactory
+    private let pinStore: CertificatePinStore
+
+    private var pinningDelegate: CertificatePinningDelegate? {
+        guard connection.useTLS else { return nil }
+        return CertificatePinningDelegate(connection: connection, pinStore: pinStore)
     }
 
-    /// Session with longer timeouts for operations that involve git (fetch, push, worktree).
-    private var longSession: URLSession {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30  // Git operations can be slow
-        config.timeoutIntervalForResource = 60
-        return URLSession(configuration: config)
+    public init(
+        connection: ServerConnection = .local,
+        tokenProvider: (@Sendable () -> String?)? = nil,
+        sessionFactory: SessionFactory? = nil,
+        pinStore: CertificatePinStore = .shared
+    ) {
+        self.connection = connection
+        self.tokenProvider = tokenProvider ?? { connection.staticToken }
+        self.sessionFactory = sessionFactory ?? { requestTimeout, resourceTimeout, delegate in
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = requestTimeout
+            config.timeoutIntervalForResource = resourceTimeout
+            return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+        }
+        self.pinStore = pinStore
+    }
+
+    private var baseURL: URL { connection.httpBaseURL }
+
+    private var apiBaseURL: URL {
+        baseURL.appendingPathComponent("v0")
+    }
+
+    private var standardTimeouts: (request: TimeInterval, resource: TimeInterval) {
+        connection.isLocal ? (3, 10) : (10, 30)
+    }
+
+    private var longTimeouts: (request: TimeInterval, resource: TimeInterval) {
+        connection.isLocal ? (30, 60) : (60, 120)
+    }
+
+    private func makeSession(
+        requestTimeout: TimeInterval,
+        resourceTimeout: TimeInterval
+    ) -> (session: URLSession, delegate: CertificatePinningDelegate?) {
+        let delegate = pinningDelegate
+        return (
+            sessionFactory(requestTimeout, resourceTimeout, delegate),
+            delegate
+        )
+    }
+
+    private func standardSession() -> (session: URLSession, delegate: CertificatePinningDelegate?) {
+        makeSession(
+            requestTimeout: standardTimeouts.request,
+            resourceTimeout: standardTimeouts.resource
+        )
+    }
+
+    private func longSession() -> (session: URLSession, delegate: CertificatePinningDelegate?) {
+        makeSession(
+            requestTimeout: longTimeouts.request,
+            resourceTimeout: longTimeouts.resource
+        )
+    }
+
+    private func makeRequest(
+        _ url: URL,
+        method: String = "GET",
+        body: [String: Any]? = nil,
+        contentType: String? = nil
+    ) throws -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+
+        if let contentType {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+
+        if connection.authMode.requiresToken {
+            guard let token = tokenProvider(), !token.isEmpty else {
+                throw WaveServiceError.authRejected("Missing token")
+            }
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        if let body {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+
+        return request
+    }
+
+    private func consumeTrustRequirement(from delegate: CertificatePinningDelegate?) -> WaveServiceError? {
+        guard let requirement = delegate?.consumeTrustRequirement(),
+              case let .certificateChanged(_, _, oldFingerprint, newFingerprint) = requirement else {
+            return nil
+        }
+        return .trustMismatch(oldFingerprint: oldFingerprint, newFingerprint: newFingerprint)
+    }
+
+    private func mapError(_ error: Error, trustDelegate: CertificatePinningDelegate?) -> WaveServiceError {
+        if let trustError = consumeTrustRequirement(from: trustDelegate) {
+            return trustError
+        }
+
+        if let waveError = error as? WaveServiceError {
+            return waveError
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return .timeout
+            case .notConnectedToInternet, .networkConnectionLost:
+                return .networkUnavailable
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return .serverUnreachable
+            default:
+                return .commandFailed(urlError.localizedDescription)
+            }
+        }
+
+        return .commandFailed(error.localizedDescription)
+    }
+
+    private func parseStatusCodeError(statusCode: Int, data: Data) -> WaveServiceError {
+        let errorMessage = Self.parseErrorMessage(data)
+        switch statusCode {
+        case 401, 403:
+            return .authRejected(errorMessage)
+        default:
+            return .serverError(status: statusCode, message: errorMessage)
+        }
+    }
+
+    private func performRequest(
+        _ request: URLRequest,
+        useLongTimeouts: Bool = false
+    ) async throws -> (Data, HTTPURLResponse) {
+        let activeSession = useLongTimeouts ? longSession() : standardSession()
+        do {
+            let (data, response) = try await activeSession.session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw WaveServiceError.commandFailed("No response from lfd")
+            }
+            return (data, httpResponse)
+        } catch {
+            throw mapError(error, trustDelegate: activeSession.delegate)
+        }
+    }
+
+    private func performGet(
+        _ url: URL,
+        useLongTimeouts: Bool = false
+    ) async throws -> (Data, HTTPURLResponse) {
+        let request = try makeRequest(url)
+        return try await performRequest(request, useLongTimeouts: useLongTimeouts)
     }
 
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.
     /// The API normalizes worktree paths to their main repo.
-    public func listWaves(repo: URL) async throws -> [Wave] {
+    public func listWaves(repo: RepoTarget) async throws -> [Wave] {
+        let repoPath = repo.path
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
-            URLQueryItem(name: "repo", value: repo.path),
+            URLQueryItem(name: "repo", value: repoPath),
             URLQueryItem(name: "expand[]", value: "active_run"),
         ]
 
         guard let url = components.url else {
-            LoggingService.lfd("listWaves: invalid URL for repo=\(repo.path)")
+            LoggingService.lfd("listWaves: invalid URL for repo=\(repoPath)")
             return []
         }
 
         LoggingService.lfd("listWaves: GET \(url)")
 
-        do {
-            // Use longSession - list may include worktree state enrichment which runs git
-            let (data, response) = try await longSession.data(from: url)
+        let (data, response) = try await performGet(url, useLongTimeouts: true)
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                LoggingService.lfd("listWaves: no HTTP response")
-                return []
-            }
+        LoggingService.lfd("listWaves: status=\(response.statusCode)")
 
-            LoggingService.lfd("listWaves: status=\(httpResponse.statusCode)")
-
-            guard httpResponse.statusCode == 200 else {
-                LoggingService.lfd("listWaves: non-200 status")
-                return []
-            }
-
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let wavesData = json["data"] as? [[String: Any]] else {
-                LoggingService.lfd("listWaves: invalid JSON response")
-                return []
-            }
-
-            let waves = wavesData.map { Self.parseWaveFromJSON($0) }
-            LoggingService.lfd("listWaves: found \(waves.count) waves")
-            return waves
-        } catch {
-            LoggingService.lfd("listWaves: error=\(error.localizedDescription)")
-            return []
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let wavesData = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid JSON response")
+        }
+
+        let waves = wavesData.map { Self.parseWaveFromJSON($0) }
+        LoggingService.lfd("listWaves: found \(waves.count) waves")
+        return waves
     }
 
     /// Fetch a single wave by id.
@@ -145,15 +280,11 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         LoggingService.lfd("getWave: GET \(url)")
 
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await performGet(url)
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw WaveServiceError.commandFailed("No response from lfd")
-        }
-
-        guard httpResponse.statusCode == 200 else {
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(httpResponse.statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -164,7 +295,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     /// List flows and steps from lfd.
-    public func listFlowsAndDirections(repo: URL) async throws -> WaveFlowsResult {
+    public func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult {
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
@@ -175,44 +306,40 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         LoggingService.lfd("listFlows: GET \(url)")
 
-        do {
-            let (data, response) = try await session.data(from: url)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                return WaveFlowsResult(flows: [], directions: [])
-            }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let result = json["result"] as? [String: Any] else {
-                return WaveFlowsResult(flows: [], directions: [])
-            }
-
-            var allFlows: [Flow] = []
-            if let flowsData = result["flows"] as? [[String: Any]] {
-                for flowDict in flowsData {
-                    guard let name = flowDict["name"] as? String else { continue }
-                    let stepNames = flowDict["steps"] as? [String] ?? []
-                    let steps = stepNames.map { Step(prompt: $0) }
-                    allFlows.append(Flow(name: name, steps: steps, type: .flow))
-                }
-            }
-
-            if let stepsData = result["steps"] as? [[String: Any]] {
-                for stepDict in stepsData {
-                    guard let name = stepDict["name"] as? String else { continue }
-                    allFlows.append(Flow(name: name, steps: [Step(prompt: name)], type: .step))
-                }
-            }
-
-            let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
-            let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
-            let directions = (result["directions"] as? [String]) ?? []
-
-            return WaveFlowsResult(flows: flows + steps, directions: directions)
-        } catch {
+        let (data, response) = try await performGet(url)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = json["result"] as? [String: Any] else {
             return WaveFlowsResult(flows: [], directions: [])
         }
+
+        var allFlows: [Flow] = []
+        if let flowsData = result["flows"] as? [[String: Any]] {
+            for flowDict in flowsData {
+                guard let name = flowDict["name"] as? String else { continue }
+                let stepNames = flowDict["steps"] as? [String] ?? []
+                let steps = stepNames.map { Step(prompt: $0) }
+                allFlows.append(Flow(name: name, steps: steps, type: .flow))
+            }
+        }
+
+        if let stepsData = result["steps"] as? [[String: Any]] {
+            for stepDict in stepsData {
+                guard let name = stepDict["name"] as? String else { continue }
+                allFlows.append(Flow(name: name, steps: [Step(prompt: name)], type: .step))
+            }
+        }
+
+        let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
+        let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
+        let directions = (result["directions"] as? [String]) ?? []
+
+        return WaveFlowsResult(flows: flows + steps, directions: directions)
     }
 
-    public func listWaveSchemas(repo: URL) async throws -> [WaveSchema] {
+    public func listWaveSchemas(repo: RepoTarget) async throws -> [WaveSchema] {
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("wave/schemas"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
@@ -224,8 +351,8 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         LoggingService.lfd("listWaveSchemas: GET \(url)")
 
         do {
-            let (data, response) = try await session.data(from: url)
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let (data, response) = try await performGet(url)
+            guard response.statusCode == 200 else {
                 return []
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -260,16 +387,10 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         LoggingService.lfd("listWaveRuns: GET \(url)")
 
         do {
-            let (data, response) = try await session.data(from: url)
+            let (data, response) = try await performGet(url)
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                LoggingService.lfd("listWaveRuns: no HTTP response")
-                return []
-            }
-
-            guard httpResponse.statusCode == 200 else {
-                LoggingService.lfd("listWaveRuns: non-200 status")
-                return []
+            guard response.statusCode == 200 else {
+                throw parseStatusCodeError(statusCode: response.statusCode, data: data)
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -281,13 +402,51 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             return runsData.compactMap { Self.parseWaveRunFromJSON($0) }
         } catch {
             LoggingService.lfd("listWaveRuns: error=\(error.localizedDescription)")
-            return []
+            throw error
         }
     }
 
     // MARK: - Actions
 
+    public func listRepos() async throws -> [RemoteRepo] {
+        let url = apiBaseURL.appendingPathComponent("repos")
+        let (data, response) = try await performGet(url)
+
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let repos = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return repos.compactMap { repo in
+            guard let path = repo["path"] as? String,
+                  let name = repo["name"] as? String else {
+                return nil
+            }
+            return RemoteRepo(
+                path: path,
+                name: name,
+                waveCount: Self.normalizeInt(repo["wave_count"])
+            )
+        }
+    }
+
+    public func checkConnection() async throws {
+        let url = baseURL.appendingPathComponent("status")
+        let (_, response) = try await performGet(url)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: Data())
+        }
+    }
+
     public func connectLfd() async throws {
+        guard connection.isLocal else {
+            try await checkConnection()
+            return
+        }
         LoggingService.lfd("connectLfd: running 'lfd install'")
         try await runShellCommand(["lfd", "install"])
         LoggingService.lfd("connectLfd: 'lfd install' completed")
@@ -296,22 +455,18 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     public func checkAvailability() async -> Bool {
         let url = baseURL.appendingPathComponent("status")
         do {
-            let (_, response) = try await session.data(from: url)
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            let (_, response) = try await performGet(url)
+            return response.statusCode == 200
         } catch {
             return false
         }
     }
 
-    public func createWave(name: String, repo: URL, schema: String? = nil) async throws -> Wave {
+    public func createWave(name: String, repo: RepoTarget, schema: String? = nil) async throws -> Wave {
         LoggingService.lfd("createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path)")
 
         // Create wave via lfd HTTP API with minimal config
         // User configures area, direction, flow in detail panel before running
-        var request = URLRequest(url: apiBaseURL.appendingPathComponent("waves"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
         // Create with defaults - area left empty, user configures in detail panel
         var body: [String: Any] = [
             "repo": repo.path,
@@ -323,26 +478,25 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             body["flow"] = "design"  // Default flow (single step)
             body["direction"] = []
         }
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves"),
+            method: "POST",
+            body: body,
+            contentType: "application/json"
+        )
 
         LoggingService.lfd("createWave: POST \(request.url!) body=\(body)")
 
         do {
-            // Use longSession - createWave does git fetch + worktree add + push
-            let (data, response) = try await longSession.data(for: request)
+            // Use long timeout - createWave does git fetch + worktree add + push
+            let (data, response) = try await performRequest(request, useLongTimeouts: true)
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                LoggingService.lfd("createWave: no HTTP response")
-                throw WaveServiceError.commandFailed("No response from lfd")
-            }
+            LoggingService.lfd("createWave: status=\(response.statusCode)")
 
-            LoggingService.lfd("createWave: status=\(httpResponse.statusCode)")
-
-            guard httpResponse.statusCode == 200 else {
+            guard response.statusCode == 200 else {
                 let errorBody = String(data: data, encoding: .utf8) ?? ""
                 LoggingService.lfd("createWave: error response=\(errorBody)")
-                let errorMsg = Self.parseErrorMessage(data)
-                throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(httpResponse.statusCode)")
+                throw parseStatusCodeError(statusCode: response.statusCode, data: data)
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -431,12 +585,6 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     /// Update wave configuration (name, area, direction, flow, status).
     public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "PATCH"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
         var body: [String: Any] = [:]
         if let name = config.name { body["name"] = name }
         if let area = config.area { body["area"] = area }
@@ -444,15 +592,19 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         if let flow = config.flow { body["flow"] = flow }
         if let status = config.status { body["status"] = status.rawValue }
 
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)"),
+            method: "PATCH",
+            body: body,
+            contentType: "application/json"
+        )
 
-        // Rename may move worktree + rename branch + push, so use longSession.
-        let (data, response) = try await longSession.data(for: request)
+        // Rename may move worktree + rename branch + push, so use long timeouts.
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -465,12 +617,6 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     /// Run wave, optionally with one-time overrides.
     public func run(_ id: String, overrides: RunOverrides?) async throws {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/run")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
         // Build body with any overrides
         var body: [String: Any] = [:]
         if let overrides {
@@ -479,16 +625,18 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             if let flow = overrides.flow { body["flow"] = flow }
         }
 
-        if !body.isEmpty {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        }
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)/run"),
+            method: "POST",
+            body: body.isEmpty ? nil : body,
+            contentType: "application/json"
+        )
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performRequest(request)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
@@ -500,22 +648,20 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     // MARK: - Stimulus
 
     public func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String? = nil) async throws -> Stimulus {
-        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
         var body: [String: Any] = ["kind": kind.rawValue]
         if let cron { body["cron"] = cron }
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus"),
+            method: "POST",
+            body: body,
+            contentType: "application/json"
+        )
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performRequest(request)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -527,32 +673,30 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func removeStimulus(_ waveId: String, stimulusId: String) async throws {
-        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus/\(stimulusId)")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus/\(stimulusId)"),
+            method: "DELETE"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
+        let (data, response) = try await performRequest(request)
 
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
     }
 
     public func connect(_ id: String) async throws -> ConnectionInfo {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/connect")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)/connect"),
+            method: "POST"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        let (data, response) = try await performRequest(request)
 
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -586,35 +730,33 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     /// Land a wave's current branch (merge via PR).
     public func landWave(_ id: String) async throws {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/land")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)/land"),
+            method: "POST",
+            body: ["create_pr": true],
+            contentType: "application/json"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["create_pr": true])
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
 
-        let (data, response) = try await longSession.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
     }
 
     /// Start the next iteration of a wave (create new branch).
     public func nextWave(_ id: String) async throws -> String {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/next")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)/next"),
+            method: "POST"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
 
-        let (data, response) = try await longSession.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -627,23 +769,18 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     /// Clone a wave with a new name.
     public func cloneWave(_ id: String, name: String?) async throws -> Wave {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/clone")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)/clone"),
+            method: "POST",
+            body: name.map { ["name": $0] },
+            contentType: "application/json"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await performRequest(request)
 
-        if let name = name {
-            let body: [String: Any] = ["name": name]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        }
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -656,17 +793,16 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     /// Delete a wave.
     public func deleteWave(_ id: String) async throws {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)"),
+            method: "DELETE"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
+        let (data, response) = try await performRequest(request)
 
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
@@ -678,18 +814,17 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     /// Combine all outstanding PRs for a wave into a single PR.
     /// Returns the new PR URL on success.
     public func combinePRs(_ id: String) async throws -> CombinePRsResult {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/combine")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)/combine"),
+            method: "POST"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        // Use long timeouts - combine does multiple git/gh operations
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
 
-        // Use longSession - combine does multiple git/gh operations
-        let (data, response) = try await longSession.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -709,7 +844,8 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     // MARK: - Worktrees
 
-    public func listWorktrees(repo: URL) async throws -> [WorktreeInfo] {
+    public func listWorktrees(repo: RepoTarget) async throws -> [WorktreeInfo] {
+        guard case .local = repo else { return [] }
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("worktrees"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
@@ -721,11 +857,10 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         LoggingService.lfd("listWorktrees: GET \(url)")
 
         do {
-            let (data, response) = try await longSession.data(from: url)
+            let (data, response) = try await performGet(url, useLongTimeouts: true)
 
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                LoggingService.lfd("listWorktrees: non-200 status")
-                return []
+            guard response.statusCode == 200 else {
+                throw parseStatusCodeError(statusCode: response.statusCode, data: data)
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -739,7 +874,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             return worktrees
         } catch {
             LoggingService.lfd("listWorktrees: error=\(error.localizedDescription)")
-            return []
+            throw error
         }
     }
 
@@ -752,13 +887,15 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         return AsyncThrowingStream { continuation in
             let task = Task {
+                let delegate = self.pinningDelegate
                 do {
                     let config = URLSessionConfiguration.default
                     config.timeoutIntervalForRequest = 300
                     config.timeoutIntervalForResource = 86400 // Keep alive for a day
-                    let streamSession = URLSession(configuration: config)
+                    let streamSession = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+                    let request = try self.makeRequest(url)
 
-                    let (bytes, response) = try await streamSession.bytes(from: url)
+                    let (bytes, response) = try await streamSession.bytes(for: request)
 
                     guard let httpResponse = response as? HTTPURLResponse,
                           httpResponse.statusCode == 200 else {
@@ -771,6 +908,10 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
                     }
                     continuation.finish()
                 } catch {
+                    if let trustError = self.consumeTrustRequirement(from: delegate) {
+                        continuation.finish(throwing: trustError)
+                        return
+                    }
                     continuation.finish(throwing: error)
                 }
             }
@@ -942,17 +1083,16 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     private func postWaveCommand(_ id: String, action: String) async throws {
-        let url = apiBaseURL.appendingPathComponent("waves/\(id)/\(action)")
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("waves/\(id)/\(action)"),
+            method: "POST"
+        )
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        let (data, response) = try await performRequest(request)
 
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard response.statusCode == 200 else {
             let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(response.statusCode)")
         }
     }
 
@@ -993,11 +1133,29 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
 public enum WaveServiceError: LocalizedError {
     case commandFailed(String)
+    case authRejected(String?)
+    case serverError(status: Int, message: String?)
+    case timeout
+    case networkUnavailable
+    case serverUnreachable
+    case trustMismatch(oldFingerprint: String, newFingerprint: String)
 
     public var errorDescription: String? {
         switch self {
         case .commandFailed(let message):
             return message
+        case .authRejected(let message):
+            return message ?? "Authentication failed"
+        case .serverError(let status, let message):
+            return message ?? "Server error (\(status))"
+        case .timeout:
+            return "Connection timed out"
+        case .networkUnavailable:
+            return "Network unavailable"
+        case .serverUnreachable:
+            return "Server unreachable"
+        case .trustMismatch:
+            return "Certificate fingerprint changed"
         }
     }
 }
@@ -1011,3 +1169,5 @@ public struct CombinePRsResult: Sendable {
         self.closedPRs = closedPRs
     }
 }
+
+public typealias LocalWaveService = WaveService

@@ -10,7 +10,7 @@ services:
     ports:
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
     depends_on:
       lfd:

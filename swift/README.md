@@ -104,12 +104,13 @@ Shortcuts only run when a text field is not focused. Terminal input and command 
 
 Two patterns, intentionally different:
 
-1. **HTTP services** (LocalWaveService.swift)
+1. **HTTP services** (WaveService in `LocalWaveService.swift`)
    - Reads waves + runs from lfd HTTP API
    - Used for primary wave data
 
-2. **WebSocket subscription** (LocalEventService.swift)
-   - Connects to `ws://127.0.0.1:2486/ws`
+2. **WebSocket subscription** (EventService in `LocalEventService.swift`)
+   - Connects to active server (`ws://.../ws` or `wss://.../ws`)
+   - Uses configured auth mode (none or static token)
    - Subscribes to wave + agent + output events
    - Used for live UI updates
 

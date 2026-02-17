@@ -1,6 +1,7 @@
 // Service for subscribing to lfd events via WebSocket.
 
 import Foundation
+import Network
 import os.log
 
 private let logger = Logger(subsystem: "com.loopflow.concerto", category: "lfd-events")
@@ -65,99 +66,149 @@ public enum LFDEvent: Sendable {
     case output(OutputEvent)
 }
 
-public actor LocalEventService {
-    private let session: URLSession
-    private let wsURL = URL(string: "ws://127.0.0.1:\(lfdDefaultPort)/ws")!
+public actor EventService {
+    public typealias SessionFactory = @Sendable (
+        _ requestTimeout: TimeInterval,
+        _ resourceTimeout: TimeInterval,
+        _ delegate: URLSessionDelegate?
+    ) -> URLSession
+
+    private let connection: ServerConnection
+    private let tokenProvider: @Sendable () -> String?
+    private let sessionFactory: SessionFactory
+    private let pinStore: CertificatePinStore
+    private let pathMonitor = NWPathMonitor()
+
     private var webSocketTask: URLSessionWebSocketTask?
     private var onEvent: (@Sendable (LFDEvent) -> Void)?
-    private var onConnectionChange: (@Sendable (Bool) -> Void)?
+    private var onConnectionStateChange: (@Sendable (ConnectionState) -> Void)?
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempts = 0
     private var _isConnected = false
+    private var intentionallyDisconnected = false
+    private var isPathMonitorStarted = false
 
-    public init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 5
-        config.timeoutIntervalForResource = 10
-        session = URLSession(configuration: config)
+    private struct SocketConnection {
+        let task: URLSessionWebSocketTask
+        let delegate: CertificatePinningDelegate?
+    }
+
+    public init(
+        connection: ServerConnection = .local,
+        tokenProvider: (@Sendable () -> String?)? = nil,
+        sessionFactory: SessionFactory? = nil,
+        pinStore: CertificatePinStore = .shared
+    ) {
+        self.connection = connection
+        self.tokenProvider = tokenProvider ?? { connection.staticToken }
+        self.sessionFactory = sessionFactory ?? { requestTimeout, resourceTimeout, delegate in
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = requestTimeout
+            config.timeoutIntervalForResource = resourceTimeout
+            return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+        }
+        self.pinStore = pinStore
     }
 
     public var isConnected: Bool { _isConnected }
 
     public func subscribe(
         onEvent: @escaping @Sendable (LFDEvent) -> Void,
-        onConnectionChange: @escaping @Sendable (Bool) -> Void
+        onConnectionStateChange: @escaping @Sendable (ConnectionState) -> Void
     ) async {
         self.onEvent = onEvent
-        self.onConnectionChange = onConnectionChange
+        self.onConnectionStateChange = onConnectionStateChange
+        intentionallyDisconnected = false
 
-        LoggingService.lfd("EventService.subscribe: connecting to ws")
-        await connect()
-        startReconnectLoop()
-    }
+        startPathMonitoringIfNeeded()
+        emitConnectionState(.connecting(.wsProbe))
 
-    private func connect() async {
-        guard webSocketTask == nil else { return }
-        LoggingService.append("connecting to \(wsURL.absoluteString)", category: LoggingService.Category.lfd)
-
-        let task = session.webSocketTask(with: wsURL)
-        webSocketTask = task
-        task.resume()
-        receiveLoop()
-    }
-
-    private func handleConnected() {
-        updateConnectionState(true)
-        reconnectAttempts = 0
-    }
-
-    private func handleDisconnected() {
-        logger.info("disconnected from lfd")
-        LoggingService.append("disconnected", category: LoggingService.Category.lfd)
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
-        updateConnectionState(false)
-    }
-
-    private func updateConnectionState(_ connected: Bool) {
-        guard _isConnected != connected else { return }
-        _isConnected = connected
-        onConnectionChange?(connected)
-    }
-
-    private func startReconnectLoop() {
-        reconnectTask?.cancel()
-        reconnectAttempts = 0
-        reconnectTask = Task {
-            while !Task.isCancelled {
-                let delay: Duration = reconnectAttempts < 10 ? .seconds(1) : .seconds(5)
-                try? await Task.sleep(for: delay)
-                guard !Task.isCancelled else { return }
-
-                if !_isConnected {
-                    reconnectAttempts += 1
-                    await connect()
-                }
-            }
+        do {
+            try await connect()
+        } catch {
+            handleConnectionFailure(error)
         }
     }
 
-    private func receiveLoop() {
+    public func probe(timeout: TimeInterval = 5) async throws {
+        let socket = try makeWebSocketConnection()
+        let task = socket.task
+        task.resume()
+
+        defer {
+            task.cancel(with: .normalClosure, reason: nil)
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                while true {
+                    let message = try await task.receive()
+                    guard let text = Self.extractText(from: message),
+                          let event = Self.parseEvent(text: text) else {
+                        continue
+                    }
+                    if case .connected = event {
+                        return
+                    }
+                }
+            }
+
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeout))
+                throw WaveServiceError.timeout
+            }
+
+            _ = try await group.next()
+            group.cancelAll()
+        }
+
+        if let trustError = trustMismatchError(from: socket.delegate) {
+            throw trustError
+        }
+    }
+
+    private func makeSession(delegate: URLSessionDelegate?) -> URLSession {
+        let requestTimeout: TimeInterval = connection.isLocal ? 3 : 10
+        let resourceTimeout: TimeInterval = connection.isLocal ? 10 : 30
+        return sessionFactory(requestTimeout, resourceTimeout, delegate)
+    }
+
+    private func connect() async throws {
+        guard webSocketTask == nil else { return }
+        let socket = try makeWebSocketConnection()
+
+        LoggingService.append("connecting to \(connection.wsBaseURL.absoluteString)", category: LoggingService.Category.lfd)
+
+        let task = socket.task
+        webSocketTask = task
+        task.resume()
+        receiveLoop(delegate: socket.delegate)
+    }
+
+    private func receiveLoop(delegate: CertificatePinningDelegate?) {
         webSocketTask?.receive { [weak self] result in
             guard let self else { return }
             Task {
-                await self.handleReceive(result)
+                await self.handleReceive(result, delegate: delegate)
             }
         }
     }
 
-    private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>) async {
+    private func handleReceive(
+        _ result: Result<URLSessionWebSocketTask.Message, Error>,
+        delegate: CertificatePinningDelegate?
+    ) async {
         switch result {
-        case .failure:
-            handleDisconnected()
+        case .failure(let error):
+            if let trustState = trustRequirementState(from: delegate) {
+                emitConnectionState(trustState)
+            } else {
+                handleConnectionFailure(error)
+            }
             return
+
         case .success(let message):
-            if let text = extractText(from: message),
+            if let text = Self.extractText(from: message),
                let event = Self.parseEvent(text: text) {
                 if case .connected = event {
                     handleConnected()
@@ -166,10 +217,180 @@ public actor LocalEventService {
             }
         }
 
-        receiveLoop()
+        receiveLoop(delegate: delegate)
     }
 
-    private func extractText(from message: URLSessionWebSocketTask.Message) -> String? {
+    private func handleConnected() {
+        reconnectAttempts = 0
+        _isConnected = true
+        emitConnectionState(.connected)
+    }
+
+    private func handleConnectionFailure(_ error: Error) {
+        logger.info("disconnected from lfd: \(error.localizedDescription)")
+        LoggingService.append("disconnected: \(error.localizedDescription)", category: LoggingService.Category.lfd)
+
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        _isConnected = false
+
+        guard !intentionallyDisconnected else {
+            emitConnectionState(.disconnected(nil))
+            return
+        }
+
+        if let waveError = error as? WaveServiceError {
+            switch waveError {
+            case .authRejected(let message):
+                emitConnectionState(.authFailed(message))
+                return
+            case .trustMismatch(let oldFingerprint, let newFingerprint):
+                emitConnectionState(
+                    .trustRequired(
+                        .certificateChanged(
+                            host: connection.host,
+                            port: connection.port,
+                            oldFingerprint: oldFingerprint,
+                            newFingerprint: newFingerprint
+                        )
+                    )
+                )
+                return
+            default:
+                break
+            }
+        }
+
+        scheduleReconnect(lastError: mapDisconnectReason(error))
+    }
+
+    private func mapDisconnectReason(_ error: Error) -> DisconnectReason {
+        if let waveError = error as? WaveServiceError {
+            switch waveError {
+            case .authRejected:
+                return .authRejected
+            case .timeout:
+                return .timeout
+            case .networkUnavailable:
+                return .networkUnavailable
+            case .serverUnreachable:
+                return .serverUnreachable
+            case .serverError(let status, _):
+                return .serverError(status: status)
+            case .trustMismatch:
+                return .trustMismatch
+            case .commandFailed(let message):
+                return .unknown(message)
+            }
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return .timeout
+            case .notConnectedToInternet, .networkConnectionLost:
+                return .networkUnavailable
+            case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                return .serverUnreachable
+            default:
+                return .unknown(urlError.localizedDescription)
+            }
+        }
+
+        return .unknown(error.localizedDescription)
+    }
+
+    private func scheduleReconnect(lastError: DisconnectReason) {
+        reconnectTask?.cancel()
+        reconnectAttempts += 1
+
+        let baseDelay = min(pow(2.0, Double(max(0, reconnectAttempts - 1))), 30.0)
+        let jitter = Double.random(in: 0...0.4)
+        let delay = min(baseDelay + jitter, 30.0)
+
+        emitConnectionState(
+            .reconnecting(
+                attempt: reconnectAttempts,
+                nextDelay: delay,
+                lastError: lastError
+            )
+        )
+
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled else { return }
+            await self.retryNow()
+        }
+    }
+
+    private func retryNow() async {
+        guard !_isConnected else { return }
+        do {
+            try await connect()
+        } catch {
+            handleConnectionFailure(error)
+        }
+    }
+
+    private func startPathMonitoringIfNeeded() {
+        guard !isPathMonitorStarted else { return }
+        isPathMonitorStarted = true
+
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task {
+                await self?.handleNetworkRestored()
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
+    }
+
+    private func handleNetworkRestored() async {
+        guard !_isConnected else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        await retryNow()
+    }
+
+    private func emitConnectionState(_ state: ConnectionState) {
+        onConnectionStateChange?(state)
+    }
+
+    private func makeWebSocketConnection() throws -> SocketConnection {
+        let delegate = connection.useTLS
+            ? CertificatePinningDelegate(connection: connection, pinStore: pinStore)
+            : nil
+        let session = makeSession(delegate: delegate)
+        var request = URLRequest(url: connection.wsBaseURL)
+        try applyAuthorization(to: &request)
+        return SocketConnection(task: session.webSocketTask(with: request), delegate: delegate)
+    }
+
+    private func applyAuthorization(to request: inout URLRequest) throws {
+        guard connection.authMode.requiresToken else { return }
+        guard let token = tokenProvider(), !token.isEmpty else {
+            throw WaveServiceError.authRejected("Missing token")
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    private func trustRequirementState(from delegate: CertificatePinningDelegate?) -> ConnectionState? {
+        guard let requirement = delegate?.consumeTrustRequirement() else { return nil }
+        return .trustRequired(requirement)
+    }
+
+    private func trustMismatchError(from delegate: CertificatePinningDelegate?) -> WaveServiceError? {
+        guard let requirement = delegate?.consumeTrustRequirement(),
+              case let .certificateChanged(_, _, oldFingerprint, newFingerprint) = requirement else {
+            return nil
+        }
+        return .trustMismatch(
+            oldFingerprint: oldFingerprint,
+            newFingerprint: newFingerprint
+        )
+    }
+
+    private nonisolated static func extractText(from message: URLSessionWebSocketTask.Message) -> String? {
         switch message {
         case .string(let text):
             return text
@@ -191,7 +412,7 @@ public actor LocalEventService {
         case "connected":
             let timestamp = parseTimestamp(json["timestamp"])
             let wavesData = json["waves"] as? [[String: Any]] ?? []
-            let waves = wavesData.map { LocalWaveService.parseWaveFromJSON($0) }
+            let waves = wavesData.map { WaveService.parseWaveFromJSON($0) }
             return .connected(ConnectedEvent(timestamp: timestamp, waves: waves))
         case "ping":
             return nil
@@ -199,7 +420,7 @@ public actor LocalEventService {
              "wave_started", "wave_stopped", "wave_waiting":
             guard let waveId = json["wave_id"] as? String,
                   let eventType = WaveEventType(rawValue: String(type.dropFirst(5))) else { return nil }
-            let wave = (json["wave"] as? [String: Any]).map { LocalWaveService.parseWaveFromJSON($0) }
+            let wave = (json["wave"] as? [String: Any]).map { WaveService.parseWaveFromJSON($0) }
             return .wave(WaveEvent(
                 type: eventType,
                 waveId: waveId,
@@ -262,12 +483,15 @@ public actor LocalEventService {
     }
 
     public func disconnect() async {
+        intentionallyDisconnected = true
         reconnectTask?.cancel()
         reconnectTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         onEvent = nil
-        onConnectionChange = nil
-        updateConnectionState(false)
+        onConnectionStateChange = nil
+        _isConnected = false
     }
 }
+
+public typealias LocalEventService = EventService

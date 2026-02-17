@@ -22,6 +22,8 @@ lfd runs on a remote Linux machine (containerized). Concerto connects from your 
 
 Phases 06, 07, and 08 can run in parallel after 05.
 
+Phase 05 implementation is intentionally capped to a single PR with a practical size guardrail. Any non-critical scope cut from 05 rolls forward into Phase 06/08 docs instead of expanding the 05 PR.
+
 ## Architecture
 
 ```

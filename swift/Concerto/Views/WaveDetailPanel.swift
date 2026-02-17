@@ -149,7 +149,11 @@ struct WaveDetailPanel: View {
                         }
 
                         if wave.worktreePath != nil {
-                            quickActionsBar
+                            if repoState.isRemoteTarget {
+                                remoteActionsNotice
+                            } else {
+                                quickActionsBar
+                            }
                         }
                     } else {
                         WaveRunsTab(
@@ -305,6 +309,18 @@ struct WaveDetailPanel: View {
     }
 
     // MARK: - Quick Actions Bar
+
+    private var remoteActionsNotice: some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "network")
+                .foregroundStyle(.secondary)
+            Text("Local Finder/terminal/editor actions are unavailable in remote mode.")
+                .font(Typography.caption())
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.md)
+    }
 
     private var quickActionsBar: some View {
         HStack(spacing: Spacing.md) {

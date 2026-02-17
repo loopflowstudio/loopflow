@@ -1,4 +1,4 @@
-:443 {
+localhost {
 	tls internal
 	reverse_proxy lfd:2486
 }

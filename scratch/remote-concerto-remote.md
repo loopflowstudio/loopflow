@@ -19,7 +19,8 @@ Ship a **connection stack** in Concerto with one active target (local or remote)
 
 Create `ServerConnection` in `LoopflowCore`:
 - `host`, `port`, `useTLS`, `authMode`, `staticToken` (optional)
-- Computed `httpBaseURL`, `wsBaseURL`, `isLocal`
+- Computed `httpBaseURL`, `wsBaseURL`
+- `isLocal`: convenience flag (`host == "127.0.0.1" && !useTLS && authMode == .none`). Used **only** for timeout tier selection — never for auth or TLS decisions. A connection to `127.0.0.1:443` with TLS and a token is not local.
 - `.local` default (`127.0.0.1:2486`, no auth, no TLS)
 
 Persist non-secret fields in `UserDefaults`. Store `staticToken` in Keychain keyed by `host:port`.
@@ -32,21 +33,24 @@ Refactor:
 
 Both services must:
 - Build requests from `connection`
-- Inject `Authorization: Bearer <token>` when non-local auth is configured
-- Use timeout tiers:
-  - Local: request 3s / resource 10s
-  - Remote: request 10s / resource 30s
+- Inject `Authorization: Bearer <token>` when `authMode != .none` (driven by the field, not by host)
+- Use `useTLS` to select `https`/`wss` scheme (driven by the field, not by host)
+- Use timeout tiers based on `isLocal`:
+  - `isLocal` (native daemon): request 3s / resource 10s
+  - Otherwise: request 10s / resource 30s
 
 `RepoState` becomes connection-driven: rebuilding wave/event services when the active connection changes.
 
 ### 3) Implement TOFU TLS pinning (fail closed on cert change)
 
-For remote TLS connections:
+For any TLS connection (`useTLS == true`, regardless of host):
 - On first successful TLS handshake, store server certificate fingerprint (`SHA-256`) for `host:port`
 - On future connects, require exact fingerprint match
-- If fingerprint changes: mark connection `trustMismatch`, block requests/events, show “Trust New Certificate” flow
+- If fingerprint changes: mark connection `trustMismatch`, block requests/events, show "Trust New Certificate" flow
 
 This follows SSH known_hosts semantics (TOFU + pinning), but with explicit UI approval on mismatch.
+
+**Localhost caveat:** Caddy's `tls internal` regenerates self-signed certs on container recreation. For `127.0.0.1` with TLS, pin mismatch after `docker compose down && up` is expected. The connection settings UI should include a "Clear Pinned Certificate" action (per `host:port`) so developers aren't blocked during container cycling. This is a UX convenience, not a security relaxation — the user still explicitly re-trusts.
 
 ### 4) Harden WebSocket reliability for WAN
 
@@ -109,6 +113,11 @@ If zero repos exist, show a clear empty state with the exact command to bootstra
   - Avoids opaque “red dot” failures.
   - Lets users distinguish auth failure vs network outage vs cert mismatch.
 
+- **Decision: auth and TLS are driven by explicit fields, not by host.**
+  - `useTLS` and `authMode` control transport and auth. `isLocal` is only a latency hint for timeouts.
+  - `127.0.0.1:443` with TLS + static token must work identically to `remote-host:443` with TLS + static token.
+  - This makes the local Docker Compose stack (`docker-compose.prod.yml`) the primary dev test target.
+
 - **Decision: repo selection uses server paths from lfd, never local filesystem paths.**
   - Prevents subtle path mismatch bugs when client and daemon run on different machines.
 
@@ -156,9 +165,11 @@ swift test --package-path swift
 ```
 
 Observable outcomes:
-1. Concerto connects to `https://<host>:443` with static token and shows connected state.
-2. Repo picker loads from `GET /v0/repos`; selecting a repo loads remote waves.
-3. Create/run/stop/land/next operations succeed against remote lfd.
-4. WebSocket events and log streaming update in real time after WAN reconnects.
-5. Cert fingerprint mismatch blocks connection until explicit re-trust.
-6. Switching back to `.local` works without restarting the app.
+1. Concerto connects to `https://127.0.0.1:443` (local container) with static token and shows connected state.
+2. Same connection works with `https://<remote-host>:443` — no code path differences.
+3. Repo picker loads from `GET /v0/repos`; selecting a repo loads remote waves.
+4. Create/run/stop/land/next operations succeed against remote lfd.
+5. WebSocket events and log streaming update in real time after WAN reconnects.
+6. Cert fingerprint mismatch blocks connection until explicit re-trust.
+7. "Clear Pinned Certificate" unblocks after container recreation (cert regeneration).
+8. Switching back to `.local` works without restarting the app.

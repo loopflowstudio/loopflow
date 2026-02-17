@@ -84,6 +84,22 @@ Wave detail now has two tabs:
 - **Runs** — historical run list with PR state, plus:
   - **Combine**: merge multiple open PRs into one
 
+## Keyboard Shortcuts
+
+```text
+J / K        Move wave focus down/up
+Enter        Select focused wave
+C            Create wave
+E D R S L N  Edit/Delete/Retry/Stop/Land/Next
+T I F P      Open Terminal/IDE/Finder/PR
+1 / 2        Switch Current/Runs tab
+/ or ⌘K      Open command palette
+?            Show shortcut help
+G H / G L    Jump to first/last wave
+```
+
+Shortcuts only run when a text field is not focused. Terminal input and command palette input keep their own key handling.
+
 ## Communication with lfd
 
 Two patterns, intentionally different:

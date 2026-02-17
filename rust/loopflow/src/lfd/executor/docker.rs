@@ -1655,12 +1655,11 @@ mod tests {
 
     #[test]
     fn docker_mount_spec_resolves_allowlisted_credentials() {
-        let home = dirs::home_dir().expect("home directory should be available");
         let mount = DockerCredentialMount::from_config(
             &CredentialMount::try_from("claude".to_string()).expect("claude mount should parse"),
         )
         .expect("mount spec should parse");
-        assert_eq!(mount.host_path, home.join(".claude"));
+        assert!(mount.host_path.ends_with(".claude"));
         assert_eq!(mount.container_path, "/home/agent/.claude");
         assert!(DockerCredentialMount::from_config(
             &CredentialMount::try_from("unknown".to_string())

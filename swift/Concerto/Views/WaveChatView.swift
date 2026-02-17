@@ -77,6 +77,7 @@ struct WaveChatView: View {
                 Button("Send") {
                     sendMessage()
                 }
+                .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(DarkButtonStyle())
                 .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !state.canSend)
             }
@@ -191,7 +192,10 @@ private struct ChatBubble: View {
     @ViewBuilder
     private var content: some View {
         if message.role == .assistant,
-           let markdown = try? AttributedString(markdown: message.content) {
+           let markdown = try? AttributedString(
+               markdown: message.content,
+               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+           ) {
             Text(markdown)
                 .font(Typography.body())
                 .foregroundStyle(palette.text)

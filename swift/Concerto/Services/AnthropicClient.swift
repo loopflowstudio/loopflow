@@ -8,7 +8,7 @@ struct AnthropicClient {
     init(
         session: URLSession = .shared,
         apiKey: String? = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"],
-        model: String = ProcessInfo.processInfo.environment["ANTHROPIC_MODEL"] ?? "claude-3-5-sonnet-latest"
+        model: String = ProcessInfo.processInfo.environment["ANTHROPIC_MODEL"] ?? "claude-sonnet-4-5-20250929"
     ) {
         self.session = session
         self.apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -34,7 +34,7 @@ struct AnthropicClient {
         let payload = AnthropicRequest(
             model: model,
             maxTokens: 1024,
-            system: system,
+            system: system.isEmpty ? nil : system,
             messages: [AnthropicRequest.Message(role: "user", content: message)]
         )
         request.httpBody = try JSONEncoder().encode(payload)
@@ -93,7 +93,7 @@ private struct AnthropicRequest: Encodable {
 
     let model: String
     let maxTokens: Int
-    let system: String
+    let system: String?
     let messages: [Message]
 
     enum CodingKeys: String, CodingKey {

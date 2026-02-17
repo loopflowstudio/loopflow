@@ -718,10 +718,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         content: String,
         position: Int?
     ) async throws -> ChatMemoryBlock {
-        guard let encodedName = Self.encodePathComponent(name) else {
-            throw WaveServiceError.commandFailed("Invalid memory block name")
-        }
-        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks/\(encodedName)")
+        let url = apiBaseURL
+            .appendingPathComponent("waves")
+            .appendingPathComponent(waveId)
+            .appendingPathComponent("memory-blocks")
+            .appendingPathComponent(name)
 
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
@@ -747,10 +748,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func deleteMemoryBlock(waveId: String, name: String) async throws {
-        guard let encodedName = Self.encodePathComponent(name) else {
-            throw WaveServiceError.commandFailed("Invalid memory block name")
-        }
-        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks/\(encodedName)")
+        let url = apiBaseURL
+            .appendingPathComponent("waves")
+            .appendingPathComponent(waveId)
+            .appendingPathComponent("memory-blocks")
+            .appendingPathComponent(name)
 
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
@@ -1031,12 +1033,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             activeWaveId: json["active_wave_id"] as? String,
             stimulus: stimulus
         )
-    }
-
-    private static func encodePathComponent(_ value: String) -> String? {
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "/")
-        return value.addingPercentEncoding(withAllowedCharacters: allowed)
     }
 
     private static func parseWorktreeFromJSON(_ json: [String: Any]) -> WorktreeInfo? {

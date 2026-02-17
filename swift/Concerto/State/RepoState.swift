@@ -502,13 +502,6 @@ final class RepoState {
         }
     }
 
-    func instantiateAllSchemas(startImmediately: Bool = true) async throws {
-        let pending = waveSchemas.filter { !$0.isInstantiated }
-        for schema in pending {
-            try await instantiateSchema(schema, startImmediately: startImmediately)
-        }
-    }
-
     func runWave(
         wave: WaveViewModel,
         area: [String]? = nil,

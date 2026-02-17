@@ -2,7 +2,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -124,18 +124,11 @@ pub async fn list_wave_schemas_handler(
     .map_err(map_store_error)?;
 
     let mut active_by_ref: HashMap<String, String> = HashMap::new();
-    let mut local_by_name: HashMap<String, &ResolvedWaveSchema> = HashMap::new();
-    let mut builtin_by_name: HashMap<String, &ResolvedWaveSchema> = HashMap::new();
-
+    let mut fallback_schema_by_name: HashMap<String, &ResolvedWaveSchema> = HashMap::new();
     for schema in &schemas {
-        match schema.source {
-            WaveSchemaSource::Local => {
-                local_by_name.insert(schema.schema.name.clone(), schema);
-            }
-            WaveSchemaSource::Builtin => {
-                builtin_by_name.insert(schema.schema.name.clone(), schema);
-            }
-        }
+        fallback_schema_by_name
+            .entry(schema.schema.name.clone())
+            .or_insert(schema);
     }
 
     for wave in &waves {
@@ -148,10 +141,7 @@ pub async fn list_wave_schemas_handler(
 
     for wave in waves.iter().filter(|wave| wave.schema_ref.is_none()) {
         let fallback_name = wave.schema_name.as_deref().unwrap_or(&wave.name);
-        let maybe_schema = local_by_name
-            .get(fallback_name)
-            .or_else(|| builtin_by_name.get(fallback_name));
-        if let Some(schema) = maybe_schema {
+        if let Some(schema) = fallback_schema_by_name.get(fallback_name) {
             active_by_ref
                 .entry(schema.schema_ref.clone())
                 .or_insert_with(|| wave.id.to_string());
@@ -289,7 +279,7 @@ fn load_builtin_wave_schemas() -> Vec<ResolvedWaveSchema> {
 
 fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, SchemaDiscoveryError> {
     let mut schemas = Vec::new();
-    let mut schema_files_by_name: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut schema_files_by_name: HashMap<String, Vec<String>> = HashMap::new();
     let waves_dir = repo.join("wave");
     let Ok(entries) = std::fs::read_dir(&waves_dir) else {
         return Ok(schemas);
@@ -337,7 +327,7 @@ fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, Schem
         schema_files_by_name
             .entry(schema.name.clone())
             .or_default()
-            .insert(canonical_display.clone());
+            .push(canonical_display.clone());
 
         schemas.push(ResolvedWaveSchema {
             schema_ref: format!("file://{canonical_display}"),
@@ -348,13 +338,18 @@ fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, Schem
 
     let mut duplicate_names = Vec::new();
     let mut duplicate_files = Vec::new();
-    for (name, files) in schema_files_by_name {
-        if files.len() > 1 {
-            duplicate_names.push(name);
-            duplicate_files.extend(files.into_iter());
+    for (name, mut files) in schema_files_by_name {
+        if files.len() < 2 {
+            continue;
         }
+        files.sort();
+        files.dedup();
+        if files.len() < 2 {
+            continue;
+        }
+        duplicate_names.push(name);
+        duplicate_files.extend(files);
     }
-
     if !duplicate_names.is_empty() {
         duplicate_names.sort();
         duplicate_files.sort();

@@ -380,11 +380,7 @@ struct WaveSidebar: View {
             defer { isCreatingWave = false }
 
             do {
-                if !repoState.lfdConnected {
-                    try await repoState.connectLfd(outputBuffer: outputBuffer)
-                    try await Task.sleep(for: .milliseconds(500))
-                }
-
+                try await ensureLfdConnected()
                 try await repoState.createWave(name: "")
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
@@ -432,10 +428,7 @@ struct WaveSidebar: View {
             }
 
             do {
-                if !repoState.lfdConnected {
-                    try await repoState.connectLfd(outputBuffer: outputBuffer)
-                    try await Task.sleep(for: .milliseconds(500))
-                }
+                try await ensureLfdConnected()
 
                 for schema in schemas {
                     try await repoState.instantiateSchema(schema, startImmediately: startImmediately)
@@ -445,6 +438,12 @@ struct WaveSidebar: View {
                 showingActionError = true
             }
         }
+    }
+
+    private func ensureLfdConnected() async throws {
+        guard !repoState.lfdConnected else { return }
+        try await repoState.connectLfd(outputBuffer: outputBuffer)
+        try await Task.sleep(for: .milliseconds(500))
     }
 }
 

@@ -179,35 +179,20 @@ pub async fn create_wave_handler(
         .and_then(|schema| schema.schema.stimulus.as_ref())
         .map(parse_schema_stimulus)
         .transpose()?;
+    let schema_defaults = resolved_schema.as_ref().map(|resolved| &resolved.schema);
 
     let id = LfdId::new();
     let name = name
-        .or_else(|| {
-            resolved_schema
-                .as_ref()
-                .map(|schema| schema.schema.name.clone())
-        })
+        .or_else(|| schema_defaults.map(|schema| schema.name.clone()))
         .unwrap_or_else(|| format!("wave-{}", id));
     let flow = flow
-        .or_else(|| {
-            resolved_schema
-                .as_ref()
-                .map(|schema| schema.schema.flow.clone())
-        })
+        .or_else(|| schema_defaults.map(|schema| schema.flow.clone()))
         .unwrap_or_else(|| "ship".to_string());
     let direction = direction
-        .or_else(|| {
-            resolved_schema
-                .as_ref()
-                .and_then(|schema| schema.schema.direction.clone())
-        })
+        .or_else(|| schema_defaults.and_then(|schema| schema.direction.clone()))
         .unwrap_or_default();
     let area = area
-        .or_else(|| {
-            resolved_schema
-                .as_ref()
-                .map(|schema| schema.schema.area.clone())
-        })
+        .or_else(|| schema_defaults.map(|schema| schema.area.clone()))
         .unwrap_or_default();
     let schema_ref = resolved_schema
         .as_ref()
@@ -217,14 +202,9 @@ pub async fn create_wave_handler(
         .map(|schema| schema.schema.name.clone());
 
     // Check for duplicate wave name in the same repo.
-    let repo_for_check = repo.clone();
-    let name_for_check = name.clone();
-    let existing = run_store(&state.store, move |store| {
-        let waves = store.list_waves(Some(&repo_for_check))?;
-        Ok(waves.into_iter().any(|w| w.name == name_for_check))
-    })
-    .await
-    .map_err(map_store_error)?;
+    let existing = wave_name_exists(&state, &repo, &name)
+        .await
+        .map_err(map_store_error)?;
     if existing {
         return Err(api_error(
             StatusCode::CONFLICT,
@@ -328,6 +308,20 @@ fn parse_schema_stimulus(
     Ok((kind, cron))
 }
 
+async fn wave_name_exists(
+    state: &HttpState,
+    repo: &str,
+    name: &str,
+) -> Result<bool, crate::lfd::store::StoreError> {
+    let repo = repo.to_string();
+    let name = name.to_string();
+    run_store(&state.store, move |store| {
+        let waves = store.list_waves(Some(&repo))?;
+        Ok(waves.into_iter().any(|wave| wave.name == name))
+    })
+    .await
+}
+
 pub async fn get_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -365,14 +359,9 @@ pub async fn update_wave_handler(
             let new_name = name.clone();
 
             // Check for duplicate name in same repo.
-            let repo_for_check = wave.repo.clone();
-            let name_for_check = new_name.clone();
-            let existing = run_store(&state.store, move |store| {
-                let waves = store.list_waves(Some(&repo_for_check))?;
-                Ok(waves.into_iter().any(|w| w.name == name_for_check))
-            })
-            .await
-            .map_err(map_store_error)?;
+            let existing = wave_name_exists(&state, &wave.repo, &new_name)
+                .await
+                .map_err(map_store_error)?;
             if existing {
                 return Err(api_error(
                     StatusCode::CONFLICT,

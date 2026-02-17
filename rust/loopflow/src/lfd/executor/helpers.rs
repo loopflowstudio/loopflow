@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 use crate::engine::agent::LaunchConfig;
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{ConcreteItem, ConcreteStep};
+use crate::engine::fork::merge_directions;
 use crate::engine::git::{
     commit, create_branch, current_branch, is_clean, push_with_upstream, stage_all,
 };
@@ -242,19 +243,6 @@ pub(crate) fn format_ci_failure_message(failure: &CiFailure) -> String {
          Reproduce the failure from this branch, apply a fix, run relevant checks, and leave the branch ready to push.",
         failure.check_name, failure.pr_number, failure.branch, failure.commit_sha, failure.logs_url
     )
-}
-
-pub(crate) fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
-    if extra.is_empty() {
-        return base.to_vec();
-    }
-    let mut combined = base.to_vec();
-    for item in extra {
-        if !combined.contains(item) {
-            combined.push(item.clone());
-        }
-    }
-    combined
 }
 
 pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) -> Vec<String> {

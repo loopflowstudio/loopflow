@@ -24,28 +24,17 @@ use crate::lfd::scheduler::Scheduler;
 struct ForkSchedulerSlotGuard {
     scheduler: Arc<Scheduler>,
     run_id: String,
-    acquired: bool,
 }
 
 impl ForkSchedulerSlotGuard {
     fn new(scheduler: Arc<Scheduler>, run_id: String) -> Self {
-        Self {
-            scheduler,
-            run_id,
-            acquired: false,
-        }
-    }
-
-    fn mark_acquired(&mut self) {
-        self.acquired = true;
+        Self { scheduler, run_id }
     }
 }
 
 impl Drop for ForkSchedulerSlotGuard {
     fn drop(&mut self) {
-        if self.acquired {
-            self.scheduler.release(self.run_id.as_str());
-        }
+        self.scheduler.release(self.run_id.as_str());
     }
 }
 
@@ -177,19 +166,18 @@ impl WaveExecutor {
                     return;
                 }
 
-                let mut slot_guard =
-                    ForkSchedulerSlotGuard::new(scheduler.clone(), fork_run_id.to_string());
                 loop {
                     if cancel.is_cancelled() {
                         return;
                     }
                     let (acquired, _) = scheduler.acquire(fork_run_id.as_str()).await;
                     if acquired {
-                        slot_guard.mark_acquired();
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
+                let _slot_guard =
+                    ForkSchedulerSlotGuard::new(scheduler.clone(), fork_run_id.to_string());
 
                 if cancel.is_cancelled() {
                     return;

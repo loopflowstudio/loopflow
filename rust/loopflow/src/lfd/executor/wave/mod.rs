@@ -640,7 +640,11 @@ mod tests {
         repo.commit("add fork fixtures");
     }
 
-    fn create_wave_and_run(store: &SharedStore, repo: &Path, flow_name: &str) -> (LfdId, LfdId) {
+    async fn create_wave_and_run(
+        store: &SharedStore,
+        repo: &Path,
+        flow_name: &str,
+    ) -> (LfdId, LfdId) {
         let wave_id = LfdId::new();
         let run_id = LfdId::new();
 
@@ -657,7 +661,10 @@ mod tests {
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
         };
-        store.create_wave(&wave).expect("wave should be created");
+        store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
 
         let run = WaveRun {
             id: run_id.clone(),
@@ -689,6 +696,7 @@ mod tests {
         };
         store
             .create_wave_run(&run)
+            .await
             .expect("wave run should be created");
         (wave_id, run_id)
     }
@@ -717,53 +725,7 @@ mod tests {
                 .expect("store should open"),
         );
 
-        let wave_id = LfdId::new();
-        let run_id = LfdId::new();
-
-        let wave = Wave {
-            id: wave_id.clone(),
-            name: "test-wave".to_string(),
-            repo: repo.to_string_lossy().to_string(),
-            flow: "test-flow".to_string(),
-            direction: vec![],
-            area: vec![],
-            status: WaveStatus::Running,
-            iteration: 0,
-            schema_ref: None,
-            schema_name: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-        };
-        store.create_wave(&wave).await.unwrap();
-
-        let run = WaveRun {
-            id: run_id.clone(),
-            wave_id: wave_id.clone(),
-            snapshot: WaveRunSnapshot {
-                repo: repo.to_string_lossy().to_string(),
-                flow: "test-flow".to_string(),
-                direction: vec![],
-                area: vec![],
-                pr: None,
-            },
-            iteration: 0,
-            step_index: 0,
-            status: WaveRunStatus::Running,
-            worktree: repo.to_string_lossy().to_string(),
-            branch: "main".to_string(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: vec![],
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
-            parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: wave_id.to_string(),
-            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
-            lineage_inferred: false,
-        };
-        store.create_wave_run(&run).await.unwrap();
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo, "test-flow").await;
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -832,58 +794,7 @@ mod tests {
                 .expect("db should open"),
         );
 
-        let wave_id = LfdId::new();
-        let run_id = LfdId::new();
-        let wave = Wave {
-            id: wave_id.clone(),
-            name: "fork-wave".to_string(),
-            repo: repo.to_string_lossy().to_string(),
-            flow: "fork-flow".to_string(),
-            direction: vec![],
-            area: vec![],
-            status: WaveStatus::Running,
-            iteration: 0,
-            schema_ref: None,
-            schema_name: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-        };
-        store
-            .create_wave(&wave)
-            .await
-            .expect("wave should be created");
-
-        let run = WaveRun {
-            id: run_id.clone(),
-            wave_id: wave_id.clone(),
-            snapshot: WaveRunSnapshot {
-                repo: repo.to_string_lossy().to_string(),
-                flow: "fork-flow".to_string(),
-                direction: vec![],
-                area: vec![],
-                pr: None,
-            },
-            iteration: 0,
-            step_index: 0,
-            status: WaveRunStatus::Running,
-            worktree: repo.to_string_lossy().to_string(),
-            branch: "main".to_string(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: vec![],
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
-            parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: wave_id.to_string(),
-            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
-            lineage_inferred: false,
-        };
-        store
-            .create_wave_run(&run)
-            .await
-            .expect("wave run should be created");
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo, "fork-flow").await;
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");

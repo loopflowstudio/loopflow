@@ -46,6 +46,10 @@ impl AgentExecutor for LocalProcessExecutor {
         }
 
         let agent_id_string = context.agent_id.to_string();
+        let wave_id = context.wave_id.to_string();
+        let wave_run_id = context.wave_run_id.to_string();
+        let output_prefix = context.output_prefix.map(str::to_string);
+        let output = context.output.clone();
         let mut command = Command::new(&cmd[0]);
         command.args(&cmd[1..]);
         command.current_dir(cwd);
@@ -83,19 +87,19 @@ impl AgentExecutor for LocalProcessExecutor {
 
         let stdout_task = tokio::spawn(read_stream(
             stdout,
-            context.output.clone(),
-            context.wave_id.to_string(),
-            context.wave_run_id.to_string(),
-            context.agent_id.to_string(),
-            context.output_prefix.map(str::to_string),
+            output.clone(),
+            wave_id.clone(),
+            wave_run_id.clone(),
+            agent_id_string.clone(),
+            output_prefix.clone(),
         ));
         let stderr_task = tokio::spawn(read_stream(
             stderr,
-            context.output.clone(),
-            context.wave_id.to_string(),
-            context.wave_run_id.to_string(),
-            context.agent_id.to_string(),
-            context.output_prefix.map(str::to_string),
+            output,
+            wave_id,
+            wave_run_id,
+            agent_id_string.clone(),
+            output_prefix,
         ));
 
         let status = match tokio::time::timeout(self.agent_timeout, child.wait()).await {

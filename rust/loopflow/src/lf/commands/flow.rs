@@ -114,7 +114,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             &selected.step.name,
             &directions,
             message,
-            Some(branch_label.as_str()),
+            branch_label.as_str(),
         )?;
         if exit_code != 0 {
             return Err(anyhow!(
@@ -173,7 +173,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
                 &step_name,
                 &directions,
                 msg.as_deref(),
-                Some(branch_label.as_str()),
+                branch_label.as_str(),
             )
         });
         handles.push((task, handle));
@@ -237,7 +237,7 @@ fn run_fork_branch(
     step: &str,
     directions: &[String],
     message: Option<&str>,
-    branch_label: Option<&str>,
+    branch_label: &str,
 ) -> Result<i32> {
     let mut cmd = build_lf_command();
     cmd.arg(step).arg("-b");
@@ -259,15 +259,15 @@ fn run_fork_branch(
 
     let mut log_threads = Vec::new();
     if let Some(stdout) = child.stdout.take() {
-        let label = branch_label.map(str::to_string);
+        let label = branch_label.to_string();
         log_threads.push(std::thread::spawn(move || {
-            relay_fork_logs(stdout, label.as_deref(), false);
+            relay_fork_logs(stdout, &label, false);
         }));
     }
     if let Some(stderr) = child.stderr.take() {
-        let label = branch_label.map(str::to_string);
+        let label = branch_label.to_string();
         log_threads.push(std::thread::spawn(move || {
-            relay_fork_logs(stderr, label.as_deref(), true);
+            relay_fork_logs(stderr, &label, true);
         }));
     }
 
@@ -323,19 +323,13 @@ fn choose_fork_branch(
     Ok(parsed - 1)
 }
 
-fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: Option<&str>, stderr: bool) {
+fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool) {
     let buffered = BufReader::new(reader);
     for line in buffered.lines().map_while(|line| line.ok()) {
-        if let Some(label) = branch_label {
-            if stderr {
-                eprintln!("[{label}] {line}");
-            } else {
-                println!("[{label}] {line}");
-            }
-        } else if stderr {
-            eprintln!("{line}");
+        if stderr {
+            eprintln!("[{branch_label}] {line}");
         } else {
-            println!("{line}");
+            println!("[{branch_label}] {line}");
         }
     }
 }

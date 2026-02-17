@@ -1,1 +1,0 @@
-- Policy: when `snapshot.pr.number` is `None` but state is `open`/`draft`, should `open_pr_count` include it? Current implementation ignores them — live PR sync is now the source of truth for open counts. Revisit if edge cases surface.

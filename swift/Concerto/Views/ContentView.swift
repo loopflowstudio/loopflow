@@ -153,7 +153,9 @@ struct ContentView: View {
             Task { await repoState.refreshWaves() }
         })
 
-        if let wave = repoState.selectedWave, let worktreePath = wave.worktreePath {
+        if !repoState.isRemoteTarget,
+           let wave = repoState.selectedWave,
+           let worktreePath = wave.worktreePath {
             let terminalLauncher = TerminalLauncher()
             let terminal = TerminalApp.warp
             let ide = IDEApp.cursor

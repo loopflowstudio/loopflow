@@ -53,6 +53,7 @@ final class RepoState {
     }
 
     var currentRepo: URL?
+    var repoTarget: RepoTarget?
     var flows: [Flow] = []
     var availableDirections: [String] = []
     var waveSchemas: [WaveSchema] = []
@@ -84,15 +85,26 @@ final class RepoState {
     var isLoading: Bool = false
     var errorMessage: String?
 
-    // Daemon connection
+    // Connection
+    let connectionStore = ConnectionStore()
+    var connectionState: ConnectionState = .disconnected(nil)
     var lfdConnected: Bool = false
+    var availableRemoteRepos: [RemoteRepo] = []
 
     // Services
-    private let waveService = LocalWaveService()
-    private var eventService: LocalEventService?
+    private var waveService: WaveService
+    private var eventService: EventService?
     private weak var outputBuffer: OutputBuffer?
 
     init() {
+        let connection = connectionStore.activeConnection
+        let token = connectionStore.token(for: connection)
+        waveService = WaveService(
+            connection: connection,
+            tokenProvider: { token }
+        )
+        connectionState = connectionStore.state
+
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
             self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
         }
@@ -111,6 +123,7 @@ final class RepoState {
 
     func configureForUITest(_ mode: UITestMode, repoURL: URL) {
         currentRepo = repoURL
+        repoTarget = .local(repoURL)
         flows = []
         waveStore.removeAll()
         worktreeStore.removeAll()
@@ -132,6 +145,7 @@ final class RepoState {
 
     func configureMockWaves() {
         lfdConnected = true
+        connectionState = .connected
         let repo = currentRepo?.path ?? "/tmp/demo"
         waveStore.setAll([
             WaveViewModel(
@@ -281,12 +295,14 @@ final class RepoState {
 
     func configureMockWavesEmpty() {
         lfdConnected = true
+        connectionState = .connected
         waveStore.removeAll()
     }
 
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
+        repoTarget = .local(url)
         isLoading = true
         errorMessage = nil
         isLoading = false
@@ -309,8 +325,12 @@ final class RepoState {
         LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
         self.outputBuffer = outputBuffer
         if eventService != nil { return }
-        LoggingService.append("creating LocalEventService", category: LoggingService.Category.lfd)
-        eventService = LocalEventService()
+        LoggingService.append("creating EventService", category: LoggingService.Category.lfd)
+        let token = connectionStore.token(for: connectionStore.activeConnection)
+        eventService = EventService(
+            connection: connectionStore.activeConnection,
+            tokenProvider: { token }
+        )
 
         Task {
             await eventService?.subscribe(
@@ -319,7 +339,7 @@ final class RepoState {
                         guard let self, let outputBuffer else { return }
                         switch event {
                         case .connected(let connected):
-                            self.lfdConnected = true
+                            self.updateConnectionState(.connected)
                             self.waveStore.setAll(connected.waves.map { WaveViewModel(api: $0) })
                             await self.refreshWorktrees()
                             await self.refreshFlowsAsync()
@@ -336,10 +356,10 @@ final class RepoState {
                         }
                     }
                 },
-                onConnectionChange: { [weak self] connected in
+                onConnectionStateChange: { [weak self] state in
                     Task { @MainActor in
-                        LoggingService.lfd("onConnectionChange: connected=\(connected)")
-                        self?.lfdConnected = connected
+                        LoggingService.lfd("onConnectionStateChange: state=\(state)")
+                        self?.updateConnectionState(state)
                     }
                 }
             )
@@ -378,7 +398,7 @@ final class RepoState {
     // MARK: - Flows
 
     func refreshFlowsAsync() async {
-        guard let repo = currentRepo else { return }
+        guard let repo = repoTarget else { return }
         guard let result = try? await waveService.listFlowsAndDirections(repo: repo) else { return }
         if !result.flows.isEmpty {
             flows = result.flows
@@ -390,8 +410,8 @@ final class RepoState {
     // MARK: - Waves
 
     func refreshWaves() async {
-        guard let repo = currentRepo else {
-            LoggingService.model("refreshWaves: no currentRepo")
+        guard let repo = repoTarget else {
+            LoggingService.model("refreshWaves: no repoTarget")
             return
         }
         LoggingService.model("refreshWaves: starting for repo=\(repo.path)")
@@ -413,7 +433,7 @@ final class RepoState {
     }
 
     func refreshWorktrees() async {
-        guard let repo = currentRepo else { return }
+        guard let repo = repoTarget else { return }
         worktreeStore.setAll((try? await waveService.listWorktrees(repo: repo)) ?? [])
     }
 
@@ -459,8 +479,8 @@ final class RepoState {
 
     @discardableResult
     func createWave(name: String, schemaRef: String? = nil) async throws -> Wave {
-        guard let repo = currentRepo else {
-            LoggingService.model("createWave: no currentRepo")
+        guard let repo = repoTarget else {
+            LoggingService.model("createWave: no repoTarget")
             throw WaveServiceError.commandFailed("No repository selected")
         }
 
@@ -621,11 +641,214 @@ final class RepoState {
     }
 
     func connectLfd(outputBuffer: OutputBuffer) async throws {
-        LoggingService.lfd("connectLfd: starting")
-        try? await waveService.connectLfd()
-        LoggingService.lfd("connectLfd: waveService.connectLfd completed")
+        try await connect(to: connectionStore.activeConnection, outputBuffer: outputBuffer)
+    }
+
+    func connect(to connection: ServerConnection, outputBuffer: OutputBuffer) async throws {
+        self.outputBuffer = outputBuffer
+        outputBuffer.configureConnection(connection)
+        connectionStore.setConnection(connection)
+        rebuildServices(for: connection)
+
+        if connection.isLocal {
+            try? await waveService.connectLfd()
+        }
+
+        updateConnectionState(.connecting(.tlsTrustCheck))
+        do {
+            try await waveService.checkConnection()
+        } catch {
+            let mappedState = mapConnectionError(error, connection: connection)
+            updateConnectionState(mappedState)
+            throw error
+        }
+
+        updateConnectionState(.connecting(.authCheck))
+        do {
+            try await waveService.checkConnection()
+        } catch {
+            let mappedState = mapConnectionError(error, connection: connection)
+            updateConnectionState(mappedState)
+            throw error
+        }
+
+        updateConnectionState(.connecting(.repoDiscovery))
+        let repos: [RemoteRepo]
+        do {
+            repos = try await waveService.listRepos()
+        } catch {
+            let mappedState = mapConnectionError(error, connection: connection)
+            updateConnectionState(mappedState)
+            throw error
+        }
+
+        availableRemoteRepos = repos
+        connectionStore.setDiscoveredRepos(repos)
+        if connection.isLocal {
+            if let currentRepo {
+                repoTarget = .local(currentRepo)
+            }
+        } else if let remote = repos.first {
+            selectRemoteRepo(path: remote.path)
+        } else {
+            repoTarget = nil
+        }
+
+        updateConnectionState(.connecting(.wsProbe))
+        let probeToken = connectionStore.token(for: connection)
+        let probeService = EventService(
+            connection: connection,
+            tokenProvider: { probeToken }
+        )
+        do {
+            try await probeService.probe()
+        } catch {
+            let mappedState = mapConnectionError(error, connection: connection)
+            updateConnectionState(mappedState)
+            throw error
+        }
+
         startEventSubscription(outputBuffer: outputBuffer)
-        LoggingService.lfd("connectLfd: event subscription started")
+        updateConnectionState(.connected)
+        await refreshWaves()
+    }
+
+    func switchToLocal(outputBuffer: OutputBuffer) async throws {
+        let connection = ServerConnection.local
+        try await connect(to: connection, outputBuffer: outputBuffer)
+    }
+
+    func selectRemoteRepo(path: String) {
+        repoTarget = .remote(path: path)
+        currentRepo = URL(fileURLWithPath: path)
+    }
+
+    func clearPinnedCertificate() {
+        connectionStore.clearPinnedCertificate()
+    }
+
+    func trustNewCertificate() {
+        guard case .trustRequired(let requirement) = connectionState else { return }
+        connectionStore.trustNewCertificate(requirement)
+    }
+
+    var isRemoteTarget: Bool {
+        repoTarget?.isRemote ?? false
+    }
+
+    var isConnected: Bool {
+        if case .connected = connectionState {
+            return true
+        }
+        return false
+    }
+
+    var connectionSummary: String {
+        switch connectionState {
+        case .connected:
+            return "Connected"
+        case .connecting(let phase):
+            switch phase {
+            case .tlsTrustCheck: return "Checking TLS trust…"
+            case .authCheck: return "Authenticating…"
+            case .repoDiscovery: return "Loading repos…"
+            case .wsProbe: return "Probing event stream…"
+            }
+        case .reconnecting(let attempt, _, _):
+            return "Reconnecting (attempt \(attempt))…"
+        case .authFailed(let message):
+            return message ?? "Authentication failed"
+        case .trustRequired:
+            return "Trust required"
+        case .disconnected(let reason):
+            switch reason {
+            case .networkUnavailable:
+                return "Network unavailable"
+            case .timeout:
+                return "Connection timed out"
+            case .serverUnreachable:
+                return "Server unreachable"
+            case .serverError(let status):
+                return "Server error (\(status))"
+            case .wsClosed:
+                return "Connection closed"
+            case .authRejected:
+                return "Authentication failed"
+            case .trustMismatch:
+                return "Certificate changed"
+            case .unknown(let message):
+                return message
+            case nil:
+                return "Disconnected"
+            }
+        }
+    }
+
+    private func rebuildServices(for connection: ServerConnection) {
+        let token = connectionStore.token(for: connection)
+        waveService = WaveService(
+            connection: connection,
+            tokenProvider: { token }
+        )
+        outputBuffer?.configureConnection(connection)
+
+        Task {
+            await eventService?.disconnect()
+        }
+        eventService = nil
+    }
+
+    private func mapConnectionError(_ error: Error, connection: ServerConnection) -> ConnectionState {
+        if let serviceError = error as? WaveServiceError {
+            switch serviceError {
+            case .authRejected(let message):
+                return .authFailed(message)
+            case .trustMismatch(let oldFingerprint, let newFingerprint):
+                return .trustRequired(
+                    .certificateChanged(
+                        host: connection.host,
+                        port: connection.port,
+                        oldFingerprint: oldFingerprint,
+                        newFingerprint: newFingerprint
+                    )
+                )
+            case .timeout:
+                return .disconnected(.timeout)
+            case .networkUnavailable:
+                return .disconnected(.networkUnavailable)
+            case .serverUnreachable:
+                return .disconnected(.serverUnreachable)
+            case .serverError(let status, _):
+                return .disconnected(.serverError(status: status))
+            case .commandFailed(let message):
+                return .disconnected(.unknown(message))
+            }
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return .disconnected(.timeout)
+            case .notConnectedToInternet, .networkConnectionLost:
+                return .disconnected(.networkUnavailable)
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return .disconnected(.serverUnreachable)
+            default:
+                return .disconnected(.unknown(urlError.localizedDescription))
+            }
+        }
+
+        return .disconnected(.unknown(error.localizedDescription))
+    }
+
+    private func updateConnectionState(_ state: ConnectionState) {
+        connectionState = state
+        connectionStore.state = state
+        if case .connected = state {
+            lfdConnected = true
+        } else {
+            lfdConnected = false
+        }
     }
 
     // MARK: - Optimistic helpers

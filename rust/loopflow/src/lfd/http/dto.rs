@@ -325,6 +325,14 @@ pub struct WorktreeDto {
     pub wave_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RepoDto {
+    pub object: String,
+    pub path: String,
+    pub name: String,
+    pub wave_count: u32,
+}
+
 pub fn wave_run_status_str(status: WaveRunStatus) -> String {
     match status {
         WaveRunStatus::Pending => "pending",

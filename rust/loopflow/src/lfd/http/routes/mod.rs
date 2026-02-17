@@ -1,5 +1,6 @@
 pub mod flows;
 pub mod hooks;
+pub mod repos;
 pub mod system;
 pub mod wave_runs;
 pub mod wave_schemas;

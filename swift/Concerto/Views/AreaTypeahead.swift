@@ -33,16 +33,24 @@ struct AreaTypeahead: View {
                     }
                 }
 
-                GhostTextField(
-                    text: $inputText,
-                    ghost: computeGhostCompletion(for: inputText),
-                    placeholder: selectedAreas.isEmpty ? "Type path, tab to complete" : "",
-                    onTab: acceptGhost,
-                    onEnter: commitToken,
-                    onBackspace: removeLastToken
-                )
-                .frame(minWidth: 80, maxWidth: .infinity)
-                .frame(height: 20)
+                if repoState.isRemoteTarget {
+                    TextField(selectedAreas.isEmpty ? "Type path and press return" : "", text: $inputText)
+                        .textFieldStyle(.plain)
+                        .onSubmit { commitToken() }
+                        .frame(minWidth: 80, maxWidth: .infinity)
+                        .frame(height: 20)
+                } else {
+                    GhostTextField(
+                        text: $inputText,
+                        ghost: computeGhostCompletion(for: inputText),
+                        placeholder: selectedAreas.isEmpty ? "Type path, tab to complete" : "",
+                        onTab: acceptGhost,
+                        onEnter: commitToken,
+                        onBackspace: removeLastToken
+                    )
+                    .frame(minWidth: 80, maxWidth: .infinity)
+                    .frame(height: 20)
+                }
             }
             .padding(Spacing.sm)
             .background(palette.surface)
@@ -66,6 +74,7 @@ struct AreaTypeahead: View {
     // MARK: - Path Completion Logic
 
     private func childrenOf(_ parentPath: String) -> [String] {
+        guard !repoState.isRemoteTarget else { return [] }
         guard let repo = repoState.currentRepo else { return [] }
 
         let parentURL: URL
@@ -101,6 +110,7 @@ struct AreaTypeahead: View {
     }
 
     private func isDirectory(_ path: String) -> Bool {
+        guard !repoState.isRemoteTarget else { return false }
         guard let repo = repoState.currentRepo else { return false }
         if path == "." { return true }
         let url = repo.appendingPathComponent(path)

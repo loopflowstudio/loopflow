@@ -27,11 +27,12 @@ struct EmbeddedTerminalPanel: View {
     }
 
     private var hasActiveWorktree: Bool {
-        repoState.selectedWave?.worktreePath != nil
+        !repoState.isRemoteTarget && repoState.selectedWave?.worktreePath != nil
     }
 
     private var effectiveWorktree: String? {
-        repoState.selectedWave?.worktreePath ?? repoState.currentRepo?.path()
+        guard !repoState.isRemoteTarget else { return nil }
+        return repoState.selectedWave?.worktreePath ?? repoState.currentRepo?.path()
     }
 
     private var terminalHeader: some View {

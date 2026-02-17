@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -8,96 +7,39 @@ use crate::engine::{launch_agent, LaunchConfig};
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::util::command_exists;
 
 pub fn ensure_lint_passes(repo: &Path, progress: &impl Progress) -> OpsResult<bool> {
     let config = load_config_or_default(Some(repo));
-    match check_lint(repo, config.lint_check.as_deref())? {
-        Some(true) => {
-            progress.status("Lint passed");
-            return Ok(true);
-        }
-        Some(false) => progress.status("Lint issues found, running fixer..."),
+    let lint_cmd = match config.lint.as_deref() {
+        Some(cmd) => cmd,
         None => {
-            progress.status("Lint skipped (no checker configured)");
+            progress.status("Lint skipped (no `lint` command configured)");
             return Ok(true);
         }
+    };
+
+    if run_check(repo, lint_cmd)? {
+        progress.status("Lint passed");
+        return Ok(true);
     }
 
+    progress.status("Lint issues found, running fixer...");
     run_lint_agent(repo, progress)?;
 
-    match check_lint(repo, config.lint_check.as_deref())? {
-        Some(true) => Ok(true),
-        Some(false) => Err(OpsError::LintFailed),
-        None => Ok(true),
+    if run_check(repo, lint_cmd)? {
+        Ok(true)
+    } else {
+        Err(OpsError::LintFailed)
     }
 }
 
-fn has_python_files(dir: &Path) -> bool {
-    if !dir.is_dir() {
-        return false;
-    }
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return false,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "py" {
-                    return true;
-                }
-            }
-        } else if path.is_dir() && has_python_files(&path) {
-            return true;
-        }
-    }
-    false
-}
-
-fn check_lint(repo: &Path, lint_check: Option<&str>) -> OpsResult<Option<bool>> {
-    if let Some(cmd) = lint_check {
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .current_dir(repo)
-            .status()?;
-        return Ok(Some(status.success()));
-    }
-
-    if !command_exists("ruff") {
-        return Ok(None);
-    }
-
-    let mut targets = Vec::new();
-    if has_python_files(&repo.join("src")) {
-        targets.push("src/");
-    }
-    if has_python_files(&repo.join("tests")) {
-        targets.push("tests/");
-    }
-    if targets.is_empty() {
-        return Ok(None);
-    }
-
-    let check_status = Command::new("ruff")
-        .arg("check")
-        .args(&targets)
+fn run_check(repo: &Path, cmd: &str) -> OpsResult<bool> {
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
         .current_dir(repo)
         .status()?;
-    if !check_status.success() {
-        return Ok(Some(false));
-    }
-
-    let fmt_status = Command::new("ruff")
-        .arg("format")
-        .arg("--check")
-        .args(&targets)
-        .current_dir(repo)
-        .status()?;
-
-    Ok(Some(fmt_status.success()))
+    Ok(status.success())
 }
 
 fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {

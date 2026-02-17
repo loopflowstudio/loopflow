@@ -1,46 +1,18 @@
 ---
 produces: passing lint checks
 ---
-Run linting and fix any issues.
-
-## Goal
-
-Get the codebase passing lint and format checks. Fix issues directly rather than just reporting them.
+Run lint and format checks. Fix failures. If everything passes, stop immediately.
 
 ## Workflow
 
-### 1. Run lint check
-```bash
-ruff check src/ tests/
-```
+### 1. Find the project's lint commands
 
-If errors are found, fix them. Common fixes:
-- Unused imports: remove them
-- Unused variables: remove or use them
-- Import sorting: ruff will auto-fix with `--fix`
+Check `.lf/config.yaml` for a `lint:` field. If not configured, check `TESTING.md` or CI config (`.github/workflows/`).
 
-For auto-fixable issues:
-```bash
-ruff check src/ tests/ --fix
-```
+### 2. Run them
 
-### 2. Run format check
-```bash
-ruff format --check src/ tests/
-```
+Run all lint and format checks. If everything passes, you're done — stop here.
 
-If formatting issues are found:
-```bash
-ruff format src/ tests/
-```
+### 3. Fix failures
 
-### 3. Verify
-Run both checks again to confirm everything passes:
-```bash
-ruff check src/ tests/
-ruff format --check src/ tests/
-```
-
-## Output
-
-Fix all lint and format issues. When both commands pass with no errors, you're done.
+Auto-fix where possible (`--fix` flags, formatters). Fix remaining issues manually. Run checks again to confirm.

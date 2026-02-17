@@ -5,13 +5,17 @@ CI runs five test suites. All must pass before merging.
 ## Quick Reference
 
 ```bash
-# Run all tests (what CI runs)
-uv run pytest python/tests/             # Python
-cargo test --all                        # Rust
-swift test --package-path swift         # Swift package
+# Run all checks (what CI runs)
+cargo fmt --check                      # Rust formatting
+cargo clippy -- -D warnings            # Rust lints (warnings = errors)
+cargo test --all                       # Rust tests
+uv run pytest python/tests/            # Python tests
+swift test --package-path swift        # Swift package tests
 cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'  # Concerto UI
-tests/e2e/test_smoke.sh                 # E2E smoke
+tests/e2e/test_smoke.sh               # E2E smoke
 ```
+
+Run at minimum the checks that apply to files you changed. A PR that passes locally but fails CI is a broken gate.
 
 ## Python Tests
 

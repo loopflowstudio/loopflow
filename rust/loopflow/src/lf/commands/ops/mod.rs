@@ -56,6 +56,34 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
+        OpsCommand::Lint => run_check("lint"),
+        OpsCommand::Test => run_check("test"),
+    }
+}
+
+fn run_check(kind: &str) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let config = crate::engine::config::load_config_or_default(Some(&repo_root));
+    let cmd = match kind {
+        "lint" => config.lint,
+        "test" => config.test,
+        _ => None,
+    };
+    let Some(cmd) = cmd else {
+        return Err(anyhow!(
+            "no `{}` command configured in .lf/config.yaml",
+            kind
+        ));
+    };
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&cmd)
+        .current_dir(&repo_root)
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("{} failed", kind))
     }
 }
 

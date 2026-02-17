@@ -140,10 +140,7 @@ fn land_cleans_up_remote_branch() {
 fn land_with_lint_gate() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
     let repo = TestRepo::new();
-    repo.create_file(
-        ".lf/config.yaml",
-        "lint_check: 'false'\nagent_model: claude\n",
-    );
+    repo.create_file(".lf/config.yaml", "lint: 'false'\nagent_model: claude\n");
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
     repo.stage_all();

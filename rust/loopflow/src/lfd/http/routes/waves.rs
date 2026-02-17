@@ -808,62 +808,6 @@ fn default_memory_block_position(existing: &[ChatMemoryBlock], name: &str) -> u3
         .unwrap_or(0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lfd::id::LfdId;
-
-    #[test]
-    fn normalized_memory_block_name_rejects_whitespace() {
-        let result = normalized_memory_block_name("   ".to_string());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn normalized_memory_block_name_trims_surrounding_whitespace() {
-        let result = normalized_memory_block_name("  project-context  ".to_string())
-            .expect("name should normalize");
-        assert_eq!(result, "project-context");
-    }
-
-    #[test]
-    fn default_memory_block_position_keeps_existing_position() {
-        let existing = vec![ChatMemoryBlock {
-            wave_id: LfdId::from_raw("wave-1"),
-            name: "project-context".to_string(),
-            content: "repo context".to_string(),
-            position: 4,
-            updated_at: None,
-        }];
-
-        let position = default_memory_block_position(&existing, "project-context");
-        assert_eq!(position, 4);
-    }
-
-    #[test]
-    fn default_memory_block_position_appends_after_highest_position() {
-        let existing = vec![
-            ChatMemoryBlock {
-                wave_id: LfdId::from_raw("wave-1"),
-                name: "first".to_string(),
-                content: "a".to_string(),
-                position: 0,
-                updated_at: None,
-            },
-            ChatMemoryBlock {
-                wave_id: LfdId::from_raw("wave-1"),
-                name: "second".to_string(),
-                content: "b".to_string(),
-                position: 3,
-                updated_at: None,
-            },
-        ];
-
-        let position = default_memory_block_position(&existing, "third");
-        assert_eq!(position, 4);
-    }
-}
-
 pub async fn stop_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -1393,6 +1337,7 @@ fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::id::LfdId;
 
     #[test]
     fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
@@ -1415,5 +1360,55 @@ mod tests {
         let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
         assert_eq!(parsed.0, StimulusKind::Cron);
         assert_eq!(parsed.1, "0 8 * * *");
+    }
+
+    #[test]
+    fn normalized_memory_block_name_rejects_whitespace() {
+        let result = normalized_memory_block_name("   ".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn normalized_memory_block_name_trims_surrounding_whitespace() {
+        let result = normalized_memory_block_name("  project-context  ".to_string())
+            .expect("name should normalize");
+        assert_eq!(result, "project-context");
+    }
+
+    #[test]
+    fn default_memory_block_position_keeps_existing_position() {
+        let existing = vec![ChatMemoryBlock {
+            wave_id: LfdId::from_raw("wave-1"),
+            name: "project-context".to_string(),
+            content: "repo context".to_string(),
+            position: 4,
+            updated_at: None,
+        }];
+
+        let position = default_memory_block_position(&existing, "project-context");
+        assert_eq!(position, 4);
+    }
+
+    #[test]
+    fn default_memory_block_position_appends_after_highest_position() {
+        let existing = vec![
+            ChatMemoryBlock {
+                wave_id: LfdId::from_raw("wave-1"),
+                name: "first".to_string(),
+                content: "a".to_string(),
+                position: 0,
+                updated_at: None,
+            },
+            ChatMemoryBlock {
+                wave_id: LfdId::from_raw("wave-1"),
+                name: "second".to_string(),
+                content: "b".to_string(),
+                position: 3,
+                updated_at: None,
+            },
+        ];
+
+        let position = default_memory_block_position(&existing, "third");
+        assert_eq!(position, 4);
     }
 }

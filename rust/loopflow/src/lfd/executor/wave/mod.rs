@@ -828,6 +828,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_fork_with_no_branches_fails_cleanly() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- fork:
+    branches: []
+    select: all
+"#,
+        );
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner::default());
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler, output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert_eq!(updated_run.error.as_deref(), Some("fork has no branches"));
+    }
+
+    #[tokio::test]
     async fn execute_fork_success_cleans_worktrees_and_records() {
         let repo = TestRepo::new();
         let tmp = tempdir().expect("tempdir");

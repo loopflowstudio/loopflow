@@ -91,6 +91,11 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
+        if fork.branches.is_empty() {
+            self.fail_run(run, wave, "fork has no branches".to_string())?;
+            return Ok(());
+        }
+
         if self.executor_type == ExecutorType::Docker {
             self.fail_run(
                 run,

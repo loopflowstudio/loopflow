@@ -86,6 +86,10 @@ struct ForkBranchTask {
 }
 
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
+    if fork.branches.is_empty() {
+        return Err(anyhow!("fork has no branches"));
+    }
+
     if !matches!(fork.select, ForkSelect::All) {
         let mut chooser = |prompt: &str, branches: &[crate::engine::ConcreteStep]| {
             choose_fork_branch(prompt, branches)
@@ -123,10 +127,6 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
                 exit_code
             ));
         }
-        return Ok(());
-    }
-
-    if fork.branches.is_empty() {
         return Ok(());
     }
 

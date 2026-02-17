@@ -246,4 +246,28 @@ mod tests {
             vec![r#"{"type":"mystery","payload":42}"#, "plain text line"]
         );
     }
+
+    #[test]
+    fn handle_output_line_applies_output_prefix() {
+        let output_dir = tempdir().expect("tempdir should be created");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let mut parser = StreamParser::new();
+
+        handle_output_line(
+            "plain text line",
+            &mut parser,
+            &output,
+            "wave-1",
+            "run-prefix",
+            "agent-1",
+            Some("[fork-0] "),
+        );
+
+        let lines = output
+            .read_log("run-prefix")
+            .expect("output log should exist")
+            .0;
+
+        assert_eq!(lines, vec!["[fork-0] plain text line"]);
+    }
 }

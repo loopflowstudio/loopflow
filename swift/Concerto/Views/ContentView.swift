@@ -68,7 +68,7 @@ struct ContentView: View {
             }
         }
         .overlay {
-            if keyboardRouter.isHelpOverlayVisible {
+            if keyboardRouter.isHelpOverlayVisible && isKeyWindowActive {
                 ShortcutHelpOverlay(
                     isPresented: isHelpOverlayPresented,
                     shortcuts: keyboardRouter.shortcuts,
@@ -77,7 +77,7 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if let chordIndicator = keyboardRouter.chordIndicator {
+            if let chordIndicator = keyboardRouter.chordIndicator, isKeyWindowActive {
                 Text(chordIndicator)
                     .font(Typography.code(12))
                     .foregroundStyle(.white)
@@ -106,6 +106,7 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
+            keyboardRouter.isHelpOverlayVisible = false
             showCommandPalette = true
         }
         .onChange(of: showCommandPalette) { _, isVisible in
@@ -158,11 +159,19 @@ struct ContentView: View {
             let ide = IDEApp.cursor
 
             actions.append(PaletteAction("Open Terminal", icon: "terminal", shortcut: "T") {
-                try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktreePath))
+                do {
+                    try terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktreePath))
+                } catch {
+                    repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
+                }
             })
 
             actions.append(PaletteAction("Open \(ide.displayName)", icon: "curlybraces", shortcut: "I") {
-                try? terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktreePath), workspace: nil)
+                do {
+                    try terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktreePath), workspace: nil)
+                } catch {
+                    repoState.errorMessage = "Failed to open \(ide.displayName): \(error.localizedDescription)"
+                }
             })
 
             actions.append(PaletteAction("Reveal in Finder", icon: "folder", shortcut: "F") {
@@ -306,6 +315,11 @@ struct ContentView: View {
     private var selectedWorktreeURL: URL? {
         guard let path = repoState.selectedWave?.worktreePath else { return nil }
         return URL(fileURLWithPath: path)
+    }
+
+    private var isKeyWindowActive: Bool {
+        guard let windowNumber else { return false }
+        return NSApp.keyWindow?.windowNumber == windowNumber
     }
 
     private func performLauncherAction(

@@ -1,5 +1,5 @@
 // Global command palette for searching and executing actions.
-// Activated with Cmd+K.
+// Activated with Cmd+K or /.
 
 import SwiftUI
 

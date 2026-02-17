@@ -217,6 +217,31 @@ pub struct DeletedResourceResponse {
     pub deleted: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct StimulusDefDto {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WaveSchemaDto {
+    pub name: String,
+    pub schema_ref: String,
+    pub flow: String,
+    pub area: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stimulus: Option<StimulusDefDto>,
+    pub direction: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_wave_id: Option<String>,
+}
+
 pub fn stimulus_kind_str(kind: StimulusKind) -> &'static str {
     match kind {
         StimulusKind::Loop => "loop",

@@ -46,10 +46,10 @@ pub struct StimulusDef {
 
 Built-in schemas work in any repo without setup. Wave directory schemas are the repo-local extension point — co-located with wave plans.
 
-Selectors support both unqualified and namespaced forms:
+Schema inputs support unqualified and explicit-ref forms:
 - `scan` (unqualified, default resolution rules)
-- `local/scan`
-- `builtin/scan`
+- `builtin://scan`
+- `file:///abs/path/to/repo/wave/scan/scan.yaml`
 
 ### Rust: embed + parse
 
@@ -71,7 +71,7 @@ Returns all schemas (built-in + wave directory), cross-referenced with active wa
 #[derive(Serialize)]
 struct WaveSchemaDto {
     name: String,
-    selector: String,            // "local/scan" or "builtin/scan"
+    schema_ref: String,          // "builtin://scan" or absolute "file://..." URI
     flow: String,
     area: Vec<String>,
     stimulus: Option<StimulusDefDto>,
@@ -86,10 +86,9 @@ struct WaveSchemaDto {
 Logic:
 1. Collect all `WaveSchema`s from builtins + `wave/<name>/<name>.yaml`
 2. Load active waves from the store
-3. Match instantiated state by source-aware selector:
-   - `local/<name>` uses active wave named `<name>`
-   - `builtin/<name>` is marked instantiated only when no local schema with that name exists and an active wave named `<name>` exists
-4. Return the merged list
+3. Match instantiated state by stored schema provenance (`schema_ref`) on wave rows
+4. For older waves without provenance, fallback to name match with local-over-builtin precedence
+5. Return the merged list
 
 **`POST /v0/waves` (extended)**
 
@@ -102,36 +101,51 @@ pub struct CreateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
-    schema: Option<String>,      // new: instantiate from this schema
+    schema: Option<String>,      // new: schema name or explicit schema_ref URI
 }
 ```
 
 When `schema` is present:
-1. Resolve schema selector:
+1. Resolve schema input:
    - **Unqualified (`scan`)**: local wins over builtin
-   - **Namespaced (`local/scan`, `builtin/scan`)**: use explicit source
+   - **Explicit ref (`builtin://scan`, `file://...`)**: exact match
 2. Ensure exactly one matching schema candidate; return `409 Conflict` when ambiguous
 3. Return `404` when no matching schema is found
 4. Fill in flow, area, direction from the schema (request fields override if also provided)
 5. Create wave via store
 6. If schema has stimulus, create stimulus via store
-7. Emit `WaveCreated` event
-8. Return enriched `WaveDto`
+7. Persist schema provenance on the created wave (`schema_ref`)
+8. Emit `WaveCreated` event
+9. Return enriched `WaveDto`
 
 No separate instantiation endpoint. The schema just provides defaults for wave creation.
 
 ### Collision and dedupe policy
 
 - **Local overrides builtin for unqualified lookups.**
-  - If both `local/scan` and `builtin/scan` exist, `schema: "scan"` resolves to `local/scan`.
+  - If both local `scan` and builtin `scan` exist, `schema: "scan"` resolves to local.
 - **Error on ambiguous matches.**
-  - Multiple local schemas matching one selector (or any other ambiguous resolution) returns `409 Conflict` with candidate selectors.
-- **Use namespacing to dedupe explicitly.**
-  - `schema: "builtin/scan"` always picks builtin.
-  - `schema: "local/scan"` always picks local.
+  - Multiple local schemas matching one input (or any other ambiguous resolution) returns `409 Conflict` with candidate schema refs.
+- **Use explicit refs to dedupe.**
+  - `schema: "builtin://scan"` always picks builtin.
+  - `schema: "file:///abs/path/to/repo/wave/scan/scan.yaml"` always picks that local schema.
 - **Validation:**
   - Duplicate local schema names are an error (include file paths in response/logs).
   - Duplicate builtin names fail at build time.
+
+### Schema provenance on waves
+
+Persist provenance on instantiated waves so active-state mapping is exact and collision-safe.
+
+Proposed fields on wave rows:
+- `schema_ref: Option<String>` — absolute schema ref URI (`builtin://scan` or `file://...`)
+- `schema_name: Option<String>` — human-friendly name (`scan`) for display/filtering
+
+Behavior:
+- Instantiated waves always store `schema_ref` and `schema_name`.
+- Manually created waves leave these fields as `None`.
+- `GET /v0/wave/schemas` uses `schema_ref` for `active_wave_id` mapping.
+- If the repo moves, stale absolute file refs remain valid provenance for existing waves; future schema lookups use current scan results.
 
 **Deinstantiation**
 
@@ -141,6 +155,7 @@ No special endpoint — deleting the wave deinstantiates it. The existing `DELET
 
 ```swift
 struct WaveSchema: Sendable, Identifiable {
+    let schemaRef: String
     let name: String
     let flow: String
     let area: [String]
@@ -150,7 +165,7 @@ struct WaveSchema: Sendable, Identifiable {
     let source: Source  // .builtin, .local
     let activeWaveId: String?
 
-    var id: String { name }
+    var id: String { schemaRef }
     var isInstantiated: Bool { activeWaveId != nil }
 
     enum Source: String, Sendable { case builtin, local }
@@ -193,7 +208,7 @@ Filters (source/owner) are a planned follow-up so "instantiate all" naturally me
 
 3. **Extend `POST /v0/waves` instead of a separate instantiate endpoint.** The schema provides defaults for wave creation. No new write route needed.
 
-4. **Name-based instantiation with source-aware resolution.** A wave named "scan" is the instantiated form of schema `local/scan` or `builtin/scan`, with local taking precedence for unqualified lookup and namespaced selectors for explicit dedupe.
+4. **Unqualified convenience + absolute refs.** `schema: "scan"` is a convenience lookup (local > builtin). Exact selection uses `builtin://...` or absolute `file://...` refs.
 
 5. **`build.rs` handles embedding.** Same `generate_map` pattern as steps/flows/directions. Adding a new built-in schema: drop a YAML in `builtins/waves/`, rebuild.
 
@@ -201,8 +216,9 @@ Filters (source/owner) are a planned follow-up so "instantiate all" naturally me
 
 7. **Deinstantiation = deletion.** No pause/disable state. Delete the wave and re-instantiate later. The schema is always there.
 
-8. **Owner field preserved but unused in v1.** The YAML format supports `owner` for future filtering/batch-per-user. V1 shows all schemas regardless.
-9. **`/v0/wave/schemas` stays singular by design.** Schema meta-resources live under `wave`; instantiated resource CRUD remains under `/v0/waves`.
+8. **Schema provenance is stored on waves.** Instantiated waves persist `schema_ref` (+ `schema_name`) so active mapping is exact, collision-safe, and debuggable.
+9. **Owner field preserved but unused in v1.** The YAML format supports `owner` for future filtering/batch-per-user. V1 shows all schemas regardless.
+10. **`/v0/wave/schemas` stays singular by design.** Schema meta-resources live under `wave`; instantiated resource CRUD remains under `/v0/waves`.
 
 ## Scope
 
@@ -211,12 +227,13 @@ Filters (source/owner) are a planned follow-up so "instantiate all" naturally me
 - `WaveSchema` struct + YAML parsing
 - `GET /v0/wave/schemas` endpoint
 - `POST /v0/waves` extended with `schema` field
+- Wave provenance fields on wave rows (`schema_ref`, `schema_name`)
 - `WaveSchema` Swift model
 - `listWaveSchemas()` service method
 - Wave directory scanning (`wave/<name>/<name>.yaml`)
 - Batch instantiation (instantiate all uninstantiated schemas)
 - Batch confirmation UI that previews created waves/stimuli/start behavior
-- Namespaced schema selection (`local/<name>`, `builtin/<name>`)
+- Explicit schema refs (`builtin://...`, `file://...`)
 
 **Out of scope:**
 - Sidebar UI details (separate design pass)
@@ -238,8 +255,8 @@ Filters (source/owner) are a planned follow-up so "instantiate all" naturally me
 
 - `GET /v0/wave/schemas` returns `scan` (and any `wave/<name>/<name>.yaml` schemas)
 - `POST /v0/waves` with `schema: "scan"` creates a wave + cron stimulus
-- `POST /v0/waves` supports `schema: "local/<name>"` and `schema: "builtin/<name>"` for explicit source selection
-- Local-vs-builtin collisions resolve as specified (local default; explicit namespacing; ambiguous => `409`)
+- `POST /v0/waves` supports `schema: "builtin://scan"` and absolute `schema: "file://..."` for explicit selection
+- Local-vs-builtin collisions resolve as specified (local default; explicit refs; ambiguous => `409`)
 - Concerto can instantiate all uninstantiated schemas with one action
 - Concerto shows a confirmation preview before batch instantiation
 - The instantiated wave appears in Active/Idle immediately

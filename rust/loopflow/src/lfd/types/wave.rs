@@ -194,6 +194,8 @@ pub struct Wave {
     pub area: Vec<String>,
     pub status: WaveStatus,
     pub iteration: u32,
+    pub schema_ref: Option<String>,
+    pub schema_name: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
@@ -210,6 +212,8 @@ impl Wave {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            schema_ref: None,
+            schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
         }
     }

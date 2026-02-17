@@ -35,6 +35,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "005_wave_run_lineage_live_pr_state",
         sql: include_str!("migrations/005_wave_run_lineage_live_pr_state.sql"),
     },
+    Migration {
+        version: "006_wave_schema_provenance",
+        sql: include_str!("migrations/006_wave_schema_provenance.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

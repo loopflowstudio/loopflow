@@ -97,7 +97,8 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 
 // -- Shared row mappers ------------------------------------------------------
 
-/// SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+/// SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+///        created_at, schema_ref, schema_name
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(4)?)?;
     let area = parse_json_vec(&row.text(5)?)?;
@@ -119,6 +120,8 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         area,
         status,
         iteration,
+        schema_ref: row.opt_text(10)?,
+        schema_name: row.opt_text(11)?,
         created_at: Some(created_at),
     })
 }

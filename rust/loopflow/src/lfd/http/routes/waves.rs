@@ -2,7 +2,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
-use std::path::Path as FsPath;
+use std::path::{Path as FsPath, PathBuf};
 use std::str::FromStr;
 use time::OffsetDateTime;
 use tracing::warn;
@@ -19,6 +19,7 @@ use crate::lfd::http::dto::{
     DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
     RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
+use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
@@ -90,6 +91,7 @@ pub struct CreateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
+    schema: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -155,12 +157,67 @@ pub async fn create_wave_handler(
     State(state): State<HttpState>,
     Json(payload): Json<CreateWaveRequest>,
 ) -> ApiResult<WaveDto> {
+    let CreateWaveRequest {
+        repo,
+        name,
+        flow,
+        direction,
+        area,
+        schema,
+    } = payload;
+    let repo_path = PathBuf::from(&repo);
+    let resolved_schema = if let Some(schema_input) = schema.as_deref() {
+        Some(
+            resolve_wave_schema(&repo_path, schema_input)
+                .map_err(|err| api_error(err.status_code(), err.message()))?,
+        )
+    } else {
+        None
+    };
+    let schema_stimulus = resolved_schema
+        .as_ref()
+        .and_then(|schema| schema.schema.stimulus.as_ref())
+        .map(parse_schema_stimulus)
+        .transpose()?;
+
     let id = LfdId::new();
-    let name = payload.name.unwrap_or_else(|| format!("wave-{}", id));
-    let flow = payload.flow.unwrap_or_else(|| "ship".to_string());
+    let name = name
+        .or_else(|| {
+            resolved_schema
+                .as_ref()
+                .map(|schema| schema.schema.name.clone())
+        })
+        .unwrap_or_else(|| format!("wave-{}", id));
+    let flow = flow
+        .or_else(|| {
+            resolved_schema
+                .as_ref()
+                .map(|schema| schema.schema.flow.clone())
+        })
+        .unwrap_or_else(|| "ship".to_string());
+    let direction = direction
+        .or_else(|| {
+            resolved_schema
+                .as_ref()
+                .and_then(|schema| schema.schema.direction.clone())
+        })
+        .unwrap_or_default();
+    let area = area
+        .or_else(|| {
+            resolved_schema
+                .as_ref()
+                .map(|schema| schema.schema.area.clone())
+        })
+        .unwrap_or_default();
+    let schema_ref = resolved_schema
+        .as_ref()
+        .map(|schema| schema.schema_ref.clone());
+    let schema_name = resolved_schema
+        .as_ref()
+        .map(|schema| schema.schema.name.clone());
 
     // Check for duplicate wave name in the same repo.
-    let repo_for_check = payload.repo.clone();
+    let repo_for_check = repo.clone();
     let name_for_check = name.clone();
     let existing = run_store(&state.store, move |store| {
         let waves = store.list_waves(Some(&repo_for_check))?;
@@ -178,12 +235,14 @@ pub async fn create_wave_handler(
     let wave = Wave {
         id: id.clone(),
         name,
-        repo: payload.repo,
+        repo,
         flow,
-        direction: payload.direction.unwrap_or_default(),
-        area: payload.area.unwrap_or_default(),
+        direction,
+        area,
         status: WaveStatus::Idle,
         iteration: 0,
+        schema_ref,
+        schema_name,
         created_at: Some(OffsetDateTime::now_utc()),
     };
     let wave_clone = wave.clone();
@@ -212,6 +271,29 @@ pub async fn create_wave_handler(
         }
     }
 
+    if let Some((kind, cron)) = schema_stimulus {
+        let stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            kind,
+            cron,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        let stimulus_for_store = stimulus.clone();
+        if let Err(err) = run_store(&state.store, move |store| {
+            store.create_stimulus(&stimulus_for_store)
+        })
+        .await
+        {
+            let wave_id = wave.id.clone();
+            let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
+            return Err(map_store_error(err));
+        }
+    }
+
     state
         .event_hub
         .send(Event::wave_created(wave.id.clone(), wave.name.clone()));
@@ -220,6 +302,30 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
+}
+
+fn parse_schema_stimulus(
+    stimulus: &StimulusDef,
+) -> Result<(StimulusKind, String), (StatusCode, Json<ErrorResponse>)> {
+    let kind = match stimulus.kind.as_str() {
+        "cron" => StimulusKind::Cron,
+        "watch" => StimulusKind::Watch,
+        "loop" => StimulusKind::Loop,
+        "once" => StimulusKind::Once,
+        value => {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                format!("invalid schema stimulus kind '{value}'"),
+            ));
+        }
+    };
+
+    let cron = match kind {
+        StimulusKind::Cron => stimulus.cron.clone().unwrap_or_default(),
+        _ => String::new(),
+    };
+
+    Ok((kind, cron))
 }
 
 pub async fn get_wave_handler(

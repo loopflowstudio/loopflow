@@ -55,6 +55,7 @@ final class RepoState {
     var currentRepo: URL?
     var flows: [Flow] = []
     var availableDirections: [String] = []
+    var waveSchemas: [WaveSchema] = []
 
     // Wave state — delegated to WaveStore
     let waveStore = WaveStore()
@@ -381,6 +382,7 @@ final class RepoState {
             flows = result.flows
         }
         availableDirections = result.directions
+        waveSchemas = (try? await waveService.listWaveSchemas(repo: repo)) ?? []
     }
 
     // MARK: - Waves
@@ -453,31 +455,57 @@ final class RepoState {
         }
     }
 
-    func createWave(name: String) async throws {
+    @discardableResult
+    func createWave(name: String, schemaRef: String? = nil) async throws -> Wave {
         guard let repo = currentRepo else {
             LoggingService.model("createWave: no currentRepo")
-            return
+            throw WaveServiceError.commandFailed("No repository selected")
         }
 
-        let waveName = name.isEmpty ? NameGenerator.generate() : name
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let waveName: String
+        if normalizedName.isEmpty && schemaRef == nil {
+            waveName = NameGenerator.generate()
+        } else {
+            waveName = normalizedName
+        }
         LoggingService.model("createWave: name=\(waveName) repo=\(repo.path)")
 
         let pendingId = "pending-\(UUID().uuidString)"
         let pending = WaveViewModel(
-            api: Wave(id: pendingId, name: waveName, repo: repo.path)
+            api: Wave(id: pendingId, name: waveName.isEmpty ? "New wave" : waveName, repo: repo.path)
         )
         waveStore.insertPending(pending)
         selectedWaveId = pendingId
 
         do {
-            let wave = try await waveService.createWave(name: waveName, repo: repo)
+            let wave = try await waveService.createWave(name: waveName, repo: repo, schema: schemaRef)
             waveStore.replacePending(pendingId, with: WaveViewModel(api: wave))
             selectedWaveId = wave.id
+            await refreshFlowsAsync()
             LoggingService.model("createWave: selectedWave=\(wave.id)")
+            return wave
         } catch {
             waveStore.removePending(pendingId)
             if selectedWaveId == pendingId { selectedWaveId = nil }
             throw error
+        }
+    }
+
+    func instantiateSchema(_ schema: WaveSchema, startImmediately: Bool = true) async throws {
+        let wave = try await createWave(name: schema.name, schemaRef: schema.schemaRef)
+        if startImmediately {
+            try await waveService.run(wave.id, overrides: nil)
+            _ = waveStore.applyOptimistic(wave.id) { $0.status = .running }
+            waveStore.commitMutation(wave.id)
+            scheduleRefresh(for: wave.id)
+        }
+    }
+
+    func instantiateAllSchemas(startImmediately: Bool = true) async throws {
+        let pending = waveSchemas.filter { !$0.isInstantiated }
+        for schema in pending {
+            try await instantiateSchema(schema, startImmediately: startImmediately)
         }
     }
 
@@ -554,6 +582,7 @@ final class RepoState {
             waveStore.commitMutation(wave.id)
             runStore.clear(for: wave.id)
             outputBuffer?.clearOutput(for: wave.id)
+            await refreshFlowsAsync()
         } catch {
             waveStore.rollback(wave)
             throw error

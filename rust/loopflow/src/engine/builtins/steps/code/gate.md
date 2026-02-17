@@ -17,7 +17,7 @@ Ship-ready code. Reviewer-friendly docs. No excuses left.
 Make the implementation as clean as possible.
 
 1. **Review the diff**
-   The diff against main is in your context. Check it against repo style guides (CLAUDE.md, STYLE.md).
+   The diff against main is in your context. Check it against the repo's style guides.
 
 2. **Fix developer experience**
    - Intuitive APIs: sensible defaults, obvious signatures, no surprises
@@ -33,8 +33,8 @@ Make the implementation as clean as possible.
 
    Example: Run through the main user flows the branch touches. Click every button. Time the response. If something feels sluggish, profile it.
 
-4. **Tests**
-   Run the project's test suite. Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
+4. **Tests and lints**
+   Run the project's test suite and lint checks. Check `.lf/config.yaml` for `lint:` and `test:` commands. If not configured, check `TESTING.md` or CI config. Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 
 5. **Cleanup**
    - Remove dead code, debug prints, resolved TODOs
@@ -89,5 +89,6 @@ If nothing needs fixing and tests pass, say so—but still write the design revi
 
 ```bash
 git diff main...HEAD     # see what changed
-uv run pytest tests/     # run tests (or project's test command)
 ```
+
+Check `.lf/config.yaml` for `lint:` and `test:` commands. If not configured, check `TESTING.md` or CI config (`.github/workflows/`). A gate that passes locally but fails CI is a broken gate.

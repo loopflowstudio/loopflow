@@ -9,6 +9,7 @@ struct WaveDetailPanel: View {
     private enum DetailTab: String, CaseIterable {
         case current = "Current"
         case runs = "Runs"
+        case chat = "Chat"
     }
 
     let wave: WaveViewModel
@@ -115,54 +116,58 @@ struct WaveDetailPanel: View {
 
             Divider()
 
-            ScrollView {
-                VStack(spacing: Spacing.lg) {
-                    if selectedTab == .current {
-                        if wave.status == .idle || wave.status == .failed {
-                            if wave.status == .failed {
-                                failedRunDetail
+            if selectedTab == .chat {
+                WaveChatView(state: repoState.chatState(for: wave.id))
+            } else {
+                ScrollView {
+                    VStack(spacing: Spacing.lg) {
+                        if selectedTab == .current {
+                            if wave.status == .idle || wave.status == .failed {
+                                if wave.status == .failed {
+                                    failedRunDetail
+                                }
+
+                                StepRunner(wave: wave)
+
+                                if !wave.commits.isEmpty {
+                                    commitLogSection
+                                }
+
+                                if let stat = wave.diffStat {
+                                    diffStatSection(stat)
+                                }
+
+                                if !wave.commits.isEmpty || wave.prURL != nil {
+                                    opsActionsBar
+                                } else if wave.status == .idle && !wave.recentSteps.isEmpty {
+                                    Divider()
+                                    NextActionsBar(wave: wave)
+                                }
+
+                                if wave.status == .failed && !outputBuffer.output(for: wave.id).isEmpty {
+                                    liveOutputSection
+                                }
+                            } else {
+                                waveConfigSummary
+                                runProgressSection
                             }
 
-                            StepRunner(wave: wave)
-
-                            if !wave.commits.isEmpty {
-                                commitLogSection
-                            }
-
-                            if let stat = wave.diffStat {
-                                diffStatSection(stat)
-                            }
-
-                            if !wave.commits.isEmpty || wave.prURL != nil {
-                                opsActionsBar
-                            } else if wave.status == .idle && !wave.recentSteps.isEmpty {
-                                Divider()
-                                NextActionsBar(wave: wave)
-                            }
-
-                            if wave.status == .failed && !outputBuffer.output(for: wave.id).isEmpty {
-                                liveOutputSection
+                            if wave.worktreePath != nil {
+                                if repoState.isRemoteTarget {
+                                    remoteActionsNotice
+                                } else {
+                                    quickActionsBar
+                                }
                             }
                         } else {
-                            waveConfigSummary
-                            runProgressSection
+                            WaveRunsTab(
+                                runs: waveRuns,
+                                onCombine: combinePRs
+                            )
                         }
-
-                        if wave.worktreePath != nil {
-                            if repoState.isRemoteTarget {
-                                remoteActionsNotice
-                            } else {
-                                quickActionsBar
-                            }
-                        }
-                    } else {
-                        WaveRunsTab(
-                            runs: waveRuns,
-                            onCombine: combinePRs
-                        )
                     }
+                    .padding(Spacing.xl)
                 }
-                .padding(Spacing.xl)
             }
         }
     }
@@ -245,9 +250,10 @@ struct WaveDetailPanel: View {
             Picker("", selection: $selectedTab) {
                 Text("Current").tag(DetailTab.current)
                 Text("Runs (\(waveRuns.count))").tag(DetailTab.runs)
+                Text("Chat").tag(DetailTab.chat)
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
+            .frame(maxWidth: 320)
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.lg)

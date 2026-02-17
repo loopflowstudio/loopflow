@@ -5,13 +5,14 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
 use crate::lfd::id::LfdId;
 use crate::lfd::store::rows::{
-    map_agent_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_agent_row, map_chat_memory_block_row, map_fork_run_row, map_live_pr_state_row,
+    map_pending_activation_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row,
+    now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, RunStore, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, LivePullRequestState, PendingActivation, Stimulus, Summary, Wave, WaveRun,
-    WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, ChatMemoryBlock, LivePullRequestState, PendingActivation, Stimulus,
+    Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug)]
@@ -930,6 +931,55 @@ impl RunStore for SqliteStore {
                 summary.model,
                 created_at,
             ],
+        )?;
+        Ok(())
+    }
+
+    fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT wave_id, name, content, position, updated_at
+             FROM chat_memory_blocks
+             WHERE wave_id = ?1
+             ORDER BY position ASC, name ASC",
+        )?;
+        let rows = stmt.query_map(params![wave_id], |row| Ok(map_chat_memory_block_row(row)))?;
+        let mut blocks = Vec::new();
+        for row in rows {
+            blocks.push(row??);
+        }
+        Ok(blocks)
+    }
+
+    fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated_at = block
+            .updated_at
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or_else(now_unix);
+        conn.execute(
+            "INSERT INTO chat_memory_blocks (wave_id, name, content, position, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(wave_id, name) DO UPDATE SET
+                 content = excluded.content,
+                 position = excluded.position,
+                 updated_at = excluded.updated_at",
+            params![
+                block.wave_id,
+                block.name,
+                block.content,
+                block.position as i64,
+                updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM chat_memory_blocks WHERE wave_id = ?1 AND name = ?2",
+            params![wave_id, name],
         )?;
         Ok(())
     }

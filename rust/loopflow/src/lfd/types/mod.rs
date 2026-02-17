@@ -4,12 +4,14 @@
 //! without gRPC/proto dependencies.
 
 mod agent;
+mod chat_memory;
 mod event;
 mod stimulus;
 mod summary;
 mod wave;
 
 pub use agent::{Agent, AgentStatus};
+pub use chat_memory::ChatMemoryBlock;
 pub use event::Event;
 pub use stimulus::{PendingActivation, Stimulus, StimulusKind};
 pub use summary::Summary;

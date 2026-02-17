@@ -43,17 +43,9 @@ The chat system is one consumer of the harness. The harness doesn't know about U
 
 A simple chat product that calls LLMs, manages memory, shows conversation.
 
-#### A1 — Single-shot chat
+#### A1 — Single-shot chat ✓
 
-The simplest possible chat: user sends a message, LLM responds, response is displayed. Memory exists and is included in the prompt, but only edited manually by the user. No agent loop, no tools.
-
-**What we'll learn:** What the chat UX feels like. How memory should be displayed and edited.
-
-**Checkpoint:** A user can send a message, see a response, read/edit memory, and have that memory included in the next prompt.
-
-**Try it:**
-- Verification: send a message, get a response, edit a memory block, send another message, confirm the memory is in the prompt
-- Feel: does the memory feel useful? Is it clear what the LLM "knows"? Would you actually edit it?
+Moved to `scratch/harness-a1-single-shot-chat.md` for implementation.
 
 #### A2 — Multi-turn with harness events
 

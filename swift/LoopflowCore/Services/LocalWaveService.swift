@@ -686,6 +686,70 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    public func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
+        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks")
+        let request = try makeRequest(url)
+
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return rows.compactMap(Self.parseMemoryBlockFromJSON)
+    }
+
+    public func upsertMemoryBlock(
+        waveId: String,
+        name: String,
+        content: String,
+        position: Int?
+    ) async throws -> ChatMemoryBlock {
+        let url = apiBaseURL
+            .appendingPathComponent("waves")
+            .appendingPathComponent(waveId)
+            .appendingPathComponent("memory-blocks")
+            .appendingPathComponent(name)
+
+        var body: [String: Any] = ["content": content]
+        if let position { body["position"] = position }
+        let request = try makeRequest(
+            url,
+            method: "PUT",
+            body: body,
+            contentType: "application/json"
+        )
+
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let block = Self.parseMemoryBlockFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return block
+    }
+
+    public func deleteMemoryBlock(waveId: String, name: String) async throws {
+        let url = apiBaseURL
+            .appendingPathComponent("waves")
+            .appendingPathComponent(waveId)
+            .appendingPathComponent("memory-blocks")
+            .appendingPathComponent(name)
+
+        let request = try makeRequest(url, method: "DELETE")
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+    }
+
     public func connect(_ id: String) async throws -> ConnectionInfo {
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves/\(id)/connect"),
@@ -964,6 +1028,20 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             merged: json["merged"] as? Bool ?? false,
             prunable: json["prunable"] as? Bool ?? false,
             waveId: json["wave_id"] as? String
+        )
+    }
+
+    private static func parseMemoryBlockFromJSON(_ json: [String: Any]) -> ChatMemoryBlock? {
+        guard let name = json["name"] as? String,
+              let content = json["content"] as? String else {
+            return nil
+        }
+
+        return ChatMemoryBlock(
+            name: name,
+            content: content,
+            position: normalizeInt(json["position"]),
+            updatedAt: parseDate(json["updated_at"])
         )
     }
 

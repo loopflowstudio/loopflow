@@ -7,13 +7,14 @@ use tokio_postgres::NoTls;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::store::rows::{
-    map_agent_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_agent_row, map_chat_memory_block_row, map_fork_run_row, map_live_pr_state_row,
+    map_pending_activation_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row,
+    now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, RunStore, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, LivePullRequestState, PendingActivation, Stimulus, Summary, Wave, WaveRun,
-    WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, ChatMemoryBlock, LivePullRequestState, PendingActivation, Stimulus,
+    Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -1040,6 +1041,61 @@ impl RunStore for PostgresStore {
                         &summary.model,
                         &created_at,
                     ],
+                )
+                .await?;
+            Ok(())
+        })
+    }
+
+    fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT wave_id, name, content, position, updated_at
+                     FROM chat_memory_blocks
+                     WHERE wave_id = $1
+                     ORDER BY position ASC, name ASC",
+                    &[&wave_id],
+                )
+                .await?;
+            rows.iter().map(map_chat_memory_block_row).collect()
+        })
+    }
+
+    fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let updated_at = block
+                .updated_at
+                .map(|dt| dt.unix_timestamp())
+                .unwrap_or_else(now_unix);
+            client
+                .execute(
+                    "INSERT INTO chat_memory_blocks (wave_id, name, content, position, updated_at)
+                     VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT(wave_id, name) DO UPDATE SET
+                         content = excluded.content,
+                         position = excluded.position,
+                         updated_at = excluded.updated_at",
+                    &[
+                        &block.wave_id,
+                        &block.name,
+                        &block.content,
+                        &(block.position as i32),
+                        &updated_at,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+    }
+
+    fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+        let name = name.to_string();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "DELETE FROM chat_memory_blocks WHERE wave_id = $1 AND name = $2",
+                    &[&wave_id, &name],
                 )
                 .await?;
             Ok(())

@@ -43,10 +43,8 @@ git rebase --continue
 
 ### 4. Verify and push
 ```bash
-# Verify nothing broke
-uv run pytest tests/
-
-# Push the rebased branch
+# Verify nothing broke — run the project's test suite
+# Check TESTING.md or CI config for the right commands
 git push --force-with-lease
 ```
 

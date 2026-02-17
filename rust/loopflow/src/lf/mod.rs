@@ -226,6 +226,10 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ShellCommand,
     },
+    /// Run configured lint checks
+    Lint,
+    /// Run configured test checks
+    Test,
 }
 
 #[derive(Subcommand, Debug)]

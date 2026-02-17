@@ -309,9 +309,7 @@ final class RepoState {
         let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
         repoTarget = .local(url)
-        isLoading = true
         errorMessage = nil
-        isLoading = false
         LoggingService.append("openRepo.total elapsed=\(Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))ms")
 
         // Background operations (skip in screenshot mode to avoid overwriting mock data)

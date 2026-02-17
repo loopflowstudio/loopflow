@@ -199,8 +199,7 @@ struct AreaTypeahead: View {
         recentSteps: []
     )
 
-    return AreaTypeahead(wave: wave) { areas in
-        print("Selected: \(areas)")
+    return AreaTypeahead(wave: wave) { _ in
     }
     .environment(repoState)
     .frame(width: 400)

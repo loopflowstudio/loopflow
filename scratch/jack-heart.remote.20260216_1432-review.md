@@ -58,3 +58,16 @@ ConnectionStore (persistence, keychain, pin store)
 - **Remote file browsing/typeahead** — AreaTypeahead falls back to a plain text field for remote. Full file browsing is Phase 08.
 - **Remote terminal/editor launch** — Disabled for remote targets. SSH-based launch is Phase 06.
 - **Repo-less startup flow** — Concerto still enters remote mode from an existing repo window.
+
+## Gate
+
+**SHIP**
+
+All test suites pass (110 Swift, all Rust). Clippy and fmt clean. Two minor fixes applied:
+
+- Removed dead `isLoading` toggle in `RepoState.openRepo` (set true then immediately false with no async work between)
+- Removed debug `print` in `AreaTypeahead` preview
+
+Pre-existing force unwraps in `LocalWaveService.swift` (`URLComponents` construction) are out of scope — they predate this branch. The `ServerConnection.makeURL` fallback force unwrap is on a hardcoded literal and is safe.
+
+README updated to reflect renamed services and remote transport. Wave/security docs are self-contained and discoverable.

@@ -1,0 +1,1 @@
+- Manual verification remains: launch `lfd` and validate runtime checks from the design doc (`~/.lf/session-token` created on startup, local read succeeds without token, local mutation fails without token, Concerto can create/run waves against local lfd).

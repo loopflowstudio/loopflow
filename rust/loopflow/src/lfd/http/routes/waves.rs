@@ -740,11 +740,7 @@ pub async fn upsert_memory_block_handler(
             .await
             .map_err(map_store_error)?;
 
-            existing
-                .iter()
-                .find(|block| block.name == name)
-                .map(|block| block.position)
-                .unwrap_or(existing.len() as u32)
+            default_memory_block_position(&existing, &name)
         }
     };
 
@@ -796,6 +792,75 @@ fn normalized_memory_block_name(name: String) -> Result<String, (StatusCode, Jso
         ))
     } else {
         Ok(trimmed)
+    }
+}
+
+fn default_memory_block_position(existing: &[ChatMemoryBlock], name: &str) -> u32 {
+    if let Some(block) = existing.iter().find(|block| block.name == name) {
+        return block.position;
+    }
+
+    existing
+        .iter()
+        .map(|block| block.position)
+        .max()
+        .map(|max_position| max_position.saturating_add(1))
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lfd::id::LfdId;
+
+    #[test]
+    fn normalized_memory_block_name_rejects_whitespace() {
+        let result = normalized_memory_block_name("   ".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn normalized_memory_block_name_trims_surrounding_whitespace() {
+        let result = normalized_memory_block_name("  project-context  ".to_string())
+            .expect("name should normalize");
+        assert_eq!(result, "project-context");
+    }
+
+    #[test]
+    fn default_memory_block_position_keeps_existing_position() {
+        let existing = vec![ChatMemoryBlock {
+            wave_id: LfdId::from_raw("wave-1"),
+            name: "project-context".to_string(),
+            content: "repo context".to_string(),
+            position: 4,
+            updated_at: None,
+        }];
+
+        let position = default_memory_block_position(&existing, "project-context");
+        assert_eq!(position, 4);
+    }
+
+    #[test]
+    fn default_memory_block_position_appends_after_highest_position() {
+        let existing = vec![
+            ChatMemoryBlock {
+                wave_id: LfdId::from_raw("wave-1"),
+                name: "first".to_string(),
+                content: "a".to_string(),
+                position: 0,
+                updated_at: None,
+            },
+            ChatMemoryBlock {
+                wave_id: LfdId::from_raw("wave-1"),
+                name: "second".to_string(),
+                content: "b".to_string(),
+                position: 3,
+                updated_at: None,
+            },
+        ];
+
+        let position = default_memory_block_position(&existing, "third");
+        assert_eq!(position, 4);
     }
 }
 

@@ -72,6 +72,7 @@ struct WaveChatView: View {
                 TextField("Message", text: $composerText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...6)
+                    .disabled(state.missingAPIKey)
 
                 Button("Send") {
                     sendMessage()
@@ -105,12 +106,11 @@ struct WaveChatView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
 
                 Button("Add Memory Block") {
-                    let position = state.memory.blocks.count
                     Task {
                         await state.upsertMemoryBlock(
                             name: newBlockName,
                             content: newBlockContent,
-                            position: position
+                            position: nil
                         )
                         if state.memoryError == nil {
                             newBlockName = ""
@@ -119,6 +119,7 @@ struct WaveChatView: View {
                     }
                 }
                 .buttonStyle(GhostButtonStyle())
+                .disabled(newBlockName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
             if let memoryError = state.memoryError {

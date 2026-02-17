@@ -704,7 +704,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
         return rows
             .compactMap(Self.parseMemoryBlockFromJSON)
-            .sorted { $0.position < $1.position }
+            .sorted {
+                if $0.position == $1.position {
+                    return $0.name < $1.name
+                }
+                return $0.position < $1.position
+            }
     }
 
     public func upsertMemoryBlock(

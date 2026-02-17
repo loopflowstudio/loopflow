@@ -40,4 +40,80 @@ struct ChatStateTests {
         #expect(state.messages.first?.role == .user)
         #expect(state.messages.last?.role == .error)
     }
+
+    @MainActor
+    @Test("loadMemoryIfNeeded retries after a failed load")
+    func loadMemoryRetriesAfterFailure() async {
+        let service = MockChatMemoryService(
+            listResults: [
+                .failure(.commandFailed("temporary failure")),
+                .success([ChatMemoryBlock(name: "context", content: "Loaded", position: 0)]),
+            ]
+        )
+        let state = ChatState(
+            waveId: "wave-test",
+            waveService: service,
+            anthropic: AnthropicClient(apiKey: nil)
+        )
+
+        await state.loadMemoryIfNeeded()
+        #expect(state.memory.blocks.isEmpty)
+        #expect(state.memoryError == "temporary failure")
+
+        await state.loadMemoryIfNeeded()
+        #expect(state.memory.blocks.count == 1)
+        #expect(state.memoryError == nil)
+
+        let calls = await service.listCallCount()
+        #expect(calls == 2)
+    }
+}
+
+private actor MockChatMemoryService: ChatMemoryService {
+    private var listResults: [Result<[ChatMemoryBlock], WaveServiceError>]
+    private var blocks: [ChatMemoryBlock] = []
+    private var listCalls = 0
+
+    init(listResults: [Result<[ChatMemoryBlock], WaveServiceError>]) {
+        self.listResults = listResults
+    }
+
+    func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
+        listCalls += 1
+        if !listResults.isEmpty {
+            let next = listResults.removeFirst()
+            switch next {
+            case .success(let nextBlocks):
+                blocks = nextBlocks
+                return nextBlocks
+            case .failure(let error):
+                throw error
+            }
+        }
+        return blocks
+    }
+
+    func upsertMemoryBlock(
+        waveId: String,
+        name: String,
+        content: String,
+        position: Int?
+    ) async throws -> ChatMemoryBlock {
+        let block = ChatMemoryBlock(
+            name: name,
+            content: content,
+            position: position ?? blocks.count
+        )
+        blocks.removeAll { $0.name == name }
+        blocks.append(block)
+        return block
+    }
+
+    func deleteMemoryBlock(waveId: String, name: String) async throws {
+        blocks.removeAll { $0.name == name }
+    }
+
+    func listCallCount() -> Int {
+        listCalls
+    }
 }

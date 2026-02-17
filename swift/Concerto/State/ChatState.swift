@@ -25,7 +25,8 @@ struct MemoryStore {
     var blocks: [ChatMemoryBlock] = []
 
     mutating func setBlocks(_ value: [ChatMemoryBlock]) {
-        blocks = value.sorted { $0.position < $1.position }
+        blocks = value
+        sortBlocks()
     }
 
     mutating func upsert(_ block: ChatMemoryBlock) {
@@ -34,7 +35,7 @@ struct MemoryStore {
         } else {
             blocks.append(block)
         }
-        blocks.sort { $0.position < $1.position }
+        sortBlocks()
     }
 
     mutating func remove(named name: String) {
@@ -61,7 +62,29 @@ struct MemoryStore {
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&apos;")
     }
+
+    private mutating func sortBlocks() {
+        blocks.sort {
+            if $0.position == $1.position {
+                return $0.name < $1.name
+            }
+            return $0.position < $1.position
+        }
+    }
 }
+
+protocol ChatMemoryService: Sendable {
+    func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock]
+    func upsertMemoryBlock(
+        waveId: String,
+        name: String,
+        content: String,
+        position: Int?
+    ) async throws -> ChatMemoryBlock
+    func deleteMemoryBlock(waveId: String, name: String) async throws
+}
+
+extension LocalWaveService: ChatMemoryService {}
 
 @MainActor
 @Observable
@@ -78,12 +101,12 @@ final class ChatState {
 
     private var hasLoadedMemory = false
 
-    private let waveService: LocalWaveService
+    private let waveService: any ChatMemoryService
     private let anthropic: AnthropicClient
 
     init(
         waveId: String,
-        waveService: LocalWaveService = LocalWaveService(),
+        waveService: any ChatMemoryService = LocalWaveService(),
         anthropic: AnthropicClient = AnthropicClient()
     ) {
         self.waveId = waveId
@@ -101,17 +124,19 @@ final class ChatState {
 
     func loadMemoryIfNeeded() async {
         guard !hasLoadedMemory else { return }
-        hasLoadedMemory = true
-        await loadMemory()
+        hasLoadedMemory = await loadMemory()
     }
 
-    func loadMemory() async {
+    @discardableResult
+    func loadMemory() async -> Bool {
         do {
             let blocks = try await waveService.listMemoryBlocks(waveId: waveId)
             memory.setBlocks(blocks)
             memoryError = nil
+            return true
         } catch {
             memoryError = error.localizedDescription
+            return false
         }
     }
 
@@ -166,7 +191,7 @@ final class ChatState {
         let trimmedOld = oldName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmedNew = validatedMemoryBlockName(newName) else { return }
 
-        if trimmedOld != trimmedNew {
+        if !trimmedOld.isEmpty && trimmedOld != trimmedNew {
             do {
                 try await waveService.deleteMemoryBlock(waveId: waveId, name: trimmedOld)
                 memory.remove(named: trimmedOld)

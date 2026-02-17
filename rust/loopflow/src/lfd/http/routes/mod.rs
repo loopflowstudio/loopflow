@@ -12,9 +12,12 @@ use crate::lfd::http::dto::{
 use crate::lfd::http::run_store;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{SharedStore, StoreError};
-use crate::lfd::types::Wave;
+use crate::lfd::types::{LivePrState, LivePullRequestState, Wave, WaveRun};
+use crate::lfd::{config::GitHubConfig, github};
 use axum::http::StatusCode;
 use axum::Json;
+use std::collections::{HashMap, HashSet};
+use time::OffsetDateTime;
 
 pub async fn resolve_wave_id(
     state: &crate::lfd::http::HttpState,
@@ -34,38 +37,29 @@ pub async fn resolve_wave_id(
 
 pub async fn build_wave_dtos(
     store: &SharedStore,
+    github_config: &GitHubConfig,
     waves: Vec<Wave>,
     include_active_run: bool,
 ) -> Result<Vec<WaveDto>, StoreError> {
     let mut views = Vec::with_capacity(waves.len());
     for wave in waves {
-        views.push(build_wave_dto(store, wave, include_active_run).await?);
+        views.push(build_wave_dto(store, github_config, wave, include_active_run).await?);
     }
     Ok(views)
 }
 
 pub async fn build_wave_dto(
     store: &SharedStore,
+    github_config: &GitHubConfig,
     wave: Wave,
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
     let wave_id = wave.id.clone();
     let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
     let wave_id = wave.id.clone();
-    let open_pr_count = run_store(store, move |store| {
-        let runs = store.list_wave_runs(Some(&wave_id), None)?;
-        let count = runs
-            .into_iter()
-            .filter(|run| {
-                run.snapshot
-                    .pr
-                    .as_ref()
-                    .is_some_and(|pr| is_open_pr_state(pr.state.as_deref()))
-            })
-            .count();
-        Ok(count as u32)
-    })
-    .await?;
+    let stack_runs = run_store(store, move |store| store.list_stack_runs(&wave_id)).await?;
+    let live_pr_projection =
+        build_wave_live_pr_projection(store, github_config, &stack_runs).await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
     let flow_name = wave.flow.clone();
@@ -94,7 +88,10 @@ pub async fn build_wave_dto(
     let stimuli = stimuli_list.into_iter().map(stimulus_dto).collect();
 
     let active_run = if include_active_run {
-        latest.map(wave_run_dto)
+        latest.map(|run| {
+            let (live_pr_state, pr_state_stale) = live_pr_for_run(&live_pr_projection, &run);
+            wave_run_dto(run, live_pr_state, pr_state_stale)
+        })
     } else {
         None
     };
@@ -124,9 +121,148 @@ pub async fn build_wave_dto(
         commits,
         diff_stat,
         flow_steps,
-        open_pr_count,
+        open_pr_count: live_pr_projection.open_pr_count,
+        stack_count: stack_runs.len() as u32,
+        has_stale_pr_state: live_pr_projection.has_stale_pr_state,
         stimuli,
         active_run,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct LivePrKey {
+    pub(crate) repo_id: String,
+    pub(crate) pr_number: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct WaveLivePrProjection {
+    pub live_states: HashMap<LivePrKey, LivePullRequestState>,
+    pub stale_keys: HashSet<LivePrKey>,
+    pub open_pr_count: u32,
+    pub has_stale_pr_state: bool,
+}
+
+pub(crate) fn run_live_pr_key(run: &WaveRun) -> Option<LivePrKey> {
+    let pr_number = run.snapshot.pr.as_ref()?.number?;
+    Some(LivePrKey {
+        repo_id: run.snapshot.repo.clone(),
+        pr_number,
+    })
+}
+
+pub(crate) fn live_pr_for_run<'a>(
+    projection: &'a WaveLivePrProjection,
+    run: &WaveRun,
+) -> (Option<&'a LivePullRequestState>, bool) {
+    let Some(key) = run_live_pr_key(run) else {
+        return (None, false);
+    };
+    let live = projection.live_states.get(&key);
+    let stale = projection.stale_keys.contains(&key);
+    (live, stale)
+}
+
+pub(crate) async fn build_wave_live_pr_projection(
+    store: &SharedStore,
+    github_config: &GitHubConfig,
+    runs: &[WaveRun],
+) -> Result<WaveLivePrProjection, StoreError> {
+    let targets: HashSet<LivePrKey> = runs.iter().filter_map(run_live_pr_key).collect();
+
+    let mut stale_keys: HashSet<LivePrKey> = HashSet::new();
+    if !targets.is_empty() {
+        let token = github_config
+            .token
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
+        if token.is_empty() {
+            stale_keys.extend(targets.iter().cloned());
+        } else {
+            let mut repo_targets: HashMap<String, Vec<LivePrKey>> = HashMap::new();
+            for key in &targets {
+                repo_targets
+                    .entry(key.repo_id.clone())
+                    .or_default()
+                    .push(key.clone());
+            }
+
+            let mut repo_lookup: HashMap<String, Option<String>> = HashMap::new();
+            for repo_id in repo_targets.keys() {
+                let repo_path = repo_id.clone();
+                let repo_full_name = tokio::task::spawn_blocking(move || {
+                    github::github_repo_from_local(std::path::Path::new(&repo_path))
+                })
+                .await
+                .ok()
+                .flatten();
+                repo_lookup.insert(repo_id.clone(), repo_full_name);
+            }
+
+            for (repo_id, keys) in &repo_targets {
+                let repo_full_name = repo_lookup.get(repo_id).cloned().flatten();
+                let Some(repo_full_name) = repo_full_name else {
+                    stale_keys.extend(keys.iter().cloned());
+                    continue;
+                };
+
+                for key in keys {
+                    match github::fetch_pull_request(&repo_full_name, key.pr_number, token).await {
+                        Ok(Some(pull_request)) => {
+                            let live_state = LivePullRequestState {
+                                repo_id: key.repo_id.clone(),
+                                pr_number: pull_request.number,
+                                state: pull_request.state,
+                                is_draft: pull_request.is_draft,
+                                head_ref: pull_request.head_ref,
+                                head_sha: pull_request.head_sha,
+                                base_ref: pull_request.base_ref,
+                                updated_at: pull_request.updated_at,
+                                merged_at: pull_request.merged_at,
+                                synced_at: OffsetDateTime::now_utc(),
+                            };
+                            let state_for_store = live_state.clone();
+                            run_store(store, move |store| {
+                                store.upsert_live_pr_state(&state_for_store)
+                            })
+                            .await?;
+                        }
+                        Ok(None) | Err(_) => {
+                            stale_keys.insert(key.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut live_states = HashMap::new();
+    for key in &targets {
+        let repo_id = key.repo_id.clone();
+        let pr_number = key.pr_number;
+        let state = run_store(store, move |store| {
+            store.get_live_pr_state(&repo_id, pr_number)
+        })
+        .await?;
+        if let Some(state) = state {
+            live_states.insert(key.clone(), state);
+        } else {
+            stale_keys.insert(key.clone());
+        }
+    }
+
+    let open_pr_count = live_states
+        .values()
+        .filter(|state| state.state == LivePrState::Open)
+        .count() as u32;
+    let has_stale_pr_state = !stale_keys.is_empty();
+
+    Ok(WaveLivePrProjection {
+        live_states,
+        stale_keys,
+        open_pr_count,
+        has_stale_pr_state,
     })
 }
 
@@ -190,7 +326,7 @@ fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
 fn is_open_pr_state(state: Option<&str>) -> bool {
     match state {
         Some(state) => state.eq_ignore_ascii_case("open") || state.eq_ignore_ascii_case("draft"),
-        None => true,
+        None => false,
     }
 }
 
@@ -328,6 +464,50 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::types::{
+        LivePrState, LivePullRequestState, PullRequest, WaveRun, WaveRunKind, WaveRunSnapshot,
+        WaveRunStackStatus, WaveRunStatus,
+    };
+    use std::collections::{HashMap, HashSet};
+    use time::OffsetDateTime;
+
+    fn wave_run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> WaveRun {
+        WaveRun {
+            id: LfdId::new(),
+            wave_id: LfdId::new(),
+            snapshot: WaveRunSnapshot {
+                repo: ".".to_string(),
+                flow: "ship".to_string(),
+                direction: Vec::new(),
+                area: Vec::new(),
+                pr: Some(PullRequest {
+                    url: "https://example.test/pr/1".to_string(),
+                    number: pr_number,
+                    state: pr_state.map(ToString::to_string),
+                    title: Some("test".to_string()),
+                    branch: Some("feature".to_string()),
+                }),
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: "/tmp/worktree".to_string(),
+            branch: "feature".to_string(),
+            started_at: None,
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: "wave-group".to_string(),
+            stack_status: WaveRunStackStatus::Active,
+            lineage_inferred: false,
+        }
+    }
 
     #[test]
     fn current_tracking_branch_matches_local_branch_name() {
@@ -343,5 +523,44 @@ mod tests {
             "origin/jack.wave.20260209_1001",
             "jack.wave.20260209_1000"
         ));
+    }
+
+    #[test]
+    fn unknown_pr_state_is_not_open() {
+        assert!(!is_open_pr_state(None));
+        assert!(!is_open_pr_state(Some("closed")));
+        assert!(!is_open_pr_state(Some("merged")));
+        assert!(is_open_pr_state(Some("open")));
+        assert!(is_open_pr_state(Some("draft")));
+    }
+
+    #[test]
+    fn live_pr_for_run_uses_projection_values() {
+        let run = wave_run_with_pr(Some(101), Some("open"));
+        let key = run_live_pr_key(&run).expect("key");
+        let projection = WaveLivePrProjection {
+            live_states: HashMap::from([(
+                key.clone(),
+                LivePullRequestState {
+                    repo_id: ".".to_string(),
+                    pr_number: 101,
+                    state: LivePrState::Open,
+                    is_draft: false,
+                    head_ref: "feature".to_string(),
+                    head_sha: "abc123".to_string(),
+                    base_ref: "main".to_string(),
+                    updated_at: OffsetDateTime::now_utc(),
+                    merged_at: None,
+                    synced_at: OffsetDateTime::now_utc(),
+                },
+            )]),
+            stale_keys: HashSet::from([key]),
+            open_pr_count: 1,
+            has_stale_pr_state: true,
+        };
+
+        let (live_pr_state, stale) = live_pr_for_run(&projection, &run);
+        assert_eq!(live_pr_state.map(|state| state.pr_number), Some(101));
+        assert!(stale);
     }
 }

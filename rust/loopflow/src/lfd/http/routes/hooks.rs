@@ -272,7 +272,7 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
     let Some(pr) = run.snapshot.pr.as_ref() else {
         return false;
     };
-    if !is_open_pr_state(pr.state.as_deref()) {
+    if !super::is_open_pr_state(pr.state.as_deref()) {
         return false;
     }
     if let Some(branch) = branch {
@@ -287,13 +287,6 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
     }
 
     true
-}
-
-fn is_open_pr_state(state: Option<&str>) -> bool {
-    match state {
-        Some(value) => value.eq_ignore_ascii_case("open") || value.eq_ignore_ascii_case("draft"),
-        None => true,
-    }
 }
 
 fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {
@@ -383,6 +376,12 @@ mod tests {
             flow_parents: Vec::new(),
             run_kind,
             sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: "wave-group".to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
         }
     }
 
@@ -393,6 +392,13 @@ mod tests {
 
         let closed = wave_run_with_pr(WaveRunKind::Main, Some("closed"), Some("feature"));
         assert!(!run_matches_ci_target(&closed, Some("feature"), Some(1)));
+
+        let unknown_state = wave_run_with_pr(WaveRunKind::Main, None, Some("feature"));
+        assert!(!run_matches_ci_target(
+            &unknown_state,
+            Some("feature"),
+            Some(1)
+        ));
 
         let sidecar = wave_run_with_pr(WaveRunKind::Sidecar, Some("open"), Some("feature"));
         assert!(!run_matches_ci_target(&sidecar, Some("feature"), Some(1)));

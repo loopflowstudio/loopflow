@@ -236,7 +236,7 @@ struct WaveSidebar: View {
                         .background(.white.opacity(0.15))
                         .padding(.vertical, Spacing.xs)
 
-                    sectionHeader("On Disk", icon: "folder", count: orphanWorktrees.count)
+                    sectionHeader("Worktrees", icon: "folder", count: orphanWorktrees.count)
 
                     ForEach(orphanWorktrees) { worktree in
                         WorktreeRow(worktree: worktree) {

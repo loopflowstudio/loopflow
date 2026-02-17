@@ -2,7 +2,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lfd::registration::RegistrationState;
-use crate::lfd::types::{Stimulus, StimulusKind, WaveRun, WaveRunStatus};
+use crate::lfd::types::{LivePullRequestState, Stimulus, StimulusKind, WaveRun, WaveRunStatus};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -94,6 +94,8 @@ pub struct WaveDto {
     pub diff_stat: Option<String>,
     pub flow_steps: Vec<String>,
     pub open_pr_count: u32,
+    pub stack_count: u32,
+    pub has_stale_pr_state: bool,
     pub stimuli: Vec<StimulusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
@@ -119,6 +121,16 @@ pub struct WaveRunDto {
     pub ended_at: Option<String>,
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
+    pub stack_position: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_pr_number: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_pr_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_pr_is_draft: Option<bool>,
+    pub pr_state_stale: bool,
     pub created_at: Option<String>,
 }
 
@@ -221,7 +233,11 @@ pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
         .ok()
 }
 
-pub fn wave_run_dto(run: WaveRun) -> WaveRunDto {
+pub fn wave_run_dto(
+    run: WaveRun,
+    live_pr_state: Option<&LivePullRequestState>,
+    pr_state_stale: bool,
+) -> WaveRunDto {
     WaveRunDto {
         id: run.id.to_string(),
         object: "wave_run".to_string(),
@@ -246,6 +262,12 @@ pub fn wave_run_dto(run: WaveRun) -> WaveRunDto {
         ended_at: format_datetime(run.ended_at),
         error: run.error,
         flow_parents: run.flow_parents,
+        stack_position: run.stack_position,
+        parent_run_id: run.parent_run_id.map(|value| value.to_string()),
+        parent_pr_number: run.parent_pr_number,
+        live_pr_state: live_pr_state.map(|value| value.state.as_str().to_string()),
+        live_pr_is_draft: live_pr_state.map(|value| value.is_draft),
+        pr_state_stale,
         created_at: format_datetime(run.started_at),
     }
 }

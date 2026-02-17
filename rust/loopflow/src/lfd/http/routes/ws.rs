@@ -22,7 +22,7 @@ pub async fn ws_handler(
 }
 
 async fn handle_ws(mut socket: WebSocket, state: HttpState) {
-    let connected = match current_snapshot(&state.store).await {
+    let connected = match current_snapshot(&state).await {
         Ok(snapshot) => snapshot,
         Err(err) => {
             let _ = socket
@@ -67,7 +67,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
             maybe_event = events.next() => {
                 let Some(event) = maybe_event else { break };
                 if let Ok(event) = event {
-                    let json = match enrich_event(&event, &state.store).await {
+                    let json = match enrich_event(&event, &state.store, &state.github).await {
                         Some(enriched) => enriched,
                         None => serde_json::to_string(&event).unwrap_or_default(),
                     };
@@ -104,19 +104,24 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
 }
 
 async fn current_snapshot(
-    store: &crate::lfd::store::SharedStore,
+    state: &HttpState,
 ) -> Result<Vec<crate::lfd::http::dto::WaveDto>, String> {
-    let waves = run_store(store, move |store| store.list_waves(None))
+    let store = state.store.clone();
+    let waves = run_store(&store, move |store| store.list_waves(None))
         .await
         .map_err(|err| err.to_string())?;
-    build_wave_dtos(store, waves, true)
+    build_wave_dtos(&state.store, &state.github, waves, true)
         .await
         .map_err(|err| err.to_string())
 }
 
 /// Enrich wave lifecycle events with the full WaveDto payload.
 /// Returns `None` for non-wave events, letting the caller fall back to plain serialization.
-async fn enrich_event(event: &Event, store: &SharedStore) -> Option<String> {
+async fn enrich_event(
+    event: &Event,
+    store: &SharedStore,
+    github_config: &crate::lfd::config::GitHubConfig,
+) -> Option<String> {
     let wave_id = match event {
         Event::WaveCreated { wave_id, .. }
         | Event::WaveUpdated { wave_id, .. }
@@ -130,7 +135,9 @@ async fn enrich_event(event: &Event, store: &SharedStore) -> Option<String> {
     let wave = run_store(store, move |s| s.get_wave(&wave_id))
         .await
         .ok()??;
-    let dto = build_wave_dto(store, wave, true).await.ok()?;
+    let dto = build_wave_dto(store, github_config, wave, true)
+        .await
+        .ok()?;
 
     let mut base = serde_json::to_value(event).ok()?;
     if let serde_json::Value::Object(ref mut map) = base {

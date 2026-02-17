@@ -5,13 +5,13 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
 use crate::lfd::id::LfdId;
 use crate::lfd::store::rows::{
-    map_agent_row, map_fork_run_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
-    map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_agent_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
+    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, RunStore, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, PendingActivation, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
-    WaveStatus,
+    Agent, AgentStatus, LivePullRequestState, PendingActivation, Stimulus, Summary, Wave, WaveRun,
+    WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug)]
@@ -174,7 +174,9 @@ impl RunStore for SqliteStore {
         let mut query = String::from(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,
+                    lineage_inferred
              FROM wave_runs",
         );
         let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
@@ -206,7 +208,9 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,
+                    lineage_inferred
              FROM wave_runs WHERE id = ?1",
         )?;
         let run = stmt
@@ -220,7 +224,9 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,
+                    lineage_inferred
              FROM wave_runs
              WHERE wave_id = ?1 AND status IN (?2, ?3, ?4) AND run_kind = ?5
              ORDER BY started_at DESC LIMIT 1",
@@ -245,7 +251,9 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
                     started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,
+                    lineage_inferred
              FROM wave_runs WHERE wave_id = ?1 AND run_kind = ?2
              ORDER BY started_at DESC LIMIT 1",
         )?;
@@ -272,8 +280,10 @@ impl RunStore for SqliteStore {
             "INSERT INTO wave_runs (
                 id, wave_id, iteration, step_index, status, worktree, branch,
                 started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,
+                lineage_inferred
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             params![
                 run.id,
                 run.wave_id,
@@ -293,6 +303,12 @@ impl RunStore for SqliteStore {
                 flow_parents_json,
                 run.run_kind.as_i32() as i64,
                 run.sidecar_kind.map(|kind| kind.as_i32() as i64),
+                run.parent_run_id.as_ref(),
+                run.parent_pr_number.map(|value| value as i64),
+                run.stack_position as i64,
+                run.stack_group_id,
+                run.stack_status.as_i32() as i64,
+                if run.lineage_inferred { 1i64 } else { 0i64 },
             ],
         )?;
         Ok(())
@@ -307,8 +323,10 @@ impl RunStore for SqliteStore {
                  branch = ?5, started_at = ?6, ended_at = ?7, error = ?8,
                  snapshot_repo = ?9, snapshot_flow = ?10, snapshot_direction = ?11,
                  snapshot_area = ?12, snapshot_pr = ?13, flow_parents = ?14,
-                 run_kind = ?15, sidecar_kind = ?16
-             WHERE id = ?17",
+                 run_kind = ?15, sidecar_kind = ?16, parent_run_id = ?17,
+                 parent_pr_number = ?18, stack_position = ?19, stack_group_id = ?20,
+                 stack_status = ?21, lineage_inferred = ?22
+             WHERE id = ?23",
             params![
                 run.iteration as i64,
                 run.step_index as i64,
@@ -326,12 +344,97 @@ impl RunStore for SqliteStore {
                 flow_parents_json,
                 run.run_kind.as_i32() as i64,
                 run.sidecar_kind.map(|kind| kind.as_i32() as i64),
+                run.parent_run_id.as_ref(),
+                run.parent_pr_number.map(|value| value as i64),
+                run.stack_position as i64,
+                run.stack_group_id,
+                run.stack_status.as_i32() as i64,
+                if run.lineage_inferred { 1i64 } else { 0i64 },
                 run.id,
             ],
         )?;
         if updated == 0 {
             return Err(StoreError::NotFound);
         }
+        Ok(())
+    }
+
+    fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                    snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
+                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,
+                    lineage_inferred
+             FROM wave_runs
+             WHERE wave_id = ?1 AND run_kind = ?2
+             ORDER BY stack_position ASC, started_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                wave_id,
+                crate::lfd::types::WaveRunKind::Main.as_i32() as i64
+            ],
+            |row| Ok(map_wave_run_row(row)),
+        )?;
+
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
+    fn get_live_pr_state(
+        &self,
+        repo_id: &str,
+        pr_number: u32,
+    ) -> StoreResult<Option<LivePullRequestState>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
+                    updated_at, merged_at, synced_at
+             FROM live_pr_states
+             WHERE repo_id = ?1 AND pr_number = ?2",
+        )?;
+        let state = stmt
+            .query_row(params![repo_id, pr_number as i64], |row| {
+                Ok(map_live_pr_state_row(row))
+            })
+            .optional()?;
+        state.transpose()
+    }
+
+    fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO live_pr_states (
+                repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
+                updated_at, merged_at, synced_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(repo_id, pr_number) DO UPDATE SET
+                state = excluded.state,
+                is_draft = excluded.is_draft,
+                head_ref = excluded.head_ref,
+                head_sha = excluded.head_sha,
+                base_ref = excluded.base_ref,
+                updated_at = excluded.updated_at,
+                merged_at = excluded.merged_at,
+                synced_at = excluded.synced_at",
+            params![
+                state.repo_id,
+                state.pr_number as i64,
+                state.state.as_i32() as i64,
+                if state.is_draft { 1i64 } else { 0i64 },
+                state.head_ref,
+                state.head_sha,
+                state.base_ref,
+                state.updated_at.unix_timestamp(),
+                state.merged_at.map(|value| value.unix_timestamp()),
+                state.synced_at.unix_timestamp(),
+            ],
+        )?;
         Ok(())
     }
 

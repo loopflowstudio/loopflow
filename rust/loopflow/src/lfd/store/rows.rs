@@ -1,8 +1,9 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind,
-    Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
+    SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot,
+    WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -125,7 +126,8 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
 ///        snapshot_direction, snapshot_area, snapshot_pr, flow_parents,
-///        run_kind, sidecar_kind
+///        run_kind, sidecar_kind, parent_run_id, parent_pr_number,
+///        stack_position, stack_group_id, stack_status, lineage_inferred
 pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let started_at = unix_to_datetime(row.bigint(7)?);
     let ended_at = row.opt_bigint(8)?;
@@ -135,6 +137,12 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let flow_parents = parse_json_vec(&row.text(15)?)?;
     let run_kind = WaveRunKind::from_i32(row.int(16)?);
     let sidecar_kind = row.opt_int(17)?.and_then(SidecarKind::from_i32);
+    let parent_run_id = row.opt_text(18)?.map(LfdId::from_raw);
+    let parent_pr_number = row.opt_bigint(19)?.map(|value| value as u32);
+    let stack_position = row.int(20)? as u32;
+    let stack_group_id = row.text(21)?;
+    let stack_status = WaveRunStackStatus::from_i32(row.int(22)?);
+    let lineage_inferred = row.int(23)? != 0;
 
     let snapshot = WaveRunSnapshot {
         repo: row.text(10)?,
@@ -159,6 +167,29 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         flow_parents,
         run_kind,
         sidecar_kind,
+        parent_run_id,
+        parent_pr_number,
+        stack_position,
+        stack_group_id,
+        stack_status,
+        lineage_inferred,
+    })
+}
+
+/// SELECT repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
+///        updated_at, merged_at, synced_at
+pub fn map_live_pr_state_row(row: &impl StoreRow) -> StoreResult<LivePullRequestState> {
+    Ok(LivePullRequestState {
+        repo_id: row.text(0)?,
+        pr_number: row.bigint(1)? as u32,
+        state: LivePrState::from_i32(row.int(2)?),
+        is_draft: row.int(3)? != 0,
+        head_ref: row.text(4)?,
+        head_sha: row.text(5)?,
+        base_ref: row.text(6)?,
+        updated_at: unix_to_datetime(row.bigint(7)?),
+        merged_at: row.opt_bigint(8)?.map(unix_to_datetime),
+        synced_at: unix_to_datetime(row.bigint(9)?),
     })
 }
 

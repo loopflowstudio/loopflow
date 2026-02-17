@@ -5,6 +5,10 @@ use hmac::{Hmac, Mac};
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::Deserialize;
 use sha2::Sha256;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
+
+use crate::lfd::types::LivePrState;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -47,6 +51,37 @@ pub struct GitHubRepository {
 #[derive(Debug, Deserialize)]
 struct CheckRunsResponse {
     check_runs: Vec<CheckRun>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitHubPullRequestState {
+    pub number: u32,
+    pub state: LivePrState,
+    pub is_draft: bool,
+    pub head_ref: String,
+    pub head_sha: String,
+    pub base_ref: String,
+    pub updated_at: OffsetDateTime,
+    pub merged_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestResponse {
+    number: u32,
+    state: String,
+    #[serde(default)]
+    draft: bool,
+    head: PullRequestRef,
+    base: PullRequestRef,
+    updated_at: String,
+    merged_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullRequestRef {
+    #[serde(rename = "ref")]
+    branch: String,
+    sha: String,
 }
 
 pub fn verify_webhook_signature(secret: &str, body: &[u8], signature_header: &str) -> bool {
@@ -149,6 +184,68 @@ pub async fn poll_check_runs(
         .await
         .map(|data| data.check_runs)
         .map_err(|err| err.to_string())
+}
+
+pub async fn fetch_pull_request(
+    repo_full_name: &str,
+    pr_number: u32,
+    token: &str,
+) -> Result<Option<GitHubPullRequestState>, String> {
+    let url = format!("https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}");
+    let client = reqwest::Client::new();
+    let response = client
+        .get(url)
+        .header(ACCEPT, "application/vnd.github+json")
+        .header(USER_AGENT, "loopflow-lfd")
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("github API error {status}: {body}"));
+    }
+
+    let payload = response
+        .json::<PullRequestResponse>()
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let updated_at = OffsetDateTime::parse(&payload.updated_at, &Rfc3339)
+        .map_err(|err| format!("invalid updated_at timestamp: {err}"))?;
+    let merged_at = payload
+        .merged_at
+        .as_deref()
+        .map(|value| OffsetDateTime::parse(value, &Rfc3339))
+        .transpose()
+        .map_err(|err| format!("invalid merged_at timestamp: {err}"))?;
+
+    let state = if merged_at.is_some() {
+        LivePrState::Merged
+    } else if payload.state.eq_ignore_ascii_case("open") {
+        LivePrState::Open
+    } else if payload.state.eq_ignore_ascii_case("closed") {
+        LivePrState::Closed
+    } else {
+        LivePrState::Unknown
+    };
+
+    Ok(Some(GitHubPullRequestState {
+        number: payload.number,
+        state,
+        is_draft: payload.draft,
+        head_ref: payload.head.branch,
+        head_sha: payload.head.sha,
+        base_ref: payload.base.branch,
+        updated_at,
+        merged_at,
+    }))
 }
 
 #[cfg(test)]

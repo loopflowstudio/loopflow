@@ -13,6 +13,21 @@ struct ShortcutHelpOverlay: View {
         [.tabs],
     ]
 
+    private var entriesByCategory: [ShortcutCategory: [ShortcutEntry]] {
+        var grouped: [ShortcutCategory: [ShortcutEntry]] = [:]
+        for shortcut in shortcuts {
+            grouped[shortcut.category, default: []].append(
+                ShortcutEntry(key: shortcut.gesture.displayKey, label: shortcut.label)
+            )
+        }
+        for chord in chords {
+            grouped[chord.category, default: []].append(
+                ShortcutEntry(key: chord.displayKey, label: chord.label)
+            )
+        }
+        return grouped
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.35)
@@ -41,10 +56,11 @@ struct ShortcutHelpOverlay: View {
                 }
 
                 HStack(alignment: .top, spacing: Spacing.xxl) {
-                    ForEach(Array(columnLayout.enumerated()), id: \.offset) { _, categories in
+                    ForEach(columnLayout, id: \.self) { categories in
                         VStack(alignment: .leading, spacing: Spacing.lg) {
                             ForEach(categories, id: \.self) { category in
-                                if let entries = entries(for: category), !entries.isEmpty {
+                                let entries = entriesByCategory[category, default: []]
+                                if !entries.isEmpty {
                                     categorySection(title: category.rawValue, entries: entries)
                                 }
                             }
@@ -88,26 +104,13 @@ struct ShortcutHelpOverlay: View {
             }
         }
     }
-
-    private func entries(for category: ShortcutCategory) -> [ShortcutEntry]? {
-        var entries: [ShortcutEntry] = []
-
-        entries.append(contentsOf: shortcuts
-            .filter { $0.category == category }
-            .map { ShortcutEntry(key: $0.gesture.displayKey, label: $0.label) }
-        )
-
-        entries.append(contentsOf: chords
-            .filter { $0.category == category }
-            .map { ShortcutEntry(key: $0.displayKey, label: $0.label) }
-        )
-
-        return entries
-    }
 }
 
 private struct ShortcutEntry: Identifiable {
-    let id = UUID()
     let key: String
     let label: String
+
+    var id: String {
+        "\(key)|\(label)"
+    }
 }

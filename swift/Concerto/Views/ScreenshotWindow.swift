@@ -25,6 +25,7 @@ struct ScreenshotWindow: View {
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
     @State private var hasLoaded = false
+    @State private var hasScheduledCapture = false
     @State private var hasCaptured = false
 
     var body: some View {
@@ -36,11 +37,13 @@ struct ScreenshotWindow: View {
             .task {
                 await setupState()
             }
-            .background(ScreenshotWindowAccessor(onWindowReady: { window in
+            .background(WindowAccessor { window in
+                guard let window, !hasScheduledCapture else { return }
+                hasScheduledCapture = true
                 Task { @MainActor in
                     await captureWhenReady(window: window)
                 }
-            }))
+            })
     }
 
     /// Configure state before the view fully renders.
@@ -150,27 +153,6 @@ private struct ScreenshotLayout: View {
                 .id(wave.id)
         } else {
             StartWaveView()
-        }
-    }
-}
-
-/// Helper to get the hosting window when it becomes available.
-private struct ScreenshotWindowAccessor: NSViewRepresentable {
-    let onWindowReady: (NSWindow) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            if let window = view.window {
-                onWindowReady(window)
-            }
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        if let window = nsView.window {
-            onWindowReady(window)
         }
     }
 }

@@ -18,6 +18,8 @@ final class KeyboardRouter {
     private var chordTimer: Task<Void, Never>?
     private let chordTimeout: Duration
     private let keyDisplayByAction: [ShortcutAction: String]
+    private let chordFirstKeys: Set<ShortcutKey>
+    private let chordActions: [ChordPair: ShortcutAction]
 
     init(
         shortcuts: [ShortcutBinding] = ShortcutCatalog.shortcuts,
@@ -41,6 +43,10 @@ final class KeyboardRouter {
             }
         }
         self.keyDisplayByAction = display
+        self.chordFirstKeys = Set(chords.map(\.first))
+        self.chordActions = Dictionary(
+            uniqueKeysWithValues: chords.map { (ChordPair(first: $0.first, second: $0.second), $0.action) }
+        )
     }
 
     func register(windowNumber: Int, actionHandler: @escaping (ShortcutAction) -> Void) {
@@ -229,20 +235,20 @@ final class KeyboardRouter {
         handler: (ShortcutAction) -> Void
     ) -> Bool {
         if let prefix = chordPrefix {
-            if keyMatches(key, expected: .keyCode(ShortcutCatalog.escapeKeyCode)) {
+            if isEscapeKey(key) {
                 cancelChord()
                 return true
             }
 
             if modifiers.isEmpty,
-               let chord = chords.first(where: { $0.first == prefix && $0.second == key }) {
+               let action = chordActions[ChordPair(first: prefix, second: key)] {
                 cancelChord()
-                handler(chord.action)
+                handler(action)
                 return true
             }
 
             if modifiers.isEmpty,
-               chords.contains(where: { $0.first == key }) {
+               chordFirstKeys.contains(key) {
                 beginChord(with: key)
                 return true
             }
@@ -252,7 +258,7 @@ final class KeyboardRouter {
         }
 
         if modifiers.isEmpty,
-           chords.contains(where: { $0.first == key }) {
+           chordFirstKeys.contains(key) {
             beginChord(with: key)
             return true
         }
@@ -286,16 +292,15 @@ final class KeyboardRouter {
             return true
         }
 
-        let returnFallback: [ShortcutKey] = [
-            .keyCode(ShortcutCatalog.returnKeyCode),
-            .keyCode(ShortcutCatalog.keypadEnterKeyCode),
-        ]
-        if returnFallback.contains(key) && returnFallback.contains(expected) {
+        if Self.returnFallbackKeys.contains(key) && Self.returnFallbackKeys.contains(expected) {
             return true
         }
 
-        let slashFallback: [ShortcutKey] = [.character("/"), .keyCode(ShortcutCatalog.slashKeyCode)]
-        return slashFallback.contains(key) && slashFallback.contains(expected)
+        return Self.slashFallbackKeys.contains(key) && Self.slashFallbackKeys.contains(expected)
+    }
+
+    private func isEscapeKey(_ key: ShortcutKey) -> Bool {
+        keyMatches(key, expected: .keyCode(ShortcutCatalog.escapeKeyCode))
     }
 
     private func isTextResponder(_ responder: Any?) -> Bool {
@@ -308,6 +313,21 @@ final class KeyboardRouter {
         let typeName = String(describing: type(of: responder))
         return typeName.contains("GhosttyMetalView")
     }
+
+    private static let returnFallbackKeys: Set<ShortcutKey> = [
+        .keyCode(ShortcutCatalog.returnKeyCode),
+        .keyCode(ShortcutCatalog.keypadEnterKeyCode),
+    ]
+
+    private static let slashFallbackKeys: Set<ShortcutKey> = [
+        .character("/"),
+        .keyCode(ShortcutCatalog.slashKeyCode),
+    ]
+}
+
+private struct ChordPair: Hashable {
+    let first: ShortcutKey
+    let second: ShortcutKey
 }
 
 enum KeyboardMode: Equatable {

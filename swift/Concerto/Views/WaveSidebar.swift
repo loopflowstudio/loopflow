@@ -11,6 +11,8 @@ struct WaveSidebar: View {
     @State private var actionError: String?
     @State private var showingActionError = false
     @State private var isCreatingWave = false
+    @State private var showingInstantiateAllConfirm = false
+    @State private var pendingSchemas: [WaveSchema] = []
 
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
@@ -23,6 +25,10 @@ struct WaveSidebar: View {
 
     private var orphanWorktrees: [WorktreeInfo] {
         repoState.worktreeStore.orphans
+    }
+
+    private var uninstantiatedSchemas: [WaveSchema] {
+        repoState.waveSchemas.filter { !$0.isInstantiated }.sorted { $0.name < $1.name }
     }
 
     private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
@@ -88,6 +94,20 @@ struct WaveSidebar: View {
         } message: {
             Text(actionError ?? "An error occurred")
         }
+        .confirmationDialog(
+            "Instantiate schemas",
+            isPresented: $showingInstantiateAllConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Instantiate and start \(pendingSchemas.count) waves") {
+                instantiateSchemas(pendingSchemas, startImmediately: true)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSchemas = []
+            }
+        } message: {
+            Text(batchConfirmationMessage)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .newWaveRequested)) { _ in
             createWaveDirectly()
         }
@@ -114,17 +134,42 @@ struct WaveSidebar: View {
                 .frame(width: 6, height: 6)
                 .help(repoState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
 
-            Button {
-                createWaveDirectly()
+            Menu {
+                Button {
+                    createWaveDirectly()
+                } label: {
+                    Label("New wave", systemImage: "plus")
+                }
+
+                if !uninstantiatedSchemas.isEmpty {
+                    Divider()
+
+                    ForEach(uninstantiatedSchemas.prefix(8)) { schema in
+                        Button {
+                            instantiateSchemas([schema], startImmediately: true)
+                        } label: {
+                            Label(schema.name, systemImage: schemaIcon(schema))
+                        }
+                    }
+
+                    Divider()
+
+                    Button {
+                        pendingSchemas = uninstantiatedSchemas
+                        showingInstantiateAllConfirm = true
+                    } label: {
+                        Label("Instantiate all", systemImage: "sparkles")
+                    }
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(isCreatingWave || !repoState.lfdConnected ? 0.3 : 0.7))
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
             .disabled(isCreatingWave || !repoState.lfdConnected)
-            .help(repoState.lfdConnected ? "Create a new wave" : "Connect to lfd first")
-            .accessibleButton("Create new wave")
+            .help(repoState.lfdConnected ? "Create or instantiate waves" : "Connect to lfd first")
+            .accessibleButton("Create or instantiate wave")
             .minHitTarget()
 
             Button {
@@ -198,16 +243,45 @@ struct WaveSidebar: View {
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.5))
 
-                Button {
-                    createWaveDirectly()
-                } label: {
-                    Label("Create Wave", systemImage: "plus")
-                        .font(Typography.caption())
+                if uninstantiatedSchemas.isEmpty {
+                    Button {
+                        createWaveDirectly()
+                    } label: {
+                        Label("Create Wave", systemImage: "plus")
+                            .font(Typography.caption())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isCreatingWave)
+                    .accessibilityIdentifier("wave-empty-create")
+                } else {
+                    VStack(spacing: Spacing.xs) {
+                        ForEach(uninstantiatedSchemas.prefix(3)) { schema in
+                            Button {
+                                instantiateSchemas([schema], startImmediately: true)
+                            } label: {
+                                Label("Start \(schema.name)", systemImage: schemaIcon(schema))
+                                    .font(Typography.caption())
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(isCreatingWave)
+                        }
+
+                        if uninstantiatedSchemas.count > 1 {
+                            Button {
+                                pendingSchemas = uninstantiatedSchemas
+                                showingInstantiateAllConfirm = true
+                            } label: {
+                                Label("Instantiate all", systemImage: "sparkles")
+                                    .font(Typography.caption())
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(isCreatingWave)
+                        }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(isCreatingWave)
-                .accessibilityIdentifier("wave-empty-create")
             }
 
             Spacer()
@@ -306,11 +380,7 @@ struct WaveSidebar: View {
             defer { isCreatingWave = false }
 
             do {
-                if !repoState.lfdConnected {
-                    try await repoState.connectLfd(outputBuffer: outputBuffer)
-                    try await Task.sleep(for: .milliseconds(500))
-                }
-
+                try await ensureLfdConnected()
                 try await repoState.createWave(name: "")
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
@@ -320,6 +390,60 @@ struct WaveSidebar: View {
                 showingActionError = true
             }
         }
+    }
+
+    private var batchConfirmationMessage: String {
+        guard !pendingSchemas.isEmpty else {
+            return "No schemas selected."
+        }
+
+        let names = pendingSchemas.map(\.name).joined(separator: ", ")
+        let stimulusKinds = Set(
+            pendingSchemas.compactMap { schema in
+                schema.stimulus?.kind
+            }
+        )
+        let stimulusText = stimulusKinds.isEmpty ? "none" : stimulusKinds.sorted().joined(separator: ", ")
+        return "Schemas: \(names)\nStimuli: \(stimulusText)\nWaves will start immediately."
+    }
+
+    private func schemaIcon(_ schema: WaveSchema) -> String {
+        switch schema.stimulus?.kind {
+        case "cron": return "clock"
+        case "watch": return "eye"
+        case "loop": return "repeat"
+        default: return "waveform.path.ecg"
+        }
+    }
+
+    private func instantiateSchemas(_ schemas: [WaveSchema], startImmediately: Bool) {
+        guard !schemas.isEmpty else { return }
+        guard !isCreatingWave else { return }
+        isCreatingWave = true
+
+        Task {
+            defer {
+                isCreatingWave = false
+                pendingSchemas = []
+            }
+
+            do {
+                try await ensureLfdConnected()
+
+                for schema in schemas {
+                    try await repoState.instantiateSchema(schema, startImmediately: startImmediately)
+                }
+            } catch {
+                actionError = error.localizedDescription
+                showingActionError = true
+            }
+        }
+    }
+
+    private func ensureLfdConnected() async throws {
+        guard !repoState.lfdConnected else { return }
+        try await repoState.connectLfd(outputBuffer: outputBuffer)
+        try await Task.sleep(for: .milliseconds(500))
     }
 }
 

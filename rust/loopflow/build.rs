@@ -40,6 +40,13 @@ fn main() {
         &out_dir.join("builtin_ops_prompts.rs"),
     );
 
+    generate_map(
+        &builtins_dir.join("waves"),
+        "yaml",
+        "BUILTIN_WAVES",
+        &out_dir.join("builtin_waves.rs"),
+    );
+
     // Re-run if any file in the builtins tree changes
     println!("cargo:rerun-if-changed={}", builtins_dir.display());
     for entry in walkdir(&builtins_dir) {
@@ -51,6 +58,17 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
     collect_files(dir, extension, &mut entries);
     entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for pair in entries.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            panic!(
+                "duplicate builtin key '{}' for '{}' and '{}'",
+                pair[0].0,
+                pair[0].1.display(),
+                pair[1].1.display()
+            );
+        }
+    }
 
     let mut code = String::new();
     writeln!(

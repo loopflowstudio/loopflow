@@ -52,6 +52,25 @@ loopflow.create_wave("engbot", repo=".")
 loopflow.run_wave("engbot")
 ```
 
+## Wave schemas
+
+```bash
+curl -s "http://127.0.0.1:2486/v0/wave/schemas?repo=$(pwd)" | jq '.data[].name'
+```
+
+```bash
+curl -s -X POST "http://127.0.0.1:2486/v0/waves" \
+  -H "Content-Type: application/json" \
+  -d "{\"repo\":\"$(pwd)\",\"schema\":\"scan\"}"
+```
+
+Use explicit refs when names collide:
+
+```json
+{"schema":"builtin://scan"}
+{"schema":"file:///abs/path/to/repo/wave/scan/scan.yaml"}
+```
+
 ## Configuration
 
 Environment variables:

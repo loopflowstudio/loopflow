@@ -126,7 +126,8 @@ impl PostgresStore {
             let rows = if let Some(repo) = repo {
                 client
                     .query(
-                        "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+                        "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                                created_at, schema_ref, schema_name
                          FROM waves WHERE repo = $1 ORDER BY created_at DESC",
                         &[&repo],
                     )
@@ -134,7 +135,8 @@ impl PostgresStore {
             } else {
                 client
                     .query(
-                        "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+                        "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                                created_at, schema_ref, schema_name
                          FROM waves ORDER BY created_at DESC",
                         &[],
                     )
@@ -161,8 +163,9 @@ impl PostgresStore {
             client
                 .execute(
                     "INSERT INTO waves (
-                        id, name, repo, flow, direction, area, paused, status, iteration, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        id, name, repo, flow, direction, area, paused, status, iteration, created_at,
+                        schema_ref, schema_name
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         repo = excluded.repo,
@@ -172,7 +175,9 @@ impl PostgresStore {
                         paused = excluded.paused,
                         status = excluded.status,
                         iteration = excluded.iteration,
-                        created_at = excluded.created_at",
+                        created_at = excluded.created_at,
+                        schema_ref = excluded.schema_ref,
+                        schema_name = excluded.schema_name",
                     &[
                         &wave.id,
                         &wave.name,
@@ -184,6 +189,8 @@ impl PostgresStore {
                         &wave.status.as_i32(),
                         &(wave.iteration as i32),
                         &created_at,
+                        &wave.schema_ref,
+                        &wave.schema_name,
                     ],
                 )
                 .await?;
@@ -212,7 +219,8 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+                    "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                            created_at, schema_ref, schema_name
                      FROM waves WHERE id = $1",
                     &[&wave_id],
                 )
@@ -226,7 +234,8 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+                    "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                            created_at, schema_ref, schema_name
                      FROM waves WHERE name = $1",
                     &[&name],
                 )

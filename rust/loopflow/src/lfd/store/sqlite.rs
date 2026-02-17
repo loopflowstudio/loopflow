@@ -43,13 +43,15 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (sql, params): (&str, Vec<Box<dyn ToSql>>) = if let Some(repo) = repo {
             (
-                "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+                "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                        created_at, schema_ref, schema_name
                  FROM waves WHERE repo = ?1 ORDER BY created_at DESC",
                 vec![Box::new(repo.to_string())],
             )
         } else {
             (
-                "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+                "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                        created_at, schema_ref, schema_name
                  FROM waves ORDER BY created_at DESC",
                 vec![],
             )
@@ -78,8 +80,9 @@ impl SqliteStore {
 
         conn.execute(
             "INSERT INTO waves (
-                id, name, repo, flow, direction, area, paused, status, iteration, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                id, name, repo, flow, direction, area, paused, status, iteration, created_at,
+                schema_ref, schema_name
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 repo = excluded.repo,
@@ -89,7 +92,9 @@ impl SqliteStore {
                 paused = excluded.paused,
                 status = excluded.status,
                 iteration = excluded.iteration,
-                created_at = excluded.created_at",
+                created_at = excluded.created_at,
+                schema_ref = excluded.schema_ref,
+                schema_name = excluded.schema_name",
             params![
                 wave.id,
                 wave.name,
@@ -105,6 +110,8 @@ impl SqliteStore {
                 wave.status.as_i32() as i64,
                 wave.iteration as i64,
                 created_at,
+                wave.schema_ref.clone(),
+                wave.schema_name.clone(),
             ],
         )?;
         Ok(())
@@ -130,7 +137,8 @@ impl RunStore for SqliteStore {
     fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+            "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                    created_at, schema_ref, schema_name
              FROM waves WHERE id = ?1",
         )?;
         let wave = stmt
@@ -142,7 +150,8 @@ impl RunStore for SqliteStore {
     fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+            "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
+                    created_at, schema_ref, schema_name
              FROM waves WHERE name = ?1",
         )?;
         let wave = stmt

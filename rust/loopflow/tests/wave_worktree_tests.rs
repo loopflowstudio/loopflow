@@ -29,6 +29,8 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         area: vec![],
         status: WaveStatus::Idle,
         iteration: 0,
+        schema_ref: None,
+        schema_name: None,
         created_at: None,
     }
 }

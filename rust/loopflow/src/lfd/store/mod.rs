@@ -635,6 +635,8 @@ mod tests {
             area: vec!["src".to_string()],
             status: WaveStatus::Idle,
             iteration: 0,
+            schema_ref: None,
+            schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
         }
     }

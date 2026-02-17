@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!(schema_version = %version, "postgres schema up to date");
     }
 
-    let store: SharedStore = open_store(&storage_config).await?.into_shared();
+    let store: SharedStore = Arc::new(open_store(&storage_config).await?);
 
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
@@ -133,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let repo_roots = store
         .list_waves(None)
+        .await
         .unwrap_or_default()
         .into_iter()
         .map(|wave| PathBuf::from(wave.repo))

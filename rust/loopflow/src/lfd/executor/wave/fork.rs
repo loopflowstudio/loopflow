@@ -26,7 +26,8 @@ impl WaveExecutor {
         fork: &ConcreteFork,
     ) -> Result<()> {
         let Some(selected) = fork.branches.first().cloned() else {
-            self.fail_run(run, wave, "fork has no branches".to_string())?;
+            self.fail_run(run, wave, "fork has no branches".to_string())
+                .await?;
             return Ok(());
         };
 
@@ -35,7 +36,8 @@ impl WaveExecutor {
                 run,
                 wave,
                 "interactive fork branches are not supported".to_string(),
-            )?;
+            )
+            .await?;
             return Ok(());
         }
 
@@ -45,11 +47,12 @@ impl WaveExecutor {
                 run,
                 wave,
                 format!("fork step {} failed", selected.step.name),
-            )?;
+            )
+            .await?;
             return Ok(());
         }
 
-        self.advance_run_step(run, plan, &wave.id)?;
+        self.advance_run_step(run, plan, &wave.id).await?;
         Ok(())
     }
 
@@ -65,7 +68,8 @@ impl WaveExecutor {
                 run,
                 wave,
                 "fork(select=all) is not supported by the docker executor yet".to_string(),
-            )?;
+            )
+            .await?;
             return Ok(());
         }
 
@@ -76,7 +80,8 @@ impl WaveExecutor {
                     run,
                     wave,
                     "interactive fork branches are not supported".to_string(),
-                )?;
+                )
+                .await?;
                 return Ok(());
             }
 
@@ -104,7 +109,7 @@ impl WaveExecutor {
                 status: ForkRunStatus::Pending,
                 worktree: fork_worktree,
             };
-            self.store.upsert_fork_run(&fork_run)?;
+            self.store.upsert_fork_run(&fork_run).await?;
             fork_runs.push((fork_run, branch.clone()));
         }
 
@@ -140,10 +145,13 @@ impl WaveExecutor {
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
 
-                let _ = executor.store.upsert_fork_run(&ForkRun {
-                    status: ForkRunStatus::Running,
-                    ..fork_run.clone()
-                });
+                let _ = executor
+                    .store
+                    .upsert_fork_run(&ForkRun {
+                        status: ForkRunStatus::Running,
+                        ..fork_run.clone()
+                    })
+                    .await;
 
                 debug!(
                     fork_run_id = %fork_run_id,
@@ -159,7 +167,8 @@ impl WaveExecutor {
                     None,
                     Some((&executor.store, &fork_wave_id)),
                     None,
-                );
+                )
+                .await;
                 let (prompt, model, launch) = match prompt {
                     Ok(result) => result,
                     Err(err) => {
@@ -210,10 +219,13 @@ impl WaveExecutor {
                         ForkRunStatus::Failed
                     }
                 };
-                let _ = executor.store.upsert_fork_run(&ForkRun {
-                    status,
-                    ..fork_run.clone()
-                });
+                let _ = executor
+                    .store
+                    .upsert_fork_run(&ForkRun {
+                        status,
+                        ..fork_run.clone()
+                    })
+                    .await;
                 let _ = tx.send((fork_run_id.to_string(), result)).await;
                 scheduler.release(fork_run_id.as_str());
             });
@@ -252,12 +264,12 @@ impl WaveExecutor {
                 handle.abort();
             }
             self.cleanup_fork(run, &fork_runs).await;
-            self.fail_run(run, wave, error)?;
+            self.fail_run(run, wave, error).await?;
             return Ok(());
         }
 
         self.cleanup_fork(run, &fork_runs).await;
-        self.advance_run_step(run, plan, &wave.id)?;
+        self.advance_run_step(run, plan, &wave.id).await?;
         Ok(())
     }
 
@@ -269,6 +281,6 @@ impl WaveExecutor {
             }
             self.scheduler.release(fork_run.id.as_str());
         }
-        let _ = self.store.delete_fork_runs(&run.id, run.step_index);
+        let _ = self.store.delete_fork_runs(&run.id, run.step_index).await;
     }
 }

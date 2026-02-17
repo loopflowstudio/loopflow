@@ -33,12 +33,12 @@ use crate::lfd::types::{
 use super::CiFailure;
 
 /// Create a wave run with a worktree and branch for the wave.
-pub fn create_wave_run_with_id(
+pub async fn create_wave_run_with_id(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
 ) -> anyhow::Result<WaveRun> {
-    let stack_runs = store.list_stack_runs(&wave.id)?;
+    let stack_runs = store.list_stack_runs(&wave.id).await?;
     let last_run = stack_runs.last().cloned();
     let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
     let stack_position = last_run
@@ -86,11 +86,11 @@ pub fn create_wave_run_with_id(
         stack_status: WaveRunStackStatus::Active,
         lineage_inferred: false,
     };
-    store.create_wave_run(&run)?;
-    if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
+    store.create_wave_run(&run).await?;
+    if let Ok(Some(mut wave)) = store.get_wave(&wave.id).await {
         wave.status = WaveStatus::Running;
         wave.iteration = iteration;
-        if let Err(err) = store.update_wave(&wave) {
+        if let Err(err) = store.update_wave(&wave).await {
             warn!(wave_id = %wave.id, error = %err, "failed to set wave status to running");
         }
     }
@@ -262,7 +262,7 @@ pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) ->
     }
 }
 
-pub(crate) fn build_step_prompt(
+pub(crate) async fn build_step_prompt(
     worktree: &str,
     step: &ConcreteStep,
     directions: &[String],
@@ -293,7 +293,7 @@ pub(crate) fn build_step_prompt(
 
     // Inject wave summary if available
     if let Some((store, wave_id)) = summary_source {
-        if let Ok(Some(summary)) = store.get_summary(wave_id) {
+        if let Ok(Some(summary)) = store.get_summary(wave_id).await {
             components.summaries.push(Document {
                 path: "wave-summary".to_string(),
                 content: summary.content,

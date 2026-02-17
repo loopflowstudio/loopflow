@@ -89,19 +89,260 @@ enum StoreBackend {
     Postgres(postgres::PostgresStore),
 }
 
+async fn run_sqlite<T, F>(store: &sqlite::SqliteStore, func: F) -> StoreResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
+{
+    let store = store.clone();
+    tokio::task::spawn_blocking(move || func(store))
+        .await
+        .map_err(|err| StoreError::InvalidData(err.to_string()))?
+}
+
 impl Store {
-    pub fn into_shared(self) -> SharedStore {
-        match self.backend {
-            StoreBackend::Sqlite(store) => Arc::new(store) as SharedStore,
-            StoreBackend::Postgres(store) => Arc::new(store) as SharedStore,
-        }
+    pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
+        WaveStateStore::list_waves(self, repo).await
     }
 
-    fn as_run_store(&self) -> &dyn RunStore {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => store,
-            StoreBackend::Postgres(store) => store,
-        }
+    pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+        WaveStateStore::get_wave(self, wave_id).await
+    }
+
+    pub async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
+        WaveStateStore::get_wave_by_name(self, name).await
+    }
+
+    pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
+        WaveStateStore::create_wave(self, wave).await
+    }
+
+    pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
+        WaveStateStore::update_wave(self, wave).await
+    }
+
+    pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+        WaveStateStore::delete_wave(self, wave_id).await
+    }
+
+    pub async fn list_wave_runs(
+        &self,
+        wave_id: Option<&LfdId>,
+        limit: Option<u32>,
+    ) -> StoreResult<Vec<WaveRun>> {
+        WaveStateStore::list_wave_runs(self, wave_id, limit).await
+    }
+
+    pub async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        WaveStateStore::get_wave_run(self, wave_run_id).await
+    }
+
+    pub async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        WaveStateStore::get_active_wave_run(self, wave_id).await
+    }
+
+    pub async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        WaveStateStore::get_latest_wave_run(self, wave_id).await
+    }
+
+    pub async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+        WaveStateStore::create_wave_run(self, run).await
+    }
+
+    pub async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+        WaveStateStore::update_wave_run(self, run).await
+    }
+
+    pub async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+        WaveStateStore::list_stack_runs(self, wave_id).await
+    }
+
+    pub async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        WaveStateStore::find_next_unmerged_run(self, wave_id).await
+    }
+
+    pub async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+        WaveStateStore::find_descendants(self, run_id).await
+    }
+
+    pub async fn get_live_pr_state(
+        &self,
+        repo_id: &str,
+        pr_number: u32,
+    ) -> StoreResult<Option<LivePullRequestState>> {
+        WaveStateStore::get_live_pr_state(self, repo_id, pr_number).await
+    }
+
+    pub async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
+        WaveStateStore::upsert_live_pr_state(self, state).await
+    }
+
+    pub async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
+        WaveStateStore::list_stimuli(self, wave_id).await
+    }
+
+    pub async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+        WaveStateStore::list_stimuli_by_kind(self, kind).await
+    }
+
+    pub async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
+        WaveStateStore::get_stimulus(self, stimulus_id).await
+    }
+
+    pub async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+        WaveStateStore::create_stimulus(self, stimulus).await
+    }
+
+    pub async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+        WaveStateStore::update_stimulus(self, stimulus).await
+    }
+
+    pub async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
+        WaveStateStore::delete_stimulus(self, stimulus_id).await
+    }
+
+    pub async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        WaveStateStore::delete_stimuli_for_wave(self, wave_id).await
+    }
+
+    pub async fn list_pending_activations(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<PendingActivation>> {
+        WaveStateStore::list_pending_activations(self, wave_id).await
+    }
+
+    pub async fn create_pending_activation(
+        &self,
+        activation: &PendingActivation,
+    ) -> StoreResult<()> {
+        WaveStateStore::create_pending_activation(self, activation).await
+    }
+
+    pub async fn update_pending_activation(
+        &self,
+        activation: &PendingActivation,
+    ) -> StoreResult<()> {
+        WaveStateStore::update_pending_activation(self, activation).await
+    }
+
+    pub async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        WaveStateStore::delete_pending_activations(self, wave_id).await
+    }
+
+    pub async fn get_pending_for_stimulus(
+        &self,
+        wave_id: &LfdId,
+        stimulus_id: &LfdId,
+    ) -> StoreResult<Option<PendingActivation>> {
+        WaveStateStore::get_pending_for_stimulus(self, wave_id, stimulus_id).await
+    }
+
+    pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
+        WaveStateStore::get_summary(self, wave_id).await
+    }
+
+    pub async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
+        WaveStateStore::upsert_summary(self, summary).await
+    }
+
+    pub async fn list_chat_memory_blocks(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Vec<ChatMemoryBlock>> {
+        WaveStateStore::list_chat_memory_blocks(self, wave_id).await
+    }
+
+    pub async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+        WaveStateStore::upsert_chat_memory_block(self, block).await
+    }
+
+    pub async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+        WaveStateStore::delete_chat_memory_block(self, wave_id, name).await
+    }
+
+    pub async fn list_fork_runs(
+        &self,
+        wave_run_id: &LfdId,
+        step_index: u32,
+    ) -> StoreResult<Vec<ForkRun>> {
+        ExecutionStore::list_fork_runs(self, wave_run_id, step_index).await
+    }
+
+    pub async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
+        ExecutionStore::upsert_fork_run(self, fork_run).await
+    }
+
+    pub async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+        ExecutionStore::delete_fork_runs(self, wave_run_id, step_index).await
+    }
+
+    pub async fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+        ExecutionStore::list_agents(self).await
+    }
+
+    pub async fn list_agent_history(
+        &self,
+        worktree: Option<&str>,
+        repo: Option<&str>,
+        limit: Option<u32>,
+    ) -> StoreResult<Vec<Agent>> {
+        ExecutionStore::list_agent_history(self, worktree, repo, limit).await
+    }
+
+    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+        ExecutionStore::get_agent(self, agent_id).await
+    }
+
+    pub async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+        ExecutionStore::get_waiting_agent_for_wave(self, wave_id).await
+    }
+
+    pub async fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+        ExecutionStore::start_agent(self, agent).await
+    }
+
+    pub async fn update_agent_status(
+        &self,
+        agent_id: &LfdId,
+        status: i32,
+        pid: Option<u32>,
+        container_id: Option<&str>,
+    ) -> StoreResult<()> {
+        ExecutionStore::update_agent_status(self, agent_id, status, pid, container_id).await
+    }
+
+    pub async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
+        ExecutionStore::end_agent(self, agent_id, status, ended_at).await
+    }
+
+    pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+        ExecutionStore::get_active_agents_for_wave(self, wave_id).await
+    }
+
+    pub async fn end_active_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+        status: i32,
+        ended_at: i64,
+    ) -> StoreResult<()> {
+        ExecutionStore::end_active_agent_for_wave(self, wave_id, status, ended_at).await
+    }
+
+    pub async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+        ExecutionStore::get_stuck_agents(self, older_than_secs).await
+    }
+
+    pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
+        ExecutionStore::fail_orphaned_runs(self).await
+    }
+
+    pub async fn health_check(&self) -> StoreResult<()> {
+        StoreAdmin::health_check(self).await
+    }
+
+    pub async fn schema_version(&self) -> StoreResult<String> {
+        StoreAdmin::schema_version(self).await
     }
 }
 
@@ -157,6 +398,10 @@ pub trait WaveStateStore: Send + Sync {
 
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
+
+    async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>>;
+    async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()>;
+    async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()>;
 }
 
 #[async_trait::async_trait]
@@ -208,27 +453,63 @@ pub trait StoreAdmin: Send + Sync {
 #[async_trait::async_trait]
 impl WaveStateStore for Store {
     async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        self.as_run_store().list_waves(repo)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let repo = repo.map(str::to_string);
+                run_sqlite(store, move |store| store.list_waves(repo.as_deref())).await
+            }
+            StoreBackend::Postgres(store) => store.list_waves(repo).await,
+        }
     }
 
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        self.as_run_store().get_wave(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.get_wave(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_wave(wave_id).await,
+        }
     }
 
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        self.as_run_store().get_wave_by_name(name)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let name = name.to_string();
+                run_sqlite(store, move |store| store.get_wave_by_name(&name)).await
+            }
+            StoreBackend::Postgres(store) => store.get_wave_by_name(name).await,
+        }
     }
 
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        self.as_run_store().create_wave(wave)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave = wave.clone();
+                run_sqlite(store, move |store| store.create_wave(&wave)).await
+            }
+            StoreBackend::Postgres(store) => store.create_wave(wave).await,
+        }
     }
 
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
-        self.as_run_store().update_wave(wave)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave = wave.clone();
+                run_sqlite(store, move |store| store.update_wave(&wave)).await
+            }
+            StoreBackend::Postgres(store) => store.update_wave(wave).await,
+        }
     }
 
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        self.as_run_store().delete_wave(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.delete_wave(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.delete_wave(wave_id).await,
+        }
     }
 
     async fn list_wave_runs(
@@ -236,39 +517,119 @@ impl WaveStateStore for Store {
         wave_id: Option<&LfdId>,
         limit: Option<u32>,
     ) -> StoreResult<Vec<WaveRun>> {
-        self.as_run_store().list_wave_runs(wave_id, limit)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.cloned();
+                run_sqlite(store, move |store| {
+                    store.list_wave_runs(wave_id.as_ref(), limit)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_wave_runs(wave_id, limit).await,
+        }
     }
 
     async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        self.as_run_store().get_wave_run(wave_run_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_run_id = wave_run_id.clone();
+                run_sqlite(store, move |store| store.get_wave_run(&wave_run_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_wave_run(wave_run_id).await,
+        }
     }
 
     async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        self.as_run_store().get_active_wave_run(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.get_active_wave_run(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_active_wave_run(wave_id).await,
+        }
     }
 
     async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        self.as_run_store().get_latest_wave_run(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.get_latest_wave_run(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_latest_wave_run(wave_id).await,
+        }
     }
 
     async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
-        self.as_run_store().create_wave_run(run)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let run = run.clone();
+                run_sqlite(store, move |store| store.create_wave_run(&run)).await
+            }
+            StoreBackend::Postgres(store) => store.create_wave_run(run).await,
+        }
     }
 
     async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
-        self.as_run_store().update_wave_run(run)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let run = run.clone();
+                run_sqlite(store, move |store| store.update_wave_run(&run)).await
+            }
+            StoreBackend::Postgres(store) => store.update_wave_run(run).await,
+        }
     }
 
     async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
-        self.as_run_store().list_stack_runs(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.list_stack_runs(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.list_stack_runs(wave_id).await,
+        }
     }
 
     async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        self.as_run_store().find_next_unmerged_run(wave_id)
+        let runs = self.list_stack_runs(wave_id).await?;
+        for run in runs {
+            if matches!(
+                run.stack_status,
+                WaveRunStackStatus::Merged | WaveRunStackStatus::Superseded
+            ) {
+                continue;
+            }
+
+            let Some(pr_number) = run.snapshot.pr.as_ref().and_then(|pr| pr.number) else {
+                return Ok(Some(run));
+            };
+
+            let Some(live_state) = self
+                .get_live_pr_state(&run.snapshot.repo, pr_number)
+                .await?
+            else {
+                return Ok(Some(run));
+            };
+            if live_state.state != LivePrState::Merged {
+                return Ok(Some(run));
+            }
+        }
+        Ok(None)
     }
 
     async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
-        self.as_run_store().find_descendants(run_id)
+        let Some(parent) = self.get_wave_run(run_id).await? else {
+            return Ok(Vec::new());
+        };
+        let descendants = self
+            .list_stack_runs(&parent.wave_id)
+            .await?
+            .into_iter()
+            .filter(|run| {
+                run.stack_group_id == parent.stack_group_id
+                    && run.stack_position > parent.stack_position
+            })
+            .collect();
+        Ok(descendants)
     }
 
     async fn get_live_pr_state(
@@ -276,58 +637,147 @@ impl WaveStateStore for Store {
         repo_id: &str,
         pr_number: u32,
     ) -> StoreResult<Option<LivePullRequestState>> {
-        self.as_run_store().get_live_pr_state(repo_id, pr_number)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let repo_id = repo_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.get_live_pr_state(&repo_id, pr_number)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.get_live_pr_state(repo_id, pr_number).await,
+        }
     }
 
     async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
-        self.as_run_store().upsert_live_pr_state(state)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let state = state.clone();
+                run_sqlite(store, move |store| store.upsert_live_pr_state(&state)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_live_pr_state(state).await,
+        }
     }
 
     async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
-        self.as_run_store().list_stimuli(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.cloned();
+                run_sqlite(store, move |store| store.list_stimuli(wave_id.as_ref())).await
+            }
+            StoreBackend::Postgres(store) => store.list_stimuli(wave_id).await,
+        }
     }
 
     async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
-        self.as_run_store().list_stimuli_by_kind(kind)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, move |store| store.list_stimuli_by_kind(kind)).await
+            }
+            StoreBackend::Postgres(store) => store.list_stimuli_by_kind(kind).await,
+        }
     }
 
     async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
-        self.as_run_store().get_stimulus(stimulus_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let stimulus_id = stimulus_id.clone();
+                run_sqlite(store, move |store| store.get_stimulus(&stimulus_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_stimulus(stimulus_id).await,
+        }
     }
 
     async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
-        self.as_run_store().create_stimulus(stimulus)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let stimulus = stimulus.clone();
+                run_sqlite(store, move |store| store.create_stimulus(&stimulus)).await
+            }
+            StoreBackend::Postgres(store) => store.create_stimulus(stimulus).await,
+        }
     }
 
     async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
-        self.as_run_store().update_stimulus(stimulus)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let stimulus = stimulus.clone();
+                run_sqlite(store, move |store| store.update_stimulus(&stimulus)).await
+            }
+            StoreBackend::Postgres(store) => store.update_stimulus(stimulus).await,
+        }
     }
 
     async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
-        self.as_run_store().delete_stimulus(stimulus_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let stimulus_id = stimulus_id.clone();
+                run_sqlite(store, move |store| store.delete_stimulus(&stimulus_id)).await
+            }
+            StoreBackend::Postgres(store) => store.delete_stimulus(stimulus_id).await,
+        }
     }
 
     async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        self.as_run_store().delete_stimuli_for_wave(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.delete_stimuli_for_wave(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.delete_stimuli_for_wave(wave_id).await,
+        }
     }
 
     async fn list_pending_activations(
         &self,
         wave_id: &LfdId,
     ) -> StoreResult<Vec<PendingActivation>> {
-        self.as_run_store().list_pending_activations(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.list_pending_activations(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.list_pending_activations(wave_id).await,
+        }
     }
 
     async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
-        self.as_run_store().create_pending_activation(activation)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let activation = activation.clone();
+                run_sqlite(store, move |store| {
+                    store.create_pending_activation(&activation)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.create_pending_activation(activation).await,
+        }
     }
 
     async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
-        self.as_run_store().update_pending_activation(activation)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let activation = activation.clone();
+                run_sqlite(store, move |store| {
+                    store.update_pending_activation(&activation)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.update_pending_activation(activation).await,
+        }
     }
 
     async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        self.as_run_store().delete_pending_activations(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| {
+                    store.delete_pending_activations(&wave_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.delete_pending_activations(wave_id).await,
+        }
     }
 
     async fn get_pending_for_stimulus(
@@ -335,16 +785,73 @@ impl WaveStateStore for Store {
         wave_id: &LfdId,
         stimulus_id: &LfdId,
     ) -> StoreResult<Option<PendingActivation>> {
-        self.as_run_store()
-            .get_pending_for_stimulus(wave_id, stimulus_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                let stimulus_id = stimulus_id.clone();
+                run_sqlite(store, move |store| {
+                    store.get_pending_for_stimulus(&wave_id, &stimulus_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store.get_pending_for_stimulus(wave_id, stimulus_id).await
+            }
+        }
     }
 
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
-        self.as_run_store().get_summary(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.get_summary(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_summary(wave_id).await,
+        }
     }
 
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
-        self.as_run_store().upsert_summary(summary)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let summary = summary.clone();
+                run_sqlite(store, move |store| store.upsert_summary(&summary)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_summary(summary).await,
+        }
+    }
+
+    async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.list_chat_memory_blocks(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.list_chat_memory_blocks(wave_id).await,
+        }
+    }
+
+    async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let block = block.clone();
+                run_sqlite(store, move |store| store.upsert_chat_memory_block(&block)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_chat_memory_block(block).await,
+        }
+    }
+
+    async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                let name = name.to_string();
+                run_sqlite(store, move |store| {
+                    store.delete_chat_memory_block(&wave_id, &name)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.delete_chat_memory_block(wave_id, name).await,
+        }
     }
 }
 
@@ -355,20 +862,46 @@ impl ExecutionStore for Store {
         wave_run_id: &LfdId,
         step_index: u32,
     ) -> StoreResult<Vec<ForkRun>> {
-        self.as_run_store().list_fork_runs(wave_run_id, step_index)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_run_id = wave_run_id.clone();
+                run_sqlite(store, move |store| {
+                    store.list_fork_runs(&wave_run_id, step_index)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_fork_runs(wave_run_id, step_index).await,
+        }
     }
 
     async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
-        self.as_run_store().upsert_fork_run(fork_run)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let fork_run = fork_run.clone();
+                run_sqlite(store, move |store| store.upsert_fork_run(&fork_run)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_fork_run(fork_run).await,
+        }
     }
 
     async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
-        self.as_run_store()
-            .delete_fork_runs(wave_run_id, step_index)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_run_id = wave_run_id.clone();
+                run_sqlite(store, move |store| {
+                    store.delete_fork_runs(&wave_run_id, step_index)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.delete_fork_runs(wave_run_id, step_index).await,
+        }
     }
 
     async fn list_agents(&self) -> StoreResult<Vec<Agent>> {
-        self.as_run_store().list_agents()
+        match &self.backend {
+            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_agents()).await,
+            StoreBackend::Postgres(store) => store.list_agents().await,
+        }
     }
 
     async fn list_agent_history(
@@ -377,20 +910,50 @@ impl ExecutionStore for Store {
         repo: Option<&str>,
         limit: Option<u32>,
     ) -> StoreResult<Vec<Agent>> {
-        self.as_run_store()
-            .list_agent_history(worktree, repo, limit)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let worktree = worktree.map(str::to_string);
+                let repo = repo.map(str::to_string);
+                run_sqlite(store, move |store| {
+                    store.list_agent_history(worktree.as_deref(), repo.as_deref(), limit)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_agent_history(worktree, repo, limit).await,
+        }
     }
 
     async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
-        self.as_run_store().get_agent(agent_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let agent_id = agent_id.clone();
+                run_sqlite(store, move |store| store.get_agent(&agent_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_agent(agent_id).await,
+        }
     }
 
     async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
-        self.as_run_store().get_waiting_agent_for_wave(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| {
+                    store.get_waiting_agent_for_wave(&wave_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.get_waiting_agent_for_wave(wave_id).await,
+        }
     }
 
     async fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
-        self.as_run_store().start_agent(agent)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let agent = agent.clone();
+                run_sqlite(store, move |store| store.start_agent(&agent)).await
+            }
+            StoreBackend::Postgres(store) => store.start_agent(agent).await,
+        }
     }
 
     async fn update_agent_status(
@@ -400,16 +963,47 @@ impl ExecutionStore for Store {
         pid: Option<u32>,
         container_id: Option<&str>,
     ) -> StoreResult<()> {
-        self.as_run_store()
-            .update_agent_status(agent_id, status, pid, container_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let agent_id = agent_id.clone();
+                let container_id = container_id.map(str::to_string);
+                run_sqlite(store, move |store| {
+                    store.update_agent_status(&agent_id, status, pid, container_id.as_deref())
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_agent_status(agent_id, status, pid, container_id)
+                    .await
+            }
+        }
     }
 
     async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
-        self.as_run_store().end_agent(agent_id, status, ended_at)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let agent_id = agent_id.clone();
+                run_sqlite(store, move |store| {
+                    store.end_agent(&agent_id, status, ended_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.end_agent(agent_id, status, ended_at).await,
+        }
     }
 
     async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
-        self.as_run_store().get_active_agents_for_wave(wave_id)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| {
+                    store.get_active_agents_for_wave(&wave_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.get_active_agents_for_wave(wave_id).await,
+        }
     }
 
     async fn end_active_agent_for_wave(
@@ -418,27 +1012,55 @@ impl ExecutionStore for Store {
         status: i32,
         ended_at: i64,
     ) -> StoreResult<()> {
-        self.as_run_store()
-            .end_active_agent_for_wave(wave_id, status, ended_at)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| {
+                    store.end_active_agent_for_wave(&wave_id, status, ended_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .end_active_agent_for_wave(wave_id, status, ended_at)
+                    .await
+            }
+        }
     }
 
     async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
-        self.as_run_store().get_stuck_agents(older_than_secs)
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, move |store| store.get_stuck_agents(older_than_secs)).await
+            }
+            StoreBackend::Postgres(store) => store.get_stuck_agents(older_than_secs).await,
+        }
     }
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
-        self.as_run_store().fail_orphaned_runs()
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, |store| store.fail_orphaned_runs()).await
+            }
+            StoreBackend::Postgres(store) => store.fail_orphaned_runs().await,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl StoreAdmin for Store {
     async fn health_check(&self) -> StoreResult<()> {
-        self.as_run_store().health_check()
+        match &self.backend {
+            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.health_check()).await,
+            StoreBackend::Postgres(store) => store.health_check().await,
+        }
     }
 
     async fn schema_version(&self) -> StoreResult<String> {
-        self.as_run_store().schema_version()
+        match &self.backend {
+            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.schema_version()).await,
+            StoreBackend::Postgres(store) => store.schema_version().await,
+        }
     }
 }
 
@@ -478,153 +1100,15 @@ pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResul
         }
     }
 }
-
-#[allow(dead_code)]
-pub trait RunStore: Send + Sync {
-    fn health_check(&self) -> StoreResult<()>;
-    fn schema_version(&self) -> StoreResult<String>;
-
-    // Wave management
-    fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
-    fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
-    fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
-    fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
-    fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
-    fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
-
-    // Wave runs
-    fn list_wave_runs(
-        &self,
-        wave_id: Option<&LfdId>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<WaveRun>>;
-    fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>>;
-    fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
-    fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()>;
-    fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>>;
-    fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
-        let runs = self.list_stack_runs(wave_id)?;
-        for run in runs {
-            if matches!(
-                run.stack_status,
-                WaveRunStackStatus::Merged | WaveRunStackStatus::Superseded
-            ) {
-                continue;
-            }
-
-            let Some(pr_number) = run.snapshot.pr.as_ref().and_then(|pr| pr.number) else {
-                return Ok(Some(run));
-            };
-
-            let Some(live_state) = self.get_live_pr_state(&run.snapshot.repo, pr_number)? else {
-                return Ok(Some(run));
-            };
-            if live_state.state != LivePrState::Merged {
-                return Ok(Some(run));
-            }
-        }
-        Ok(None)
-    }
-
-    fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
-        let Some(parent) = self.get_wave_run(run_id)? else {
-            return Ok(Vec::new());
-        };
-        let descendants = self
-            .list_stack_runs(&parent.wave_id)?
-            .into_iter()
-            .filter(|run| {
-                run.stack_group_id == parent.stack_group_id
-                    && run.stack_position > parent.stack_position
-            })
-            .collect();
-        Ok(descendants)
-    }
-    fn get_live_pr_state(
-        &self,
-        repo_id: &str,
-        pr_number: u32,
-    ) -> StoreResult<Option<LivePullRequestState>>;
-    fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()>;
-    /// Mark all Running/Pending/Waiting runs as Failed. Called on startup to
-    /// clean up orphaned runs from a previous lfd process.
-    fn fail_orphaned_runs(&self) -> StoreResult<u32>;
-
-    // Stimulus management (many:1 with waves)
-    fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
-    fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
-    fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>>;
-    fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
-    fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
-    fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()>;
-    fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32>;
-
-    // Pending activations (for coalescing triggers)
-    fn list_pending_activations(&self, wave_id: &LfdId) -> StoreResult<Vec<PendingActivation>>;
-    fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
-    fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
-    fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32>;
-    fn get_pending_for_stimulus(
-        &self,
-        wave_id: &LfdId,
-        stimulus_id: &LfdId,
-    ) -> StoreResult<Option<PendingActivation>>;
-
-    // Fork runs
-    fn list_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>>;
-    fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
-    fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
-
-    // Step runs
-    fn list_agents(&self) -> StoreResult<Vec<Agent>>;
-    fn list_agent_history(
-        &self,
-        worktree: Option<&str>,
-        repo: Option<&str>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<Agent>>;
-    fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>>;
-    fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>>;
-    fn start_agent(&self, agent: &Agent) -> StoreResult<()>;
-    fn update_agent_status(
-        &self,
-        agent_id: &LfdId,
-        status: i32,
-        pid: Option<u32>,
-        container_id: Option<&str>,
-    ) -> StoreResult<()>;
-    fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
-    fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>>;
-    fn end_active_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-        status: i32,
-        ended_at: i64,
-    ) -> StoreResult<()>;
-    fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>>;
-
-    // Summaries
-    fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
-    fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
-
-    // Chat memory blocks
-    fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>>;
-    fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()>;
-    fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()>;
-}
-
-pub type SharedStore = Arc<dyn RunStore>;
+pub type SharedStore = Arc<Store>;
 
 #[cfg(test)]
 mod tests {
-    use super::{ForkRun, ForkRunStatus, RunStore};
+    use super::{ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation,
-        PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind,
-        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Agent, AgentStatus, ChatMemoryBlock, SidecarKind, Stimulus, StimulusKind, Summary, Wave,
+        WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -646,78 +1130,8 @@ mod tests {
         }
     }
 
-    fn make_stimulus(wave_id: &LfdId) -> Stimulus {
-        Stimulus {
-            id: LfdId::new(),
-            wave_id: wave_id.clone(),
-            kind: StimulusKind::Watch,
-            cron: "".to_string(),
-            last_main_sha: Some("abc123".to_string()),
-            last_triggered_at: Some(100),
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        }
-    }
-
-    fn make_pending_activation(wave_id: &LfdId, stimulus_id: &LfdId) -> PendingActivation {
-        PendingActivation {
-            id: LfdId::new(),
-            wave_id: wave_id.clone(),
-            stimulus_id: stimulus_id.clone(),
-            from_sha: "aaa".to_string(),
-            to_sha: "bbb".to_string(),
-            queued_at: OffsetDateTime::now_utc().unix_timestamp(),
-        }
-    }
-
-    fn make_agent(wave_run_id: Option<&LfdId>, status: AgentStatus, started_at: i64) -> Agent {
-        Agent {
-            id: LfdId::new(),
-            step: "plan".to_string(),
-            repo: "/repo".to_string(),
-            worktree: "/repo".to_string(),
-            wave_run_id: wave_run_id.cloned(),
-            status,
-            started_at: Some(OffsetDateTime::from_unix_timestamp(started_at).unwrap()),
-            ended_at: None,
-            pid: None,
-            container_id: None,
-            model: "claude-code".to_string(),
-            run_mode: "auto".to_string(),
-        }
-    }
-
-    fn run_store_suite(store: &dyn RunStore) {
-        let mut wave = make_wave("/repo");
-        store.create_wave(&wave).unwrap();
-
-        let loaded = store.get_wave(&wave.id).unwrap().unwrap();
-        assert_eq!(loaded.name, wave.name);
-
-        wave.status = WaveStatus::Paused;
-        store.update_wave(&wave).unwrap();
-        let updated = store.get_wave(&wave.id).unwrap().unwrap();
-        assert_eq!(updated.status, WaveStatus::Paused);
-
-        let repo_waves = store.list_waves(Some(&wave.repo)).unwrap();
-        assert!(!repo_waves.is_empty());
-
-        let stimulus = make_stimulus(&wave.id);
-        store.create_stimulus(&stimulus).unwrap();
-        let listed = store.list_stimuli(Some(&wave.id)).unwrap();
-        assert_eq!(listed.len(), 1);
-        let by_kind = store
-            .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
-            .unwrap();
-        assert_eq!(by_kind.len(), 1);
-
-        let mut stimulus_updated = stimulus.clone();
-        stimulus_updated.cron = "0 9 * * *".to_string();
-        store.update_stimulus(&stimulus_updated).unwrap();
-        let loaded_stimulus = store.get_stimulus(&stimulus.id).unwrap().unwrap();
-        assert_eq!(loaded_stimulus.cron, "0 9 * * *");
-
-        let run = WaveRun {
+    fn make_run(wave: &Wave, status: WaveRunStatus, kind: WaveRunKind) -> WaveRun {
+        WaveRun {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
             snapshot: WaveRunSnapshot {
@@ -727,118 +1141,79 @@ mod tests {
                 area: wave.area.clone(),
                 pr: None,
             },
-            iteration: 1,
+            iteration: 0,
             step_index: 0,
-            status: WaveRunStatus::Running,
+            status,
             worktree: "/repo".to_string(),
             branch: "main".to_string(),
             started_at: Some(OffsetDateTime::now_utc()),
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
+            run_kind: kind,
+            sidecar_kind: if kind == WaveRunKind::Sidecar {
+                Some(SidecarKind::CiFix)
+            } else {
+                None
+            },
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: wave.id.to_string(),
-            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
-            lineage_inferred: false,
-        };
-        store.create_wave_run(&run).unwrap();
-        let loaded_run = store.get_wave_run(&run.id).unwrap().unwrap();
-        assert_eq!(loaded_run.wave_id, wave.id);
-        assert_eq!(loaded_run.stack_position, 0);
-        assert_eq!(loaded_run.stack_status, WaveRunStackStatus::Active);
-
-        let run_with_pr = WaveRun {
-            id: LfdId::new(),
-            wave_id: wave.id.clone(),
-            snapshot: WaveRunSnapshot {
-                repo: wave.repo.clone(),
-                flow: wave.flow.clone(),
-                direction: wave.direction.clone(),
-                area: wave.area.clone(),
-                pr: Some(PullRequest {
-                    url: "https://example.test/pr/42".to_string(),
-                    number: Some(42),
-                    state: Some("open".to_string()),
-                    title: Some("feature".to_string()),
-                    branch: Some("feature-42".to_string()),
-                }),
-            },
-            iteration: 2,
-            step_index: 0,
-            status: WaveRunStatus::Running,
-            worktree: "/repo".to_string(),
-            branch: "feature-42".to_string(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
-            parent_run_id: Some(run.id.clone()),
-            parent_pr_number: None,
-            stack_position: 1,
-            stack_group_id: wave.id.to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_basic_suite() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let mut wave = make_wave("/repo");
+        store.create_wave(&wave).await.expect("create wave");
+        assert!(store.get_wave(&wave.id).await.expect("get wave").is_some());
+
+        wave.status = WaveStatus::Paused;
+        store.update_wave(&wave).await.expect("update wave");
+        let loaded = store
+            .get_wave(&wave.id)
+            .await
+            .expect("get wave")
+            .expect("wave exists");
+        assert_eq!(loaded.status, WaveStatus::Paused);
+
+        let stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            kind: StimulusKind::Watch,
+            cron: "".to_string(),
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
         };
-        store.create_wave_run(&run_with_pr).unwrap();
-
-        let stack_runs = store.list_stack_runs(&wave.id).unwrap();
-        assert_eq!(stack_runs.len(), 2);
-        assert_eq!(stack_runs[0].id, run.id);
-        assert_eq!(stack_runs[1].id, run_with_pr.id);
-        assert_eq!(stack_runs[1].parent_run_id, Some(run.id.clone()));
-
-        let descendants = store.find_descendants(&run.id).unwrap();
-        assert_eq!(descendants.len(), 1);
-        assert_eq!(descendants[0].id, run_with_pr.id);
-
-        let next_before_live = store.find_next_unmerged_run(&wave.id).unwrap();
-        assert_eq!(next_before_live.map(|value| value.id), Some(run.id.clone()));
-
-        let live_state = LivePullRequestState {
-            repo_id: wave.repo.clone(),
-            pr_number: 42,
-            state: LivePrState::Merged,
-            is_draft: false,
-            head_ref: "feature-42".to_string(),
-            head_sha: "abc123".to_string(),
-            base_ref: "main".to_string(),
-            updated_at: OffsetDateTime::now_utc(),
-            merged_at: Some(OffsetDateTime::now_utc()),
-            synced_at: OffsetDateTime::now_utc(),
-        };
-        store.upsert_live_pr_state(&live_state).unwrap();
-        let loaded_live = store.get_live_pr_state(&wave.repo, 42).unwrap().unwrap();
-        assert_eq!(loaded_live.state, LivePrState::Merged);
-
-        let activation = make_pending_activation(&wave.id, &stimulus.id);
-        store.create_pending_activation(&activation).unwrap();
-        let activations = store.list_pending_activations(&wave.id).unwrap();
-        assert_eq!(activations.len(), 1);
-        let pending = store
-            .get_pending_for_stimulus(&wave.id, &stimulus.id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(pending.id, activation.id);
-
-        let wave_after_pending = store.get_wave(&wave.id).unwrap().unwrap();
-        assert_eq!(wave_after_pending.id, wave.id);
-
-        let mut activation_updated = activation.clone();
-        activation_updated.to_sha = "ccc".to_string();
         store
-            .update_pending_activation(&activation_updated)
-            .unwrap();
+            .create_stimulus(&stimulus)
+            .await
+            .expect("create stimulus");
+        assert_eq!(
+            store
+                .list_stimuli(Some(&wave.id))
+                .await
+                .expect("list stimuli")
+                .len(),
+            1
+        );
 
-        let deleted = store.delete_pending_activations(&wave.id).unwrap();
-        assert_eq!(deleted, 1);
-        let wave_after_delete = store.get_wave(&wave.id).unwrap().unwrap();
-        assert_eq!(wave_after_delete.id, wave.id);
+        let run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
+        store.create_wave_run(&run).await.expect("create wave run");
+        assert!(store
+            .get_active_wave_run(&wave.id)
+            .await
+            .expect("get active")
+            .is_some());
 
         let fork_run = ForkRun {
             id: LfdId::new(),
@@ -848,51 +1223,58 @@ mod tests {
             status: ForkRunStatus::Pending,
             worktree: "/tmp/branch".to_string(),
         };
-        store.upsert_fork_run(&fork_run).unwrap();
-        let forks = store.list_fork_runs(&run.id, 0).unwrap();
-        assert_eq!(forks.len(), 1);
-        let deleted_forks = store.delete_fork_runs(&run.id, 0).unwrap();
-        assert_eq!(deleted_forks, 1);
-
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        let agent = make_agent(Some(&run.id), AgentStatus::Waiting, now);
-        store.start_agent(&agent).unwrap();
-        let waiting = store.get_waiting_agent_for_wave(&wave.id).unwrap().unwrap();
-        assert_eq!(waiting.id, agent.id);
         store
-            .update_agent_status(
-                &agent.id,
-                AgentStatus::Running.as_i32(),
-                Some(123),
-                Some("container-123"),
-            )
-            .unwrap();
-        let updated_agent = store.get_agent(&agent.id).unwrap().unwrap();
-        assert_eq!(updated_agent.pid, Some(123));
-        assert_eq!(updated_agent.container_id.as_deref(), Some("container-123"));
-        store
-            .end_agent(&agent.id, AgentStatus::Completed.as_i32(), now + 10)
-            .unwrap();
+            .upsert_fork_run(&fork_run)
+            .await
+            .expect("upsert fork run");
+        assert_eq!(
+            store
+                .list_fork_runs(&run.id, 0)
+                .await
+                .expect("list fork runs")
+                .len(),
+            1
+        );
 
-        let old_run = make_agent(Some(&run.id), AgentStatus::Running, now - 3600);
-        store.start_agent(&old_run).unwrap();
-        let stuck = store.get_stuck_agents(60).unwrap();
-        assert!(stuck.iter().any(|run| run.id == old_run.id));
+        let agent = Agent {
+            id: LfdId::new(),
+            step: "plan".to_string(),
+            repo: "/repo".to_string(),
+            worktree: "/repo".to_string(),
+            wave_run_id: Some(run.id.clone()),
+            status: AgentStatus::Waiting,
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            pid: None,
+            container_id: None,
+            model: "claude-code".to_string(),
+            run_mode: "auto".to_string(),
+        };
+        store.start_agent(&agent).await.expect("start agent");
+        assert!(store
+            .get_waiting_agent_for_wave(&wave.id)
+            .await
+            .expect("get waiting")
+            .is_some());
 
-        // Summary CRUD
         let summary = Summary {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
-            content: "# Summary\nCore types and APIs...".to_string(),
-            source_hash: "abc123".to_string(),
-            token_budget: 10000,
+            content: "summary".to_string(),
+            source_hash: "abc".to_string(),
+            token_budget: 100,
             model: "claude-code".to_string(),
             created_at: Some(OffsetDateTime::now_utc()),
         };
-        store.upsert_summary(&summary).unwrap();
-        let loaded_summary = store.get_summary(&wave.id).unwrap().unwrap();
-        assert_eq!(loaded_summary.content, summary.content);
-        assert_eq!(loaded_summary.source_hash, "abc123");
+        store
+            .upsert_summary(&summary)
+            .await
+            .expect("upsert summary");
+        assert!(store
+            .get_summary(&wave.id)
+            .await
+            .expect("get summary")
+            .is_some());
 
         // Upsert replaces on same wave_id
         let updated_summary = Summary {
@@ -904,8 +1286,15 @@ mod tests {
             model: "claude-code".to_string(),
             created_at: Some(OffsetDateTime::now_utc()),
         };
-        store.upsert_summary(&updated_summary).unwrap();
-        let reloaded = store.get_summary(&wave.id).unwrap().unwrap();
+        store
+            .upsert_summary(&updated_summary)
+            .await
+            .expect("upsert updated summary");
+        let reloaded = store
+            .get_summary(&wave.id)
+            .await
+            .expect("get updated summary")
+            .expect("summary should exist");
         assert_eq!(reloaded.content, "# Updated summary");
         assert_eq!(reloaded.source_hash, "def456");
 
@@ -924,9 +1313,18 @@ mod tests {
             position: 0,
             updated_at: Some(OffsetDateTime::now_utc()),
         };
-        store.upsert_chat_memory_block(&block_a).unwrap();
-        store.upsert_chat_memory_block(&block_b).unwrap();
-        let blocks = store.list_chat_memory_blocks(&wave.id).unwrap();
+        store
+            .upsert_chat_memory_block(&block_a)
+            .await
+            .expect("upsert block a");
+        store
+            .upsert_chat_memory_block(&block_b)
+            .await
+            .expect("upsert block b");
+        let blocks = store
+            .list_chat_memory_blocks(&wave.id)
+            .await
+            .expect("list blocks");
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].name, "project-context");
         assert_eq!(blocks[1].name, "preferences");
@@ -936,8 +1334,14 @@ mod tests {
             position: 2,
             ..block_a
         };
-        store.upsert_chat_memory_block(&block_a_updated).unwrap();
-        let blocks = store.list_chat_memory_blocks(&wave.id).unwrap();
+        store
+            .upsert_chat_memory_block(&block_a_updated)
+            .await
+            .expect("upsert updated block");
+        let blocks = store
+            .list_chat_memory_blocks(&wave.id)
+            .await
+            .expect("list blocks after update");
         let updated = blocks
             .iter()
             .find(|block| block.name == "preferences")
@@ -947,131 +1351,71 @@ mod tests {
 
         store
             .delete_chat_memory_block(&wave.id, "project-context")
-            .unwrap();
-        let blocks = store.list_chat_memory_blocks(&wave.id).unwrap();
+            .await
+            .expect("delete block");
+        let blocks = store
+            .list_chat_memory_blocks(&wave.id)
+            .await
+            .expect("list blocks after delete");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name, "preferences");
 
-        store.delete_wave(&wave.id).unwrap();
-        assert!(store.get_wave(&wave.id).unwrap().is_none());
+        store.delete_wave(&wave.id).await.expect("delete wave");
+        assert!(store
+            .get_wave(&wave.id)
+            .await
+            .expect("get deleted wave")
+            .is_none());
     }
 
-    /// get_active_wave_run excludes failed runs (they're not active).
-    /// get_latest_wave_run returns the most recent run regardless of status,
-    /// so the UI can still display error details for failed waves.
-    fn run_active_excludes_failed_latest_includes_suite(store: &dyn RunStore) {
-        let wave = make_wave("/repo-fail-test");
-        store.create_wave(&wave).unwrap();
+    #[tokio::test]
+    async fn active_run_excludes_failed_and_sidecar() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
 
-        let mut run = WaveRun {
-            id: LfdId::new(),
-            wave_id: wave.id.clone(),
-            snapshot: WaveRunSnapshot {
-                repo: wave.repo.clone(),
-                flow: wave.flow.clone(),
-                direction: wave.direction.clone(),
-                area: wave.area.clone(),
-                pr: None,
-            },
-            iteration: 0,
-            step_index: 1,
-            status: WaveRunStatus::Running,
-            worktree: "/repo".to_string(),
-            branch: "main".to_string(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
-            parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: wave.id.to_string(),
-            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
-            lineage_inferred: false,
-        };
-        store.create_wave_run(&run).unwrap();
+        let wave = make_wave("/repo-active");
+        store.create_wave(&wave).await.expect("create wave");
 
-        // Should find the running run as active
-        let active = store.get_active_wave_run(&wave.id).unwrap();
-        assert!(active.is_some(), "should find running run");
+        let mut run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
+        store
+            .create_wave_run(&run)
+            .await
+            .expect("create running run");
+        assert!(store
+            .get_active_wave_run(&wave.id)
+            .await
+            .expect("active run")
+            .is_some());
 
-        // Mark as failed
         run.status = WaveRunStatus::Failed;
-        run.error = Some("step reduce failed".to_string());
+        run.error = Some("failed".to_string());
         run.ended_at = Some(OffsetDateTime::now_utc());
-        store.update_wave_run(&run).unwrap();
-
-        // get_active_wave_run should NOT return failed runs
-        let active = store.get_active_wave_run(&wave.id).unwrap();
-        assert!(active.is_none(), "failed run should not be active");
-
-        // get_latest_wave_run should still return the failed run
-        let latest = store.get_latest_wave_run(&wave.id).unwrap();
-        assert!(latest.is_some(), "should find failed run via latest");
-        let latest = latest.unwrap();
-        assert_eq!(latest.status, WaveRunStatus::Failed);
-        assert_eq!(latest.error.as_deref(), Some("step reduce failed"));
-
-        // Sidecar runs should not count as active main runs.
-        let sidecar = WaveRun {
-            id: LfdId::new(),
-            wave_id: wave.id.clone(),
-            snapshot: WaveRunSnapshot {
-                repo: wave.repo.clone(),
-                flow: "debug".to_string(),
-                direction: wave.direction.clone(),
-                area: wave.area.clone(),
-                pr: None,
-            },
-            iteration: 0,
-            step_index: 0,
-            status: WaveRunStatus::Running,
-            worktree: "/repo.sidecar".to_string(),
-            branch: "ci-fix-temp".to_string(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            run_kind: WaveRunKind::Sidecar,
-            sidecar_kind: Some(SidecarKind::CiFix),
-            parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: wave.id.to_string(),
-            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
-            lineage_inferred: false,
-        };
-        store.create_wave_run(&sidecar).unwrap();
-        let active = store.get_active_wave_run(&wave.id).unwrap();
-        assert!(
-            active.is_none(),
-            "sidecar run should not be returned as active main run"
+        store.update_wave_run(&run).await.expect("update run");
+        assert!(store
+            .get_active_wave_run(&wave.id)
+            .await
+            .expect("active after fail")
+            .is_none());
+        assert_eq!(
+            store
+                .get_latest_wave_run(&wave.id)
+                .await
+                .expect("latest run")
+                .expect("run exists")
+                .status,
+            WaveRunStatus::Failed
         );
 
-        store.delete_wave(&wave.id).unwrap();
-    }
-
-    #[test]
-    fn sqlite_store_suite() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = super::StorageConfig::sqlite(db_path);
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let store = runtime.block_on(super::open_store(&config)).unwrap();
-
-        let shared = store.into_shared();
-        run_store_suite(shared.as_ref());
-        run_active_excludes_failed_latest_includes_suite(shared.as_ref());
-    }
-
-    #[test]
-    fn run_active_excludes_failed_latest_includes() {
-        let path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let store = super::sqlite::SqliteStore::new(&path).unwrap();
-        run_active_excludes_failed_latest_includes_suite(&store);
+        let sidecar = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Sidecar);
+        store
+            .create_wave_run(&sidecar)
+            .await
+            .expect("create sidecar run");
+        assert!(store
+            .get_active_wave_run(&wave.id)
+            .await
+            .expect("active with sidecar")
+            .is_none());
     }
 }

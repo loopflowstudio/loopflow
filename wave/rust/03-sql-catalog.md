@@ -8,11 +8,13 @@ One SQL string per query operation. A thin dialect layer converts `?` placeholde
 
 ## Current state
 
-~45 SQL statements duplicated across `sqlite.rs` (824 lines) and `postgres.rs` (970 lines). The SQL is nearly identical — same column lists, same WHERE clauses, same ORDER BY. Differences:
+~45 SQL statements duplicated across `sqlite.rs` (940 lines) and `postgres.rs` (1074 lines). The SQL is nearly identical — same column lists, same WHERE clauses, same ORDER BY. Differences:
 
 - Placeholder syntax: `?1` (sqlite) vs `$1` (postgres)
 - Driver API: `conn.prepare().query_map()` vs `client.query()`
 - Parameter passing: `params![]` vs `&[]`
+
+Additionally, `store/mod.rs` (1284 lines) has ~226 lines of `pub async fn` forwarding methods on `Store` that dispatch to `SqliteStore` or `PostgresStore` by matching on `StoreBackend`. These are mechanical: match, call, return. The catalog may reduce some of this repetition if query dispatch can be generalized.
 
 Row mapping is already shared: `StoreRow` trait in `store/rows.rs` abstracts over `rusqlite::Row` and `tokio_postgres::Row`. Functions like `map_wave_row()` work for both backends.
 
@@ -61,14 +63,15 @@ Snapshot tests that render each catalog query for both dialects and compare agai
 | File | Lines | What changes |
 |------|-------|-------------|
 | `lfd/store/catalog.rs` | new (~200) | All SQL strings defined once |
-| `lfd/store/sqlite.rs` | ~824 → ~400 | Query bodies replaced with catalog + render |
-| `lfd/store/postgres.rs` | ~970 → ~500 | Same reduction |
+| `lfd/store/sqlite.rs` | ~940 → ~450 | Query bodies replaced with catalog + render |
+| `lfd/store/postgres.rs` | ~1074 → ~550 | Same reduction |
+| `lfd/store/mod.rs` | ~1284 | Forwarding methods unchanged; catalog reduces backend code they dispatch to |
 | `lfd/store/rows.rs` | unchanged | Already shared |
 
 ## Risks
 
 - **Edge cases in SQL between backends**: SQLite and Postgres have minor syntax differences beyond placeholders (e.g., `UPSERT` syntax, type casting). The catalog needs to handle these — likely with per-dialect query variants for the ~5 queries that differ.
-- **Migration ordering**: This stage depends on Stage 02 because the backend method signatures change (sync → async). Easier to deduplicate when both backends have the same async shape.
+- **mod.rs forwarding layer**: Stage 02 added ~226 lines of `pub async fn` on `Store` that match on backend and call the corresponding method. The catalog doesn't directly reduce this — it's a dispatch pattern, not SQL duplication. But it's worth noting that the store module is now 3298 lines across three files. The catalog should shrink it by ~1000 lines.
 
 ## Done when
 

@@ -40,7 +40,10 @@ async fn tick_loop_waves(
     executor: &WaveExecutor,
     event_hub: &EventHub,
 ) {
-    let stimuli = match store.list_stimuli_by_kind(StimulusKind::Loop.as_i32()) {
+    let stimuli = match store
+        .list_stimuli_by_kind(StimulusKind::Loop.as_i32())
+        .await
+    {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list loop stimuli");
@@ -53,7 +56,7 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let wave = match store.get_wave(&stimulus.wave_id) {
+        let wave = match store.get_wave(&stimulus.wave_id).await {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
@@ -70,7 +73,7 @@ async fn tick_loop_waves(
             continue;
         }
 
-        if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id) {
+        if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
             continue;
         }
 
@@ -80,7 +83,7 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let run = match create_wave_run_with_id(store, &wave, &run_id) {
+        let run = match create_wave_run_with_id(store, &wave, &run_id).await {
             Ok(run) => run,
             Err(err) => {
                 scheduler.release(run_id.as_str());

@@ -6,17 +6,20 @@ use loopflow::engine::naming::sanitize_for_branch;
 use loopflow::engine::worktrees::{branch_exists, worktree_path};
 use loopflow::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use loopflow::lfd::id::LfdId;
-use loopflow::lfd::store::sqlite::SqliteStore;
-use loopflow::lfd::store::SharedStore;
+use loopflow::lfd::store::{open_store, SharedStore, StorageConfig};
 use loopflow::lfd::types::{Wave, WaveStatus};
 use loopflow_test_support::TestRepo;
 
-fn make_store() -> SharedStore {
+async fn make_store() -> SharedStore {
     let path = std::env::temp_dir()
         .join(format!("lfd-test-{}.db", LfdId::new()))
         .to_string_lossy()
         .to_string();
-    Arc::new(SqliteStore::new(&PathBuf::from(path)).unwrap())
+    Arc::new(
+        open_store(&StorageConfig::sqlite(PathBuf::from(path)))
+            .await
+            .unwrap(),
+    )
 }
 
 fn make_wave(repo: &str, name: &str) -> Wave {
@@ -35,15 +38,17 @@ fn make_wave(repo: &str, name: &str) -> Wave {
     }
 }
 
-#[test]
-fn wave_run_creates_worktree() {
+#[tokio::test]
+async fn wave_run_creates_worktree() {
     let repo = TestRepo::new();
-    let store = make_store();
+    let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "expand");
-    store.create_wave(&wave).unwrap();
+    store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id).unwrap();
+    let run = create_wave_run_with_id(&store, &wave, &run_id)
+        .await
+        .unwrap();
 
     let wt = PathBuf::from(&run.worktree);
     assert!(wt.exists(), "worktree directory should exist: {wt:?}");
@@ -53,15 +58,17 @@ fn wave_run_creates_worktree() {
     );
 }
 
-#[test]
-fn wave_run_creates_branch() {
+#[tokio::test]
+async fn wave_run_creates_branch() {
     let repo = TestRepo::new();
-    let store = make_store();
+    let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "polish");
-    store.create_wave(&wave).unwrap();
+    store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id).unwrap();
+    let run = create_wave_run_with_id(&store, &wave, &run_id)
+        .await
+        .unwrap();
 
     assert!(!run.branch.is_empty(), "branch should be set");
 
@@ -75,15 +82,17 @@ fn wave_run_creates_branch() {
     assert_eq!(branch, run.branch);
 }
 
-#[test]
-fn wave_run_worktree_follows_naming_convention() {
+#[tokio::test]
+async fn wave_run_worktree_follows_naming_convention() {
     let repo = TestRepo::new();
-    let store = make_store();
+    let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "review");
-    store.create_wave(&wave).unwrap();
+    store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id).unwrap();
+    let run = create_wave_run_with_id(&store, &wave, &run_id)
+        .await
+        .unwrap();
 
     let expected = worktree_path(repo.path(), "review");
     assert_eq!(
@@ -93,32 +102,40 @@ fn wave_run_worktree_follows_naming_convention() {
     );
 }
 
-#[test]
-fn wave_run_reuses_existing_worktree() {
+#[tokio::test]
+async fn wave_run_reuses_existing_worktree() {
     let repo = TestRepo::new();
-    let store = make_store();
+    let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "iterate");
-    store.create_wave(&wave).unwrap();
+    store.create_wave(&wave).await.unwrap();
 
     // First run creates the worktree
-    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new()).unwrap();
+    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+        .await
+        .unwrap();
     let wt_path = run1.worktree.clone();
 
     // Second run reuses the existing worktree
-    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new()).unwrap();
+    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+        .await
+        .unwrap();
     assert_eq!(run2.worktree, wt_path, "should reuse existing worktree");
     assert!(!run2.branch.is_empty(), "branch should still be set");
 }
 
-#[test]
-fn wave_run_records_parent_lineage() {
+#[tokio::test]
+async fn wave_run_records_parent_lineage() {
     let repo = TestRepo::new();
-    let store = make_store();
+    let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "lineage");
-    store.create_wave(&wave).unwrap();
+    store.create_wave(&wave).await.unwrap();
 
-    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new()).unwrap();
-    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new()).unwrap();
+    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+        .await
+        .unwrap();
+    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+        .await
+        .unwrap();
 
     assert_eq!(run1.stack_position, 0);
     assert_eq!(run2.stack_position, 1);

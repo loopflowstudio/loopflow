@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
@@ -9,15 +9,15 @@ use crate::lfd::store::rows::{
     map_pending_activation_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row,
     now_unix, serialize_pr,
 };
-use crate::lfd::store::{ForkRun, RunStore, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, LivePullRequestState, PendingActivation, Stimulus,
     Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SqliteStore {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteStore {
@@ -36,7 +36,7 @@ impl SqliteStore {
         super::migrations::apply_sqlite(&conn)?;
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
         })
     }
 
@@ -119,23 +119,23 @@ impl SqliteStore {
     }
 }
 
-impl RunStore for SqliteStore {
-    fn health_check(&self) -> StoreResult<()> {
+impl SqliteStore {
+    pub fn health_check(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("SELECT 1", [])?;
         Ok(())
     }
 
-    fn schema_version(&self) -> StoreResult<String> {
+    pub fn schema_version(&self) -> StoreResult<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         super::migrations::latest_version_sqlite(&conn)
     }
 
-    fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
+    pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         self.read_waves(repo)
     }
 
-    fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+    pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
@@ -148,7 +148,7 @@ impl RunStore for SqliteStore {
         wave.transpose()
     }
 
-    fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
+    pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
@@ -161,21 +161,21 @@ impl RunStore for SqliteStore {
         wave.transpose()
     }
 
-    fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
+    pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.upsert_wave(wave)
     }
 
-    fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
+    pub fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.upsert_wave(wave)
     }
 
-    fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+    pub fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         Ok(())
     }
 
-    fn list_wave_runs(
+    pub fn list_wave_runs(
         &self,
         wave_id: Option<&LfdId>,
         limit: Option<u32>,
@@ -213,7 +213,7 @@ impl RunStore for SqliteStore {
         Ok(runs)
     }
 
-    fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    pub fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
@@ -229,7 +229,7 @@ impl RunStore for SqliteStore {
         run.transpose()
     }
 
-    fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    pub fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
@@ -256,7 +256,7 @@ impl RunStore for SqliteStore {
         run.transpose()
     }
 
-    fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+    pub fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
@@ -279,7 +279,7 @@ impl RunStore for SqliteStore {
         run.transpose()
     }
 
-    fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+    pub fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let started_at = run
             .started_at
@@ -324,7 +324,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+    pub fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
         let updated = conn.execute(
@@ -369,7 +369,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
+    pub fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
@@ -396,7 +396,7 @@ impl RunStore for SqliteStore {
         Ok(runs)
     }
 
-    fn get_live_pr_state(
+    pub fn get_live_pr_state(
         &self,
         repo_id: &str,
         pr_number: u32,
@@ -416,7 +416,7 @@ impl RunStore for SqliteStore {
         state.transpose()
     }
 
-    fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
+    pub fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO live_pr_states (
@@ -448,7 +448,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn fail_orphaned_runs(&self) -> StoreResult<u32> {
+    pub fn fail_orphaned_runs(&self) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             "UPDATE wave_runs SET status = ?1, error = ?2, ended_at = ?3
@@ -465,7 +465,7 @@ impl RunStore for SqliteStore {
         Ok(updated as u32)
     }
 
-    fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
+    pub fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (query, params): (&str, Vec<Box<dyn ToSql>>) = if let Some(wave_id) = wave_id {
             (
@@ -494,7 +494,7 @@ impl RunStore for SqliteStore {
         Ok(stimuli)
     }
 
-    fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    pub fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
@@ -508,7 +508,7 @@ impl RunStore for SqliteStore {
         Ok(stimuli)
     }
 
-    fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
+    pub fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
@@ -520,7 +520,7 @@ impl RunStore for SqliteStore {
         stimulus.transpose()
     }
 
-    fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    pub fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let created_at = stimulus
             .created_at
@@ -544,7 +544,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    pub fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             "UPDATE stimuli SET
@@ -566,19 +566,19 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
+    pub fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("DELETE FROM stimuli WHERE id = ?1", params![stimulus_id])?;
         Ok(())
     }
 
-    fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
+    pub fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute("DELETE FROM stimuli WHERE wave_id = ?1", params![wave_id])?;
         Ok(deleted as u32)
     }
 
-    fn list_pending_activations(&self, wave_id: &LfdId) -> StoreResult<Vec<PendingActivation>> {
+    pub fn list_pending_activations(&self, wave_id: &LfdId) -> StoreResult<Vec<PendingActivation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, stimulus_id, from_sha, to_sha, queued_at
@@ -592,7 +592,7 @@ impl RunStore for SqliteStore {
         Ok(activations)
     }
 
-    fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
+    pub fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO pending_activations (id, wave_id, stimulus_id, from_sha, to_sha, queued_at)
@@ -609,7 +609,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
+    pub fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             "UPDATE pending_activations SET from_sha = ?1, to_sha = ?2 WHERE id = ?3",
@@ -621,7 +621,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
+    pub fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute(
             "DELETE FROM pending_activations WHERE wave_id = ?1",
@@ -630,7 +630,7 @@ impl RunStore for SqliteStore {
         Ok(deleted as u32)
     }
 
-    fn get_pending_for_stimulus(
+    pub fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
         stimulus_id: &LfdId,
@@ -648,7 +648,11 @@ impl RunStore for SqliteStore {
         activation.transpose()
     }
 
-    fn list_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
+    pub fn list_fork_runs(
+        &self,
+        wave_run_id: &LfdId,
+        step_index: u32,
+    ) -> StoreResult<Vec<ForkRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_run_id, step_index, branch_index, status, worktree
@@ -665,7 +669,7 @@ impl RunStore for SqliteStore {
         Ok(runs)
     }
 
-    fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
+    pub fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO fork_runs (id, wave_run_id, step_index, branch_index, status, worktree)
@@ -688,7 +692,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+    pub fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute(
             "DELETE FROM fork_runs WHERE wave_run_id = ?1 AND step_index = ?2",
@@ -697,11 +701,11 @@ impl RunStore for SqliteStore {
         Ok(deleted as u32)
     }
 
-    fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+    pub fn list_agents(&self) -> StoreResult<Vec<Agent>> {
         self.list_agent_history(None, None, None)
     }
 
-    fn list_agent_history(
+    pub fn list_agent_history(
         &self,
         worktree: Option<&str>,
         repo: Option<&str>,
@@ -747,7 +751,7 @@ impl RunStore for SqliteStore {
         Ok(runs)
     }
 
-    fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, step, repo, worktree, wave_run_id, status,
@@ -760,7 +764,7 @@ impl RunStore for SqliteStore {
         run.transpose()
     }
 
-    fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
@@ -778,7 +782,7 @@ impl RunStore for SqliteStore {
         run.transpose()
     }
 
-    fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+    pub fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let started_at = agent
             .started_at
@@ -807,7 +811,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn update_agent_status(
+    pub fn update_agent_status(
         &self,
         agent_id: &LfdId,
         status: i32,
@@ -829,7 +833,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
+    pub fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             "UPDATE agents SET status = ?1, ended_at = ?2 WHERE id = ?3",
@@ -841,7 +845,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+    pub fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
@@ -858,7 +862,7 @@ impl RunStore for SqliteStore {
         Ok(agents)
     }
 
-    fn end_active_agent_for_wave(
+    pub fn end_active_agent_for_wave(
         &self,
         wave_id: &LfdId,
         status: i32,
@@ -877,7 +881,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+    pub fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let cutoff = now_unix() - older_than_secs as i64;
         let mut stmt = conn.prepare(
@@ -894,7 +898,7 @@ impl RunStore for SqliteStore {
         Ok(runs)
     }
 
-    fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
+    pub fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, content, source_hash, token_budget, model, created_at
@@ -906,7 +910,7 @@ impl RunStore for SqliteStore {
         summary.transpose()
     }
 
-    fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
+    pub fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let created_at = summary
             .created_at
@@ -935,7 +939,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
+    pub fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT wave_id, name, content, position, updated_at
@@ -951,7 +955,7 @@ impl RunStore for SqliteStore {
         Ok(blocks)
     }
 
-    fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+    pub fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated_at = block
             .updated_at
@@ -975,7 +979,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+    pub fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "DELETE FROM chat_memory_blocks WHERE wave_id = ?1 AND name = ?2",

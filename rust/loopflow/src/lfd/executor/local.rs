@@ -62,12 +62,15 @@ impl AgentExecutor for LocalProcessExecutor {
         // Record the PID so the process can be killed on stop.
         if let Some(pid) = child.id() {
             let agent_lfd_id = LfdId::from_raw(agent_id);
-            let _ = self.store.update_agent_status(
-                &agent_lfd_id,
-                AgentStatus::Running.as_i32(),
-                Some(pid),
-                None,
-            );
+            let _ = self
+                .store
+                .update_agent_status(
+                    &agent_lfd_id,
+                    AgentStatus::Running.as_i32(),
+                    Some(pid),
+                    None,
+                )
+                .await;
             self.active
                 .lock()
                 .await
@@ -115,7 +118,7 @@ impl AgentExecutor for LocalProcessExecutor {
     }
 
     async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
-        let orphaned_runs_failed = self.store.fail_orphaned_runs()?;
+        let orphaned_runs_failed = self.store.fail_orphaned_runs().await?;
         Ok(StartupRecovery {
             orphaned_runs_failed,
             ..Default::default()

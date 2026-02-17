@@ -53,33 +53,17 @@ struct Counts {
 }
 
 async fn counts(state: &HttpState) -> Counts {
-    let store = state.store.clone();
-    let waves = tokio::task::spawn_blocking(move || store.list_waves(None))
-        .await
-        .ok()
-        .and_then(|result| result.ok())
-        .unwrap_or_default();
+    let waves_fut = state.store.list_waves(None);
+    let agents_fut = state.store.list_agents();
+    let wave_runs_fut = state.store.list_wave_runs(None, None);
+    let health_fut = state.store.health_check();
+    let (waves, agents, wave_runs, health) =
+        tokio::join!(waves_fut, agents_fut, wave_runs_fut, health_fut);
 
-    let store = state.store.clone();
-    let agents = tokio::task::spawn_blocking(move || store.list_agents())
-        .await
-        .ok()
-        .and_then(|result| result.ok())
-        .unwrap_or_default();
-
-    let store = state.store.clone();
-    let wave_runs = tokio::task::spawn_blocking(move || store.list_wave_runs(None, None))
-        .await
-        .ok()
-        .and_then(|result| result.ok())
-        .unwrap_or_default();
-
-    let store = state.store.clone();
-    let database_ok = tokio::task::spawn_blocking(move || store.health_check())
-        .await
-        .ok()
-        .and_then(|result| result.ok())
-        .is_some();
+    let waves = waves.unwrap_or_default();
+    let agents = agents.unwrap_or_default();
+    let wave_runs = wave_runs.unwrap_or_default();
+    let database_ok = health.is_ok();
 
     let waves_defined = waves.len() as u32;
     let waves_running = wave_runs

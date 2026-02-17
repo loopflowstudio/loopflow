@@ -1,4 +1,4 @@
-# 05: Prompt Pipeline
+# 04: Prompt Pipeline
 
 Replace stringly-typed document categories with a typed pipeline.
 

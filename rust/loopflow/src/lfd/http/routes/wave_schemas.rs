@@ -8,7 +8,7 @@ use tracing::warn;
 
 use crate::lfd::http::dto::{ListResponse, StimulusDefDto, WaveSchemaDto};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiResult};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct StimulusDef {
@@ -116,12 +116,11 @@ pub async fn list_wave_schemas_handler(
     let schemas = discover_wave_schemas(&repo_path)
         .map_err(|err| api_error(StatusCode::CONFLICT, err.message()))?;
 
-    let waves = run_store(&state.store, {
-        let repo = repo.clone();
-        move |store| store.list_waves(Some(&repo))
-    })
-    .await
-    .map_err(map_store_error)?;
+    let waves = state
+        .store
+        .list_waves(Some(&repo))
+        .await
+        .map_err(map_store_error)?;
 
     let mut active_by_ref: HashMap<String, String> = HashMap::new();
     let mut fallback_schema_by_name: HashMap<String, &ResolvedWaveSchema> = HashMap::new();

@@ -32,7 +32,7 @@ pub fn spawn_recovery_loop(
 
 async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
     let stuck_threshold = 4 * 60 * 60;
-    let stuck_runs = match store.get_stuck_agents(stuck_threshold) {
+    let stuck_runs = match store.get_stuck_agents(stuck_threshold).await {
         Ok(runs) => runs,
         Err(err) => {
             tracing::error!(error = %err, "failed to query stuck runs");
@@ -52,19 +52,21 @@ async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
         }
 
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        let _ = store.end_agent(&agent.id, AgentStatus::Failed.as_i32(), now);
+        let _ = store
+            .end_agent(&agent.id, AgentStatus::Failed.as_i32(), now)
+            .await;
 
         if let Some(ref run_id) = agent.wave_run_id {
-            if let Ok(Some(mut run)) = store.get_wave_run(run_id) {
+            if let Ok(Some(mut run)) = store.get_wave_run(run_id).await {
                 run.status = WaveRunStatus::Failed;
                 run.error = Some("agent stuck >4h".to_string());
                 run.ended_at = Some(OffsetDateTime::now_utc());
-                if let Err(err) = store.update_wave_run(&run) {
+                if let Err(err) = store.update_wave_run(&run).await {
                     tracing::error!(run_id = %run.id, error = %err, "failed to update stuck run status");
                 }
-                if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
+                if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id).await {
                     wave.status = WaveStatus::Failed;
-                    if let Err(err) = store.update_wave(&wave) {
+                    if let Err(err) = store.update_wave(&wave).await {
                         tracing::error!(wave_id = %run.wave_id, error = %err, "failed to update wave status");
                     }
                 }

@@ -9,18 +9,24 @@ Make **Combine PRs** a first-class lifecycle operation with coherent run history
 
 ## Estimated implementation size
 
-~250-600 LOC across combine operation, run-model updates, and API projections.
+~300-700 LOC across combine orchestration, reconciliation persistence, and API projections.
+
+## What changed after 01 + 02 shipped
+
+- Queue advancement and merge dedupe already exist and are reliable entry points.
+- Queue role is currently projected from run stack status + live PR cache; no historical queue-role log exists.
+- Live PR sync can infer `superseded` when originals close, but it cannot explain *why* they closed.
 
 ## What exists after this step
 
 - Combine PRs is no longer a detached git-only operation.
-- Original iteration runs are preserved and linked to the combined PR.
+- Original iteration runs are preserved and linked to a durable combine event.
 - Queue projection excludes superseded items automatically.
 - API/Concerto can explain exactly what happened after combine.
 
 ## Core problem being solved
 
-Current combine behavior creates a combined PR and closes originals, but runs still point to stale/closed PRs with no explicit relationship.
+Current combine behavior can leave runs looking closed/superseded via live state, but with no explicit relationship to the combined PR or actor intent.
 
 This step adds lifecycle reconciliation so stack history remains trustworthy.
 
@@ -34,6 +40,7 @@ Persist a combine event with:
 - `combined_run_id` (if synthetic run used)
 - `actor`
 - `created_at`
+- `reconcile_status` (`complete`, `partial`, `retry_needed`)
 
 Persist per-run links:
 
@@ -47,13 +54,13 @@ Persist per-run links:
 2. Build combined branch from intended deltas.
 3. Open combined PR.
 4. Close superseded PRs.
-5. Persist reconciliation links in one transaction boundary where possible.
-6. Resync live PR state.
-7. Recompute queue roles.
+5. Persist combine event + supersession links in one reconciliation write.
+6. Re-run queue reconciliation (`reconcile_wave_queue`) to project final roles.
+7. Resync live PR state.
 
 ## Atomicity expectations
 
-Prefer all-or-nothing semantics for model updates.
+Prefer all-or-nothing semantics for reconciliation writes.
 
 If combined PR is created but reconciliation write fails:
 
@@ -75,12 +82,7 @@ Queue endpoints should ignore superseded items when determining next actionable 
 
 ## Backward compatibility policy
 
-No compatibility shim needed for old combine records.
-
-For existing historical combines (without links), backfill best-effort:
-
-- infer by branch pattern + close timestamps
-- mark inferred links explicitly (`reconciled_inferred = true`)
+No compatibility shim needed for old combine records. Historical runs without combine links remain unlabeled in v1.
 
 ## Error handling
 
@@ -94,7 +96,7 @@ For existing historical combines (without links), backfill best-effort:
 
 - combined PR may remain valid
 - mark original runs as `pending_supersede_cleanup`
-- background retry closure + state sync
+- retry closure + state sync without creating duplicate combine events
 
 ### Reconciliation write failure
 
@@ -105,19 +107,31 @@ For existing historical combines (without links), backfill best-effort:
 
 ### Unit tests
 
-- combine event writes expected links
+- combine event persistence is idempotent for same combined PR
+- combine event writes expected supersession links
 - queue projection excludes superseded items
 
 ### Integration tests
 
 - combine creates one active landing target
 - originals close and show superseded status in API
+- webhook/poll merge reconciliation remains idempotent after combine
 - partial failure paths remain recoverable
 
 ### Regression tests
 
 - no orphaned runs after combine
 - open PR counts remain correct post-combine
+
+## Open questions
+
+- Do we need a synthetic `combined_run_id` in v1, or can event + per-run links fully explain combine history?
+- Should `superseded_by_run_id` point to a synthetic run or remain nullable when combine is event-only?
+
+## Try it
+
+- Create three stacked PRs, run Combine PRs, then verify `/v0/wave_runs?wave_id=<id>&order=stack` shows one active landing target and explicit supersession links.
+- Repeat the same combine webhook payload and verify event processing is idempotent.
 
 ## Observability
 

@@ -338,7 +338,7 @@ impl WaveExecutor {
                                 merged_at: None,
                                 synced_at: OffsetDateTime::now_utc(),
                             };
-                            if let Err(err) = self.store.upsert_live_pr_state(&live_state) {
+                            if let Err(err) = self.store.upsert_live_pr_state(&live_state).await {
                                 warn!(
                                     run_id = %run.id,
                                     error = %err,

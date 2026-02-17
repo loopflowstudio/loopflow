@@ -474,7 +474,6 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::sqlite::SqliteStore;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
         LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunKind,
@@ -521,9 +520,14 @@ mod tests {
         }
     }
 
-    fn sqlite_store() -> SharedStore {
+    async fn sqlite_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-routes-test-{}.db", LfdId::new()));
-        Arc::new(SqliteStore::new(&db_path).expect("sqlite store should initialize"))
+        let config = crate::lfd::store::StorageConfig::sqlite(db_path);
+        Arc::new(
+            crate::lfd::store::open_store(&config)
+                .await
+                .expect("sqlite store should initialize"),
+        )
     }
 
     fn make_wave(repo: &str) -> Wave {
@@ -579,8 +583,10 @@ mod tests {
         }
     }
 
-    fn setup_wave_with_run(pr_number: u32) -> (SharedStore, tempfile::TempDir, Wave, WaveRun) {
-        let store = sqlite_store();
+    async fn setup_wave_with_run(
+        pr_number: u32,
+    ) -> (SharedStore, tempfile::TempDir, Wave, WaveRun) {
+        let store = sqlite_store().await;
         let repo_dir = tempfile::tempdir().expect("tempdir should be created");
         let wave = make_wave(
             repo_dir
@@ -590,10 +596,12 @@ mod tests {
         );
         store
             .create_wave(&wave)
+            .await
             .expect("wave should be created in store");
         let run = make_wave_run(&wave, pr_number);
         store
             .create_wave_run(&run)
+            .await
             .expect("wave run should be created in store");
         (store, repo_dir, wave, run)
     }
@@ -670,10 +678,11 @@ mod tests {
 
     #[tokio::test]
     async fn build_wave_dto_uses_live_pr_state_for_open_counts() {
-        let (store, _repo_dir, wave, _) = setup_wave_with_run(17);
+        let (store, _repo_dir, wave, _) = setup_wave_with_run(17).await;
 
         store
             .upsert_live_pr_state(&live_state(&wave.repo, 17, LivePrState::Closed))
+            .await
             .expect("live PR state should be upserted");
 
         let dto = build_wave_dto(
@@ -695,7 +704,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_projection_tracks_live_pr_state_transitions() {
-        let (store, _repo_dir, wave, run) = setup_wave_with_run(21);
+        let (store, _repo_dir, wave, run) = setup_wave_with_run(21).await;
         let key = run_live_pr_key(&run).expect("run should have a live PR key");
 
         let github = crate::lfd::config::GitHubConfig::default();
@@ -707,6 +716,7 @@ mod tests {
         ] {
             store
                 .upsert_live_pr_state(&live_state(&wave.repo, 21, state))
+                .await
                 .expect("live PR state should be upserted");
 
             let projection =

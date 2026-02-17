@@ -1207,8 +1207,8 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation,
-        PullRequest, QueueBlock, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind, Summary,
+        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
+        QueueBlock, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind, Summary,
         Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;

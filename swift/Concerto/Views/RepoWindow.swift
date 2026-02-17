@@ -29,7 +29,9 @@ struct RepoWindow: View {
                     .environment(outputBuffer)
             }
         }
-        .background(RepoRepresentedURLAccessor(repoURL: repoURL))
+        .background(WindowAccessor { window in
+            window?.representedURL = repoURL
+        })
         .task {
             if let mode = RepoState.uiTestMode() {
                 setupComplete = true
@@ -60,25 +62,6 @@ struct RepoWindow: View {
                     recentsService.addRecent(url)
                 }
             }
-        }
-    }
-}
-
-/// Helper to set representedURL on the hosting window for snapshot service.
-private struct RepoRepresentedURLAccessor: NSViewRepresentable {
-    let repoURL: URL?
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            view.window?.representedURL = repoURL
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            nsView.window?.representedURL = repoURL
         }
     }
 }

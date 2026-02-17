@@ -70,10 +70,7 @@ struct ContentView: View {
         .overlay {
             if keyboardRouter.isHelpOverlayVisible {
                 ShortcutHelpOverlay(
-                    isPresented: Binding(
-                        get: { keyboardRouter.isHelpOverlayVisible },
-                        set: { keyboardRouter.isHelpOverlayVisible = $0 }
-                    ),
+                    isPresented: isHelpOverlayPresented,
                     shortcuts: keyboardRouter.shortcuts,
                     chords: keyboardRouter.chords
                 )
@@ -190,19 +187,19 @@ struct ContentView: View {
 
         switch action {
         case .moveDown:
-            NotificationCenter.default.post(name: .moveFocusDown, object: nil)
+            post(.moveFocusDown)
         case .moveUp:
-            NotificationCenter.default.post(name: .moveFocusUp, object: nil)
+            post(.moveFocusUp)
         case .selectFocused:
-            NotificationCenter.default.post(name: .selectFocusedWave, object: nil)
+            post(.selectFocusedWave)
         case .goToFirst:
-            NotificationCenter.default.post(name: .goToFirstWave, object: nil)
+            post(.goToFirstWave)
         case .goToLast:
-            NotificationCenter.default.post(name: .goToLastWave, object: nil)
+            post(.goToLastWave)
         case .createWave:
-            NotificationCenter.default.post(name: .newWaveRequested, object: nil)
+            post(.newWaveRequested)
         case .editName:
-            NotificationCenter.default.post(name: .editWaveName, object: nil)
+            post(.editWaveName)
         case .deleteWave:
             guard let wave = repoState.selectedWave else { return }
             performWaveAction("delete wave") {
@@ -238,9 +235,9 @@ struct ContentView: View {
         case .viewPR:
             openPRForSelectedWave()
         case .switchToCurrentTab:
-            NotificationCenter.default.post(name: .switchToCurrentTab, object: nil)
+            post(.switchToCurrentTab)
         case .switchToRunsTab:
-            NotificationCenter.default.post(name: .switchToRunsTab, object: nil)
+            post(.switchToRunsTab)
         case .openCommandPalette:
             keyboardRouter.isHelpOverlayVisible = false
             showCommandPalette = true
@@ -276,35 +273,56 @@ struct ContentView: View {
     }
 
     private func openTerminalForSelectedWave() {
-        guard let path = repoState.selectedWave?.worktreePath else { return }
-        let launcher = TerminalLauncher()
-        do {
-            try launcher.launchTerminal(.warp, at: URL(fileURLWithPath: path))
-        } catch {
-            repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
+        performLauncherAction(failureLabel: "open terminal") { launcher, worktreeURL in
+            try launcher.launchTerminal(.warp, at: worktreeURL)
         }
     }
 
     private func openIDEForSelectedWave() {
-        guard let path = repoState.selectedWave?.worktreePath else { return }
-        let launcher = TerminalLauncher()
-        do {
-            try launcher.openInIDE(.cursor, at: URL(fileURLWithPath: path))
-        } catch {
-            repoState.errorMessage = "Failed to open Cursor: \(error.localizedDescription)"
+        performLauncherAction(failureLabel: "open Cursor") { launcher, worktreeURL in
+            try launcher.openInIDE(.cursor, at: worktreeURL)
         }
     }
 
     private func openFinderForSelectedWave() {
-        guard let path = repoState.selectedWave?.worktreePath else { return }
+        guard let worktreeURL = selectedWorktreeURL else { return }
         let launcher = TerminalLauncher()
-        launcher.openInFinder(at: URL(fileURLWithPath: path))
+        launcher.openInFinder(at: worktreeURL)
     }
 
     private func openPRForSelectedWave() {
         guard let url = repoState.selectedWave?.prURL else { return }
         let launcher = TerminalLauncher()
         launcher.openURL(url)
+    }
+
+    private var isHelpOverlayPresented: Binding<Bool> {
+        Binding(
+            get: { keyboardRouter.isHelpOverlayVisible },
+            set: { keyboardRouter.isHelpOverlayVisible = $0 }
+        )
+    }
+
+    private var selectedWorktreeURL: URL? {
+        guard let path = repoState.selectedWave?.worktreePath else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    private func performLauncherAction(
+        failureLabel: String,
+        _ action: (TerminalLauncher, URL) throws -> Void
+    ) {
+        guard let worktreeURL = selectedWorktreeURL else { return }
+        let launcher = TerminalLauncher()
+        do {
+            try action(launcher, worktreeURL)
+        } catch {
+            repoState.errorMessage = "Failed to \(failureLabel): \(error.localizedDescription)"
+        }
+    }
+
+    private func post(_ name: Notification.Name) {
+        NotificationCenter.default.post(name: name, object: nil)
     }
 
     @ViewBuilder

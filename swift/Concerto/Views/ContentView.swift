@@ -3,17 +3,18 @@
 import SwiftUI
 import LoopflowCore
 
-// MARK: - Notification Names for Keyboard Actions
-
-extension Notification.Name {
-    static let toggleCommandPalette = Notification.Name("toggleCommandPalette")
-}
-
 struct ContentView: View {
     @Environment(RepoState.self) private var repoState
+    @Environment(OutputBuffer.self) private var outputBuffer
+    @Environment(KeyboardRouter.self) private var keyboardRouter
 
     @State private var showingError = false
     @State private var showCommandPalette = false
+    @State private var windowNumber: Int?
+    @State private var noWaveToast: String?
+    @State private var lastNoWaveToastAt = Date.distantPast
+    @State private var toastDismissTask: Task<Void, Never>?
+
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -44,39 +45,113 @@ struct ContentView: View {
         }
         .navigationTitle(repoState.currentRepo?.lastPathComponent ?? "Loopflow Concerto")
         .background(palette.background)
+        .background(WindowAccessor { window in
+            let number = window?.windowNumber
+            guard number != windowNumber else { return }
+
+            if let old = windowNumber {
+                keyboardRouter.unregister(windowNumber: old)
+            }
+
+            windowNumber = number
+
+            if let number {
+                keyboardRouter.register(windowNumber: number) { action in
+                    handleShortcut(action)
+                }
+                keyboardRouter.setCommandPaletteVisible(showCommandPalette, for: number)
+            }
+        })
         .overlay {
             if showCommandPalette {
-                ZStack {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            showCommandPalette = false
-                        }
-
-                    VStack {
-                        CommandPalette(
-                            isPresented: $showCommandPalette,
-                            actions: buildPaletteActions()
-                        )
-                        .padding(.top, 80)
-
-                        Spacer()
-                    }
-                }
+                commandPaletteOverlay
+            }
+        }
+        .overlay {
+            if keyboardRouter.isHelpOverlayVisible {
+                ShortcutHelpOverlay(
+                    isPresented: Binding(
+                        get: { keyboardRouter.isHelpOverlayVisible },
+                        set: { keyboardRouter.isHelpOverlayVisible = $0 }
+                    ),
+                    shortcuts: keyboardRouter.shortcuts,
+                    chords: keyboardRouter.chords
+                )
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if let chordIndicator = keyboardRouter.chordIndicator {
+                Text(chordIndicator)
+                    .font(Typography.code(12))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xs)
+                    .background(.black.opacity(0.65))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .padding(.trailing, Spacing.lg)
+                    .padding(.bottom, Spacing.lg)
+                    .transition(.opacity)
+                    .zIndex(ZIndex.toast)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let noWaveToast {
+                Text(noWaveToast)
+                    .font(Typography.caption())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                    .background(.black.opacity(0.75))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .padding(.bottom, Spacing.lg)
+                    .transition(.opacity)
+                    .zIndex(ZIndex.toast)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
-            showCommandPalette.toggle()
+            showCommandPalette = true
         }
+        .onChange(of: showCommandPalette) { _, isVisible in
+            if let windowNumber {
+                keyboardRouter.setCommandPaletteVisible(isVisible, for: windowNumber)
+            }
+        }
+        .onDisappear {
+            toastDismissTask?.cancel()
+            if let number = windowNumber {
+                keyboardRouter.unregister(windowNumber: number)
+            }
+        }
+    }
+
+    private var commandPaletteOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    showCommandPalette = false
+                }
+
+            VStack {
+                CommandPalette(
+                    isPresented: $showCommandPalette,
+                    actions: buildPaletteActions()
+                )
+                .padding(.top, 80)
+
+                Spacer()
+            }
+        }
+        .zIndex(ZIndex.modal)
     }
 
     private func buildPaletteActions() -> [PaletteAction] {
         var actions: [PaletteAction] = []
 
-        actions.append(PaletteAction("New Wave", icon: "plus.square", shortcut: "⌘N") {
+        actions.append(PaletteAction("New Wave", icon: "plus.square", shortcut: "C") {
             NotificationCenter.default.post(name: .newWaveRequested, object: nil)
         })
-        actions.append(PaletteAction("Refresh Waves", icon: "arrow.clockwise", shortcut: "R") {
+        actions.append(PaletteAction("Refresh Waves", icon: "arrow.clockwise") {
             Task { await repoState.refreshWaves() }
         })
 
@@ -93,12 +168,143 @@ struct ContentView: View {
                 try? terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktreePath), workspace: nil)
             })
 
-            actions.append(PaletteAction("Reveal in Finder", icon: "folder", shortcut: "⌘⇧F") {
+            actions.append(PaletteAction("Reveal in Finder", icon: "folder", shortcut: "F") {
                 terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktreePath))
             })
+
+            if wave.prURL != nil {
+                actions.append(PaletteAction("View PR", icon: "arrow.up.right.square", shortcut: "P") {
+                    NotificationCenter.default.post(name: .viewWavePR, object: nil)
+                })
+            }
         }
 
         return actions
+    }
+
+    private func handleShortcut(_ action: ShortcutAction) {
+        if keyboardRouter.requiresWaveActions.contains(action), repoState.selectedWave == nil {
+            showNoWaveShortcutToast(for: action)
+            return
+        }
+
+        switch action {
+        case .moveDown:
+            NotificationCenter.default.post(name: .moveFocusDown, object: nil)
+        case .moveUp:
+            NotificationCenter.default.post(name: .moveFocusUp, object: nil)
+        case .selectFocused:
+            NotificationCenter.default.post(name: .selectFocusedWave, object: nil)
+        case .goToFirst:
+            NotificationCenter.default.post(name: .goToFirstWave, object: nil)
+        case .goToLast:
+            NotificationCenter.default.post(name: .goToLastWave, object: nil)
+        case .createWave:
+            NotificationCenter.default.post(name: .newWaveRequested, object: nil)
+        case .editName:
+            NotificationCenter.default.post(name: .editWaveName, object: nil)
+        case .deleteWave:
+            guard let wave = repoState.selectedWave else { return }
+            performWaveAction("delete wave") {
+                try await repoState.deleteWave(wave)
+            }
+        case .retryWave:
+            guard let wave = repoState.selectedWave else { return }
+            outputBuffer.clearOutput(for: wave.id)
+            performWaveAction("retry wave") {
+                try await repoState.runWave(wave: wave)
+            }
+        case .stopWave:
+            guard let wave = repoState.selectedWave else { return }
+            performWaveAction("stop wave") {
+                try await repoState.stopWave(wave)
+            }
+        case .landWave:
+            guard let wave = repoState.selectedWave else { return }
+            performWaveAction("land wave") {
+                try await repoState.landWave(wave)
+            }
+        case .nextWave:
+            guard let wave = repoState.selectedWave else { return }
+            performWaveAction("start next iteration") {
+                try await repoState.nextWave(wave)
+            }
+        case .openTerminal:
+            openTerminalForSelectedWave()
+        case .openIDE:
+            openIDEForSelectedWave()
+        case .openFinder:
+            openFinderForSelectedWave()
+        case .viewPR:
+            openPRForSelectedWave()
+        case .switchToCurrentTab:
+            NotificationCenter.default.post(name: .switchToCurrentTab, object: nil)
+        case .switchToRunsTab:
+            NotificationCenter.default.post(name: .switchToRunsTab, object: nil)
+        case .openCommandPalette:
+            keyboardRouter.isHelpOverlayVisible = false
+            showCommandPalette = true
+        case .showHelp:
+            showCommandPalette = false
+            keyboardRouter.isHelpOverlayVisible.toggle()
+        }
+    }
+
+    private func showNoWaveShortcutToast(for action: ShortcutAction) {
+        let now = Date()
+        guard now.timeIntervalSince(lastNoWaveToastAt) > 1.5 else { return }
+
+        lastNoWaveToastAt = now
+        let key = keyboardRouter.keyDisplay(for: action) ?? "shortcut"
+        noWaveToast = "Select a wave to use \(key)"
+
+        toastDismissTask?.cancel()
+        toastDismissTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            noWaveToast = nil
+        }
+    }
+
+    private func performWaveAction(_ label: String, action: @escaping () async throws -> Void) {
+        Task {
+            do {
+                try await action()
+            } catch {
+                repoState.errorMessage = "Failed to \(label): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func openTerminalForSelectedWave() {
+        guard let path = repoState.selectedWave?.worktreePath else { return }
+        let launcher = TerminalLauncher()
+        do {
+            try launcher.launchTerminal(.warp, at: URL(fileURLWithPath: path))
+        } catch {
+            repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
+        }
+    }
+
+    private func openIDEForSelectedWave() {
+        guard let path = repoState.selectedWave?.worktreePath else { return }
+        let launcher = TerminalLauncher()
+        do {
+            try launcher.openInIDE(.cursor, at: URL(fileURLWithPath: path))
+        } catch {
+            repoState.errorMessage = "Failed to open Cursor: \(error.localizedDescription)"
+        }
+    }
+
+    private func openFinderForSelectedWave() {
+        guard let path = repoState.selectedWave?.worktreePath else { return }
+        let launcher = TerminalLauncher()
+        launcher.openInFinder(at: URL(fileURLWithPath: path))
+    }
+
+    private func openPRForSelectedWave() {
+        guard let url = repoState.selectedWave?.prURL else { return }
+        let launcher = TerminalLauncher()
+        launcher.openURL(url)
     }
 
     @ViewBuilder
@@ -116,4 +322,5 @@ struct ContentView: View {
     ContentView()
         .environment(RepoState())
         .environment(OutputBuffer())
+        .environment(KeyboardRouter())
 }

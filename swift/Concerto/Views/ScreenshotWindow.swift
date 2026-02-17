@@ -36,7 +36,7 @@ struct ScreenshotWindow: View {
             .task {
                 await setupState()
             }
-            .background(WindowAccessor(onWindowReady: { window in
+            .background(ScreenshotWindowAccessor(onWindowReady: { window in
                 Task { @MainActor in
                     await captureWhenReady(window: window)
                 }
@@ -155,7 +155,7 @@ private struct ScreenshotLayout: View {
 }
 
 /// Helper to get the hosting window when it becomes available.
-private struct WindowAccessor: NSViewRepresentable {
+private struct ScreenshotWindowAccessor: NSViewRepresentable {
     let onWindowReady: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> NSView {

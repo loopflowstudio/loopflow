@@ -35,6 +35,20 @@ The lfd container itself mounts `/var/run/docker.sock` — if compromised, it ca
 
 Agent containers run as a non-root user with memory/CPU/PID limits, `no-new-privileges`, and scoped volume mounts. The lfd container accesses Docker through a socket proxy that restricts API operations.
 
+## Security boundary for this phase
+
+This phase reduces impact when an agent runtime is compromised:
+
+- A compromised container has fewer kernel/runtime privileges.
+- Resource limits reduce single-run host exhaustion.
+- Runtime defaults make accidental container-escape misconfiguration less likely.
+
+This phase does not provide:
+
+- A guarantee against all container escape techniques.
+- Protection against full host compromise.
+- Full cross-worktree confidentiality in the current shared-volume model (addressed incrementally).
+
 ## Implementation
 
 ### Non-root agent user

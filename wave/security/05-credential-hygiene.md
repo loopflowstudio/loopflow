@@ -9,6 +9,19 @@ Reduce credential exposure without introducing a complex key-tier system.
 - Secrets are not persisted accidentally through config writes or surfaced in logs/errors.
 - Tokens are carried in headers, never URL/query strings.
 
+## Security boundary for this phase
+
+This phase reduces accidental credential exposure:
+
+- Secrets are less likely to leak through config writes, logs, status, and errors.
+- Token roles are less likely to blur across daemon and user/session contexts.
+- Static credentials have a supported rotation path.
+
+This phase does not provide:
+
+- A full IAM/key-management system.
+- Protection from same-user local process compromise reading locally stored secrets.
+
 ## Scope (lightweight by design)
 
 ### Token separation

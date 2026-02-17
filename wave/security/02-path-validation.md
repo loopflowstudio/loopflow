@@ -2,7 +2,7 @@
 
 Prevent directory traversal in any identifier that touches the filesystem: wave IDs, run IDs, worktree paths, and the file APIs coming in remote/08.
 
-Path traversal is consistently the most common vulnerability class in self-hosted services that map user-supplied identifiers to filesystem operations (Gitea, Woodpecker CI, and every CI/CD runner with artifact storage). OWASP API7 (SSRF) and CWE-22 (Path Traversal) apply.
+Path traversal is consistently one of the most common vulnerability classes in self-hosted services that map user input to filesystem operations (Gitea, Woodpecker CI, and most CI/CD runners with artifact storage). CWE-22 (Path Traversal) applies directly.
 
 ## What exists today
 
@@ -14,6 +14,18 @@ Path traversal is consistently the most common vulnerability class in self-hoste
 ## What exists after this
 
 A shared `path_within_root` function validates all filesystem paths against their expected root. All identifiers that become path components are validated at the API boundary.
+
+## Security boundary for this phase
+
+This phase prevents:
+
+- User-controlled path input from escaping the intended filesystem root.
+- ID/path values from being interpreted as parent traversal or alternate roots.
+
+This phase does not prevent:
+
+- A compromised process with direct host filesystem access outside lfd APIs.
+- Cross-worktree access that occurs purely inside agent runtime mounts (covered in Phase 03).
 
 ## Implementation
 
@@ -30,11 +42,14 @@ pub fn path_within_root(root: &Path, candidate: &str) -> Result<PathBuf> {
         return Err(anyhow!("null byte in path"));
     }
 
+    let root_canonical = root.canonicalize()
+        .with_context(|| format!("root does not exist: {}", root.display()))?;
+
     let joined = root.join(candidate);
     let canonical = joined.canonicalize()
         .with_context(|| format!("path does not exist: {}", joined.display()))?;
 
-    if !canonical.starts_with(root.canonicalize()?) {
+    if !canonical.starts_with(&root_canonical) {
         return Err(anyhow!("path escapes root: {}", candidate));
     }
 

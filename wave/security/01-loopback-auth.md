@@ -17,11 +17,25 @@ This means:
 - **Container mode**: lfd binds `0.0.0.0:2486`. Other containers on the Docker bridge network see lfd as non-loopback and need a token. But the lfd container itself gets full access via localhost.
 - **Caddy topology**: Caddy reverse-proxies to `lfd:2486`. lfd sees the source as Docker-network, not loopback, so auth applies. But the healthcheck (`curl -sf http://localhost:2486/health`) runs inside the lfd container as loopback — acceptable since `/health` is read-only.
 
-The risk is native mode. OWASP API2 (Broken Authentication) applies: the auth mechanism has a blanket bypass that any co-located process can exploit.
+The highest risk is native mode, but loopback trust is a fragile primitive in any topology where requests can be relayed locally. OWASP API2 (Broken Authentication) applies: a blanket loopback bypass lets co-located processes execute privileged actions.
 
 ## What exists after this
 
 lfd generates a session token on startup and writes it to a known path. Concerto reads the token from that path. Loopback connections without the token get read-only access (health, status). Mutation routes require the token regardless of source IP.
+
+This phase enforces the invariant: **no unauthenticated mutation**.
+
+## Security boundary for this phase
+
+This phase prevents:
+
+- A caller that can reach `127.0.0.1:2486` but does **not** have the session token cannot execute mutate routes.
+- Browser-originated/local-web requests lose their old "localhost means trusted" mutation path.
+
+This phase does not prevent:
+
+- A rogue process running as the same OS user can often read `~/.lf/session-token` and authenticate as that user.
+- A fully compromised host.
 
 ## Implementation
 
@@ -38,10 +52,10 @@ Split lfd routes into three tiers:
 | Tier | Auth required | Examples |
 |------|--------------|---------|
 | **Public** | None | `GET /health`, `GET /metrics` |
-| **Read** | Loopback OR token | `GET /v0/status`, `GET /v0/waves`, `GET /v0/wave_runs`, `GET /v0/flows`, `GET /v0/worktrees`, `GET /v0/waves/:id/logs`, `GET /v0/ws` |
+| **Read** | Loopback OR token | `GET /v0/status`, `GET /v0/waves`, `GET /v0/wave_runs`, `GET /v0/flows`, `GET /v0/worktrees`, `GET /v0/waves/:id/logs`, event stream handshake (`GET /ws`) |
 | **Mutate** | Token always | `POST /v0/waves`, `PUT /v0/waves/:id`, `DELETE /v0/waves/:id`, `POST /v0/waves/:id/run`, `POST /v0/waves/:id/stop`, `POST /v0/waves/:id/land`, `POST /v0/waves/:id/next`, `POST /v0/waves/:id/combine`, `PUT /v0/waves/:id/stimuli`, `POST /v0/hooks/*` |
 
-Rationale: read-only loopback access lets monitoring tools and scripts query status without auth. Anything that creates, modifies, or triggers execution requires the token. This follows the tiered key model used by Supabase (anon/user/service) at a simpler scale.
+Rationale: read-only loopback access lets monitoring tools and scripts query status without auth. Anything that creates, modifies, or triggers execution requires the token.
 
 ### Middleware change
 
@@ -70,7 +84,7 @@ This is transparent — no user configuration needed for local mode.
 
 ## What this doesn't do
 
-- Doesn't change `Static` or `Studio` auth providers — they already require tokens for all non-loopback requests
+- Doesn't complete `Static`/`Studio` loopback hardening. Phase 06 removes loopback bypass for non-`Local` providers entirely.
 - Doesn't add TLS to local connections — loopback traffic is machine-local
 - Doesn't add per-wave or per-user authorization — all token holders have full access
 - Doesn't add rate limiting on auth failures — that's Phase 04

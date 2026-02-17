@@ -30,6 +30,21 @@ lfd is an HTTP+WebSocket server that spawns Docker containers running AI coding 
 5. **Resource exhaustion** — unbounded requests, payloads, or container resource consumption cause denial of service.
 6. **Credential leakage** — secrets appear in logs, error responses, persisted config, or are exfiltrated by agents via network.
 
+## Security boundary
+
+This roadmap is intended to make these statements true:
+
+- If an attacker can send HTTP/WS requests to lfd (local or remote) but has no valid credentials, they cannot run mutate routes.
+- If an attacker controls path-like API input, they cannot make lfd read/write outside declared roots.
+- If lfd talks to another host, it does not forward internal auth headers/tokens to that host.
+- If someone reads normal logs/status/error output, they do not see secrets.
+
+This roadmap does **not** promise:
+
+- It does not stop malware running as the same OS user from reading local session material.
+- It does not fix a fully compromised host.
+- It does not provide hosted-grade tenant isolation yet.
+
 ## Security invariants (must always hold)
 
 These are non-negotiable properties. Each phase should add tests that assert them.

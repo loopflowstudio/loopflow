@@ -10,6 +10,20 @@ Constrain the lfd HTTP/WebSocket surface so malformed, oversized, or cross-bound
 - Outbound HTTP behavior cannot leak credentials across host boundaries.
 - Forwarded headers are trusted only from configured proxy CIDRs.
 
+## Security boundary for this phase
+
+This phase prevents common API-surface failures:
+
+- Oversized/malformed requests causing avoidable service instability.
+- Internal error detail disclosure through HTTP responses.
+- Internal auth material being forwarded to unintended hosts.
+- Blind trust of spoofable forwarded headers.
+
+This phase does not provide:
+
+- Business-logic authorization guarantees by itself (covered by auth phases).
+- Protection from host-level compromise.
+
 ## Scope
 
 ### Inbound hardening

@@ -22,6 +22,19 @@ But there are gaps:
 
 Auth providers enforce strict boundaries: no loopback bypass for `Static` or `Studio` providers, JWKS validation fails closed, and proxy-aware source IP handling is explicit.
 
+## Security boundary for this phase
+
+This phase prevents auth ambiguity:
+
+- Requests are evaluated by one auth provider path, not implicit fallback behavior.
+- `Static`/`Studio` modes do not inherit localhost bypass behavior meant for `Local`.
+- JWT validation errors fail closed instead of silently allowing access.
+
+This phase does not provide:
+
+- Fine-grained per-wave authorization (remote/09 scope).
+- Full zero-trust service-to-service identity across all internal components.
+
 ## Implementation
 
 ### Remove loopback bypass for non-Local providers

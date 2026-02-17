@@ -1,6 +1,7 @@
 ---
-status: proposed
+status: in_progress
 seq: 1
+source: wave/loop/01-foundations-live-state.md
 ---
 
 # 01: Foundations + Live State

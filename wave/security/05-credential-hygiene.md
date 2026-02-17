@@ -26,10 +26,10 @@ This phase does not provide:
 
 ### Token separation
 
-- Distinct credential slots for:
-  - daemon/static service token
-  - user/session token (Concerto/CLI auth)
-- No silent fallback between token types.
+Phase 01 established the session token (`~/.lf/session-token`) as distinct from static tokens. The remaining work:
+
+- Ensure no silent fallback between token types at the middleware level (session token accepted only for `Local` provider, static token only for `Static` provider).
+- Verify that client-side token resolution doesn't mix credentials across provider types.
 
 ### Rotation
 

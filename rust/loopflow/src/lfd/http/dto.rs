@@ -180,8 +180,7 @@ pub struct ChatMemoryBlockDto {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ChatTurnDto {
-    pub id: String,
+pub struct ChatStartedDto {
     pub object: String,
     pub wave_id: String,
     pub status: String,

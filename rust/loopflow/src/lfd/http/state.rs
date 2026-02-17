@@ -70,7 +70,7 @@ impl ChatTurnStream {
 
 #[derive(Clone, Debug, Default)]
 pub struct ChatTurnRegistry {
-    turns: Arc<StdMutex<HashMap<LfdId, Arc<ChatTurnStream>>>>,
+    streams: Arc<StdMutex<HashMap<LfdId, Arc<ChatTurnStream>>>>,
 }
 
 impl ChatTurnRegistry {
@@ -78,23 +78,21 @@ impl ChatTurnRegistry {
         Self::default()
     }
 
-    pub fn create(&self, wave_id: LfdId) -> (LfdId, Arc<ChatTurnStream>) {
-        let turn_id = LfdId::new();
-        let stream = Arc::new(ChatTurnStream::new(wave_id));
+    pub fn start(&self, wave_id: LfdId) -> Arc<ChatTurnStream> {
+        let stream = Arc::new(ChatTurnStream::new(wave_id.clone()));
 
-        if let Ok(mut turns) = self.turns.lock() {
-            turns.insert(turn_id.clone(), stream.clone());
+        if let Ok(mut streams) = self.streams.lock() {
+            streams.insert(wave_id, stream.clone());
         }
 
-        (turn_id, stream)
+        stream
     }
 
-    pub fn get(&self, wave_id: &LfdId, turn_id: &LfdId) -> Option<Arc<ChatTurnStream>> {
-        self.turns
+    pub fn get(&self, wave_id: &LfdId) -> Option<Arc<ChatTurnStream>> {
+        self.streams
             .lock()
             .ok()
-            .and_then(|turns| turns.get(turn_id).cloned())
-            .filter(|stream| stream.wave_id() == wave_id)
+            .and_then(|streams| streams.get(wave_id).cloned())
     }
 }
 

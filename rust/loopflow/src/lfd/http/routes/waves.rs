@@ -22,7 +22,7 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    chat_memory_block_dto, stimulus_dto, stimulus_kind_str, ChatMemoryBlockDto, ChatTurnDto,
+    chat_memory_block_dto, stimulus_dto, stimulus_kind_str, ChatMemoryBlockDto, ChatStartedDto,
     CombineResponse, CombineResponseResult, ContinueWaveResponse, DeletedResourceResponse,
     ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse,
     RunWaveResponse, StopWaveResponse, WaveDto,
@@ -774,11 +774,11 @@ pub async fn delete_memory_block_handler(
     }))
 }
 
-pub async fn create_chat_turn_handler(
+pub async fn start_chat_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
     Json(payload): Json<CreateChatTurnRequest>,
-) -> ApiResult<ChatTurnDto> {
+) -> ApiResult<ChatStartedDto> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let message = payload.message.trim().to_string();
     if message.is_empty() {
@@ -788,21 +788,19 @@ pub async fn create_chat_turn_handler(
         ));
     }
 
-    run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    let memory_blocks = if payload.memory_blocks.is_empty() {
-        run_store(&state.store, {
-            let wave_id = wave_id.clone();
-            move |store| store.list_chat_memory_blocks(&wave_id)
-        })
+    state
+        .store
+        .get_wave(&wave_id)
         .await
         .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    let memory_blocks = if payload.memory_blocks.is_empty() {
+        state
+            .store
+            .list_chat_memory_blocks(&wave_id)
+            .await
+            .map_err(map_store_error)?
         .into_iter()
         .map(|block| PromptMemoryBlock {
             name: block.name,
@@ -815,7 +813,7 @@ pub async fn create_chat_turn_handler(
     };
 
     let system_prompt = build_chat_system_prompt(&memory_blocks);
-    let (turn_id, turn_stream) = state.chat_turns.create(wave_id.clone());
+    let turn_stream = state.chat_turns.start(wave_id.clone());
 
     tokio::spawn(async move {
         let registry = tools::default_registry();
@@ -844,26 +842,23 @@ pub async fn create_chat_turn_handler(
         turn_stream.mark_completed();
     });
 
-    Ok(Json(ChatTurnDto {
-        id: turn_id.to_string(),
-        object: "chat_turn".to_string(),
+    Ok(Json(ChatStartedDto {
+        object: "chat".to_string(),
         wave_id: wave_id.to_string(),
         status: "running".to_string(),
     }))
 }
 
-pub async fn stream_chat_turn_events_handler(
+pub async fn stream_chat_events_handler(
     State(state): State<HttpState>,
-    Path((wave_id, turn_id)): Path<(String, String)>,
+    Path(wave_id): Path<String>,
 ) -> Result<Sse<ReceiverStream<Result<SseEvent, Infallible>>>, ApiError> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let turn_id = LfdId::from_str(&turn_id)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid chat turn id"))?;
 
     let turn_stream = state
         .chat_turns
-        .get(&wave_id, &turn_id)
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "chat turn not found"))?;
+        .get(&wave_id)
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active chat for wave"))?;
 
     let history = turn_stream.history();
     let live_rx = turn_stream.subscribe();

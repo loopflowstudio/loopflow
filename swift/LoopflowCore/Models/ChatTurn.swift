@@ -1,23 +1,5 @@
 import Foundation
 
-public enum ChatTurnStatus: String, Sendable, Hashable {
-    case running
-    case completed
-    case failed
-}
-
-public struct ChatTurn: Sendable, Hashable {
-    public var id: String
-    public var waveId: String
-    public var status: ChatTurnStatus
-
-    public init(id: String, waveId: String, status: ChatTurnStatus) {
-        self.id = id
-        self.waveId = waveId
-        self.status = status
-    }
-}
-
 public enum ChatTurnPhase: String, Sendable, Hashable {
     case progress
     case final

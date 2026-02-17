@@ -62,14 +62,13 @@ protocol ChatService: Sendable {
         position: Int?
     ) async throws -> ChatMemoryBlock
     func deleteMemoryBlock(waveId: String, name: String) async throws
-    func createChatTurn(
+    func startChat(
         waveId: String,
         message: String,
         memoryBlocks: [ChatMemoryBlock]
-    ) async throws -> ChatTurn
-    func streamChatTurnEvents(
-        waveId: String,
-        turnId: String
+    ) async throws
+    func streamChatEvents(
+        waveId: String
     ) -> AsyncThrowingStream<ChatTurnEvent, Error>
 }
 
@@ -142,7 +141,7 @@ final class ChatState {
         turnState = .running
 
         do {
-            let turn = try await waveService.createChatTurn(
+            try await waveService.startChat(
                 waveId: waveId,
                 message: text,
                 memoryBlocks: memory.blocks
@@ -152,7 +151,7 @@ final class ChatState {
             var sawFailure = false
             var sawTerminal = false
 
-            for try await event in waveService.streamChatTurnEvents(waveId: waveId, turnId: turn.id) {
+            for try await event in waveService.streamChatEvents(waveId: waveId) {
                 switch event {
                 case .message(let content, let phase):
                     let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)

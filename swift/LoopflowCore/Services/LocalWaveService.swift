@@ -761,12 +761,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    public func createChatTurn(
+    public func startChat(
         waveId: String,
         message: String,
         memoryBlocks: [ChatMemoryBlock]
-    ) async throws -> ChatTurn {
-        let url = waveURL(waveId, components: "chat", "turns")
+    ) async throws {
+        let url = waveURL(waveId, components: "chat")
 
         let body: [String: Any] = [
             "message": message,
@@ -790,26 +790,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         guard response.statusCode == 200 else {
             throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = json["id"] as? String,
-              let turnWaveId = json["wave_id"] as? String else {
-            throw WaveServiceError.commandFailed("Invalid chat turn response")
-        }
-
-        let status = Self.parseChatTurnStatus(json["status"] as? String)
-        return ChatTurn(id: id, waveId: turnWaveId, status: status)
     }
 
-    public func streamChatTurnEvents(
-        waveId: String,
-        turnId: String
+    public func streamChatEvents(
+        waveId: String
     ) -> AsyncThrowingStream<ChatTurnEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 let activeSession = longSession()
                 do {
-                    let url = waveURL(waveId, components: "chat", "turns", turnId, "events")
+                    let url = waveURL(waveId, components: "chat", "events")
                     let request = try makeRequest(url)
                     let (bytes, response) = try await activeSession.session.bytes(for: request)
 
@@ -1136,11 +1126,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             position: normalizeInt(json["position"]),
             updatedAt: parseDate(json["updated_at"])
         )
-    }
-
-    private static func parseChatTurnStatus(_ raw: String?) -> ChatTurnStatus {
-        guard let raw else { return .running }
-        return ChatTurnStatus(rawValue: raw) ?? .running
     }
 
     private static func parseChatTurnEvent(_ raw: String) throws -> ChatTurnEvent {

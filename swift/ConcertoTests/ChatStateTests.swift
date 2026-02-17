@@ -21,9 +21,6 @@ struct ChatStateTests {
     @Test("send consumes harness events and persists memory edits")
     func sendConsumesHarnessEvents() async {
         let service = MockChatService(
-            turns: [
-                .success(ChatTurn(id: "turn-1", waveId: "wave-test", status: .running)),
-            ],
             eventBatches: [[
                 .success(.message(content: "Working on it", phase: .progress)),
                 .success(.memoryEdit(op: "upsert", block: "prefs", detail: "Answer in bullets")),
@@ -49,9 +46,6 @@ struct ChatStateTests {
     @Test("send surfaces completion contract errors")
     func sendCompletionContractError() async {
         let service = MockChatService(
-            turns: [
-                .success(ChatTurn(id: "turn-2", waveId: "wave-test", status: .running)),
-            ],
             eventBatches: [[
                 .success(.message(content: "Still thinking", phase: .progress)),
                 .success(.done),
@@ -96,16 +90,13 @@ private final class MockChatService: ChatService, @unchecked Sendable {
     private var listResults: [Result<[ChatMemoryBlock], WaveServiceError>]
     private var blocks: [ChatMemoryBlock] = []
     private var listCalls = 0
-    private var turns: [Result<ChatTurn, WaveServiceError>]
     private var eventBatches: [[Result<ChatTurnEvent, WaveServiceError>]]
 
     init(
         listResults: [Result<[ChatMemoryBlock], WaveServiceError>] = [.success([])],
-        turns: [Result<ChatTurn, WaveServiceError>] = [.success(ChatTurn(id: "turn-default", waveId: "wave-test", status: .running))],
         eventBatches: [[Result<ChatTurnEvent, WaveServiceError>]] = []
     ) {
         self.listResults = listResults
-        self.turns = turns
         self.eventBatches = eventBatches
     }
 
@@ -150,28 +141,14 @@ private final class MockChatService: ChatService, @unchecked Sendable {
         }
     }
 
-    func createChatTurn(
+    func startChat(
         waveId: String,
         message: String,
         memoryBlocks: [ChatMemoryBlock]
-    ) async throws -> ChatTurn {
-        try queue.sync {
-            if !turns.isEmpty {
-                let next = turns.removeFirst()
-                switch next {
-                case .success(let turn):
-                    return turn
-                case .failure(let error):
-                    throw error
-                }
-            }
-            return ChatTurn(id: "turn-fallback", waveId: waveId, status: .running)
-        }
-    }
+    ) async throws {}
 
-    func streamChatTurnEvents(
-        waveId: String,
-        turnId: String
+    func streamChatEvents(
+        waveId: String
     ) -> AsyncThrowingStream<ChatTurnEvent, Error> {
         let batch = queue.sync {
             eventBatches.isEmpty ? [] : eventBatches.removeFirst()

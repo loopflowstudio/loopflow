@@ -22,6 +22,14 @@ public protocol WaveServiceProtocol: Sendable {
     func run(_ id: String, overrides: RunOverrides?) async throws
     func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus
     func removeStimulus(_ waveId: String, stimulusId: String) async throws
+    func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock]
+    func upsertMemoryBlock(
+        waveId: String,
+        name: String,
+        content: String,
+        position: Int?
+    ) async throws -> ChatMemoryBlock
+    func deleteMemoryBlock(waveId: String, name: String) async throws
     func stop(_ id: String) async throws
     func restartStep(_ id: String) async throws
     func landWave(_ id: String) async throws

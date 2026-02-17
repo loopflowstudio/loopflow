@@ -2,7 +2,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lfd::registration::RegistrationState;
-use crate::lfd::types::{LivePullRequestState, Stimulus, StimulusKind, WaveRun, WaveRunStatus};
+use crate::lfd::types::{ChatMemoryBlock, LivePullRequestState, Stimulus, StimulusKind, WaveRun, WaveRunStatus};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -169,6 +169,15 @@ pub struct StimulusDto {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ChatMemoryBlockDto {
+    pub object: String,
+    pub name: String,
+    pub content: String,
+    pub position: u32,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct StopWaveResponse {
     pub stopped: bool,
 }
@@ -310,6 +319,16 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
         last_main_sha: s.last_main_sha,
         last_triggered_at: s.last_triggered_at,
         created_at: format_datetime(s.created_at),
+    }
+}
+
+pub fn chat_memory_block_dto(block: ChatMemoryBlock) -> ChatMemoryBlockDto {
+    ChatMemoryBlockDto {
+        object: "memory_block".to_string(),
+        name: block.name,
+        content: block.content,
+        position: block.position,
+        updated_at: format_datetime(block.updated_at),
     }
 }
 

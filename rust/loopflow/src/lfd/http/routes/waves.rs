@@ -15,9 +15,9 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
-    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
-    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    chat_memory_block_dto, stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult,
+    ContinueWaveResponse, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
+    NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
@@ -26,7 +26,8 @@ use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
-    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    AgentStatus, ChatMemoryBlock, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -114,6 +115,12 @@ pub struct RunWaveRequest {
 pub struct AddStimulusRequest {
     kind: StimulusKind,
     cron: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpsertMemoryBlockRequest {
+    content: String,
+    position: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -695,6 +702,99 @@ pub async fn list_stimuli_handler(
     let dtos: Vec<_> = stimuli.into_iter().map(stimulus_dto).collect();
 
     Ok(Json(serde_json::json!({ "data": dtos })))
+}
+
+pub async fn list_memory_blocks_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<ListResponse<crate::lfd::http::dto::ChatMemoryBlockDto>> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+
+    let blocks = run_store(&state.store, move |store| {
+        store.list_chat_memory_blocks(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    let dtos = blocks.into_iter().map(chat_memory_block_dto).collect();
+    Ok(Json(ListResponse::new(dtos, false)))
+}
+
+pub async fn upsert_memory_block_handler(
+    State(state): State<HttpState>,
+    Path((wave_id, name)): Path<(String, String)>,
+    Json(payload): Json<UpsertMemoryBlockRequest>,
+) -> ApiResult<crate::lfd::http::dto::ChatMemoryBlockDto> {
+    if name.trim().is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "memory block name cannot be empty",
+        ));
+    }
+
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let name = name.trim().to_string();
+    let content = payload.content;
+    let requested_position = payload.position;
+
+    let existing = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.list_chat_memory_blocks(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    let position = requested_position.unwrap_or_else(|| {
+        existing
+            .iter()
+            .find(|block| block.name == name)
+            .map(|block| block.position)
+            .unwrap_or(existing.len() as u32)
+    });
+
+    let block = ChatMemoryBlock {
+        wave_id: wave_id.clone(),
+        name: name.clone(),
+        content,
+        position,
+        updated_at: Some(OffsetDateTime::now_utc()),
+    };
+
+    let block_to_store = block.clone();
+    run_store(&state.store, move |store| {
+        store.upsert_chat_memory_block(&block_to_store)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    Ok(Json(chat_memory_block_dto(block)))
+}
+
+pub async fn delete_memory_block_handler(
+    State(state): State<HttpState>,
+    Path((wave_id, name)): Path<(String, String)>,
+) -> ApiResult<DeletedResourceResponse> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "memory block name cannot be empty",
+        ));
+    }
+
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let name_for_delete = name.clone();
+    run_store(&state.store, move |store| {
+        store.delete_chat_memory_block(&wave_id, &name_for_delete)
+    })
+    .await
+    .map_err(map_store_error)?;
+
+    Ok(Json(DeletedResourceResponse {
+        id: name,
+        object: "memory_block".to_string(),
+        deleted: true,
+    }))
 }
 
 pub async fn stop_wave_handler(

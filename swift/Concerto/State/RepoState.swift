@@ -73,6 +73,7 @@ final class RepoState {
     let waveStore = WaveStore()
     let runStore = RunStore()
     let worktreeStore = WorktreeStore()
+    private var chatStates: [String: ChatState] = [:]
 
     var waves: [WaveViewModel] { waveStore.ordered }
     var waveGroups: WaveGroups { waveStore.groups }
@@ -83,6 +84,15 @@ final class RepoState {
     var selectedWave: WaveViewModel? {
         get { selectedWaveId.flatMap { waveStore.wave(for: $0) } }
         set { selectedWaveId = newValue?.id }
+    }
+
+    func chatState(for waveId: String) -> ChatState {
+        if let state = chatStates[waveId] {
+            return state
+        }
+        let state = ChatState(waveId: waveId)
+        chatStates[waveId] = state
+        return state
     }
 
     // In-flight actions (land) — buttons disable while pending

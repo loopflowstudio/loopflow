@@ -686,6 +686,79 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    public func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
+        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks")
+
+        let (data, response) = try await session.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return rows
+            .compactMap(Self.parseMemoryBlockFromJSON)
+            .sorted { $0.position < $1.position }
+    }
+
+    public func upsertMemoryBlock(
+        waveId: String,
+        name: String,
+        content: String,
+        position: Int?
+    ) async throws -> ChatMemoryBlock {
+        guard let encodedName = Self.encodePathComponent(name) else {
+            throw WaveServiceError.commandFailed("Invalid memory block name")
+        }
+        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks/\(encodedName)")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var body: [String: Any] = ["content": content]
+        if let position { body["position"] = position }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let block = Self.parseMemoryBlockFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return block
+    }
+
+    public func deleteMemoryBlock(waveId: String, name: String) async throws {
+        guard let encodedName = Self.encodePathComponent(name) else {
+            throw WaveServiceError.commandFailed("Invalid memory block name")
+        }
+        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks/\(encodedName)")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+    }
+
     public func connect(_ id: String) async throws -> ConnectionInfo {
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves/\(id)/connect"),
@@ -955,6 +1028,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
+    private static func encodePathComponent(_ value: String) -> String? {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed)
+    }
+
     private static func parseWorktreeFromJSON(_ json: [String: Any]) -> WorktreeInfo? {
         guard let path = json["path"] as? String, !path.isEmpty else { return nil }
 
@@ -964,6 +1043,20 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             merged: json["merged"] as? Bool ?? false,
             prunable: json["prunable"] as? Bool ?? false,
             waveId: json["wave_id"] as? String
+        )
+    }
+
+    private static func parseMemoryBlockFromJSON(_ json: [String: Any]) -> ChatMemoryBlock? {
+        guard let name = json["name"] as? String,
+              let content = json["content"] as? String else {
+            return nil
+        }
+
+        return ChatMemoryBlock(
+            name: name,
+            content: content,
+            position: normalizeInt(json["position"]),
+            updatedAt: parseDate(json["updated_at"])
         )
     }
 

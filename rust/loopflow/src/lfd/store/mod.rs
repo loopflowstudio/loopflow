@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    Agent, LivePrState, LivePullRequestState, PendingActivation, Stimulus, Summary, Wave, WaveRun,
-    WaveRunStackStatus,
+    Agent, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation, Stimulus, Summary,
+    Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod migrations;
@@ -608,6 +608,11 @@ pub trait RunStore: Send + Sync {
     // Summaries
     fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
     fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
+
+    // Chat memory blocks
+    fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>>;
+    fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()>;
+    fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()>;
 }
 
 pub type SharedStore = Arc<dyn RunStore>;
@@ -617,9 +622,9 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, RunStore};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-        SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot,
-        WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState,
+        PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave,
+        WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -903,6 +908,49 @@ mod tests {
         let reloaded = store.get_summary(&wave.id).unwrap().unwrap();
         assert_eq!(reloaded.content, "# Updated summary");
         assert_eq!(reloaded.source_hash, "def456");
+
+        // Chat memory block CRUD
+        let block_a = ChatMemoryBlock {
+            wave_id: wave.id.clone(),
+            name: "preferences".to_string(),
+            content: "Keep responses concise.".to_string(),
+            position: 1,
+            updated_at: Some(OffsetDateTime::now_utc()),
+        };
+        let block_b = ChatMemoryBlock {
+            wave_id: wave.id.clone(),
+            name: "project-context".to_string(),
+            content: "Repo uses Rust + Swift.".to_string(),
+            position: 0,
+            updated_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.upsert_chat_memory_block(&block_a).unwrap();
+        store.upsert_chat_memory_block(&block_b).unwrap();
+        let blocks = store.list_chat_memory_blocks(&wave.id).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].name, "project-context");
+        assert_eq!(blocks[1].name, "preferences");
+
+        let block_a_updated = ChatMemoryBlock {
+            content: "Prefer bullet points.".to_string(),
+            position: 2,
+            ..block_a
+        };
+        store.upsert_chat_memory_block(&block_a_updated).unwrap();
+        let blocks = store.list_chat_memory_blocks(&wave.id).unwrap();
+        let updated = blocks
+            .iter()
+            .find(|block| block.name == "preferences")
+            .expect("updated memory block should exist");
+        assert_eq!(updated.content, "Prefer bullet points.");
+        assert_eq!(updated.position, 2);
+
+        store
+            .delete_chat_memory_block(&wave.id, "project-context")
+            .unwrap();
+        let blocks = store.list_chat_memory_blocks(&wave.id).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].name, "preferences");
 
         store.delete_wave(&wave.id).unwrap();
         assert!(store.get_wave(&wave.id).unwrap().is_none());

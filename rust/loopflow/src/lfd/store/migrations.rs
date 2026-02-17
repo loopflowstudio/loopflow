@@ -39,6 +39,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "006_wave_schema_provenance",
         sql: include_str!("migrations/006_wave_schema_provenance.sql"),
     },
+    Migration {
+        version: "007_chat_memory_blocks",
+        sql: include_str!("migrations/007_chat_memory_blocks.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

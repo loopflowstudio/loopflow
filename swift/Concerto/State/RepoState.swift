@@ -828,10 +828,10 @@ final class RepoState {
         lfdConnected = state.isConnected
     }
 
-    private func runConnectionPhase<T>(
+    private func runConnectionPhase<T: Sendable>(
         _ phase: ConnectionPhase,
         connection: ServerConnection,
-        operation: () async throws -> T
+        operation: @Sendable () async throws -> T
     ) async throws -> T {
         updateConnectionState(.connecting(phase))
         do {

@@ -8,6 +8,7 @@ import LoopflowCore
 @main
 struct ConcertoApp: App {
     @State private var recentsService = RecentsService()
+    @State private var keyboardRouter = KeyboardRouter()
     @Environment(\.openWindow) private var openWindow
     @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
@@ -78,6 +79,7 @@ struct ConcertoApp: App {
             .tint(.loopflowBurgundy)
             .preferredColorScheme(preferredScheme)
             .environment(\.palette, resolvedPalette)
+            .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 500, height: 400)
@@ -88,6 +90,7 @@ struct ConcertoApp: App {
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(preferredScheme)
                 .environment(\.palette, resolvedPalette)
+                .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)

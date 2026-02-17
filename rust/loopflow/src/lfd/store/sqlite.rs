@@ -6,14 +6,13 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql};
 use crate::lfd::id::LfdId;
 use crate::lfd::store::rows::{
     map_agent_row, map_chat_memory_block_row, map_fork_run_row, map_live_pr_state_row,
-    map_pending_activation_row,
-    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_pending_activation_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row,
+    now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, RunStore, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, ChatMemoryBlock, LivePullRequestState, PendingActivation, Stimulus, Summary,
-    Wave, WaveRun,
-    WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, ChatMemoryBlock, LivePullRequestState, PendingActivation, Stimulus,
+    Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug)]

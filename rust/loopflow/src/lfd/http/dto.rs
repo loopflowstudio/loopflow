@@ -2,7 +2,9 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lfd::registration::RegistrationState;
-use crate::lfd::types::{ChatMemoryBlock, LivePullRequestState, Stimulus, StimulusKind, WaveRun, WaveRunStatus};
+use crate::lfd::types::{
+    ChatMemoryBlock, LivePullRequestState, Stimulus, StimulusKind, WaveRun, WaveRunStatus,
+};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

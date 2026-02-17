@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    Agent, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation, Stimulus, Summary,
-    Wave, WaveRun, WaveRunStackStatus,
+    Agent, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation, Stimulus,
+    Summary, Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod migrations;
@@ -622,9 +622,9 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, RunStore};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState,
-        PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave,
-        WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation,
+        PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind,
+        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;

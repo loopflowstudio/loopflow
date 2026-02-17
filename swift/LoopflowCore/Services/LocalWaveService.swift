@@ -702,14 +702,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             throw WaveServiceError.commandFailed("Invalid response")
         }
 
-        return rows
-            .compactMap(Self.parseMemoryBlockFromJSON)
-            .sorted {
-                if $0.position == $1.position {
-                    return $0.name < $1.name
-                }
-                return $0.position < $1.position
-            }
+        return rows.compactMap(Self.parseMemoryBlockFromJSON)
     }
 
     public func upsertMemoryBlock(

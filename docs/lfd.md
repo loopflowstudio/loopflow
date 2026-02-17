@@ -185,3 +185,25 @@ POST /v0/waves/{wave_id}/check-ci
 ```
 
 Set `github.webhook_secret` (or `LFD_GITHUB_WEBHOOK_SECRET`) before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
+
+## Stacked PR queue state
+
+Wave PRs are created as Draft first. `lfd` reconciles queue roles so only the oldest unmerged run is promoted to Ready.
+
+```bash
+curl -s "http://127.0.0.1:2486/v0/wave_runs?wave_id=<wave_id>&order=stack" | jq '.data[] | {id, stack_position, queue_role, queue_block_reason, next_action}'
+```
+
+`/v0/wave_runs` now includes:
+
+- `queue_role`: `ready | draft | blocked | merged | superseded`
+- `queue_block_reason` / `queue_blocked_at`
+- `next_action`: `open_pr | resolve_conflict | combine_prs | await_merge`
+
+`/v0/waves/{id}` reports:
+
+- `open_pr_count` from live GitHub PR state (not historical snapshot state)
+- `stack_count` for stack depth
+- `has_stale_pr_state` when live PR state could not be refreshed
+
+`LFD_GITHUB_TOKEN` enables live PR refresh during reconciliation and poll cycles.

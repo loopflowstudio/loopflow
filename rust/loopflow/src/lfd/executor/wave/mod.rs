@@ -45,6 +45,7 @@ pub struct WaveExecutor {
     runner: Arc<dyn AgentExecutor>,
     event_hub: EventHub,
     executor_type: ExecutorType,
+    github_config: GitHubConfig,
 }
 
 impl std::fmt::Debug for WaveExecutor {
@@ -62,6 +63,7 @@ impl WaveExecutor {
         output: OutputHub,
         event_hub: EventHub,
         config: ExecutorConfig,
+        github_config: GitHubConfig,
     ) -> Result<Self> {
         let executor_type = config.r#type;
         let runner: Arc<dyn AgentExecutor> = match executor_type {
@@ -75,6 +77,7 @@ impl WaveExecutor {
             runner,
             event_hub,
             executor_type,
+            github_config,
         })
     }
 
@@ -93,6 +96,7 @@ impl WaveExecutor {
             runner,
             event_hub,
             executor_type: ExecutorType::Local,
+            github_config: GitHubConfig::default(),
         }
     }
 
@@ -382,7 +386,7 @@ impl WaveExecutor {
                     if run.snapshot.pr.is_some() {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
                             &self.store,
-                            &GitHubConfig::default(),
+                            &self.github_config,
                             &wave.id,
                             crate::lfd::queue::QueueTrigger::RunCompleted,
                         )
@@ -704,6 +708,7 @@ mod tests {
             runner: Arc::new(MockRunner),
             event_hub,
             executor_type: ExecutorType::Docker,
+            github_config: GitHubConfig::default(),
         };
 
         executor

@@ -98,6 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.clone(),
         event_hub.clone(),
         lfd_config.executor.clone(),
+        lfd_config.github.clone(),
     )?;
 
     match executor.recover_startup().await {

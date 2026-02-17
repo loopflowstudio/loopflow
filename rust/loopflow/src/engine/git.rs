@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::thread;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -147,14 +149,24 @@ pub fn delete_local_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
 }
 
 pub fn branch_rename(repo: &Path, old_name: &str, new_name: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["branch", "-m", old_name, new_name])?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git branch -m {} {}", old_name, new_name),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
+    let command = format!("git branch -m {} {}", old_name, new_name);
+    for attempt in 0..3 {
+        let output = run_git(repo, &["branch", "-m", old_name, new_name])?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let lock_failed = stderr.contains("could not lock config file");
+        if lock_failed && attempt < 2 {
+            thread::sleep(Duration::from_millis(25));
+            continue;
+        }
+        return Err(GitError::CommandFailed { command, stderr });
     }
-    Ok(())
+    Err(GitError::CommandFailed {
+        command,
+        stderr: "git branch rename retry exhausted".to_string(),
+    })
 }
 
 /// Get current branch name. Returns None if in detached HEAD state.

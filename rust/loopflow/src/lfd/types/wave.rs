@@ -336,3 +336,14 @@ impl WaveRun {
         self.run_kind == WaveRunKind::Main
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WaveRunKind;
+
+    #[test]
+    fn wave_run_kind_main_storage_value_is_stable() {
+        assert_eq!(WaveRunKind::Main.as_i32(), 1);
+        assert_eq!(WaveRunKind::from_i32(1), WaveRunKind::Main);
+    }
+}

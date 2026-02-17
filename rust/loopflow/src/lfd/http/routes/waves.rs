@@ -319,34 +319,6 @@ fn parse_schema_stimulus(
     Ok((kind, cron))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
-        let stimulus = StimulusDef {
-            kind: "cron".to_string(),
-            cron: None,
-        };
-
-        let result = parse_schema_stimulus(&stimulus);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_schema_stimulus_accepts_valid_cron_expression() {
-        let stimulus = StimulusDef {
-            kind: "cron".to_string(),
-            cron: Some("0 8 * * *".to_string()),
-        };
-
-        let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
-        assert_eq!(parsed.0, StimulusKind::Cron);
-        assert_eq!(parsed.1, "0 8 * * *");
-    }
-}
-
 async fn wave_name_exists(
     state: &HttpState,
     repo: &str,
@@ -1249,4 +1221,32 @@ fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(
     let message = format!("lfd: auto-commit after interactive step '{step_name}'");
     commit(worktree, &message).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
+        let stimulus = StimulusDef {
+            kind: "cron".to_string(),
+            cron: None,
+        };
+
+        let result = parse_schema_stimulus(&stimulus);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_schema_stimulus_accepts_valid_cron_expression() {
+        let stimulus = StimulusDef {
+            kind: "cron".to_string(),
+            cron: Some("0 8 * * *".to_string()),
+        };
+
+        let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
+        assert_eq!(parsed.0, StimulusKind::Cron);
+        assert_eq!(parsed.1, "0 8 * * *");
+    }
 }

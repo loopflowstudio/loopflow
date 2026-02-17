@@ -14,7 +14,7 @@ lfd runs on a remote Linux machine (containerized). Concerto connects from your 
 | 02 | Compose Stack | Full stack in Docker (lfd + postgres), test locally | 01 | Shipped |
 | 03 | Pre-shared Token Auth | lfd accepts remote connections | None | Shipped |
 | 04 | EC2 Infrastructure | A box to deploy on (Docker + compose) | 02 | Shipped |
-| 05 | Concerto Remote Connection | Wave CRUD, events, logs over WAN | 03, 04 |  |
+| 05 | Concerto Remote Connection | Wave CRUD, events, logs over WAN | 03, 04 | Next |
 | 06 | Remote File Access | One-click "Open in Cursor" per wave | 05 |
 | 07 | Studio Auth | Real JWT auth via auth.loopflow.studio (server built, client wiring remaining) | 05 |
 | 08 | API Expansion | File browsing, step/flow/direction typeahead | 05 |
@@ -23,6 +23,31 @@ lfd runs on a remote Linux machine (containerized). Concerto connects from your 
 Phases 06, 07, and 08 can run in parallel after 05.
 
 Phase 05 implementation is intentionally capped to a single PR with a practical size guardrail. Any non-critical scope cut from 05 rolls forward into Phase 06/08 docs instead of expanding the 05 PR.
+
+## Update after Phase 01D hardening
+
+Phase 01D shipped and changed what we now treat as non-negotiable for remote work:
+
+- Fork selection must behave the same in CLI and daemon.
+- Headless `prompt` fork selection must fail fast (never auto-pick).
+- Scheduler slot release and orphan-fork cleanup must be restart-safe.
+- Agent timeout is explicit operator config (`executor.agent_timeout`), not hidden watchdog behavior.
+
+### Impact on the next phase (05)
+
+Phase 05 now needs to include two correctness checks that were previously implicit:
+
+1. Capability gating must treat interactive fork prompt mode as unsupported in headless remote runs.
+2. Timeout/fail-fast errors from daemon execution need clear surfacing in Concerto (not generic request failures).
+
+### Open questions for 05/06
+
+- Do we expose `executor.agent_timeout` in Concerto connection settings, or keep it daemon-config only in v1?
+- Should remote capability warnings live in wave detail only, or also in wave edit/config surfaces?
+
+### What might change next
+
+If Docker build-context cost is painful on large repos during Phase 05 dogfooding, we may need to pull that optimization earlier than currently planned.
 
 ## Architecture
 

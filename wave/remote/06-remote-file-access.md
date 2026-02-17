@@ -21,6 +21,13 @@ Phase 05 adds only correctness-critical capability gating for remote mode. The f
 - Replacing hidden local-only actions with remote alternatives (`Copy Path`, `Copy SSH Command`)
 - Wider capability matrix polish across secondary UI surfaces
 
+## Adjustments from Phase 01D hardening
+
+Phase 01D confirmed remote execution is strictly headless and timeout-driven. This phase should assume:
+
+- No interactive fallback: remote-only actions must honor capability gating from Phase 05.
+- Error copy should distinguish unsupported remote action vs execution timeout vs SSH/editor launch failure.
+
 ## Implementation
 
 ### Remote editor launch
@@ -124,6 +131,20 @@ Don't block on full editor support. Cursor + VS Code covers the primary use case
 - **SSH config must exist**: User must have SSH access configured to the remote host. We don't manage SSH keys.
 - **One host per connection**: The remote host for file access is the same as the lfd host. Multi-host (lfd on one machine, files on another) is future work.
 - **Worktree paths are remote paths**: `/home/lfd/repos/repo.wave-name`, not local paths. The wave API already returns these.
+- **Headless remote invariants apply**: Don't offer actions that depend on interactive daemon prompts.
+
+## Try it
+
+1. Connect Concerto to remote lfd (Phase 05 path).
+2. Open the same wave in Cursor and VS Code via remote commands.
+3. Launch remote terminal into worktree and run `pwd`.
+4. Verify local-only actions are hidden/disabled with explicit reason text.
+5. Repeat on local connection to confirm no regression.
+
+## Open questions
+
+- For unsupported editors (for example Zed/JetBrains before remote support is wired), do we hide actions or show disabled actions with guidance?
+- Should "Copy SSH Command" include a repo-relative shortcut, or only full `ssh -t host 'cd path && ...'` for clarity?
 
 ## Done when
 
@@ -131,4 +152,5 @@ Don't block on full editor support. Cursor + VS Code covers the primary use case
 - "Open in VS Code" works for remote waves (same mechanism)
 - "Open in Terminal" SSHs into the worktree directory
 - "Reveal in Finder" hidden for remote connections, replaced with "Copy Path"
+- Remote capability-gated actions fail clearly (unsupported vs timeout vs launch error)
 - Local waves still open editors locally (no regression)

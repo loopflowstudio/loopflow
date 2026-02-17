@@ -88,6 +88,11 @@ public actor EventService {
     private var intentionallyDisconnected = false
     private var isPathMonitorStarted = false
 
+    private struct SocketConnection {
+        let task: URLSessionWebSocketTask
+        let delegate: CertificatePinningDelegate?
+    }
+
     public init(
         connection: ServerConnection = .local,
         tokenProvider: (@Sendable () -> String?)? = nil,
@@ -126,20 +131,8 @@ public actor EventService {
     }
 
     public func probe(timeout: TimeInterval = 5) async throws {
-        let delegate = connection.useTLS
-            ? CertificatePinningDelegate(connection: connection, pinStore: pinStore)
-            : nil
-        let session = makeSession(delegate: delegate)
-        var request = URLRequest(url: connection.wsBaseURL)
-
-        if connection.authMode.requiresToken {
-            guard let token = tokenProvider(), !token.isEmpty else {
-                throw WaveServiceError.authRejected("Missing token")
-            }
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        let task = session.webSocketTask(with: request)
+        let socket = try makeWebSocketConnection()
+        let task = socket.task
         task.resume()
 
         defer {
@@ -169,12 +162,8 @@ public actor EventService {
             group.cancelAll()
         }
 
-        if let trustRequirement = delegate?.consumeTrustRequirement(),
-           case let .certificateChanged(_, _, oldFingerprint, newFingerprint) = trustRequirement {
-            throw WaveServiceError.trustMismatch(
-                oldFingerprint: oldFingerprint,
-                newFingerprint: newFingerprint
-            )
+        if let trustError = trustMismatchError(from: socket.delegate) {
+            throw trustError
         }
     }
 
@@ -186,26 +175,14 @@ public actor EventService {
 
     private func connect() async throws {
         guard webSocketTask == nil else { return }
-
-        let delegate = connection.useTLS
-            ? CertificatePinningDelegate(connection: connection, pinStore: pinStore)
-            : nil
-        let session = makeSession(delegate: delegate)
-        var request = URLRequest(url: connection.wsBaseURL)
-
-        if connection.authMode.requiresToken {
-            guard let token = tokenProvider(), !token.isEmpty else {
-                throw WaveServiceError.authRejected("Missing token")
-            }
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        let socket = try makeWebSocketConnection()
 
         LoggingService.append("connecting to \(connection.wsBaseURL.absoluteString)", category: LoggingService.Category.lfd)
 
-        let task = session.webSocketTask(with: request)
+        let task = socket.task
         webSocketTask = task
         task.resume()
-        receiveLoop(delegate: delegate)
+        receiveLoop(delegate: socket.delegate)
     }
 
     private func receiveLoop(delegate: CertificatePinningDelegate?) {
@@ -223,18 +200,8 @@ public actor EventService {
     ) async {
         switch result {
         case .failure(let error):
-            if let trustRequirement = delegate?.consumeTrustRequirement(),
-               case let .certificateChanged(host, port, oldFingerprint, newFingerprint) = trustRequirement {
-                emitConnectionState(
-                    .trustRequired(
-                        .certificateChanged(
-                            host: host,
-                            port: port,
-                            oldFingerprint: oldFingerprint,
-                            newFingerprint: newFingerprint
-                        )
-                    )
-                )
+            if let trustState = trustRequirementState(from: delegate) {
+                emitConnectionState(trustState)
             } else {
                 handleConnectionFailure(error)
             }
@@ -387,6 +354,40 @@ public actor EventService {
 
     private func emitConnectionState(_ state: ConnectionState) {
         onConnectionStateChange?(state)
+    }
+
+    private func makeWebSocketConnection() throws -> SocketConnection {
+        let delegate = connection.useTLS
+            ? CertificatePinningDelegate(connection: connection, pinStore: pinStore)
+            : nil
+        let session = makeSession(delegate: delegate)
+        var request = URLRequest(url: connection.wsBaseURL)
+        try applyAuthorization(to: &request)
+        return SocketConnection(task: session.webSocketTask(with: request), delegate: delegate)
+    }
+
+    private func applyAuthorization(to request: inout URLRequest) throws {
+        guard connection.authMode.requiresToken else { return }
+        guard let token = tokenProvider(), !token.isEmpty else {
+            throw WaveServiceError.authRejected("Missing token")
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    private func trustRequirementState(from delegate: CertificatePinningDelegate?) -> ConnectionState? {
+        guard let requirement = delegate?.consumeTrustRequirement() else { return nil }
+        return .trustRequired(requirement)
+    }
+
+    private func trustMismatchError(from delegate: CertificatePinningDelegate?) -> WaveServiceError? {
+        guard let requirement = delegate?.consumeTrustRequirement(),
+              case let .certificateChanged(_, _, oldFingerprint, newFingerprint) = requirement else {
+            return nil
+        }
+        return .trustMismatch(
+            oldFingerprint: oldFingerprint,
+            newFingerprint: newFingerprint
+        )
     }
 
     private nonisolated static func extractText(from message: URLSessionWebSocketTask.Message) -> String? {

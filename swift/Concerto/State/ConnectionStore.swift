@@ -4,8 +4,8 @@ import LoopflowCore
 @MainActor
 @Observable
 final class ConnectionStore {
-    private let defaults = UserDefaults.standard
-    private let defaultsKey = "concerto.serverConnection.v1"
+    private let defaults: UserDefaults
+    private static let defaultsKey = "concerto.serverConnection.v1"
     private let secretStore: ConnectionSecretStore
     private let pinStore: CertificatePinStore
 
@@ -20,12 +20,14 @@ final class ConnectionStore {
 
     init(
         secretStore: ConnectionSecretStore = .shared,
-        pinStore: CertificatePinStore = .shared
+        pinStore: CertificatePinStore = .shared,
+        defaults: UserDefaults = .standard
     ) {
         self.secretStore = secretStore
         self.pinStore = pinStore
+        self.defaults = defaults
 
-        if let loaded = Self.loadConnection(from: UserDefaults.standard, key: defaultsKey) {
+        if let loaded = Self.loadConnection(from: defaults) {
             var connection = loaded
             connection.staticToken = secretStore.token(for: loaded)
             activeConnection = connection
@@ -51,10 +53,7 @@ final class ConnectionStore {
     }
 
     func token(for connection: ServerConnection) -> String? {
-        if let token = connection.staticToken {
-            return token
-        }
-        return secretStore.token(for: connection)
+        connection.staticToken ?? secretStore.token(for: connection)
     }
 
     func setDiscoveredRepos(_ repos: [RemoteRepo]) {
@@ -84,11 +83,11 @@ final class ConnectionStore {
         value.staticToken = nil
 
         guard let data = try? JSONEncoder().encode(value) else { return }
-        defaults.set(data, forKey: defaultsKey)
+        defaults.set(data, forKey: Self.defaultsKey)
     }
 
-    private static func loadConnection(from defaults: UserDefaults, key: String) -> ServerConnection? {
-        guard let data = defaults.data(forKey: key) else { return nil }
+    private static func loadConnection(from defaults: UserDefaults) -> ServerConnection? {
+        guard let data = defaults.data(forKey: Self.defaultsKey) else { return nil }
         return try? JSONDecoder().decode(ServerConnection.self, from: data)
     }
 }

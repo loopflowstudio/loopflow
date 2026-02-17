@@ -98,11 +98,7 @@ final class RepoState {
 
     init() {
         let connection = connectionStore.activeConnection
-        let token = connectionStore.token(for: connection)
-        waveService = WaveService(
-            connection: connection,
-            tokenProvider: { token }
-        )
+        waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
         connectionState = connectionStore.state
 
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
@@ -326,10 +322,10 @@ final class RepoState {
         self.outputBuffer = outputBuffer
         if eventService != nil { return }
         LoggingService.append("creating EventService", category: LoggingService.Category.lfd)
-        let token = connectionStore.token(for: connectionStore.activeConnection)
-        eventService = EventService(
-            connection: connectionStore.activeConnection,
-            tokenProvider: { token }
+        let connection = connectionStore.activeConnection
+        eventService = Self.makeEventService(
+            connection: connection,
+            token: connectionStore.token(for: connection)
         )
 
         Task {
@@ -654,32 +650,16 @@ final class RepoState {
             try? await waveService.connectLfd()
         }
 
-        updateConnectionState(.connecting(.tlsTrustCheck))
-        do {
+        try await runConnectionPhase(.tlsTrustCheck, connection: connection) {
             try await waveService.checkConnection()
-        } catch {
-            let mappedState = mapConnectionError(error, connection: connection)
-            updateConnectionState(mappedState)
-            throw error
         }
 
-        updateConnectionState(.connecting(.authCheck))
-        do {
+        try await runConnectionPhase(.authCheck, connection: connection) {
             try await waveService.checkConnection()
-        } catch {
-            let mappedState = mapConnectionError(error, connection: connection)
-            updateConnectionState(mappedState)
-            throw error
         }
 
-        updateConnectionState(.connecting(.repoDiscovery))
-        let repos: [RemoteRepo]
-        do {
-            repos = try await waveService.listRepos()
-        } catch {
-            let mappedState = mapConnectionError(error, connection: connection)
-            updateConnectionState(mappedState)
-            throw error
+        let repos = try await runConnectionPhase(.repoDiscovery, connection: connection) {
+            try await waveService.listRepos()
         }
 
         availableRemoteRepos = repos
@@ -694,18 +674,12 @@ final class RepoState {
             repoTarget = nil
         }
 
-        updateConnectionState(.connecting(.wsProbe))
-        let probeToken = connectionStore.token(for: connection)
-        let probeService = EventService(
+        let probeService = Self.makeEventService(
             connection: connection,
-            tokenProvider: { probeToken }
+            token: connectionStore.token(for: connection)
         )
-        do {
+        try await runConnectionPhase(.wsProbe, connection: connection) {
             try await probeService.probe()
-        } catch {
-            let mappedState = mapConnectionError(error, connection: connection)
-            updateConnectionState(mappedState)
-            throw error
         }
 
         startEventSubscription(outputBuffer: outputBuffer)
@@ -737,10 +711,7 @@ final class RepoState {
     }
 
     var isConnected: Bool {
-        if case .connected = connectionState {
-            return true
-        }
-        return false
+        connectionState.isConnected
     }
 
     var connectionSummary: String {
@@ -785,11 +756,7 @@ final class RepoState {
     }
 
     private func rebuildServices(for connection: ServerConnection) {
-        let token = connectionStore.token(for: connection)
-        waveService = WaveService(
-            connection: connection,
-            tokenProvider: { token }
-        )
+        waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
         outputBuffer?.configureConnection(connection)
 
         Task {
@@ -844,11 +811,36 @@ final class RepoState {
     private func updateConnectionState(_ state: ConnectionState) {
         connectionState = state
         connectionStore.state = state
-        if case .connected = state {
-            lfdConnected = true
-        } else {
-            lfdConnected = false
+        lfdConnected = state.isConnected
+    }
+
+    private func runConnectionPhase<T>(
+        _ phase: ConnectionPhase,
+        connection: ServerConnection,
+        operation: () async throws -> T
+    ) async throws -> T {
+        updateConnectionState(.connecting(phase))
+        do {
+            return try await operation()
+        } catch {
+            let mappedState = mapConnectionError(error, connection: connection)
+            updateConnectionState(mappedState)
+            throw error
         }
+    }
+
+    private static func makeWaveService(connection: ServerConnection, token: String?) -> WaveService {
+        WaveService(
+            connection: connection,
+            tokenProvider: { token }
+        )
+    }
+
+    private static func makeEventService(connection: ServerConnection, token: String?) -> EventService {
+        EventService(
+            connection: connection,
+            tokenProvider: { token }
+        )
     }
 
     // MARK: - Optimistic helpers
@@ -888,5 +880,14 @@ final class RepoState {
                 waveStore.set(WaveViewModel(api: wave))
             }
         }
+    }
+}
+
+private extension ConnectionState {
+    var isConnected: Bool {
+        if case .connected = self {
+            return true
+        }
+        return false
     }
 }

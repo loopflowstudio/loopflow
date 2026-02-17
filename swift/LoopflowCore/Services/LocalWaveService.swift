@@ -306,41 +306,37 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
         LoggingService.lfd("listFlows: GET \(url)")
 
-        do {
-            let (data, response) = try await performGet(url)
-            guard response.statusCode == 200 else {
-                throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-            }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let result = json["result"] as? [String: Any] else {
-                return WaveFlowsResult(flows: [], directions: [])
-            }
-
-            var allFlows: [Flow] = []
-            if let flowsData = result["flows"] as? [[String: Any]] {
-                for flowDict in flowsData {
-                    guard let name = flowDict["name"] as? String else { continue }
-                    let stepNames = flowDict["steps"] as? [String] ?? []
-                    let steps = stepNames.map { Step(prompt: $0) }
-                    allFlows.append(Flow(name: name, steps: steps, type: .flow))
-                }
-            }
-
-            if let stepsData = result["steps"] as? [[String: Any]] {
-                for stepDict in stepsData {
-                    guard let name = stepDict["name"] as? String else { continue }
-                    allFlows.append(Flow(name: name, steps: [Step(prompt: name)], type: .step))
-                }
-            }
-
-            let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
-            let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
-            let directions = (result["directions"] as? [String]) ?? []
-
-            return WaveFlowsResult(flows: flows + steps, directions: directions)
-        } catch {
-            throw error
+        let (data, response) = try await performGet(url)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = json["result"] as? [String: Any] else {
+            return WaveFlowsResult(flows: [], directions: [])
+        }
+
+        var allFlows: [Flow] = []
+        if let flowsData = result["flows"] as? [[String: Any]] {
+            for flowDict in flowsData {
+                guard let name = flowDict["name"] as? String else { continue }
+                let stepNames = flowDict["steps"] as? [String] ?? []
+                let steps = stepNames.map { Step(prompt: $0) }
+                allFlows.append(Flow(name: name, steps: steps, type: .flow))
+            }
+        }
+
+        if let stepsData = result["steps"] as? [[String: Any]] {
+            for stepDict in stepsData {
+                guard let name = stepDict["name"] as? String else { continue }
+                allFlows.append(Flow(name: name, steps: [Step(prompt: name)], type: .step))
+            }
+        }
+
+        let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
+        let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
+        let directions = (result["directions"] as? [String]) ?? []
+
+        return WaveFlowsResult(flows: flows + steps, directions: directions)
     }
 
     public func listWaveSchemas(repo: RepoTarget) async throws -> [WaveSchema] {
@@ -430,15 +426,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                   let name = repo["name"] as? String else {
                 return nil
             }
-            let waveCount: Int
-            if let intCount = repo["wave_count"] as? Int {
-                waveCount = intCount
-            } else if let doubleCount = repo["wave_count"] as? Double {
-                waveCount = Int(doubleCount)
-            } else {
-                waveCount = 0
-            }
-            return RemoteRepo(path: path, name: name, waveCount: waveCount)
+            return RemoteRepo(
+                path: path,
+                name: name,
+                waveCount: Self.normalizeInt(repo["wave_count"])
+            )
         }
     }
 

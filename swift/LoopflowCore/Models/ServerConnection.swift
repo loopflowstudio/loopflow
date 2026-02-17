@@ -35,20 +35,20 @@ public struct ServerConnection: Hashable, Sendable {
     }
 
     public var httpBaseURL: URL {
-        var components = URLComponents()
-        components.scheme = useTLS ? "https" : "http"
-        components.host = host
-        components.port = port
-        return components.url ?? URL(string: "http://127.0.0.1:2486")!
+        makeURL(scheme: useTLS ? "https" : "http")
     }
 
     public var wsBaseURL: URL {
+        makeURL(scheme: useTLS ? "wss" : "ws", path: "/ws")
+    }
+
+    private func makeURL(scheme: String, path: String = "") -> URL {
         var components = URLComponents()
-        components.scheme = useTLS ? "wss" : "ws"
+        components.scheme = scheme
         components.host = host
         components.port = port
-        components.path = "/ws"
-        return components.url ?? URL(string: "ws://127.0.0.1:2486/ws")!
+        components.path = path
+        return components.url ?? URL(string: "\(scheme)://127.0.0.1:2486\(path)")!
     }
 
     /// Used only for timeout tier selection.
@@ -120,17 +120,21 @@ public enum RepoTarget: Hashable, Sendable {
     }
 
     public var isRemote: Bool {
-        if case .remote = self {
-            return true
+        switch self {
+        case .local:
+            false
+        case .remote:
+            true
         }
-        return false
     }
 
     public var localURL: URL? {
-        if case .local(let url) = self {
-            return url
+        switch self {
+        case .local(let url):
+            url
+        case .remote:
+            nil
         }
-        return nil
     }
 }
 

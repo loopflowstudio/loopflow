@@ -20,6 +20,8 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Area scope | `--area PATH` | `area: PATH` |
 | Context files | — | `context: [FILE]` |
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
+| Lint command | `lf ops lint` | `lint: "..."` |
+| Test command | `lf ops test` | `test: "..."` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 
@@ -259,6 +261,23 @@ Auto-push after commits in auto mode.
 |---|---|
 | **Config** | `push: true` |
 | **Default** | `false` |
+
+### Lint and Test Commands
+
+Configure project-specific gate commands for `lf ops lint` and `lf ops test`.
+
+```yaml
+lint: "cargo fmt --check && cargo clippy -- -D warnings"
+test: "cargo test --all && uv run pytest python/tests/"
+```
+
+| | |
+|---|---|
+| **CLI** | `lf ops lint`, `lf ops test` |
+| **Config** | `lint: "..."`, `test: "..."` |
+| **Default** | not set |
+
+If either value is missing, the corresponding command exits with an error.
 
 ### Yolo
 

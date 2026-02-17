@@ -688,13 +688,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     public func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
         let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks")
+        let request = try makeRequest(url)
 
-        let (data, response) = try await session.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -717,20 +715,18 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             .appendingPathComponent("memory-blocks")
             .appendingPathComponent(name)
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
         var body: [String: Any] = ["content": content]
         if let position { body["position"] = position }
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let request = try makeRequest(
+            url,
+            method: "PUT",
+            body: body,
+            contentType: "application/json"
+        )
 
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -747,15 +743,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             .appendingPathComponent("memory-blocks")
             .appendingPathComponent(name)
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = Self.parseErrorMessage(data)
-            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        let request = try makeRequest(url, method: "DELETE")
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
     }
 

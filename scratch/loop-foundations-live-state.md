@@ -4,172 +4,83 @@ seq: 1
 source: wave/loop/01-foundations-live-state.md
 ---
 
-# 01: Foundations + Live State
+# Foundations + Live State
 
-Establish explicit stack structure and remove stale PR-state assumptions.
+## Problem
 
-## Estimated implementation size
+Stacked wave runs currently rely on inferred lineage and frozen PR snapshots. That breaks when people merge, close, or re-draft PRs from GitHub or local CLI outside the daemon's happy path.
 
-~350-700 LOC across Rust storage/model/API paths plus sync integration.
+Who benefits:
+- Conductors managing many stacked iterations
+- Queue automation in step 02 (promotion + merge advancement)
+- Concerto/API users who need reliable open counts and queue head state
 
-## What exists after this step
+Why now: step 02 cannot be deterministic until ancestry and current PR state are both authoritative.
 
-- Every iteration has explicit ancestry metadata.
-- Stack order is queryable without branch-name parsing.
-- PR current state comes from live GitHub sync, not frozen snapshots.
-- API DTOs can project accurate open/draft/merged state even after manual GitHub actions.
+## Approach
 
-## Why this step is first
+Build a two-layer model: immutable run snapshots for history + mutable live PR state for “now”.
 
-Queue lifecycle logic depends on two primitives:
+1. **Make run lineage explicit at write time**
+   - Set `parent_run_id`, `parent_pr_number`, `stack_position`, `stack_group_id`, `stack_status` when creating each main run.
+   - Keep `lineage_inferred` only for historical backfill rows.
+   - Add/standardize store helpers for oldest-first stack listing, next-unmerged lookup, and descendant traversal.
 
-1. A stable graph of iteration ancestry.
-2. Reliable current PR state.
+2. **Introduce authoritative live PR cache**
+   - Upsert `(repo_id, pr_number)` into `live_pr_states` with `state`, draft bit, refs, and sync timestamps.
+   - Sync from GitHub pull data using three triggers: periodic poll, wave-scoped refresh before projection, merge-triggered refresh hook (for step 02).
+   - On sync failure, keep last known state and mark projection stale; never invent “open”.
 
-Without both, promotion, merge detection, and queue advancement become guesswork.
+3. **Project API from live truth, keep snapshot historical**
+   - Wave DTO derives `open_pr_count`, `stack_count`, and `has_stale_pr_state` from live projection.
+   - Run DTO includes lineage fields plus `live_pr_state`, `live_pr_is_draft`, and `pr_state_stale`.
+   - `snapshot.pr` remains untouched as point-in-time run history.
 
-## Data model additions
+4. **Backfill safely**
+   - One-shot migration orders main runs by `(iteration, started_at, id)` per wave.
+   - Link each run to previous run, set `stack_position`, and mark inferred lineage.
+   - Never overwrite explicit lineage on rows already populated by newer code.
 
-### Run stack metadata
+5. **Research-informed pattern choice**
+   - Use the common "materialized remote state + stale bit" pattern (cache remote truth locally, expose freshness explicitly).
+   - Avoid webhook-only dependency in v1; polling + on-demand refresh gives safer degraded behavior.
 
-Store explicit lineage on each run (or a dedicated stack table keyed by run id):
+## Alternatives considered
 
-- `parent_run_id: Option<RunId>`
-- `parent_pr_number: Option<u64>`
-- `stack_position: u32` (oldest = 0)
-- `stack_group_id: String` (wave-scoped chain id)
-- `stack_status: enum` (`active`, `superseded`, `merged`)
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep branch-name/iteration inference only | Minimal schema work | Breaks on rebases/manual branch changes and cannot support deterministic queue progression |
+| Fetch GitHub PR state on every API request (no table) | Freshest possible per call | High API fanout/rate-limit risk, slow list endpoints, no durable last-known fallback |
+| Webhook-only PR state updates | Lower polling overhead | Missed events during downtime become silent correctness bugs without replay infra |
 
-### Live PR state table
+## Key decisions
 
-Store GitHub truth separately from run snapshot:
+- Following wave principles directly: **"Keep stacked iterations and track ancestry explicitly."** and **"Make GitHub live PR state authoritative for current status."**
+- Bold choice: stale/unknown is explicit API data (`pr_state_stale`, `unknown`), not hidden fallback behavior.
+- Wild success target: merge a PR in GitHub UI and queue-facing endpoints reflect new truth within 60 seconds.
+- Wild failure guard: if GitHub is unavailable, we degrade visibly (stale=true) instead of silently reporting incorrect open counts.
+- Immutable history wins: run snapshots are never rewritten by live sync.
 
-- `repo_id`
-- `pr_number`
-- `state` (`open`, `closed`, `merged`)
-- `is_draft: bool`
-- `head_ref`
-- `head_sha`
-- `base_ref`
-- `updated_at`
-- `merged_at: Option<DateTime>`
-- `synced_at`
+## Scope
 
-### Snapshot policy
-
-Keep `run.snapshot.pr` unchanged as historical capture from run completion time.
-
-## Migration and backfill
-
-### New runs
-
-- Populate stack metadata at run creation.
-- `parent_run_id` points to most recent run in same wave.
-- `stack_position` increments from previous max.
-
-### Existing runs
-
-Backfill in best-effort mode:
-
-1. Group runs by wave.
-2. Order by iteration index / created time.
-3. Infer parent from previous iteration.
-4. Mark inferred rows with `lineage_inferred = true` if confidence is partial.
-
-No destructive rewrite of historical snapshots.
-
-## Sync architecture
-
-### Sync sources
-
-- Primary: GitHub API / `gh pr list` + `gh pr view`.
-- Trigger modes:
-  - periodic polling
-  - wave-scoped on-demand refresh
-  - merge-triggered immediate refresh (used by step 02)
-
-### Sync behavior
-
-- Upsert by `(repo_id, pr_number)`.
-- Preserve last successful sync timestamp.
-- On partial failure, return stale marker instead of fabricating state.
-
-### GitHub unavailable behavior
-
-- Keep last synced values.
-- Emit `is_stale: true` for affected projections.
-- Avoid defaulting unknown to open.
-
-## API changes
-
-### Wave DTO
-
-Expose stack + sync health:
-
-- `open_pr_count` from live state
-- `stack_count`
-- `has_stale_pr_state`
-
-### Run DTO additions
-
-- `stack_position`
-- `parent_run_id`
-- `parent_pr_number`
-- `live_pr_state`
-- `live_pr_is_draft`
-- `pr_state_stale`
-
-### Ordering endpoint behavior
-
-Add query support for chronological stack order so UI can render queue-first.
-
-## Query helpers
-
-Implement helpers in store/service layer:
-
-- `list_stack_runs(wave_id) -> Vec<Run>` ordered oldest-first
-- `find_next_unmerged_run(wave_id) -> Option<Run>`
-- `find_descendants(run_id) -> Vec<Run>`
-- `get_live_pr_state(repo_id, pr_number) -> Option<LivePrState>`
-
-These become foundational for queue progression in step 02.
-
-## Acceptance tests
-
-### Storage tests
-
-- Creating iteration N records parent linkage to N-1.
-- Backfill does not overwrite existing explicit metadata.
-
-### Sync tests
-
-- Merged PR in GitHub transitions from open to merged in local state.
-- Closed PR remains excluded from open counts.
-- Unknown state is surfaced as unknown, not auto-open.
-
-### API tests
-
-- `open_pr_count` reflects live state, not snapshot-only state.
-- Runs can be returned oldest-first with stable parent links.
-
-## Rollout notes
-
-- Ship model + sync first behind read-path fallback.
-- Switch API projections to live state once sync reliability is verified.
-- Keep temporary observability counters:
-  - sync latency
-  - stale projection rate
-  - live-vs-snapshot mismatch count
-
-## Non-goals in this step
-
-- Draft/Ready promotion logic.
-- Merge-triggered rebase logic.
-- Combine reconciliation.
-- Concerto queue UX.
+- In scope:
+  - explicit lineage metadata for main runs
+  - best-effort historical backfill with inference marking
+  - live PR state table and sync upserts
+  - wave/run DTO projection from live state with stale markers
+  - oldest-first stack ordering support for queue rendering
+- Out of scope:
+  - draft/ready promotion policy
+  - merge-triggered rebase execution
+  - combine PR reconciliation
+  - Concerto queue UX polish
 
 ## Done when
 
-- Stack lineage is explicit and queryable.
-- Current PR status in API reflects GitHub reality.
-- Existing stale-count bug class is eliminated at source.
+- `cargo test --all` passes with coverage proving:
+  - iteration N links to N-1 and increments `stack_position`
+  - backfill does not overwrite explicit lineage
+  - merged/closed/unknown live PR transitions project correctly
+  - API `open_pr_count` is live-state derived, not snapshot-derived
+- `GET /waves/{id}` reports accurate `open_pr_count`, `stack_count`, and `has_stale_pr_state` for a stacked wave.
+- `GET /wave_runs?wave_id=<id>&order=stack` returns stable oldest-first lineage with correct per-run stale flags.

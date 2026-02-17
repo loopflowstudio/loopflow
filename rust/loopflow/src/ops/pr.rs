@@ -65,10 +65,11 @@ pub fn create_or_update_pr(
         flow_parents: Vec::new(),
         message: None,
     };
-    let _ = commit_workflow(repo, &commit_options, progress)?;
+    let committed = commit_workflow(repo, &commit_options, progress)?;
 
     sync_main_repo(repo)?;
 
+    let mut rebased = false;
     if commits_behind_main(repo)? > 0 {
         progress.status("Branch behind base, rebasing...");
         let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
@@ -81,10 +82,13 @@ pub fn create_or_update_pr(
             },
             progress,
         )?;
+        rebased = true;
     }
 
+    let has_changes = committed || rebased;
+
     if let Some(pr) = find_open_pr(repo)? {
-        if !options.refresh && !has_unpushed_commits(repo)? && !pr.is_draft {
+        if !options.refresh && !has_changes && !pr.is_draft {
             open_url(&pr.url);
             return Ok(PrResult {
                 url: pr.url,
@@ -280,23 +284,6 @@ fn commits_behind_main(repo: &Path) -> OpsResult<i32> {
         .parse::<i32>()
         .unwrap_or(0);
     Ok(count)
-}
-
-fn has_unpushed_commits(repo: &Path) -> OpsResult<bool> {
-    let output = Command::new("git")
-        .arg("rev-list")
-        .arg("--count")
-        .arg("@{u}..HEAD")
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
-        return Ok(true);
-    }
-    let count = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<i32>()
-        .unwrap_or(0);
-    Ok(count > 0)
 }
 
 fn pr_target(repo: &Path) -> OpsResult<String> {

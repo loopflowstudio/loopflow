@@ -1,9 +1,10 @@
 ---
-status: proposed
+status: in_progress
 seq: 2
+source: wave/loop/02-queue-lifecycle-merge-advancement.md
 ---
 
-# 02: Queue Lifecycle + Merge Advancement
+# Queue Lifecycle + Merge Advancement
 
 Adopt a deterministic landing queue with Draft-first semantics and lazy rebase.
 

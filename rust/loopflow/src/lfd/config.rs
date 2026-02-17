@@ -2,10 +2,12 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::warn;
 
 const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
+const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 45 * 60;
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
@@ -117,6 +119,13 @@ impl RawLfdConfig {
             }
         }
 
+        if let Ok(value) = std::env::var("LFD_EXECUTOR_AGENT_TIMEOUT") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.executor.agent_timeout = parse_duration_str(trimmed)?;
+            }
+        }
+
         if let Ok(value) = std::env::var("LFD_GITHUB_WEBHOOK_SECRET") {
             self.github.webhook_secret = value;
         }
@@ -159,6 +168,7 @@ impl RawLfdConfig {
                 r#type: profile.executor_type,
                 image: self.executor.image,
                 credentials: self.executor.credentials,
+                agent_timeout: self.executor.agent_timeout,
             },
             github: self.github,
         })
@@ -335,6 +345,7 @@ pub struct ExecutorConfig {
     pub r#type: ExecutorType,
     pub image: String,
     pub credentials: ExecutorCredentialsConfig,
+    pub agent_timeout: Duration,
 }
 
 impl Default for ExecutorConfig {
@@ -343,6 +354,7 @@ impl Default for ExecutorConfig {
             r#type: ExecutorType::Local,
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
+            agent_timeout: default_agent_timeout(),
         }
     }
 }
@@ -354,6 +366,11 @@ struct RawExecutorConfig {
     image: String,
     #[serde(default)]
     credentials: ExecutorCredentialsConfig,
+    #[serde(
+        default = "default_agent_timeout",
+        deserialize_with = "deserialize_duration"
+    )]
+    agent_timeout: Duration,
 }
 
 impl Default for RawExecutorConfig {
@@ -362,12 +379,45 @@ impl Default for RawExecutorConfig {
             r#type: None,
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
+            agent_timeout: default_agent_timeout(),
         }
     }
 }
 
 fn default_executor_image() -> String {
     DEFAULT_EXECUTOR_IMAGE.to_string()
+}
+
+fn default_agent_timeout() -> Duration {
+    Duration::from_secs(DEFAULT_AGENT_TIMEOUT_SECS)
+}
+
+fn parse_duration_str(raw: &str) -> Result<Duration> {
+    humantime::parse_duration(raw)
+        .with_context(|| format!("invalid duration '{raw}' for executor.agent_timeout"))
+}
+
+fn deserialize_duration<'de, D>(deserializer: D) -> std::result::Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum DurationValue {
+        String(String),
+        Seconds(u64),
+    }
+
+    let value = DurationValue::deserialize(deserializer)?;
+    match value {
+        DurationValue::String(raw) => humantime::parse_duration(raw.trim()).map_err(|err| {
+            serde::de::Error::custom(format!(
+                "invalid duration '{}' for executor.agent_timeout: {}",
+                raw, err
+            ))
+        }),
+        DurationValue::Seconds(seconds) => Ok(Duration::from_secs(seconds)),
+    }
 }
 
 fn config_path() -> PathBuf {
@@ -382,6 +432,7 @@ mod tests {
     use super::*;
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
     use tempfile::tempdir;
 
     fn env_lock() -> &'static Mutex<()> {
@@ -423,6 +474,7 @@ mod tests {
         assert_eq!(config.runtime_backend, RuntimeBackend::Native);
         assert_eq!(config.storage, StorageType::Sqlite);
         assert_eq!(config.executor.r#type, ExecutorType::Local);
+        assert_eq!(config.executor.agent_timeout, Duration::from_secs(45 * 60));
     }
 
     #[test]
@@ -486,6 +538,7 @@ executor:
             "LFD_AUTH_PROVIDER",
             "LFD_AUTH_TOKEN",
             "LFD_EXECUTOR_IMAGE",
+            "LFD_EXECUTOR_AGENT_TIMEOUT",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
         ]);
@@ -493,6 +546,7 @@ executor:
         std::env::set_var("LFD_AUTH_PROVIDER", "static");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
         std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
+        std::env::set_var("LFD_EXECUTOR_AGENT_TIMEOUT", "30m");
         std::env::set_var("LFD_GITHUB_WEBHOOK_SECRET", "env-secret");
         std::env::set_var("LFD_GITHUB_TOKEN", "ghp_env");
 
@@ -506,6 +560,10 @@ executor:
         assert_eq!(resolved.auth.provider, "static");
         assert_eq!(resolved.auth.token, Some("env-token-456".to_string()));
         assert_eq!(resolved.executor.image, "loopflow/agent:env");
+        assert_eq!(
+            resolved.executor.agent_timeout,
+            Duration::from_secs(30 * 60)
+        );
         assert_eq!(resolved.github.webhook_secret, "env-secret");
         assert_eq!(resolved.github.token, Some("ghp_env".to_string()));
     }
@@ -535,6 +593,7 @@ executor:
             "LFD_AUTH_PROVIDER",
             "LFD_AUTH_TOKEN",
             "LFD_EXECUTOR_IMAGE",
+            "LFD_EXECUTOR_AGENT_TIMEOUT",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
         ]);
@@ -552,5 +611,16 @@ executor:
         }
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn executor_agent_timeout_accepts_duration_string() {
+        let raw = r#"
+executor:
+  agent_timeout: 75s
+"#;
+        let config: RawLfdConfig = serde_yaml::from_str(raw).expect("yaml parses");
+        let resolved = config.resolve().expect("resolved");
+        assert_eq!(resolved.executor.agent_timeout, Duration::from_secs(75));
     }
 }

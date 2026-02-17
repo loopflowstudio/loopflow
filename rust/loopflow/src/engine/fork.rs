@@ -4,9 +4,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::error::CoreError;
+use crate::engine::flow::{ConcreteStep, ForkSelect};
 use crate::engine::worktree::remove_worktree;
 
 const FORK_MANIFEST_FILE: &str = ".lf/fork-manifest.json";
+type ForkPromptChooser<'a> =
+    &'a mut dyn FnMut(&str, &[ConcreteStep]) -> std::result::Result<usize, String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkManifest {
@@ -49,6 +52,35 @@ pub fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
         }
     }
     combined
+}
+
+pub fn resolve_fork_selection(
+    select: &ForkSelect,
+    branches: &[ConcreteStep],
+    mut prompt_choice: Option<ForkPromptChooser<'_>>,
+) -> Result<usize, String> {
+    if branches.is_empty() {
+        return Err("fork has no branches".to_string());
+    }
+
+    match select {
+        ForkSelect::One => Ok(0),
+        ForkSelect::Prompt { prompt } => {
+            let chooser = prompt_choice
+                .as_mut()
+                .ok_or_else(|| "fork(select=prompt) requires an interactive TTY".to_string())?;
+            let selected = chooser(prompt, branches)?;
+            if selected >= branches.len() {
+                return Err(format!(
+                    "fork prompt selected branch {} but only {} branch(es) exist",
+                    selected,
+                    branches.len()
+                ));
+            }
+            Ok(selected)
+        }
+        ForkSelect::All => Err("fork(select=all) does not select a single branch".to_string()),
+    }
 }
 
 /// Write fork manifest to `.lf/fork-manifest.json` in the repo root.
@@ -102,6 +134,7 @@ pub fn cleanup_fork_worktrees(manifest_path: Option<&Path>, worktrees: &[PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::flow::{ConcreteStep, ForkSelect, Step};
     use tempfile::tempdir;
 
     #[test]
@@ -151,5 +184,48 @@ mod tests {
         let base = vec!["designer".to_string()];
         let merged = merge_directions(&base, &[]);
         assert_eq!(merged, base);
+    }
+
+    fn branch(name: &str) -> ConcreteStep {
+        ConcreteStep {
+            step: Step::named(name),
+            flow_parents: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_fork_selection_one_is_deterministic_first_branch() {
+        let branches = vec![branch("a"), branch("b")];
+        let selected = resolve_fork_selection(&ForkSelect::One, &branches, None).expect("select");
+        assert_eq!(selected, 0);
+    }
+
+    #[test]
+    fn resolve_fork_selection_prompt_requires_chooser() {
+        let branches = vec![branch("a"), branch("b")];
+        let err = resolve_fork_selection(
+            &ForkSelect::Prompt {
+                prompt: "choose".to_string(),
+            },
+            &branches,
+            None,
+        )
+        .expect_err("missing chooser should fail");
+        assert_eq!(err, "fork(select=prompt) requires an interactive TTY");
+    }
+
+    #[test]
+    fn resolve_fork_selection_prompt_uses_chooser_result() {
+        let branches = vec![branch("a"), branch("b"), branch("c")];
+        let mut chooser = |_prompt: &str, _branches: &[ConcreteStep]| Ok(2usize);
+        let selected = resolve_fork_selection(
+            &ForkSelect::Prompt {
+                prompt: "choose".to_string(),
+            },
+            &branches,
+            Some(&mut chooser),
+        )
+        .expect("prompt select");
+        assert_eq!(selected, 2);
     }
 }

@@ -443,6 +443,7 @@ pub trait ExecutionStore: Send + Sync {
         wave_run_id: &LfdId,
         step_index: u32,
     ) -> StoreResult<Vec<ForkRun>>;
+    async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>>;
     async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
     async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
 
@@ -980,6 +981,15 @@ impl ExecutionStore for Store {
         }
     }
 
+    async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, |store| store.list_orphaned_fork_runs()).await
+            }
+            StoreBackend::Postgres(store) => store.list_orphaned_fork_runs().await,
+        }
+    }
+
     async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
@@ -1333,6 +1343,26 @@ mod tests {
                 .len(),
             1
         );
+        let mut failed_run = run.clone();
+        failed_run.status = WaveRunStatus::Failed;
+        store
+            .update_wave_run(&failed_run)
+            .await
+            .expect("update run to failed");
+        let orphaned = store
+            .list_orphaned_fork_runs()
+            .await
+            .expect("list orphaned fork runs");
+        assert_eq!(orphaned.len(), 1);
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("restore run status");
+        let deleted_forks = store
+            .delete_fork_runs(&run.id, 0)
+            .await
+            .expect("delete fork runs");
+        assert_eq!(deleted_forks, 1);
 
         let agent = Agent {
             id: LfdId::new(),

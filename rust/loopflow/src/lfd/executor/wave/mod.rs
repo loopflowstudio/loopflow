@@ -68,7 +68,10 @@ impl WaveExecutor {
         let executor_type = config.r#type;
         let runner: Arc<dyn AgentExecutor> = match executor_type {
             ExecutorType::Docker => Arc::new(DockerExecutor::new(store.clone(), &config)?),
-            ExecutorType::Local => Arc::new(LocalProcessExecutor::new(store.clone())),
+            ExecutorType::Local => Arc::new(LocalProcessExecutor::new(
+                store.clone(),
+                config.agent_timeout,
+            )),
         };
         Ok(Self {
             store,
@@ -105,7 +108,11 @@ impl WaveExecutor {
     }
 
     pub async fn recover_startup(&self) -> Result<StartupRecovery> {
-        self.runner.recover_startup(&self.output).await
+        let orphaned = self.cleanup_orphaned_fork_runs().await?;
+        let mut recovery = self.runner.recover_startup(&self.output).await?;
+        recovery.orphaned_fork_runs_cleaned = orphaned.cleaned_runs;
+        recovery.orphaned_fork_worktrees_removed = orphaned.removed_worktrees;
+        Ok(recovery)
     }
 
     pub async fn cleanup_wave_workspace(&self, wave: &Wave) -> Result<()> {
@@ -173,12 +180,17 @@ impl WaveExecutor {
         let runs = self.store.list_wave_runs(None, None).await?;
 
         for run in runs {
-            if is_active_wave_run_status(run.status) && run.run_kind == WaveRunKind::Sidecar {
+            let run_is_active = is_active_wave_run_status(run.status);
+            if run_is_active && run.run_kind == WaveRunKind::Sidecar {
                 active.push(EphemeralWorktree {
                     path: run.worktree.clone(),
                     owner_kind: EphemeralOwnerKind::Sidecar,
                     owner_id: run.id.to_string(),
                 });
+            }
+
+            if !run_is_active {
+                continue;
             }
 
             let forks = self.store.list_fork_runs(&run.id, run.step_index).await?;
@@ -195,6 +207,52 @@ impl WaveExecutor {
         }
 
         Ok(active)
+    }
+
+    async fn cleanup_orphaned_fork_runs(&self) -> Result<OrphanedForkCleanup> {
+        let orphaned_runs = self.store.list_orphaned_fork_runs().await?;
+        if orphaned_runs.is_empty() {
+            return Ok(OrphanedForkCleanup::default());
+        }
+
+        let mut removed_worktrees = 0u32;
+        let mut stale_groups = HashSet::new();
+        for fork_run in &orphaned_runs {
+            stale_groups.insert((fork_run.wave_run_id.to_string(), fork_run.step_index));
+
+            let worktree_path = Path::new(&fork_run.worktree);
+            if !worktree_path.join(".git").exists() {
+                continue;
+            }
+
+            match remove_worktree(worktree_path, true) {
+                Ok(()) => removed_worktrees += 1,
+                Err(err) => warn!(
+                    worktree = %worktree_path.display(),
+                    error = %err,
+                    "failed removing orphaned fork worktree"
+                ),
+            }
+        }
+
+        let mut cleaned_runs = 0u32;
+        for (wave_run_id, step_index) in stale_groups {
+            let run_id = LfdId::from_raw(&wave_run_id);
+            match self.store.delete_fork_runs(&run_id, step_index).await {
+                Ok(deleted) => cleaned_runs += deleted,
+                Err(err) => warn!(
+                    wave_run_id = %wave_run_id,
+                    step_index,
+                    error = %err,
+                    "failed deleting orphaned fork run records"
+                ),
+            }
+        }
+
+        Ok(OrphanedForkCleanup {
+            cleaned_runs,
+            removed_worktrees,
+        })
     }
 
     pub async fn execute(&self, run_id: &LfdId) -> Result<()> {
@@ -461,6 +519,7 @@ impl WaveExecutor {
                 step: step.clone(),
                 model: model.clone(),
                 cmd: build_agent_command(&model, &prompt, &launch),
+                output_prefix: None,
             })
             .await?;
 
@@ -476,12 +535,21 @@ impl WaveExecutor {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct OrphanedForkCleanup {
+    cleaned_runs: u32,
+    removed_worktrees: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::worktree::create_worktree;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::WaveRunSnapshot;
     use async_trait::async_trait;
+    use loopflow_test_support::TestRepo;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     struct MockRunner;
@@ -492,10 +560,7 @@ mod tests {
             &self,
             _cmd: Vec<String>,
             _cwd: &Path,
-            _wave_id: &str,
-            _agent_id: &str,
-            _wave_run_id: &str,
-            _output: &OutputHub,
+            _context: super::super::AgentRunContext<'_>,
         ) -> Result<i32> {
             Ok(0)
         }
@@ -503,6 +568,129 @@ mod tests {
         async fn terminate(&self, _agent_id: &str) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct ForkRunnerCall {
+        cwd: String,
+        output_prefix: Option<String>,
+        prompt_logs: String,
+    }
+
+    #[derive(Debug, Default)]
+    struct ForkTestRunner {
+        fail_suffix: Option<String>,
+        fail_code: i32,
+        calls: Mutex<Vec<ForkRunnerCall>>,
+    }
+
+    #[async_trait]
+    impl AgentExecutor for ForkTestRunner {
+        async fn run(
+            &self,
+            _cmd: Vec<String>,
+            cwd: &Path,
+            context: super::super::AgentRunContext<'_>,
+        ) -> Result<i32> {
+            let call = ForkRunnerCall {
+                cwd: cwd.to_string_lossy().to_string(),
+                output_prefix: context.output_prefix.map(str::to_string),
+                prompt_logs: read_prompt_logs(cwd),
+            };
+            self.calls.lock().expect("runner mutex").push(call);
+
+            if let Some(suffix) = &self.fail_suffix {
+                if cwd.to_string_lossy().ends_with(suffix) {
+                    return Ok(self.fail_code);
+                }
+            }
+            Ok(0)
+        }
+
+        async fn terminate(&self, _agent_id: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn read_prompt_logs(worktree: &Path) -> String {
+        let log_dir = worktree.join(".lf/log");
+        if !log_dir.exists() {
+            return String::new();
+        }
+        let mut files = std::fs::read_dir(log_dir)
+            .expect("read log dir")
+            .map(|entry| entry.expect("dir entry").path())
+            .collect::<Vec<_>>();
+        files.sort();
+
+        let mut content = String::new();
+        for file in files {
+            if let Ok(text) = std::fs::read_to_string(&file) {
+                content.push_str(&text);
+            }
+        }
+        content
+    }
+
+    fn create_fork_flow_repo(repo: &TestRepo, flow: &str) {
+        repo.create_file(".lf/flows/fork-flow.yaml", flow);
+        repo.create_file(".lf/steps/step-a.md", "do step a");
+        repo.create_file(".lf/steps/step-b.md", "do step b");
+        repo.stage_all();
+        repo.commit("add fork fixtures");
+    }
+
+    fn create_wave_and_run(store: &SharedStore, repo: &Path, flow_name: &str) -> (LfdId, LfdId) {
+        let wave_id = LfdId::new();
+        let run_id = LfdId::new();
+
+        let wave = Wave {
+            id: wave_id.clone(),
+            name: "fork-wave".to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: flow_name.to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Running,
+            iteration: 0,
+            schema_ref: None,
+            schema_name: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store.create_wave(&wave).expect("wave should be created");
+
+        let run = WaveRun {
+            id: run_id.clone(),
+            wave_id: wave_id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: repo.to_string_lossy().to_string(),
+                flow: flow_name.to_string(),
+                direction: vec![],
+                area: vec![],
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status: WaveRunStatus::Running,
+            worktree: repo.to_string_lossy().to_string(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: vec![],
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave_id.to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
+        };
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created");
+        (wave_id, run_id)
     }
 
     #[tokio::test]
@@ -725,6 +913,233 @@ mod tests {
         assert_eq!(
             updated_run.error.as_deref(),
             Some("fork(select=all) is not supported by the docker executor yet")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_fork_success_cleans_worktrees_and_records() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- fork:
+    branches:
+      - step: { name: step-a }
+      - step: { name: step-b }
+    select: all
+"#,
+        );
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner::default());
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler.clone(), output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Completed);
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-0")).exists());
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-1")).exists());
+        assert_eq!(
+            store
+                .list_fork_runs(&run_id, 0)
+                .expect("fork runs should load")
+                .len(),
+            0
+        );
+        assert_eq!(scheduler.slots_used(), 0);
+    }
+
+    #[tokio::test]
+    async fn execute_fork_failure_cleans_worktrees_and_releases_slots() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- fork:
+    branches:
+      - step: { name: step-a }
+      - step: { name: step-b }
+    select: all
+"#,
+        );
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner {
+            fail_suffix: Some("-fork-1".to_string()),
+            fail_code: 42,
+            ..Default::default()
+        });
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler.clone(), output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .expect("run fetch should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert_eq!(
+            updated_run.error.as_deref(),
+            Some("fork branch fork-1 exited with code 42")
+        );
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-0")).exists());
+        assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-1")).exists());
+        assert_eq!(
+            store
+                .list_fork_runs(&run_id, 0)
+                .expect("fork runs should load")
+                .len(),
+            0
+        );
+        assert_eq!(scheduler.slots_used(), 0);
+    }
+
+    #[tokio::test]
+    async fn execute_fork_merges_directions_and_prefixes_branch_logs() {
+        let repo = TestRepo::new();
+        let tmp = tempdir().expect("tempdir");
+        create_fork_flow_repo(
+            &repo,
+            r#"
+- fork:
+    branches:
+      - step:
+          name: step-a
+          directions: [branch]
+    select: all
+"#,
+        );
+        repo.create_file(".lf/directions/base.md", "BASE_DIRECTION_MARKER");
+        repo.create_file(".lf/directions/branch.md", "BRANCH_DIRECTION_MARKER");
+        repo.stage_all();
+        repo.commit("add fork direction fixtures");
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+        let (wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+
+        let mut run = store
+            .get_wave_run(&run_id)
+            .expect("run should load")
+            .expect("run should exist");
+        run.snapshot.direction = vec!["base".to_string()];
+        store.update_wave_run(&run).expect("run should update");
+        let mut wave = store
+            .get_wave(&wave_id)
+            .expect("wave should load")
+            .expect("wave should exist");
+        wave.direction = vec!["base".to_string()];
+        store.update_wave(&wave).expect("wave should update");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let runner = Arc::new(ForkTestRunner::default());
+        let runner_ref = runner.clone();
+        let executor =
+            WaveExecutor::with_runner(store.clone(), scheduler, output, event_hub, runner);
+
+        executor
+            .execute(&run_id)
+            .await
+            .expect("execution should finish");
+
+        let calls = runner_ref.calls.lock().expect("runner mutex");
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].cwd.ends_with("-fork-0"));
+        assert_eq!(calls[0].output_prefix.as_deref(), Some("[fork-0] "));
+        assert!(calls[0].prompt_logs.contains("BASE_DIRECTION_MARKER"));
+        assert!(calls[0].prompt_logs.contains("BRANCH_DIRECTION_MARKER"));
+    }
+
+    #[tokio::test]
+    async fn recover_startup_cleans_orphaned_fork_worktree_records() {
+        let repo = TestRepo::new();
+        let db_dir = tempdir().expect("tempdir");
+        let db_path = db_dir.path().join("test.db");
+        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow");
+
+        let mut run = store
+            .get_wave_run(&run_id)
+            .expect("run should load")
+            .expect("run should exist");
+        run.status = WaveRunStatus::Failed;
+        store.update_wave_run(&run).expect("run should update");
+
+        let fork_worktree = format!("{}-fork-0", repo.path().to_string_lossy());
+        create_worktree(
+            repo.path(),
+            Path::new(&fork_worktree),
+            "orphan-fork-recovery-test",
+        )
+        .expect("fork worktree should be created");
+
+        store
+            .upsert_fork_run(&crate::lfd::store::ForkRun {
+                id: LfdId::new(),
+                wave_run_id: run_id.clone(),
+                step_index: 0,
+                branch_index: 0,
+                status: ForkRunStatus::Running,
+                worktree: fork_worktree.clone(),
+            })
+            .expect("fork run should be stored");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        let recovery = executor
+            .recover_startup()
+            .await
+            .expect("startup recovery should succeed");
+        assert_eq!(recovery.orphaned_fork_runs_cleaned, 1);
+        assert_eq!(recovery.orphaned_fork_worktrees_removed, 1);
+        assert!(!Path::new(&fork_worktree).exists());
+        assert_eq!(
+            store
+                .list_fork_runs(&run_id, 0)
+                .expect("fork runs should load")
+                .len(),
+            0
         );
     }
 }

@@ -147,6 +147,7 @@ impl WaveExecutor {
                 step,
                 model: model.clone(),
                 cmd: build_agent_command(&model, &prompt, &launch),
+                output_prefix: None,
             })
             .await?;
 

@@ -1,0 +1,26 @@
+name: Docker E2E Nightly
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  docker-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify Docker is available
+        run: docker version
+      - name: Run Docker recovery tests
+        run: |
+          cargo test -p loopflow docker_startup_rehydrates_running_agents_and_cleans_orphans -- --nocapture
+          cargo test -p loopflow docker_startup_lost_agent_does_not_flip_terminal_run_wave_status -- --nocapture
+      - name: Run fork hardening tests
+        run: |
+          cargo test -p loopflow execute_fork_success_cleans_worktrees_and_records -- --nocapture
+          cargo test -p loopflow execute_fork_failure_cleans_worktrees_and_releases_slots -- --nocapture
+          cargo test -p loopflow execute_fork_merges_directions_and_prefixes_branch_logs -- --nocapture
+      - name: Run smoke workflow
+        run: tests/e2e/test_smoke.sh

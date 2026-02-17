@@ -17,17 +17,18 @@ use crate::lfd::types::Wave;
 pub use helpers::{create_wave_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
+#[derive(Debug, Clone, Copy)]
+pub struct AgentRunContext<'a> {
+    pub wave_id: &'a str,
+    pub agent_id: &'a str,
+    pub wave_run_id: &'a str,
+    pub output: &'a OutputHub,
+    pub output_prefix: Option<&'a str>,
+}
+
 #[async_trait]
 pub trait AgentExecutor: Send + Sync {
-    async fn run(
-        &self,
-        cmd: Vec<String>,
-        cwd: &Path,
-        wave_id: &str,
-        agent_id: &str,
-        wave_run_id: &str,
-        output: &OutputHub,
-    ) -> Result<i32>;
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32>;
     async fn terminate(&self, agent_id: &str) -> Result<()>;
     async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
         Ok(StartupRecovery::default())
@@ -43,6 +44,8 @@ pub struct StartupRecovery {
     pub rehydrated_agents: u32,
     pub lost_agents_failed: u32,
     pub orphaned_containers_removed: u32,
+    pub orphaned_fork_runs_cleaned: u32,
+    pub orphaned_fork_worktrees_removed: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +88,7 @@ pub(crate) async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
     wave_id: String,
     wave_run_id: String,
     agent_id: String,
+    output_prefix: Option<String>,
 ) {
     let mut parser = StreamParser::new();
     let mut lines = BufReader::new(reader).lines();
@@ -96,6 +100,7 @@ pub(crate) async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
             &wave_id,
             &wave_run_id,
             &agent_id,
+            output_prefix.as_deref(),
         );
     }
 }
@@ -107,6 +112,7 @@ pub(crate) fn handle_output_line(
     wave_id: &str,
     wave_run_id: &str,
     agent_id: &str,
+    output_prefix: Option<&str>,
 ) {
     match parser.feed_line(line) {
         ParseResult::Events(events) => {
@@ -115,18 +121,37 @@ pub(crate) fn handle_output_line(
                 let text = if !stdout.is_empty() { stdout } else { stderr };
                 let text = text.trim_end_matches('\n').to_string();
                 if !text.is_empty() {
-                    send_output(output, wave_id, wave_run_id, agent_id, text);
+                    send_output(output, wave_id, wave_run_id, agent_id, text, output_prefix);
                 }
             }
         }
         ParseResult::Skipped => {}
         ParseResult::Passthrough => {
-            send_output(output, wave_id, wave_run_id, agent_id, line.to_string());
+            send_output(
+                output,
+                wave_id,
+                wave_run_id,
+                agent_id,
+                line.to_string(),
+                output_prefix,
+            );
         }
     }
 }
 
-fn send_output(output: &OutputHub, wave_id: &str, wave_run_id: &str, agent_id: &str, text: String) {
+fn send_output(
+    output: &OutputHub,
+    wave_id: &str,
+    wave_run_id: &str,
+    agent_id: &str,
+    text: String,
+    output_prefix: Option<&str>,
+) {
+    let text = if let Some(prefix) = output_prefix {
+        format!("{prefix}{text}")
+    } else {
+        text
+    };
     output.send(OutputEvent {
         wave_id: wave_id.to_string(),
         wave_run_id: wave_run_id.to_string(),
@@ -176,6 +201,7 @@ mod tests {
             "wave-1".to_string(),
             "run-1".to_string(),
             "agent-1".to_string(),
+            None,
         )
         .await;
 
@@ -207,6 +233,7 @@ mod tests {
             "wave-1".to_string(),
             "run-2".to_string(),
             "agent-1".to_string(),
+            None,
         )
         .await;
 

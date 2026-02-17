@@ -1,6 +1,6 @@
 # Testing
 
-CI runs five test suites. All must pass before merging.
+CI runs six test suites. All must pass before merging.
 
 ## Quick Reference
 
@@ -54,10 +54,11 @@ See `.github/workflows/ci.yml`. Five parallel jobs:
 | `rust-test` | ubuntu-latest | `cargo fmt`, `cargo clippy`, `cargo test --all` |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
+| `docker-smoke` | ubuntu-latest | `docker version` + `cargo test -p loopflow docker_` |
 | `swift-test` | macos-15 | `swift test --package-path swift` |
 | `concerto-ui-test` | macos-15 | xcodegen + xcodebuild |
 
-All five must pass for PRs to merge.
+All six must pass for PRs to merge.
 
 ## Rust Tests
 

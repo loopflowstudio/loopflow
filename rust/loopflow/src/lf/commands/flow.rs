@@ -1,6 +1,6 @@
 use crate::engine::fork::{
-    cleanup_fork_worktrees, fork_worktree_path, merge_directions, write_fork_manifest,
-    ForkManifestBranch,
+    cleanup_fork_worktrees, fork_worktree_path, merge_directions, resolve_fork_selection,
+    write_fork_manifest, ForkManifestBranch,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
@@ -10,8 +10,9 @@ use crate::engine::{
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use anyhow::{anyhow, Context, Result};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
@@ -86,10 +87,43 @@ struct ForkBranchTask {
 
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     if !matches!(fork.select, ForkSelect::All) {
-        return Err(anyhow!(
-            "CLI fork execution only supports select: all (got {:?})",
-            fork.select
-        ));
+        let mut chooser = |prompt: &str, branches: &[crate::engine::ConcreteStep]| {
+            choose_fork_branch(prompt, branches)
+        };
+        let selected_index = resolve_fork_selection(
+            &fork.select,
+            &fork.branches,
+            if atty::is(atty::Stream::Stdin) {
+                Some(&mut chooser)
+            } else {
+                None
+            },
+        )
+        .map_err(|err| anyhow!(err))?;
+        let selected = fork
+            .branches
+            .get(selected_index)
+            .ok_or_else(|| anyhow!("selected fork branch missing"))?;
+        if selected.step.interactive.unwrap_or(false) {
+            return Err(anyhow!("interactive fork branches are not supported"));
+        }
+        let directions = merge_directions(&cli.direction, &selected.step.directions);
+        let branch_label = format!("fork-{selected_index}");
+        let exit_code = run_fork_branch(
+            repo,
+            &selected.step.name,
+            &directions,
+            message,
+            Some(branch_label.as_str()),
+        )?;
+        if exit_code != 0 {
+            return Err(anyhow!(
+                "fork branch {} exited with {}",
+                selected.step.name,
+                exit_code
+            ));
+        }
+        return Ok(());
     }
 
     if fork.branches.is_empty() {
@@ -131,9 +165,16 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         let worktree = task.worktree.clone();
         let step_name = task.step_name.clone();
         let directions = task.directions.clone();
+        let branch_label = format!("fork-{}", task.index);
         let msg = message.map(|value| value.to_string());
         let handle = std::thread::spawn(move || {
-            run_fork_branch(&worktree, &step_name, &directions, msg.as_deref())
+            run_fork_branch(
+                &worktree,
+                &step_name,
+                &directions,
+                msg.as_deref(),
+                Some(branch_label.as_str()),
+            )
         });
         handles.push((task, handle));
     }
@@ -196,6 +237,7 @@ fn run_fork_branch(
     step: &str,
     directions: &[String],
     message: Option<&str>,
+    branch_label: Option<&str>,
 ) -> Result<i32> {
     let mut cmd = build_lf_command();
     cmd.arg(step).arg("-b");
@@ -206,12 +248,33 @@ fn run_fork_branch(
         cmd.arg(message);
     }
     cmd.current_dir(worktree);
-    let status = cmd.status().with_context(|| {
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn().with_context(|| {
         format!(
             "failed to execute fork branch command in {}",
             worktree.display()
         )
     })?;
+
+    let mut log_threads = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        let label = branch_label.map(str::to_string);
+        log_threads.push(std::thread::spawn(move || {
+            relay_fork_logs(stdout, label.as_deref(), false);
+        }));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        let label = branch_label.map(str::to_string);
+        log_threads.push(std::thread::spawn(move || {
+            relay_fork_logs(stderr, label.as_deref(), true);
+        }));
+    }
+
+    let status = child.wait()?;
+    for thread in log_threads {
+        let _ = thread.join();
+    }
     Ok(status.code().unwrap_or(1))
 }
 
@@ -220,4 +283,59 @@ fn build_lf_command() -> Command {
         return Command::new(path);
     }
     Command::new("lf")
+}
+
+fn choose_fork_branch(
+    prompt: &str,
+    branches: &[crate::engine::ConcreteStep],
+) -> std::result::Result<usize, String> {
+    if !atty::is(atty::Stream::Stdin) {
+        return Err("fork(select=prompt) requires an interactive TTY".to_string());
+    }
+
+    eprintln!("{prompt}");
+    for (index, branch) in branches.iter().enumerate() {
+        let dirs = if branch.step.directions.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", branch.step.directions.join(","))
+        };
+        eprintln!("  {}. {}{}", index + 1, branch.step.name, dirs);
+    }
+    eprint!("Select branch [1-{}]: ", branches.len());
+    let _ = std::io::stderr().flush();
+
+    let mut line = String::new();
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|err| format!("failed reading fork selection: {err}"))?;
+    let raw = line.trim();
+    let parsed = raw
+        .parse::<usize>()
+        .map_err(|_| format!("invalid fork selection '{raw}'"))?;
+    if parsed == 0 || parsed > branches.len() {
+        return Err(format!(
+            "fork selection out of range: {} (expected 1-{})",
+            parsed,
+            branches.len()
+        ));
+    }
+    Ok(parsed - 1)
+}
+
+fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: Option<&str>, stderr: bool) {
+    let buffered = BufReader::new(reader);
+    for line in buffered.lines().map_while(|line| line.ok()) {
+        if let Some(label) = branch_label {
+            if stderr {
+                eprintln!("[{label}] {line}");
+            } else {
+                println!("[{label}] {line}");
+            }
+        } else if stderr {
+            eprintln!("{line}");
+        } else {
+            println!("{line}");
+        }
+    }
 }

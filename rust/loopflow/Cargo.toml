@@ -64,6 +64,7 @@ futures-util = "0.3"
 gethostname = "0.4"
 git2 = "0.20"
 hmac = "0.12"
+humantime = "2"
 portable-pty = "0.9"
 reqwest = { version = "0.13", features = ["json"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
@@ -74,6 +75,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tempfile = "3.9"
+tar = "0.4"
 
 [dev-dependencies]
 loopflow-test-support = { path = "../loopflow-test-support" }

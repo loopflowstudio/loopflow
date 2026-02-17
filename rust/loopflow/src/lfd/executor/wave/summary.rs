@@ -100,6 +100,7 @@ impl WaveExecutor {
                 step,
                 model: model.clone(),
                 cmd,
+                output_prefix: None,
             })
             .await?;
 

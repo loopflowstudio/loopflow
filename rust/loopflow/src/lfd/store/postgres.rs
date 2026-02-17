@@ -14,7 +14,7 @@ use crate::lfd::store::rows::{
     map_live_pr_state_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
     map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
-use crate::lfd::store::{ForkRun, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
@@ -728,6 +728,34 @@ impl PostgresStore {
                 .query(
                     Self::sql(Query::ListForkRuns),
                     &[&wave_run_id, &(step_index as i32)],
+                )
+                .await?;
+            rows.iter().map(map_fork_run_row).collect()
+        })
+        .await
+    }
+
+    pub async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT fr.id, fr.wave_run_id, fr.step_index, fr.branch_index, fr.status, fr.worktree
+                     FROM fork_runs fr
+                     LEFT JOIN wave_runs wr ON wr.id = fr.wave_run_id
+                     WHERE fr.status IN ($1, $2)
+                       AND (
+                         wr.id IS NULL
+                         OR wr.status NOT IN ($3, $4, $5)
+                         OR fr.step_index <> wr.step_index
+                       )
+                     ORDER BY fr.wave_run_id ASC, fr.step_index ASC, fr.branch_index ASC",
+                    &[
+                        &(ForkRunStatus::Pending as i32),
+                        &(ForkRunStatus::Running as i32),
+                        &WaveRunStatus::Pending.as_i32(),
+                        &WaveRunStatus::Running.as_i32(),
+                        &WaveRunStatus::Waiting.as_i32(),
+                    ],
                 )
                 .await?;
             rows.iter().map(map_fork_run_row).collect()

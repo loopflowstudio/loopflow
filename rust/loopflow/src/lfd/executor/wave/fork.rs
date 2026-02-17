@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
@@ -7,6 +8,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::engine::agent::build_agent_command;
 use crate::engine::flow::{ConcreteFork, ConcreteItem, ConcreteStep};
+use crate::engine::fork::resolve_fork_selection;
 use crate::engine::worktree::{create_worktree, remove_worktree};
 use crate::lfd::config::ExecutorType;
 use crate::lfd::id::LfdId;
@@ -16,6 +18,36 @@ use crate::lfd::types::{Wave, WaveRun};
 use super::launch::AgentLaunchRequest;
 use super::WaveExecutor;
 use crate::lfd::executor::helpers::{build_step_prompt, fork_worktree_path};
+use crate::lfd::scheduler::Scheduler;
+
+#[derive(Debug)]
+struct ForkSchedulerSlotGuard {
+    scheduler: Arc<Scheduler>,
+    run_id: String,
+    acquired: bool,
+}
+
+impl ForkSchedulerSlotGuard {
+    fn new(scheduler: Arc<Scheduler>, run_id: String) -> Self {
+        Self {
+            scheduler,
+            run_id,
+            acquired: false,
+        }
+    }
+
+    fn mark_acquired(&mut self) {
+        self.acquired = true;
+    }
+}
+
+impl Drop for ForkSchedulerSlotGuard {
+    fn drop(&mut self) {
+        if self.acquired {
+            self.scheduler.release(self.run_id.as_str());
+        }
+    }
+}
 
 impl WaveExecutor {
     pub(super) async fn run_choose(
@@ -25,11 +57,18 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
-        let Some(selected) = fork.branches.first().cloned() else {
-            self.fail_run(run, wave, "fork has no branches".to_string())
-                .await?;
-            return Ok(());
+        let selected_index = match resolve_fork_selection(&fork.select, &fork.branches, None) {
+            Ok(index) => index,
+            Err(err) => {
+                self.fail_run(run, wave, err).await?;
+                return Ok(());
+            }
         };
+        let selected = fork
+            .branches
+            .get(selected_index)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("fork branch missing after selection"))?;
 
         if selected.step.interactive.unwrap_or(false) {
             self.fail_run(
@@ -128,6 +167,7 @@ impl WaveExecutor {
             let wave_repo = run.snapshot.repo.clone();
             let worktree = fork_run.worktree.clone();
             let fork_run_id = fork_run.id.clone();
+            let branch_label = format!("fork-{}", fork_run.branch_index);
             let fork_run = fork_run.clone();
             let step = step.clone();
             let wave_directions = wave_directions.clone();
@@ -137,12 +177,22 @@ impl WaveExecutor {
                     return;
                 }
 
+                let mut slot_guard =
+                    ForkSchedulerSlotGuard::new(scheduler.clone(), fork_run_id.to_string());
                 loop {
+                    if cancel.is_cancelled() {
+                        return;
+                    }
                     let (acquired, _) = scheduler.acquire(fork_run_id.as_str()).await;
                     if acquired {
+                        slot_guard.mark_acquired();
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+
+                if cancel.is_cancelled() {
+                    return;
                 }
 
                 let _ = executor
@@ -178,8 +228,7 @@ impl WaveExecutor {
                             error = %err,
                             "fork branch prompt build failed"
                         );
-                        let _ = tx.send((fork_run_id.to_string(), Err(err))).await;
-                        scheduler.release(fork_run_id.as_str());
+                        let _ = tx.send((branch_label.clone(), Err(err))).await;
                         return;
                     }
                 };
@@ -201,6 +250,7 @@ impl WaveExecutor {
                         step: step.clone(),
                         model,
                         cmd,
+                        output_prefix: Some(format!("[{}] ", branch_label)),
                     })
                     .await
                     .map(|outcome| outcome.exit_code);
@@ -226,18 +276,19 @@ impl WaveExecutor {
                         ..fork_run.clone()
                     })
                     .await;
-                let _ = tx.send((fork_run_id.to_string(), result)).await;
+                let _ = tx.send((branch_label.clone(), result)).await;
                 scheduler.release(fork_run_id.as_str());
             });
 
             handles.push(handle);
         }
+        drop(tx);
 
         let mut failures = None;
         let mut completed = 0usize;
         let total = fork_runs.len();
         debug!(run_id = %run.id, total_branches = total, "waiting for fork results");
-        while let Some((fork_id, result)) = rx.recv().await {
+        while let Some((branch_label, result)) = rx.recv().await {
             match result {
                 Ok(0) => {
                     completed += 1;
@@ -247,22 +298,25 @@ impl WaveExecutor {
                     }
                 }
                 Ok(code) => {
-                    failures = Some(format!("fork branch {} exited with code {}", fork_id, code));
+                    failures = Some(format!(
+                        "fork branch {branch_label} exited with code {code}"
+                    ));
+                    cancel.cancel();
                     break;
                 }
                 Err(err) => {
-                    failures = Some(format!("fork branch {} error: {}", fork_id, err));
+                    failures = Some(format!("fork branch {branch_label} error: {err}"));
+                    cancel.cancel();
                     break;
                 }
             }
         }
+        for handle in handles {
+            let _ = handle.await;
+        }
 
         if let Some(error) = failures {
             error!(run_id = %run.id, error = %error, "fork failed");
-            cancel.cancel();
-            for handle in handles {
-                handle.abort();
-            }
             self.cleanup_fork(run, &fork_runs).await;
             self.fail_run(run, wave, error).await?;
             return Ok(());
@@ -279,7 +333,6 @@ impl WaveExecutor {
             if worktree_path.join(".git").exists() {
                 let _ = remove_worktree(worktree_path, true);
             }
-            self.scheduler.release(fork_run.id.as_str());
         }
         let _ = self.store.delete_fork_runs(&run.id, run.step_index).await;
     }

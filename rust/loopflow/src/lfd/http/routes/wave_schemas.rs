@@ -213,9 +213,15 @@ pub(crate) fn resolve_wave_schema(
             })
             .collect()
     } else if input.starts_with("file://") {
+        let canonical_input = canonical_schema_ref_from_input(input);
         schemas
             .into_iter()
-            .filter(|schema| schema.schema_ref == input)
+            .filter(|schema| {
+                schema.schema_ref == input
+                    || canonical_input
+                        .as_ref()
+                        .is_some_and(|value| schema.schema_ref == *value)
+            })
             .collect()
     } else {
         let local: Vec<_> = schemas
@@ -250,6 +256,13 @@ pub(crate) fn resolve_wave_schema(
                 .collect(),
         }),
     }
+}
+
+fn canonical_schema_ref_from_input(input: &str) -> Option<String> {
+    let path = std::path::Path::new(input.strip_prefix("file://")?);
+    let canonical = path.canonicalize().ok()?;
+    let display = canonical.to_string_lossy().replace('\\', "/");
+    Some(format!("file://{display}"))
 }
 
 fn load_builtin_wave_schemas() -> Vec<ResolvedWaveSchema> {
@@ -419,6 +432,25 @@ mod tests {
             resolve_wave_schema(temp.path(), "builtin://scan").expect("resolve builtin schema");
         assert_eq!(schema.source, WaveSchemaSource::Builtin);
         assert_eq!(schema.schema_ref, "builtin://scan");
+    }
+
+    #[test]
+    fn resolve_supports_explicit_file_reference_with_non_canonical_path() {
+        let temp = tempdir().expect("temp dir");
+        let local_dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&local_dir).expect("create local dir");
+        fs::write(
+            local_dir.join("scan.yaml"),
+            "name: scan\nflow: ship\narea: ['.']\n",
+        )
+        .expect("write schema");
+
+        let non_canonical = local_dir.join("..").join("scan").join("scan.yaml");
+        let input = format!("file://{}", non_canonical.to_string_lossy());
+        let schema = resolve_wave_schema(temp.path(), &input).expect("resolve local schema");
+
+        assert_eq!(schema.source, WaveSchemaSource::Local);
+        assert!(schema.schema_ref.starts_with("file://"));
     }
 
     #[test]

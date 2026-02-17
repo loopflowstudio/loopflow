@@ -29,7 +29,7 @@ use crate::lfd::types::{
     AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ListWavesQuery {
     repo: Option<String>,
     limit: Option<u32>,
@@ -39,14 +39,14 @@ pub struct ListWavesQuery {
     expand: ExpandParam,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Debug, Deserialize, Default)]
 pub struct ExpandQuery {
     #[serde(default, rename = "expand[]")]
     expand: ExpandParam,
 }
 
 /// Accept `expand[]=value` as either a single string or repeated params.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct ExpandParam(Vec<String>);
 
 impl ExpandParam {
@@ -84,7 +84,7 @@ impl<'de> serde::Deserialize<'de> for ExpandParam {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct CreateWaveRequest {
     repo: String,
     name: Option<String>,
@@ -94,7 +94,7 @@ pub struct CreateWaveRequest {
     schema: Option<String>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Debug, Deserialize, Default)]
 pub struct UpdateWaveRequest {
     name: Option<String>,
     flow: Option<String>,
@@ -103,7 +103,7 @@ pub struct UpdateWaveRequest {
     status: Option<String>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Debug, Deserialize, Default)]
 pub struct RunWaveRequest {
     area: Option<Vec<String>>,
     direction: Option<Vec<String>>,
@@ -116,7 +116,7 @@ pub struct AddStimulusRequest {
     cron: Option<String>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Debug, Deserialize, Default)]
 pub struct LandWaveRequest {
     strict: Option<bool>,
     local: Option<bool>,
@@ -301,11 +301,50 @@ fn parse_schema_stimulus(
     };
 
     let cron = match kind {
-        StimulusKind::Cron => stimulus.cron.clone().unwrap_or_default(),
+        StimulusKind::Cron => stimulus
+            .cron
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| {
+                api_error(
+                    StatusCode::BAD_REQUEST,
+                    "schema stimulus kind 'cron' requires a cron expression",
+                )
+            })?,
         _ => String::new(),
     };
 
     Ok((kind, cron))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
+        let stimulus = StimulusDef {
+            kind: "cron".to_string(),
+            cron: None,
+        };
+
+        let result = parse_schema_stimulus(&stimulus);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_schema_stimulus_accepts_valid_cron_expression() {
+        let stimulus = StimulusDef {
+            kind: "cron".to_string(),
+            cron: Some("0 8 * * *".to_string()),
+        };
+
+        let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
+        assert_eq!(parsed.0, StimulusKind::Cron);
+        assert_eq!(parsed.1, "0 8 * * *");
+    }
 }
 
 async fn wave_name_exists(

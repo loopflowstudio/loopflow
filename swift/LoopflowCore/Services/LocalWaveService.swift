@@ -341,7 +341,8 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             guard httpResponse.statusCode == 200 else {
                 let errorBody = String(data: data, encoding: .utf8) ?? ""
                 LoggingService.lfd("createWave: error response=\(errorBody)")
-                throw WaveServiceError.commandFailed("HTTP \(httpResponse.statusCode)")
+                let errorMsg = Self.parseErrorMessage(data)
+                throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(httpResponse.statusCode)")
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {

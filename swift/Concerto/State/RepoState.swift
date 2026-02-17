@@ -361,6 +361,7 @@ final class RepoState {
             // New wave may adopt a worktree
             if event.type == .created {
                 await refreshWorktrees()
+                await refreshFlowsAsync()
             }
         case .deleted:
             waveStore.remove(event.waveId)
@@ -370,6 +371,7 @@ final class RepoState {
             }
             // Deleted wave may orphan a worktree
             await refreshWorktrees()
+            await refreshFlowsAsync()
         }
     }
 

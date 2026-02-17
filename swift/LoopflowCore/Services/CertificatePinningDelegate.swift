@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Security
 
-final class CertificatePinningDelegate: NSObject {
+final class CertificatePinningDelegate: NSObject, @unchecked Sendable {
     private let connection: ServerConnection
     private let pinStore: CertificatePinStore
 
@@ -43,7 +43,8 @@ extension CertificatePinningDelegate: URLSessionDelegate, URLSessionTaskDelegate
         guard connection.useTLS,
               challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust,
-              let certificate = SecTrustGetCertificateAtIndex(trust, 0)
+              let certificateChain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let certificate = certificateChain.first
         else {
             completionHandler(.performDefaultHandling, nil)
             return

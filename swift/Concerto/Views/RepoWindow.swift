@@ -29,7 +29,7 @@ struct RepoWindow: View {
                     .environment(outputBuffer)
             }
         }
-        .background(WindowAccessor(repoURL: repoURL))
+        .background(RepoRepresentedURLAccessor(repoURL: repoURL))
         .task {
             if let mode = RepoState.uiTestMode() {
                 setupComplete = true
@@ -65,7 +65,7 @@ struct RepoWindow: View {
 }
 
 /// Helper to set representedURL on the hosting window for snapshot service.
-private struct WindowAccessor: NSViewRepresentable {
+private struct RepoRepresentedURLAccessor: NSViewRepresentable {
     let repoURL: URL?
 
     func makeNSView(context: Context) -> NSView {

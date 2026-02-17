@@ -32,6 +32,7 @@ struct WaveDetailPanel: View {
     private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var waveRuns: [WaveRun] { repoState.runStore.runs(for: wave.id) }
+    private var isSelectedWave: Bool { repoState.selectedWave?.id == wave.id }
 
     private var ideApp: IDEApp { .cursor }
     private var terminalApp: TerminalApp { .warp }
@@ -63,9 +64,17 @@ struct WaveDetailPanel: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .editWaveName)) { _ in
             // Only respond if this wave is selected
-            if repoState.selectedWave?.id == wave.id {
+            if isSelectedWave {
                 startNameEdit()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToCurrentTab)) { _ in
+            guard isSelectedWave else { return }
+            selectedTab = .current
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToRunsTab)) { _ in
+            guard isSelectedWave else { return }
+            selectedTab = .runs
         }
         .onChange(of: isNameFocused) { _, focused in
             if !focused && isEditingName {
@@ -182,6 +191,7 @@ struct WaveDetailPanel: View {
                         Text(wave.displayName)
                             .font(Typography.sectionTitle())
                             .fontWeight(.semibold)
+                            .help("Edit wave name (E)")
                             .onTapGesture {
                                 startNameEdit()
                             }
@@ -225,6 +235,7 @@ struct WaveDetailPanel: View {
                     Label("Stop", systemImage: "stop.fill")
                 }
                 .buttonStyle(DestructiveButtonStyle())
+                .help("Stop wave (S)")
             }
 
             Picker("", selection: $selectedTab) {
@@ -305,14 +316,14 @@ struct WaveDetailPanel: View {
                 }
                 .buttonStyle(GhostButtonStyle())
                 .disabled(!hasWorktree)
-                .help(hasWorktree ? "Open in \(terminalApp.displayName)" : "Worktree path no longer exists")
+                .help(hasWorktree ? "Open in \(terminalApp.displayName) (T)" : "Worktree path no longer exists")
 
                 Button { openInIDE(path: path) } label: {
                     Label(ideApp.displayName, systemImage: "curlybraces")
                 }
                 .buttonStyle(GhostButtonStyle())
                 .disabled(!hasWorktree)
-                .help(hasWorktree ? "Open in \(ideApp.displayName)" : "Worktree path no longer exists")
+                .help(hasWorktree ? "Open in \(ideApp.displayName) (I)" : "Worktree path no longer exists")
 
                 if !hasWorktree {
                     Label("Worktree missing", systemImage: "exclamationmark.triangle")
@@ -561,6 +572,7 @@ struct WaveDetailPanel: View {
                     Label("View PR", systemImage: "arrow.up.right.square")
                 }
                 .buttonStyle(GhostButtonStyle())
+                .help("View PR (P)")
             }
 
             // Land
@@ -580,6 +592,7 @@ struct WaveDetailPanel: View {
             }
             .buttonStyle(DarkButtonStyle())
             .disabled(repoState.isActionInFlight(wave.id))
+            .help("Land wave (L)")
 
             // Next
             Button { nextWave() } label: {
@@ -587,6 +600,7 @@ struct WaveDetailPanel: View {
             }
             .buttonStyle(DarkButtonStyle())
             .disabled(repoState.isActionInFlight(wave.id))
+            .help("Start next iteration (N)")
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)

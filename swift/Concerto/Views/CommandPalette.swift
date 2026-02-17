@@ -76,7 +76,7 @@ struct CommandPalette: View {
                     .buttonStyle(.plain)
                 }
 
-                Text("⌘K")
+                Text("⌘K /")
                     .font(Typography.caption())
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 6)

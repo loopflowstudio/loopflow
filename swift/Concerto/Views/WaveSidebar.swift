@@ -17,7 +17,6 @@ struct WaveSidebar: View {
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
     @State private var isEditingWaveName = false
-    @FocusState private var isSidebarFocused: Bool
 
     private var waveGroups: WaveGroups {
         repoState.waveGroups
@@ -117,6 +116,26 @@ struct WaveSidebar: View {
                 selectWave(waveId)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .moveFocusDown)) { _ in
+            moveFocus(1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .moveFocusUp)) { _ in
+            moveFocus(-1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .selectFocusedWave)) { _ in
+            selectFocusedWave()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .goToFirstWave)) { _ in
+            moveFocusToBoundary(isFirst: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .goToLastWave)) { _ in
+            moveFocusToBoundary(isFirst: false)
+        }
+        .onChange(of: repoState.selectedWaveId) { _, newValue in
+            if let newValue {
+                keyboardFocusedId = newValue
+            }
+        }
     }
 
     private var header: some View {
@@ -168,7 +187,7 @@ struct WaveSidebar: View {
             }
             .menuStyle(.borderlessButton)
             .disabled(isCreatingWave || !repoState.lfdConnected)
-            .help(repoState.lfdConnected ? "Create or instantiate waves" : "Connect to lfd first")
+            .help(repoState.lfdConnected ? "Create or instantiate waves (C)" : "Connect to lfd first")
             .accessibleButton("Create or instantiate wave")
             .minHitTarget()
 
@@ -321,28 +340,10 @@ struct WaveSidebar: View {
             }
             .padding(.horizontal, Spacing.sm)
         }
-        .focusable()
-        .focused($isSidebarFocused)
-        .focusEffectDisabled()
-        .onKeyPress(.upArrow) {
-            moveFocus(-1)
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            moveFocus(1)
-            return .handled
-        }
-        .onKeyPress(.return) {
-            guard !isEditingWaveName else { return .ignored }
-            if let id = keyboardFocusedId,
-               repoState.waveStore.wave(for: id) != nil {
-                selectWave(id)
-            }
-            return .handled
-        }
     }
 
     private func moveFocus(_ delta: Int) {
+        guard !isEditingWaveName else { return }
         let waves = waveGroups.allInOrder
         guard !waves.isEmpty else { return }
 
@@ -352,6 +353,32 @@ struct WaveSidebar: View {
             keyboardFocusedId = waves[newIndex].id
         } else {
             keyboardFocusedId = delta > 0 ? waves.first?.id : waves.last?.id
+        }
+
+        if let keyboardFocusedId {
+            repoState.selectedWaveId = keyboardFocusedId
+        }
+    }
+
+    private func moveFocusToBoundary(isFirst: Bool) {
+        let waves = waveGroups.allInOrder
+        guard !waves.isEmpty else { return }
+        let target = isFirst ? waves.first?.id : waves.last?.id
+        guard let target else { return }
+        keyboardFocusedId = target
+        repoState.selectedWaveId = target
+    }
+
+    private func selectFocusedWave() {
+        guard !isEditingWaveName else { return }
+        if let id = keyboardFocusedId,
+           repoState.waveStore.wave(for: id) != nil {
+            selectWave(id)
+        } else if let selectedWaveId = repoState.selectedWaveId,
+                  repoState.waveStore.wave(for: selectedWaveId) != nil {
+            selectWave(selectedWaveId)
+        } else if let firstId = waveGroups.allInOrder.first?.id {
+            selectWave(firstId)
         }
     }
 
@@ -445,13 +472,6 @@ struct WaveSidebar: View {
         try await repoState.connectLfd(outputBuffer: outputBuffer)
         try await Task.sleep(for: .milliseconds(500))
     }
-}
-
-// MARK: - Notification Names
-
-extension Notification.Name {
-    static let newWaveRequested = Notification.Name("newWaveRequested")
-    static let editWaveName = Notification.Name("editWaveName")
 }
 
 #Preview {

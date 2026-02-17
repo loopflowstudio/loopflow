@@ -1,0 +1,319 @@
+import AppKit
+import Observation
+
+@MainActor
+@Observable
+final class KeyboardRouter {
+    var isHelpOverlayVisible = false
+    var chordPrefix: ShortcutKey?
+    var chordIndicator: String?
+
+    let shortcuts: [ShortcutBinding]
+    let chords: [ChordBinding]
+    let requiresWaveActions: Set<ShortcutAction>
+
+    private var monitor: Any?
+    private var windowHandlers: [Int: (ShortcutAction) -> Void] = [:]
+    private var commandPaletteVisibility: [Int: Bool] = [:]
+    private var chordTimer: Task<Void, Never>?
+    private let chordTimeout: Duration
+    private let keyDisplayByAction: [ShortcutAction: String]
+
+    init(
+        shortcuts: [ShortcutBinding] = ShortcutCatalog.shortcuts,
+        chords: [ChordBinding] = ShortcutCatalog.chords,
+        chordTimeout: Duration = .milliseconds(800)
+    ) {
+        self.shortcuts = shortcuts
+        self.chords = chords
+        self.chordTimeout = chordTimeout
+        self.requiresWaveActions = Set(shortcuts.filter(\.requiresWave).map(\.action))
+
+        var display: [ShortcutAction: String] = [:]
+        for binding in shortcuts {
+            if display[binding.action] == nil {
+                display[binding.action] = binding.gesture.displayKey
+            }
+        }
+        for chord in chords {
+            if display[chord.action] == nil {
+                display[chord.action] = chord.displayKey
+            }
+        }
+        self.keyDisplayByAction = display
+    }
+
+    func register(windowNumber: Int, actionHandler: @escaping (ShortcutAction) -> Void) {
+        windowHandlers[windowNumber] = actionHandler
+        installMonitorIfNeeded()
+    }
+
+    func unregister(windowNumber: Int) {
+        windowHandlers.removeValue(forKey: windowNumber)
+        commandPaletteVisibility.removeValue(forKey: windowNumber)
+
+        if windowHandlers.isEmpty {
+            cancelChord()
+            uninstallMonitor()
+        }
+    }
+
+    func setCommandPaletteVisible(_ isVisible: Bool, for windowNumber: Int) {
+        commandPaletteVisibility[windowNumber] = isVisible
+    }
+
+    func keyDisplay(for action: ShortcutAction) -> String? {
+        keyDisplayByAction[action]
+    }
+
+    func handleKeyEvent(_ event: NSEvent, windowNumber: Int, handler: (ShortcutAction) -> Void) -> Bool {
+        let mode = resolveMode(
+            firstResponder: NSApp.keyWindow?.firstResponder,
+            isCommandPaletteVisible: commandPaletteVisibility[windowNumber] ?? false,
+            isHelpOverlayVisible: isHelpOverlayVisible
+        )
+
+        guard let key = normalizeKey(event) else { return false }
+        let modifiers = normalizeModifiers(event.modifierFlags)
+
+        return routeEvent(
+            key: key,
+            modifiers: modifiers,
+            isRepeat: event.isARepeat,
+            mode: mode,
+            handler: handler
+        )
+    }
+
+    func routeEvent(
+        key: ShortcutKey,
+        modifiers: NSEvent.ModifierFlags,
+        isRepeat: Bool,
+        mode: KeyboardMode,
+        handler: (ShortcutAction) -> Void
+    ) -> Bool {
+        switch mode {
+        case .textEditing, .terminal, .commandPalette:
+            return false
+        case .helpOverlay:
+            return handleHelpOverlayKey(key: key, modifiers: modifiers)
+        case .global:
+            if handleChordInput(key: key, modifiers: modifiers, handler: handler) {
+                return true
+            }
+
+            guard let binding = findShortcut(key: key, modifiers: modifiers) else {
+                return false
+            }
+
+            if isRepeat && !binding.gesture.allowsRepeat {
+                return true
+            }
+
+            handler(binding.action)
+            return true
+        }
+    }
+
+    func resolveMode(
+        firstResponder: Any?,
+        isCommandPaletteVisible: Bool,
+        isHelpOverlayVisible: Bool
+    ) -> KeyboardMode {
+        if isTextResponder(firstResponder) {
+            return .textEditing
+        }
+
+        if isTerminalResponder(firstResponder) {
+            return .terminal
+        }
+
+        if isCommandPaletteVisible {
+            return .commandPalette
+        }
+
+        if isHelpOverlayVisible {
+            return .helpOverlay
+        }
+
+        return .global
+    }
+
+    func normalizeModifiers(_ modifiers: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
+        modifiers.intersection(ShortcutCatalog.normalizedModifierMask)
+    }
+
+    func normalizeKey(_ event: NSEvent) -> ShortcutKey? {
+        normalizeKey(
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            specialKey: event.specialKey,
+            keyCode: event.keyCode
+        )
+    }
+
+    func normalizeKey(
+        charactersIgnoringModifiers: String?,
+        specialKey: NSEvent.SpecialKey?,
+        keyCode: UInt16
+    ) -> ShortcutKey? {
+        if keyCode == ShortcutCatalog.returnKeyCode ||
+            keyCode == ShortcutCatalog.keypadEnterKeyCode ||
+            keyCode == ShortcutCatalog.escapeKeyCode {
+            return .keyCode(keyCode)
+        }
+
+        if let specialKey {
+            return .special(specialKey)
+        }
+
+        if let chars = charactersIgnoringModifiers?.lowercased(), chars.count == 1 {
+            if keyCode == ShortcutCatalog.slashKeyCode && chars != "/" {
+                return .keyCode(ShortcutCatalog.slashKeyCode)
+            }
+            return .character(chars)
+        }
+
+        if keyCode == ShortcutCatalog.slashKeyCode {
+            return .keyCode(ShortcutCatalog.slashKeyCode)
+        }
+
+        return nil
+    }
+
+    func cancelChord() {
+        chordTimer?.cancel()
+        chordTimer = nil
+        chordPrefix = nil
+        chordIndicator = nil
+    }
+
+    private func installMonitorIfNeeded() {
+        guard monitor == nil else { return }
+
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            guard let window = NSApp.keyWindow,
+                  let handler = self.windowHandlers[window.windowNumber] else {
+                return event
+            }
+
+            if self.handleKeyEvent(event, windowNumber: window.windowNumber, handler: handler) {
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func uninstallMonitor() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    private func handleHelpOverlayKey(key: ShortcutKey, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let shouldDismissWithEscape = keyMatches(key, expected: .keyCode(ShortcutCatalog.escapeKeyCode))
+        let shouldDismissWithQuestion = keyMatches(key, expected: .character("/")) && modifiers == [.shift]
+
+        if shouldDismissWithEscape || shouldDismissWithQuestion {
+            isHelpOverlayVisible = false
+            return true
+        }
+
+        return false
+    }
+
+    private func handleChordInput(
+        key: ShortcutKey,
+        modifiers: NSEvent.ModifierFlags,
+        handler: (ShortcutAction) -> Void
+    ) -> Bool {
+        if let prefix = chordPrefix {
+            if keyMatches(key, expected: .keyCode(ShortcutCatalog.escapeKeyCode)) {
+                cancelChord()
+                return true
+            }
+
+            if modifiers.isEmpty,
+               let chord = chords.first(where: { $0.first == prefix && $0.second == key }) {
+                cancelChord()
+                handler(chord.action)
+                return true
+            }
+
+            if modifiers.isEmpty,
+               chords.contains(where: { $0.first == key }) {
+                beginChord(with: key)
+                return true
+            }
+
+            cancelChord()
+            return false
+        }
+
+        if modifiers.isEmpty,
+           chords.contains(where: { $0.first == key }) {
+            beginChord(with: key)
+            return true
+        }
+
+        return false
+    }
+
+    private func beginChord(with key: ShortcutKey) {
+        cancelChord()
+        chordPrefix = key
+        chordIndicator = "\(key.displayKey.lowercased())..."
+
+        let timeout = chordTimeout
+        chordTimer = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard let self else { return }
+            if self.chordPrefix == key {
+                self.cancelChord()
+            }
+        }
+    }
+
+    private func findShortcut(key: ShortcutKey, modifiers: NSEvent.ModifierFlags) -> ShortcutBinding? {
+        shortcuts.first { binding in
+            binding.gesture.modifiers == modifiers && keyMatches(key, expected: binding.gesture.key)
+        }
+    }
+
+    private func keyMatches(_ key: ShortcutKey, expected: ShortcutKey) -> Bool {
+        if key == expected {
+            return true
+        }
+
+        let returnFallback: [ShortcutKey] = [
+            .keyCode(ShortcutCatalog.returnKeyCode),
+            .keyCode(ShortcutCatalog.keypadEnterKeyCode),
+        ]
+        if returnFallback.contains(key) && returnFallback.contains(expected) {
+            return true
+        }
+
+        let slashFallback: [ShortcutKey] = [.character("/"), .keyCode(ShortcutCatalog.slashKeyCode)]
+        return slashFallback.contains(key) && slashFallback.contains(expected)
+    }
+
+    private func isTextResponder(_ responder: Any?) -> Bool {
+        guard let responder else { return false }
+        return responder is NSText
+    }
+
+    private func isTerminalResponder(_ responder: Any?) -> Bool {
+        guard let responder else { return false }
+        let typeName = String(describing: type(of: responder))
+        return typeName.contains("GhosttyMetalView")
+    }
+}
+
+enum KeyboardMode: Equatable {
+    case textEditing
+    case terminal
+    case commandPalette
+    case helpOverlay
+    case global
+}

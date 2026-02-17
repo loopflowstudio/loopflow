@@ -241,6 +241,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try await performRequest(request, useLongTimeouts: useLongTimeouts)
     }
 
+    private func waveURL(_ waveId: String, components: String...) -> URL {
+        components.reduce(
+            apiBaseURL
+                .appendingPathComponent("waves")
+                .appendingPathComponent(waveId)
+        ) { url, component in
+            url.appendingPathComponent(component)
+        }
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.
@@ -696,7 +706,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
-        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks")
+        let url = waveURL(waveId, components: "memory-blocks")
         let request = try makeRequest(url)
 
         let (data, response) = try await performRequest(request)
@@ -718,11 +728,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         content: String,
         position: Int?
     ) async throws -> ChatMemoryBlock {
-        let url = apiBaseURL
-            .appendingPathComponent("waves")
-            .appendingPathComponent(waveId)
-            .appendingPathComponent("memory-blocks")
-            .appendingPathComponent(name)
+        let url = waveURL(waveId, components: "memory-blocks", name)
 
         var body: [String: Any] = ["content": content]
         if let position { body["position"] = position }
@@ -746,11 +752,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func deleteMemoryBlock(waveId: String, name: String) async throws {
-        let url = apiBaseURL
-            .appendingPathComponent("waves")
-            .appendingPathComponent(waveId)
-            .appendingPathComponent("memory-blocks")
-            .appendingPathComponent(name)
+        let url = waveURL(waveId, components: "memory-blocks", name)
 
         let request = try makeRequest(url, method: "DELETE")
         let (data, response) = try await performRequest(request)
@@ -764,11 +766,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         message: String,
         memoryBlocks: [ChatMemoryBlock]
     ) async throws -> ChatTurn {
-        let url = apiBaseURL
-            .appendingPathComponent("waves")
-            .appendingPathComponent(waveId)
-            .appendingPathComponent("chat")
-            .appendingPathComponent("turns")
+        let url = waveURL(waveId, components: "chat", "turns")
 
         let body: [String: Any] = [
             "message": message,
@@ -811,13 +809,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             Task {
                 let activeSession = longSession()
                 do {
-                    let url = apiBaseURL
-                        .appendingPathComponent("waves")
-                        .appendingPathComponent(waveId)
-                        .appendingPathComponent("chat")
-                        .appendingPathComponent("turns")
-                        .appendingPathComponent(turnId)
-                        .appendingPathComponent("events")
+                    let url = waveURL(waveId, components: "chat", "turns", turnId, "events")
                     let request = try makeRequest(url)
                     let (bytes, response) = try await activeSession.session.bytes(for: request)
 

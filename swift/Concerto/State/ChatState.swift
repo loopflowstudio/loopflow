@@ -43,40 +43,6 @@ struct MemoryStore {
         blocks.removeAll { $0.name == name }
     }
 
-    mutating func upsert(_ block: ChatMemoryBlock) {
-        if let index = blocks.firstIndex(where: { $0.name == block.name }) {
-            blocks[index] = block
-        } else {
-            blocks.append(block)
-        }
-        blocks.sort { $0.position < $1.position }
-    }
-
-    mutating func remove(named name: String) {
-        blocks.removeAll { $0.name == name }
-    }
-
-    func systemPrompt() -> String {
-        guard !blocks.isEmpty else { return "" }
-        var lines: [String] = ["<memory>"]
-        for block in blocks {
-            lines.append("<block name=\"\(xmlEscape(block.name))\">")
-            lines.append(xmlEscape(block.content))
-            lines.append("</block>")
-        }
-        lines.append("</memory>")
-        return lines.joined(separator: "\n")
-    }
-
-    private func xmlEscape(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&apos;")
-    }
-
     private mutating func sortBlocks() {
         blocks.sort {
             if $0.position == $1.position {
@@ -114,17 +80,6 @@ enum ChatTurnState {
     case running
     case completed
     case failed
-}
-
-private enum ChatStateError: LocalizedError {
-    case invalidMemoryEdit(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidMemoryEdit(let message):
-            return message
-        }
-    }
 }
 
 @MainActor
@@ -303,7 +258,7 @@ final class ChatState {
     private func applyMemoryEdit(op: String, block: String, detail: String) async throws -> String {
         let normalizedBlock = block.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedBlock.isEmpty else {
-            throw ChatStateError.invalidMemoryEdit("Agent memory edit missing block name.")
+            throw WaveServiceError.commandFailed("Agent memory edit missing block name.")
         }
 
         if op.lowercased() == "delete" {

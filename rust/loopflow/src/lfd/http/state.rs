@@ -70,7 +70,7 @@ impl ChatTurnStream {
 
 #[derive(Clone, Debug, Default)]
 pub struct ChatTurnRegistry {
-    turns: Arc<StdMutex<HashMap<String, Arc<ChatTurnStream>>>>,
+    turns: Arc<StdMutex<HashMap<LfdId, Arc<ChatTurnStream>>>>,
 }
 
 impl ChatTurnRegistry {
@@ -83,7 +83,7 @@ impl ChatTurnRegistry {
         let stream = Arc::new(ChatTurnStream::new(wave_id));
 
         if let Ok(mut turns) = self.turns.lock() {
-            turns.insert(turn_id.to_string(), stream.clone());
+            turns.insert(turn_id.clone(), stream.clone());
         }
 
         (turn_id, stream)
@@ -93,7 +93,7 @@ impl ChatTurnRegistry {
         self.turns
             .lock()
             .ok()
-            .and_then(|turns| turns.get(&turn_id.to_string()).cloned())
+            .and_then(|turns| turns.get(turn_id).cloned())
             .filter(|stream| stream.wave_id() == wave_id)
     }
 }

@@ -118,7 +118,10 @@ struct KeyboardRouterTests {
             mode: .global
         ) { actions.append($0) }
 
-        try? await Task.sleep(for: .milliseconds(80))
+        // Wait well beyond the 40ms timeout, then yield to let the timer's
+        // MainActor continuation run.
+        try? await Task.sleep(for: .milliseconds(200))
+        await Task.yield()
 
         #expect(router.chordPrefix == nil)
 

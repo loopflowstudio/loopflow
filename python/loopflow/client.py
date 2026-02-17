@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from collections.abc import Iterator
 from typing import Any, Optional
 
@@ -21,10 +22,18 @@ def _resolve_base_url() -> str:
     return f"http://{host}:{port}"
 
 
-def _resolve_token() -> Optional[str]:
+def _is_local_base_url(base_url: str) -> bool:
+    host = urlparse(base_url).hostname
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+def _resolve_token(base_url: str) -> Optional[str]:
     token = os.environ.get("LFD_TOKEN")
     if token:
         return token
+
+    if not _is_local_base_url(base_url):
+        return None
 
     token_path = Path.home() / ".lf" / "session-token"
     try:
@@ -42,7 +51,7 @@ class Client:
     ) -> None:
         resolved = base_url.rstrip("/") if base_url else _resolve_base_url()
         self._base_url = resolved
-        resolved_token = token or _resolve_token()
+        resolved_token = token or _resolve_token(resolved)
         headers = {}
         if resolved_token:
             headers["Authorization"] = f"Bearer {resolved_token}"

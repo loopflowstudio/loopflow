@@ -10,7 +10,7 @@ const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
 /// `provider` selects the auth strategy:
-/// - `"local"` (default): loopback only, no auth for local connections
+/// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
 /// - `"static"`: validate against a pre-shared token
 /// - `"loopflow.studio"`: register with loopflow.studio, validate via API
 #[derive(Debug, Clone, Deserialize)]

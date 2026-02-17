@@ -45,7 +45,7 @@ class TestTokenResolution:
         token_file.parent.mkdir(parents=True)
         token_file.write_text("file-token")
 
-        assert _resolve_token() == "env-token"
+        assert _resolve_token("http://127.0.0.1:2486") == "env-token"
 
     def test_reads_session_token_file(self, monkeypatch, tmp_path):
         monkeypatch.delenv("LFD_TOKEN", raising=False)
@@ -55,13 +55,23 @@ class TestTokenResolution:
         token_file.parent.mkdir(parents=True)
         token_file.write_text(" file-token\n")
 
-        assert _resolve_token() == "file-token"
+        assert _resolve_token("http://127.0.0.1:2486") == "file-token"
 
     def test_missing_session_token_file_returns_none(self, monkeypatch, tmp_path):
         monkeypatch.delenv("LFD_TOKEN", raising=False)
         monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
 
-        assert _resolve_token() is None
+        assert _resolve_token("http://127.0.0.1:2486") is None
+
+    def test_remote_base_url_does_not_read_session_token(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-token")
+
+        assert _resolve_token("https://lfd.example.com") is None
 
 
 def _mock_client(handler):
@@ -195,7 +205,7 @@ class TestClientToken:
 
     def test_no_token_sends_no_auth_header(self, monkeypatch):
         monkeypatch.delenv("LFD_TOKEN", raising=False)
-        monkeypatch.setattr("loopflow.client._resolve_token", lambda: None)
+        monkeypatch.setattr("loopflow.client._resolve_token", lambda _base_url: None)
         client, headers = _mock_token_client()
         client.health()
         assert "authorization" not in headers

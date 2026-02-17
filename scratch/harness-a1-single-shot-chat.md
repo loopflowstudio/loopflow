@@ -60,11 +60,6 @@ A1 is implemented and working end-to-end in this branch. This doc now captures t
 4. Decide whether chat transcript persistence is needed before/with A2.
 5. Reassess ordering/reorder UX for long-lived memory block sets.
 
-## Open decisions
-
-1. Keep ordered `[ChatMemoryBlock]` in Swift, or adopt `OrderedDictionary<String, String>` via `swift-collections` before A2.
-2. Confirm preferred default model string for local Concerto when `ANTHROPIC_MODEL` is unset.
-
 ## Known risks
 
 - Manual memory editing is still likely underused (expected A1 learning).

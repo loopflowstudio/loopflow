@@ -642,7 +642,6 @@ final class RepoState {
 
     func connect(to connection: ServerConnection, outputBuffer: OutputBuffer) async throws {
         self.outputBuffer = outputBuffer
-        outputBuffer.configureConnection(connection)
         connectionStore.setConnection(connection)
         rebuildServices(for: connection)
 

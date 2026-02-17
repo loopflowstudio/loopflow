@@ -109,7 +109,8 @@ Two patterns, intentionally different:
    - Used for primary wave data
 
 2. **WebSocket subscription** (EventService in `LocalEventService.swift`)
-   - Connects to `ws://127.0.0.1:2486/ws`
+   - Connects to active server (`ws://.../ws` or `wss://.../ws`)
+   - Uses configured auth mode (none or static token)
    - Subscribes to wave + agent + output events
    - Used for live UI updates
 

@@ -152,19 +152,10 @@ struct ConnectionSettingsView: View {
     }
 
     private func connect() {
-        isConnecting = true
         errorMessage = nil
 
-        let portValue = Int(port) ?? (useTLS ? 443 : 2486)
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let connection = ServerConnection(
-            host: host.trimmingCharacters(in: .whitespacesAndNewlines),
-            port: portValue,
-            useTLS: useTLS,
-            authMode: authMode,
-            staticToken: trimmedToken.isEmpty ? nil : trimmedToken
-        )
+        guard let connection = makeConnectionFromForm() else { return }
+        isConnecting = true
 
         Task {
             do {
@@ -180,5 +171,42 @@ struct ConnectionSettingsView: View {
             }
             isConnecting = false
         }
+    }
+
+    private func makeConnectionFromForm() -> ServerConnection? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else {
+            errorMessage = "Host is required."
+            return nil
+        }
+        guard !trimmedHost.contains("://") else {
+            errorMessage = "Enter host only (no http:// or https://)."
+            return nil
+        }
+
+        let trimmedPort = port.trimmingCharacters(in: .whitespacesAndNewlines)
+        let portValue: Int
+        if trimmedPort.isEmpty {
+            portValue = useTLS ? 443 : 2486
+        } else if let parsedPort = Int(trimmedPort), (1 ... 65_535).contains(parsedPort) {
+            portValue = parsedPort
+        } else {
+            errorMessage = "Port must be between 1 and 65535."
+            return nil
+        }
+
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if authMode.requiresToken, trimmedToken.isEmpty {
+            errorMessage = "Token is required for static token auth."
+            return nil
+        }
+
+        return ServerConnection(
+            host: trimmedHost,
+            port: portValue,
+            useTLS: useTLS,
+            authMode: authMode,
+            staticToken: trimmedToken.isEmpty ? nil : trimmedToken
+        )
     }
 }

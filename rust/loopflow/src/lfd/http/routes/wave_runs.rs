@@ -67,9 +67,8 @@ pub async fn wave_logs_handler(
 
     // Find the most recent run for this wave (active or completed).
     let store = state.store.clone();
-    let wid = wave_id.clone();
     let latest_run = store
-        .list_wave_runs(Some(&wid), Some(1))
+        .list_wave_runs(Some(&wave_id), Some(1))
         .await
         .map_err(map_store_error)?
         .into_iter()
@@ -82,6 +81,7 @@ pub async fn wave_logs_handler(
     let output_hub = state.output_hub.clone();
 
     tokio::spawn(async move {
+        let wave_id_str = wave_id.to_string();
         // Step 2: Replay from log file.
         let mut replayed_lines: usize = 0;
         if let Some(ref run) = latest_run {
@@ -115,16 +115,15 @@ pub async fn wave_logs_handler(
             };
 
             // Filter: only include output for runs belonging to this wave.
-            let include = if event_wave_id == wave_id.to_string() {
+            let include = if event_wave_id == wave_id_str {
                 true
             } else if let Some(hit) = cache.get(&wave_run_id) {
                 *hit
             } else {
                 let run_id = LfdId::from_raw(wave_run_id.clone());
-                let target = wave_id.clone();
                 let result = store.get_wave_run(&run_id).await;
                 let matches = match result {
-                    Ok(Some(run)) => run.wave_id == target,
+                    Ok(Some(run)) => run.wave_id == wave_id,
                     _ => false,
                 };
                 cache.insert(wave_run_id.clone(), matches);

@@ -28,23 +28,6 @@ pub struct PostgresStore {
 }
 
 impl PostgresStore {
-    #[allow(dead_code)]
-    pub fn connect(database_url: &str) -> StoreResult<Self> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build postgres runtime");
-        let pool = build_pool(database_url)?;
-        let store = Self { pool };
-        let version = runtime.block_on(store.schema_version())?;
-        if version.is_empty() {
-            return Err(StoreError::InvalidData(
-                "postgres schema missing; run `lfd migrate`".to_string(),
-            ));
-        }
-        Ok(store)
-    }
-
     pub async fn connect_async(database_url: &str) -> StoreResult<Self> {
         let pool = build_pool(database_url)?;
         let version = super::migrations::latest_version_postgres_pool(&pool).await?;
@@ -54,15 +37,6 @@ impl PostgresStore {
             ));
         }
         Ok(Self { pool })
-    }
-
-    #[allow(dead_code)]
-    pub fn migrate(database_url: &str) -> StoreResult<String> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build postgres runtime");
-        runtime.block_on(Self::migrate_async(database_url))
     }
 
     pub async fn migrate_async(database_url: &str) -> StoreResult<String> {

@@ -233,10 +233,9 @@ pub async fn create_wave_handler(
         schema_name,
         created_at: Some(OffsetDateTime::now_utc()),
     };
-    let wave_clone = wave.clone();
     state
         .store
-        .create_wave(&wave_clone)
+        .create_wave(&wave)
         .await
         .map_err(map_store_error)?;
 
@@ -272,8 +271,7 @@ pub async fn create_wave_handler(
             created_at: Some(OffsetDateTime::now_utc()),
             enabled: true,
         };
-        let stimulus_for_store = stimulus.clone();
-        if let Err(err) = state.store.create_stimulus(&stimulus_for_store).await {
+        if let Err(err) = state.store.create_stimulus(&stimulus).await {
             let wave_id = wave.id.clone();
             let _ = state.store.delete_wave(&wave_id).await;
             return Err(map_store_error(err));
@@ -426,10 +424,9 @@ pub async fn update_wave_handler(
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
     }
 
-    let wave_clone = wave.clone();
     state
         .store
-        .update_wave(&wave_clone)
+        .update_wave(&wave)
         .await
         .map_err(map_store_error)?;
 
@@ -533,10 +530,9 @@ pub async fn run_wave_handler(
         wave.area = area;
     }
 
-    let wave_clone = wave.clone();
     state
         .store
-        .update_wave(&wave_clone)
+        .update_wave(&wave)
         .await
         .map_err(map_store_error)?;
 
@@ -635,10 +631,9 @@ pub async fn add_stimulus_handler(
         enabled: true,
     };
 
-    let stimulus_clone = stimulus.clone();
     state
         .store
-        .create_stimulus(&stimulus_clone)
+        .create_stimulus(&stimulus)
         .await
         .map_err(map_store_error)?;
 
@@ -804,10 +799,9 @@ pub async fn stop_wave_handler(
         run.status = WaveRunStatus::Failed;
         run.error = Some("stopped".to_string());
         run.ended_at = Some(OffsetDateTime::now_utc());
-        let run_clone = run.clone();
         state
             .store
-            .update_wave_run(&run_clone)
+            .update_wave_run(&run)
             .await
             .map_err(map_store_error)?;
         let wave_id_for_update = run.wave_id.clone();
@@ -828,11 +822,15 @@ pub async fn stop_wave_handler(
                 .await
                 .map_err(map_store_error)?;
         }
-        mark_active_agents_failed(&state, &wave_id).await?;
+        mark_active_agents_failed(&state, &wave_id).await;
     } else if has_auto_stimulus {
         // No active run, but still pause the wave so the auto stimulus doesn't restart it.
-        let wid = wave_id.clone();
-        if let Some(mut wave) = state.store.get_wave(&wid).await.map_err(map_store_error)? {
+        if let Some(mut wave) = state
+            .store
+            .get_wave(&wave_id)
+            .await
+            .map_err(map_store_error)?
+        {
             wave.status = WaveStatus::Paused;
             state
                 .store
@@ -869,7 +867,7 @@ pub async fn restart_step_handler(
 
     // Kill running agents.
     terminate_active_agents(&state, &wave_id).await?;
-    mark_active_agents_failed(&state, &wave_id).await?;
+    mark_active_agents_failed(&state, &wave_id).await;
 
     // Re-acquire scheduler slot and relaunch.
     let wave_run_id = run.id.to_string();
@@ -908,10 +906,7 @@ async fn terminate_active_agents(
     Ok(())
 }
 
-async fn mark_active_agents_failed(
-    state: &HttpState,
-    wave_id: &LfdId,
-) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+async fn mark_active_agents_failed(state: &HttpState, wave_id: &LfdId) {
     let _ = state
         .store
         .end_active_agent_for_wave(
@@ -920,8 +915,6 @@ async fn mark_active_agents_failed(
             OffsetDateTime::now_utc().unix_timestamp(),
         )
         .await;
-
-    Ok(())
 }
 
 async fn respawn_run_task(
@@ -977,12 +970,9 @@ pub async fn continue_wave_handler(
     let worktree = run.worktree.clone();
 
     // Resolve the current step name for the commit message.
-    let step_name = resolve_current_step_name(&run, &wave, run.step_index);
-
-    let worktree_path = worktree.clone();
-    let step_name_for_commit = step_name.clone();
+    let step_name = resolve_current_step_name(&run, run.step_index);
     tokio::task::spawn_blocking(move || {
-        auto_commit_if_dirty(std::path::Path::new(&worktree_path), &step_name_for_commit)
+        auto_commit_if_dirty(std::path::Path::new(&worktree), &step_name)
     })
     .await
     .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
@@ -991,17 +981,15 @@ pub async fn continue_wave_handler(
     // Advance to the next step.
     run.step_index += 1;
     run.status = WaveRunStatus::Running;
-    let run_clone = run.clone();
     state
         .store
-        .update_wave_run(&run_clone)
+        .update_wave_run(&run)
         .await
         .map_err(map_store_error)?;
     wave.status = WaveStatus::Running;
-    let wave_clone = wave.clone();
     state
         .store
-        .update_wave(&wave_clone)
+        .update_wave(&wave)
         .await
         .map_err(map_store_error)?;
 
@@ -1233,7 +1221,7 @@ async fn set_wave_stimuli_enabled(
     matched
 }
 
-fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {
+fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> String {
     use crate::engine::flow::{expand_flow, load_flow, next_action, FlowAction};
     let repo = std::path::Path::new(&run.snapshot.repo);
     let name = load_flow(&run.snapshot.flow, repo)

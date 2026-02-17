@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::engine::worktrees::{list_worktrees, main_repo_root, worktree_short_name_for_main_repo};
 use crate::lfd::http::dto::{ListResponse, WorktreeDto};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiResult};
 
 #[derive(Debug, Deserialize)]
 pub struct ListWorktreesQuery {
@@ -26,7 +26,9 @@ pub async fn list_worktrees_handler(
     let repo_path = std::path::PathBuf::from(&query.repo);
     let main_repo = main_repo_root(&repo_path).unwrap_or_else(|_| repo_path.clone());
     let repo_str = main_repo.to_string_lossy().to_string();
-    let waves = run_store(&state.store, move |store| store.list_waves(Some(&repo_str)))
+    let waves = state
+        .store
+        .list_waves(Some(&repo_str))
         .await
         .map_err(map_store_error)?;
 

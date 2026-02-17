@@ -8,7 +8,6 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::lfd::http::dto::ErrorResponse;
 use crate::lfd::http::routes::{build_wave_dto, build_wave_dtos};
-use crate::lfd::http::run_store;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
@@ -107,7 +106,8 @@ async fn current_snapshot(
     state: &HttpState,
 ) -> Result<Vec<crate::lfd::http::dto::WaveDto>, String> {
     let store = state.store.clone();
-    let waves = run_store(&store, move |store| store.list_waves(None))
+    let waves = store
+        .list_waves(None)
         .await
         .map_err(|err| err.to_string())?;
     build_wave_dtos(&state.store, &state.github, waves, true)
@@ -132,9 +132,7 @@ async fn enrich_event(
         _ => return None,
     };
 
-    let wave = run_store(store, move |s| s.get_wave(&wave_id))
-        .await
-        .ok()??;
+    let wave = store.get_wave(&wave_id).await.ok()??;
     let dto = build_wave_dto(store, github_config, wave, true)
         .await
         .ok()?;

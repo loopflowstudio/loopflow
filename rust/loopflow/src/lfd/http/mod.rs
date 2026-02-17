@@ -13,7 +13,7 @@ use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
     flows, hooks, repos, system, wave_runs, wave_schemas, waves, worktrees, ws,
 };
-use crate::lfd::store::{SharedStore, StoreError};
+use crate::lfd::store::StoreError;
 
 pub use state::HttpState;
 
@@ -132,15 +132,4 @@ pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
             api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
         }
     }
-}
-
-pub async fn run_store<T, F>(store: &SharedStore, f: F) -> Result<T, StoreError>
-where
-    F: FnOnce(&dyn crate::lfd::store::RunStore) -> Result<T, StoreError> + Send + 'static,
-    T: Send + 'static,
-{
-    let store = store.clone();
-    tokio::task::spawn_blocking(move || f(store.as_ref()))
-        .await
-        .map_err(|err| StoreError::InvalidData(err.to_string()))?
 }

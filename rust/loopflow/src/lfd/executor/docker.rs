@@ -449,7 +449,7 @@ impl DockerExecutor {
         &self,
         backend: &dyn DockerRecoveryBackend,
     ) -> Result<RehydrationPlan> {
-        let agents = self.store.list_agents()?;
+        let agents = self.store.list_agents().await?;
         let mut plan = RehydrationPlan {
             reattach: Vec::new(),
             lost: Vec::new(),
@@ -464,7 +464,7 @@ impl DockerExecutor {
                 continue;
             };
 
-            let Some(run) = self.store.get_wave_run(&wave_run_id)? else {
+            let Some(run) = self.store.get_wave_run(&wave_run_id).await? else {
                 plan.lost.push(agent);
                 continue;
             };
@@ -527,7 +527,9 @@ impl DockerExecutor {
             .cloned()
             .ok_or_else(|| anyhow!("active container missing for reattach"))?;
 
-        let workspace = self.resolve_workspace(wave_id.as_str(), wave_run_id.as_str())?;
+        let workspace = self
+            .resolve_workspace(wave_id.as_str(), wave_run_id.as_str())
+            .await?;
         let exit_code = self
             .wait_for_container_with_logs(
                 &container_id,
@@ -573,15 +575,16 @@ impl DockerExecutor {
 
         let _ = self
             .store
-            .end_agent(&agent.id, agent_status.as_i32(), ended_at);
+            .end_agent(&agent.id, agent_status.as_i32(), ended_at)
+            .await;
 
         let mut next_wave_status = None;
-        if let Some(mut run) = self.store.get_wave_run(wave_run_id)? {
+        if let Some(mut run) = self.store.get_wave_run(wave_run_id).await? {
             if !matches!(run.status, WaveRunStatus::Completed | WaveRunStatus::Failed) {
                 run.status = run_status;
                 run.ended_at = Some(OffsetDateTime::now_utc());
                 run.error = run_error;
-                self.store.update_wave_run(&run)?;
+                self.store.update_wave_run(&run).await?;
                 next_wave_status = Some(if run_status == WaveRunStatus::Completed {
                     WaveStatus::Idle
                 } else {
@@ -591,9 +594,9 @@ impl DockerExecutor {
         }
 
         if let Some(wave_status) = next_wave_status {
-            if let Some(mut wave) = self.store.get_wave(wave_id)? {
+            if let Some(mut wave) = self.store.get_wave(wave_id).await? {
                 wave.status = wave_status;
-                let _ = self.store.update_wave(&wave);
+                let _ = self.store.update_wave(&wave).await;
             }
         }
 
@@ -604,23 +607,24 @@ impl DockerExecutor {
         let ended_at = OffsetDateTime::now_utc().unix_timestamp();
         let _ = self
             .store
-            .end_agent(&agent.id, AgentStatus::Failed.as_i32(), ended_at);
+            .end_agent(&agent.id, AgentStatus::Failed.as_i32(), ended_at)
+            .await;
 
         if let Some(wave_run_id) = &agent.wave_run_id {
-            if let Some(mut run) = self.store.get_wave_run(wave_run_id)? {
+            if let Some(mut run) = self.store.get_wave_run(wave_run_id).await? {
                 let mut should_fail_wave = false;
                 if !matches!(run.status, WaveRunStatus::Completed | WaveRunStatus::Failed) {
                     run.status = WaveRunStatus::Failed;
                     run.error = Some("container lost during lfd restart.".to_string());
                     run.ended_at = Some(OffsetDateTime::now_utc());
-                    self.store.update_wave_run(&run)?;
+                    self.store.update_wave_run(&run).await?;
                     should_fail_wave = true;
                 }
 
                 if should_fail_wave {
-                    if let Some(mut wave) = self.store.get_wave(&run.wave_id)? {
+                    if let Some(mut wave) = self.store.get_wave(&run.wave_id).await? {
                         wave.status = WaveStatus::Failed;
-                        let _ = self.store.update_wave(&wave);
+                        let _ = self.store.update_wave(&wave).await;
                     }
                 }
             }
@@ -1155,16 +1159,18 @@ impl DockerExecutor {
         crate::engine::worktrees::main_repo_root(&repo_path).unwrap_or(repo_path)
     }
 
-    fn resolve_workspace(&self, wave_id: &str, wave_run_id: &str) -> Result<DockerWorkspace> {
+    async fn resolve_workspace(&self, wave_id: &str, wave_run_id: &str) -> Result<DockerWorkspace> {
         let wave_id = LfdId::from_raw(wave_id);
         let wave = self
             .store
-            .get_wave(&wave_id)?
+            .get_wave(&wave_id)
+            .await?
             .ok_or_else(|| anyhow!("wave not found for docker run"))?;
         let run_id = LfdId::from_raw(wave_run_id);
         let run = self
             .store
-            .get_wave_run(&run_id)?
+            .get_wave_run(&run_id)
+            .await?
             .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
         let repo_source = Self::resolve_host_repo(&wave.repo);
         let branch = Self::resolve_wave_run_branch(&run, &wave);
@@ -1498,7 +1504,7 @@ impl AgentExecutor for DockerExecutor {
             return Err(anyhow!("empty agent command"));
         }
 
-        let workspace = self.resolve_workspace(wave_id, wave_run_id)?;
+        let workspace = self.resolve_workspace(wave_id, wave_run_id).await?;
         let agent_image = self.ensure_repo_image(&workspace.repo_source).await?;
         self.prepare_workspace(&workspace, wave_run_id, cwd).await?;
 
@@ -1541,12 +1547,15 @@ impl AgentExecutor for DockerExecutor {
 
         let container_id = container.id;
         let agent_lfd_id = LfdId::from_raw(agent_id);
-        let _ = self.store.update_agent_status(
-            &agent_lfd_id,
-            AgentStatus::Running.as_i32(),
-            None,
-            Some(&container_id),
-        );
+        let _ = self
+            .store
+            .update_agent_status(
+                &agent_lfd_id,
+                AgentStatus::Running.as_i32(),
+                None,
+                Some(&container_id),
+            )
+            .await;
         self.active
             .lock()
             .await
@@ -1639,7 +1648,7 @@ impl AgentExecutor for DockerExecutor {
 mod tests {
     use super::*;
     use crate::lfd::config::ExecutorType;
-    use crate::lfd::store::sqlite::SqliteStore;
+    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{WaveRunKind, WaveRunSnapshot};
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
@@ -1829,7 +1838,7 @@ mod tests {
         }
     }
 
-    fn create_running_wave_and_run(
+    async fn create_running_wave_and_run(
         store: &SharedStore,
         repo: &Path,
         name: &str,
@@ -1847,7 +1856,10 @@ mod tests {
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
         };
-        store.create_wave(&wave).expect("wave should be created");
+        store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
 
         let run = WaveRun {
             id: LfdId::new(),
@@ -1879,6 +1891,7 @@ mod tests {
         };
         store
             .create_wave_run(&run)
+            .await
             .expect("wave run should be created");
         (wave, run)
     }
@@ -1925,20 +1938,27 @@ mod tests {
     async fn docker_startup_rehydrates_running_agents_and_cleans_orphans() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db"));
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db"),
+        );
 
         let (rehydrated_wave, rehydrated_run) =
-            create_running_wave_and_run(&store, tmp.path(), "rehydrated-wave");
-        let (lost_wave, lost_run) = create_running_wave_and_run(&store, tmp.path(), "lost-wave");
+            create_running_wave_and_run(&store, tmp.path(), "rehydrated-wave").await;
+        let (lost_wave, lost_run) =
+            create_running_wave_and_run(&store, tmp.path(), "lost-wave").await;
 
         let rehydrated_agent =
             make_running_agent(&rehydrated_run, Some("container-live"), "step-a");
         let lost_agent = make_running_agent(&lost_run, Some("container-missing"), "step-b");
         store
             .start_agent(&rehydrated_agent)
+            .await
             .expect("rehydrated agent should start");
         store
             .start_agent(&lost_agent)
+            .await
             .expect("lost agent should start");
 
         let config = ExecutorConfig {
@@ -1981,6 +2001,7 @@ mod tests {
 
         let lost_agent_after = store
             .get_agent(&lost_agent.id)
+            .await
             .expect("get lost agent")
             .expect("lost agent exists");
         assert_eq!(lost_agent_after.status, AgentStatus::Failed);
@@ -1988,6 +2009,7 @@ mod tests {
 
         let lost_run_after = store
             .get_wave_run(&lost_run.id)
+            .await
             .expect("get lost run")
             .expect("lost run exists");
         assert_eq!(lost_run_after.status, WaveRunStatus::Failed);
@@ -1998,18 +2020,21 @@ mod tests {
 
         let lost_wave_after = store
             .get_wave(&lost_wave.id)
+            .await
             .expect("get lost wave")
             .expect("lost wave exists");
         assert_eq!(lost_wave_after.status, WaveStatus::Failed);
 
         let rehydrated_run_after = store
             .get_wave_run(&rehydrated_run.id)
+            .await
             .expect("get rehydrated run")
             .expect("rehydrated run exists");
         assert_eq!(rehydrated_run_after.status, WaveRunStatus::Running);
 
         let rehydrated_wave_after = store
             .get_wave(&rehydrated_wave.id)
+            .await
             .expect("get rehydrated wave")
             .expect("rehydrated wave exists");
         assert_eq!(rehydrated_wave_after.status, WaveStatus::Running);
@@ -2022,7 +2047,11 @@ mod tests {
     async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db"));
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db"),
+        );
 
         let wave = Wave {
             id: LfdId::new(),
@@ -2037,7 +2066,10 @@ mod tests {
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
         };
-        store.create_wave(&wave).expect("wave should be created");
+        store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
 
         let run = WaveRun {
             id: LfdId::new(),
@@ -2069,11 +2101,13 @@ mod tests {
         };
         store
             .create_wave_run(&run)
+            .await
             .expect("wave run should be created");
 
         let stale_agent = make_running_agent(&run, Some("container-missing"), "step-a");
         store
             .start_agent(&stale_agent)
+            .await
             .expect("stale agent should start");
 
         let config = ExecutorConfig {
@@ -2099,6 +2133,7 @@ mod tests {
 
         let agent_after = store
             .get_agent(&stale_agent.id)
+            .await
             .expect("get agent")
             .expect("agent exists");
         assert_eq!(agent_after.status, AgentStatus::Failed);
@@ -2106,12 +2141,14 @@ mod tests {
 
         let run_after = store
             .get_wave_run(&run.id)
+            .await
             .expect("get run")
             .expect("run exists");
         assert_eq!(run_after.status, WaveRunStatus::Completed);
 
         let wave_after = store
             .get_wave(&wave.id)
+            .await
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(wave_after.status, WaveStatus::Idle);

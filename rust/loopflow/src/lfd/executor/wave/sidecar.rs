@@ -42,11 +42,13 @@ impl WaveExecutor {
     ) -> Result<()> {
         let wave = self
             .store
-            .get_wave(&failure.wave_id)?
+            .get_wave(&failure.wave_id)
+            .await?
             .ok_or_else(|| anyhow!("wave not found for CI fix"))?;
         let source_run = self
             .store
-            .get_wave_run(&failure.wave_run_id)?
+            .get_wave_run(&failure.wave_run_id)
+            .await?
             .ok_or_else(|| anyhow!("wave run not found for CI fix"))?;
 
         let worktree_path = ci_fix_worktree_path(Path::new(&wave.repo), &wave.name, sidecar_run_id);
@@ -85,7 +87,7 @@ impl WaveExecutor {
             stack_status: source_run.stack_status,
             lineage_inferred: false,
         };
-        if let Err(err) = self.store.create_wave_run(&run) {
+        if let Err(err) = self.store.create_wave_run(&run).await {
             if let Err(cleanup_err) = cleanup_ci_fix_worktree(&worktree_path) {
                 warn!(
                     worktree = %worktree,
@@ -105,7 +107,7 @@ impl WaveExecutor {
             run.status = WaveRunStatus::Completed;
         }
 
-        let update_result = self.store.update_wave_run(&run);
+        let update_result = self.store.update_wave_run(&run).await;
 
         if let Err(err) = cleanup_ci_fix_worktree(&worktree_path) {
             warn!(worktree = %worktree, error = %err, "failed to clean up CI fix worktree");
@@ -133,7 +135,8 @@ impl WaveExecutor {
             Some(&wave.name),
             Some((&self.store, &wave.id)),
             Some(message),
-        )?;
+        )
+        .await?;
 
         let outcome = self
             .launch_agent(AgentLaunchRequest {

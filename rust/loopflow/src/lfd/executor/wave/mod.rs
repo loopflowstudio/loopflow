@@ -112,7 +112,7 @@ impl WaveExecutor {
     }
 
     pub async fn run_worktree_janitor(&self, repo_roots: &[PathBuf]) -> Result<JanitorReport> {
-        let active = self.collect_active_ephemeral_worktrees()?;
+        let active = self.collect_active_ephemeral_worktrees().await?;
         let active_paths: HashSet<String> =
             active.into_iter().map(|worktree| worktree.path).collect();
 
@@ -163,9 +163,9 @@ impl WaveExecutor {
         Ok(report)
     }
 
-    fn collect_active_ephemeral_worktrees(&self) -> Result<Vec<EphemeralWorktree>> {
+    async fn collect_active_ephemeral_worktrees(&self) -> Result<Vec<EphemeralWorktree>> {
         let mut active = Vec::new();
-        let runs = self.store.list_wave_runs(None, None)?;
+        let runs = self.store.list_wave_runs(None, None).await?;
 
         for run in runs {
             if is_active_wave_run_status(run.status) && run.run_kind == WaveRunKind::Sidecar {
@@ -176,7 +176,7 @@ impl WaveExecutor {
                 });
             }
 
-            let forks = self.store.list_fork_runs(&run.id, run.step_index)?;
+            let forks = self.store.list_fork_runs(&run.id, run.step_index).await?;
             for fork in forks {
                 if !matches!(fork.status, ForkRunStatus::Pending | ForkRunStatus::Running) {
                     continue;
@@ -195,7 +195,8 @@ impl WaveExecutor {
     pub async fn execute(&self, run_id: &LfdId) -> Result<()> {
         let mut run = self
             .store
-            .get_wave_run(run_id)?
+            .get_wave_run(run_id)
+            .await?
             .ok_or_else(|| anyhow!("wave run not found"))?;
         if run.status == WaveRunStatus::Completed || run.status == WaveRunStatus::Failed {
             return Ok(());
@@ -203,7 +204,8 @@ impl WaveExecutor {
 
         let wave = self
             .store
-            .get_wave(&run.wave_id)?
+            .get_wave(&run.wave_id)
+            .await?
             .ok_or_else(|| anyhow!("wave not found"))?;
         info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "loading flow");
         let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
@@ -214,7 +216,7 @@ impl WaveExecutor {
             let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
             if run.flow_parents != current_flow_parents {
                 run.flow_parents = current_flow_parents;
-                self.store.update_wave_run(&run)?;
+                self.store.update_wave_run(&run).await?;
             }
 
             match next_action(&plan, run.step_index as usize) {
@@ -226,9 +228,10 @@ impl WaveExecutor {
                     info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
                     let exit_code = self.run_step(&wave, &mut run, &step).await?;
                     if exit_code == 0 {
-                        self.advance_run_step(&mut run, &plan, &wave.id)?;
+                        self.advance_run_step(&mut run, &plan, &wave.id).await?;
                     } else {
-                        self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))?;
+                        self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))
+                            .await?;
                         return Ok(());
                     }
                 }
@@ -247,11 +250,11 @@ impl WaveExecutor {
                         AgentStatus::Waiting,
                         &model,
                     );
-                    self.store.start_agent(&agent)?;
+                    self.store.start_agent(&agent).await?;
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
-                    self.store.update_wave_run(&run)?;
-                    self.set_wave_status(&wave.id, WaveStatus::Waiting);
+                    self.store.update_wave_run(&run).await?;
+                    self.set_wave_status(&wave.id, WaveStatus::Waiting).await;
                     self.event_hub.send(Event::wave_waiting(
                         wave.id.clone(),
                         run.id.clone(),
@@ -287,6 +290,7 @@ impl WaveExecutor {
                     let is_recurring = self
                         .store
                         .list_stimuli(Some(&wave.id))
+                        .await
                         .map(|stimuli| {
                             stimuli.iter().any(|s| {
                                 matches!(
@@ -348,10 +352,10 @@ impl WaveExecutor {
                         }
                     }
 
-                    self.store.update_wave_run(&run)?;
+                    self.store.update_wave_run(&run).await?;
                     // Wave goes back to Idle after a run completes — the run
                     // is done, but the wave is ready for its next iteration.
-                    self.set_wave_status(&wave.id, WaveStatus::Idle);
+                    self.set_wave_status(&wave.id, WaveStatus::Idle).await;
                     self.event_hub.send(Event::wave_updated(wave.id.clone()));
                     return Ok(());
                 }
@@ -359,26 +363,26 @@ impl WaveExecutor {
         }
     }
 
-    fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
-        if let Ok(Some(mut wave)) = self.store.get_wave(wave_id) {
+    async fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
+        if let Ok(Some(mut wave)) = self.store.get_wave(wave_id).await {
             wave.status = status;
-            if let Err(err) = self.store.update_wave(&wave) {
+            if let Err(err) = self.store.update_wave(&wave).await {
                 error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
             }
         }
     }
 
-    fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
+    async fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
         run.status = WaveRunStatus::Failed;
         run.ended_at = Some(OffsetDateTime::now_utc());
         run.error = Some(error);
-        self.store.update_wave_run(run)?;
-        self.set_wave_status(&wave.id, WaveStatus::Failed);
+        self.store.update_wave_run(run).await?;
+        self.set_wave_status(&wave.id, WaveStatus::Failed).await;
         self.event_hub.send(Event::wave_updated(wave.id.clone()));
         Ok(())
     }
 
-    pub(super) fn advance_run_step(
+    pub(super) async fn advance_run_step(
         &self,
         run: &mut WaveRun,
         plan: &[ConcreteItem],
@@ -387,7 +391,7 @@ impl WaveExecutor {
         run.step_index += 1;
         run.status = WaveRunStatus::Running;
         run.flow_parents = flow_parents_for_index(plan, run.step_index);
-        self.store.update_wave_run(run)?;
+        self.store.update_wave_run(run).await?;
         self.event_hub.send(Event::wave_updated(wave_id.clone()));
         Ok(())
     }
@@ -402,7 +406,8 @@ impl WaveExecutor {
             Some(&wave.name),
             Some((&self.store, &wave.id)),
             None,
-        )?;
+        )
+        .await?;
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 
         let outcome = self
@@ -432,7 +437,7 @@ impl WaveExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::store::sqlite::SqliteStore;
+    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::WaveRunSnapshot;
     use async_trait::async_trait;
     use tempfile::tempdir;
@@ -476,7 +481,11 @@ mod tests {
 
         // Set up store
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).unwrap());
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
 
         let wave_id = LfdId::new();
         let run_id = LfdId::new();
@@ -494,7 +503,7 @@ mod tests {
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
         };
-        store.create_wave(&wave).unwrap();
+        store.create_wave(&wave).await.unwrap();
 
         let run = WaveRun {
             id: run_id.clone(),
@@ -524,7 +533,7 @@ mod tests {
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
         };
-        store.create_wave_run(&run).unwrap();
+        store.create_wave_run(&run).await.unwrap();
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -587,7 +596,11 @@ mod tests {
         std::fs::write(step_dir.join("step-b.md"), "do step b").expect("step file should write");
 
         let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(SqliteStore::new(&db_path).expect("db should open"));
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("db should open"),
+        );
 
         let wave_id = LfdId::new();
         let run_id = LfdId::new();
@@ -604,7 +617,10 @@ mod tests {
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
         };
-        store.create_wave(&wave).expect("wave should be created");
+        store
+            .create_wave(&wave)
+            .await
+            .expect("wave should be created");
 
         let run = WaveRun {
             id: run_id.clone(),
@@ -636,6 +652,7 @@ mod tests {
         };
         store
             .create_wave_run(&run)
+            .await
             .expect("wave run should be created");
 
         let scheduler = Arc::new(Scheduler::new(4));
@@ -658,6 +675,7 @@ mod tests {
 
         let updated_run = store
             .get_wave_run(&run_id)
+            .await
             .expect("run fetch should succeed")
             .expect("run should exist");
         assert_eq!(updated_run.status, WaveRunStatus::Failed);

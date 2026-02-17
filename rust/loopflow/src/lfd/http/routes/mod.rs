@@ -11,7 +11,6 @@ pub mod ws;
 use crate::lfd::http::dto::{
     format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
 };
-use crate::lfd::http::run_store;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{SharedStore, StoreError};
 use crate::lfd::types::{LivePrState, LivePullRequestState, Wave, WaveRun};
@@ -30,7 +29,9 @@ pub async fn resolve_wave_id(
     }
 
     let name = value.to_string();
-    let wave = run_store(&state.store, move |store| store.get_wave_by_name(&name))
+    let wave = state
+        .store
+        .get_wave_by_name(&name)
         .await
         .map_err(crate::lfd::http::map_store_error)?;
     wave.map(|wave| wave.id)
@@ -57,9 +58,9 @@ pub async fn build_wave_dto(
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
     let wave_id = wave.id.clone();
-    let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
+    let latest = store.get_latest_wave_run(&wave_id).await?;
     let wave_id = wave.id.clone();
-    let stack_runs = run_store(store, move |store| store.list_stack_runs(&wave_id)).await?;
+    let stack_runs = store.list_stack_runs(&wave_id).await?;
     let live_pr_projection =
         build_wave_live_pr_projection(store, github_config, &stack_runs).await?;
     let repo = wave.repo.clone();
@@ -84,7 +85,8 @@ pub async fn build_wave_dto(
     );
 
     let wave_id_stim = wave.id.clone();
-    let stimuli_list = run_store(store, move |store| store.list_stimuli(Some(&wave_id_stim)))
+    let stimuli_list = store
+        .list_stimuli(Some(&wave_id_stim))
         .await
         .unwrap_or_default();
     let stimuli = stimuli_list.into_iter().map(stimulus_dto).collect();
@@ -225,10 +227,7 @@ pub(crate) async fn build_wave_live_pr_projection(
                                 synced_at: OffsetDateTime::now_utc(),
                             };
                             let state_for_store = live_state.clone();
-                            run_store(store, move |store| {
-                                store.upsert_live_pr_state(&state_for_store)
-                            })
-                            .await?;
+                            store.upsert_live_pr_state(&state_for_store).await?;
                         }
                         Ok(None) | Err(_) => {
                             stale_keys.insert(key.clone());
@@ -243,10 +242,7 @@ pub(crate) async fn build_wave_live_pr_projection(
     for key in &targets {
         let repo_id = key.repo_id.clone();
         let pr_number = key.pr_number;
-        let state = run_store(store, move |store| {
-            store.get_live_pr_state(&repo_id, pr_number)
-        })
-        .await?;
+        let state = store.get_live_pr_state(&repo_id, pr_number).await?;
         if let Some(state) = state {
             live_states.insert(key.clone(), state);
         } else {

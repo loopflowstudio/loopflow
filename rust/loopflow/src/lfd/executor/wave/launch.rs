@@ -41,7 +41,7 @@ impl WaveExecutor {
             &request.model,
         );
         let agent_id = agent.id.clone();
-        self.store.start_agent(&agent)?;
+        self.store.start_agent(&agent).await?;
         self.event_hub.send(Event::agent_started(
             agent_id.clone(),
             request.step.step.name.clone(),
@@ -65,11 +65,13 @@ impl WaveExecutor {
         } else {
             AgentStatus::Failed
         };
-        self.store.end_agent(
-            &agent_id,
-            status.as_i32(),
-            OffsetDateTime::now_utc().unix_timestamp(),
-        )?;
+        self.store
+            .end_agent(
+                &agent_id,
+                status.as_i32(),
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await?;
         self.event_hub
             .send(Event::agent_ended(agent_id.clone(), status));
 

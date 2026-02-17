@@ -31,7 +31,7 @@ impl WaveExecutor {
             }
         };
 
-        if let Ok(Some(existing)) = self.store.get_summary(&wave.id) {
+        if let Ok(Some(existing)) = self.store.get_summary(&wave.id).await {
             if existing.source_hash == current_hash {
                 debug!(wave = %wave.name, "summary is fresh");
                 return Ok(());
@@ -120,7 +120,7 @@ impl WaveExecutor {
                     model: config.agent_model,
                     created_at: Some(OffsetDateTime::now_utc()),
                 };
-                self.store.upsert_summary(&summary)?;
+                self.store.upsert_summary(&summary).await?;
                 info!(wave = %wave.name, "summary stored");
             }
             Ok(_) => {

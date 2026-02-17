@@ -33,16 +33,16 @@ async fn execute_run_inner(
 ) {
     if let Err(err) = executor.execute(&run.id).await {
         tracing::error!(run_id = %run.id, error = %err, "run execution failed");
-        if let Ok(Some(mut run)) = store.get_wave_run(&run.id) {
+        if let Ok(Some(mut run)) = store.get_wave_run(&run.id).await {
             run.status = WaveRunStatus::Failed;
             run.error = Some(err.to_string());
             run.ended_at = Some(OffsetDateTime::now_utc());
-            if let Err(err) = store.update_wave_run(&run) {
+            if let Err(err) = store.update_wave_run(&run).await {
                 tracing::error!(run_id = %run.id, error = %err, "failed to update wave run status");
             }
-            if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
+            if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id).await {
                 wave.status = WaveStatus::Failed;
-                if let Err(err) = store.update_wave(&wave) {
+                if let Err(err) = store.update_wave(&wave).await {
                     tracing::error!(wave_id = %run.wave_id, error = %err, "failed to update wave status");
                 }
                 event_hub.send(Event::wave_updated(run.wave_id.clone()));

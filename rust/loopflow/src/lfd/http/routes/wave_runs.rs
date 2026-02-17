@@ -13,7 +13,7 @@ use crate::lfd::http::routes::{
     build_wave_live_pr_projection, live_pr_for_run, resolve_wave_id, run_live_pr_key,
 };
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{map_store_error, run_store, ApiResult};
+use crate::lfd::http::{map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputEvent;
 
@@ -68,13 +68,12 @@ pub async fn wave_logs_handler(
     // Find the most recent run for this wave (active or completed).
     let store = state.store.clone();
     let wid = wave_id.clone();
-    let latest_run = run_store(&store, move |store| {
-        store.list_wave_runs(Some(&wid), Some(1))
-    })
-    .await
-    .map_err(map_store_error)?
-    .into_iter()
-    .next();
+    let latest_run = store
+        .list_wave_runs(Some(&wid), Some(1))
+        .await
+        .map_err(map_store_error)?
+        .into_iter()
+        .next();
 
     // Step 1: Subscribe to broadcast BEFORE reading the file.
     let output_rx = state.output_hub.subscribe();
@@ -123,7 +122,7 @@ pub async fn wave_logs_handler(
             } else {
                 let run_id = LfdId::from_raw(wave_run_id.clone());
                 let target = wave_id.clone();
-                let result = run_store(&store, move |store| store.get_wave_run(&run_id)).await;
+                let result = store.get_wave_run(&run_id).await;
                 let matches = match result {
                     Ok(Some(run)) => run.wave_id == target,
                     _ => false,
@@ -170,20 +169,27 @@ async fn list_wave_runs(
     let wave_id = path_wave_id.or(query_wave_id);
     let order = parse_run_order(query.order.as_deref());
 
-    let runs = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| {
-            if let Some(wave_id) = wave_id.as_ref() {
-                if order == RunOrder::OldestFirst {
-                    return store.list_stack_runs(wave_id);
-                }
-                return store.list_wave_runs(Some(wave_id), None);
-            }
-            store.list_wave_runs(None, None)
+    let runs = if let Some(wave_id) = wave_id.as_ref() {
+        if order == RunOrder::OldestFirst {
+            state
+                .store
+                .list_stack_runs(wave_id)
+                .await
+                .map_err(map_store_error)?
+        } else {
+            state
+                .store
+                .list_wave_runs(Some(wave_id), None)
+                .await
+                .map_err(map_store_error)?
         }
-    })
-    .await
-    .map_err(map_store_error)?;
+    } else {
+        state
+            .store
+            .list_wave_runs(None, None)
+            .await
+            .map_err(map_store_error)?
+    };
 
     let mut filtered = runs;
     if wave_id.is_none() && order == RunOrder::OldestFirst {
@@ -225,11 +231,11 @@ async fn list_wave_runs(
         if let Some(key) = run_live_pr_key(&run) {
             let repo_id = key.repo_id.clone();
             let pr_number = key.pr_number;
-            live_pr_state = run_store(&state.store, move |store| {
-                store.get_live_pr_state(&repo_id, pr_number)
-            })
-            .await
-            .map_err(map_store_error)?;
+            live_pr_state = state
+                .store
+                .get_live_pr_state(&repo_id, pr_number)
+                .await
+                .map_err(map_store_error)?;
             pr_state_stale = live_pr_state.is_none();
         }
 

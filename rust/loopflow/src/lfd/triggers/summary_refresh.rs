@@ -50,7 +50,7 @@ async fn refresh_summaries_for_repo(
     repo: &str,
     last_refresh: &mut HashMap<String, Instant>,
 ) {
-    let waves = match store.list_waves(Some(repo)) {
+    let waves = match store.list_waves(Some(repo)).await {
         Ok(waves) => waves,
         Err(err) => {
             tracing::error!(error = %err, "failed to list waves for summary refresh");
@@ -77,7 +77,7 @@ async fn refresh_summaries_for_repo(
         }
 
         // Need an active run to get the worktree path.
-        let run = match store.get_active_wave_run(&wave.id) {
+        let run = match store.get_active_wave_run(&wave.id).await {
             Ok(Some(run)) => run,
             _ => continue,
         };

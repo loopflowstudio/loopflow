@@ -23,7 +23,7 @@ use crate::lfd::http::dto::{
 use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
@@ -137,11 +137,11 @@ pub async fn list_waves_handler(
     State(state): State<HttpState>,
     Query(query): Query<ListWavesQuery>,
 ) -> ApiResult<ListResponse<WaveDto>> {
-    let waves = run_store(&state.store, move |store| {
-        store.list_waves(query.repo.as_deref())
-    })
-    .await
-    .map_err(map_store_error)?;
+    let waves = state
+        .store
+        .list_waves(query.repo.as_deref())
+        .await
+        .map_err(map_store_error)?;
     let include_active_run = query.expand.contains("active_run");
     let (waves, has_more) = super::paginate(
         waves,
@@ -234,7 +234,9 @@ pub async fn create_wave_handler(
         created_at: Some(OffsetDateTime::now_utc()),
     };
     let wave_clone = wave.clone();
-    run_store(&state.store, move |store| store.create_wave(&wave_clone))
+    state
+        .store
+        .create_wave(&wave_clone)
         .await
         .map_err(map_store_error)?;
 
@@ -251,7 +253,7 @@ pub async fn create_wave_handler(
 
         if let Err(err) = wt_result {
             let wave_id = wave.id.clone();
-            let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
+            let _ = state.store.delete_wave(&wave_id).await;
             return Err(api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to create worktree: {err}"),
@@ -271,13 +273,9 @@ pub async fn create_wave_handler(
             enabled: true,
         };
         let stimulus_for_store = stimulus.clone();
-        if let Err(err) = run_store(&state.store, move |store| {
-            store.create_stimulus(&stimulus_for_store)
-        })
-        .await
-        {
+        if let Err(err) = state.store.create_stimulus(&stimulus_for_store).await {
             let wave_id = wave.id.clone();
-            let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
+            let _ = state.store.delete_wave(&wave_id).await;
             return Err(map_store_error(err));
         }
     }
@@ -332,13 +330,8 @@ async fn wave_name_exists(
     repo: &str,
     name: &str,
 ) -> Result<bool, crate::lfd::store::StoreError> {
-    let repo = repo.to_string();
-    let name = name.to_string();
-    run_store(&state.store, move |store| {
-        let waves = store.list_waves(Some(&repo))?;
-        Ok(waves.into_iter().any(|wave| wave.name == name))
-    })
-    .await
+    let waves = state.store.list_waves(Some(repo)).await?;
+    Ok(waves.into_iter().any(|wave| wave.name == name))
 }
 
 pub async fn get_wave_handler(
@@ -347,7 +340,9 @@ pub async fn get_wave_handler(
     Query(query): Query<ExpandQuery>,
 ) -> ApiResult<WaveDto> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
+    let wave = state
+        .store
+        .get_wave(&wave_id)
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
@@ -364,13 +359,12 @@ pub async fn update_wave_handler(
     Json(payload): Json<UpdateWaveRequest>,
 ) -> ApiResult<WaveDto> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let mut wave = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let mut wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
     // Handle rename: move worktree + rename branch before updating DB.
     if let Some(ref name) = payload.name {
@@ -389,12 +383,11 @@ pub async fn update_wave_handler(
             }
 
             // Reject rename while wave is running or waiting.
-            let active_run = run_store(&state.store, {
-                let wave_id = wave.id.clone();
-                move |store| store.get_active_wave_run(&wave_id)
-            })
-            .await
-            .map_err(map_store_error)?;
+            let active_run = state
+                .store
+                .get_active_wave_run(&wave.id)
+                .await
+                .map_err(map_store_error)?;
             if let Some(run) = active_run {
                 if matches!(run.status, WaveRunStatus::Running | WaveRunStatus::Waiting) {
                     return Err(api_error(
@@ -434,7 +427,9 @@ pub async fn update_wave_handler(
     }
 
     let wave_clone = wave.clone();
-    run_store(&state.store, move |store| store.update_wave(&wave_clone))
+    state
+        .store
+        .update_wave(&wave_clone)
         .await
         .map_err(map_store_error)?;
 
@@ -453,23 +448,21 @@ pub async fn delete_wave_handler(
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
     // Get wave info before deleting (for worktree cleanup).
-    let wave = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
     terminate_active_agents(&state, &wave_id).await?;
 
     // Delete from the store (cascades to wave_runs, agents, etc.).
-    let wave_id_for_delete = wave_id.clone();
-    run_store(&state.store, move |store| {
-        store.delete_wave(&wave_id_for_delete)
-    })
-    .await
-    .map_err(map_store_error)?;
+    state
+        .store
+        .delete_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?;
 
     if state.executor.executor_type() == ExecutorType::Docker {
         if let Err(err) = state.executor.cleanup_wave_workspace(&wave).await {
@@ -511,20 +504,18 @@ pub async fn run_wave_handler(
 ) -> ApiResult<RunWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
-    let mut wave = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let mut wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    let active_run = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_wave_run(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    let active_run = state
+        .store
+        .get_active_wave_run(&wave_id)
+        .await
+        .map_err(map_store_error)?;
     if active_run.is_some() {
         return Err(api_error(
             StatusCode::PRECONDITION_FAILED,
@@ -543,7 +534,9 @@ pub async fn run_wave_handler(
     }
 
     let wave_clone = wave.clone();
-    run_store(&state.store, move |store| store.update_wave(&wave_clone))
+    state
+        .store
+        .update_wave(&wave_clone)
         .await
         .map_err(map_store_error)?;
 
@@ -560,22 +553,8 @@ pub async fn run_wave_handler(
         }));
     }
 
-    let run = match tokio::task::spawn_blocking({
-        let store = state.store.clone();
-        let wave = wave.clone();
-        let run_id = run_id.clone();
-        move || create_wave_run_with_id(&store, &wave, &run_id)
-    })
-    .await
-    {
-        Ok(Ok(run)) => run,
-        Ok(Err(err)) => {
-            state.scheduler.release(run_id.as_str());
-            return Err(api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                err.to_string(),
-            ));
-        }
+    let run = match create_wave_run_with_id(&state.store, &wave, &run_id).await {
+        Ok(run) => run,
         Err(err) => {
             state.scheduler.release(run_id.as_str());
             return Err(api_error(
@@ -638,13 +617,12 @@ pub async fn add_stimulus_handler(
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
     // Verify wave exists.
-    run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
     let stimulus = Stimulus {
         id: LfdId::new(),
@@ -658,11 +636,11 @@ pub async fn add_stimulus_handler(
     };
 
     let stimulus_clone = stimulus.clone();
-    run_store(&state.store, move |store| {
-        store.create_stimulus(&stimulus_clone)
-    })
-    .await
-    .map_err(map_store_error)?;
+    state
+        .store
+        .create_stimulus(&stimulus_clone)
+        .await
+        .map_err(map_store_error)?;
 
     Ok(Json(serde_json::json!({
         "id": stimulus.id.to_string(),
@@ -679,11 +657,11 @@ pub async fn remove_stimulus_handler(
     let stimulus_id = LfdId::from_str(&stimulus_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid stimulus id"))?;
 
-    run_store(&state.store, move |store| {
-        store.delete_stimulus(&stimulus_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    state
+        .store
+        .delete_stimulus(&stimulus_id)
+        .await
+        .map_err(map_store_error)?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
@@ -694,11 +672,11 @@ pub async fn list_stimuli_handler(
 ) -> ApiResult<serde_json::Value> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    let stimuli = run_store(&state.store, move |store| {
-        store.list_stimuli(Some(&wave_id))
-    })
-    .await
-    .map_err(map_store_error)?;
+    let stimuli = state
+        .store
+        .list_stimuli(Some(&wave_id))
+        .await
+        .map_err(map_store_error)?;
 
     let dtos: Vec<_> = stimuli.into_iter().map(stimulus_dto).collect();
 
@@ -711,11 +689,11 @@ pub async fn list_memory_blocks_handler(
 ) -> ApiResult<ListResponse<ChatMemoryBlockDto>> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    let blocks = run_store(&state.store, move |store| {
-        store.list_chat_memory_blocks(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    let blocks = state
+        .store
+        .list_chat_memory_blocks(&wave_id)
+        .await
+        .map_err(map_store_error)?;
 
     let dtos = blocks.into_iter().map(chat_memory_block_dto).collect();
     Ok(Json(ListResponse::new(dtos, false)))
@@ -733,12 +711,11 @@ pub async fn upsert_memory_block_handler(
     let position = match payload.position {
         Some(position) => position,
         None => {
-            let existing = run_store(&state.store, {
-                let wave_id = wave_id.clone();
-                move |store| store.list_chat_memory_blocks(&wave_id)
-            })
-            .await
-            .map_err(map_store_error)?;
+            let existing = state
+                .store
+                .list_chat_memory_blocks(&wave_id)
+                .await
+                .map_err(map_store_error)?;
 
             default_memory_block_position(&existing, &name)
         }
@@ -752,12 +729,11 @@ pub async fn upsert_memory_block_handler(
         updated_at: Some(OffsetDateTime::now_utc()),
     };
 
-    let block_to_store = block.clone();
-    run_store(&state.store, move |store| {
-        store.upsert_chat_memory_block(&block_to_store)
-    })
-    .await
-    .map_err(map_store_error)?;
+    state
+        .store
+        .upsert_chat_memory_block(&block)
+        .await
+        .map_err(map_store_error)?;
 
     Ok(Json(chat_memory_block_dto(block)))
 }
@@ -767,14 +743,13 @@ pub async fn delete_memory_block_handler(
     Path((wave_id, name)): Path<(String, String)>,
 ) -> ApiResult<DeletedResourceResponse> {
     let name = normalized_memory_block_name(name)?;
-
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let name_for_delete = name.clone();
-    run_store(&state.store, move |store| {
-        store.delete_chat_memory_block(&wave_id, &name_for_delete)
-    })
-    .await
-    .map_err(map_store_error)?;
+
+    state
+        .store
+        .delete_chat_memory_block(&wave_id, &name)
+        .await
+        .map_err(map_store_error)?;
 
     Ok(Json(DeletedResourceResponse {
         id: name,
@@ -816,12 +791,11 @@ pub async fn stop_wave_handler(
 
     terminate_active_agents(&state, &wave_id).await?;
 
-    let run = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_wave_run(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    let run = state
+        .store
+        .get_active_wave_run(&wave_id)
+        .await
+        .map_err(map_store_error)?;
 
     // Disable all auto stimuli so tickers won't restart the wave.
     let has_auto_stimulus = set_wave_stimuli_enabled(&state, &wave_id, false, true).await;
@@ -831,36 +805,41 @@ pub async fn stop_wave_handler(
         run.error = Some("stopped".to_string());
         run.ended_at = Some(OffsetDateTime::now_utc());
         let run_clone = run.clone();
-        run_store(&state.store, move |store| store.update_wave_run(&run_clone))
+        state
+            .store
+            .update_wave_run(&run_clone)
             .await
             .map_err(map_store_error)?;
         let wave_id_for_update = run.wave_id.clone();
-        run_store(&state.store, move |store| {
-            if let Some(mut wave) = store.get_wave(&wave_id_for_update)? {
-                wave.status = if has_auto_stimulus {
-                    WaveStatus::Paused
-                } else {
-                    WaveStatus::Failed
-                };
-                store.update_wave(&wave)?;
-            }
-            Ok(())
-        })
-        .await
-        .map_err(map_store_error)?;
+        if let Some(mut wave) = state
+            .store
+            .get_wave(&wave_id_for_update)
+            .await
+            .map_err(map_store_error)?
+        {
+            wave.status = if has_auto_stimulus {
+                WaveStatus::Paused
+            } else {
+                WaveStatus::Failed
+            };
+            state
+                .store
+                .update_wave(&wave)
+                .await
+                .map_err(map_store_error)?;
+        }
         mark_active_agents_failed(&state, &wave_id).await?;
     } else if has_auto_stimulus {
         // No active run, but still pause the wave so the auto stimulus doesn't restart it.
         let wid = wave_id.clone();
-        run_store(&state.store, move |store| {
-            if let Some(mut wave) = store.get_wave(&wid)? {
-                wave.status = WaveStatus::Paused;
-                store.update_wave(&wave)?;
-            }
-            Ok(())
-        })
-        .await
-        .map_err(map_store_error)?;
+        if let Some(mut wave) = state.store.get_wave(&wid).await.map_err(map_store_error)? {
+            wave.status = WaveStatus::Paused;
+            state
+                .store
+                .update_wave(&wave)
+                .await
+                .map_err(map_store_error)?;
+        }
     }
 
     state.event_hub.send(Event::wave_stopped(wave_id));
@@ -874,13 +853,12 @@ pub async fn restart_step_handler(
 ) -> ApiResult<RestartStepResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    let run = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_wave_run(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
+    let run = state
+        .store
+        .get_active_wave_run(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
 
     if run.status != WaveRunStatus::Running {
         return Err(api_error(
@@ -912,12 +890,11 @@ async fn terminate_active_agents(
     state: &HttpState,
     wave_id: &LfdId,
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
-    let agents = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_agents_for_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    let agents = state
+        .store
+        .get_active_agents_for_wave(wave_id)
+        .await
+        .map_err(map_store_error)?;
 
     for agent in agents {
         if let Err(err) = state.executor.terminate_agent(&agent.id).await {
@@ -935,17 +912,14 @@ async fn mark_active_agents_failed(
     state: &HttpState,
     wave_id: &LfdId,
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
-    let wave_id_for_agents = wave_id.clone();
-    run_store(&state.store, move |store| {
-        let _ = store.end_active_agent_for_wave(
-            &wave_id_for_agents,
+    let _ = state
+        .store
+        .end_active_agent_for_wave(
+            wave_id,
             AgentStatus::Failed.as_i32(),
             OffsetDateTime::now_utc().unix_timestamp(),
-        );
-        Ok(())
-    })
-    .await
-    .map_err(map_store_error)?;
+        )
+        .await;
 
     Ok(())
 }
@@ -978,13 +952,12 @@ pub async fn continue_wave_handler(
     Path(wave_id): Path<String>,
 ) -> ApiResult<ContinueWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let mut run = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_active_wave_run(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
+    let mut run = state
+        .store
+        .get_active_wave_run(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
 
     if run.status != WaveRunStatus::Waiting {
         return Err(api_error(
@@ -993,13 +966,12 @@ pub async fn continue_wave_handler(
         ));
     }
 
-    let mut wave = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let mut wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
     // Resolve worktree and check for uncommitted changes.
     let worktree = run.worktree.clone();
@@ -1020,12 +992,16 @@ pub async fn continue_wave_handler(
     run.step_index += 1;
     run.status = WaveRunStatus::Running;
     let run_clone = run.clone();
-    run_store(&state.store, move |store| store.update_wave_run(&run_clone))
+    state
+        .store
+        .update_wave_run(&run_clone)
         .await
         .map_err(map_store_error)?;
     wave.status = WaveStatus::Running;
     let wave_clone = wave.clone();
-    run_store(&state.store, move |store| store.update_wave(&wave_clone))
+    state
+        .store
+        .update_wave(&wave_clone)
         .await
         .map_err(map_store_error)?;
 
@@ -1050,17 +1026,18 @@ pub async fn land_wave_handler(
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
     let wave_id_for_event = wave_id.clone();
-    let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
+    let wave = state
+        .store
+        .get_wave(&wave_id)
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    let latest_run = run_store(&state.store, move |store| {
-        let wave_id = LfdId::from_raw(wave.id.clone());
-        store.get_latest_wave_run(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    let latest_run = state
+        .store
+        .get_latest_wave_run(&wave.id)
+        .await
+        .map_err(map_store_error)?;
 
     let latest_worktree = payload
         .worktree
@@ -1163,20 +1140,18 @@ pub async fn combine_wave_handler(
 }
 
 async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, String), ApiError> {
-    let wave = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_wave(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let wave = state
+        .store
+        .get_wave(wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    let latest_run = run_store(&state.store, {
-        let wave_id = wave_id.clone();
-        move |store| store.get_latest_wave_run(&wave_id)
-    })
-    .await
-    .map_err(map_store_error)?;
+    let latest_run = state
+        .store
+        .get_latest_wave_run(wave_id)
+        .await
+        .map_err(map_store_error)?;
 
     let latest_worktree = latest_run
         .map(|run| run.worktree)
@@ -1238,24 +1213,24 @@ async fn set_wave_stimuli_enabled(
     enabled: bool,
     auto_only: bool,
 ) -> bool {
-    let wave_id = wave_id.clone();
-    run_store(&state.store, move |store| {
-        let stimuli = store.list_stimuli(Some(&wave_id))?;
-        let mut matched = false;
-        for mut stimulus in stimuli {
-            if auto_only && !is_auto_stimulus(stimulus.kind) {
-                continue;
-            }
-            matched = true;
-            if stimulus.enabled != enabled {
-                stimulus.enabled = enabled;
-                store.update_stimulus(&stimulus)?;
+    let stimuli = match state.store.list_stimuli(Some(wave_id)).await {
+        Ok(stimuli) => stimuli,
+        Err(_) => return false,
+    };
+    let mut matched = false;
+    for mut stimulus in stimuli {
+        if auto_only && !is_auto_stimulus(stimulus.kind) {
+            continue;
+        }
+        matched = true;
+        if stimulus.enabled != enabled {
+            stimulus.enabled = enabled;
+            if state.store.update_stimulus(&stimulus).await.is_err() {
+                return false;
             }
         }
-        Ok(matched)
-    })
-    .await
-    .unwrap_or(false)
+    }
+    matched
 }
 
 fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {

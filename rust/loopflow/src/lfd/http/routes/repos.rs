@@ -6,13 +6,15 @@ use axum::Json;
 
 use crate::lfd::http::dto::{ListResponse, RepoDto};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{map_store_error, run_store, ApiResult};
+use crate::lfd::http::{map_store_error, ApiResult};
 use crate::lfd::types::Wave;
 
 pub async fn list_repos_handler(
     State(state): State<HttpState>,
 ) -> ApiResult<ListResponse<RepoDto>> {
-    let waves = run_store(&state.store, move |store| store.list_waves(None))
+    let waves = state
+        .store
+        .list_waves(None)
         .await
         .map_err(map_store_error)?;
 

@@ -44,7 +44,10 @@ async fn check_watch_stimuli(
     scheduler: &std::sync::Arc<Scheduler>,
     event_hub: &EventHub,
 ) {
-    let stimuli = match store.list_stimuli_by_kind(StimulusKind::Watch.as_i32()) {
+    let stimuli = match store
+        .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
+        .await
+    {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list watch stimuli");
@@ -59,7 +62,7 @@ async fn check_watch_stimuli(
             continue;
         }
 
-        let wave = match store.get_wave(&stimulus.wave_id) {
+        let wave = match store.get_wave(&stimulus.wave_id).await {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
@@ -78,11 +81,12 @@ async fn check_watch_stimuli(
 
         if store
             .get_active_wave_run(&stimulus.wave_id)
+            .await
             .ok()
             .flatten()
             .is_none()
         {
-            if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id) {
+            if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id).await {
                 if !pending.is_empty() {
                     let run_id = LfdId::new();
                     let (acquired, reason) = scheduler.acquire(run_id.as_str()).await;
@@ -95,8 +99,8 @@ async fn check_watch_stimuli(
                         continue;
                     }
 
-                    if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id) {
-                        let _ = store.delete_pending_activations(&stimulus.wave_id);
+                    if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id).await {
+                        let _ = store.delete_pending_activations(&stimulus.wave_id).await;
                         started.insert(wave.id.clone());
                         spawn_run_task_with_slot(
                             store.clone(),
@@ -118,21 +122,22 @@ async fn check_watch_stimuli(
                 if result.update_sha {
                     let mut stimulus = stimulus.clone();
                     stimulus.last_main_sha = Some(result.current_sha.clone());
-                    let _ = store.update_stimulus(&stimulus);
+                    let _ = store.update_stimulus(&stimulus).await;
                 }
 
                 if !result.trigger {
                     continue;
                 }
 
-                if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id) {
+                if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
                     queue_or_coalesce_activation(
                         store,
                         &stimulus.wave_id,
                         &stimulus.id,
                         &result.from_sha,
                         &result.current_sha,
-                    );
+                    )
+                    .await;
                     continue;
                 }
 
@@ -147,7 +152,7 @@ async fn check_watch_stimuli(
                     continue;
                 }
 
-                let run = match create_wave_run_with_id(store, &wave, &run_id) {
+                let run = match create_wave_run_with_id(store, &wave, &run_id).await {
                     Ok(run) => run,
                     Err(err) => {
                         scheduler.release(run_id.as_str());
@@ -244,17 +249,17 @@ fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, 
     })
 }
 
-fn queue_or_coalesce_activation(
+async fn queue_or_coalesce_activation(
     store: &SharedStore,
     wave_id: &LfdId,
     stimulus_id: &LfdId,
     from_sha: &str,
     to_sha: &str,
 ) {
-    match store.get_pending_for_stimulus(wave_id, stimulus_id) {
+    match store.get_pending_for_stimulus(wave_id, stimulus_id).await {
         Ok(Some(mut existing)) => {
             existing.to_sha = to_sha.to_string();
-            let _ = store.update_pending_activation(&existing);
+            let _ = store.update_pending_activation(&existing).await;
         }
         Ok(None) => {
             let activation = PendingActivation {
@@ -265,7 +270,7 @@ fn queue_or_coalesce_activation(
                 to_sha: to_sha.to_string(),
                 queued_at: Utc::now().timestamp(),
             };
-            let _ = store.create_pending_activation(&activation);
+            let _ = store.create_pending_activation(&activation).await;
         }
         Err(err) => {
             tracing::error!(wave_id = %wave_id, error = %err, "failed to check pending activation");

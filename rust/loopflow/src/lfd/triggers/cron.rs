@@ -44,7 +44,10 @@ async fn check_cron_stimuli(
     scheduler: &std::sync::Arc<Scheduler>,
     event_hub: &EventHub,
 ) {
-    let stimuli = match store.list_stimuli_by_kind(StimulusKind::Cron.as_i32()) {
+    let stimuli = match store
+        .list_stimuli_by_kind(StimulusKind::Cron.as_i32())
+        .await
+    {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list cron stimuli");
@@ -63,7 +66,7 @@ async fn check_cron_stimuli(
             continue;
         }
 
-        let wave = match store.get_wave(&stimulus.wave_id) {
+        let wave = match store.get_wave(&stimulus.wave_id).await {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
@@ -82,11 +85,12 @@ async fn check_cron_stimuli(
 
         if store
             .get_active_wave_run(&stimulus.wave_id)
+            .await
             .ok()
             .flatten()
             .is_none()
         {
-            if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id) {
+            if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id).await {
                 if !pending.is_empty() {
                     let run_id = LfdId::new();
                     let (acquired, reason) = scheduler.acquire(run_id.as_str()).await;
@@ -99,8 +103,8 @@ async fn check_cron_stimuli(
                         continue;
                     }
 
-                    if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id) {
-                        let _ = store.delete_pending_activations(&stimulus.wave_id);
+                    if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id).await {
+                        let _ = store.delete_pending_activations(&stimulus.wave_id).await;
                         started.insert(wave.id.clone());
                         spawn_run_task_with_slot(
                             store.clone(),
@@ -124,10 +128,10 @@ async fn check_cron_stimuli(
         if should_activate_cron(&stimulus.cron, last_triggered) {
             let mut stimulus = stimulus.clone();
             stimulus.last_triggered_at = Some(Utc::now().timestamp());
-            let _ = store.update_stimulus(&stimulus);
+            let _ = store.update_stimulus(&stimulus).await;
 
-            if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id) {
-                queue_or_coalesce_activation(store, &stimulus.wave_id, &stimulus.id);
+            if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
+                queue_or_coalesce_activation(store, &stimulus.wave_id, &stimulus.id).await;
                 continue;
             }
 
@@ -142,7 +146,7 @@ async fn check_cron_stimuli(
                 continue;
             }
 
-            let run = match create_wave_run_with_id(store, &wave, &run_id) {
+            let run = match create_wave_run_with_id(store, &wave, &run_id).await {
                 Ok(run) => run,
                 Err(err) => {
                     scheduler.release(run_id.as_str());
@@ -180,8 +184,8 @@ fn should_activate_cron(cron_expr: &str, last_triggered: Option<DateTime<Utc>>) 
     false
 }
 
-fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_id: &LfdId) {
-    match store.get_pending_for_stimulus(wave_id, stimulus_id) {
+async fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_id: &LfdId) {
+    match store.get_pending_for_stimulus(wave_id, stimulus_id).await {
         Ok(Some(_existing)) => {
             tracing::debug!(wave_id = %wave_id, stimulus_id = %stimulus_id, "cron activation already queued");
         }
@@ -194,7 +198,7 @@ fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_i
                 to_sha: String::new(),
                 queued_at: Utc::now().timestamp(),
             };
-            let _ = store.create_pending_activation(&activation);
+            let _ = store.create_pending_activation(&activation).await;
         }
         Err(err) => {
             tracing::error!(wave_id = %wave_id, error = %err, "failed to check pending activation");

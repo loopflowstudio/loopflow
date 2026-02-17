@@ -42,6 +42,19 @@ struct MemoryStore {
         blocks.removeAll { $0.name == name }
     }
 
+    mutating func upsert(_ block: ChatMemoryBlock) {
+        if let index = blocks.firstIndex(where: { $0.name == block.name }) {
+            blocks[index] = block
+        } else {
+            blocks.append(block)
+        }
+        blocks.sort { $0.position < $1.position }
+    }
+
+    mutating func remove(named name: String) {
+        blocks.removeAll { $0.name == name }
+    }
+
     func systemPrompt() -> String {
         guard !blocks.isEmpty else { return "" }
         var lines: [String] = ["<memory>"]

@@ -58,10 +58,5 @@ let package = Package(
             dependencies: ["Concerto", "LoopflowCore", "ViewInspector"],
             path: "ConcertoTests"
         ),
-        .testTarget(
-            name: "SymphoniaTests",
-            dependencies: ["Symphonia", "LoopflowCore"],
-            path: "SymphoniaTests"
-        ),
     ]
 )

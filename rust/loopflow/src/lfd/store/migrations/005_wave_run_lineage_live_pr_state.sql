@@ -31,18 +31,24 @@ WITH ordered AS (
 )
 UPDATE wave_runs
 SET
-    parent_run_id = (
-        SELECT ordered.parent_id
-        FROM ordered
-        WHERE ordered.id = wave_runs.id
-    ),
-    stack_position = COALESCE((
-        SELECT ordered.position
-        FROM ordered
-        WHERE ordered.id = wave_runs.id
-    ), stack_position),
+    parent_run_id = CASE
+        WHEN wave_runs.parent_run_id IS NULL THEN (
+            SELECT ordered.parent_id
+            FROM ordered
+            WHERE ordered.id = wave_runs.id
+        )
+        ELSE wave_runs.parent_run_id
+    END,
+    stack_position = CASE
+        WHEN wave_runs.parent_run_id IS NULL THEN COALESCE((
+            SELECT ordered.position
+            FROM ordered
+            WHERE ordered.id = wave_runs.id
+        ), stack_position)
+        ELSE stack_position
+    END,
     lineage_inferred = CASE
-        WHEN (
+        WHEN wave_runs.parent_run_id IS NULL AND (
             SELECT ordered.parent_id
             FROM ordered
             WHERE ordered.id = wave_runs.id

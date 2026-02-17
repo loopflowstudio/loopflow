@@ -1449,5 +1449,187 @@ mod tests {
             .await
             .expect("active with sidecar")
             .is_none());
+
+        store.delete_wave(&wave.id).await.expect("delete wave");
+    }
+
+    #[tokio::test]
+    async fn find_next_unmerged_transitions() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let wave = make_wave("/repo-live-pr-transitions");
+        store.create_wave(&wave).await.expect("create wave");
+
+        let run1 = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo.clone(),
+                flow: wave.flow.clone(),
+                direction: wave.direction.clone(),
+                area: wave.area.clone(),
+                pr: Some(PullRequest {
+                    url: "https://example.test/pr/101".to_string(),
+                    number: Some(101),
+                    state: Some("open".to_string()),
+                    title: Some("first".to_string()),
+                    branch: Some("feature-101".to_string()),
+                }),
+            },
+            iteration: 1,
+            step_index: 0,
+            status: WaveRunStatus::Completed,
+            worktree: "/repo/live-pr/1".to_string(),
+            branch: "feature-101".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: Some(OffsetDateTime::now_utc()),
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave.id.to_string(),
+            stack_status: WaveRunStackStatus::Active,
+            lineage_inferred: false,
+        };
+        store.create_wave_run(&run1).await.expect("create run1");
+
+        let run2 = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo.clone(),
+                flow: wave.flow.clone(),
+                direction: wave.direction.clone(),
+                area: wave.area.clone(),
+                pr: Some(PullRequest {
+                    url: "https://example.test/pr/102".to_string(),
+                    number: Some(102),
+                    state: Some("open".to_string()),
+                    title: Some("second".to_string()),
+                    branch: Some("feature-102".to_string()),
+                }),
+            },
+            iteration: 2,
+            step_index: 0,
+            status: WaveRunStatus::Completed,
+            worktree: "/repo/live-pr/2".to_string(),
+            branch: "feature-102".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: Some(OffsetDateTime::now_utc()),
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
+            parent_run_id: Some(run1.id.clone()),
+            parent_pr_number: Some(101),
+            stack_position: 1,
+            stack_group_id: wave.id.to_string(),
+            stack_status: WaveRunStackStatus::Active,
+            lineage_inferred: false,
+        };
+        store.create_wave_run(&run2).await.expect("create run2");
+
+        let first_pending = store
+            .find_next_unmerged_run(&wave.id)
+            .await
+            .expect("find first unmerged");
+        assert_eq!(first_pending.map(|run| run.id), Some(run1.id.clone()));
+
+        store
+            .upsert_live_pr_state(&LivePullRequestState {
+                repo_id: wave.repo.clone(),
+                pr_number: 101,
+                state: LivePrState::Merged,
+                is_draft: false,
+                head_ref: "feature-101".to_string(),
+                head_sha: "sha-101".to_string(),
+                base_ref: "main".to_string(),
+                updated_at: OffsetDateTime::now_utc(),
+                merged_at: Some(OffsetDateTime::now_utc()),
+                synced_at: OffsetDateTime::now_utc(),
+            })
+            .await
+            .expect("upsert pr 101 merged");
+        let second_pending = store
+            .find_next_unmerged_run(&wave.id)
+            .await
+            .expect("find second unmerged");
+        assert_eq!(second_pending.map(|run| run.id), Some(run2.id.clone()));
+
+        store
+            .upsert_live_pr_state(&LivePullRequestState {
+                repo_id: wave.repo.clone(),
+                pr_number: 102,
+                state: LivePrState::Closed,
+                is_draft: false,
+                head_ref: "feature-102".to_string(),
+                head_sha: "sha-102".to_string(),
+                base_ref: "main".to_string(),
+                updated_at: OffsetDateTime::now_utc(),
+                merged_at: None,
+                synced_at: OffsetDateTime::now_utc(),
+            })
+            .await
+            .expect("upsert pr 102 closed");
+        let closed_is_still_unmerged = store
+            .find_next_unmerged_run(&wave.id)
+            .await
+            .expect("closed still unmerged");
+        assert_eq!(
+            closed_is_still_unmerged.map(|run| run.id),
+            Some(run2.id.clone())
+        );
+
+        store
+            .upsert_live_pr_state(&LivePullRequestState {
+                repo_id: wave.repo.clone(),
+                pr_number: 102,
+                state: LivePrState::Unknown,
+                is_draft: false,
+                head_ref: "feature-102".to_string(),
+                head_sha: "sha-102b".to_string(),
+                base_ref: "main".to_string(),
+                updated_at: OffsetDateTime::now_utc(),
+                merged_at: None,
+                synced_at: OffsetDateTime::now_utc(),
+            })
+            .await
+            .expect("upsert pr 102 unknown");
+        let unknown_is_still_unmerged = store
+            .find_next_unmerged_run(&wave.id)
+            .await
+            .expect("unknown still unmerged");
+        assert_eq!(
+            unknown_is_still_unmerged.map(|run| run.id),
+            Some(run2.id.clone())
+        );
+
+        store
+            .upsert_live_pr_state(&LivePullRequestState {
+                repo_id: wave.repo.clone(),
+                pr_number: 102,
+                state: LivePrState::Merged,
+                is_draft: false,
+                head_ref: "feature-102".to_string(),
+                head_sha: "sha-102c".to_string(),
+                base_ref: "main".to_string(),
+                updated_at: OffsetDateTime::now_utc(),
+                merged_at: Some(OffsetDateTime::now_utc()),
+                synced_at: OffsetDateTime::now_utc(),
+            })
+            .await
+            .expect("upsert pr 102 merged");
+        let all_merged = store
+            .find_next_unmerged_run(&wave.id)
+            .await
+            .expect("all merged");
+        assert!(all_merged.is_none());
+
+        store.delete_wave(&wave.id).await.expect("delete wave");
     }
 }

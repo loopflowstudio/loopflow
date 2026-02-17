@@ -457,11 +457,14 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
+    use crate::lfd::store::sqlite::SqliteStore;
+    use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, WaveRun, WaveRunKind, WaveRunSnapshot,
-        WaveRunStackStatus, WaveRunStatus,
+        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunKind,
+        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
     use time::OffsetDateTime;
 
     fn wave_run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> WaveRun {
@@ -498,6 +501,79 @@ mod tests {
             stack_group_id: "wave-group".to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+        }
+    }
+
+    fn sqlite_store() -> SharedStore {
+        let db_path = std::env::temp_dir().join(format!("lfd-routes-test-{}.db", LfdId::new()));
+        Arc::new(SqliteStore::new(&db_path).expect("sqlite store should initialize"))
+    }
+
+    fn make_wave(repo: &str) -> Wave {
+        Wave {
+            id: LfdId::new(),
+            name: "wave-live-pr".to_string(),
+            repo: repo.to_string(),
+            flow: "ship".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Idle,
+            iteration: 0,
+            schema_ref: None,
+            schema_name: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+        }
+    }
+
+    fn make_wave_run(wave: &Wave, pr_number: u32, parent_run_id: Option<LfdId>) -> WaveRun {
+        WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo.clone(),
+                flow: wave.flow.clone(),
+                direction: wave.direction.clone(),
+                area: wave.area.clone(),
+                pr: Some(PullRequest {
+                    url: format!("https://example.test/pr/{pr_number}"),
+                    number: Some(pr_number),
+                    state: Some("open".to_string()),
+                    title: Some("title".to_string()),
+                    branch: Some(format!("feature-{pr_number}")),
+                }),
+            },
+            iteration: pr_number,
+            step_index: 0,
+            status: WaveRunStatus::Completed,
+            worktree: "/tmp/worktree".to_string(),
+            branch: format!("feature-{pr_number}"),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: Some(OffsetDateTime::now_utc()),
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            sidecar_kind: None,
+            parent_run_id,
+            parent_pr_number: None,
+            stack_position: pr_number,
+            stack_group_id: wave.id.to_string(),
+            stack_status: WaveRunStackStatus::Active,
+            lineage_inferred: false,
+        }
+    }
+
+    fn live_state(repo_id: &str, pr_number: u32, state: LivePrState) -> LivePullRequestState {
+        LivePullRequestState {
+            repo_id: repo_id.to_string(),
+            pr_number,
+            state,
+            is_draft: false,
+            head_ref: format!("feature-{pr_number}"),
+            head_sha: "abc123".to_string(),
+            base_ref: "main".to_string(),
+            updated_at: OffsetDateTime::now_utc(),
+            merged_at: (state == LivePrState::Merged).then(OffsetDateTime::now_utc),
+            synced_at: OffsetDateTime::now_utc(),
         }
     }
 
@@ -554,5 +630,91 @@ mod tests {
         let (live_pr_state, stale) = live_pr_for_run(&projection, &run);
         assert_eq!(live_pr_state.map(|state| state.pr_number), Some(101));
         assert!(stale);
+    }
+
+    #[tokio::test]
+    async fn build_wave_dto_uses_live_pr_state_for_open_counts() {
+        let store = sqlite_store();
+        let repo_dir = tempfile::tempdir().expect("tempdir should be created");
+        let wave = make_wave(
+            repo_dir
+                .path()
+                .to_str()
+                .expect("tempdir path should be valid UTF-8"),
+        );
+        store
+            .create_wave(&wave)
+            .expect("wave should be created in store");
+
+        let run = make_wave_run(&wave, 17, None);
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created in store");
+
+        store
+            .upsert_live_pr_state(&live_state(&wave.repo, 17, LivePrState::Closed))
+            .expect("live PR state should be upserted");
+
+        let dto = build_wave_dto(
+            &store,
+            &crate::lfd::config::GitHubConfig::default(),
+            wave,
+            false,
+        )
+        .await
+        .expect("wave dto should be built");
+
+        assert_eq!(
+            dto.open_pr_count, 0,
+            "closed live PRs should not count as open even if snapshot says open"
+        );
+        assert_eq!(dto.stack_count, 1);
+        assert!(dto.has_stale_pr_state);
+    }
+
+    #[tokio::test]
+    async fn build_projection_tracks_live_pr_state_transitions() {
+        let store = sqlite_store();
+        let repo_dir = tempfile::tempdir().expect("tempdir should be created");
+        let wave = make_wave(
+            repo_dir
+                .path()
+                .to_str()
+                .expect("tempdir path should be valid UTF-8"),
+        );
+        store
+            .create_wave(&wave)
+            .expect("wave should be created in store");
+        let run = make_wave_run(&wave, 21, None);
+        store
+            .create_wave_run(&run)
+            .expect("wave run should be created in store");
+        let key = run_live_pr_key(&run).expect("run should have a live PR key");
+
+        let github = crate::lfd::config::GitHubConfig::default();
+        for (state, expected_open_count) in [
+            (LivePrState::Open, 1_u32),
+            (LivePrState::Merged, 0_u32),
+            (LivePrState::Closed, 0_u32),
+            (LivePrState::Unknown, 0_u32),
+        ] {
+            store
+                .upsert_live_pr_state(&live_state(&wave.repo, 21, state))
+                .expect("live PR state should be upserted");
+
+            let projection =
+                build_wave_live_pr_projection(&store, &github, std::slice::from_ref(&run))
+                    .await
+                    .expect("projection should build");
+            assert_eq!(projection.open_pr_count, expected_open_count);
+            assert_eq!(
+                projection.live_states.get(&key).map(|value| value.state),
+                Some(state)
+            );
+            assert!(
+                projection.has_stale_pr_state,
+                "missing GitHub token should keep stale visibility explicit"
+            );
+        }
     }
 }

@@ -11,7 +11,7 @@ lfd keeps both SQLite and Postgres. Store operations are async end-to-end. Promp
 | # | Stage | What it unlocks | Pre-work | Status |
 |---|-------|----------------|----------|--------|
 | 01 | Store trait scope reset | Capability traits, `StorageConfig`, `open_store`/`migrate_store` | None | Shipped |
-| 02 | Async store boundary | Routes call store directly; no `spawn_blocking` for DB ops | 01 | |
+| 02 | Async store boundary | Routes call store directly; no `spawn_blocking` for DB ops | 01 | In progress |
 | 03 | Shared SQL catalog | One query per operation; dialect rendering for `?`/`$N` | 02 | |
 | 04 | Prompt pipeline | `DocumentSource` enum; `gather_documents(specs)` | None | |
 

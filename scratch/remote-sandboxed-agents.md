@@ -1,296 +1,95 @@
-# 01: Sandboxed Agent Execution
-
-Run agents in Docker containers with controlled filesystem, network, and credentials. lfd orchestrates containers instead of forking local processes.
-
-## What exists after this
-
-lfd spawns each wave's agent in a Docker container. Repos live in Docker volumes, not on the host. Agents can't access the host filesystem, can't interfere with each other, and only get the credentials they need. lfd itself still runs as a native process.
-
-## Phase 01 staging
-
-### Stage 01A (shipped)
-
-- `AgentExecutor` abstraction with `LocalProcessExecutor` and `DockerExecutor`
-- Executor selection from config/env (`executor.type`, `executor.image`, env overrides)
-- Ephemeral Docker container per step with log streaming and explicit cleanup
-- Executor-aware stop/delete/recovery termination paths
-- Explicit credential injection (env + configured mounts) in Docker mode
-- Local execution remains default
-
-### Stage 01B (shipped)
-
-- **Repo volumes**: persistent per-repo Docker volume keyed by canonical repo URL (fallback: local path hash)
-- **Git layout**: one shared clone + per-wave/branch git worktrees inside that volume
-- **Workspace hygiene per run**: `git fetch`, `git reset --hard`, `git clean -fdx`
-- **Concurrency**: fine-grained locking around shared clone mutations; isolated worktree execution stays concurrent
-- **No broad host path mounts** for repo workspaces
-- **Durability**: persist container metadata in run state; rehydrate across daemon restart
-- **Recovery**: aggressive startup cleanup, but only for loopflow-labeled containers
-
-### Stage 01C (shipped)
-
-- **Docker restart durability**: Persisted `agents.container_id`, daemon startup recovery (reattach, fail missing, remove orphans)
-- **Fork isolation in Docker**: Parallel containers with per-fork worktree isolation, shared clone mutation serialized
-- **Credential mount hardening**: Typed named mounts with allowlist (`claude`, `codex`, `gemini`, `gitconfig`, `ssh`, `gnupg`). Unknown names fail config parsing. Read-only
-- **Image lifecycle hardening**: Repo-scoped tags (`lfd-agent-<repo-key>:latest`), fingerprint-based rebuild triggers, default Dockerfile generation, per-image build coordination
-- **CLI fork execution**: `fork(select: all)` runs directly in CLI with sibling worktrees, parallel subprocesses, manifest tracking, fail-late policy, and cleanup after synthesis
-
-#### Remaining
-
-1. **Docker CI coverage** — Wire existing Docker tests into CI: PR smoke tests and nightly e2e suite
-2. **Fork execution integration tests** — End-to-end tests for parallel fork execution (successful fork, partial failure with cleanup, direction merging). Existing `TestRepo` harness provides the foundation
-3. **Build backend decision** — Keep `docker build` CLI dependency, or move to Docker API/BuildKit via Bollard
-4. **CLI fork select modes** — Add `ForkSelect::One` and `ForkSelect::Prompt` support in CLI mode. Infrastructure is in place; currently only `ForkSelect::All` works outside the daemon
-5. **Fork log prefixing** — Parallel fork subprocess logs share stdio and interleave. Capture and prefix per-branch output for readability
-6. **Fork abort slot leak** — `handle.abort()` on fork failure can skip `scheduler.release()`. Use `CancellationToken` checks instead of hard aborts
-7. **Orphaned fork worktree cleanup** — Detect and clean orphaned fork worktrees on daemon startup when previous cleanup partially failed. Needs new store query across sqlite/postgres
-8. **Agent execution timeout** — No timeout mechanism for agent execution (containers or processes). Add configurable timeout
-
-#### Also shipped (01C cleanup)
-
-- Executor split into `executor/{mod, docker, wave, helpers, local}.rs`
-- `LfdConfig::load()` returns `Result`, parse errors surface at startup
-- 5-minute TTL on workspace preparation cache (`prepared_key` staleness)
-- `build_step_prompt` wrapped in `spawn_blocking`
-- Parallel fork cleanup: CLI uses `thread::scope`, daemon uses `JoinSet`
-
-#### Known limits (accepted)
-
-- No full flow-state checkpoint/restore across daemon restarts
-- No downtime log replay/backfill
-- No per-wave credential scoping
-- No Docker network policy redesign
-
-## Why containerize
-
-Security. Agents run arbitrary code — file edits, bash commands, git operations. A container limits the blast radius:
-
-- No access to host filesystem (only the repo volume)
-- Explicit credentials (env vars or mounted credential files, read-only)
-- Network restricted to outbound (API calls, git push)
-- One container per wave — waves can't interfere with each other
-
-## Architecture
-
-```
-lfd (native process, has Docker socket access)
-  ├── manages wave state, serves API to Concerto
-  ├── manages repo volumes + git worktrees
-  └── creates agent containers via Docker API
-
-wave-1 (container, created by lfd at runtime)
-  ├── repos volume (shared, read-write)
-  ├── agent CLI (claude/codex/gemini/opencode)
-  ├── credentials (env vars + mounted cred files ro)
-  └── network: outbound only
-
-wave-2 (container, created by lfd at runtime)
-  └── (same pattern)
-```
-
-lfd creates sibling containers via the Docker API (bollard crate). Repo volumes are mounted only into loopflow-managed containers. Agents never touch the host filesystem directly.
-
-## Agent image
-
-One image with all supported agents pre-installed:
-
-```dockerfile
-# Dockerfile.agent
-FROM node:22-bookworm-slim
-
-# System dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl openssh-client ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Agent CLIs
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
-
-# opencode (Go binary)
-RUN curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | bash
-
-# lf binary (for context assembly)
-RUN curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
-
-# Containers run as root (security boundary is the container)
-WORKDIR /workspace
-```
-
-### Agent headless commands
-
-All 4 agents support non-interactive execution with API key auth:
-
-| Agent | Command | Permission bypass |
-|-------|---------|-------------------|
-| Claude Code | `claude -p "prompt" --allowedTools "Bash,Read,Edit"` | `--dangerously-skip-permissions` |
-| Codex CLI | `codex exec "prompt"` | `--full-auto` |
-| Gemini CLI | `gemini -p "prompt"` | `--yolo` |
-| opencode | `opencode run "prompt"` | Auto in non-interactive |
-
-None require a TTY. All authenticate via env vars.
-
-## Executor trait
-
-Replace lfd's current `fork+exec` spawning with a trait that supports both local process and container backends:
-
-```rust
-#[async_trait]
-pub trait AgentExecutor: Send + Sync {
-    async fn spawn(&self, config: AgentSpawnConfig) -> Result<AgentHandle>;
-    async fn status(&self, handle: &AgentHandle) -> Result<AgentStatus>;
-    async fn terminate(&self, handle: &AgentHandle) -> Result<()>;
-    async fn logs(&self, handle: &AgentHandle) -> Result<LogStream>;
-    async fn wait(&self, handle: &AgentHandle) -> Result<i32>;
-}
-
-pub struct AgentSpawnConfig {
-    pub agent: AgentType,          // claude, codex, gemini, opencode
-    pub command: Vec<String>,      // headless command + args
-    pub working_dir: PathBuf,      // worktree path inside container
-    pub env: HashMap<String, String>,  // API keys, git tokens
-    pub repo_volume: String,       // Docker volume name
-}
-```
-
-### Backends
-
-| Backend | When | How agents run |
-|---------|------|---------------|
-| `LocalProcess` | Default (backwards compat) | Fork + exec, current behavior |
-| `DockerExecutor` | Container mode | Docker API via bollard crate |
-
-### Configuration
-
-```yaml
-# ~/.lf/lfd.yaml
-executor:
-  type: local          # default: fork+exec (no Docker)
-  # type: docker
-  # image: loopflow/agent:latest
-```
-
-### Docker executor implementation
-
-```rust
-use bollard::Docker;
-
-pub struct DockerExecutor {
-    docker: Docker,
-    image: String,
-}
-
-impl AgentExecutor for DockerExecutor {
-    async fn spawn(&self, config: AgentSpawnConfig) -> Result<AgentHandle> {
-        let container = self.docker.create_container(
-            None,
-            bollard::container::Config {
-                image: Some(self.image.clone()),
-                cmd: Some(config.command),
-                working_dir: Some(config.working_dir.to_string_lossy().into()),
-                env: Some(config.env.iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect()),
-                host_config: Some(bollard::models::HostConfig {
-                    binds: Some(vec![
-                        format!("{}:/repos", config.repo_volume),
-                    ]),
-                    network_mode: Some("bridge".to_string()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        ).await?;
-
-        self.docker.start_container(&container.id, None).await?;
-
-        Ok(AgentHandle { id: container.id })
-    }
-
-    async fn logs(&self, handle: &AgentHandle) -> Result<LogStream> {
-        let stream = self.docker.logs(&handle.id, Some(LogsOptions {
-            follow: true,
-            stdout: true,
-            stderr: true,
-            ..Default::default()
-        }));
-        Ok(LogStream::from_docker(stream))
-    }
-
-    async fn terminate(&self, handle: &AgentHandle) -> Result<()> {
-        self.docker.stop_container(&handle.id, None).await?;
-        self.docker.remove_container(&handle.id, None).await?;
-        Ok(())
-    }
-}
-```
-
-## Repo volumes
-
-One Docker volume per repo. Clone once when the repo is added to loopflow. Worktrees are siblings inside the same volume.
-
-```
-Docker volume: repo-loopflow
-  /repos/loopflow/                # main clone
-  /repos/loopflow.wave-feature/   # worktree for wave
-  /repos/loopflow.wave-bugfix/    # worktree for wave
-```
-
-### Lifecycle
-
-1. **Add repo**: `lf repo add git@github.com:you/repo.git`
-   - lfd creates a Docker volume
-   - Clones the repo into the volume
-2. **Create wave**: lfd creates a worktree inside the volume (git worktree add)
-3. **Run wave**: lfd spawns agent container, mounts the volume at `/repos/`
-4. **Stop wave**: container stops, volume persists
-5. **Delete wave**: lfd removes the worktree from the volume
-
-The volume persists across container stop/start. Git state (branches, worktrees, objects) is preserved.
-
-### Volume identity
-
-- Primary key: canonical repo remote URL
-- Fallback key: local repo path hash (when no remote is configured)
-
-## Credentials per wave
-
-Each wave container gets only what it needs:
-
-| Credential | How | Scope |
-|-----------|-----|-------|
-| Claude Code (Max/Pro) | `~/.claude/` mounted read-only | Global |
-| Claude Code (API) | `ANTHROPIC_API_KEY` env var | Per wave config |
-| Codex CLI (ChatGPT) | `~/.codex/auth.json` mounted read-only | Global |
-| Codex CLI (API) | `CODEX_API_KEY` env var | Per wave config |
-| Gemini CLI | `GEMINI_API_KEY` env var or Google OAuth creds mounted | Per wave or global |
-| opencode | Provider-specific env var or creds | Per wave config |
-| Git push access | `GH_TOKEN` env var for HTTPS | Shared or per wave |
-| Git config | `~/.gitconfig` mounted read-only | Global |
-
-Default to subscription auth (mounted credential files, read-only). The user explicitly grants loopflow access to these credentials. API key env vars are the alternative for users who prefer API billing or don't have subscriptions.
-
-Read-only mounts of auth tokens are acceptable — these aren't arbitrary host directories, they're credentials the user has chosen to share with loopflow.
-
-### Credential mount policy (Phase 01)
-
-- Use typed config for credential mounts (no raw `host:container` strings)
-- Enforce hard allowlist for host credential paths
-- Force read-only semantics
-- Deny by default outside allowlist
+# Sandboxed Agent Execution — 01D Hardening Plan
+
+## Problem
+
+Phase 01 proved that loopflow can run agents in Docker with repo volumes, restart recovery, and credential allowlisting. What remains is reliability debt that will slow every remote phase after this.
+
+Who benefits:
+- **Remote users** get predictable runs instead of hung agents and orphaned worktrees.
+- **Contributors** get CI coverage for Docker paths before shipping regressions.
+- **Operators** get readable fork logs and deterministic cleanup after partial failure.
+
+Why now:
+- Phases 05–09 depend on Docker execution being boring and trustworthy.
+- Today, critical Docker/fork behavior is only partially covered in CI and integration tests.
+
+## Approach
+
+Ship one focused hardening tranche (01D) that closes the eight remaining gaps with shared primitives instead of one-off fixes.
+
+1. **Make Docker correctness a required signal in CI**
+   - Add a required `docker-smoke` PR job in `.github/workflows/ci.yml`.
+   - Add a scheduled `docker-e2e-nightly.yml` workflow for restart/fork/end-to-end Docker paths.
+
+2. **Unify fork execution semantics across CLI and daemon**
+   - Add a shared fork selection resolver used by both runtimes.
+   - Implement `ForkSelect::One` and `ForkSelect::Prompt` in CLI mode.
+     - `one`: deterministic branch selection.
+     - `prompt`: interactive select in TTY, explicit error in headless mode.
+   - Prefix fork branch logs with stable branch labels in both CLI and daemon.
+
+3. **Make fork cleanup cancellation-safe**
+   - Replace hard `handle.abort()` shutdown with cooperative cancellation.
+   - Introduce a guard that always releases scheduler slots on drop.
+   - Add startup orphan-fork cleanup driven by store queries valid for sqlite + postgres.
+
+4. **Commit to Docker API image builds (BuildKit via Bollard)**
+   - Remove direct `docker build` shell dependency from agent image build path.
+   - Keep repo-scoped tags + fingerprint invalidation, but build through Docker API streams.
+
+5. **Add explicit agent execution timeout**
+   - New config: `executor.agent_timeout` (duration, default 45m).
+   - Apply to both local process and Docker executor waits.
+   - On timeout: terminate agent/container, mark run failed, emit structured timeout reason.
+
+6. **Lock confidence with integration tests first**
+   - Add integration tests for: successful fork, partial fork failure with cleanup, direction merge behavior.
+   - Reuse `loopflow-test-support::TestRepo` for deterministic repository setup.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Patch each remaining item independently | Low coordination cost, but duplicates logic and leaves fork behavior divergent | Creates long-term maintenance drag and inconsistent user behavior |
+| Re-architect now around Kubernetes/containerd | Maximum isolation and scheduling flexibility | Massive scope jump that delays remote roadmap without immediate user value |
+| **Chosen: 01D hardening tranche with shared fork/runtime primitives + Docker API builds** | Higher upfront integration work | Best path to make remote execution trustworthy and keep future phases fast |
+
+## Key decisions
+
+- **"Bold over safe"**: remove the Docker CLI build dependency now instead of carrying two build paths.
+- **"Concrete over abstract"**: timeout is a real config (`executor.agent_timeout`, default **45 minutes**), not a vague “watchdog later.”
+- **"Decisions over options"**: headless `ForkSelect::Prompt` fails fast with a clear error; it does not silently pick a branch.
+- Fork slot release is guaranteed by RAII-style guard semantics so cancellation cannot leak scheduler capacity.
+- Orphaned fork worktree cleanup runs at daemon startup from persisted fork-run state, not filesystem heuristics alone.
+- Success scenario we optimize for: users can run parallel forks overnight and wake up to clean logs, clean worktrees, and deterministic status.
+- Failure scenario we prevent: one stuck branch or aborted task deadlocks scheduler slots and leaves hidden garbage until manual cleanup.
+
+## Scope
+
+- In scope:
+  - PR Docker smoke job and nightly Docker e2e workflow
+  - Fork integration tests (success, partial failure, direction merge)
+  - CLI support for `ForkSelect::One` and `ForkSelect::Prompt`
+  - Fork log prefixing in parallel branch output
+  - Cancellation-safe fork cleanup and scheduler slot release guarantees
+  - Startup orphaned fork worktree cleanup across sqlite/postgres stores
+  - Docker API/BuildKit image build backend
+  - Configurable agent execution timeout for local + Docker executors
+
+- Out of scope:
+  - Full flow-state checkpoint/restore across daemon restarts
+  - Downtime log replay/backfill
+  - Per-wave credential scoping
+  - Docker network policy redesign
+  - Hosted SaaS orchestration (remote phases 07–09)
 
 ## Done when
 
-- Agent Docker image builds with Claude Code, Codex, Gemini CLI, opencode
-- `AgentExecutor` trait implemented with `LocalProcess` and `DockerExecutor` backends
-- lfd can spawn a wave agent in a Docker container
-- Agent executes Claude Code headless, produces commits
-- Logs stream from container to lfd to Concerto
-- Repo volume persists across container stop/start and is keyed per repo
-- Shared clone + git worktree model runs inside Docker-managed repo volumes
-- Container has no access to host filesystem (only repo volume + explicit read-only credential mounts)
-- Container metadata survives daemon restart for stop/delete/recovery paths
-- Docker image build path handles missing `.lf/Dockerfile` via `_docker-gen` and rebuild triggers
-- Concurrent waves coordinate image builds with per-image locks
-- Docker smoke runs in PR CI and full Docker e2e coverage runs nightly
-- `executor.type: docker` in config switches to container mode
-- `executor.type: local` still works (no regression)
+- `docker-smoke` is a required PR check and is green on at least one non-trivial PR.
+- A scheduled nightly workflow runs Docker e2e coverage and reports pass/fail status.
+- New integration tests cover fork success, fork partial failure cleanup, and direction merge behavior.
+- CLI `ForkSelect::One` works deterministically; `ForkSelect::Prompt` works in TTY and fails clearly in headless mode.
+- Parallel fork logs are prefixed per branch, making interleaved output readable.
+- Forced cancellation does not leak scheduler slots (verified by test).
+- Startup cleanup removes orphan fork worktrees left by interrupted runs (verified for sqlite + postgres stores).
+- Agent timeout kills hung runs and records explicit timeout errors in run state.

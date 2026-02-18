@@ -9,7 +9,19 @@ Make landing intent obvious in Concerto and remove merge dependence on tracked s
 
 ## Estimated implementation size
 
-~350-800 LOC across Swift queue views, API DTO consumption, and PR artifact publishing paths.
+~250-650 LOC across Swift queue views and PR artifact publishing paths.
+
+## What changed after 01 + 02 shipped
+
+- Backend already supports queue-first ordering (`order=stack`) and queue role projection.
+- Run DTOs already expose `queue_role`, `queue_block_reason`, `queue_blocked_at`, and `next_action`.
+- Scratch-clean promotion gating already exists (`scratch_dirty` -> blocked with `next_action=resolve_conflict`).
+- Wave and run projections now expose stale PR-state metadata that UI must handle explicitly.
+- `QueueRole` has five values (Ready, Draft, Blocked, Merged, Superseded) — badge mapping is 1:1, no client-side inference needed.
+- `QueueNextAction` has four values (OpenPr, ResolveConflict, CombinePrs, AwaitMerge) — maps directly to primary actions in the UI.
+- `LivePrSnapshot` caching means API responses include fresh-enough PR state without requiring the UI to poll GitHub separately.
+- Phase 04 is almost entirely a *consumer* of shipped backend semantics. No new queue logic needed on the backend — only review artifact publishing and the Swift UI layer.
+- Poll-based reconciliation runs every 60 seconds. Queue badge updates after GitHub-side merges may take up to one cycle to reflect. Webhook path is near-instant when configured. UX should not promise real-time accuracy in poll-only setups.
 
 ## What exists after this step
 
@@ -28,6 +40,7 @@ UI should answer: **"What should I land next?"**
 
 - Oldest-first queue at top.
 - Reverse-chron timeline remains available as secondary history view.
+- Use existing `order=stack` backend support as the default list mode.
 
 ### Role badges
 
@@ -47,6 +60,7 @@ UI should answer: **"What should I land next?"**
 ## UX constraints
 
 - No stale badge rendering; consume live-state-backed DTO fields.
+- Surface stale PR state as explicit degraded mode, not silent omission.
 - Keep current run detail/log surfaces intact.
 - Preserve accessibility conventions from `VISUAL_DESIGN.md`.
 
@@ -80,12 +94,13 @@ Fallback:
 
 ## Scratch-clean gate in queue workflow
 
-Before promoting a run to Ready:
+Backend already enforces this gate during queue reconciliation.
 
-- verify no tracked `scratch/` diff
-- if dirty, retain Draft and expose clear remediation status
+UI requirements:
 
-This keeps GitHub Land button compatible while preventing scratch leakage to main.
+- show blocked reason when `queue_block_reason=scratch_dirty`
+- surface `next_action=resolve_conflict` as the primary remediation path
+- avoid suggesting "land now" actions while the gate is active
 
 ## GitHub-first merge compatibility
 
@@ -100,13 +115,19 @@ Expected behavior:
 
 ## API contract needed by UI
 
-Queue projection fields:
+### Already shipped
 
-- `queue_role`
-- `queue_block_reason`
-- `queue_index`
-- `superseded_by_pr`
-- `combined_pr`
+- `queue_role` (Ready, Draft, Blocked, Merged, Superseded)
+- `queue_block_reason` (MissingPr, WaveRunning, ScratchDirty, RebaseConflict, PromotionFailed)
+- `queue_blocked_at`
+- `next_action` (OpenPr, ResolveConflict, CombinePrs, AwaitMerge)
+- wave-level `has_stale_pr_state`
+- `open_pr_count`, `stack_count`
+
+### Still needed for full Phase 04 + 03 UX
+
+- `superseded_by_pr` (from Phase 03 combine events)
+- `combined_pr` (from Phase 03 combine events)
 
 Review artifact fields:
 
@@ -120,7 +141,8 @@ Review artifact fields:
 
 - queue ordering displays oldest-first by default
 - role badges map correctly from DTO
-- blocked state shows actionable path
+- blocked state shows actionable path (`resolve_conflict`) for scratch/rebase failures
+- stale-state indicator appears when live PR state is unavailable
 
 ### Publishing tests
 
@@ -130,15 +152,32 @@ Review artifact fields:
 
 ### Promotion gate tests
 
-- scratch diff blocks Ready promotion
-- clean state allows promotion
+- blocked scratch/rebase status is rendered from DTO without client-side re-implementation
+- landing actions remain hidden/disabled for blocked queue-head runs
 
 ## Rollout strategy
 
-1. Ship API fields and hidden queue-first toggle.
-2. Enable queue-first as default once backend roles stabilize.
+1. Enable queue-first as default using existing API fields.
+2. Add stale/degraded-state UX and blocked remediation surfaces.
 3. Migrate review summary publish path from scratch doc dependence.
 4. Remove legacy UI assumptions tied to reverse-chron-only flow.
+
+## Open questions
+
+- Should review summaries live in run metadata only, or also persist last-published artifact pointers for fast UI fetch?
+- For publish failures, is inline retry in Concerto enough, or do we need daemon-side retry scheduling in this phase?
+
+## Resolved questions (from 01+02)
+
+- **Does the UI need to compute queue roles?** No — roles are fully projected by the backend. UI consumes directly.
+- **How does the UI handle stale PR state?** `has_stale_pr_state` is already on the wave DTO. Show degraded-mode indicator, not an error.
+- **What ordering does the queue view use?** `order=stack` is already implemented and returns oldest-first.
+
+## Try it
+
+- On a wave with 3 stacked runs, confirm queue-first view answers "what lands next" without opening run details.
+- Trigger a scratch-dirty block and verify the UI shows `Resolve Blocked` with no false-ready affordance.
+- Merge queue-head from GitHub UI and confirm queue badges update within one reconciliation cycle.
 
 ## Non-goals
 

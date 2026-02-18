@@ -17,7 +17,8 @@ use crate::lfd::store::rows::{
 use crate::lfd::store::{ForkRun, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
-    Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -397,6 +398,106 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        let wave_id = wave_id.clone();
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT wave_id, run_id, reason, attempted_at, conflict_files, error
+                     FROM wave_queue_blocks
+                     WHERE wave_id = $1
+                     ORDER BY attempted_at DESC",
+                    &[&wave_id],
+                )
+                .await?;
+            rows.into_iter()
+                .map(|row| {
+                    let conflict_files = row
+                        .try_get::<_, String>(4)
+                        .ok()
+                        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+                        .unwrap_or_default();
+                    let reason_raw: String = row.try_get(2)?;
+                    let reason = reason_raw
+                        .parse::<QueueBlockReason>()
+                        .map_err(StoreError::InvalidData)?;
+                    Ok(QueueBlock {
+                        wave_id: LfdId::from_raw(row.try_get::<_, String>(0)?),
+                        run_id: LfdId::from_raw(row.try_get::<_, String>(1)?),
+                        reason,
+                        attempted_at: crate::lfd::store::rows::unix_to_datetime(row.try_get(3)?),
+                        conflict_files,
+                        error: row.try_get(5)?,
+                    })
+                })
+                .collect()
+        })
+        .await
+    }
+
+    pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+        let block = block.clone();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "INSERT INTO wave_queue_blocks (wave_id, run_id, reason, attempted_at, conflict_files, error)
+                     VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT(wave_id, run_id) DO UPDATE SET
+                        reason = excluded.reason,
+                        attempted_at = excluded.attempted_at,
+                        conflict_files = excluded.conflict_files,
+                        error = excluded.error",
+                    &[
+                        &block.wave_id,
+                        &block.run_id,
+                        &block.reason.as_str(),
+                        &block.attempted_at.unix_timestamp(),
+                        &serde_json::to_string(&block.conflict_files)?,
+                        &block.error,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        let wave_id = wave_id.clone();
+        let run_id = run_id.clone();
+        self.with_client(|client| async move {
+            let deleted = client
+                .execute(
+                    "DELETE FROM wave_queue_blocks WHERE wave_id = $1 AND run_id = $2",
+                    &[&wave_id, &run_id],
+                )
+                .await?;
+            Ok(deleted as u32)
+        })
+        .await
+    }
+
+    pub async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
+        let event = event.clone();
+        self.with_client(|client| async move {
+            let inserted = client
+                .execute(
+                    "INSERT INTO wave_pr_merge_events (wave_id, pr_number, merged_at, processed_at)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT(wave_id, pr_number, merged_at) DO NOTHING",
+                    &[
+                        &event.wave_id,
+                        &(event.pr_number as i64),
+                        &event.merged_at.unix_timestamp(),
+                        &event.processed_at.unix_timestamp(),
+                    ],
+                )
+                .await?;
+            Ok(inserted > 0)
         })
         .await
     }

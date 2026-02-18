@@ -47,6 +47,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "008_chat_messages",
         sql: include_str!("migrations/008_chat_messages.sql"),
     },
+    Migration {
+        version: "009_wave_queue_state",
+        sql: include_str!("migrations/009_wave_queue_state.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

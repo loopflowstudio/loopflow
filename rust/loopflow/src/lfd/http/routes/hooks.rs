@@ -12,13 +12,15 @@ use tokio::sync::Mutex;
 use crate::lfd::events::EventHub;
 use crate::lfd::github::{
     github_repo_from_local, poll_check_runs, verify_webhook_signature, CheckRun,
-    GitHubCheckRunEvent,
+    GitHubCheckRunEvent, GitHubPullRequestEvent,
 };
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, Wave, WaveRun};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 #[derive(Deserialize)]
 pub struct GitHookRequest {
@@ -74,65 +76,108 @@ pub async fn github_webhook_handler(
         ));
     }
 
-    if headers
+    let event_kind = headers
         .get("X-GitHub-Event")
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|kind| !kind.eq_ignore_ascii_case("check_run"))
-    {
-        return Ok(Json(
-            serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
-        ));
+        .unwrap_or_default()
+        .to_string();
+
+    if event_kind.eq_ignore_ascii_case("check_run") {
+        let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body)
+            .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+
+        if event.action != "completed"
+            || !is_failed_check_run(
+                &event.check_run.status,
+                event.check_run.conclusion.as_deref(),
+            )
+        {
+            return Ok(Json(
+                serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
+            ));
+        }
+
+        let mut matched = 0_u32;
+        for pr in &event.check_run.pull_requests {
+            let targets = find_wave_ci_targets(
+                &state.store,
+                &event.repository.full_name,
+                &pr.head.branch,
+                Some(pr.number),
+            )
+            .await
+            .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+
+            for target in targets {
+                let emitted = emit_ci_failure(
+                    &state.event_hub,
+                    &state.ci_failure_cache,
+                    build_ci_failure_event(&target, &event.check_run),
+                )
+                .await;
+                if emitted {
+                    matched += 1;
+                    tracing::info!(
+                        wave_id = %target.wave_id,
+                        wave_run_id = %target.wave_run_id,
+                        repo = %event.repository.full_name,
+                        branch = %target.branch,
+                        commit_sha = %event.check_run.head_sha,
+                        check_id = event.check_run.id,
+                        check_name = %event.check_run.name,
+                        "matched GitHub CI failure to wave"
+                    );
+                }
+            }
+        }
+
+        return Ok(Json(serde_json::json!({ "ok": true, "matched": matched })));
     }
 
-    let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body)
-        .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
-
-    if event.action != "completed"
-        || !is_failed_check_run(
-            &event.check_run.status,
-            event.check_run.conclusion.as_deref(),
-        )
-    {
-        return Ok(Json(
-            serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
-        ));
-    }
-
-    let mut matched = 0_u32;
-    for pr in &event.check_run.pull_requests {
-        let targets = find_wave_ci_targets(
+    if event_kind.eq_ignore_ascii_case("pull_request") {
+        let event = serde_json::from_slice::<GitHubPullRequestEvent>(&body)
+            .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+        if event.action != "closed" || !event.pull_request.merged {
+            return Ok(Json(
+                serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
+            ));
+        }
+        let merged_at = event
+            .pull_request
+            .merged_at
+            .as_deref()
+            .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
+            .unwrap_or_else(OffsetDateTime::now_utc);
+        let wave_ids = find_waves_for_pr(
             &state.store,
             &event.repository.full_name,
-            &pr.head.branch,
-            Some(pr.number),
+            event.pull_request.number,
         )
         .await
         .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
-
-        for target in targets {
-            let emitted = emit_ci_failure(
-                &state.event_hub,
-                &state.ci_failure_cache,
-                build_ci_failure_event(&target, &event.check_run),
+        let mut processed = 0_u32;
+        for wave_id in wave_ids {
+            let handled = crate::lfd::queue::handle_pr_merged(
+                &state.store,
+                &state.github,
+                &wave_id,
+                event.pull_request.number,
+                merged_at,
             )
-            .await;
-            if emitted {
-                matched += 1;
-                tracing::info!(
-                    wave_id = %target.wave_id,
-                    wave_run_id = %target.wave_run_id,
-                    repo = %event.repository.full_name,
-                    branch = %target.branch,
-                    commit_sha = %event.check_run.head_sha,
-                    check_id = event.check_run.id,
-                    check_name = %event.check_run.name,
-                    "matched GitHub CI failure to wave"
-                );
+            .await
+            .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+            if handled {
+                processed += 1;
             }
         }
+        return Ok(Json(
+            serde_json::json!({ "ok": true, "processed": processed }),
+        ));
     }
 
-    Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
+    Ok(Json(
+        serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
+    ))
 }
 
 pub async fn poll_all_waves_ci(
@@ -214,6 +259,36 @@ async fn find_wave_ci_targets(
     collect_wave_ci_targets(store, waves, Some(repo_full_name), Some(branch), pr_number).await
 }
 
+async fn find_waves_for_pr(
+    store: &SharedStore,
+    repo_full_name: &str,
+    pr_number: u32,
+) -> Result<Vec<LfdId>, String> {
+    let waves = store
+        .list_waves(None)
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut matches = Vec::new();
+    for wave in waves {
+        let Some(repo_name) = github_repo_from_local(Path::new(&wave.repo)) else {
+            continue;
+        };
+        if repo_name != repo_full_name {
+            continue;
+        }
+        let has_pr = store
+            .list_stack_runs(&wave.id)
+            .await
+            .map_err(|err| err.to_string())?
+            .into_iter()
+            .any(|run| run.snapshot.pr.and_then(|pr| pr.number) == Some(pr_number));
+        if has_pr {
+            matches.push(wave.id);
+        }
+    }
+    Ok(matches)
+}
+
 async fn collect_wave_ci_targets(
     store: &SharedStore,
     waves: Vec<Wave>,
@@ -268,21 +343,9 @@ fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<
     let Some(pr) = run.snapshot.pr.as_ref() else {
         return false;
     };
-    if !super::is_open_pr_state(pr.state.as_deref()) {
-        return false;
-    }
-    if let Some(branch) = branch {
-        if pr.branch.as_deref() != Some(branch) {
-            return false;
-        }
-    }
-    if let Some(pr_number) = pr_number {
-        if pr.number != Some(pr_number) {
-            return false;
-        }
-    }
-
-    true
+    super::is_open_pr_state(pr.state.as_deref())
+        && branch.is_none_or(|branch| pr.branch.as_deref() == Some(branch))
+        && pr_number.is_none_or(|number| pr.number == Some(number))
 }
 
 fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {

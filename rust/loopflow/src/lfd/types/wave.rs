@@ -167,6 +167,43 @@ impl LivePrState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum QueueBlockReason {
+    MissingPr,
+    WaveRunning,
+    ScratchDirty,
+    RebaseConflict,
+    PromotionFailed,
+}
+
+impl QueueBlockReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingPr => "missing_pr",
+            Self::WaveRunning => "wave_running",
+            Self::ScratchDirty => "scratch_dirty",
+            Self::RebaseConflict => "rebase_conflict",
+            Self::PromotionFailed => "promotion_failed",
+        }
+    }
+}
+
+impl std::str::FromStr for QueueBlockReason {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "missing_pr" => Ok(Self::MissingPr),
+            "wave_running" => Ok(Self::WaveRunning),
+            "scratch_dirty" => Ok(Self::ScratchDirty),
+            "rebase_conflict" => Ok(Self::RebaseConflict),
+            "promotion_failed" => Ok(Self::PromotionFailed),
+            _ => Err(format!("unknown queue block reason: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SidecarKind {
     CiFix = 1,
 }
@@ -283,6 +320,27 @@ pub struct LivePullRequestState {
     pub synced_at: OffsetDateTime,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueBlock {
+    pub wave_id: LfdId,
+    pub run_id: LfdId,
+    pub reason: QueueBlockReason,
+    #[serde(with = "time::serde::rfc3339")]
+    pub attempted_at: OffsetDateTime,
+    pub conflict_files: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueMergeEvent {
+    pub wave_id: LfdId,
+    pub pr_number: u32,
+    #[serde(with = "time::serde::rfc3339")]
+    pub merged_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub processed_at: OffsetDateTime,
+}
+
 impl WaveRun {
     #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, wave_id: LfdId) -> Self {
@@ -313,5 +371,16 @@ impl WaveRun {
 
     pub fn is_main(&self) -> bool {
         self.run_kind == WaveRunKind::Main
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WaveRunKind;
+
+    #[test]
+    fn wave_run_kind_main_storage_value_is_stable() {
+        assert_eq!(WaveRunKind::Main.as_i32(), 1);
+        assert_eq!(WaveRunKind::from_i32(1), WaveRunKind::Main);
     }
 }

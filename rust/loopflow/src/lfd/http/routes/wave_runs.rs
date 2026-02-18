@@ -9,12 +9,11 @@ use serde::Deserialize;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
 use crate::lfd::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
-use crate::lfd::http::routes::{
-    build_wave_live_pr_projection, live_pr_for_run, resolve_wave_id, run_live_pr_key,
-};
+use crate::lfd::http::routes::{build_wave_queue_views, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
+use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key};
 use crate::lfd::output::OutputEvent;
 
 #[derive(Deserialize, Default)]
@@ -167,14 +166,21 @@ async fn list_wave_runs(
     };
     let wave_id = path_wave_id.or(query_wave_id);
     let order = parse_run_order(query.order.as_deref());
-
-    let runs = if let Some(wave_id) = wave_id.as_ref() {
-        if order == RunOrder::OldestFirst {
+    let stack_runs = if let Some(wave_id) = wave_id.as_ref() {
+        Some(
             state
                 .store
                 .list_stack_runs(wave_id)
                 .await
-                .map_err(map_store_error)?
+                .map_err(map_store_error)?,
+        )
+    } else {
+        None
+    };
+
+    let runs = if let Some(wave_id) = wave_id.as_ref() {
+        if order == RunOrder::OldestFirst {
+            stack_runs.clone().unwrap_or_default()
         } else {
             state
                 .store
@@ -207,38 +213,55 @@ async fn list_wave_runs(
         |r| &r.id,
     );
 
-    let live_projection = if wave_id.is_some() {
+    // Queue roles are global to the wave stack, so projections must use the full
+    // stack regardless of pagination/order of the response slice.
+    let live_snapshot = if let Some(stack_runs) = stack_runs.as_ref() {
         Some(
-            build_wave_live_pr_projection(&state.store, &state.github, &runs)
+            build_live_pr_snapshot(&state.store, &state.github, stack_runs)
                 .await
                 .map_err(map_store_error)?,
         )
     } else {
         None
     };
+    let queue_views =
+        if let (Some(wave_id), Some(snapshot)) = (wave_id.as_ref(), live_snapshot.as_ref()) {
+            Some(
+                build_wave_queue_views(&state.store, wave_id, snapshot)
+                    .await
+                    .map_err(map_store_error)?,
+            )
+        } else {
+            None
+        };
 
     let mut data = Vec::with_capacity(runs.len());
     for run in runs {
-        if let Some(projection) = live_projection.as_ref() {
-            let (live_pr_state, pr_state_stale) = live_pr_for_run(projection, &run);
-            data.push(wave_run_dto(run, live_pr_state, pr_state_stale));
+        if let Some(snapshot) = live_snapshot.as_ref() {
+            let live_pr_state = snapshot.state_for_run(&run);
+            let pr_state_stale = snapshot.stale_for_run(&run);
+            let queue_view = queue_views.as_ref().and_then(|views| views.get(&run.id));
+            data.push(wave_run_dto(run, live_pr_state, pr_state_stale, queue_view));
             continue;
         }
 
         let mut live_pr_state = None;
         let mut pr_state_stale = false;
         if let Some(key) = run_live_pr_key(&run) {
-            let repo_id = key.repo_id.clone();
-            let pr_number = key.pr_number;
             live_pr_state = state
                 .store
-                .get_live_pr_state(&repo_id, pr_number)
+                .get_live_pr_state(&key.repo_id, key.pr_number)
                 .await
                 .map_err(map_store_error)?;
             pr_state_stale = live_pr_state.is_none();
         }
 
-        data.push(wave_run_dto(run, live_pr_state.as_ref(), pr_state_stale));
+        data.push(wave_run_dto(
+            run,
+            live_pr_state.as_ref(),
+            pr_state_stale,
+            None,
+        ));
     }
 
     Ok(Json(ListResponse::new(data, has_more)))

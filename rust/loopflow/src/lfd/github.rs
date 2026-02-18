@@ -8,7 +8,7 @@ use sha2::Sha256;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::lfd::types::LivePrState;
+use crate::lfd::types::{LivePrState, LivePullRequestState};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -17,6 +17,21 @@ pub struct GitHubCheckRunEvent {
     pub action: String,
     pub check_run: CheckRun,
     pub repository: GitHubRepository,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubPullRequestEvent {
+    pub action: String,
+    pub pull_request: GitHubWebhookPullRequest,
+    pub repository: GitHubRepository,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubWebhookPullRequest {
+    pub number: u32,
+    #[serde(default)]
+    pub merged: bool,
+    pub merged_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -63,6 +78,25 @@ pub struct GitHubPullRequestState {
     pub base_ref: String,
     pub updated_at: OffsetDateTime,
     pub merged_at: Option<OffsetDateTime>,
+}
+
+pub fn into_live_pull_request_state(
+    repo_id: String,
+    pull_request: GitHubPullRequestState,
+    synced_at: OffsetDateTime,
+) -> LivePullRequestState {
+    LivePullRequestState {
+        repo_id,
+        pr_number: pull_request.number,
+        state: pull_request.state,
+        is_draft: pull_request.is_draft,
+        head_ref: pull_request.head_ref,
+        head_sha: pull_request.head_sha,
+        base_ref: pull_request.base_ref,
+        updated_at: pull_request.updated_at,
+        merged_at: pull_request.merged_at,
+        synced_at,
+    }
 }
 
 #[derive(Debug, Deserialize)]

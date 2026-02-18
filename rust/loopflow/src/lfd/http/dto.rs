@@ -1,6 +1,7 @@
 use serde::Serialize;
 use time::OffsetDateTime;
 
+use crate::lfd::queue::QueueRunView;
 use crate::lfd::registration::RegistrationState;
 use crate::lfd::types::{
     ChatMemoryBlock, ChatMessage, LivePullRequestState, Stimulus, StimulusKind, WaveRun,
@@ -134,6 +135,14 @@ pub struct WaveRunDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live_pr_is_draft: Option<bool>,
     pub pr_state_stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_block_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_blocked_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<String>,
     pub created_at: Option<String>,
 }
 
@@ -290,6 +299,7 @@ pub fn wave_run_dto(
     run: WaveRun,
     live_pr_state: Option<&LivePullRequestState>,
     pr_state_stale: bool,
+    queue_view: Option<&QueueRunView>,
 ) -> WaveRunDto {
     WaveRunDto {
         id: run.id.to_string(),
@@ -321,6 +331,11 @@ pub fn wave_run_dto(
         live_pr_state: live_pr_state.map(|value| value.state.as_str().to_string()),
         live_pr_is_draft: live_pr_state.map(|value| value.is_draft),
         pr_state_stale,
+        queue_role: queue_view.map(|value| value.role.as_str().to_string()),
+        queue_block_reason: queue_view
+            .and_then(|value| value.block_reason.map(|reason| reason.as_str().to_string())),
+        queue_blocked_at: format_datetime(queue_view.and_then(|value| value.blocked_at)),
+        next_action: queue_view.map(|value| value.next_action.as_str().to_string()),
         created_at: format_datetime(run.started_at),
     }
 }

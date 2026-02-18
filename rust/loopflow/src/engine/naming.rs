@@ -1,7 +1,7 @@
 use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use chrono::Local;
-use rand::seq::SliceRandom;
+use rand::prelude::IndexedRandom;
 use rand::Rng;
 use std::path::Path;
 use std::process::Command;
@@ -78,7 +78,7 @@ fn generate_word_pair_with_rng<R: Rng + ?Sized>(rng: &mut R) -> String {
 }
 
 pub fn generate_word_pair() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     generate_word_pair_with_rng(&mut rng)
 }
 

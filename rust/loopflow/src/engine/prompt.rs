@@ -1317,8 +1317,7 @@ pub fn write_prompt_log(
     ensure_gitignore_entry(repo_root, ".lf/log/")?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    // Sanitize step name: replace / with . so namespaced steps (e.g., scan/scan-report)
-    // don't create subdirectories in the log path.
+    // Replace / with . so namespaced steps (e.g., scan/scan-report) don't create subdirectories.
     let safe_step = step_name.replace('/', ".");
     let name_part = match flow_parents {
         Some(parents) if !parents.is_empty() => {

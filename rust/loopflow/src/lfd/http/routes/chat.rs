@@ -1,6 +1,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
+use axum::response::sse::{Event as SseEvent, KeepAlive, KeepAliveStream, Sse};
 use axum::Json;
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -200,7 +200,7 @@ pub async fn start_chat_handler(
 pub async fn stream_chat_events_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> Result<Sse<ReceiverStream<Result<SseEvent, Infallible>>>, ApiError> {
+) -> Result<Sse<KeepAliveStream<ReceiverStream<Result<SseEvent, Infallible>>>>, ApiError> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
     let turn_stream = state

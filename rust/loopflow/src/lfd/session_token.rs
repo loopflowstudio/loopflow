@@ -1,4 +1,3 @@
-use rand::RngCore;
 use std::path::{Path, PathBuf};
 
 /// Generate a new session token and write it to disk.
@@ -8,7 +7,7 @@ pub fn generate_and_write() -> Result<String, std::io::Error> {
 
 fn generate_and_write_at(path: &Path) -> Result<String, std::io::Error> {
     let mut bytes = [0_u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     let token = hex::encode(bytes);
 
     if let Some(parent) = path.parent() {

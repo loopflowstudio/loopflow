@@ -16,7 +16,8 @@ use crate::lfd::store::rows::{
 use crate::lfd::store::{ForkRun, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
-    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -351,6 +352,15 @@ impl SqliteStore {
     }
 
     pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        struct RawQueueBlock {
+            wave_id: LfdId,
+            run_id: LfdId,
+            reason: String,
+            attempted_at: i64,
+            conflict_files: Vec<String>,
+            error: Option<String>,
+        }
+
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT wave_id, run_id, reason, attempted_at, conflict_files, error
@@ -364,18 +374,30 @@ impl SqliteStore {
                 .ok()
                 .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
                 .unwrap_or_default();
-            Ok(QueueBlock {
+            Ok(RawQueueBlock {
                 wave_id: LfdId::from_raw(row.get::<_, String>(0)?),
                 run_id: LfdId::from_raw(row.get::<_, String>(1)?),
                 reason: row.get(2)?,
-                attempted_at: crate::lfd::store::rows::unix_to_datetime(row.get::<_, i64>(3)?),
+                attempted_at: row.get::<_, i64>(3)?,
                 conflict_files,
                 error: row.get(5)?,
             })
         })?;
         let mut blocks = Vec::new();
-        for block in rows {
-            blocks.push(block?);
+        for raw in rows {
+            let raw = raw?;
+            let reason = raw
+                .reason
+                .parse::<QueueBlockReason>()
+                .map_err(StoreError::InvalidData)?;
+            blocks.push(QueueBlock {
+                wave_id: raw.wave_id,
+                run_id: raw.run_id,
+                reason,
+                attempted_at: crate::lfd::store::rows::unix_to_datetime(raw.attempted_at),
+                conflict_files: raw.conflict_files,
+                error: raw.error,
+            });
         }
         Ok(blocks)
     }
@@ -393,7 +415,7 @@ impl SqliteStore {
             params![
                 block.wave_id,
                 block.run_id,
-                block.reason,
+                block.reason.as_str(),
                 block.attempted_at.unix_timestamp(),
                 serde_json::to_string(&block.conflict_files)?,
                 block.error,

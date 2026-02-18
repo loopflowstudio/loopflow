@@ -17,7 +17,8 @@ use crate::lfd::store::rows::{
 use crate::lfd::store::{ForkRun, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
-    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -420,10 +421,14 @@ impl PostgresStore {
                         .ok()
                         .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
                         .unwrap_or_default();
+                    let reason_raw: String = row.try_get(2)?;
+                    let reason = reason_raw
+                        .parse::<QueueBlockReason>()
+                        .map_err(StoreError::InvalidData)?;
                     Ok(QueueBlock {
                         wave_id: LfdId::from_raw(row.try_get::<_, String>(0)?),
                         run_id: LfdId::from_raw(row.try_get::<_, String>(1)?),
-                        reason: row.try_get(2)?,
+                        reason,
                         attempted_at: crate::lfd::store::rows::unix_to_datetime(row.try_get(3)?),
                         conflict_files,
                         error: row.try_get(5)?,
@@ -449,7 +454,7 @@ impl PostgresStore {
                     &[
                         &block.wave_id,
                         &block.run_id,
-                        &block.reason,
+                        &block.reason.as_str(),
                         &block.attempted_at.unix_timestamp(),
                         &serde_json::to_string(&block.conflict_files)?,
                         &block.error,

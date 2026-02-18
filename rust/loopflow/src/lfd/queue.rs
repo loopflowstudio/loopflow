@@ -1,17 +1,21 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
+use once_cell::sync::Lazy;
 use time::OffsetDateTime;
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::engine::git;
 use crate::engine::worktrees::main_repo_root;
 use crate::lfd::config::GitHubConfig;
-use crate::lfd::github;
 use crate::lfd::id::LfdId;
+use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapshot};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    LivePrState, LivePullRequestState, QueueBlock, QueueMergeEvent, WaveRun, WaveRunStackStatus,
+    LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason, QueueMergeEvent, WaveRun,
+    WaveRunStackStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +68,7 @@ impl QueueNextAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueRunView {
     pub role: QueueRole,
-    pub block_reason: Option<String>,
+    pub block_reason: Option<QueueBlockReason>,
     pub blocked_at: Option<OffsetDateTime>,
     pub next_action: QueueNextAction,
 }
@@ -88,6 +92,9 @@ trait QueueOps: Send + Sync {
 
 #[derive(Debug, Clone, Copy)]
 struct RealQueueOps;
+
+static QUEUE_RECONCILE_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 impl QueueOps for RealQueueOps {
     fn ensure_branch_checked_out(&self, worktree: &Path, branch: &str) -> Result<(), String> {
@@ -170,7 +177,20 @@ pub async fn reconcile_wave_queue(
     wave_id: &LfdId,
     trigger: QueueTrigger,
 ) -> Result<(), String> {
+    let _guard = acquire_reconcile_lock(wave_id).await;
     reconcile_wave_queue_with_ops(store, github_config, wave_id, trigger, &RealQueueOps).await
+}
+
+async fn acquire_reconcile_lock(wave_id: &LfdId) -> OwnedMutexGuard<()> {
+    let wave_key = wave_id.to_string();
+    let lock = {
+        let mut locks = QUEUE_RECONCILE_LOCKS.lock().await;
+        locks
+            .entry(wave_key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    lock.lock_owned().await
 }
 
 async fn reconcile_wave_queue_with_ops(
@@ -189,12 +209,13 @@ async fn reconcile_wave_queue_with_ops(
         return Ok(());
     }
 
-    refresh_live_states(store, github_config, &runs).await;
-    let mut live_states = load_live_states(store, &runs).await;
+    let mut live_snapshot = build_live_pr_snapshot(store, github_config, &runs)
+        .await
+        .map_err(|err| format!("build_live_pr_snapshot failed: {err}"))?;
 
     let mut status_changed = false;
     for run in &mut runs {
-        let Some(live_state) = live_for_run(&live_states, run) else {
+        let Some(live_state) = live_snapshot.state_for_run(run) else {
             continue;
         };
         let inferred = inferred_stack_status(run.stack_status, Some(live_state));
@@ -212,10 +233,12 @@ async fn reconcile_wave_queue_with_ops(
             .list_stack_runs(wave_id)
             .await
             .map_err(|err| format!("list_stack_runs refresh failed: {err}"))?;
-        live_states = load_live_states(store, &runs).await;
+        live_snapshot = build_live_pr_snapshot(store, github_config, &runs)
+            .await
+            .map_err(|err| format!("build_live_pr_snapshot refresh failed: {err}"))?;
     }
 
-    let head_index = find_queue_head_index(&runs, &live_states);
+    let head_index = find_queue_head_index(&runs, &live_snapshot);
     let Some(head_index) = head_index else {
         tracing::debug!(wave_id = %wave_id_for_log, ?trigger, "queue reconcile: no active queue head");
         return Ok(());
@@ -228,7 +251,7 @@ async fn reconcile_wave_queue_with_ops(
         let Some(pr_number) = pr_number(run) else {
             continue;
         };
-        let Some(state) = live_for_run(&live_states, run) else {
+        let Some(state) = live_snapshot.state_for_run(run) else {
             continue;
         };
         if state.state == LivePrState::Open
@@ -242,19 +265,19 @@ async fn reconcile_wave_queue_with_ops(
             updated.is_draft = true;
             updated.synced_at = OffsetDateTime::now_utc();
             let _ = store.upsert_live_pr_state(&updated).await;
-            if let Some(key) = run_pr_key(run) {
-                live_states.insert(key, updated);
+            if let Some(key) = run_live_pr_key(run) {
+                live_snapshot.live_states.insert(key, updated);
             }
         }
     }
 
     let head = runs[head_index].clone();
     let Some(head_pr_number) = pr_number(&head) else {
-        set_queue_block(store, &head, "missing_pr", Vec::new(), None).await?;
+        set_queue_block(store, &head, QueueBlockReason::MissingPr, Vec::new(), None).await?;
         return Ok(());
     };
-    let Some(head_live_state) = live_for_run(&live_states, &head) else {
-        set_queue_block(store, &head, "missing_pr", Vec::new(), None).await?;
+    let Some(head_live_state) = live_snapshot.state_for_run(&head) else {
+        set_queue_block(store, &head, QueueBlockReason::MissingPr, Vec::new(), None).await?;
         return Ok(());
     };
     if head_live_state.state != LivePrState::Open {
@@ -267,14 +290,28 @@ async fn reconcile_wave_queue_with_ops(
         .map_err(|err| format!("get_active_wave_run failed: {err}"))?
     {
         if active_run.id != head.id {
-            set_queue_block(store, &head, "wave_running", Vec::new(), None).await?;
+            set_queue_block(
+                store,
+                &head,
+                QueueBlockReason::WaveRunning,
+                Vec::new(),
+                None,
+            )
+            .await?;
             return Ok(());
         }
     }
 
     let worktree = Path::new(&head.worktree);
     if !ops.scratch_clean(worktree)? {
-        set_queue_block(store, &head, "scratch_dirty", Vec::new(), None).await?;
+        set_queue_block(
+            store,
+            &head,
+            QueueBlockReason::ScratchDirty,
+            Vec::new(),
+            None,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -290,7 +327,7 @@ async fn reconcile_wave_queue_with_ops(
             set_queue_block(
                 store,
                 &head,
-                "rebase_conflict",
+                QueueBlockReason::RebaseConflict,
                 conflict.files.clone(),
                 Some("lazy rebase failed".to_string()),
             )
@@ -302,7 +339,14 @@ async fn reconcile_wave_queue_with_ops(
     if head_live_state.is_draft {
         ops.ensure_branch_checked_out(worktree, &head.branch)?;
         if let Err(err) = ops.mark_ready(worktree, head_pr_number) {
-            set_queue_block(store, &head, "promotion_failed", Vec::new(), Some(err)).await?;
+            set_queue_block(
+                store,
+                &head,
+                QueueBlockReason::PromotionFailed,
+                Vec::new(),
+                Some(err),
+            )
+            .await?;
             return Ok(());
         }
 
@@ -396,7 +440,7 @@ where
             run.id.clone(),
             QueueRunView {
                 role,
-                block_reason: block.map(|value| value.reason.clone()),
+                block_reason: block.map(|value| value.reason),
                 blocked_at: block.map(|value| value.attempted_at),
                 next_action,
             },
@@ -417,25 +461,19 @@ fn queue_next_action(role: QueueRole, block: Option<&QueueBlock>, has_pr: bool) 
                 QueueNextAction::OpenPr
             }
         }
-        QueueRole::Blocked => {
-            let reason = block.map(|value| value.reason.as_str()).unwrap_or_default();
-            if reason.contains("scratch") || reason.contains("conflict") {
+        QueueRole::Blocked => match block.map(|value| value.reason) {
+            Some(QueueBlockReason::ScratchDirty | QueueBlockReason::RebaseConflict) => {
                 QueueNextAction::ResolveConflict
-            } else if reason == "missing_pr" {
-                QueueNextAction::OpenPr
-            } else {
-                QueueNextAction::AwaitMerge
             }
-        }
+            Some(QueueBlockReason::MissingPr) => QueueNextAction::OpenPr,
+            _ => QueueNextAction::AwaitMerge,
+        },
     }
 }
 
-fn find_queue_head_index(
-    runs: &[WaveRun],
-    live_states: &HashMap<String, LivePullRequestState>,
-) -> Option<usize> {
+fn find_queue_head_index(runs: &[WaveRun], live_snapshot: &LivePrSnapshot) -> Option<usize> {
     runs.iter().position(|run| {
-        let live = live_for_run(live_states, run);
+        let live = live_snapshot.state_for_run(run);
         inferred_stack_status(run.stack_status, live) == WaveRunStackStatus::Active
     })
 }
@@ -454,52 +492,21 @@ fn inferred_stack_status(
     }
 }
 
-fn run_pr_key(run: &WaveRun) -> Option<String> {
-    let pr = pr_number(run)?;
-    Some(format!("{}:{pr}", run.snapshot.repo))
-}
-
 fn pr_number(run: &WaveRun) -> Option<u32> {
     run.snapshot.pr.as_ref()?.number
-}
-
-fn live_for_run<'a>(
-    live_states: &'a HashMap<String, LivePullRequestState>,
-    run: &WaveRun,
-) -> Option<&'a LivePullRequestState> {
-    let key = run_pr_key(run)?;
-    live_states.get(&key)
-}
-
-async fn load_live_states(
-    store: &SharedStore,
-    runs: &[WaveRun],
-) -> HashMap<String, LivePullRequestState> {
-    let mut states = HashMap::new();
-    for run in runs {
-        let Some(pr_number) = pr_number(run) else {
-            continue;
-        };
-        if let Ok(Some(state)) = store.get_live_pr_state(&run.snapshot.repo, pr_number).await {
-            if let Some(key) = run_pr_key(run) {
-                states.insert(key, state);
-            }
-        }
-    }
-    states
 }
 
 async fn set_queue_block(
     store: &SharedStore,
     run: &WaveRun,
-    reason: &str,
+    reason: QueueBlockReason,
     conflict_files: Vec<String>,
     error: Option<String>,
 ) -> Result<(), String> {
     let block = QueueBlock {
         wave_id: run.wave_id.clone(),
         run_id: run.id.clone(),
-        reason: reason.to_string(),
+        reason,
         attempted_at: OffsetDateTime::now_utc(),
         conflict_files,
         error,
@@ -510,52 +517,6 @@ async fn set_queue_block(
         .map_err(|err| format!("upsert_queue_block failed: {err}"))
 }
 
-async fn refresh_live_states(store: &SharedStore, github_config: &GitHubConfig, runs: &[WaveRun]) {
-    let token = github_config
-        .token
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_string();
-    if token.is_empty() {
-        return;
-    }
-
-    let mut repo_cache: HashMap<String, Option<String>> = HashMap::new();
-    for run in runs {
-        let Some(pr_number) = pr_number(run) else {
-            continue;
-        };
-        let repo_path = run.snapshot.repo.clone();
-        let repo_name = if let Some(existing) = repo_cache.get(&repo_path) {
-            existing.clone()
-        } else {
-            let repo_path_clone = repo_path.clone();
-            let full_name = tokio::task::spawn_blocking(move || {
-                github::github_repo_from_local(Path::new(&repo_path_clone))
-            })
-            .await
-            .ok()
-            .flatten();
-            repo_cache.insert(repo_path.clone(), full_name.clone());
-            full_name
-        };
-        let Some(repo_name) = repo_name else {
-            continue;
-        };
-        let fetched = github::fetch_pull_request(&repo_name, pr_number, &token).await;
-        let Ok(Some(pull_request)) = fetched else {
-            continue;
-        };
-        let live_state = github::into_live_pull_request_state(
-            run.snapshot.repo.clone(),
-            pull_request,
-            OffsetDateTime::now_utc(),
-        );
-        let _ = store.upsert_live_pr_state(&live_state).await;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,7 +524,8 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus,
+        WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -615,7 +577,11 @@ mod tests {
     async fn sqlite_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-queue-test-{}.db", LfdId::new()));
         let config = crate::lfd::store::StorageConfig::sqlite(db_path);
-        Arc::new(crate::lfd::store::open_store(&config).await.expect("sqlite store should initialize"))
+        Arc::new(
+            crate::lfd::store::open_store(&config)
+                .await
+                .expect("sqlite store should initialize"),
+        )
     }
 
     fn make_wave(repo: &str) -> Wave {
@@ -724,10 +690,12 @@ mod tests {
             .map(|block| (block.run_id.clone(), block))
             .collect::<HashMap<_, _>>();
         let runs = store.list_stack_runs(&wave.id).await.expect("runs");
-        let live_states = load_live_states(&store, &runs).await;
+        let live_snapshot = build_live_pr_snapshot(&store, &GitHubConfig::default(), &runs)
+            .await
+            .expect("live snapshot");
         let projected = project_queue_views(
             &runs,
-            |run| live_for_run(&live_states, run).cloned(),
+            |run| live_snapshot.state_for_run(run).cloned(),
             &blocks,
         );
         let ready_count = projected
@@ -798,17 +766,41 @@ mod tests {
             .into_iter()
             .next()
             .expect("block");
-        assert_eq!(block.reason, "scratch_dirty");
+        assert_eq!(block.reason, QueueBlockReason::ScratchDirty);
 
-        let live_states = load_live_states(&store, &[run.clone()]).await;
+        let live_snapshot =
+            build_live_pr_snapshot(&store, &GitHubConfig::default(), std::slice::from_ref(&run))
+                .await
+                .expect("live snapshot");
         let projection = project_queue_views(
             &[run.clone()],
-            |r| live_for_run(&live_states, r).cloned(),
+            |r| live_snapshot.state_for_run(r).cloned(),
             &HashMap::from([(run.id.clone(), block)]),
         );
         assert_eq!(
             projection.get(&run.id).map(|view| view.next_action),
             Some(QueueNextAction::ResolveConflict)
         );
+    }
+
+    #[tokio::test]
+    async fn reconcile_lock_serializes_per_wave() {
+        let wave_id = LfdId::new();
+        let guard = acquire_reconcile_lock(&wave_id).await;
+
+        let locked = Arc::new(Mutex::new(false));
+        let locked_clone = Arc::clone(&locked);
+        let wave_id_clone = wave_id.clone();
+        let waiter = tokio::spawn(async move {
+            let _guard = acquire_reconcile_lock(&wave_id_clone).await;
+            *locked_clone.lock().expect("mutex") = true;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(!*locked.lock().expect("mutex"));
+
+        drop(guard);
+        waiter.await.expect("waiter task");
+        assert!(*locked.lock().expect("mutex"));
     }
 }

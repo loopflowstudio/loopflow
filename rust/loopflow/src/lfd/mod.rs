@@ -6,6 +6,7 @@ pub mod executor;
 pub mod github;
 pub mod http;
 pub mod id;
+pub mod live_pr;
 pub mod machine_id;
 pub mod obs;
 pub mod output;

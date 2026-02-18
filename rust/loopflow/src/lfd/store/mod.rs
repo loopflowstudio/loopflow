@@ -186,11 +186,7 @@ impl Store {
         WaveStateStore::upsert_queue_block(self, block).await
     }
 
-    pub async fn delete_queue_block(
-        &self,
-        wave_id: &LfdId,
-        run_id: &LfdId,
-    ) -> StoreResult<u32> {
+    pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
         WaveStateStore::delete_queue_block(self, wave_id, run_id).await
     }
 
@@ -1208,8 +1204,9 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
-        QueueBlock, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind, Summary,
-        Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        QueueBlock, QueueBlockReason, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind,
+        Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
+        WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1585,16 +1582,10 @@ mod tests {
             };
 
         let run1 = make_run(1, None, None);
-        store
-            .create_wave_run(&run1)
-            .await
-            .expect("create run1");
+        store.create_wave_run(&run1).await.expect("create run1");
 
         let run2 = make_run(2, Some(run1.id.clone()), Some(101));
-        store
-            .create_wave_run(&run2)
-            .await
-            .expect("create run2");
+        store.create_wave_run(&run2).await.expect("create run2");
 
         let first_pending = store
             .find_next_unmerged_run(&wave.id)
@@ -1654,7 +1645,7 @@ mod tests {
         let block = QueueBlock {
             wave_id: wave.id.clone(),
             run_id: run.id.clone(),
-            reason: "rebase_conflict".to_string(),
+            reason: QueueBlockReason::RebaseConflict,
             attempted_at: OffsetDateTime::now_utc(),
             conflict_files: vec!["src/lib.rs".to_string()],
             error: Some("merge failed".to_string()),
@@ -1668,7 +1659,7 @@ mod tests {
             .await
             .expect("list blocks");
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].reason, "rebase_conflict");
+        assert_eq!(blocks[0].reason, QueueBlockReason::RebaseConflict);
         let deleted = store
             .delete_queue_block(&wave.id, &run.id)
             .await

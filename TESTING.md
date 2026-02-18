@@ -47,7 +47,7 @@ xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination '
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. Five parallel jobs:
+See `.github/workflows/ci.yml`. Six parallel jobs:
 
 | Job | Runner | Command |
 |-----|--------|---------|

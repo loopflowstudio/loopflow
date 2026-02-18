@@ -512,16 +512,7 @@ fn render_sql(template: &str, dialect: SqlDialect) -> String {
     let mut idx = 0;
 
     while idx < bytes.len() {
-        if idx + 2 < bytes.len() && bytes[idx] == b'{' && bytes[idx + 1] == b'p' {
-            let start = idx + 2;
-            let mut end = start;
-            while end < bytes.len() && bytes[end].is_ascii_digit() {
-                end += 1;
-            }
-            if end == start || end >= bytes.len() || bytes[end] != b'}' {
-                panic!("invalid placeholder in SQL template: {template}");
-            }
-
+        if let Some((start, end)) = placeholder_bounds(template, idx) {
             let value = &template[start..end];
             match dialect {
                 SqlDialect::Sqlite => {
@@ -544,6 +535,24 @@ fn render_sql(template: &str, dialect: SqlDialect) -> String {
     output
 }
 
+fn placeholder_bounds(template: &str, idx: usize) -> Option<(usize, usize)> {
+    let bytes = template.as_bytes();
+    if idx + 2 >= bytes.len() || bytes[idx] != b'{' || bytes[idx + 1] != b'p' {
+        return None;
+    }
+
+    let start = idx + 2;
+    let mut end = start;
+    while end < bytes.len() && bytes[end].is_ascii_digit() {
+        end += 1;
+    }
+    if end == start || end >= bytes.len() || bytes[end] != b'}' {
+        panic!("invalid placeholder in SQL template: {template}");
+    }
+
+    Some((start, end))
+}
+
 #[cfg(test)]
 fn extract_placeholder_numbers(template: &str) -> Vec<usize> {
     let bytes = template.as_bytes();
@@ -551,16 +560,7 @@ fn extract_placeholder_numbers(template: &str) -> Vec<usize> {
     let mut idx = 0;
 
     while idx < bytes.len() {
-        if idx + 2 < bytes.len() && bytes[idx] == b'{' && bytes[idx + 1] == b'p' {
-            let start = idx + 2;
-            let mut end = start;
-            while end < bytes.len() && bytes[end].is_ascii_digit() {
-                end += 1;
-            }
-            if end == start || end >= bytes.len() || bytes[end] != b'}' {
-                panic!("invalid placeholder in SQL template: {template}");
-            }
-
+        if let Some((start, end)) = placeholder_bounds(template, idx) {
             let value = template[start..end]
                 .parse::<usize>()
                 .expect("placeholder number should parse");
@@ -586,8 +586,8 @@ fn placeholders_are_contiguous(template: &str) -> bool {
     numbers.dedup();
     numbers
         .iter()
-        .copied()
-        .eq((1..=numbers.len()).collect::<Vec<_>>())
+        .enumerate()
+        .all(|(idx, number)| *number == idx + 1)
 }
 
 #[cfg(test)]

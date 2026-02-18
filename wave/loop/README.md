@@ -49,6 +49,8 @@ Stack lineage is explicit, GitHub live PR state is current truth, and queue adva
 - `QueueBlockReason::FromStr` errors on unknown values. Phase 03 should add new reasons (e.g., `CombinePending`) to the enum before storing them, not rely on string tolerance.
 - Implementation of 01+02 was larger than estimated (~2,300 LOC across 33 files vs. estimated 800-1,600 combined). Phase 03 estimate may similarly need headroom, especially for atomicity/retry paths.
 - Per-wave reconcile locks and `QueueOps` trait are clean extension points — Phase 03 should add combine operations to the existing trait rather than building parallel infrastructure.
+- `QueueOps` trait currently has five methods (checkout, mark_ready, mark_draft, rebase, scratch_clean). Phase 03 must add `close_pr` and `create_combined_pr` — the trait was designed for extension but these methods don't exist yet.
+- Poll-based reconciliation runs on a 60-second interval. Phase 04 UX should account for this latency in poll-only setups; webhook path provides near-instant updates when configured.
 
 ## What might change
 

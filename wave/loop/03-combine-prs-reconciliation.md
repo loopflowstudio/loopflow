@@ -18,7 +18,7 @@ Make **Combine PRs** a first-class lifecycle operation with coherent run history
 - Live PR sync can infer `superseded` when originals close, but it cannot explain *why* they closed.
 - `QueueRole::Superseded` and `WaveRunStackStatus::Superseded` are already defined and projected from `LivePrState::Closed`. Phase 03 converts this inference to durable fact with combine event linkage.
 - `QueueNextAction::CombinePrs` is already returned for superseded runs — the UI affordance exists before the backing operation.
-- `QueueOps` trait is the right extension point for combine operations (`close_pr`, `create_combined_pr`). Avoid building parallel infrastructure.
+- `QueueOps` trait is the right extension point for combine operations, but currently only has five methods (`ensure_branch_checked_out`, `mark_ready`, `mark_draft`, `rebase_onto_default`, `scratch_clean`). Phase 03 must add `close_pr` and `create_combined_pr` to the trait and implement them in `RealQueueOps`.
 - Per-wave reconcile locks serialize combine+reconcile safely — no new locking needed.
 - `QueueBlockReason` enum needs new variants (e.g., `CombinePending`) added to the Rust enum *before* storing them. `FromStr` is strict and will reject unknown values.
 

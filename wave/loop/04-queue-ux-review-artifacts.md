@@ -21,6 +21,7 @@ Make landing intent obvious in Concerto and remove merge dependence on tracked s
 - `QueueNextAction` has four values (OpenPr, ResolveConflict, CombinePrs, AwaitMerge) — maps directly to primary actions in the UI.
 - `LivePrSnapshot` caching means API responses include fresh-enough PR state without requiring the UI to poll GitHub separately.
 - Phase 04 is almost entirely a *consumer* of shipped backend semantics. No new queue logic needed on the backend — only review artifact publishing and the Swift UI layer.
+- Poll-based reconciliation runs every 60 seconds. Queue badge updates after GitHub-side merges may take up to one cycle to reflect. Webhook path is near-instant when configured. UX should not promise real-time accuracy in poll-only setups.
 
 ## What exists after this step
 

@@ -428,7 +428,7 @@ mod tests {
     use crate::lfd::config::{ExecutorConfig, GitHubConfig};
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
-    use crate::lfd::http::state::{ChatTurnRegistry, HttpState};
+    use crate::lfd::http::state::HttpState;
     use crate::lfd::output::OutputHub;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
@@ -456,7 +456,6 @@ mod tests {
                 output_hub.clone(),
                 event_hub.clone(),
                 ExecutorConfig::default(),
-                GitHubConfig::default(),
             )
             .expect("build executor"),
         );
@@ -472,7 +471,6 @@ mod tests {
             started_at: OffsetDateTime::now_utc(),
             github: GitHubConfig::default(),
             ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            chat_turns: ChatTurnRegistry::new(),
         }
     }
 

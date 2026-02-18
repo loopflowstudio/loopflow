@@ -1,1 +1,0 @@
-- Manual verification remains: Concerto local auth flow still needs hands-on validation (create/run waves against local `lfd` using `~/.lf/session-token`).

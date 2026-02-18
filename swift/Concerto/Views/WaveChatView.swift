@@ -31,7 +31,7 @@ struct WaveChatView: View {
                         if state.messages.isEmpty {
                             Text("Start a chat. Only memory blocks are sent as context between turns.")
                                 .font(Typography.body())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(palette.textSecondary)
                                 .padding(.vertical, Spacing.xl)
                         }
 
@@ -43,7 +43,7 @@ struct WaveChatView: View {
                         if state.isLoading {
                             ProgressView("Thinking…")
                                 .font(Typography.caption())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(palette.textSecondary)
                                 .padding(.top, Spacing.sm)
                         }
                     }
@@ -94,7 +94,7 @@ struct WaveChatView: View {
 
             Text("Editable context sent on every request.")
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 TextField("Block name", text: $newBlockName)
@@ -178,7 +178,7 @@ private struct ChatBubble: View {
                 content
                 Text(message.timestamp, style: .time)
                     .font(Typography.caption(11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
             .padding(Spacing.md)
             .background(backgroundColor)

@@ -39,7 +39,7 @@ struct EmbeddedTerminalPanel: View {
         HStack {
             Image(systemName: "terminal")
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             if let wave = repoState.selectedWave, wave.status == .running {
                 Circle()
@@ -48,7 +48,7 @@ struct EmbeddedTerminalPanel: View {
 
                 Text("running")
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             } else {
                 Circle()
                     .fill(Color.statusNeutral)
@@ -56,7 +56,7 @@ struct EmbeddedTerminalPanel: View {
 
                 Text("idle")
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             Spacer()
@@ -66,7 +66,7 @@ struct EmbeddedTerminalPanel: View {
             case .uninitialized:
                 Text("Terminal not initialized")
                     .font(Typography.caption(10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(palette.textSecondary)
             case .initializing:
                 ProgressView()
                     .scaleEffect(0.5)
@@ -93,8 +93,8 @@ struct EmbeddedTerminalPanel: View {
             .accessibleButton("Toggle terminal panel", hint: isExpanded ? "Collapse" : "Expand")
             .minHitTarget()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
         .background(palette.surface)
     }
 

@@ -19,7 +19,7 @@ struct DirectionTypeahead: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Direction")
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             HStack(spacing: 4) {
                 ForEach(selectedDirections, id: \.self) { direction in

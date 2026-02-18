@@ -59,7 +59,7 @@ struct InteractiveSessionView: View {
             // Step name
             Text(session.step)
                 .font(Typography.body())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             // Interactive badge
             Text("interactive")
@@ -78,7 +78,7 @@ struct InteractiveSessionView: View {
             case .uninitialized:
                 Text("Terminal not initialized")
                     .font(Typography.caption(10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(palette.textSecondary)
             case .initializing:
                 ProgressView()
                     .scaleEffect(0.5)

@@ -20,7 +20,7 @@ struct FlowProgressPills: View {
                 if index > 0 {
                     Image(systemName: "chevron.right")
                         .font(Typography.caption(8)).fontWeight(.semibold)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(palette.textSecondary)
                         .accessibilityHidden(true)
                 }
 
@@ -60,7 +60,7 @@ struct FlowProgressPills: View {
             if isCurrent, let elapsed = formattedElapsedTime {
                 Text(elapsed)
                     .font(Typography.caption(10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
                     .monospacedDigit()
             }
 

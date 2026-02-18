@@ -6,6 +6,7 @@ import LoopflowCore
 struct SetupView: View {
     @Binding var isComplete: Bool
 
+    @Environment(\.palette) private var palette
     @State private var status: SetupService.DependencyStatus?
     @State private var installStep: InstallStep = .checking
     @State private var errorMessage: String?
@@ -30,7 +31,7 @@ struct SetupView: View {
 
                 Text("First-time setup")
                     .font(Typography.sectionTitle())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             Spacer()
@@ -41,7 +42,7 @@ struct SetupView: View {
                     ProgressView()
                         .scaleEffect(1.5)
                     Text("Installing loopflow...")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.textSecondary)
                 } else if installStep == .complete {
                     Image(systemName: "checkmark.circle.fill")
                         .font(Typography.heroTitle(48))
@@ -57,12 +58,12 @@ struct SetupView: View {
                             .font(Typography.sectionTitle())
                         Text(path)
                             .font(Typography.caption())
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(palette.textSecondary)
                     }
                 } else if installStep != .checking {
                     Image(systemName: "arrow.down.circle")
                         .font(Typography.heroTitle(48))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.textSecondary)
                     Text("Loopflow CLI not found")
                         .font(Typography.sectionTitle())
                 }
@@ -89,7 +90,7 @@ struct SetupView: View {
                     }
                     .buttonStyle(.plain)
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
                 }
             }
         }

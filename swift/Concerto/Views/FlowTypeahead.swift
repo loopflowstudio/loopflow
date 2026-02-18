@@ -42,7 +42,7 @@ struct FlowTypeahead: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Flow")
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             // Selected flow chip + input
             HStack(spacing: 4) {
@@ -72,7 +72,7 @@ struct FlowTypeahead: View {
                 let chain = flow.steps.map(\.prompt).joined(separator: " \u{2192} ")
                 Text(chain)
                     .font(Typography.caption())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
             }
 
@@ -104,7 +104,7 @@ struct FlowTypeahead: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(title)
                 .font(Typography.caption(10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(palette.textSecondary)
 
             WrappingHStack(spacing: Spacing.xs) {
                 ForEach(items) { item in
@@ -114,7 +114,7 @@ struct FlowTypeahead: View {
                         HStack(spacing: 4) {
                             Image(systemName: icon)
                                 .font(Typography.caption(10))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(palette.textSecondary)
                             Text(item.name)
                                 .font(Typography.code(12))
                         }

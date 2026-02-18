@@ -137,7 +137,7 @@ struct TypeaheadChip: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(Typography.caption(9)).fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
             .buttonStyle(.plain)
             .opacity(isHovered ? 1 : 0.6)

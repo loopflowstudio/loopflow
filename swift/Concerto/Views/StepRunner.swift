@@ -98,7 +98,7 @@ struct StepRunner: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Additional context (optional)")
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             TextField("e.g. focus on error handling", text: $prompt, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -121,7 +121,7 @@ struct StepRunner: View {
 
             Text("Examples: 0 9 * * * (daily 9am), */30 * * * * (every 30 min)")
                 .font(Typography.caption(10))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(palette.textSecondary)
         }
     }
 
@@ -137,14 +137,14 @@ struct StepRunner: View {
                     if let cron = s.cron {
                         Text(cron)
                             .font(Typography.code(11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.textSecondary)
                     }
                     Spacer()
                     Button {
                         removeActiveStimulus(s.id)
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Remove stimulus")

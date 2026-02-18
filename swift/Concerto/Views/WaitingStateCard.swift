@@ -22,13 +22,13 @@ struct WaitingStateCard: View {
             if let reason = wave.waitingReason {
                 Text(reason.description)
                     .font(Typography.body())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
                     .monospacedDigit()
                     .accessibilityLabel(reason.accessibilityDescription)
             } else {
                 Text("PR limit reached")
                     .font(Typography.body())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             HStack(spacing: Spacing.sm) {
@@ -42,7 +42,7 @@ struct WaitingStateCard: View {
 
                 Text("Use the Runs tab to combine PRs.")
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
         }
         .padding(Spacing.lg)

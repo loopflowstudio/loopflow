@@ -4,6 +4,7 @@
 import SwiftUI
 
 struct TerminalTestWindow: View {
+    @Environment(\.palette) private var palette
     @StateObject private var ghosttyManager = GhosttyManager.shared
 
     var body: some View {
@@ -40,7 +41,7 @@ struct TerminalTestWindow: View {
         switch ghosttyManager.state {
         case .uninitialized:
             Label("Not initialized", systemImage: "circle")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
         case .initializing:
             HStack(spacing: 4) {
                 ProgressView()
@@ -69,7 +70,7 @@ struct TerminalTestWindow: View {
 
             Text(error)
                 .font(Typography.body())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 

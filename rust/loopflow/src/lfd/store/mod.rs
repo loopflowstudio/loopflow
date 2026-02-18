@@ -7,6 +7,7 @@ use crate::lfd::types::{
     Summary, Wave, WaveRun, WaveRunStackStatus,
 };
 
+pub mod catalog;
 pub mod migrations;
 pub mod postgres;
 pub mod rows;

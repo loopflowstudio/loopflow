@@ -5,6 +5,10 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::NoTls;
 
 use crate::lfd::id::LfdId;
+use crate::lfd::store::catalog::{
+    list_agent_history_query, list_stimuli_query, list_wave_runs_query, list_waves_query, sql,
+    Query, SqlDialect,
+};
 use crate::lfd::store::rows::{
     map_agent_row, map_chat_memory_block_row, map_fork_run_row, map_live_pr_state_row,
     map_pending_activation_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row,
@@ -28,6 +32,10 @@ pub struct PostgresStore {
 }
 
 impl PostgresStore {
+    fn sql(query: Query) -> &'static str {
+        sql(query, SqlDialect::Postgres)
+    }
+
     pub async fn connect_async(database_url: &str) -> StoreResult<Self> {
         let pool = build_pool(database_url)?;
         let version = super::migrations::latest_version_postgres_pool(&pool).await?;
@@ -75,21 +83,11 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = if let Some(repo) = repo {
                 client
-                    .query(
-                        "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-                                created_at, schema_ref, schema_name
-                         FROM waves WHERE repo = $1 ORDER BY created_at DESC",
-                        &[&repo],
-                    )
+                    .query(Self::sql(list_waves_query(true)), &[&repo])
                     .await?
             } else {
                 client
-                    .query(
-                        "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-                                created_at, schema_ref, schema_name
-                         FROM waves ORDER BY created_at DESC",
-                        &[],
-                    )
+                    .query(Self::sql(list_waves_query(false)), &[])
                     .await?
             };
             rows.iter().map(map_wave_row).collect()
@@ -113,22 +111,7 @@ impl PostgresStore {
 
             client
                 .execute(
-                    "INSERT INTO waves (
-                        id, name, repo, flow, direction, area, paused, status, iteration, created_at,
-                        schema_ref, schema_name
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    ON CONFLICT(id) DO UPDATE SET
-                        name = excluded.name,
-                        repo = excluded.repo,
-                        flow = excluded.flow,
-                        direction = excluded.direction,
-                        area = excluded.area,
-                        paused = excluded.paused,
-                        status = excluded.status,
-                        iteration = excluded.iteration,
-                        created_at = excluded.created_at,
-                        schema_ref = excluded.schema_ref,
-                        schema_name = excluded.schema_name",
+                    Self::sql(Query::UpsertWave),
                     &[
                         &wave.id,
                         &wave.name,
@@ -146,14 +129,15 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(())
-        }).await
+        })
+        .await
     }
 }
 
 impl PostgresStore {
     pub async fn health_check(&self) -> StoreResult<()> {
         self.with_client(|client| async move {
-            client.execute("SELECT 1", &[]).await?;
+            client.execute(Self::sql(Query::HealthCheck), &[]).await?;
             Ok(())
         })
         .await
@@ -170,12 +154,7 @@ impl PostgresStore {
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(
-                    "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-                            created_at, schema_ref, schema_name
-                     FROM waves WHERE id = $1",
-                    &[&wave_id],
-                )
+                .query_opt(Self::sql(Query::GetWaveById), &[&wave_id])
                 .await?;
             row.as_ref().map(map_wave_row).transpose()
         })
@@ -186,12 +165,7 @@ impl PostgresStore {
         let name = name.to_string();
         self.with_client(|client| async move {
             let row = client
-                .query_opt(
-                    "SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-                            created_at, schema_ref, schema_name
-                     FROM waves WHERE name = $1",
-                    &[&name],
-                )
+                .query_opt(Self::sql(Query::GetWaveByName), &[&name])
                 .await?;
             row.as_ref().map(map_wave_row).transpose()
         })
@@ -209,7 +183,7 @@ impl PostgresStore {
     pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
         self.with_client(|client| async move {
             client
-                .execute("DELETE FROM waves WHERE id = $1", &[&wave_id])
+                .execute(Self::sql(Query::DeleteWaveById), &[&wave_id])
                 .await?;
             Ok(())
         })
@@ -222,22 +196,12 @@ impl PostgresStore {
         limit: Option<u32>,
     ) -> StoreResult<Vec<WaveRun>> {
         self.with_client(|client| async move {
-            let mut query = String::from(
-                "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                        started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                        snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
-                        parent_run_id, parent_pr_number, stack_position, stack_group_id,
-                        stack_status, lineage_inferred
-                 FROM wave_runs",
-            );
+            let query = Self::sql(list_wave_runs_query(wave_id.is_some(), limit.is_some()));
             let mut params: Vec<Box<dyn ToSql + Sync + Send>> = Vec::new();
             if let Some(wave_id) = wave_id {
-                query.push_str(" WHERE wave_id = $1");
                 params.push(Box::new(wave_id.clone()));
             }
-            query.push_str(" ORDER BY started_at DESC");
             if let Some(limit) = limit {
-                query.push_str(&format!(" LIMIT ${}", params.len() + 1));
                 params.push(Box::new(limit as i64));
             }
 
@@ -245,26 +209,20 @@ impl PostgresStore {
                 .iter()
                 .map(|v| v.as_ref() as &(dyn ToSql + Sync))
                 .collect();
-            let rows = client.query(&query, &params_ref).await?;
+            let rows = client.query(query, &params_ref).await?;
             rows.iter().map(map_wave_run_row).collect()
-        }).await
+        })
+        .await
     }
 
     pub async fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(
-                    "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                            started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
-                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
-                            stack_status, lineage_inferred
-                     FROM wave_runs WHERE id = $1",
-                    &[&wave_run_id],
-                )
+                .query_opt(Self::sql(Query::GetWaveRunById), &[&wave_run_id])
                 .await?;
             row.as_ref().map(map_wave_run_row).transpose()
-        }).await
+        })
+        .await
     }
 
     pub async fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
@@ -276,37 +234,30 @@ impl PostgresStore {
             ];
             let row = client
                 .query_opt(
-                    "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                            started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
-                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
-                            stack_status, lineage_inferred
-                     FROM wave_runs
-                     WHERE wave_id = $1 AND status = ANY($2) AND run_kind = $3
-                     ORDER BY started_at DESC LIMIT 1",
-                    &[&wave_id, &&statuses[..], &crate::lfd::types::WaveRunKind::Main.as_i32()],
+                    Self::sql(Query::GetActiveWaveRun),
+                    &[
+                        &wave_id,
+                        &&statuses[..],
+                        &crate::lfd::types::WaveRunKind::Main.as_i32(),
+                    ],
                 )
                 .await?;
             row.as_ref().map(map_wave_run_row).transpose()
-        }).await
+        })
+        .await
     }
 
     pub async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                            started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
-                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
-                            stack_status, lineage_inferred
-                     FROM wave_runs WHERE wave_id = $1 AND run_kind = $2
-                     ORDER BY started_at DESC LIMIT 1",
+                    Self::sql(Query::GetLatestWaveRun),
                     &[&wave_id, &crate::lfd::types::WaveRunKind::Main.as_i32()],
                 )
                 .await?;
             row.as_ref().map(map_wave_run_row).transpose()
-        }).await
+        })
+        .await
     }
 
     pub async fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
@@ -319,13 +270,7 @@ impl PostgresStore {
             let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
             client
                 .execute(
-                    "INSERT INTO wave_runs (
-                        id, wave_id, iteration, step_index, status, worktree, branch,
-                        started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                        snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
-                        parent_run_id, parent_pr_number, stack_position, stack_group_id,
-                        stack_status, lineage_inferred
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)",
+                    Self::sql(Query::InsertWaveRun),
                     &[
                         &run.id,
                         &run.wave_id,
@@ -355,7 +300,8 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
@@ -363,15 +309,7 @@ impl PostgresStore {
             let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
             let updated = client
                 .execute(
-                    "UPDATE wave_runs
-                     SET iteration = $1, step_index = $2, status = $3, worktree = $4,
-                         branch = $5, started_at = $6, ended_at = $7, error = $8,
-                         snapshot_repo = $9, snapshot_flow = $10, snapshot_direction = $11,
-                         snapshot_area = $12, snapshot_pr = $13, flow_parents = $14,
-                         run_kind = $15, sidecar_kind = $16, parent_run_id = $17,
-                         parent_pr_number = $18, stack_position = $19, stack_group_id = $20,
-                         stack_status = $21, lineage_inferred = $22
-                     WHERE id = $23",
+                    Self::sql(Query::UpdateWaveRun),
                     &[
                         &(run.iteration as i32),
                         &(run.step_index as i32),
@@ -411,19 +349,13 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                            started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
-                            snapshot_area, snapshot_pr, flow_parents, run_kind, sidecar_kind,
-                            parent_run_id, parent_pr_number, stack_position, stack_group_id,
-                            stack_status, lineage_inferred
-                     FROM wave_runs
-                     WHERE wave_id = $1 AND run_kind = $2
-                     ORDER BY stack_position ASC, started_at ASC, id ASC",
+                    Self::sql(Query::ListStackRuns),
                     &[&wave_id, &crate::lfd::types::WaveRunKind::Main.as_i32()],
                 )
                 .await?;
             rows.iter().map(map_wave_run_row).collect()
-        }).await
+        })
+        .await
     }
 
     pub async fn get_live_pr_state(
@@ -435,10 +367,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
-                            updated_at, merged_at, synced_at
-                     FROM live_pr_states
-                     WHERE repo_id = $1 AND pr_number = $2",
+                    Self::sql(Query::GetLivePrState),
                     &[&repo_id, &(pr_number as i64)],
                 )
                 .await?;
@@ -452,19 +381,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO live_pr_states (
-                        repo_id, pr_number, state, is_draft, head_ref, head_sha, base_ref,
-                        updated_at, merged_at, synced_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    ON CONFLICT(repo_id, pr_number) DO UPDATE SET
-                        state = excluded.state,
-                        is_draft = excluded.is_draft,
-                        head_ref = excluded.head_ref,
-                        head_sha = excluded.head_sha,
-                        base_ref = excluded.base_ref,
-                        updated_at = excluded.updated_at,
-                        merged_at = excluded.merged_at,
-                        synced_at = excluded.synced_at",
+                    Self::sql(Query::UpsertLivePrState),
                     &[
                         &state.repo_id,
                         &(state.pr_number as i64),
@@ -493,8 +410,7 @@ impl PostgresStore {
             ];
             let updated = client
                 .execute(
-                    "UPDATE wave_runs SET status = $1, error = $2, ended_at = $3
-                     WHERE status = ANY($4)",
+                    Self::sql(Query::FailOrphanedRuns),
                     &[
                         &WaveRunStatus::Failed.as_i32(),
                         &"orphaned: lfd restarted".to_string(),
@@ -512,49 +428,36 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = if let Some(wave_id) = wave_id {
                 client
-                    .query(
-                        "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
-                         FROM stimuli WHERE wave_id = $1 ORDER BY created_at",
-                        &[&wave_id],
-                    )
+                    .query(Self::sql(list_stimuli_query(true)), &[&wave_id])
                     .await?
             } else {
                 client
-                    .query(
-                        "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
-                         FROM stimuli ORDER BY created_at",
-                        &[],
-                    )
+                    .query(Self::sql(list_stimuli_query(false)), &[])
                     .await?
             };
             rows.iter().map(map_stimulus_row).collect()
-        }).await
+        })
+        .await
     }
 
     pub async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
         self.with_client(|client| async move {
             let rows = client
-                .query(
-                    "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
-                     FROM stimuli WHERE kind = $1 ORDER BY created_at",
-                    &[&kind],
-                )
+                .query(Self::sql(Query::ListStimuliByKind), &[&kind])
                 .await?;
             rows.iter().map(map_stimulus_row).collect()
-        }).await
+        })
+        .await
     }
 
     pub async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(
-                    "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled
-                     FROM stimuli WHERE id = $1",
-                    &[&stimulus_id],
-                )
+                .query_opt(Self::sql(Query::GetStimulusById), &[&stimulus_id])
                 .await?;
             row.as_ref().map(map_stimulus_row).transpose()
-        }).await
+        })
+        .await
     }
 
     pub async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
@@ -567,8 +470,7 @@ impl PostgresStore {
 
             client
                 .execute(
-                    "INSERT INTO stimuli (id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    Self::sql(Query::InsertStimulus),
                     &[
                         &stimulus.id,
                         &stimulus.wave_id,
@@ -582,7 +484,8 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
@@ -590,10 +493,7 @@ impl PostgresStore {
             let enabled: i32 = if stimulus.enabled { 1 } else { 0 };
             let updated = client
                 .execute(
-                    "UPDATE stimuli SET
-                        kind = $1, cron = $2, last_main_sha = $3,
-                        last_triggered_at = $4, enabled = $5
-                     WHERE id = $6",
+                    Self::sql(Query::UpdateStimulus),
                     &[
                         &stimulus.kind.as_i32(),
                         &stimulus.cron,
@@ -615,7 +515,7 @@ impl PostgresStore {
     pub async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
         self.with_client(|client| async move {
             client
-                .execute("DELETE FROM stimuli WHERE id = $1", &[&stimulus_id])
+                .execute(Self::sql(Query::DeleteStimulusById), &[&stimulus_id])
                 .await?;
             Ok(())
         })
@@ -625,7 +525,7 @@ impl PostgresStore {
     pub async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let deleted = client
-                .execute("DELETE FROM stimuli WHERE wave_id = $1", &[&wave_id])
+                .execute(Self::sql(Query::DeleteStimuliByWave), &[&wave_id])
                 .await?;
             Ok(deleted as u32)
         })
@@ -638,11 +538,7 @@ impl PostgresStore {
     ) -> StoreResult<Vec<PendingActivation>> {
         self.with_client(|client| async move {
             let rows = client
-                .query(
-                    "SELECT id, wave_id, stimulus_id, from_sha, to_sha, queued_at
-                     FROM pending_activations WHERE wave_id = $1 ORDER BY queued_at",
-                    &[&wave_id],
-                )
+                .query(Self::sql(Query::ListPendingActivationsByWave), &[&wave_id])
                 .await?;
             rows.iter().map(map_pending_activation_row).collect()
         })
@@ -656,8 +552,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO pending_activations (id, wave_id, stimulus_id, from_sha, to_sha, queued_at)
-                     VALUES ($1, $2, $3, $4, $5, $6)",
+                    Self::sql(Query::InsertPendingActivation),
                     &[
                         &activation.id,
                         &activation.wave_id,
@@ -669,7 +564,8 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn update_pending_activation(
@@ -679,7 +575,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let updated = client
                 .execute(
-                    "UPDATE pending_activations SET from_sha = $1, to_sha = $2 WHERE id = $3",
+                    Self::sql(Query::UpdatePendingActivation),
                     &[&activation.from_sha, &activation.to_sha, &activation.id],
                 )
                 .await?;
@@ -695,7 +591,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let deleted = client
                 .execute(
-                    "DELETE FROM pending_activations WHERE wave_id = $1",
+                    Self::sql(Query::DeletePendingActivationsByWave),
                     &[&wave_id],
                 )
                 .await?;
@@ -712,8 +608,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, wave_id, stimulus_id, from_sha, to_sha, queued_at
-                     FROM pending_activations WHERE wave_id = $1 AND stimulus_id = $2",
+                    Self::sql(Query::GetPendingActivationForStimulus),
                     &[&wave_id, &stimulus_id],
                 )
                 .await?;
@@ -730,9 +625,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT id, wave_run_id, step_index, branch_index, status, worktree
-                     FROM fork_runs WHERE wave_run_id = $1 AND step_index = $2
-                     ORDER BY branch_index ASC",
+                    Self::sql(Query::ListForkRuns),
                     &[&wave_run_id, &(step_index as i32)],
                 )
                 .await?;
@@ -745,14 +638,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO fork_runs (id, wave_run_id, step_index, branch_index, status, worktree)
-                     VALUES ($1, $2, $3, $4, $5, $6)
-                     ON CONFLICT(id) DO UPDATE SET
-                         wave_run_id = excluded.wave_run_id,
-                         step_index = excluded.step_index,
-                         branch_index = excluded.branch_index,
-                         status = excluded.status,
-                         worktree = excluded.worktree",
+                    Self::sql(Query::UpsertForkRun),
                     &[
                         &fork_run.id,
                         &fork_run.wave_run_id,
@@ -764,14 +650,15 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(())
-        }).await
+        })
+        .await
     }
 
     pub async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let deleted = client
                 .execute(
-                    "DELETE FROM fork_runs WHERE wave_run_id = $1 AND step_index = $2",
+                    Self::sql(Query::DeleteForkRuns),
                     &[&wave_run_id, &(step_index as i32)],
                 )
                 .await?;
@@ -791,29 +678,20 @@ impl PostgresStore {
         limit: Option<u32>,
     ) -> StoreResult<Vec<Agent>> {
         self.with_client(|client| async move {
-            let mut query = String::from(
-                "SELECT id, step, repo, worktree, wave_run_id, status,
-                        started_at, ended_at, pid, container_id, model, run_mode
-                 FROM agents",
-            );
+            let query = Self::sql(list_agent_history_query(
+                worktree.is_some(),
+                repo.is_some(),
+                limit.is_some(),
+            ));
             let mut params: Vec<Box<dyn ToSql + Sync + Send>> = Vec::new();
-            let mut where_clauses = Vec::new();
 
             if let Some(worktree) = worktree {
-                where_clauses.push(format!("worktree = ${}", params.len() + 1));
                 params.push(Box::new(worktree.to_string()));
             }
             if let Some(repo) = repo {
-                where_clauses.push(format!("repo = ${}", params.len() + 1));
                 params.push(Box::new(repo.to_string()));
             }
-            if !where_clauses.is_empty() {
-                query.push_str(" WHERE ");
-                query.push_str(&where_clauses.join(" AND "));
-            }
-            query.push_str(" ORDER BY started_at DESC");
             if let Some(limit) = limit {
-                query.push_str(&format!(" LIMIT ${}", params.len() + 1));
                 params.push(Box::new(limit as i64));
             }
 
@@ -821,7 +699,7 @@ impl PostgresStore {
                 .iter()
                 .map(|v| v.as_ref() as &(dyn ToSql + Sync))
                 .collect();
-            let rows = client.query(&query, &params_ref).await?;
+            let rows = client.query(query, &params_ref).await?;
             rows.iter().map(map_agent_row).collect()
         })
         .await
@@ -830,12 +708,7 @@ impl PostgresStore {
     pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(
-                    "SELECT id, step, repo, worktree, wave_run_id, status,
-                            started_at, ended_at, pid, container_id, model, run_mode
-                     FROM agents WHERE id = $1",
-                    &[&agent_id],
-                )
+                .query_opt(Self::sql(Query::GetAgentById), &[&agent_id])
                 .await?;
             row.as_ref().map(map_agent_row).transpose()
         })
@@ -846,11 +719,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
-                            a.started_at, a.ended_at, a.pid, a.container_id, a.model, a.run_mode
-                     FROM agents a JOIN wave_runs r ON a.wave_run_id = r.id
-                     WHERE r.wave_id = $1 AND a.status = $2
-                     ORDER BY a.started_at DESC LIMIT 1",
+                    Self::sql(Query::GetWaitingAgentForWave),
                     &[&wave_id, &AgentStatus::Waiting.as_i32()],
                 )
                 .await?;
@@ -870,10 +739,7 @@ impl PostgresStore {
             let container_id = agent.container_id.as_deref();
             client
                 .execute(
-                    "INSERT INTO agents (
-                        id, step, repo, worktree, wave_run_id, status, started_at,
-                        ended_at, pid, container_id, model, run_mode
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                    Self::sql(Query::InsertAgent),
                     &[
                         &agent.id,
                         &agent.step,
@@ -907,11 +773,7 @@ impl PostgresStore {
             let container_id = container_id.map(str::to_string);
             let updated = client
                 .execute(
-                    "UPDATE agents
-                     SET status = $1,
-                         pid = COALESCE($2, pid),
-                         container_id = COALESCE($3, container_id)
-                     WHERE id = $4",
+                    Self::sql(Query::UpdateAgentStatus),
                     &[&status, &pid, &container_id, &agent_id],
                 )
                 .await?;
@@ -926,10 +788,7 @@ impl PostgresStore {
     pub async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
         self.with_client(|client| async move {
             let updated = client
-                .execute(
-                    "UPDATE agents SET status = $1, ended_at = $2 WHERE id = $3",
-                    &[&status, &ended_at, &agent_id],
-                )
+                .execute(Self::sql(Query::EndAgent), &[&status, &ended_at, &agent_id])
                 .await?;
             if updated == 0 {
                 return Err(StoreError::NotFound);
@@ -942,14 +801,7 @@ impl PostgresStore {
     pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
         self.with_client(|client| async move {
             let rows = client
-                .query(
-                    "SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
-                            a.started_at, a.ended_at, a.pid, a.container_id, a.model, a.run_mode
-                     FROM agents a JOIN wave_runs r ON a.wave_run_id = r.id
-                     WHERE r.wave_id = $1 AND a.ended_at IS NULL
-                     ORDER BY a.started_at DESC",
-                    &[&wave_id],
-                )
+                .query(Self::sql(Query::GetActiveAgentsForWave), &[&wave_id])
                 .await?;
             rows.iter().map(map_agent_row).collect()
         })
@@ -965,9 +817,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let updated = client
                 .execute(
-                    "UPDATE agents SET status = $1, ended_at = $2
-                     WHERE wave_run_id IN (SELECT id FROM wave_runs WHERE wave_id = $3)
-                     AND ended_at IS NULL",
+                    Self::sql(Query::EndActiveAgentsForWave),
                     &[&status, &ended_at, &wave_id.as_str()],
                 )
                 .await?;
@@ -983,13 +833,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let cutoff = now_unix() - older_than_secs as i64;
             let rows = client
-                .query(
-                    "SELECT id, step, repo, worktree, wave_run_id, status,
-                            started_at, ended_at, pid, container_id, model, run_mode
-                     FROM agents WHERE ended_at IS NULL AND started_at <= $1
-                     ORDER BY started_at ASC",
-                    &[&cutoff],
-                )
+                .query(Self::sql(Query::GetStuckAgents), &[&cutoff])
                 .await?;
             rows.iter().map(map_agent_row).collect()
         })
@@ -999,11 +843,7 @@ impl PostgresStore {
     pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(
-                    "SELECT id, wave_id, content, source_hash, token_budget, model, created_at
-                     FROM summaries WHERE wave_id = $1",
-                    &[&wave_id],
-                )
+                .query_opt(Self::sql(Query::GetSummaryByWave), &[&wave_id])
                 .await?;
             row.as_ref().map(map_summary_row).transpose()
         })
@@ -1019,14 +859,7 @@ impl PostgresStore {
 
             client
                 .execute(
-                    "INSERT INTO summaries (id, wave_id, content, source_hash, token_budget, model, created_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)
-                     ON CONFLICT(wave_id) DO UPDATE SET
-                         content = excluded.content,
-                         source_hash = excluded.source_hash,
-                         token_budget = excluded.token_budget,
-                         model = excluded.model,
-                         created_at = excluded.created_at",
+                    Self::sql(Query::UpsertSummary),
                     &[
                         &summary.id,
                         &summary.wave_id,
@@ -1049,13 +882,7 @@ impl PostgresStore {
     ) -> StoreResult<Vec<ChatMemoryBlock>> {
         self.with_client(|client| async move {
             let rows = client
-                .query(
-                    "SELECT wave_id, name, content, position, updated_at
-                     FROM chat_memory_blocks
-                     WHERE wave_id = $1
-                     ORDER BY position ASC, name ASC",
-                    &[&wave_id],
-                )
+                .query(Self::sql(Query::ListChatMemoryBlocks), &[&wave_id])
                 .await?;
             rows.iter().map(map_chat_memory_block_row).collect()
         })
@@ -1070,12 +897,7 @@ impl PostgresStore {
                 .unwrap_or_else(now_unix);
             client
                 .execute(
-                    "INSERT INTO chat_memory_blocks (wave_id, name, content, position, updated_at)
-                     VALUES ($1, $2, $3, $4, $5)
-                     ON CONFLICT(wave_id, name) DO UPDATE SET
-                         content = excluded.content,
-                         position = excluded.position,
-                         updated_at = excluded.updated_at",
+                    Self::sql(Query::UpsertChatMemoryBlock),
                     &[
                         &block.wave_id,
                         &block.name,
@@ -1094,10 +916,7 @@ impl PostgresStore {
         let name = name.to_string();
         self.with_client(|client| async move {
             client
-                .execute(
-                    "DELETE FROM chat_memory_blocks WHERE wave_id = $1 AND name = $2",
-                    &[&wave_id, &name],
-                )
+                .execute(Self::sql(Query::DeleteChatMemoryBlock), &[&wave_id, &name])
                 .await?;
             Ok(())
         })

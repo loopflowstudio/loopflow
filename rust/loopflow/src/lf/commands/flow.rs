@@ -1,6 +1,6 @@
 use crate::engine::fork::{
-    cleanup_fork_worktrees, fork_worktree_path, merge_directions, resolve_fork_selection,
-    write_fork_manifest, ForkManifestBranch,
+    cleanup_fork_worktrees, fork_worktree_path, plan_fork_execution, write_fork_manifest,
+    ForkManifestBranch,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
@@ -86,44 +86,36 @@ struct ForkBranchTask {
 }
 
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    if fork.branches.is_empty() {
-        return Err(anyhow!("fork has no branches"));
-    }
+    let mut chooser = |prompt: &str, branches: &[crate::engine::ConcreteStep]| {
+        choose_fork_branch(prompt, branches)
+    };
+    let planned = plan_fork_execution(
+        &fork.select,
+        &fork.branches,
+        &cli.direction,
+        if atty::is(atty::Stream::Stdin) {
+            Some(&mut chooser)
+        } else {
+            None
+        },
+    )
+    .map_err(|err| anyhow!(err))?;
 
     if !matches!(fork.select, ForkSelect::All) {
-        let mut chooser = |prompt: &str, branches: &[crate::engine::ConcreteStep]| {
-            choose_fork_branch(prompt, branches)
-        };
-        let selected_index = resolve_fork_selection(
-            &fork.select,
-            &fork.branches,
-            if atty::is(atty::Stream::Stdin) {
-                Some(&mut chooser)
-            } else {
-                None
-            },
-        )
-        .map_err(|err| anyhow!(err))?;
-        let selected = fork
-            .branches
-            .get(selected_index)
+        let selected = planned
+            .first()
             .ok_or_else(|| anyhow!("selected fork branch missing"))?;
-        if selected.step.interactive.unwrap_or(false) {
-            return Err(anyhow!("interactive fork branches are not supported"));
-        }
-        let directions = merge_directions(&cli.direction, &selected.step.directions);
-        let branch_label = format!("fork-{selected_index}");
         let exit_code = run_fork_branch(
             repo,
-            &selected.step.name,
-            &directions,
+            &selected.step.step.name,
+            &selected.directions,
             message,
-            branch_label.as_str(),
+            selected.label.as_str(),
         )?;
         if exit_code != 0 {
             return Err(anyhow!(
                 "fork branch {} exited with {}",
-                selected.step.name,
+                selected.step.step.name,
                 exit_code
             ));
         }
@@ -135,10 +127,10 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     let mut tasks = Vec::new();
     let mut worktrees = Vec::new();
 
-    for (index, branch) in fork.branches.iter().enumerate() {
+    for branch in &planned {
+        let index = branch.index;
         let worktree = fork_worktree_path(repo, index);
         let branch_name = format!("{base_branch}-fork-{index}");
-        let directions = merge_directions(&cli.direction, &branch.step.directions);
         if let Err(err) = create_worktree(repo, &worktree, &branch_name).with_context(|| {
             format!(
                 "failed to create fork worktree {} for branch {}",
@@ -153,8 +145,8 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         worktrees.push(worktree.clone());
         tasks.push(ForkBranchTask {
             index,
-            step_name: branch.step.name.clone(),
-            directions,
+            step_name: branch.step.step.name.clone(),
+            directions: branch.directions.clone(),
             worktree,
             branch_name,
         });

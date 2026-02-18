@@ -26,6 +26,14 @@ pub struct ForkManifestBranch {
     pub exit_code: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkBranchExecutionPlan {
+    pub index: usize,
+    pub label: String,
+    pub step: ConcreteStep,
+    pub directions: Vec<String>,
+}
+
 /// Compute sibling worktree path for a fork branch.
 ///
 /// Given `/tmp/myrepo` and index 2, returns `/tmp/myrepo.fork-2`.
@@ -54,7 +62,7 @@ pub fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
     combined
 }
 
-pub fn resolve_fork_selection(
+fn resolve_fork_selection(
     select: &ForkSelect,
     branches: &[ConcreteStep],
     mut prompt_choice: Option<ForkPromptChooser<'_>>,
@@ -80,6 +88,41 @@ pub fn resolve_fork_selection(
             Ok(selected)
         }
         ForkSelect::All => Err("fork(select=all) does not select a single branch".to_string()),
+    }
+}
+
+pub fn plan_fork_execution(
+    select: &ForkSelect,
+    branches: &[ConcreteStep],
+    base_directions: &[String],
+    prompt_choice: Option<ForkPromptChooser<'_>>,
+) -> Result<Vec<ForkBranchExecutionPlan>, String> {
+    if branches.is_empty() {
+        return Err("fork has no branches".to_string());
+    }
+
+    let build_branch = |index: usize| -> Result<ForkBranchExecutionPlan, String> {
+        let step = branches
+            .get(index)
+            .cloned()
+            .ok_or_else(|| format!("fork selected branch {index}, but it does not exist"))?;
+        if step.step.interactive.unwrap_or(false) {
+            return Err("interactive fork branches are not supported".to_string());
+        }
+        Ok(ForkBranchExecutionPlan {
+            index,
+            label: format!("fork-{index}"),
+            directions: merge_directions(base_directions, &step.step.directions),
+            step,
+        })
+    };
+
+    match select {
+        ForkSelect::All => (0..branches.len()).map(build_branch).collect(),
+        ForkSelect::One | ForkSelect::Prompt { .. } => {
+            let index = resolve_fork_selection(select, branches, prompt_choice)?;
+            Ok(vec![build_branch(index)?])
+        }
     }
 }
 
@@ -227,5 +270,29 @@ mod tests {
         )
         .expect("prompt select");
         assert_eq!(selected, 2);
+    }
+
+    #[test]
+    fn plan_fork_execution_all_returns_labeled_branches() {
+        let branches = vec![branch("a"), branch("b")];
+        let base = vec!["base".to_string()];
+        let planned =
+            plan_fork_execution(&ForkSelect::All, &branches, &base, None).expect("planned");
+        assert_eq!(planned.len(), 2);
+        assert_eq!(planned[0].label, "fork-0");
+        assert_eq!(planned[0].directions, vec!["base".to_string()]);
+    }
+
+    #[test]
+    fn plan_fork_execution_rejects_interactive_branch() {
+        let mut step = Step::named("a");
+        step.interactive = Some(true);
+        let branches = vec![ConcreteStep {
+            step,
+            flow_parents: Vec::new(),
+        }];
+        let err = plan_fork_execution(&ForkSelect::All, &branches, &[], None)
+            .expect_err("interactive branch should fail");
+        assert_eq!(err, "interactive fork branches are not supported");
     }
 }

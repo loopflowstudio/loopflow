@@ -20,19 +20,16 @@ use crate::lfd::executor::CiFailure;
 impl WaveExecutor {
     pub async fn spawn_ci_fix_agent(&self, failure: &CiFailure) -> Result<()> {
         let sidecar_run_id = LfdId::new();
-        let (acquired, reason) = self.scheduler.acquire(sidecar_run_id.as_str()).await;
-        if !acquired {
-            return Err(anyhow!(
-                "scheduler at capacity, cannot start CI fix agent: {}",
-                reason.unwrap_or_else(|| "no slots available".to_string())
-            ));
-        }
+        let _slot_guard = self
+            .scheduler
+            .acquire_guard(sidecar_run_id.as_str())
+            .await
+            .map_err(|reason| {
+                anyhow!("scheduler at capacity, cannot start CI fix agent: {reason}")
+            })?;
 
-        let result = self
-            .run_ci_fix_agent_with_slot(failure, &sidecar_run_id)
-            .await;
-        self.scheduler.release(sidecar_run_id.as_str());
-        result
+        self.run_ci_fix_agent_with_slot(failure, &sidecar_run_id)
+            .await
     }
 
     async fn run_ci_fix_agent_with_slot(

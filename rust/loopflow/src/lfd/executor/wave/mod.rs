@@ -218,7 +218,7 @@ impl WaveExecutor {
         let mut removed_worktrees = 0u32;
         let mut stale_groups = HashSet::new();
         for fork_run in &orphaned_runs {
-            stale_groups.insert((fork_run.wave_run_id.to_string(), fork_run.step_index));
+            stale_groups.insert((fork_run.wave_run_id.clone(), fork_run.step_index));
 
             let worktree_path = Path::new(&fork_run.worktree);
             if !worktree_path.join(".git").exists() {
@@ -237,8 +237,7 @@ impl WaveExecutor {
 
         let mut cleaned_runs = 0u32;
         for (wave_run_id, step_index) in stale_groups {
-            let run_id = LfdId::from_raw(&wave_run_id);
-            match self.store.delete_fork_runs(&run_id, step_index).await {
+            match self.store.delete_fork_runs(&wave_run_id, step_index).await {
                 Ok(deleted) => cleaned_runs += deleted,
                 Err(err) => warn!(
                     wave_run_id = %wave_run_id,

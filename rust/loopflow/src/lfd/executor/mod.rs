@@ -26,6 +26,27 @@ pub struct AgentRunContext<'a> {
     pub output_prefix: Option<&'a str>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct OutputContext {
+    pub(crate) wave_id: String,
+    pub(crate) wave_run_id: String,
+    pub(crate) agent_id: String,
+    pub(crate) output: OutputHub,
+    pub(crate) output_prefix: Option<String>,
+}
+
+impl<'a> From<AgentRunContext<'a>> for OutputContext {
+    fn from(context: AgentRunContext<'a>) -> Self {
+        Self {
+            wave_id: context.wave_id.to_string(),
+            wave_run_id: context.wave_run_id.to_string(),
+            agent_id: context.agent_id.to_string(),
+            output: context.output.clone(),
+            output_prefix: context.output_prefix.map(str::to_string),
+        }
+    }
+}
+
 #[async_trait]
 pub trait AgentExecutor: Send + Sync {
     async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32>;
@@ -84,36 +105,16 @@ pub struct CiFailure {
 
 pub(crate) async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
     reader: R,
-    output: OutputHub,
-    wave_id: String,
-    wave_run_id: String,
-    agent_id: String,
-    output_prefix: Option<String>,
+    context: OutputContext,
 ) {
     let mut parser = StreamParser::new();
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        handle_output_line(
-            &line,
-            &mut parser,
-            &output,
-            &wave_id,
-            &wave_run_id,
-            &agent_id,
-            output_prefix.as_deref(),
-        );
+        handle_output_line(&line, &mut parser, &context);
     }
 }
 
-pub(crate) fn handle_output_line(
-    line: &str,
-    parser: &mut StreamParser,
-    output: &OutputHub,
-    wave_id: &str,
-    wave_run_id: &str,
-    agent_id: &str,
-    output_prefix: Option<&str>,
-) {
+pub(crate) fn handle_output_line(line: &str, parser: &mut StreamParser, context: &OutputContext) {
     match parser.feed_line(line) {
         ParseResult::Events(events) => {
             for event in &events {
@@ -121,41 +122,27 @@ pub(crate) fn handle_output_line(
                 let text = if !stdout.is_empty() { stdout } else { stderr };
                 let text = text.trim_end_matches('\n').to_string();
                 if !text.is_empty() {
-                    send_output(output, wave_id, wave_run_id, agent_id, text, output_prefix);
+                    send_output(context, text);
                 }
             }
         }
         ParseResult::Skipped => {}
         ParseResult::Passthrough => {
-            send_output(
-                output,
-                wave_id,
-                wave_run_id,
-                agent_id,
-                line.to_string(),
-                output_prefix,
-            );
+            send_output(context, line.to_string());
         }
     }
 }
 
-fn send_output(
-    output: &OutputHub,
-    wave_id: &str,
-    wave_run_id: &str,
-    agent_id: &str,
-    text: String,
-    output_prefix: Option<&str>,
-) {
-    let text = if let Some(prefix) = output_prefix {
+fn send_output(context: &OutputContext, text: String) {
+    let text = if let Some(prefix) = context.output_prefix.as_deref() {
         format!("{prefix}{text}")
     } else {
         text
     };
-    output.send(OutputEvent {
-        wave_id: wave_id.to_string(),
-        wave_run_id: wave_run_id.to_string(),
-        agent_id: agent_id.to_string(),
+    context.output.send(OutputEvent {
+        wave_id: context.wave_id.clone(),
+        wave_run_id: context.wave_run_id.clone(),
+        agent_id: context.agent_id.clone(),
         text,
     });
 }
@@ -197,11 +184,13 @@ mod tests {
 
         read_stream(
             reader,
-            output.clone(),
-            "wave-1".to_string(),
-            "run-1".to_string(),
-            "agent-1".to_string(),
-            None,
+            OutputContext {
+                wave_id: "wave-1".to_string(),
+                wave_run_id: "run-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                output: output.clone(),
+                output_prefix: None,
+            },
         )
         .await;
 
@@ -229,11 +218,13 @@ mod tests {
 
         read_stream(
             reader,
-            output.clone(),
-            "wave-1".to_string(),
-            "run-2".to_string(),
-            "agent-1".to_string(),
-            None,
+            OutputContext {
+                wave_id: "wave-1".to_string(),
+                wave_run_id: "run-2".to_string(),
+                agent_id: "agent-1".to_string(),
+                output: output.clone(),
+                output_prefix: None,
+            },
         )
         .await;
 
@@ -256,11 +247,13 @@ mod tests {
         handle_output_line(
             "plain text line",
             &mut parser,
-            &output,
-            "wave-1",
-            "run-prefix",
-            "agent-1",
-            Some("[fork-0] "),
+            &OutputContext {
+                wave_id: "wave-1".to_string(),
+                wave_run_id: "run-prefix".to_string(),
+                agent_id: "agent-1".to_string(),
+                output: output.clone(),
+                output_prefix: Some("[fork-0] ".to_string()),
+            },
         );
 
         let lines = output

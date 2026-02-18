@@ -31,7 +31,7 @@ use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Agent, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
 
-use super::{handle_output_line, AgentExecutor, AgentRunContext, StartupRecovery};
+use super::{handle_output_line, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
 
 #[derive(Clone)]
 pub struct DockerExecutor {
@@ -533,11 +533,13 @@ impl DockerExecutor {
         let exit_code = self
             .wait_for_container_with_logs(
                 &container_id,
-                output,
-                wave_id.as_str(),
-                wave_run_id.as_str(),
-                agent.id.as_str(),
-                None,
+                OutputContext {
+                    wave_id: wave_id.to_string(),
+                    wave_run_id: wave_run_id.to_string(),
+                    agent_id: agent.id.to_string(),
+                    output: output.clone(),
+                    output_prefix: None,
+                },
             )
             .await;
 
@@ -784,20 +786,12 @@ impl DockerExecutor {
     async fn wait_for_container_with_logs(
         &self,
         container_id: &str,
-        output: &OutputHub,
-        wave_id: &str,
-        wave_run_id: &str,
-        agent_id: &str,
-        output_prefix: Option<&str>,
+        context: OutputContext,
     ) -> Result<i32> {
         let logs_task = tokio::spawn(Self::stream_logs(
             self.docker.clone(),
             container_id.to_string(),
-            output.clone(),
-            wave_id.to_string(),
-            wave_run_id.to_string(),
-            agent_id.to_string(),
-            output_prefix.map(str::to_string),
+            context,
         ));
 
         let mut wait_stream = self
@@ -829,15 +823,7 @@ impl DockerExecutor {
         }
     }
 
-    async fn stream_logs(
-        docker: Docker,
-        container_id: String,
-        output: OutputHub,
-        wave_id: String,
-        wave_run_id: String,
-        agent_id: String,
-        output_prefix: Option<String>,
-    ) {
+    async fn stream_logs(docker: Docker, container_id: String, context: OutputContext) {
         let mut logs = docker.logs(&container_id, Some(logs_options(true)));
 
         let mut parser = StreamParser::new();
@@ -856,15 +842,7 @@ impl DockerExecutor {
                         if line.ends_with('\r') {
                             line.pop();
                         }
-                        handle_output_line(
-                            &line,
-                            &mut parser,
-                            &output,
-                            &wave_id,
-                            &wave_run_id,
-                            &agent_id,
-                            output_prefix.as_deref(),
-                        );
+                        handle_output_line(&line, &mut parser, &context);
                     }
                 }
                 Err(err) => {
@@ -876,15 +854,7 @@ impl DockerExecutor {
         }
 
         if !pending.is_empty() {
-            handle_output_line(
-                &pending,
-                &mut parser,
-                &output,
-                &wave_id,
-                &wave_run_id,
-                &agent_id,
-                output_prefix.as_deref(),
-            );
+            handle_output_line(&pending, &mut parser, &context);
         }
     }
 
@@ -1542,6 +1512,7 @@ impl AgentExecutor for DockerExecutor {
             return Err(anyhow!("empty agent command"));
         }
 
+        let output_context: OutputContext = context.into();
         let workspace = self
             .resolve_workspace(context.wave_id, context.wave_run_id)
             .await?;
@@ -1607,14 +1578,7 @@ impl AgentExecutor for DockerExecutor {
         }
 
         let exit_code = self
-            .wait_for_container_with_logs(
-                &container_id,
-                context.output,
-                context.wave_id,
-                context.wave_run_id,
-                context.agent_id,
-                context.output_prefix,
-            )
+            .wait_for_container_with_logs(&container_id, output_context)
             .await;
         self.active.lock().await.remove(context.agent_id);
         self.remove_container(&container_id).await;

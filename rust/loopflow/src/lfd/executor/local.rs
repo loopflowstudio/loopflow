@@ -14,7 +14,7 @@ use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::AgentStatus;
 
-use super::{read_stream, AgentExecutor, AgentRunContext, StartupRecovery};
+use super::{read_stream, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
 
 pub struct LocalProcessExecutor {
     store: SharedStore,
@@ -46,10 +46,7 @@ impl AgentExecutor for LocalProcessExecutor {
         }
 
         let agent_id_string = context.agent_id.to_string();
-        let wave_id = context.wave_id.to_string();
-        let wave_run_id = context.wave_run_id.to_string();
-        let output_prefix = context.output_prefix.map(str::to_string);
-        let output = context.output.clone();
+        let output_context: OutputContext = context.into();
         let mut command = Command::new(&cmd[0]);
         command.args(&cmd[1..]);
         command.current_dir(cwd);
@@ -85,22 +82,8 @@ impl AgentExecutor for LocalProcessExecutor {
             .take()
             .ok_or_else(|| anyhow!("missing stderr"))?;
 
-        let stdout_task = tokio::spawn(read_stream(
-            stdout,
-            output.clone(),
-            wave_id.clone(),
-            wave_run_id.clone(),
-            agent_id_string.clone(),
-            output_prefix.clone(),
-        ));
-        let stderr_task = tokio::spawn(read_stream(
-            stderr,
-            output,
-            wave_id,
-            wave_run_id,
-            agent_id_string.clone(),
-            output_prefix,
-        ));
+        let stdout_task = tokio::spawn(read_stream(stdout, output_context.clone()));
+        let stderr_task = tokio::spawn(read_stream(stderr, output_context));
 
         let status = match tokio::time::timeout(self.agent_timeout, child.wait()).await {
             Ok(result) => result?,

@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -122,7 +122,8 @@ impl RawLfdConfig {
         if let Ok(value) = std::env::var("LFD_EXECUTOR_AGENT_TIMEOUT") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                self.executor.agent_timeout = parse_duration_str(trimmed)?;
+                self.executor.agent_timeout =
+                    parse_agent_timeout_duration(trimmed).map_err(|err| anyhow!(err))?;
             }
         }
 
@@ -392,9 +393,14 @@ fn default_agent_timeout() -> Duration {
     Duration::from_secs(DEFAULT_AGENT_TIMEOUT_SECS)
 }
 
-fn parse_duration_str(raw: &str) -> Result<Duration> {
-    humantime::parse_duration(raw)
-        .with_context(|| format!("invalid duration '{raw}' for executor.agent_timeout"))
+fn parse_agent_timeout_duration(raw: &str) -> std::result::Result<Duration, String> {
+    let trimmed = raw.trim();
+    humantime::parse_duration(trimmed).map_err(|err| {
+        format!(
+            "invalid duration '{}' for executor.agent_timeout: {}",
+            raw, err
+        )
+    })
 }
 
 fn deserialize_duration<'de, D>(deserializer: D) -> std::result::Result<Duration, D::Error>
@@ -410,12 +416,9 @@ where
 
     let value = DurationValue::deserialize(deserializer)?;
     match value {
-        DurationValue::String(raw) => humantime::parse_duration(raw.trim()).map_err(|err| {
-            serde::de::Error::custom(format!(
-                "invalid duration '{}' for executor.agent_timeout: {}",
-                raw, err
-            ))
-        }),
+        DurationValue::String(raw) => {
+            parse_agent_timeout_duration(raw.as_str()).map_err(serde::de::Error::custom)
+        }
         DurationValue::Seconds(seconds) => Ok(Duration::from_secs(seconds)),
     }
 }

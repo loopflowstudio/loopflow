@@ -241,6 +241,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return try await performRequest(request, useLongTimeouts: useLongTimeouts)
     }
 
+    private func waveURL(_ waveId: String, components: String...) -> URL {
+        components.reduce(
+            apiBaseURL
+                .appendingPathComponent("waves")
+                .appendingPathComponent(waveId)
+        ) { url, component in
+            url.appendingPathComponent(component)
+        }
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.
@@ -696,7 +706,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
-        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/memory-blocks")
+        let url = waveURL(waveId, components: "memory-blocks")
         let request = try makeRequest(url)
 
         let (data, response) = try await performRequest(request)
@@ -718,11 +728,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         content: String,
         position: Int?
     ) async throws -> ChatMemoryBlock {
-        let url = apiBaseURL
-            .appendingPathComponent("waves")
-            .appendingPathComponent(waveId)
-            .appendingPathComponent("memory-blocks")
-            .appendingPathComponent(name)
+        let url = waveURL(waveId, components: "memory-blocks", name)
 
         var body: [String: Any] = ["content": content]
         if let position { body["position"] = position }
@@ -746,16 +752,103 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func deleteMemoryBlock(waveId: String, name: String) async throws {
-        let url = apiBaseURL
-            .appendingPathComponent("waves")
-            .appendingPathComponent(waveId)
-            .appendingPathComponent("memory-blocks")
-            .appendingPathComponent(name)
+        let url = waveURL(waveId, components: "memory-blocks", name)
 
         let request = try makeRequest(url, method: "DELETE")
         let (data, response) = try await performRequest(request)
         guard response.statusCode == 200 else {
             throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+    }
+
+    public func startChat(
+        waveId: String,
+        message: String
+    ) async throws {
+        let url = waveURL(waveId, components: "chat")
+
+        let body: [String: Any] = [
+            "message": message,
+        ]
+
+        let request = try makeRequest(
+            url,
+            method: "POST",
+            body: body,
+            contentType: "application/json"
+        )
+
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+    }
+
+    public func listChatMessages(waveId: String) async throws -> [ChatMessageRecord] {
+        let url = waveURL(waveId, components: "chat", "messages")
+        let request = try makeRequest(url)
+
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return rows.compactMap { dict in
+            guard let id = dict["id"] as? String,
+                  let role = dict["role"] as? String,
+                  let content = dict["content"] as? String else { return nil }
+            return ChatMessageRecord(
+                id: id,
+                role: role,
+                content: content,
+                createdAt: Self.parseDate(dict["created_at"])
+            )
+        }
+    }
+
+    public func streamChatEvents(
+        waveId: String
+    ) -> AsyncThrowingStream<ChatTurnEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                let activeSession = longSession()
+                do {
+                    let url = waveURL(waveId, components: "chat", "events")
+                    let request = try makeRequest(url)
+                    let (bytes, response) = try await activeSession.session.bytes(for: request)
+
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        throw WaveServiceError.commandFailed("No response from lfd")
+                    }
+
+                    guard httpResponse.statusCode == 200 else {
+                        var data = Data()
+                        for try await byte in bytes {
+                            data.append(byte)
+                        }
+                        throw parseStatusCodeError(statusCode: httpResponse.statusCode, data: data)
+                    }
+
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data:") else { continue }
+                        let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                        guard !payload.isEmpty else { continue }
+                        let event = try Self.parseChatTurnEvent(payload)
+                        continuation.yield(event)
+                        if event.isTerminal {
+                            break
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: mapError(error, trustDelegate: activeSession.delegate))
+                }
+            }
         }
     }
 
@@ -1052,6 +1145,37 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             position: normalizeInt(json["position"]),
             updatedAt: parseDate(json["updated_at"])
         )
+    }
+
+    private static func parseChatTurnEvent(_ raw: String) throws -> ChatTurnEvent {
+        guard let data = raw.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else {
+            throw WaveServiceError.commandFailed("Invalid chat event payload")
+        }
+
+        switch type {
+        case "message":
+            let content = json["content"] as? String ?? ""
+            let phaseRaw = json["phase"] as? String
+            let phase = ChatTurnPhase(rawValue: phaseRaw ?? "") ?? .progress
+            return .message(content: content, phase: phase)
+        case "memory_edit":
+            return .memoryEdit(
+                op: json["op"] as? String ?? "upsert",
+                block: json["block"] as? String ?? "",
+                detail: json["detail"] as? String ?? ""
+            )
+        case "done":
+            return .done
+        case "failed":
+            return .failed(
+                code: json["code"] as? String ?? "failed",
+                message: json["message"] as? String ?? "Turn failed"
+            )
+        default:
+            throw WaveServiceError.commandFailed("Unknown chat event type: \(type)")
+        }
     }
 
     private static func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {

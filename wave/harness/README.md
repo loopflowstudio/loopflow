@@ -1,6 +1,6 @@
 # Harness Roadmap
 
-Two systems that work together: a **chat system** (the product — users send messages, see responses, manage memory) and an **agent harness** (the runtime — manages turns, tools, context windows, notifies consumers via events). Building both in parallel makes the boundary between them tangible rather than theoretical.
+Two systems that work together: a **chat system** (the product — users send messages, see responses, manage memory) and an **agent harness** (the runtime — manages turns, tools, context windows, notifies consumers via events). Built in parallel to make the boundary tangible rather than theoretical. Both tracks are now proven (A2, B2 shipped); the remaining work is integration (B3).
 
 The chat system is one consumer of the harness. The harness doesn't know about UI. The chat system doesn't know about context windows.
 
@@ -47,13 +47,11 @@ A simple chat product that calls LLMs, manages memory, shows conversation.
 
 Moved to `scratch/harness-a1-single-shot-chat.md` for implementation.
 
-#### A2 — Multi-turn with harness events
+#### A2 — Multi-turn with harness events ✓
 
-Replace the direct LLM call with the agent harness. The chat system receives `send_message` events instead of raw responses. Memory edits come as tool call requests from the harness.
+Shipped. Chat turns now route through lfd (`POST /waves/:wave_id/chat`) and stream events via SSE (`GET /waves/:wave_id/chat/events`). `ChatState` in Concerto is an event consumer/state machine (`idle → running → completed|failed`). Assistant text renders only from harness `send_message` events. Wave-scoped memory blocks persist in SQLite/Postgres with full CRUD APIs. `turn::run_with_event_handler()` emits `AgentEvent`s live during execution.
 
-**What we'll learn:** Whether the harness boundary feels right. Whether `send_message` as a tool call (vs streaming) is the right UX.
-
-**Checkpoint:** Same UX as A1, but now powered by the harness underneath.
+**What we learned:** The harness boundary feels right — routing through `send_message` events works as the sole UI output mechanism. The UX without streaming tokens is acceptable; the event-driven approach (progress → final) gives the UI enough to show activity. SSE is the right transport for real-time event delivery. The in-memory turn stream (`HttpState.chat_turns`) works for the happy path but has no TTL/cleanup — this needs addressing before B3 where multiple agent invocations will accumulate streams. Memory ownership confirmed: chat system persists, harness requests edits via tool calls — the boundary is clean.
 
 ### Track B — Agent harness
 
@@ -73,15 +71,21 @@ Shipped. Eleven tools across three tiers: boundary (`send_message`, `memory_edit
 
 #### B3 — Wave integration
 
-The two tracks converge:
-- The chat system provides memory to the harness at session start
-- The harness emits `memory_edit` tool calls back to the chat system
-- lfd spawns and monitors agent processes
-- Events stream to consumers
+The two tracks converge. A2 shipped the plumbing (lfd orchestrates turns, SSE streams events, memory persists) — B3 wires this into the wave lifecycle so multiple agent invocations share memory across a wave run.
+
+Remaining work:
+- lfd seeds harness context from wave memory blocks at turn start
+- Memory blocks carry forward across invocations within a wave run
+- Turn stream lifecycle management (TTL/cleanup for in-memory `HttpState.chat_turns`)
+- Approval flow for `memory_edit` events (currently auto-applied)
+
+**Resolved questions:**
+- What crosses the invocation boundary? Memory blocks — A2 shipped the persistence layer (`007_chat_memory_blocks.sql`) and CRUD APIs. The harness reads them at turn start, requests edits via tool calls.
+- Does the harness need to know it's in a wave? No — confirmed by both B2 and A2. lfd provides memory and prompt; the harness runs a turn and emits events.
 
 **Open questions:**
-- What exactly crosses the invocation boundary? Memory blocks only? Or also a summary? (B2 answered the shape: `ContextStore` is `HashMap<String, String>` with token counting. The chat system seeds it from memory. Whether it also includes a summary is a chat system design question, not a harness question.)
-- Does the harness need to know it's in a wave, or is it always just "run this prompt with these tools and this memory"? (B2 confirmed: the harness doesn't know. `TurnConfig` takes a prompt, tools, and config. The consumer decides what to provide.)
+- Should chat turn streams persist across lfd restarts? Currently in-memory only. For single-turn chat this is fine, but wave runs spanning hours may need bounded persistence for restart resilience.
+- What's the approval UX for `memory_edit`? Auto-apply (current) vs. user confirms before persisting.
 
 **Checkpoint:** A wave runs multiple agent invocations. Memory carries forward via the chat system. lfd orchestrates it.
 
@@ -90,13 +94,11 @@ The two tracks converge:
 - Model abstraction (extract `Model` trait when we add a second provider)
 - Compaction/summarization (when context gets too large within a session)
 - MemGPT-style memory policies (evidence-based experiment harness)
-- Swift viewer UI
-- E2E hardening
+- E2E hardening (chat turn lifecycle, SSE reconnect, memory consistency across failures)
 
 ## What might change
 
-- **`send_message` as a tool call** works well from the harness side — the model calls it naturally, the completion contract validates cleanly. The real test is still A2: does a UI that consumes `send_message` events feel responsive enough without streaming tokens?
-- **Memory ownership** (chat system vs harness) might need to shift if the agent needs to update memory autonomously.
-- **Track A is no longer blocked.** B2 shipped the harness surface that A2 needs to integrate with. A2 can proceed whenever.
-- **The two-track approach itself** might collapse into one track if we discover the boundary is in the wrong place. (B2 evidence: the boundary feels right. Boundary tools emit events, internal tools don't. The registry tiers keep concerns separate.)
+- **In-memory turn streams** are the main operational risk for B3. A2's `HttpState.chat_turns` HashMap works for single turns but has no eviction. Wave runs with many invocations will accumulate unbounded state. Options: TTL-based eviction, bounded ring buffer, or persist to SQLite and evict from memory.
+- **Memory ownership** held up through A2 — the chat system persists, the harness requests edits. But auto-applying `memory_edit` without user approval may not survive real usage. B3 should decide: always auto-apply, always confirm, or let the wave config choose.
 - **Sync tool dispatch** works for B2 but shell commands that block for 30s may need async dispatch in B3. The `Tool` trait is sync (`fn call`) — changing to async would touch every tool impl.
+- **The two-track approach collapses into one.** A2 and B2 are both shipped; B3 is where they converge. The separation was useful for building the boundary — both sides are now proven and the remaining work is integration, not parallel discovery.

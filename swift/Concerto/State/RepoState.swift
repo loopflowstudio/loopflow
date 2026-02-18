@@ -90,7 +90,7 @@ final class RepoState {
         if let state = chatStates[waveId] {
             return state
         }
-        let state = ChatState(waveId: waveId)
+        let state = ChatState(waveId: waveId, waveService: waveService)
         chatStates[waveId] = state
         return state
     }

@@ -15,20 +15,18 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    chat_memory_block_dto, stimulus_dto, stimulus_kind_str, ChatMemoryBlockDto, CombineResponse,
-    CombineResponseResult, ContinueWaveResponse, DeletedResourceResponse, ErrorResponse,
-    LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse, RunWaveResponse,
-    StopWaveResponse, WaveDto,
+    stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
+    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
+    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
-use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
+use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
-    AgentStatus, ChatMemoryBlock, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
-    WaveStatus,
+    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -116,12 +114,6 @@ pub struct RunWaveRequest {
 pub struct AddStimulusRequest {
     kind: StimulusKind,
     cron: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpsertMemoryBlockRequest {
-    content: String,
-    position: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -678,106 +670,6 @@ pub async fn list_stimuli_handler(
     Ok(Json(serde_json::json!({ "data": dtos })))
 }
 
-pub async fn list_memory_blocks_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<ListResponse<ChatMemoryBlockDto>> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    let blocks = state
-        .store
-        .list_chat_memory_blocks(&wave_id)
-        .await
-        .map_err(map_store_error)?;
-
-    let dtos = blocks.into_iter().map(chat_memory_block_dto).collect();
-    Ok(Json(ListResponse::new(dtos, false)))
-}
-
-pub async fn upsert_memory_block_handler(
-    State(state): State<HttpState>,
-    Path((wave_id, name)): Path<(String, String)>,
-    Json(payload): Json<UpsertMemoryBlockRequest>,
-) -> ApiResult<ChatMemoryBlockDto> {
-    let name = normalized_memory_block_name(name)?;
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let content = payload.content;
-
-    let position = match payload.position {
-        Some(position) => position,
-        None => {
-            let existing = state
-                .store
-                .list_chat_memory_blocks(&wave_id)
-                .await
-                .map_err(map_store_error)?;
-
-            default_memory_block_position(&existing, &name)
-        }
-    };
-
-    let block = ChatMemoryBlock {
-        wave_id: wave_id.clone(),
-        name: name.clone(),
-        content,
-        position,
-        updated_at: Some(OffsetDateTime::now_utc()),
-    };
-
-    state
-        .store
-        .upsert_chat_memory_block(&block)
-        .await
-        .map_err(map_store_error)?;
-
-    Ok(Json(chat_memory_block_dto(block)))
-}
-
-pub async fn delete_memory_block_handler(
-    State(state): State<HttpState>,
-    Path((wave_id, name)): Path<(String, String)>,
-) -> ApiResult<DeletedResourceResponse> {
-    let name = normalized_memory_block_name(name)?;
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    state
-        .store
-        .delete_chat_memory_block(&wave_id, &name)
-        .await
-        .map_err(map_store_error)?;
-
-    Ok(Json(DeletedResourceResponse {
-        id: name,
-        object: "memory_block".to_string(),
-        deleted: true,
-    }))
-}
-
-fn normalized_memory_block_name(name: String) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
-    let trimmed = name.trim().to_string();
-    if trimmed.is_empty() {
-        Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "memory block name cannot be empty",
-        ))
-    } else {
-        Ok(trimmed)
-    }
-}
-
-fn default_memory_block_position(existing: &[ChatMemoryBlock], name: &str) -> u32 {
-    if let Some(block) = existing.iter().find(|block| block.name == name) {
-        return block.position;
-    }
-
-    existing
-        .iter()
-        .map(|block| block.position)
-        .max()
-        .map(|max_position| max_position.saturating_add(1))
-        .unwrap_or(0)
-}
-
 pub async fn stop_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -1151,8 +1043,6 @@ async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, 
     Ok((wave, work_dir))
 }
 
-type ApiError = (StatusCode, Json<ErrorResponse>);
-
 async fn resolve_wave_work_dir_for_api(
     repo_path: String,
     wave_name: String,
@@ -1300,7 +1190,6 @@ fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::id::LfdId;
 
     #[test]
     fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
@@ -1323,55 +1212,5 @@ mod tests {
         let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
         assert_eq!(parsed.0, StimulusKind::Cron);
         assert_eq!(parsed.1, "0 8 * * *");
-    }
-
-    #[test]
-    fn normalized_memory_block_name_rejects_whitespace() {
-        let result = normalized_memory_block_name("   ".to_string());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn normalized_memory_block_name_trims_surrounding_whitespace() {
-        let result = normalized_memory_block_name("  project-context  ".to_string())
-            .expect("name should normalize");
-        assert_eq!(result, "project-context");
-    }
-
-    #[test]
-    fn default_memory_block_position_keeps_existing_position() {
-        let existing = vec![ChatMemoryBlock {
-            wave_id: LfdId::from_raw("wave-1"),
-            name: "project-context".to_string(),
-            content: "repo context".to_string(),
-            position: 4,
-            updated_at: None,
-        }];
-
-        let position = default_memory_block_position(&existing, "project-context");
-        assert_eq!(position, 4);
-    }
-
-    #[test]
-    fn default_memory_block_position_appends_after_highest_position() {
-        let existing = vec![
-            ChatMemoryBlock {
-                wave_id: LfdId::from_raw("wave-1"),
-                name: "first".to_string(),
-                content: "a".to_string(),
-                position: 0,
-                updated_at: None,
-            },
-            ChatMemoryBlock {
-                wave_id: LfdId::from_raw("wave-1"),
-                name: "second".to_string(),
-                content: "b".to_string(),
-                position: 3,
-                updated_at: None,
-            },
-        ];
-
-        let position = default_memory_block_position(&existing, "third");
-        assert_eq!(position, 4);
     }
 }

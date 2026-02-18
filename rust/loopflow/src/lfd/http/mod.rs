@@ -11,7 +11,7 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    flows, hooks, repos, system, wave_runs, wave_schemas, waves, worktrees, ws,
+    chat, flows, hooks, repos, system, wave_runs, wave_schemas, waves, worktrees, ws,
 };
 use crate::lfd::store::StoreError;
 
@@ -50,11 +50,20 @@ pub fn router(state: HttpState) -> Router {
         .route("/waves/:wave_id/stimuli", get(waves::list_stimuli_handler))
         .route(
             "/waves/:wave_id/memory-blocks",
-            get(waves::list_memory_blocks_handler),
+            get(chat::list_memory_blocks_handler),
         )
         .route(
             "/waves/:wave_id/memory-blocks/:name",
-            put(waves::upsert_memory_block_handler).delete(waves::delete_memory_block_handler),
+            put(chat::upsert_memory_block_handler).delete(chat::delete_memory_block_handler),
+        )
+        .route("/waves/:wave_id/chat", post(chat::start_chat_handler))
+        .route(
+            "/waves/:wave_id/chat/events",
+            get(chat::stream_chat_events_handler),
+        )
+        .route(
+            "/waves/:wave_id/chat/messages",
+            get(chat::list_chat_messages_handler),
         )
         .route("/waves/:wave_id/stop", post(waves::stop_wave_handler))
         .route(

@@ -3,7 +3,8 @@ use time::OffsetDateTime;
 
 use crate::lfd::registration::RegistrationState;
 use crate::lfd::types::{
-    ChatMemoryBlock, LivePullRequestState, Stimulus, StimulusKind, WaveRun, WaveRunStatus,
+    ChatMemoryBlock, ChatMessage, LivePullRequestState, Stimulus, StimulusKind, WaveRun,
+    WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -180,6 +181,22 @@ pub struct ChatMemoryBlockDto {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ChatStartedDto {
+    pub object: String,
+    pub wave_id: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChatMessageDto {
+    pub id: String,
+    pub object: String,
+    pub role: String,
+    pub content: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct StopWaveResponse {
     pub stopped: bool,
 }
@@ -331,6 +348,16 @@ pub fn chat_memory_block_dto(block: ChatMemoryBlock) -> ChatMemoryBlockDto {
         content: block.content,
         position: block.position,
         updated_at: format_datetime(block.updated_at),
+    }
+}
+
+pub fn chat_message_dto(message: ChatMessage) -> ChatMessageDto {
+    ChatMessageDto {
+        id: message.id.to_string(),
+        object: "chat_message".to_string(),
+        role: message.role,
+        content: message.content,
+        created_at: format_datetime(Some(message.created_at)),
     }
 }
 

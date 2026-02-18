@@ -42,18 +42,20 @@ pub async fn auth_middleware(
     }
 
     let headers = request.headers();
+    let provided_token = extract_token(headers);
+
     match &state.auth {
         AuthProvider::Local => auth_error(
             StatusCode::FORBIDDEN,
             "remote access requires auth configuration",
         ),
-        AuthProvider::Static { token } => match extract_token(headers) {
+        AuthProvider::Static { token } => match provided_token {
             Some(provided) if constant_time_eq(provided, token) => next.run(request).await,
             Some(_) => auth_error(StatusCode::UNAUTHORIZED, "invalid token"),
             None => auth_error(StatusCode::UNAUTHORIZED, "missing token"),
         },
         AuthProvider::Studio { validator } => {
-            let token = match extract_token(headers) {
+            let token = match provided_token {
                 Some(t) => t,
                 None => {
                     return auth_error(StatusCode::UNAUTHORIZED, "missing connection token");

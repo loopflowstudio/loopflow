@@ -39,15 +39,14 @@ impl Writers {
     }
 
     fn append(&mut self, wave_run_id: &str, line: &str) {
-        if validate_safe_id(wave_run_id).is_err() {
+        let Some(relative) = relative_log_path(wave_run_id) else {
             warn!(wave_run_id = %wave_run_id, "rejecting unsafe wave_run_id for output log");
             return;
-        }
+        };
 
         let file = if let Some(file) = self.files.get_mut(wave_run_id) {
             file
         } else {
-            let relative = PathBuf::from(format!("{wave_run_id}.log"));
             let path = match path_within_root_planned(&self.dir, &relative) {
                 Ok(path) => path,
                 Err(err) => {
@@ -110,8 +109,7 @@ impl OutputHub {
     /// Read the log file for a wave run. Returns lines and the byte offset
     /// at end of read (for dedup with the broadcast stream).
     pub fn read_log(&self, wave_run_id: &str) -> Option<(Vec<String>, u64)> {
-        validate_safe_id(wave_run_id).ok()?;
-        let relative = PathBuf::from(format!("{wave_run_id}.log"));
+        let relative = relative_log_path(wave_run_id)?;
         let path = path_within_root_existing(&self.output_dir, &relative).ok()?;
         let file = File::open(&path).ok()?;
         let metadata = file.metadata().ok()?;
@@ -125,6 +123,11 @@ impl OutputHub {
     pub fn output_dir(&self) -> &Path {
         &self.output_dir
     }
+}
+
+fn relative_log_path(wave_run_id: &str) -> Option<PathBuf> {
+    validate_safe_id(wave_run_id).ok()?;
+    Some(PathBuf::from(format!("{wave_run_id}.log")))
 }
 
 #[cfg(test)]

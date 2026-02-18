@@ -285,7 +285,7 @@ mod tests {
     use super::{storage_config_from_config, LfdConfig, StorageConfig, StorageType};
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
-    use tempfile::tempdir;
+    use tempfile::{tempdir, TempDir};
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -319,14 +319,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn storage_config_defaults_to_sqlite() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+    fn setup_sqlite_env() -> TempDir {
         let home = tempdir().expect("tempdir");
         std::env::set_var("HOME", home.path());
         std::env::remove_var("LFD_DB_PATH");
         std::env::remove_var("LFD_DATABASE_URL");
+        home
+    }
+
+    #[test]
+    fn storage_config_defaults_to_sqlite() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        let home = setup_sqlite_env();
 
         let config =
             storage_config_from_config(&LfdConfig::default()).expect("sqlite default should parse");
@@ -347,10 +352,7 @@ mod tests {
     fn storage_config_honors_relative_db_path_override_for_sqlite() {
         let _lock = env_lock().lock().expect("env lock poisoned");
         let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
-        let home = tempdir().expect("tempdir");
-        std::env::set_var("HOME", home.path());
-        std::env::remove_var("LFD_DB_PATH");
-        std::env::remove_var("LFD_DATABASE_URL");
+        let home = setup_sqlite_env();
         std::fs::create_dir_all(home.path().join(".lf").join("db")).expect("create db dir");
         std::env::set_var("LFD_DB_PATH", "db/custom.db");
 
@@ -373,9 +375,7 @@ mod tests {
     fn storage_config_rejects_absolute_db_path_override_for_sqlite() {
         let _lock = env_lock().lock().expect("env lock poisoned");
         let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
-        let home = tempdir().expect("tempdir");
-        std::env::set_var("HOME", home.path());
-        std::env::remove_var("LFD_DATABASE_URL");
+        let _home = setup_sqlite_env();
         std::env::set_var("LFD_DB_PATH", "/tmp/custom.db");
 
         let err = storage_config_from_config(&LfdConfig::default())

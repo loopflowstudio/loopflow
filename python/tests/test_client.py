@@ -166,7 +166,7 @@ class TestClientResponses:
         client.close()
 
 
-def _mock_token_client(token=None):
+def _mock_token_client(token=None, base_url="http://test"):
     """Create a Client with a mock transport that captures request headers."""
     received_headers = {}
 
@@ -175,9 +175,9 @@ def _mock_token_client(token=None):
         return httpx.Response(200, json={"status": "ok"})
 
     transport = httpx.MockTransport(handler)
-    client = Client(base_url="http://test", token=token)
+    client = Client(base_url=base_url, token=token)
     client._client = httpx.Client(
-        base_url="http://test", transport=transport, headers=client._client.headers,
+        base_url=base_url, transport=transport, headers=client._client.headers,
     )
     return client, received_headers
 
@@ -219,20 +219,9 @@ class TestClientToken:
         token_file.parent.mkdir(parents=True)
         token_file.write_text("file-session-token")
 
-        received_headers = {}
-
-        def handler(request):
-            received_headers.update(dict(request.headers))
-            return httpx.Response(200, json={"status": "ok"})
-
-        client = Client(base_url="http://127.0.0.1:2486")
-        client._client = httpx.Client(
-            base_url="http://127.0.0.1:2486",
-            transport=httpx.MockTransport(handler),
-            headers=client._client.headers,
-        )
+        client, headers = _mock_token_client(base_url="http://127.0.0.1:2486")
         client.health()
-        assert received_headers.get("authorization") == "Bearer file-session-token"
+        assert headers.get("authorization") == "Bearer file-session-token"
         client.close()
 
     def test_session_token_file_not_sent_to_remote_url(self, monkeypatch, tmp_path):
@@ -243,20 +232,9 @@ class TestClientToken:
         token_file.parent.mkdir(parents=True)
         token_file.write_text("file-session-token")
 
-        received_headers = {}
-
-        def handler(request):
-            received_headers.update(dict(request.headers))
-            return httpx.Response(200, json={"status": "ok"})
-
-        client = Client(base_url="https://lfd.example.com")
-        client._client = httpx.Client(
-            base_url="https://lfd.example.com",
-            transport=httpx.MockTransport(handler),
-            headers=client._client.headers,
-        )
+        client, headers = _mock_token_client(base_url="https://lfd.example.com")
         client.health()
-        assert "authorization" not in received_headers
+        assert "authorization" not in headers
         client.close()
 
 

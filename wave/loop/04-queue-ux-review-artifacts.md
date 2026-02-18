@@ -17,6 +17,10 @@ Make landing intent obvious in Concerto and remove merge dependence on tracked s
 - Run DTOs already expose `queue_role`, `queue_block_reason`, `queue_blocked_at`, and `next_action`.
 - Scratch-clean promotion gating already exists (`scratch_dirty` -> blocked with `next_action=resolve_conflict`).
 - Wave and run projections now expose stale PR-state metadata that UI must handle explicitly.
+- `QueueRole` has five values (Ready, Draft, Blocked, Merged, Superseded) — badge mapping is 1:1, no client-side inference needed.
+- `QueueNextAction` has four values (OpenPr, ResolveConflict, CombinePrs, AwaitMerge) — maps directly to primary actions in the UI.
+- `LivePrSnapshot` caching means API responses include fresh-enough PR state without requiring the UI to poll GitHub separately.
+- Phase 04 is almost entirely a *consumer* of shipped backend semantics. No new queue logic needed on the backend — only review artifact publishing and the Swift UI layer.
 
 ## What exists after this step
 
@@ -112,16 +116,17 @@ Expected behavior:
 
 ### Already shipped
 
-- `queue_role`
-- `queue_block_reason`
+- `queue_role` (Ready, Draft, Blocked, Merged, Superseded)
+- `queue_block_reason` (MissingPr, WaveRunning, ScratchDirty, RebaseConflict, PromotionFailed)
 - `queue_blocked_at`
-- `next_action`
+- `next_action` (OpenPr, ResolveConflict, CombinePrs, AwaitMerge)
 - wave-level `has_stale_pr_state`
+- `open_pr_count`, `stack_count`
 
 ### Still needed for full Phase 04 + 03 UX
 
-- `superseded_by_pr`
-- `combined_pr`
+- `superseded_by_pr` (from Phase 03 combine events)
+- `combined_pr` (from Phase 03 combine events)
 
 Review artifact fields:
 
@@ -160,6 +165,12 @@ Review artifact fields:
 
 - Should review summaries live in run metadata only, or also persist last-published artifact pointers for fast UI fetch?
 - For publish failures, is inline retry in Concerto enough, or do we need daemon-side retry scheduling in this phase?
+
+## Resolved questions (from 01+02)
+
+- **Does the UI need to compute queue roles?** No — roles are fully projected by the backend. UI consumes directly.
+- **How does the UI handle stale PR state?** `has_stale_pr_state` is already on the wave DTO. Show degraded-mode indicator, not an error.
+- **What ordering does the queue view use?** `order=stack` is already implemented and returns oldest-first.
 
 ## Try it
 

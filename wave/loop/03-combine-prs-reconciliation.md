@@ -9,13 +9,18 @@ Make **Combine PRs** a first-class lifecycle operation with coherent run history
 
 ## Estimated implementation size
 
-~300-700 LOC across combine orchestration, reconciliation persistence, and API projections.
+~400-900 LOC across combine orchestration, reconciliation persistence, and API projections. (Revised upward — 01+02 showed atomicity/retry paths add significant code, and combine has similar multi-step GitHub+DB coordination.)
 
 ## What changed after 01 + 02 shipped
 
 - Queue advancement and merge dedupe already exist and are reliable entry points.
 - Queue role is currently projected from run stack status + live PR cache; no historical queue-role log exists.
 - Live PR sync can infer `superseded` when originals close, but it cannot explain *why* they closed.
+- `QueueRole::Superseded` and `WaveRunStackStatus::Superseded` are already defined and projected from `LivePrState::Closed`. Phase 03 converts this inference to durable fact with combine event linkage.
+- `QueueNextAction::CombinePrs` is already returned for superseded runs — the UI affordance exists before the backing operation.
+- `QueueOps` trait is the right extension point for combine operations (`close_pr`, `create_combined_pr`). Avoid building parallel infrastructure.
+- Per-wave reconcile locks serialize combine+reconcile safely — no new locking needed.
+- `QueueBlockReason` enum needs new variants (e.g., `CombinePending`) added to the Rust enum *before* storing them. `FromStr` is strict and will reject unknown values.
 
 ## What exists after this step
 
@@ -50,13 +55,14 @@ Persist per-run links:
 
 ## Operation flow
 
-1. Resolve eligible open queue runs in wave.
-2. Build combined branch from intended deltas.
-3. Open combined PR.
-4. Close superseded PRs.
-5. Persist combine event + supersession links in one reconciliation write.
-6. Re-run queue reconciliation (`reconcile_wave_queue`) to project final roles.
-7. Resync live PR state.
+1. Acquire per-wave reconcile lock (reuse existing `QUEUE_RECONCILE_LOCKS`).
+2. Resolve eligible open queue runs in wave via `LivePrSnapshot`.
+3. Build combined branch from intended deltas.
+4. Open combined PR via new `QueueOps::create_combined_pr`.
+5. Close superseded PRs via new `QueueOps::close_pr`.
+6. Persist combine event + supersession links in one reconciliation write.
+7. Re-run `reconcile_wave_queue` to project final roles (existing function handles `Superseded` inference).
+8. Resync live PR state via `build_live_pr_snapshot`.
 
 ## Atomicity expectations
 
@@ -127,6 +133,12 @@ No compatibility shim needed for old combine records. Historical runs without co
 
 - Do we need a synthetic `combined_run_id` in v1, or can event + per-run links fully explain combine history?
 - Should `superseded_by_run_id` point to a synthetic run or remain nullable when combine is event-only?
+
+## Resolved questions (from 01+02)
+
+- **Where does combine hook into reconciliation?** Through the existing per-wave lock + `reconcile_wave_queue` call. No new locking infrastructure needed.
+- **How does the UI know to suggest combine?** `QueueNextAction::CombinePrs` is already projected for superseded runs.
+- **Does combine need its own live PR fetching?** No — reuse `build_live_pr_snapshot` from `live_pr.rs`.
 
 ## Try it
 

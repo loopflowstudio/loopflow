@@ -773,7 +773,7 @@ mod tests {
                 .await
                 .expect("live snapshot");
         let projection = project_queue_views(
-            &[run.clone()],
+            std::slice::from_ref(&run),
             |r| live_snapshot.state_for_run(r).cloned(),
             &HashMap::from([(run.id.clone(), block)]),
         );

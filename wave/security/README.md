@@ -10,14 +10,14 @@ Every lfd deployment — local, containerized, remote — enforces auth, validat
 
 | # | Phase | What it closes | Pre-work | Doc | Status |
 |---|-------|---------------|----------|-----|--------|
-| 01 | Loopback Auth | Local-process and container-to-container access without tokens | None | [01-loopback-auth.md](01-loopback-auth.md) | |
+| 01 | Loopback Auth | Local-process and container-to-container access without tokens | None | [01-loopback-auth.md](01-loopback-auth.md) | done |
 | 02 | Path Validation | Traversal in wave IDs, worktree paths, future file APIs | None | [02-path-validation.md](02-path-validation.md) | |
 | 03 | Container Hardening | Resource limits, non-root agent user, cross-worktree isolation | None | [03-container-hardening.md](03-container-hardening.md) | |
 | 04 | API Surface Gating | Rate limiting, body size limits, error sanitization, WebSocket caps, outbound token/header leakage prevention | 01 | [04-api-surface-gating.md](04-api-surface-gating.md) | |
 | 05 | Credential Hygiene | Config writes persisting secrets, log leakage, mount exfiltration risks, lightweight token separation/rotation | None | [05-credential-hygiene.md](05-credential-hygiene.md) | |
 | 06 | Auth Provider Isolation | Fallthrough bypass, proxy-trust loopback, JWKS fail-open | remote/07 | [06-auth-provider-isolation.md](06-auth-provider-isolation.md) | |
 
-Phases 01–03 and 05 are independent. Phase 04 depends on 01 (needs token infrastructure). Phase 06 depends on remote/07 (Studio auth implementation).
+Phases 02, 03, and 05 are independent. Phase 04 depends on 01 (done — token infrastructure exists). Phase 06 depends on remote/07 (Studio auth implementation).
 
 ## Threat Model
 

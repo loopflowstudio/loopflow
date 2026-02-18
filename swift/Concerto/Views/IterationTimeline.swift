@@ -4,6 +4,8 @@ import LoopflowCore
 struct IterationTimeline: View {
     let runs: [WaveRun]
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
         HStack(spacing: Spacing.xs) {
             ForEach(displayRuns) { run in
@@ -13,13 +15,13 @@ struct IterationTimeline: View {
 
                 if run.id != displayRuns.last?.id {
                     Rectangle()
-                        .fill(Color.secondary.opacity(0.35))
+                        .fill(palette.border)
                         .frame(width: 8, height: 1)
                 }
             }
 
             Circle()
-                .strokeBorder(Color.secondary, lineWidth: 1.5)
+                .strokeBorder(palette.border, lineWidth: 1.5)
                 .frame(width: 10, height: 10)
         }
     }

@@ -100,7 +100,12 @@ public actor EventService {
         pinStore: CertificatePinStore = .shared
     ) {
         self.connection = connection
-        self.tokenProvider = tokenProvider ?? { connection.staticToken }
+        self.tokenProvider = {
+            FileTokenProvider.resolveToken(
+                connection: connection,
+                tokenProvider: tokenProvider
+            )
+        }
         self.sessionFactory = sessionFactory ?? { requestTimeout, resourceTimeout, delegate in
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = requestTimeout
@@ -367,10 +372,20 @@ public actor EventService {
     }
 
     private func applyAuthorization(to request: inout URLRequest) throws {
-        guard connection.authMode.requiresToken else { return }
-        guard let token = tokenProvider(), !token.isEmpty else {
-            throw WaveServiceError.authRejected("Missing token")
+        if connection.authMode.requiresToken {
+            guard let token = tokenProvider(), !token.isEmpty else {
+                throw WaveServiceError.authRejected("Missing token")
+            }
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            return
         }
+
+        guard connection.isLocal,
+              let token = tokenProvider(),
+              !token.isEmpty else {
+            return
+        }
+
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 

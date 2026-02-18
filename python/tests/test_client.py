@@ -9,7 +9,7 @@ import pytest
 
 from conftest import WAVE_MINIMAL, WAVE_RUN_MINIMAL
 
-from loopflow.client import Client, _extract_error_message, _resolve_base_url
+from loopflow.client import Client, _extract_error_message, _resolve_base_url, _resolve_token
 from loopflow.errors import LoopflowError, WaveAlreadyRunning
 
 
@@ -34,6 +34,44 @@ class TestUrlResolution:
         client = Client(base_url="http://localhost:2486/")
         assert client._base_url == "http://localhost:2486"
         client.close()
+
+
+class TestTokenResolution:
+    def test_env_token_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("LFD_TOKEN", "env-token")
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-token")
+
+        assert _resolve_token("http://127.0.0.1:2486") == "env-token"
+
+    def test_reads_session_token_file(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text(" file-token\n")
+
+        assert _resolve_token("http://127.0.0.1:2486") == "file-token"
+
+    def test_missing_session_token_file_returns_none(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        assert _resolve_token("http://127.0.0.1:2486") is None
+
+    def test_remote_base_url_does_not_read_session_token(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-token")
+
+        assert _resolve_token("https://lfd.example.com") is None
 
 
 def _mock_client(handler):
@@ -167,9 +205,58 @@ class TestClientToken:
 
     def test_no_token_sends_no_auth_header(self, monkeypatch):
         monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client._resolve_token", lambda _base_url: None)
         client, headers = _mock_token_client()
         client.health()
         assert "authorization" not in headers
+        client.close()
+
+    def test_session_token_file_sends_bearer_on_local_url(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-session-token")
+
+        received_headers = {}
+
+        def handler(request):
+            received_headers.update(dict(request.headers))
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = Client(base_url="http://127.0.0.1:2486")
+        client._client = httpx.Client(
+            base_url="http://127.0.0.1:2486",
+            transport=httpx.MockTransport(handler),
+            headers=client._client.headers,
+        )
+        client.health()
+        assert received_headers.get("authorization") == "Bearer file-session-token"
+        client.close()
+
+    def test_session_token_file_not_sent_to_remote_url(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-session-token")
+
+        received_headers = {}
+
+        def handler(request):
+            received_headers.update(dict(request.headers))
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = Client(base_url="https://lfd.example.com")
+        client._client = httpx.Client(
+            base_url="https://lfd.example.com",
+            transport=httpx.MockTransport(handler),
+            headers=client._client.headers,
+        )
+        client.health()
+        assert "authorization" not in received_headers
         client.close()
 
 

@@ -20,9 +20,6 @@ struct WelcomeWindow: View {
                 Text("Loopflow Concerto")
                     .font(Typography.heroTitle())
                     .fontWeight(.semibold)
-
-                Text("Tell it what to build. It writes the code.")
-                    .foregroundStyle(.secondary)
             }
 
             // Recent repos
@@ -39,19 +36,19 @@ struct WelcomeWindow: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "folder")
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(palette.textSecondary)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(recent.displayName)
                                             .fontWeight(.medium)
                                         Text(recent.path)
                                             .font(Typography.caption())
-                                            .foregroundStyle(.tertiary)
+                                            .foregroundStyle(palette.textSecondary)
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                     }
                                     Spacer()
                                     Image(systemName: "chevron.right")
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(palette.textSecondary)
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)

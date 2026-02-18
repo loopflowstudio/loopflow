@@ -5,6 +5,7 @@ struct ShortcutHelpOverlay: View {
     let shortcuts: [ShortcutBinding]
     let chords: [ChordBinding]
 
+    @Environment(\.palette) private var palette
     @FocusState private var isCloseFocused: Bool
 
     private let columnLayout: [[ShortcutCategory]] = [
@@ -86,7 +87,7 @@ struct ShortcutHelpOverlay: View {
             Text(title)
                 .font(Typography.caption())
                 .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 ForEach(entries) { entry in
@@ -96,7 +97,7 @@ struct ShortcutHelpOverlay: View {
                             .frame(width: 48, alignment: .leading)
                         Text(entry.label)
                             .font(Typography.caption())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.textSecondary)
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(entry.key), \(entry.label)")

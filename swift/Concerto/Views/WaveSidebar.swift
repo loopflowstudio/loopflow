@@ -177,43 +177,7 @@ struct WaveSidebar: View {
             .accessibleButton("Open connection settings")
             .minHitTarget()
 
-            Menu {
-                Button {
-                    createWaveDirectly()
-                } label: {
-                    Label("New wave", systemImage: "plus")
-                }
-
-                if !uninstantiatedSchemas.isEmpty {
-                    Divider()
-
-                    ForEach(uninstantiatedSchemas.prefix(8)) { schema in
-                        Button {
-                            instantiateSchemas([schema], startImmediately: true)
-                        } label: {
-                            Label(schema.name, systemImage: schemaIcon(schema))
-                        }
-                    }
-
-                    Divider()
-
-                    Button {
-                        pendingSchemas = uninstantiatedSchemas
-                        showingInstantiateAllConfirm = true
-                    } label: {
-                        Label("Instantiate all", systemImage: "sparkles")
-                    }
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .font(Typography.caption())
-                    .foregroundStyle(.white.opacity(isCreatingWave || !repoState.isConnected || repoState.repoTarget == nil ? 0.3 : 0.7))
-            }
-            .menuStyle(.borderlessButton)
-            .disabled(isCreatingWave || !repoState.isConnected || repoState.repoTarget == nil)
-            .help(repoState.isConnected ? "Create or instantiate waves (C)" : repoState.connectionSummary)
-            .accessibleButton("Create or instantiate wave")
-            .minHitTarget()
+            createButton
 
             Button {
                 showingDiagnostics = true
@@ -229,6 +193,65 @@ struct WaveSidebar: View {
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
+    }
+
+    private var createButtonDisabled: Bool {
+        isCreatingWave || !repoState.isConnected || repoState.repoTarget == nil
+    }
+
+    private var createButtonLabel: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(createButtonDisabled ? .white.opacity(0.35) : .white)
+    }
+
+    @ViewBuilder
+    private var createButton: some View {
+        if uninstantiatedSchemas.isEmpty {
+            Button {
+                createWaveDirectly()
+            } label: {
+                createButtonLabel
+            }
+            .buttonStyle(.plain)
+            .disabled(createButtonDisabled)
+            .help(repoState.isConnected ? "Create wave (C)" : repoState.connectionSummary)
+            .accessibleButton("Create wave")
+        } else {
+            Menu {
+                Button {
+                    createWaveDirectly()
+                } label: {
+                    Label("New wave", systemImage: "plus")
+                }
+
+                Divider()
+
+                ForEach(uninstantiatedSchemas.prefix(8)) { schema in
+                    Button {
+                        instantiateSchemas([schema], startImmediately: true)
+                    } label: {
+                        Label(schema.name, systemImage: schemaIcon(schema))
+                    }
+                }
+
+                Divider()
+
+                Button {
+                    pendingSchemas = uninstantiatedSchemas
+                    showingInstantiateAllConfirm = true
+                } label: {
+                    Label("Instantiate all", systemImage: "sparkles")
+                }
+            } label: {
+                createButtonLabel
+            }
+            .menuStyle(.borderlessButton)
+            .tint(createButtonDisabled ? .white.opacity(0.35) : .white)
+            .disabled(createButtonDisabled)
+            .help(repoState.isConnected ? "Create or instantiate waves (C)" : repoState.connectionSummary)
+            .accessibleButton("Create or instantiate wave")
+        }
     }
 
     private var disconnectedState: some View {

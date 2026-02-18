@@ -156,9 +156,11 @@ LFD_GITHUB_TOKEN=ghp_xxx
 
 Auth behavior:
 
-- Loopback clients (`127.0.0.1`) always bypass auth.
-- `auth.provider=local` rejects non-loopback requests with `403`.
-- `auth.provider=static` and `auth.provider=loopflow.studio` require `Authorization: Bearer <token>` on non-loopback requests.
+- `auth.provider=local` (default) writes a startup session token to `~/.lf/session-token` (`0600` on Unix).
+- Loopback reads (`GET`, `HEAD`, `OPTIONS`) on protected routes are allowed without a token.
+- Mutations (`POST`, `PATCH`, `DELETE`) on protected routes always require `Authorization: Bearer <token>`, including loopback requests.
+- In `auth.provider=local`, non-loopback requests also require the session token.
+- In `auth.provider=static` or `auth.provider=loopflow.studio`, any request that is not a loopback read requires that provider's bearer token.
 
 When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 

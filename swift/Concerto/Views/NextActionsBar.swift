@@ -26,7 +26,7 @@ struct NextActionsBar: View {
 
                 Text("\(stepsRunCount) step\(stepsRunCount == 1 ? "" : "s") run")
                     .font(Typography.body())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             Spacer()

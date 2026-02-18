@@ -19,7 +19,7 @@ struct AreaTypeahead: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Area")
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             HStack(spacing: 4) {
                 ForEach(selectedAreas, id: \.self) { area in

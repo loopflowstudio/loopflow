@@ -69,10 +69,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::warn!(
                 addr = %http_addr,
                 "binding to non-loopback address with auth.provider=local; \
-                 remote connections will be rejected"
+                 remote requests require the session token"
             );
         }
         (provider, client, creds)
+    };
+
+    let session_token = if matches!(&auth_provider, AuthProvider::Local) {
+        Some(generate_session_token_or_exit())
+    } else {
+        None
     };
 
     if matches!(&storage_config, StorageConfig::Postgres { .. }) {
@@ -174,6 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         event_hub,
         output_hub: output,
         auth: auth_provider,
+        session_token,
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
         github: lfd_config.github,
@@ -232,6 +239,22 @@ fn storage_config_from_config(
                 )
             })?;
             Ok(StorageConfig::postgres(database_url))
+        }
+    }
+}
+
+fn generate_session_token_or_exit() -> String {
+    match loopflow::lfd::session_token::generate_and_write() {
+        Ok(token) => {
+            tracing::info!(
+                path = %loopflow::lfd::session_token::token_path().display(),
+                "session token written"
+            );
+            token
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "failed to write session token");
+            std::process::exit(1);
         }
     }
 }

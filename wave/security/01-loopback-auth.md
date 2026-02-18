@@ -1,31 +1,40 @@
-# 01: Loopback Auth
+# 01: Loopback Auth — Done
 
 Stop treating loopback as proof of identity. A rogue local process, browser extension, or compromised dependency can reach `127.0.0.1:2486` and control all waves.
 
-## What exists today
+## What shipped
 
-`auth_middleware` in `auth.rs:36-41` bypasses auth entirely for loopback connections, regardless of the configured `AuthProvider`:
+### Startup token generation
 
-```rust
-if addr.ip().is_loopback() {
-    return next.run(request).await;
-}
-```
+lfd generates a random 32-byte hex token on startup and writes it to `~/.lf/session-token` with `0600` permissions. The token rotates on every daemon restart. Only generated when `AuthProvider::Local` is configured (the default).
 
-This means:
-- **Native mode**: Any process on the host can hit every lfd endpoint — create waves, run agents, stop runs, land PRs.
-- **Container mode**: lfd binds `0.0.0.0:2486`. Other containers on the Docker bridge network see lfd as non-loopback and need a token. But the lfd container itself gets full access via localhost.
-- **Caddy topology**: Caddy reverse-proxies to `lfd:2486`. lfd sees the source as Docker-network, not loopback, so auth applies. But the healthcheck (`curl -sf http://localhost:2486/health`) runs inside the lfd container as loopback — acceptable since `/health` is read-only.
+Implementation: `session_token::generate_and_write()` in `rust/loopflow/src/lfd/session_token.rs`. Token stored in `HttpState.session_token`.
 
-The highest risk is native mode, but loopback trust is a fragile primitive in any topology where requests can be relayed locally. OWASP API2 (Broken Authentication) applies: a blanket loopback bypass lets co-located processes execute privileged actions.
+### Auth tiering
 
-## What exists after this
+The middleware uses HTTP method to classify requests rather than per-route tagging:
 
-lfd generates a session token on startup and writes it to a known path. Concerto reads the token from that path. Loopback connections without the token get read-only access (health, status). Mutation routes require the token regardless of source IP.
+| Tier | Auth required | Classification |
+|------|--------------|----------------|
+| **Public** | None | Health, metrics, webhooks (outside auth middleware) |
+| **Read** | Loopback OR token | `GET`, `HEAD`, `OPTIONS` on protected routes |
+| **Mutate** | Token always | `POST`, `PATCH`, `DELETE` on protected routes |
 
-This phase enforces the invariant: **no unauthenticated mutation**.
+Method-based classification turned out simpler than the planned route-tagging approach. `should_bypass_auth()` and `is_mutation()` in `auth.rs` handle it in two functions.
 
-## Security boundary for this phase
+### Client integration
+
+**Python (lfq)**: `_resolve_token()` checks `LFD_TOKEN` env var first, then reads `~/.lf/session-token` for local base URLs only. Does not send the local token file to non-local servers.
+
+**Swift (Concerto)**: `FileTokenProvider` reads `~/.lf/session-token`. `FileTokenProvider.resolveToken()` cascades: explicit provider → static connection token → local session-token file. Both `WaveService` and `EventService` use this cascade. `applyAuthorization` sends the token on all requests when `authMode.requiresToken`, and also sends it opportunistically for local connections (supports mutations without requiring authMode changes).
+
+### Test coverage
+
+- Rust: `should_bypass_auth`, `authorize_local` (loopback read bypass, loopback mutation forbidden, valid token allowed, remote without token forbidden), token generation/persistence/permissions.
+- Python: `_resolve_token` (env precedence, file fallback, missing file, remote non-fallback).
+- Swift: `FileTokenProvider` (trimmed reads, missing file, async token resolution).
+
+## Security boundary
 
 This phase prevents:
 
@@ -34,57 +43,12 @@ This phase prevents:
 
 This phase does not prevent:
 
-- A rogue process running as the same OS user can often read `~/.lf/session-token` and authenticate as that user.
+- A rogue process running as the same OS user reading `~/.lf/session-token`.
 - A fully compromised host.
-
-## Implementation
-
-### Startup token generation
-
-On startup, lfd generates a random 32-byte hex token and writes it to `~/.lf/session-token`. File permissions: `0o600`. The token rotates on every daemon restart.
-
-When `AuthProvider::Local` is configured (the default), this token is the only auth mechanism. When `Static` or `Studio` is configured, the session token is not generated — those providers handle all auth.
-
-### Route classification
-
-Split lfd routes into three tiers:
-
-| Tier | Auth required | Examples |
-|------|--------------|---------|
-| **Public** | None | `GET /health`, `GET /metrics` |
-| **Read** | Loopback OR token | `GET /v0/status`, `GET /v0/waves`, `GET /v0/wave_runs`, `GET /v0/flows`, `GET /v0/worktrees`, `GET /v0/waves/:id/logs`, event stream handshake (`GET /ws`) |
-| **Mutate** | Token always | `POST /v0/waves`, `PUT /v0/waves/:id`, `DELETE /v0/waves/:id`, `POST /v0/waves/:id/run`, `POST /v0/waves/:id/stop`, `POST /v0/waves/:id/land`, `POST /v0/waves/:id/next`, `POST /v0/waves/:id/combine`, `PUT /v0/waves/:id/stimuli`, `POST /v0/hooks/*` |
-
-Rationale: read-only loopback access lets monitoring tools and scripts query status without auth. Anything that creates, modifies, or triggers execution requires the token.
-
-### Middleware change
-
-```rust
-// Before: loopback bypasses everything
-if addr.ip().is_loopback() {
-    return next.run(request).await;
-}
-
-// After: loopback bypasses read-only routes, mutations require token
-if addr.ip().is_loopback() && !route_is_mutation(&request) {
-    return next.run(request).await;
-}
-// All mutation routes check token regardless of source
-```
-
-### Concerto integration
-
-Concerto reads the session token from `~/.lf/session-token` on launch and when reconnecting. Sends it as `Authorization: Bearer <token>` on all requests. If the file is missing (lfd not running), Concerto shows the existing "lfd not running" state.
-
-This is transparent — no user configuration needed for local mode.
-
-### CLI integration
-
-`lf` CLI commands that talk to lfd (e.g., `lf wave list`) read the session token from the same path. The Python client (`lfq`) reads from `LFD_TOKEN` env var or the file path.
 
 ## What this doesn't do
 
-- Doesn't complete `Static`/`Studio` loopback hardening. Phase 06 removes loopback bypass for non-`Local` providers entirely.
-- Doesn't add TLS to local connections — loopback traffic is machine-local
-- Doesn't add per-wave or per-user authorization — all token holders have full access
-- Doesn't add rate limiting on auth failures — that's Phase 04
+- Loopback read bypass applies to all providers, not just Local. Phase 06 removes it for Static/Studio.
+- No TLS on local connections — loopback traffic is machine-local.
+- No per-wave or per-user authorization — all token holders have full access.
+- No rate limiting on auth failures — that's Phase 04.

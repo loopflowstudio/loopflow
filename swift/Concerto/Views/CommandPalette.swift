@@ -23,6 +23,7 @@ struct CommandPalette: View {
     @Binding var isPresented: Bool
     let actions: [PaletteAction]
 
+    @Environment(\.palette) private var palette
     @State private var query = ""
     @State private var selectedIndex = 0
     @FocusState private var isSearchFocused: Bool
@@ -53,9 +54,9 @@ struct CommandPalette: View {
     var body: some View {
         VStack(spacing: 0) {
             // Search field
-            HStack(spacing: 12) {
+            HStack(spacing: Spacing.md) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
 
                 TextField("Search actions...", text: $query)
                     .textFieldStyle(.plain)
@@ -71,39 +72,39 @@ struct CommandPalette: View {
                         query = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.textSecondary)
                     }
                     .buttonStyle(.plain)
                 }
 
                 Text("⌘K /")
                     .font(Typography.caption())
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.2))
+                    .foregroundStyle(palette.textSecondary)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(palette.surfaceMuted)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
 
             Divider()
 
             // Results list
             if filteredActions.isEmpty {
-                VStack(spacing: 8) {
+                VStack(spacing: Spacing.sm) {
                     Image(systemName: "magnifyingglass")
                         .font(Typography.sectionTitle())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(palette.textSecondary)
                     Text("No matching actions")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.textSecondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.xxxl + Spacing.sm)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 2) {
+                        LazyVStack(spacing: Spacing.xxs) {
                             ForEach(Array(filteredActions.enumerated()), id: \.element.id) { index, action in
                                 ActionRow(
                                     action: action,
@@ -115,7 +116,7 @@ struct CommandPalette: View {
                                 }
                             }
                         }
-                        .padding(8)
+                        .padding(Spacing.sm)
                     }
                     .frame(maxHeight: 300)
                     .onChange(of: selectedIndex) { _, newIndex in
@@ -127,14 +128,14 @@ struct CommandPalette: View {
             }
 
             // Footer hint
-            HStack(spacing: 16) {
+            HStack(spacing: Spacing.lg) {
                 Label("navigate", systemImage: "arrow.up.arrow.down")
                 Label("select", systemImage: "return")
                 Label("close", systemImage: "escape")
             }
             .font(Typography.caption(10))
-            .foregroundStyle(.tertiary)
-            .padding(.vertical, 8)
+            .foregroundStyle(palette.textSecondary)
+            .padding(.vertical, Spacing.sm)
         }
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
@@ -177,32 +178,34 @@ private struct ActionRow: View {
     let action: PaletteAction
     let isSelected: Bool
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.md) {
             Image(systemName: action.icon)
                 .frame(width: 20)
-                .foregroundStyle(isSelected ? .white : .secondary)
+                .foregroundStyle(isSelected ? .white : palette.textSecondary)
 
             Text(action.title)
-                .foregroundStyle(isSelected ? .white : .primary)
+                .foregroundStyle(isSelected ? .white : palette.text)
 
             Spacer()
 
             if let shortcut = action.shortcut {
                 Text(shortcut)
                     .font(Typography.caption())
-                    .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(isSelected ? Color.white.opacity(0.2) : Color.secondary.opacity(0.15))
+                    .foregroundStyle(isSelected ? .white.opacity(0.7) : palette.textSecondary)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, Spacing.xxs)
+                    .background(isSelected ? Color.white.opacity(0.2) : palette.surfaceMuted)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .background(
             RoundedRectangle(cornerRadius: CornerRadius.md)
-                .fill(isSelected ? Color.accentColor : Color.clear)
+                .fill(isSelected ? palette.accent : Color.clear)
         )
         .contentShape(Rectangle())
     }

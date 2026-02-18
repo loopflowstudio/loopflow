@@ -209,9 +209,9 @@ struct WaveDetailPanel: View {
                     if wave.iteration > 0 {
                         Text("iter \(wave.iteration)")
                             .font(Typography.caption())
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
+                            .foregroundStyle(palette.textSecondary)
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.vertical, Spacing.xxs)
                             .background(palette.surface)
                             .clipShape(Capsule())
                     }
@@ -223,7 +223,7 @@ struct WaveDetailPanel: View {
 
                 Text(wave.statusText)
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             Spacer()
@@ -274,7 +274,7 @@ struct WaveDetailPanel: View {
                 .font(Typography.caption())
                 .fontWeight(.medium)
                 .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, 3)
+                .padding(.vertical, Spacing.xxs)
                 .background(color.opacity(0.15))
                 .foregroundStyle(color)
                 .clipShape(Capsule())
@@ -288,7 +288,7 @@ struct WaveDetailPanel: View {
             .font(Typography.caption())
             .fontWeight(.medium)
             .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, 3)
+            .padding(.vertical, Spacing.xxs)
             .background(Color.statusWarning.opacity(0.14))
             .foregroundStyle(Color.statusWarning)
             .clipShape(Capsule())
@@ -310,7 +310,7 @@ struct WaveDetailPanel: View {
         if !text.isEmpty {
             Label(text, systemImage: icon)
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
         }
     }
 
@@ -319,10 +319,10 @@ struct WaveDetailPanel: View {
     private var remoteActionsNotice: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "network")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
             Text("Local Finder/terminal/editor actions are unavailable in remote mode.")
                 .font(Typography.caption())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
             Spacer()
         }
         .padding(.horizontal, Spacing.md)
@@ -385,7 +385,7 @@ struct WaveDetailPanel: View {
                    let recentOutput = outputBuffer.recentOutput(for: wave.id) {
                     Text(recentOutput)
                         .font(Typography.caption())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .padding(.horizontal, Spacing.sm)
@@ -424,7 +424,7 @@ struct WaveDetailPanel: View {
                         .font(Typography.caption())
                     Text(error)
                         .font(Typography.caption())
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(palette.text)
                         .textSelection(.enabled)
                 }
                 .padding(Spacing.md)
@@ -434,14 +434,14 @@ struct WaveDetailPanel: View {
             } else {
                 Text("No error details available.")
                     .font(Typography.caption())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             // Failed step context
             if let step = wave.activeRun?.currentStep {
                 Text("Failed during: \(step)")
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             // Retry button
@@ -457,13 +457,13 @@ struct WaveDetailPanel: View {
             Text(wave.status == .running ? "Live Output" : "Output")
                 .font(Typography.caption())
                 .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             let output = outputBuffer.output(for: wave.id)
             if output.isEmpty {
                 Text("Waiting for output…")
                     .font(Typography.caption())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(palette.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Spacing.md)
                     .background(palette.background)
@@ -482,14 +482,14 @@ struct WaveDetailPanel: View {
             Text("Commits")
                 .font(Typography.caption())
                 .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             VStack(spacing: 0) {
                 ForEach(wave.commits) { entry in
                     HStack(spacing: Spacing.sm) {
                         Text(entry.sha)
                             .font(Typography.code(11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.textSecondary)
                             .frame(width: 60, alignment: .leading)
 
                         Text(entry.message)
@@ -517,7 +517,7 @@ struct WaveDetailPanel: View {
             Text("Diff")
                 .font(Typography.caption())
                 .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(stat.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
@@ -541,7 +541,7 @@ struct WaveDetailPanel: View {
         }
 
         let prefix = Text(String(line[line.startIndex..<pipeRange.upperBound]))
-            .foregroundColor(.secondary)
+            .foregroundColor(palette.textSecondary)
 
         let bar = String(line[pipeRange.upperBound...])
         var result = prefix
@@ -552,7 +552,7 @@ struct WaveDetailPanel: View {
             case "-":
                 result = result + Text("-").foregroundColor(Color.statusError)
             default:
-                result = result + Text(String(char)).foregroundColor(.secondary)
+                result = result + Text(String(char)).foregroundColor(palette.textSecondary)
             }
         }
         return result
@@ -563,13 +563,13 @@ struct WaveDetailPanel: View {
         let parts = line.components(separatedBy: ", ")
         var result = Text("")
         for (i, part) in parts.enumerated() {
-            let separator = i > 0 ? Text(", ").foregroundColor(.secondary) : Text("")
+            let separator = i > 0 ? Text(", ").foregroundColor(palette.textSecondary) : Text("")
             if part.contains("insertion") {
                 result = result + separator + Text(part).foregroundColor(Color.statusSuccess)
             } else if part.contains("deletion") {
                 result = result + separator + Text(part).foregroundColor(Color.statusError)
             } else {
-                result = result + separator + Text(part).foregroundColor(.secondary)
+                result = result + separator + Text(part).foregroundColor(palette.textSecondary)
             }
         }
         return result
@@ -580,10 +580,10 @@ struct WaveDetailPanel: View {
             // Commit count
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
                 Text("\(wave.commits.count) commit\(wave.commits.count == 1 ? "" : "s")")
                     .font(Typography.body())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             Spacer()

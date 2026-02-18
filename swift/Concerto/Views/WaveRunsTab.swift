@@ -45,7 +45,7 @@ struct WaveRunsTab: View {
             if runs.isEmpty {
                 Text("No runs yet")
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             } else {
                 ForEach(sortedRuns) { run in
                     WaveRunRow(run: run)
@@ -86,7 +86,7 @@ struct WaveRunsTab: View {
                     .fontWeight(.medium)
                 Text("Combine into a single PR")
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             Spacer()
@@ -144,6 +144,7 @@ struct WaveRunsTab: View {
 private struct WaveRunRow: View {
     let run: WaveRun
 
+    @Environment(\.palette) private var palette
     @State private var isExpanded = false
 
     var body: some View {
@@ -156,7 +157,7 @@ private struct WaveRunRow: View {
 
                 Text(run.flow)
                     .font(Typography.caption())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
 
                 if let pr = run.pr {
                     RunPRBadge(pr: pr)
@@ -167,13 +168,13 @@ private struct WaveRunRow: View {
                 if let duration = run.duration {
                     Text(duration)
                         .font(Typography.caption(10))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(palette.textSecondary)
                         .monospacedDigit()
                 }
 
                 Text(run.relativeTime)
                     .font(Typography.caption(10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(palette.textSecondary)
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -208,7 +209,7 @@ private struct WaveRunRow: View {
             }
         }
         .padding(Spacing.md)
-        .background(Color.secondary.opacity(0.06))
+        .background(palette.surfaceMuted)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
 
@@ -216,7 +217,7 @@ private struct WaveRunRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
             Text("\(label):")
                 .font(Typography.caption(10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
             Text(value)
                 .font(Typography.caption(10))
                 .textSelection(.enabled)
@@ -238,7 +239,7 @@ private struct RunPRBadge: View {
         case .draft: Color.statusWarning
         case .merged: Color.statusInfo
         case .closed: Color.statusError
-        case .none: Color.secondary
+        case .none: Color.statusNeutral
         }
 
         return Button {
@@ -247,8 +248,8 @@ private struct RunPRBadge: View {
             Text(labelText)
                 .font(Typography.caption(10))
                 .fontWeight(.medium)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xxs)
                 .background(color.opacity(isHovering ? 0.28 : 0.18))
                 .foregroundStyle(color)
                 .clipShape(Capsule())

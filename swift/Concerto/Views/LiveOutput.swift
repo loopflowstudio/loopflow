@@ -20,8 +20,8 @@ struct LiveOutput: View {
                             .id(line.id)
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(Color.black.opacity(0.3))

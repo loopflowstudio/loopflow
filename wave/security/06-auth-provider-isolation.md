@@ -6,11 +6,11 @@ Depends on remote/07 (Studio auth client wiring) since it hardens the `Studio` a
 
 ## What exists today
 
-The auth middleware in `auth.rs` has a clean structure: match on `AuthProvider` enum, each variant handles its own validation. No fallthrough between providers. This is better than many self-hosted services that layer multiple auth mechanisms with fallback chains.
+Phase 01 shipped a clean auth middleware structure: `should_bypass_auth()` allows loopback reads without a token, then the middleware matches on `AuthProvider` enum with each variant handling its own validation. No fallthrough between providers.
 
-But there are gaps:
+The key gap Phase 01 left open: **loopback read bypass applies to all providers**. `should_bypass_auth(is_loopback, method)` runs before the provider match — so a loopback `GET` bypasses auth even when `Static` or `Studio` is configured. For `Local` mode this is intentional (monitoring scripts query status without auth). For `Static`/`Studio` deployments it's a residual weakness: a co-located process can read wave status, run logs, and event streams without credentials.
 
-**Loopback bypass in proxy topologies**: When Caddy reverse-proxies to lfd on the same host, the connection appears as non-loopback (Docker network source IP). This is correct. But if someone deploys lfd behind a different proxy on the same machine (e.g., `nginx` on `localhost` forwarding to `localhost:2486`), lfd sees loopback and skips auth entirely. Phase 01 partially addresses this for mutation routes, but read routes still bypass.
+Other gaps:
 
 **Studio validator caching**: `ConnectionValidator` caches validation results for 60 seconds. If a token is revoked server-side, it remains valid in lfd for up to 60 seconds. Acceptable for the threat model, but should be documented.
 
@@ -39,22 +39,15 @@ This phase does not provide:
 
 ### Remove loopback bypass for non-Local providers
 
-When `AuthProvider::Static` or `AuthProvider::Studio` is configured, the loopback bypass should be disabled entirely — even for read routes:
+The current `should_bypass_auth(is_loopback, method)` runs before the provider match. Change it to take the provider into account:
 
 ```rust
-match &state.auth {
-    AuthProvider::Local => {
-        // Phase 01 rules: loopback gets read-only, mutations need token
-        if addr.ip().is_loopback() && !route_is_mutation(&request) {
-            return next.run(request).await;
-        }
-        // Fall through to Local token check for mutations
-    }
-    AuthProvider::Static { .. } | AuthProvider::Studio { .. } => {
-        // No loopback bypass. All requests must authenticate.
-    }
+fn should_bypass_auth(is_loopback: bool, method: &Method, provider: &AuthProvider) -> bool {
+    matches!(provider, AuthProvider::Local) && is_loopback && !is_mutation(method)
 }
 ```
+
+Only `AuthProvider::Local` gets the loopback read bypass. `Static` and `Studio` require credentials on all requests, including loopback reads.
 
 Rationale: if you've configured `Static` or `Studio` auth, you've opted into requiring credentials. The deployment is either remote or explicitly secured. Loopback bypass defeats the purpose.
 

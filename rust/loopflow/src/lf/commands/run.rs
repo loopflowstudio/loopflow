@@ -8,6 +8,7 @@ use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_clie
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use anyhow::{anyhow, Result};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, info, instrument, trace};
@@ -245,7 +246,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote context log"
     );
 
-    let use_color = std::env::var("NO_COLOR").is_err() && atty::is(atty::Stream::Stderr);
+    let use_color = std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal();
     let launch_config = LaunchConfig {
         auto: !built.is_interactive,
         stream: !built.is_interactive,

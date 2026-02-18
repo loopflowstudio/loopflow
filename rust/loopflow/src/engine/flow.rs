@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde_yaml_ng::Value;
 
 use crate::engine::error::LoadError;
 
@@ -144,7 +144,7 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
         Err(err) => return Err(err),
     };
     let value: Value =
-        serde_yaml::from_str(&content).map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
+        serde_yaml_ng::from_str(&content).map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
     let items = parse_flow_items(&value)?;
     Ok(Flow {
         name: name.to_string(),
@@ -197,7 +197,7 @@ fn parse_step_frontmatter(content: &str) -> Result<(StepFrontmatter, String), Lo
         return Ok((StepFrontmatter::default(), content.to_string()));
     };
 
-    let value: Value = serde_yaml::from_str(&frontmatter)
+    let value: Value = serde_yaml_ng::from_str(&frontmatter)
         .map_err(|err| LoadError::InvalidStep(err.to_string()))?;
     Ok((parse_frontmatter_value(&value), body))
 }
@@ -343,7 +343,7 @@ fn parse_flow_item(value: &Value) -> Result<FlowItem, LoadError> {
     }
 }
 
-fn parse_flow_mapping(map: &serde_yaml::Mapping) -> Result<FlowItem, LoadError> {
+fn parse_flow_mapping(map: &serde_yaml_ng::Mapping) -> Result<FlowItem, LoadError> {
     if let Some(step_value) = map.get(key("step")) {
         return Ok(FlowItem::Step(parse_step_value(step_value)?));
     }
@@ -450,7 +450,7 @@ fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
     Ok(FlowItem::FlowRef(name.to_string()))
 }
 
-fn parse_fork_select(map: &serde_yaml::Mapping) -> Result<ForkSelect, LoadError> {
+fn parse_fork_select(map: &serde_yaml_ng::Mapping) -> Result<ForkSelect, LoadError> {
     let select_value = map.get(key("select"));
     let select = match select_value.and_then(|val| val.as_str()) {
         None => ForkSelect::All,
@@ -830,7 +830,7 @@ Be careful.
       - direction: product-engineer
 - publish
 "#;
-        let value: Value = serde_yaml::from_str(yaml).unwrap();
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
         assert_eq!(items.len(), 3);
 

@@ -12,7 +12,7 @@ lfd keeps both SQLite and Postgres. Store operations are async end-to-end. Promp
 |---|-------|----------------|----------|--------|
 | 01 | Store trait scope reset | Capability traits, `StorageConfig`, `open_store`/`migrate_store` | None | Shipped |
 | 02 | Async store boundary | Routes call store directly; no `spawn_blocking` for DB ops | 01 | Shipped |
-| 03 | Shared SQL catalog | One query per operation; dialect rendering for `?`/`$N` | 02 | |
+| 03 | Shared SQL catalog | One query per operation; dialect rendering for `?`/`$N` | 02 | Shipped |
 | 04 | Prompt pipeline | `DocumentSource` enum; `gather_documents(specs)` | None | |
 
 Stage 04 is independent of the store work and can run in parallel with 03. Each stage deletes what it replaces — no deferred cleanup.
@@ -35,16 +35,23 @@ Stage 04 is independent of the store work and can run in parallel with 03. Each 
 - Postgres calls `tokio-postgres` directly; embedded runtime removed
 - HTTP routes, executor, triggers, and tests all migrated to async-first
 
+### Stage 03 — Shared SQL catalog
+
+- `lfd/store/catalog.rs` defines one `Query` catalog for both backends
+- SQL templates use `{pN}` placeholders and render to `?N` (sqlite) or `$N` (postgres)
+- Backend-specific syntax is isolated in explicit per-query overrides
+- Rendered SQL is cached via lazy static storage
+- Catalog parity tests enforce rendering coverage and contiguous placeholder numbering
+
 ## Architecture (current → target)
 
 ```
-Current (Stage 02 shipped):
+Current (Stage 03 shipped):
   HTTP routes ──await──▶ Arc<Store>
   Store dispatches to SqliteStore (spawn_blocking) or PostgresStore (async)
-  ~45 SQL queries duplicated between sqlite.rs and postgres.rs
+  SQL comes from one catalog and is rendered per dialect once
 
 Target (Stage 04 complete):
-  SQL defined once per query, rendered per dialect
   Documents typed by source, assembled declaratively
 ```
 

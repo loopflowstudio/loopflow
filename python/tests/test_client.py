@@ -211,6 +211,54 @@ class TestClientToken:
         assert "authorization" not in headers
         client.close()
 
+    def test_session_token_file_sends_bearer_on_local_url(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-session-token")
+
+        received_headers = {}
+
+        def handler(request):
+            received_headers.update(dict(request.headers))
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = Client(base_url="http://127.0.0.1:2486")
+        client._client = httpx.Client(
+            base_url="http://127.0.0.1:2486",
+            transport=httpx.MockTransport(handler),
+            headers=client._client.headers,
+        )
+        client.health()
+        assert received_headers.get("authorization") == "Bearer file-session-token"
+        client.close()
+
+    def test_session_token_file_not_sent_to_remote_url(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("LFD_TOKEN", raising=False)
+        monkeypatch.setattr("loopflow.client.Path.home", lambda: tmp_path)
+
+        token_file = tmp_path / ".lf" / "session-token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-session-token")
+
+        received_headers = {}
+
+        def handler(request):
+            received_headers.update(dict(request.headers))
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = Client(base_url="https://lfd.example.com")
+        client._client = httpx.Client(
+            base_url="https://lfd.example.com",
+            transport=httpx.MockTransport(handler),
+            headers=client._client.headers,
+        )
+        client.health()
+        assert "authorization" not in received_headers
+        client.close()
+
 
 class TestExtractErrorMessage:
     def test_nested_error_message(self):

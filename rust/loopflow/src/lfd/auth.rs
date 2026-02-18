@@ -173,6 +173,11 @@ mod tests {
     }
 
     #[test]
+    fn loopback_post_does_not_bypass_auth() {
+        assert!(!should_bypass_auth(true, &Method::POST));
+    }
+
+    #[test]
     fn loopback_post_without_token_is_forbidden() {
         let result = authorize_local(Some("session-token"), None, true);
         assert_eq!(
@@ -209,7 +214,7 @@ mod tests {
 
     #[test]
     fn remote_post_with_valid_token_is_allowed() {
-        assert!(!should_bypass_auth(true, &Method::POST));
+        assert!(!should_bypass_auth(false, &Method::POST));
 
         let result = authorize_local(Some("session-token"), Some("session-token"), false);
         assert_eq!(result, Ok(()));

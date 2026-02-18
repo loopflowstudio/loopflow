@@ -11,14 +11,15 @@ Two features shipped as a single cohesive branch:
 Supporting infrastructure:
 
 - `live_pr.rs` module: shared `LivePrSnapshot` for batch-fetching and caching GitHub PR state, replacing ad-hoc per-function state loading.
-- `queue.rs` module (814 lines): `reconcile_wave_queue`, `handle_pr_merged`, `project_queue_views`, per-wave reconcile locks.
+- `queue.rs` module (806 lines): `reconcile_wave_queue`, `handle_pr_merged`, `project_queue_views`, per-wave reconcile locks.
 - Two new tables: `wave_queue_blocks` (blocked reason/details), `wave_pr_merge_events` (merge-event deduplication).
 - Queue projection fields on run DTOs: `queue_role`, `queue_block_reason`, `queue_blocked_at`, `next_action`.
 - Typed `QueueBlockReason` enum replacing raw strings for block reasons.
+- PR ops: replaced `has_unpushed_commits` git query with direct `committed || rebased` state tracking in `create_or_update_pr`, eliminating a redundant git command.
 
 ## Key choices
 
-**Queue role is projected, not stored.** `project_queue_views` derives `QueueRole` (Head / Waiting / Blocked / Merged) from stack order + live PR state + block records. No canonical queue-role column. This avoids state synchronization bugs at the cost of requiring the full stack for projection.
+**Queue role is projected, not stored.** `project_queue_views` derives `QueueRole` (Ready / Draft / Blocked / Merged / Superseded) from stack order + live PR state + block records. No canonical queue-role column. This avoids state synchronization bugs at the cost of requiring the full stack for projection.
 
 **Block facts are persisted, merge events are deduplicated.** `wave_queue_blocks` stores the reason and conflict files for blocked runs. `wave_pr_merge_events` ensures the same merge is processed exactly once across webhook and polling paths.
 

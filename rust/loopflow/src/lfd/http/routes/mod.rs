@@ -180,6 +180,7 @@ pub fn paginate<T>(
     (items, has_more)
 }
 
+#[derive(Debug)]
 struct WaveGitState {
     worktree: String,
     branch: Option<String>,

@@ -6,8 +6,8 @@ Route Concerto chat turns through the harness boundary so chat UX is driven by s
 
 ## Final architecture
 
-- `lfd` starts chat turns with `POST /waves/:wave_id/chat/turns`.
-- `lfd` streams turn events with `GET /waves/:wave_id/chat/turns/:turn_id/events` (SSE).
+- `lfd` starts chat turns with `POST /waves/:wave_id/chat`.
+- `lfd` streams turn events with `GET /waves/:wave_id/chat/events` (SSE).
 - `ChatState` in Concerto is an event consumer/state machine (`idle -> running -> completed|failed`).
 - Assistant text is rendered only from harness `send_message` events.
 - `memory_edit` events are applied by chat APIs and persisted as wave-scoped memory blocks.
@@ -19,8 +19,8 @@ Route Concerto chat turns through the harness boundary so chat UX is driven by s
   - `PUT /waves/:wave_id/memory-blocks/:name`
   - `DELETE /waves/:wave_id/memory-blocks/:name`
 - Added harness-backed chat turn APIs:
-  - `POST /waves/:wave_id/chat/turns`
-  - `GET /waves/:wave_id/chat/turns/:turn_id/events`
+  - `POST /waves/:wave_id/chat`
+  - `GET /waves/:wave_id/chat/events`
 - Added `turn::run_with_event_handler(...)` so harness `AgentEvent`s are emitted live during turn execution.
 - Added persistent chat memory storage in SQLite/Postgres (`007_chat_memory_blocks.sql`).
 - Added chat UI integration in Concerto (`WaveDetailPanel` chat tab, event-driven chat timeline, inline memory update indicators).

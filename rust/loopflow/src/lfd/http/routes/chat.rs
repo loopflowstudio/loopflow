@@ -9,6 +9,8 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
+use tracing::warn;
+
 use crate::agent::{tools, turn};
 use crate::chat::{validate_turn_completion, AgentEvent, CompletionError, ContextSnapshot};
 use crate::lfd::http::dto::{
@@ -261,7 +263,9 @@ async fn persist_turn_events(
         let Some(message) = chat_message_from_agent_event(wave_id, event) else {
             continue;
         };
-        let _ = store.create_chat_message(&message).await;
+        if let Err(err) = store.create_chat_message(&message).await {
+            warn!(wave_id = %wave_id, role = %message.role, error = %err, "failed to persist chat message");
+        }
     }
 }
 
@@ -272,7 +276,9 @@ async fn publish_terminal_event(
     event: AgentEvent,
 ) {
     if let Some(message) = chat_message_from_agent_event(wave_id, &event) {
-        let _ = store.create_chat_message(&message).await;
+        if let Err(err) = store.create_chat_message(&message).await {
+            warn!(wave_id = %wave_id, role = %message.role, error = %err, "failed to persist chat message");
+        }
     }
     turn_stream.publish(event);
 }

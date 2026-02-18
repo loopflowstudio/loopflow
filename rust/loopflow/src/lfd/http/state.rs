@@ -55,9 +55,12 @@ pub struct ChatTurnRegistry {
     streams: Arc<StdMutex<HashMap<LfdId, Arc<ChatTurnStream>>>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ChatTurnStartError {
+    #[error("chat turn already running")]
     AlreadyRunning,
+    #[error("chat turn registry unavailable")]
     Unavailable,
 }
 

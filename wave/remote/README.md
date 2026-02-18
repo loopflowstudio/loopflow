@@ -32,6 +32,7 @@ Phase 01D shipped and changed what we now treat as non-negotiable for remote wor
 - Headless `prompt` fork selection must fail fast (never auto-pick).
 - Scheduler slot release and orphan-fork cleanup must be restart-safe.
 - Agent timeout is explicit operator config (`executor.agent_timeout`), not hidden watchdog behavior.
+- Fork parallelism (`fork(select=all)`) is unsupported in the Docker executor — no worktree-based parallelism in containers. Remote users on Docker are limited to sequential execution. This is an accepted gap, not a blocker.
 
 ### Impact on the next phase (05)
 
@@ -39,6 +40,7 @@ Phase 05 now needs to include two correctness checks that were previously implic
 
 1. Capability gating must treat interactive fork prompt mode as unsupported in headless remote runs.
 2. Timeout/fail-fast errors from daemon execution need clear surfacing in Concerto (not generic request failures).
+3. Chat events use SSE (`GET /waves/:id/chat/events`), not WebSocket. Phase 05 must verify SSE works through the TLS proxy (Caddy) alongside the existing WebSocket path for run events.
 
 ### Open questions for 05/06
 

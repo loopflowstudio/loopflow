@@ -14,6 +14,7 @@ pub mod rows;
 pub mod sqlite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ForkRunStatus {
     Pending = 0,
     Running = 1,

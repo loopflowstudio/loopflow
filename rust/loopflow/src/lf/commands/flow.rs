@@ -10,7 +10,7 @@ use crate::engine::{
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use anyhow::{anyhow, Context, Result};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -93,7 +93,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         &fork.select,
         &fork.branches,
         &cli.direction,
-        if atty::is(atty::Stream::Stdin) {
+        if std::io::stdin().is_terminal() {
             Some(&mut chooser)
         } else {
             None
@@ -281,7 +281,7 @@ fn choose_fork_branch(
     prompt: &str,
     branches: &[crate::engine::ConcreteStep],
 ) -> std::result::Result<usize, String> {
-    if !atty::is(atty::Stream::Stdin) {
+    if !std::io::stdin().is_terminal() {
         return Err("fork(select=prompt) requires an interactive TTY".to_string());
     }
 

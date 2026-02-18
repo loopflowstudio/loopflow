@@ -622,7 +622,7 @@ executor:
 executor:
   agent_timeout: 75s
 "#;
-        let config: RawLfdConfig = serde_yaml::from_str(raw).expect("yaml parses");
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("resolved");
         assert_eq!(resolved.executor.agent_timeout, Duration::from_secs(75));
     }

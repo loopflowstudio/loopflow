@@ -80,7 +80,10 @@ async fn tick_loop_waves(
         let run_id = LfdId::new();
         let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
             Ok(guard) => guard,
-            Err(_) => continue,
+            Err(reason) => {
+                tracing::warn!(wave_id = %wave.id, %reason, "scheduler at capacity; loop tick deferred");
+                continue;
+            }
         };
 
         let run = match create_wave_run_with_id(store, &wave, &run_id).await {

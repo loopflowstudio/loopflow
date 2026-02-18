@@ -4,15 +4,17 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use bollard::container::{
-    Config as DockerContainerConfig, CreateContainerOptions, InspectContainerOptions,
-    ListContainersOptions, LogOutput, LogsOptions, RemoveContainerOptions, StartContainerOptions,
-    StopContainerOptions, WaitContainerOptions,
-};
+use bollard::container::LogOutput;
 use bollard::errors::Error as DockerError;
-use bollard::image::CreateImageOptions;
-use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
-use bollard::volume::CreateVolumeOptions;
+use bollard::models::{
+    ContainerCreateBody, ContainerInspectResponse, HostConfig, Mount, MountTypeEnum,
+    VolumeCreateOptions,
+};
+use bollard::query_parameters::{
+    CreateContainerOptions, CreateImageOptions, InspectContainerOptions, ListContainersOptions,
+    LogsOptions, RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
+    WaitContainerOptions,
+};
 use bollard::Docker;
 use futures_util::StreamExt;
 use tokio::process::Command;
@@ -226,9 +228,9 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
 
         let containers = self
             .docker
-            .list_containers(Some(ListContainersOptions::<String> {
+            .list_containers(Some(ListContainersOptions {
                 all: true,
-                filters,
+                filters: Some(filters),
                 ..Default::default()
             }))
             .await?;
@@ -241,7 +243,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
     async fn stop_container(&self, container_id: &str) -> Result<()> {
         match self
             .docker
-            .stop_container(container_id, Some(StopContainerOptions { t: 1 }))
+            .stop_container(container_id, Some(stop_container_options()))
             .await
         {
             Ok(_) => Ok(()),
@@ -251,14 +253,9 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
     }
 
     async fn remove_container(&self, container_id: &str) -> Result<()> {
-        let options = RemoveContainerOptions {
-            force: true,
-            v: true,
-            link: false,
-        };
         match self
             .docker
-            .remove_container(container_id, Some(options))
+            .remove_container(container_id, Some(remove_container_options()))
             .await
         {
             Ok(_) => Ok(()),
@@ -770,14 +767,9 @@ impl DockerExecutor {
     }
 
     async fn remove_container(&self, container_id: &str) {
-        let options = RemoveContainerOptions {
-            force: true,
-            v: true,
-            link: false,
-        };
         if let Err(err) = self
             .docker
-            .remove_container(container_id, Some(options))
+            .remove_container(container_id, Some(remove_container_options()))
             .await
         {
             warn!(container_id, error = %err, "failed to remove container");
@@ -803,7 +795,7 @@ impl DockerExecutor {
 
         let mut wait_stream = self
             .docker
-            .wait_container(container_id, None::<WaitContainerOptions<String>>);
+            .wait_container(container_id, None::<WaitContainerOptions>);
         let wait_result = wait_stream.next().await;
 
         let _ = logs_task.await;
@@ -820,17 +812,7 @@ impl DockerExecutor {
         wave_run_id: String,
         agent_id: String,
     ) {
-        let mut logs = docker.logs(
-            &container_id,
-            Some(LogsOptions::<String> {
-                follow: true,
-                stdout: true,
-                stderr: true,
-                timestamps: false,
-                tail: "all".to_string(),
-                ..Default::default()
-            }),
-        );
+        let mut logs = docker.logs(&container_id, Some(logs_options(true)));
 
         let mut parser = StreamParser::new();
         let mut pending = String::new();
@@ -889,23 +871,16 @@ impl DockerExecutor {
             .docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name: Self::build_helper_container_name(label),
-                    platform: None,
+                    name: Some(Self::build_helper_container_name(label)),
+                    ..Default::default()
                 }),
-                DockerContainerConfig {
+                ContainerCreateBody {
                     image: Some(self.image.clone()),
                     cmd: Some(cmd),
                     working_dir,
                     env: Some(self.collect_env()),
                     user: Some("root".to_string()),
-                    host_config: Some(HostConfig {
-                        mounts: Some(mounts),
-                        network_mode: Some("bridge".to_string()),
-                        privileged: Some(false),
-                        cap_drop: Some(vec!["ALL".to_string()]),
-                        auto_remove: Some(false),
-                        ..Default::default()
-                    }),
+                    host_config: Some(container_host_config(mounts)),
                     labels: Some(HashMap::from([(
                         "io.loopflow.managed".to_string(),
                         "true".to_string(),
@@ -920,7 +895,7 @@ impl DockerExecutor {
 
         if let Err(err) = self
             .docker
-            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .start_container(&container_id, None::<StartContainerOptions>)
             .await
         {
             self.remove_container(&container_id).await;
@@ -929,20 +904,10 @@ impl DockerExecutor {
 
         let mut wait_stream = self
             .docker
-            .wait_container(&container_id, None::<WaitContainerOptions<String>>);
+            .wait_container(&container_id, None::<WaitContainerOptions>);
         let wait_result = wait_stream.next().await;
 
-        let mut logs = self.docker.logs(
-            &container_id,
-            Some(LogsOptions::<String> {
-                follow: false,
-                stdout: true,
-                stderr: true,
-                timestamps: false,
-                tail: "all".to_string(),
-                ..Default::default()
-            }),
-        );
+        let mut logs = self.docker.logs(&container_id, Some(logs_options(false)));
         let mut output = String::new();
         while let Some(entry) = logs.next().await {
             match entry {
@@ -984,9 +949,9 @@ impl DockerExecutor {
 
         let _ = self
             .docker
-            .create_volume(CreateVolumeOptions::<String> {
-                name: volume_name.to_string(),
-                labels,
+            .create_volume(VolumeCreateOptions {
+                name: Some(volume_name.to_string()),
+                labels: Some(labels),
                 ..Default::default()
             })
             .await?;
@@ -1001,7 +966,7 @@ impl DockerExecutor {
 
     async fn pull_image(&self, image: &str) -> Result<()> {
         let options = CreateImageOptions {
-            from_image: image,
+            from_image: Some(image.to_string()),
             ..Default::default()
         };
         let mut stream = self.docker.create_image(Some(options), None, None);
@@ -1489,6 +1454,43 @@ fn is_container_not_found(err: &DockerError) -> bool {
     )
 }
 
+fn stop_container_options() -> StopContainerOptions {
+    StopContainerOptions {
+        t: Some(1),
+        ..Default::default()
+    }
+}
+
+fn remove_container_options() -> RemoveContainerOptions {
+    RemoveContainerOptions {
+        force: true,
+        v: true,
+        link: false,
+    }
+}
+
+fn logs_options(follow: bool) -> LogsOptions {
+    LogsOptions {
+        follow,
+        stdout: true,
+        stderr: true,
+        timestamps: false,
+        tail: "all".to_string(),
+        ..Default::default()
+    }
+}
+
+fn container_host_config(mounts: Vec<Mount>) -> HostConfig {
+    HostConfig {
+        mounts: Some(mounts),
+        network_mode: Some("bridge".to_string()),
+        privileged: Some(false),
+        cap_drop: Some(vec!["ALL".to_string()]),
+        auto_remove: Some(false),
+        ..Default::default()
+    }
+}
+
 #[async_trait]
 impl AgentExecutor for DockerExecutor {
     async fn run(
@@ -1514,23 +1516,16 @@ impl AgentExecutor for DockerExecutor {
         let mounts = self.build_mounts(&workspace.volume.volume_name);
         let labels = Self::build_agent_labels(agent_id, wave_id, wave_run_id);
 
-        let host_config = HostConfig {
-            mounts: Some(mounts),
-            network_mode: Some("bridge".to_string()),
-            privileged: Some(false),
-            cap_drop: Some(vec!["ALL".to_string()]),
-            auto_remove: Some(false),
-            ..Default::default()
-        };
+        let host_config = container_host_config(mounts);
 
         let container = self
             .docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name: container_name,
-                    platform: None,
+                    name: Some(container_name),
+                    ..Default::default()
                 }),
-                DockerContainerConfig {
+                ContainerCreateBody {
                     image: Some(agent_image),
                     cmd: Some(cmd),
                     working_dir: Some(workspace.container_worktree.clone()),
@@ -1563,7 +1558,7 @@ impl AgentExecutor for DockerExecutor {
 
         if let Err(err) = self
             .docker
-            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .start_container(&container_id, None::<StartContainerOptions>)
             .await
         {
             self.active.lock().await.remove(agent_id);
@@ -1587,7 +1582,7 @@ impl AgentExecutor for DockerExecutor {
         if let Some(container_id) = container_id {
             let _ = self
                 .docker
-                .stop_container(&container_id, Some(StopContainerOptions { t: 1 }))
+                .stop_container(&container_id, Some(stop_container_options()))
                 .await;
             self.remove_container(&container_id).await;
         }

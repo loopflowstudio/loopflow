@@ -33,59 +33,62 @@ pub fn router(state: HttpState) -> Router {
             get(waves::list_waves_handler).post(waves::create_wave_handler),
         )
         .route(
-            "/waves/:wave_id",
+            "/waves/{wave_id}",
             get(waves::get_wave_handler)
                 .patch(waves::update_wave_handler)
                 .delete(waves::delete_wave_handler),
         )
-        .route("/waves/:wave_id/run", post(waves::run_wave_handler))
+        .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
-            "/waves/:wave_id/stimulus",
+            "/waves/{wave_id}/stimulus",
             post(waves::add_stimulus_handler),
         )
         .route(
-            "/waves/:wave_id/stimulus/:stimulus_id",
+            "/waves/{wave_id}/stimulus/{stimulus_id}",
             delete(waves::remove_stimulus_handler),
         )
-        .route("/waves/:wave_id/stimuli", get(waves::list_stimuli_handler))
+        .route("/waves/{wave_id}/stimuli", get(waves::list_stimuli_handler))
         .route(
-            "/waves/:wave_id/memory-blocks",
+            "/waves/{wave_id}/memory-blocks",
             get(chat::list_memory_blocks_handler),
         )
         .route(
-            "/waves/:wave_id/memory-blocks/:name",
+            "/waves/{wave_id}/memory-blocks/{name}",
             put(chat::upsert_memory_block_handler).delete(chat::delete_memory_block_handler),
         )
-        .route("/waves/:wave_id/chat", post(chat::start_chat_handler))
+        .route("/waves/{wave_id}/chat", post(chat::start_chat_handler))
         .route(
-            "/waves/:wave_id/chat/events",
+            "/waves/{wave_id}/chat/events",
             get(chat::stream_chat_events_handler),
         )
         .route(
-            "/waves/:wave_id/chat/messages",
+            "/waves/{wave_id}/chat/messages",
             get(chat::list_chat_messages_handler),
         )
-        .route("/waves/:wave_id/stop", post(waves::stop_wave_handler))
+        .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
         .route(
-            "/waves/:wave_id/restart-step",
+            "/waves/{wave_id}/restart-step",
             post(waves::restart_step_handler),
         )
         .route(
-            "/waves/:wave_id/continue",
+            "/waves/{wave_id}/continue",
             post(waves::continue_wave_handler),
         )
-        .route("/waves/:wave_id/land", post(waves::land_wave_handler))
-        .route("/waves/:wave_id/next", post(waves::next_wave_handler))
+        .route("/waves/{wave_id}/land", post(waves::land_wave_handler))
+        .route("/waves/{wave_id}/next", post(waves::next_wave_handler))
         .route(
-            "/waves/:wave_id/check-ci",
+            "/waves/{wave_id}/check-ci",
             post(waves::check_wave_ci_handler),
         )
-        .route("/waves/:wave_id/combine", post(waves::combine_wave_handler))
         .route(
-            "/waves/:wave_id/runs",
+            "/waves/{wave_id}/combine",
+            post(waves::combine_wave_handler),
+        )
+        .route(
+            "/waves/{wave_id}/runs",
             get(wave_runs::list_wave_runs_for_wave_handler),
         )
-        .route("/waves/:wave_id/logs", get(wave_runs::wave_logs_handler))
+        .route("/waves/{wave_id}/logs", get(wave_runs::wave_logs_handler))
         .route("/wave_runs", get(wave_runs::list_wave_runs_handler))
         .route("/worktrees", get(worktrees::list_worktrees_handler))
         .route_layer(middleware::from_fn_with_state(

@@ -25,7 +25,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
         Ok(snapshot) => snapshot,
         Err(err) => {
             let _ = socket
-                .send(Message::Text(
+                .send(text_message(
                     serde_json::json!({
                         "type": "error",
                         "error": err,
@@ -38,7 +38,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
     };
 
     let _ = socket
-        .send(Message::Text(
+        .send(text_message(
             serde_json::json!({
                 "type": "connected",
                 "timestamp": time::OffsetDateTime::now_utc()
@@ -59,7 +59,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
         tokio::select! {
             _ = ticker.tick() => {
                 let ping = serde_json::json!({ "type": "ping" }).to_string();
-                if sender.send(Message::Text(ping)).await.is_err() {
+                if sender.send(text_message(ping)).await.is_err() {
                     break;
                 }
             }
@@ -70,7 +70,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
                         Some(enriched) => enriched,
                         None => serde_json::to_string(&event).unwrap_or_default(),
                     };
-                    if sender.send(Message::Text(json)).await.is_err() {
+                    if sender.send(text_message(json)).await.is_err() {
                         break;
                     }
                 }
@@ -84,7 +84,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
                         timestamp: Event::now(),
                     };
                     let json = serde_json::to_string(&event).unwrap_or_default();
-                    if sender.send(Message::Text(json)).await.is_err() {
+                    if sender.send(text_message(json)).await.is_err() {
                         break;
                     }
                 }
@@ -100,6 +100,10 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
             }
         }
     }
+}
+
+fn text_message(text: String) -> Message {
+    Message::Text(text.into())
 }
 
 async fn current_snapshot(

@@ -35,6 +35,12 @@ The lfd container itself mounts `/var/run/docker.sock` — if compromised, it ca
 
 Agent containers run as a non-root user with memory/CPU/PID limits, `no-new-privileges`, and scoped volume mounts. The lfd container accesses Docker through a socket proxy that restricts API operations.
 
+## What we learned from phases 01 and 02
+
+- Path/ID sanitization is now centralized in `lfd::security`, so this phase can stay focused on runtime isolation instead of input validation.
+- Worktree names and repo paths are now normalized/canonicalized before use, which lowers risk when we evaluate per-worktree mounts.
+- Auth is already split into read vs mutate tiers, so this phase does not need extra auth-specific branching.
+
 ## Security boundary for this phase
 
 This phase reduces impact when an agent runtime is compromised:
@@ -153,7 +159,7 @@ Options (in order of preference):
 2. **Use `--workdir` enforcement** in the container and rely on the non-root user not having write access to sibling worktree directories. Weaker — agents can still read.
 3. **Accept the risk** and document it. Worktrees within a single repo are already branches of the same codebase. Cross-worktree access is a confidentiality issue, not an integrity issue (agents can already push to any branch via git).
 
-Start with option 3 (document), investigate option 1 for a future stage.
+Checkpoint expectation: ship options 1-2 only if they are reliable in this phase; otherwise document option 3 explicitly and carry sub-mount isolation into a follow-up.
 
 ## Verification
 
@@ -161,3 +167,24 @@ Start with option 3 (document), investigate option 1 for a future stage.
 - Resource limits applied: `docker stats` shows memory cap
 - Socket proxy blocks exec: `docker exec <agent-container> sh` fails from lfd container
 - No-new-privileges: `docker inspect <container> | jq '.[0].HostConfig.SecurityOpt'`
+
+## Open questions
+
+- Are `4 GB / 2 CPU / 512 PIDs` safe defaults for both Claude Code and Codex under real prompts?
+- Can Bollard mount only a worktree subpath from the repo volume in a portable way, or does that require host bind mounts?
+
+## Checkpoints
+
+1. Non-root user + resource limits + `no-new-privileges` land with regression tests.
+2. Compose mode uses a socket proxy and isolated networks.
+3. Cross-worktree decision is explicit: ship scoped mounts, or document risk and defer with a tracked follow-up.
+
+## Try it
+
+- Run two heavy wave executions concurrently and confirm one container hitting limits does not destabilize lfd.
+- From an agent shell, attempt to read a sibling worktree path and verify the documented isolation behavior.
+
+## What might change
+
+- Read-only rootfs may move to a later phase if agent CLIs require writes outside known temp/home paths.
+- If per-worktree mounts are not technically reliable yet, this phase will ship hard runtime limits first and defer mount isolation as a smaller dedicated item.

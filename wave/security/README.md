@@ -17,7 +17,21 @@ Every lfd deployment — local, containerized, remote — enforces auth, validat
 | 05 | Credential Hygiene | Config writes persisting secrets, log leakage, mount exfiltration risks, lightweight token separation/rotation | None | [05-credential-hygiene.md](05-credential-hygiene.md) | |
 | 06 | Auth Provider Isolation | Fallthrough bypass, proxy-trust loopback, JWKS fail-open | remote/07 | [06-auth-provider-isolation.md](06-auth-provider-isolation.md) | |
 
-Phases 02, 03, and 05 are independent. Phase 04 depends on 01 (done — token infrastructure exists). Phase 06 depends on remote/07 (Studio auth implementation).
+Phases 03 and 05 are independent. Phase 04 depends on 01 (done — token infrastructure exists). Phase 06 depends on remote/07 (Studio auth implementation).
+
+## Post-ship adjustments (after phases 01 and 02)
+
+What changed after implementation:
+
+- **Method-tier auth beat route tagging.** Phase 04 should apply limits and throttles by request tier (`read` vs `mutate`) instead of per-route tagging.
+- **Centralized path guards are in place.** Path traversal controls for current surfaces are done; Phase 04 should focus on API envelope hardening, not duplicate path validation logic.
+- **Biggest uncertainty moved to runtime isolation defaults.** Container limits and worktree mount isolation now carry the highest implementation risk.
+
+Near-term sequencing stays:
+
+1. **Phase 03** first (runtime blast-radius reduction and container defaults)
+2. **Phase 04** second (API envelope and leakage controls using the auth tiers already shipped)
+3. **Phase 05** in parallel or immediately after 04 (credential hygiene and rotation workflow)
 
 ## Threat Model
 

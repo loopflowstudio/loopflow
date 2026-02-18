@@ -9,18 +9,18 @@ pub mod waves;
 pub mod worktrees;
 pub mod ws;
 
+use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
     format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
 };
 use crate::lfd::id::LfdId;
+use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
 use crate::lfd::queue::{project_queue_views, QueueRunView};
 use crate::lfd::store::{SharedStore, StoreError};
-use crate::lfd::types::{LivePrState, LivePullRequestState, Wave, WaveRun};
-use crate::lfd::{config::GitHubConfig, github};
+use crate::lfd::types::Wave;
 use axum::http::StatusCode;
 use axum::Json;
-use std::collections::{HashMap, HashSet};
-use time::OffsetDateTime;
+use std::collections::HashMap;
 
 pub type ApiError = (StatusCode, Json<ErrorResponse>);
 
@@ -63,10 +63,8 @@ pub async fn build_wave_dto(
 ) -> Result<WaveDto, StoreError> {
     let latest = store.get_latest_wave_run(&wave.id).await?;
     let stack_runs = store.list_stack_runs(&wave.id).await?;
-    let live_pr_projection =
-        build_wave_live_pr_projection(store, github_config, &stack_runs).await?;
-    let queue_views =
-        build_wave_queue_views(store, &wave.id, &stack_runs, &live_pr_projection).await?;
+    let live_snapshot = build_live_pr_snapshot(store, github_config, &stack_runs).await?;
+    let queue_views = build_wave_queue_views(store, &wave.id, &live_snapshot).await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
     let flow_name = wave.flow.clone();
@@ -93,7 +91,8 @@ pub async fn build_wave_dto(
 
     let active_run = if include_active_run {
         latest.map(|run| {
-            let (live_pr_state, pr_state_stale) = live_pr_for_run(&live_pr_projection, &run);
+            let live_pr_state = live_snapshot.state_for_run(&run);
+            let pr_state_stale = live_snapshot.stale_for_run(&run);
             let queue_view = queue_views.get(&run.id);
             wave_run_dto(run, live_pr_state, pr_state_stale, queue_view)
         })
@@ -126,151 +125,28 @@ pub async fn build_wave_dto(
         commits,
         diff_stat,
         flow_steps,
-        open_pr_count: live_pr_projection.open_pr_count,
+        open_pr_count: live_snapshot.open_pr_count(),
         stack_count: stack_runs.len() as u32,
-        has_stale_pr_state: live_pr_projection.has_stale_pr_state,
+        has_stale_pr_state: live_snapshot.has_stale_pr_state(),
         stimuli,
         active_run,
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct LivePrKey {
-    pub(crate) repo_id: String,
-    pub(crate) pr_number: u32,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct WaveLivePrProjection {
-    pub live_states: HashMap<LivePrKey, LivePullRequestState>,
-    pub stale_keys: HashSet<LivePrKey>,
-    pub open_pr_count: u32,
-    pub has_stale_pr_state: bool,
-}
-
-pub(crate) fn run_live_pr_key(run: &WaveRun) -> Option<LivePrKey> {
-    let pr_number = run.snapshot.pr.as_ref()?.number?;
-    Some(LivePrKey {
-        repo_id: run.snapshot.repo.clone(),
-        pr_number,
-    })
-}
-
-pub(crate) fn live_pr_for_run<'a>(
-    projection: &'a WaveLivePrProjection,
-    run: &WaveRun,
-) -> (Option<&'a LivePullRequestState>, bool) {
-    let Some(key) = run_live_pr_key(run) else {
-        return (None, false);
-    };
-    let live = projection.live_states.get(&key);
-    let stale = projection.stale_keys.contains(&key);
-    (live, stale)
-}
-
-pub(crate) async fn build_wave_live_pr_projection(
-    store: &SharedStore,
-    github_config: &GitHubConfig,
-    runs: &[WaveRun],
-) -> Result<WaveLivePrProjection, StoreError> {
-    let targets: HashSet<LivePrKey> = runs.iter().filter_map(run_live_pr_key).collect();
-
-    let mut stale_keys: HashSet<LivePrKey> = HashSet::new();
-    if !targets.is_empty() {
-        let token = github_config
-            .token
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or_default();
-        if token.is_empty() {
-            stale_keys.extend(targets.iter().cloned());
-        } else {
-            let mut repo_targets: HashMap<String, Vec<LivePrKey>> = HashMap::new();
-            for key in &targets {
-                repo_targets
-                    .entry(key.repo_id.clone())
-                    .or_default()
-                    .push(key.clone());
-            }
-
-            let mut repo_lookup: HashMap<String, Option<String>> = HashMap::new();
-            for repo_id in repo_targets.keys() {
-                let repo_path = repo_id.clone();
-                let repo_full_name = tokio::task::spawn_blocking(move || {
-                    github::github_repo_from_local(std::path::Path::new(&repo_path))
-                })
-                .await
-                .ok()
-                .flatten();
-                repo_lookup.insert(repo_id.clone(), repo_full_name);
-            }
-
-            for (repo_id, keys) in &repo_targets {
-                let repo_full_name = repo_lookup.get(repo_id).cloned().flatten();
-                let Some(repo_full_name) = repo_full_name else {
-                    stale_keys.extend(keys.iter().cloned());
-                    continue;
-                };
-
-                for key in keys {
-                    match github::fetch_pull_request(&repo_full_name, key.pr_number, token).await {
-                        Ok(Some(pull_request)) => {
-                            let live_state = github::into_live_pull_request_state(
-                                key.repo_id.clone(),
-                                pull_request,
-                                OffsetDateTime::now_utc(),
-                            );
-                            store.upsert_live_pr_state(&live_state).await?;
-                        }
-                        Ok(None) | Err(_) => {
-                            stale_keys.insert(key.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let mut live_states = HashMap::new();
-    for key in &targets {
-        let state = store.get_live_pr_state(&key.repo_id, key.pr_number).await?;
-        if let Some(state) = state {
-            live_states.insert(key.clone(), state);
-        } else {
-            stale_keys.insert(key.clone());
-        }
-    }
-
-    let open_pr_count = live_states
-        .values()
-        .filter(|state| state.state == LivePrState::Open)
-        .count() as u32;
-    let has_stale_pr_state = !stale_keys.is_empty();
-
-    Ok(WaveLivePrProjection {
-        live_states,
-        stale_keys,
-        open_pr_count,
-        has_stale_pr_state,
     })
 }
 
 pub(crate) async fn build_wave_queue_views(
     store: &SharedStore,
     wave_id: &LfdId,
-    runs: &[WaveRun],
-    live_pr_projection: &WaveLivePrProjection,
+    snapshot: &LivePrSnapshot,
 ) -> Result<HashMap<LfdId, QueueRunView>, StoreError> {
+    let stack_runs = store.list_stack_runs(wave_id).await?;
     let blocks = store.list_queue_blocks(wave_id).await?;
     let blocks_by_run = blocks
         .into_iter()
         .map(|block| (block.run_id.clone(), block))
         .collect::<HashMap<_, _>>();
     Ok(project_queue_views(
-        runs,
-        |run| {
-            run_live_pr_key(run).and_then(|key| live_pr_projection.live_states.get(&key).cloned())
-        },
+        &stack_runs,
+        |run| snapshot.state_for_run(run).cloned(),
         &blocks_by_run,
     ))
 }
@@ -647,10 +523,10 @@ mod tests {
     }
 
     #[test]
-    fn live_pr_for_run_uses_projection_values() {
+    fn snapshot_returns_state_and_stale_for_run() {
         let run = wave_run_with_pr(Some(101), Some("open"));
-        let key = run_live_pr_key(&run).expect("key");
-        let projection = WaveLivePrProjection {
+        let key = crate::lfd::live_pr::run_live_pr_key(&run).expect("key");
+        let snapshot = LivePrSnapshot {
             live_states: HashMap::from([(
                 key.clone(),
                 LivePullRequestState {
@@ -667,13 +543,10 @@ mod tests {
                 },
             )]),
             stale_keys: HashSet::from([key]),
-            open_pr_count: 1,
-            has_stale_pr_state: true,
         };
 
-        let (live_pr_state, stale) = live_pr_for_run(&projection, &run);
-        assert_eq!(live_pr_state.map(|state| state.pr_number), Some(101));
-        assert!(stale);
+        assert_eq!(snapshot.state_for_run(&run).map(|s| s.pr_number), Some(101));
+        assert!(snapshot.stale_for_run(&run));
     }
 
     #[tokio::test]
@@ -703,9 +576,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_projection_tracks_live_pr_state_transitions() {
+    async fn build_snapshot_tracks_live_pr_state_transitions() {
         let (store, _repo_dir, wave, run) = setup_wave_with_run(21).await;
-        let key = run_live_pr_key(&run).expect("run should have a live PR key");
+        let key =
+            crate::lfd::live_pr::run_live_pr_key(&run).expect("run should have a live PR key");
 
         let github = crate::lfd::config::GitHubConfig::default();
         for (state, expected_open_count) in [
@@ -719,17 +593,16 @@ mod tests {
                 .await
                 .expect("live PR state should be upserted");
 
-            let projection =
-                build_wave_live_pr_projection(&store, &github, std::slice::from_ref(&run))
-                    .await
-                    .expect("projection should build");
-            assert_eq!(projection.open_pr_count, expected_open_count);
+            let snapshot = build_live_pr_snapshot(&store, &github, std::slice::from_ref(&run))
+                .await
+                .expect("snapshot should build");
+            assert_eq!(snapshot.open_pr_count(), expected_open_count);
             assert_eq!(
-                projection.live_states.get(&key).map(|value| value.state),
+                snapshot.live_states.get(&key).map(|value| value.state),
                 Some(state)
             );
             assert!(
-                projection.has_stale_pr_state,
+                snapshot.has_stale_pr_state(),
                 "missing GitHub token should keep stale visibility explicit"
             );
         }

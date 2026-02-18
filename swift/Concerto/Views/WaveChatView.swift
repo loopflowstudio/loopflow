@@ -19,6 +19,7 @@ struct WaveChatView: View {
                 .frame(minWidth: 320, maxWidth: 420)
         }
         .task {
+            await state.loadMessagesIfNeeded()
             await state.loadMemoryIfNeeded()
         }
     }

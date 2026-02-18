@@ -32,12 +32,12 @@ public protocol WaveServiceProtocol: Sendable {
     func deleteMemoryBlock(waveId: String, name: String) async throws
     func startChat(
         waveId: String,
-        message: String,
-        memoryBlocks: [ChatMemoryBlock]
+        message: String
     ) async throws
     func streamChatEvents(
         waveId: String
     ) -> AsyncThrowingStream<ChatTurnEvent, Error>
+    func listChatMessages(waveId: String) async throws -> [ChatMessageRecord]
     func stop(_ id: String) async throws
     func restartStep(_ id: String) async throws
     func landWave(_ id: String) async throws

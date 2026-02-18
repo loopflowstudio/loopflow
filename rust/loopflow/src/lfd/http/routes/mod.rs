@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod flows;
 pub mod hooks;
 pub mod repos;
@@ -19,6 +20,8 @@ use axum::http::StatusCode;
 use axum::Json;
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
+
+pub type ApiError = (StatusCode, Json<ErrorResponse>);
 
 pub async fn resolve_wave_id(
     state: &crate::lfd::http::HttpState,

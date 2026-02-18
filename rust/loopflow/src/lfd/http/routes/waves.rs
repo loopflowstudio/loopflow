@@ -1,19 +1,12 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::Json;
-use futures_util::StreamExt;
 use serde::Deserialize;
-use std::convert::Infallible;
 use std::path::{Path as FsPath, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 use time::OffsetDateTime;
-use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tracing::warn;
 
-use crate::agent::{tools, turn};
-use crate::chat::{validate_turn_completion, AgentEvent, CompletionError, ContextSnapshot};
 use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
@@ -22,20 +15,18 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    chat_memory_block_dto, stimulus_dto, stimulus_kind_str, ChatMemoryBlockDto, ChatStartedDto,
-    CombineResponse, CombineResponseResult, ContinueWaveResponse, DeletedResourceResponse,
-    ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse,
-    RunWaveResponse, StopWaveResponse, WaveDto,
+    stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
+    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
+    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
-use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id};
+use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
-    AgentStatus, ChatMemoryBlock, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
-    WaveStatus,
+    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -123,26 +114,6 @@ pub struct RunWaveRequest {
 pub struct AddStimulusRequest {
     kind: StimulusKind,
     cron: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpsertMemoryBlockRequest {
-    content: String,
-    position: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateChatTurnRequest {
-    message: String,
-    #[serde(default)]
-    memory_blocks: Vec<ChatTurnMemoryBlockInput>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ChatTurnMemoryBlockInput {
-    name: String,
-    content: String,
-    position: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -699,323 +670,6 @@ pub async fn list_stimuli_handler(
     Ok(Json(serde_json::json!({ "data": dtos })))
 }
 
-pub async fn list_memory_blocks_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<ListResponse<ChatMemoryBlockDto>> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    let blocks = state
-        .store
-        .list_chat_memory_blocks(&wave_id)
-        .await
-        .map_err(map_store_error)?;
-
-    let dtos = blocks.into_iter().map(chat_memory_block_dto).collect();
-    Ok(Json(ListResponse::new(dtos, false)))
-}
-
-pub async fn upsert_memory_block_handler(
-    State(state): State<HttpState>,
-    Path((wave_id, name)): Path<(String, String)>,
-    Json(payload): Json<UpsertMemoryBlockRequest>,
-) -> ApiResult<ChatMemoryBlockDto> {
-    let name = normalized_memory_block_name(name)?;
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let content = payload.content;
-
-    let position = match payload.position {
-        Some(position) => position,
-        None => {
-            let existing = state
-                .store
-                .list_chat_memory_blocks(&wave_id)
-                .await
-                .map_err(map_store_error)?;
-
-            default_memory_block_position(&existing, &name)
-        }
-    };
-
-    let block = ChatMemoryBlock {
-        wave_id: wave_id.clone(),
-        name: name.clone(),
-        content,
-        position,
-        updated_at: Some(OffsetDateTime::now_utc()),
-    };
-
-    state
-        .store
-        .upsert_chat_memory_block(&block)
-        .await
-        .map_err(map_store_error)?;
-
-    Ok(Json(chat_memory_block_dto(block)))
-}
-
-pub async fn delete_memory_block_handler(
-    State(state): State<HttpState>,
-    Path((wave_id, name)): Path<(String, String)>,
-) -> ApiResult<DeletedResourceResponse> {
-    let name = normalized_memory_block_name(name)?;
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    state
-        .store
-        .delete_chat_memory_block(&wave_id, &name)
-        .await
-        .map_err(map_store_error)?;
-
-    Ok(Json(DeletedResourceResponse {
-        id: name,
-        object: "memory_block".to_string(),
-        deleted: true,
-    }))
-}
-
-pub async fn start_chat_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-    Json(payload): Json<CreateChatTurnRequest>,
-) -> ApiResult<ChatStartedDto> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let message = payload.message.trim().to_string();
-    if message.is_empty() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "message cannot be empty",
-        ));
-    }
-
-    state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    let memory_blocks = if payload.memory_blocks.is_empty() {
-        state
-            .store
-            .list_chat_memory_blocks(&wave_id)
-            .await
-            .map_err(map_store_error)?
-        .into_iter()
-        .map(|block| PromptMemoryBlock {
-            name: block.name,
-            content: block.content,
-            position: block.position,
-        })
-        .collect::<Vec<_>>()
-    } else {
-        prompt_memory_blocks_from_request(payload.memory_blocks)?
-    };
-
-    let system_prompt = build_chat_system_prompt(&memory_blocks);
-    let turn_stream = state.chat_turns.start(wave_id.clone());
-
-    tokio::spawn(async move {
-        let registry = tools::default_registry();
-        let config = turn::TurnConfig {
-            system: Some(system_prompt),
-            ..Default::default()
-        };
-
-        let run_result = turn::run_with_event_handler(&message, &config, &registry, |event| {
-            turn_stream.publish(event.clone());
-        })
-        .await;
-
-        match run_result {
-            Ok(result) => {
-                let completion = completion_event_from_result(&result);
-                turn_stream.publish(completion);
-            }
-            Err(err) => {
-                turn_stream.publish(AgentEvent::Failed {
-                    code: "turn_failed".to_string(),
-                    message: err.to_string(),
-                });
-            }
-        }
-        turn_stream.mark_completed();
-    });
-
-    Ok(Json(ChatStartedDto {
-        object: "chat".to_string(),
-        wave_id: wave_id.to_string(),
-        status: "running".to_string(),
-    }))
-}
-
-pub async fn stream_chat_events_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> Result<Sse<ReceiverStream<Result<SseEvent, Infallible>>>, ApiError> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    let turn_stream = state
-        .chat_turns
-        .get(&wave_id)
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active chat for wave"))?;
-
-    let history = turn_stream.history();
-    let live_rx = turn_stream.subscribe();
-    let completed = turn_stream.is_completed();
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<SseEvent, Infallible>>(256);
-    tokio::spawn(async move {
-        for event in history {
-            let terminal = is_terminal_agent_event(&event);
-            if tx.send(Ok(agent_event_sse(&event))).await.is_err() {
-                return;
-            }
-            if terminal {
-                return;
-            }
-        }
-
-        if completed {
-            return;
-        }
-
-        let mut stream = BroadcastStream::new(live_rx);
-        while let Some(next) = stream.next().await {
-            let Ok(event) = next else {
-                continue;
-            };
-            let terminal = is_terminal_agent_event(&event);
-            if tx.send(Ok(agent_event_sse(&event))).await.is_err() {
-                break;
-            }
-            if terminal {
-                break;
-            }
-        }
-    });
-
-    Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("keep-alive"),
-    ))
-}
-
-fn normalized_memory_block_name(name: String) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
-    let trimmed = name.trim().to_string();
-    if trimmed.is_empty() {
-        Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "memory block name cannot be empty",
-        ))
-    } else {
-        Ok(trimmed)
-    }
-}
-
-fn default_memory_block_position(existing: &[ChatMemoryBlock], name: &str) -> u32 {
-    if let Some(block) = existing.iter().find(|block| block.name == name) {
-        return block.position;
-    }
-
-    existing
-        .iter()
-        .map(|block| block.position)
-        .max()
-        .map(|max_position| max_position.saturating_add(1))
-        .unwrap_or(0)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PromptMemoryBlock {
-    name: String,
-    content: String,
-    position: u32,
-}
-
-fn prompt_memory_blocks_from_request(
-    raw_blocks: Vec<ChatTurnMemoryBlockInput>,
-) -> Result<Vec<PromptMemoryBlock>, ApiError> {
-    let mut blocks = Vec::with_capacity(raw_blocks.len());
-    for (index, block) in raw_blocks.into_iter().enumerate() {
-        let name = normalized_memory_block_name(block.name)?;
-        blocks.push(PromptMemoryBlock {
-            name,
-            content: block.content,
-            position: block.position.unwrap_or(index as u32),
-        });
-    }
-    blocks.sort_by(|left, right| {
-        left.position
-            .cmp(&right.position)
-            .then_with(|| left.name.cmp(&right.name))
-    });
-    Ok(blocks)
-}
-
-fn build_chat_system_prompt(memory_blocks: &[PromptMemoryBlock]) -> String {
-    let mut lines = vec![
-        "You are the Loopflow chat assistant.".to_string(),
-        "All user-visible output must be sent with the send_message tool.".to_string(),
-        "Use send_message phase=\"progress\" for intermediate updates.".to_string(),
-        "End successful turns with exactly one send_message phase=\"final\".".to_string(),
-        "Use memory_edit when durable memory should change.".to_string(),
-    ];
-    if !memory_blocks.is_empty() {
-        lines.push("<memory>".to_string());
-        for block in memory_blocks {
-            lines.push(format!("<block name=\"{}\">", xml_escape(&block.name)));
-            lines.push(xml_escape(&block.content));
-            lines.push("</block>".to_string());
-        }
-        lines.push("</memory>".to_string());
-    }
-    lines.join("\n")
-}
-
-fn xml_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
-fn completion_event_from_result(result: &turn::TurnResult) -> AgentEvent {
-    match validate_turn_completion(&result.events) {
-        Ok(()) => AgentEvent::Done {
-            context: ContextSnapshot {
-                memory_tokens: 0,
-                history_tokens: result.input_tokens,
-                total_tokens: result.input_tokens.saturating_add(result.output_tokens),
-            },
-        },
-        Err(err) => AgentEvent::Failed {
-            code: completion_error_code(&err).to_string(),
-            message: err.to_string(),
-        },
-    }
-}
-
-fn completion_error_code(error: &CompletionError) -> &'static str {
-    match error {
-        CompletionError::MissingFinalMessage => "missing_final_message",
-        CompletionError::MultipleFinalMessages => "multiple_final_messages",
-        CompletionError::FinalMessageOnFailedTurn => "final_message_on_failed_turn",
-    }
-}
-
-fn is_terminal_agent_event(event: &AgentEvent) -> bool {
-    matches!(event, AgentEvent::Done { .. } | AgentEvent::Failed { .. })
-}
-
-fn agent_event_sse(event: &AgentEvent) -> SseEvent {
-    let payload = serde_json::to_string(event).expect("AgentEvent should always serialize for SSE");
-    SseEvent::default().event("agent_event").data(payload)
-}
-
 pub async fn stop_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -1389,8 +1043,6 @@ async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, 
     Ok((wave, work_dir))
 }
 
-type ApiError = (StatusCode, Json<ErrorResponse>);
-
 async fn resolve_wave_work_dir_for_api(
     repo_path: String,
     wave_name: String,
@@ -1538,7 +1190,6 @@ fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::id::LfdId;
 
     #[test]
     fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
@@ -1561,108 +1212,5 @@ mod tests {
         let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
         assert_eq!(parsed.0, StimulusKind::Cron);
         assert_eq!(parsed.1, "0 8 * * *");
-    }
-
-    #[test]
-    fn normalized_memory_block_name_rejects_whitespace() {
-        let result = normalized_memory_block_name("   ".to_string());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn normalized_memory_block_name_trims_surrounding_whitespace() {
-        let result = normalized_memory_block_name("  project-context  ".to_string())
-            .expect("name should normalize");
-        assert_eq!(result, "project-context");
-    }
-
-    #[test]
-    fn default_memory_block_position_keeps_existing_position() {
-        let existing = vec![ChatMemoryBlock {
-            wave_id: LfdId::from_raw("wave-1"),
-            name: "project-context".to_string(),
-            content: "repo context".to_string(),
-            position: 4,
-            updated_at: None,
-        }];
-
-        let position = default_memory_block_position(&existing, "project-context");
-        assert_eq!(position, 4);
-    }
-
-    #[test]
-    fn default_memory_block_position_appends_after_highest_position() {
-        let existing = vec![
-            ChatMemoryBlock {
-                wave_id: LfdId::from_raw("wave-1"),
-                name: "first".to_string(),
-                content: "a".to_string(),
-                position: 0,
-                updated_at: None,
-            },
-            ChatMemoryBlock {
-                wave_id: LfdId::from_raw("wave-1"),
-                name: "second".to_string(),
-                content: "b".to_string(),
-                position: 3,
-                updated_at: None,
-            },
-        ];
-
-        let position = default_memory_block_position(&existing, "third");
-        assert_eq!(position, 4);
-    }
-
-    #[test]
-    fn prompt_memory_blocks_from_request_normalizes_order() {
-        let blocks = vec![
-            ChatTurnMemoryBlockInput {
-                name: "second".to_string(),
-                content: "B".to_string(),
-                position: Some(2),
-            },
-            ChatTurnMemoryBlockInput {
-                name: " first ".to_string(),
-                content: "A".to_string(),
-                position: Some(1),
-            },
-        ];
-
-        let normalized = prompt_memory_blocks_from_request(blocks).expect("normalize blocks");
-        assert_eq!(normalized[0].name, "first");
-        assert_eq!(normalized[1].name, "second");
-    }
-
-    #[test]
-    fn build_chat_system_prompt_embeds_memory_xml() {
-        let prompt = build_chat_system_prompt(&[PromptMemoryBlock {
-            name: "prefs".to_string(),
-            content: "Use <short> answers & bullets".to_string(),
-            position: 0,
-        }]);
-
-        assert!(prompt.contains("send_message"));
-        assert!(prompt.contains("<memory>"));
-        assert!(prompt.contains("&lt;short&gt; answers &amp; bullets"));
-    }
-
-    #[test]
-    fn completion_event_from_result_reports_missing_final_message() {
-        let result = turn::TurnResult {
-            response: "assistant text".to_string(),
-            iterations: 1,
-            input_tokens: 10,
-            output_tokens: 5,
-            events: vec![AgentEvent::Message {
-                content: "working".to_string(),
-                phase: crate::chat::UserMessagePhase::Progress,
-            }],
-        };
-
-        let event = completion_event_from_result(&result);
-        assert!(matches!(
-            event,
-            AgentEvent::Failed { code, .. } if code == "missing_final_message"
-        ));
     }
 }

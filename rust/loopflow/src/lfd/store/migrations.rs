@@ -43,6 +43,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "007_chat_memory_blocks",
         sql: include_str!("migrations/007_chat_memory_blocks.sql"),
     },
+    Migration {
+        version: "008_chat_messages",
+        sql: include_str!("migrations/008_chat_messages.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

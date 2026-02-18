@@ -1,9 +1,9 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation,
-    PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind,
-    WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState,
+    PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun,
+    WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -285,5 +285,16 @@ pub fn map_chat_memory_block_row(row: &impl StoreRow) -> StoreResult<ChatMemoryB
         content: row.text(2)?,
         position: row.int(3)? as u32,
         updated_at: Some(unix_to_datetime(row.bigint(4)?)),
+    })
+}
+
+/// SELECT id, wave_id, role, content, created_at
+pub fn map_chat_message_row(row: &impl StoreRow) -> StoreResult<ChatMessage> {
+    Ok(ChatMessage {
+        id: LfdId::from_raw(row.text(0)?),
+        wave_id: LfdId::from_raw(row.text(1)?),
+        role: row.text(2)?,
+        content: row.text(3)?,
+        created_at: unix_to_datetime(row.bigint(4)?),
     })
 }

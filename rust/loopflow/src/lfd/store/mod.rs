@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    Agent, ChatMemoryBlock, LivePrState, LivePullRequestState, PendingActivation, Stimulus,
-    Summary, Wave, WaveRun, WaveRunStackStatus,
+    Agent, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PendingActivation,
+    Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod migrations;
@@ -261,6 +261,14 @@ impl Store {
         WaveStateStore::delete_chat_memory_block(self, wave_id, name).await
     }
 
+    pub async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
+        WaveStateStore::list_chat_messages(self, wave_id).await
+    }
+
+    pub async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
+        WaveStateStore::create_chat_message(self, message).await
+    }
+
     pub async fn list_fork_runs(
         &self,
         wave_run_id: &LfdId,
@@ -402,6 +410,9 @@ pub trait WaveStateStore: Send + Sync {
     async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>>;
     async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()>;
     async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()>;
+
+    async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>>;
+    async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()>;
 }
 
 #[async_trait::async_trait]
@@ -851,6 +862,26 @@ impl WaveStateStore for Store {
                 .await
             }
             StoreBackend::Postgres(store) => store.delete_chat_memory_block(wave_id, name).await,
+        }
+    }
+
+    async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.list_chat_messages(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.list_chat_messages(wave_id).await,
+        }
+    }
+
+    async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let message = message.clone();
+                run_sqlite(store, move |store| store.create_chat_message(&message)).await
+            }
+            StoreBackend::Postgres(store) => store.create_chat_message(message).await,
         }
     }
 }

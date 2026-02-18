@@ -6,14 +6,14 @@ use tokio_postgres::NoTls;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::store::rows::{
-    map_agent_row, map_chat_memory_block_row, map_fork_run_row, map_live_pr_state_row,
-    map_pending_activation_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row,
-    now_unix, serialize_pr,
+    map_agent_row, map_chat_memory_block_row, map_chat_message_row, map_fork_run_row,
+    map_live_pr_state_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
+    map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, ChatMemoryBlock, LivePullRequestState, PendingActivation, Stimulus,
-    Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
+    Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -1097,6 +1097,42 @@ impl PostgresStore {
                 .execute(
                     "DELETE FROM chat_memory_blocks WHERE wave_id = $1 AND name = $2",
                     &[&wave_id, &name],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT id, wave_id, role, content, created_at
+                     FROM chat_messages
+                     WHERE wave_id = $1
+                     ORDER BY created_at ASC",
+                    &[&wave_id],
+                )
+                .await?;
+            rows.iter().map(map_chat_message_row).collect()
+        })
+        .await
+    }
+
+    pub async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "INSERT INTO chat_messages (id, wave_id, role, content, created_at)
+                     VALUES ($1, $2, $3, $4, $5)",
+                    &[
+                        &message.id,
+                        &message.wave_id,
+                        &message.role,
+                        &message.content,
+                        &message.created_at.unix_timestamp(),
+                    ],
                 )
                 .await?;
             Ok(())

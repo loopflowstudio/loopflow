@@ -20,31 +20,20 @@ use crate::lfd::store::SharedStore;
 
 #[derive(Debug)]
 pub struct ChatTurnStream {
-    wave_id: LfdId,
     sender: broadcast::Sender<AgentEvent>,
-    history: StdMutex<Vec<AgentEvent>>,
     completed: AtomicBool,
 }
 
 impl ChatTurnStream {
-    fn new(wave_id: LfdId) -> Self {
+    fn new() -> Self {
         let (sender, _) = broadcast::channel(256);
         Self {
-            wave_id,
             sender,
-            history: StdMutex::new(Vec::new()),
             completed: AtomicBool::new(false),
         }
     }
 
-    pub fn wave_id(&self) -> &LfdId {
-        &self.wave_id
-    }
-
     pub fn publish(&self, event: AgentEvent) {
-        if let Ok(mut history) = self.history.lock() {
-            history.push(event.clone());
-        }
         let _ = self.sender.send(event);
     }
 
@@ -54,13 +43,6 @@ impl ChatTurnStream {
 
     pub fn is_completed(&self) -> bool {
         self.completed.load(Ordering::Relaxed)
-    }
-
-    pub fn history(&self) -> Vec<AgentEvent> {
-        self.history
-            .lock()
-            .map(|events| events.clone())
-            .unwrap_or_default()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<AgentEvent> {
@@ -73,19 +55,35 @@ pub struct ChatTurnRegistry {
     streams: Arc<StdMutex<HashMap<LfdId, Arc<ChatTurnStream>>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatTurnStartError {
+    AlreadyRunning,
+    Unavailable,
+}
+
 impl ChatTurnRegistry {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn start(&self, wave_id: LfdId) -> Arc<ChatTurnStream> {
-        let stream = Arc::new(ChatTurnStream::new(wave_id.clone()));
+    pub fn start_for_wave(
+        &self,
+        wave_id: LfdId,
+    ) -> Result<Arc<ChatTurnStream>, ChatTurnStartError> {
+        let mut streams = self
+            .streams
+            .lock()
+            .map_err(|_| ChatTurnStartError::Unavailable)?;
 
-        if let Ok(mut streams) = self.streams.lock() {
-            streams.insert(wave_id, stream.clone());
+        if let Some(existing) = streams.get(&wave_id) {
+            if !existing.is_completed() {
+                return Err(ChatTurnStartError::AlreadyRunning);
+            }
         }
 
-        stream
+        let stream = Arc::new(ChatTurnStream::new());
+        streams.insert(wave_id, stream.clone());
+        Ok(stream)
     }
 
     pub fn get(&self, wave_id: &LfdId) -> Option<Arc<ChatTurnStream>> {
@@ -111,4 +109,37 @@ pub struct HttpState {
     pub github: GitHubConfig,
     pub ci_failure_cache: Arc<Mutex<std::collections::HashSet<String>>>,
     pub chat_turns: ChatTurnRegistry,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_for_wave_rejects_concurrent_turns() {
+        let registry = ChatTurnRegistry::new();
+        let wave_id = LfdId::from_raw("wave-1");
+
+        let _first = registry
+            .start_for_wave(wave_id.clone())
+            .expect("first turn should start");
+        let second = registry.start_for_wave(wave_id);
+        assert!(matches!(second, Err(ChatTurnStartError::AlreadyRunning)));
+    }
+
+    #[test]
+    fn start_for_wave_allows_new_turn_after_completion() {
+        let registry = ChatTurnRegistry::new();
+        let wave_id = LfdId::from_raw("wave-1");
+
+        let first = registry
+            .start_for_wave(wave_id.clone())
+            .expect("first turn should start");
+        first.mark_completed();
+
+        let second = registry
+            .start_for_wave(wave_id)
+            .expect("completed turn should be replaceable");
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
 }

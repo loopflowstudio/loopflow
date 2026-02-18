@@ -64,12 +64,12 @@ protocol ChatService: Sendable {
     func deleteMemoryBlock(waveId: String, name: String) async throws
     func startChat(
         waveId: String,
-        message: String,
-        memoryBlocks: [ChatMemoryBlock]
+        message: String
     ) async throws
     func streamChatEvents(
         waveId: String
     ) -> AsyncThrowingStream<ChatTurnEvent, Error>
+    func listChatMessages(waveId: String) async throws -> [ChatMessageRecord]
 }
 
 extension LocalWaveService: ChatService {}
@@ -85,7 +85,6 @@ enum ChatTurnState {
 @Observable
 final class ChatState {
     private static let missingBlockNameMessage = "Memory block name is required."
-    private static let invalidCompletionContractMessage = "Turn failed: expected exactly one final message."
 
     let waveId: String
 
@@ -95,6 +94,7 @@ final class ChatState {
     var memoryError: String?
 
     private var hasLoadedMemory = false
+    private var hasLoadedMessages = false
     private let waveService: any ChatService
 
     init(
@@ -116,6 +116,20 @@ final class ChatState {
     func loadMemoryIfNeeded() async {
         guard !hasLoadedMemory else { return }
         hasLoadedMemory = await loadMemory()
+    }
+
+    func loadMessagesIfNeeded() async {
+        guard !hasLoadedMessages else { return }
+        do {
+            let records = try await waveService.listChatMessages(waveId: waveId)
+            if !records.isEmpty {
+                messages = records.compactMap(Self.chatMessageFromRecord)
+            }
+            hasLoadedMessages = true
+        } catch {
+            // Non-fatal — messages will accumulate from live events.
+            hasLoadedMessages = true
+        }
     }
 
     @discardableResult
@@ -143,23 +157,18 @@ final class ChatState {
         do {
             try await waveService.startChat(
                 waveId: waveId,
-                message: text,
-                memoryBlocks: memory.blocks
+                message: text
             )
 
-            var finalMessageCount = 0
-            var sawFailure = false
-            var sawTerminal = false
+            var hasLocalFailure = false
+            var terminalState: ChatTurnState?
 
             for try await event in waveService.streamChatEvents(waveId: waveId) {
                 switch event {
-                case .message(let content, let phase):
+                case .message(let content, _):
                     let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
                         messages.append(ChatMessage(role: .assistant, content: trimmed))
-                    }
-                    if phase == .final {
-                        finalMessageCount += 1
                     }
                 case .memoryEdit(let op, let block, let detail):
                     do {
@@ -168,37 +177,31 @@ final class ChatState {
                     } catch {
                         memoryError = error.localizedDescription
                         messages.append(ChatMessage(role: .error, content: error.localizedDescription))
-                        sawFailure = true
+                        hasLocalFailure = true
                     }
                 case .done:
-                    sawTerminal = true
+                    if terminalState == nil {
+                        terminalState = .completed
+                    }
                 case .failed(_, let message):
-                    sawFailure = true
-                    sawTerminal = true
+                    terminalState = .failed
                     let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
                     let display = trimmed.isEmpty ? "Turn failed." : trimmed
                     messages.append(ChatMessage(role: .error, content: display))
                 }
             }
 
-            if sawFailure {
+            if hasLocalFailure {
                 turnState = .failed
                 return
             }
 
-            guard sawTerminal else {
+            guard let terminalState else {
                 messages.append(ChatMessage(role: .error, content: "Turn ended before completion."))
                 turnState = .failed
                 return
             }
-
-            guard finalMessageCount == 1 else {
-                messages.append(ChatMessage(role: .error, content: Self.invalidCompletionContractMessage))
-                turnState = .failed
-                return
-            }
-
-            turnState = .completed
+            turnState = terminalState
         } catch {
             messages.append(ChatMessage(role: .error, content: error.localizedDescription))
             turnState = .failed
@@ -286,5 +289,21 @@ final class ChatState {
             return nil
         }
         return trimmed
+    }
+
+    private static func chatMessageFromRecord(_ record: ChatMessageRecord) -> ChatMessage? {
+        let role: ChatRole
+        switch record.role {
+        case "user": role = .user
+        case "assistant": role = .assistant
+        case "memory": role = .memory
+        case "error": role = .error
+        default: return nil
+        }
+        return ChatMessage(
+            role: role,
+            content: record.content,
+            timestamp: record.createdAt ?? Date()
+        )
     }
 }

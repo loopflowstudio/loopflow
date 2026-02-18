@@ -5,6 +5,7 @@
 
 mod agent;
 mod chat_memory;
+mod chat_message;
 mod event;
 mod stimulus;
 mod summary;
@@ -12,6 +13,7 @@ mod wave;
 
 pub use agent::{Agent, AgentStatus};
 pub use chat_memory::ChatMemoryBlock;
+pub use chat_message::ChatMessage;
 pub use event::Event;
 pub use stimulus::{PendingActivation, Stimulus, StimulusKind};
 pub use summary::Summary;

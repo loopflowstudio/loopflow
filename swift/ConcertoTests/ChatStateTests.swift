@@ -43,12 +43,11 @@ struct ChatStateTests {
     }
 
     @MainActor
-    @Test("send surfaces completion contract errors")
-    func sendCompletionContractError() async {
+    @Test("send surfaces failed turn events from server")
+    func sendServerFailedTurn() async {
         let service = MockChatService(
             eventBatches: [[
-                .success(.message(content: "Still thinking", phase: .progress)),
-                .success(.done),
+                .success(.failed(code: "missing_final_message", message: "Turn failed: expected exactly one final message.")),
             ]]
         )
 
@@ -58,6 +57,30 @@ struct ChatStateTests {
         #expect(state.turnState == .failed)
         #expect(state.messages.last?.role == .error)
         #expect(state.messages.last?.content.contains("expected exactly one final message") == true)
+    }
+
+    @MainActor
+    @Test("loadMessagesIfNeeded populates messages from DB")
+    func loadMessagesFromDB() async {
+        let records = [
+            ChatMessageRecord(id: "msg-1", role: "user", content: "Hello", createdAt: Date()),
+            ChatMessageRecord(id: "msg-2", role: "assistant", content: "Hi there", createdAt: Date()),
+        ]
+        let service = MockChatService(messageRecords: records)
+
+        let state = ChatState(waveId: "wave-test", waveService: service)
+        #expect(state.messages.isEmpty)
+
+        await state.loadMessagesIfNeeded()
+        #expect(state.messages.count == 2)
+        #expect(state.messages[0].role == .user)
+        #expect(state.messages[0].content == "Hello")
+        #expect(state.messages[1].role == .assistant)
+        #expect(state.messages[1].content == "Hi there")
+
+        // Second call is a no-op.
+        await state.loadMessagesIfNeeded()
+        #expect(state.messages.count == 2)
     }
 
     @MainActor
@@ -91,13 +114,16 @@ private final class MockChatService: ChatService, @unchecked Sendable {
     private var blocks: [ChatMemoryBlock] = []
     private var listCalls = 0
     private var eventBatches: [[Result<ChatTurnEvent, WaveServiceError>]]
+    private var messageRecords: [ChatMessageRecord]
 
     init(
         listResults: [Result<[ChatMemoryBlock], WaveServiceError>] = [.success([])],
-        eventBatches: [[Result<ChatTurnEvent, WaveServiceError>]] = []
+        eventBatches: [[Result<ChatTurnEvent, WaveServiceError>]] = [],
+        messageRecords: [ChatMessageRecord] = []
     ) {
         self.listResults = listResults
         self.eventBatches = eventBatches
+        self.messageRecords = messageRecords
     }
 
     func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
@@ -141,10 +167,13 @@ private final class MockChatService: ChatService, @unchecked Sendable {
         }
     }
 
+    func listChatMessages(waveId: String) async throws -> [ChatMessageRecord] {
+        queue.sync { messageRecords }
+    }
+
     func startChat(
         waveId: String,
-        message: String,
-        memoryBlocks: [ChatMemoryBlock]
+        message: String
     ) async throws {}
 
     func streamChatEvents(

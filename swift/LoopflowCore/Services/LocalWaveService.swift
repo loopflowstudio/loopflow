@@ -763,20 +763,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     public func startChat(
         waveId: String,
-        message: String,
-        memoryBlocks: [ChatMemoryBlock]
+        message: String
     ) async throws {
         let url = waveURL(waveId, components: "chat")
 
         let body: [String: Any] = [
             "message": message,
-            "memory_blocks": memoryBlocks.map { block in
-                [
-                    "name": block.name,
-                    "content": block.content,
-                    "position": block.position,
-                ]
-            },
         ]
 
         let request = try makeRequest(
@@ -789,6 +781,33 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         let (data, response) = try await performRequest(request, useLongTimeouts: true)
         guard response.statusCode == 200 else {
             throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+    }
+
+    public func listChatMessages(waveId: String) async throws -> [ChatMessageRecord] {
+        let url = waveURL(waveId, components: "chat", "messages")
+        let request = try makeRequest(url)
+
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = json["data"] as? [[String: Any]] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return rows.compactMap { dict in
+            guard let id = dict["id"] as? String,
+                  let role = dict["role"] as? String,
+                  let content = dict["content"] as? String else { return nil }
+            return ChatMessageRecord(
+                id: id,
+                role: role,
+                content: content,
+                createdAt: Self.parseDate(dict["created_at"])
+            )
         }
     }
 

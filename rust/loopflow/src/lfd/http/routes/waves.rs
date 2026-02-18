@@ -391,12 +391,13 @@ pub async fn update_wave_handler(
             let old_name = wave.name.clone();
             let repo = wave.repo.clone();
             let new_name_for_wt = new_name.clone();
-            tokio::task::spawn_blocking(move || {
-                rename_wave_worktree(std::path::Path::new(&repo), &old_name, &new_name_for_wt)
-            })
-            .await
-            .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-            .map_err(|err| api_error(StatusCode::CONFLICT, err))?;
+            run_blocking_result(
+                move || {
+                    rename_wave_worktree(std::path::Path::new(&repo), &old_name, &new_name_for_wt)
+                },
+                StatusCode::CONFLICT,
+            )
+            .await?;
 
             wave.name = new_name;
         }
@@ -863,12 +864,11 @@ pub async fn continue_wave_handler(
 
     // Resolve the current step name for the commit message.
     let step_name = resolve_current_step_name(&run, run.step_index);
-    tokio::task::spawn_blocking(move || {
-        auto_commit_if_dirty(std::path::Path::new(&worktree), &step_name)
-    })
-    .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    run_blocking_result(
+        move || auto_commit_if_dirty(std::path::Path::new(&worktree), &step_name),
+        StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await?;
 
     // Advance to the next step.
     run.step_index += 1;
@@ -933,23 +933,24 @@ pub async fn land_wave_handler(
     let lint = payload.lint.unwrap_or(true);
 
     let repo_path = wave.repo.clone();
-    tokio::task::spawn_blocking(move || {
-        let progress = crate::ops::NullProgress;
-        crate::ops::land(
-            std::path::Path::new(&repo_path),
-            &crate::ops::LandOptions {
-                strict,
-                local,
-                create_pr,
-                worktree: Some(worktree),
-                lint,
-            },
-            &progress,
-        )
-    })
-    .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+    run_blocking_result(
+        move || {
+            let progress = crate::ops::NullProgress;
+            crate::ops::land(
+                std::path::Path::new(&repo_path),
+                &crate::ops::LandOptions {
+                    strict,
+                    local,
+                    create_pr,
+                    worktree: Some(worktree),
+                    lint,
+                },
+                &progress,
+            )
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await?;
 
     state.event_hub.send(Event::wave_updated(wave_id_for_event));
 
@@ -964,21 +965,22 @@ pub async fn next_wave_handler(
     let (wave, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
 
     let wave_name = wave.name.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let progress = crate::ops::NullProgress;
-        crate::ops::next_branch(
-            std::path::Path::new(&work_dir),
-            &crate::ops::NextOptions {
-                wave_name: Some(wave_name),
-                create_pr: true,
-                ..Default::default()
-            },
-            &progress,
-        )
-    })
-    .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+    let result = run_blocking_result(
+        move || {
+            let progress = crate::ops::NullProgress;
+            crate::ops::next_branch(
+                std::path::Path::new(&work_dir),
+                &crate::ops::NextOptions {
+                    wave_name: Some(wave_name),
+                    create_pr: true,
+                    ..Default::default()
+                },
+                &progress,
+            )
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await?;
 
     state.event_hub.send(Event::wave_updated(wave_id));
 
@@ -995,18 +997,19 @@ pub async fn combine_wave_handler(
     let (wave, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
     let wave_name = wave.name.clone();
 
-    let result = tokio::task::spawn_blocking(move || {
-        crate::ops::combine_prs(
-            std::path::Path::new(&work_dir),
-            &crate::ops::CombineOptions {
-                wave_name: Some(wave_name),
-            },
-            &crate::ops::NullProgress,
-        )
-    })
-    .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+    let result = run_blocking_result(
+        move || {
+            crate::ops::combine_prs(
+                std::path::Path::new(&work_dir),
+                &crate::ops::CombineOptions {
+                    wave_name: Some(wave_name),
+                },
+                &crate::ops::NullProgress,
+            )
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await?;
 
     state.event_hub.send(Event::wave_updated(wave_id));
 
@@ -1048,12 +1051,27 @@ async fn resolve_wave_work_dir_for_api(
     wave_name: String,
     latest_worktree: Option<String>,
 ) -> Result<String, ApiError> {
-    tokio::task::spawn_blocking(move || {
-        resolve_wave_work_dir(&repo_path, &wave_name, latest_worktree)
-    })
+    run_blocking_result(
+        move || resolve_wave_work_dir(&repo_path, &wave_name, latest_worktree),
+        StatusCode::BAD_REQUEST,
+    )
     .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-    .map_err(|err| api_error(StatusCode::BAD_REQUEST, err))
+}
+
+fn map_join_error(err: tokio::task::JoinError) -> ApiError {
+    api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+}
+
+async fn run_blocking_result<T, E, F>(func: F, failure_status: StatusCode) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    E: std::fmt::Display + Send + 'static,
+    F: FnOnce() -> Result<T, E> + Send + 'static,
+{
+    tokio::task::spawn_blocking(func)
+        .await
+        .map_err(map_join_error)?
+        .map_err(|err| api_error(failure_status, err.to_string()))
 }
 
 fn resolve_wave_work_dir(

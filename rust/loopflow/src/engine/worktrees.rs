@@ -5,6 +5,7 @@ use crate::engine::git::{
     worktree_move,
 };
 use crate::engine::naming::format_branch_name;
+use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -56,7 +57,7 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
 
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
     let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let sanitized = name.replace(['/', '\\'], "-");
+    let sanitized = sanitize_fs_component(name);
     let repo_name = repo_root
         .file_name()
         .and_then(|n| n.to_str())
@@ -415,4 +416,22 @@ pub fn preserve_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, GitErr
         .join(format!("{name}.{ts}"));
     worktree_move(repo, worktree, &new_path)?;
     Ok(new_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::worktree_path;
+    use std::path::Path;
+
+    #[test]
+    fn worktree_path_sanitizes_wave_name_for_filesystem_component() {
+        let path = worktree_path(Path::new("/tmp/repo"), "feature/new*wave");
+        assert_eq!(path, Path::new("/tmp/repo.feature-new-wave"));
+    }
+
+    #[test]
+    fn worktree_path_uses_wave_fallback_for_empty_sanitized_component() {
+        let path = worktree_path(Path::new("/tmp/repo"), "../..");
+        assert_eq!(path, Path::new("/tmp/repo.wave"));
+    }
 }

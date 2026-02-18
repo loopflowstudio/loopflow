@@ -78,7 +78,7 @@ Environment variables:
 ```
 LFD_MODE          # optional mode override: native or container
 LFD_HTTP_ADDR     # daemon listen address (default 127.0.0.1:2486)
-LFD_DB_PATH       # sqlite path override (native mode)
+LFD_DB_PATH       # sqlite path override relative to ~/.lf (native mode)
 LFD_DATABASE_URL  # required for container mode (postgres)
 LFD_MAX_SLOTS     # concurrent run slots
 LFD_AUTH_PROVIDER # local (default), static, or loopflow.studio

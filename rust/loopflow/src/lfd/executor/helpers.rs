@@ -24,6 +24,7 @@ use crate::engine::worktrees::{
 };
 
 use crate::lfd::id::LfdId;
+use crate::lfd::security::{sanitize_fs_component, validate_safe_id};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     Agent, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
@@ -125,11 +126,13 @@ pub(crate) fn ci_fix_worktree_path(repo: &Path, wave_name: &str, run_id: &LfdId)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("repo");
+    let wave_component = sanitize_fs_component(wave_name);
     let short_id = short_hash(run_id.as_str(), 8);
+    validate_safe_id(&short_id).expect("short hash should always produce a safe id");
     repo_root
         .parent()
         .unwrap_or(repo_root.as_path())
-        .join(format!("{repo_name}.{wave_name}.ci-fix.{short_id}"))
+        .join(format!("{repo_name}.{wave_component}.ci-fix.{short_id}"))
 }
 
 pub(crate) fn create_ci_fix_worktree(

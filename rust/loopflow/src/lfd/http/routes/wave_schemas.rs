@@ -276,7 +276,7 @@ fn load_builtin_wave_schemas() -> Vec<ResolvedWaveSchema> {
         let Some(raw) = crate::engine::builtins::get_builtin_wave(&name) else {
             continue;
         };
-        match serde_yaml::from_str::<WaveSchema>(raw) {
+        match serde_yaml_ng::from_str::<WaveSchema>(raw) {
             Ok(schema) => schemas.push(ResolvedWaveSchema {
                 schema_ref: format!("builtin://{}", schema.name),
                 source: WaveSchemaSource::Builtin,
@@ -327,7 +327,7 @@ fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, Schem
             }
         };
 
-        let schema = match serde_yaml::from_str::<WaveSchema>(&raw) {
+        let schema = match serde_yaml_ng::from_str::<WaveSchema>(&raw) {
             Ok(schema) => schema,
             Err(err) => {
                 warn!(path = %canonical_schema_path.display(), error = %err, "invalid local wave schema");

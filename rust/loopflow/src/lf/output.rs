@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Colors {
     pub cyan: &'static str,
@@ -10,7 +12,7 @@ pub struct Colors {
 
 impl Colors {
     pub fn new() -> Self {
-        let use_color = std::env::var("NO_COLOR").is_err() && atty::is(atty::Stream::Stdout);
+        let use_color = std::env::var("NO_COLOR").is_err() && std::io::stdout().is_terminal();
         if use_color {
             Self {
                 cyan: "\x1b[36m",

@@ -11,7 +11,7 @@ pub const RLM_DOC: &str = include_str!("builtins/RLM.md");
 
 /// Returns the content of a built-in step, if it exists.
 ///
-/// Namespaced steps (e.g., "scan/cves") are registered with their prefix.
+/// Namespaced steps (e.g., "scan/scan-report") are registered with their prefix.
 /// The auto-registration in build.rs uses file stems as keys, so namespaced
 /// steps need explicit overrides here.
 pub fn get_builtin_step(name: &str) -> Option<&'static str> {
@@ -21,18 +21,20 @@ pub fn get_builtin_step(name: &str) -> Option<&'static str> {
         .or_else(|| NAMESPACED_STEPS.get(name).copied())
 }
 
-/// Steps whose key includes a directory prefix (e.g., "scan/cves").
-/// build.rs auto-registers these under their file stem ("cves"), but
+/// Steps whose key includes a directory prefix (e.g., "scan/scan-report").
+/// build.rs auto-registers these under their file stem ("scan-report"), but
 /// the user-facing name includes the namespace.
 static NAMESPACED_STEPS: std::sync::LazyLock<
     std::collections::HashMap<&'static str, &'static str>,
 > = std::sync::LazyLock::new(|| {
     let mut m = std::collections::HashMap::new();
-    m.insert("scan/cves", include_str!("builtins/steps/scan/cves.md"));
-    m.insert("scan/deps", include_str!("builtins/steps/scan/deps.md"));
     m.insert(
-        "scan/upstream",
-        include_str!("builtins/steps/scan/upstream.md"),
+        "scan/scan-report",
+        include_str!("builtins/steps/scan/scan-report.md"),
+    );
+    m.insert(
+        "scan/scan-plan",
+        include_str!("builtins/steps/scan/scan-plan.md"),
     );
     m
 });

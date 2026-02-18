@@ -341,7 +341,7 @@ pub fn parse_model(model: &str) -> (String, Option<String>) {
 }
 
 /// Load YAML file, returning None if not present or empty.
-fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml::Value>, LoadError> {
+fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError> {
     if !path.exists() {
         return Ok(None);
     }
@@ -349,7 +349,7 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml::Value>, LoadError> {
     if content.trim().is_empty() {
         return Ok(None);
     }
-    let value: serde_yaml::Value = serde_yaml::from_str(&content).map_err(|e| {
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
         LoadError::InvalidFlow(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
     Ok(Some(value))
@@ -357,27 +357,27 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml::Value>, LoadError> {
 
 /// Merge global and repo config. Repo wins for scalars, additive keys combine.
 fn merge_config_values(
-    global: Option<serde_yaml::Value>,
-    repo: Option<serde_yaml::Value>,
-) -> serde_yaml::Value {
+    global: Option<serde_yaml_ng::Value>,
+    repo: Option<serde_yaml_ng::Value>,
+) -> serde_yaml_ng::Value {
     match (global, repo) {
-        (None, None) => serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        (None, None) => serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
         (Some(g), None) => g,
         (None, Some(r)) => r,
         (
-            Some(serde_yaml::Value::Mapping(mut global_map)),
-            Some(serde_yaml::Value::Mapping(repo_map)),
+            Some(serde_yaml_ng::Value::Mapping(mut global_map)),
+            Some(serde_yaml_ng::Value::Mapping(repo_map)),
         ) => {
             for (key, value) in repo_map {
                 let key_str = key.as_str().unwrap_or("");
                 if ADDITIVE_KEYS.contains(&key_str) {
                     // Combine lists
-                    if let Some(serde_yaml::Value::Sequence(mut global_seq)) =
+                    if let Some(serde_yaml_ng::Value::Sequence(mut global_seq)) =
                         global_map.remove(&key)
                     {
-                        if let serde_yaml::Value::Sequence(repo_seq) = value {
+                        if let serde_yaml_ng::Value::Sequence(repo_seq) = value {
                             global_seq.extend(repo_seq);
-                            global_map.insert(key, serde_yaml::Value::Sequence(global_seq));
+                            global_map.insert(key, serde_yaml_ng::Value::Sequence(global_seq));
                         } else {
                             global_map.insert(key, value);
                         }
@@ -389,7 +389,7 @@ fn merge_config_values(
                     global_map.insert(key, value);
                 }
             }
-            serde_yaml::Value::Mapping(global_map)
+            serde_yaml_ng::Value::Mapping(global_map)
         }
         (_, Some(r)) => r,
     }
@@ -416,7 +416,7 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
 
     let merged = merge_config_values(global_data, repo_data);
 
-    let config: Config = serde_yaml::from_value(merged)
+    let config: Config = serde_yaml_ng::from_value(merged)
         .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
 
     Ok(Some(config))
@@ -552,7 +552,7 @@ mod tests {
     fn autoprune_config_from_empty_yaml() {
         // When deserialized from YAML, gets proper defaults
         let yaml = "autoprune: {}\n";
-        let config: Config = serde_yaml::from_str(yaml).expect("parse");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
         assert!(!config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 60);
     }
@@ -561,7 +561,7 @@ mod tests {
     fn budget_config_from_empty_yaml() {
         // When deserialized from YAML, gets proper defaults
         let yaml = "budgets: {}\n";
-        let config: Config = serde_yaml::from_str(yaml).expect("parse");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse");
         assert_eq!(config.budgets.area, 50000);
         assert_eq!(config.budgets.docs, 30000);
         assert_eq!(config.budgets.diff, 20000);
@@ -578,7 +578,7 @@ agent_model: codex:o3
 yolo: true
 chrome: true
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.agent_model, "codex:o3");
         assert!(config.yolo);
         assert!(config.chrome);
@@ -591,7 +591,7 @@ context:
   - src/
   - tests/
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.context, vec!["src/", "tests/"]);
     }
 
@@ -603,7 +603,7 @@ exclude:
   - build/
   - node_modules/
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.exclude, vec!["*.log", "build/", "node_modules/"]);
     }
 
@@ -614,7 +614,7 @@ direction:
   - architect
   - concise
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
             config.direction,
             Some(vec!["architect".to_string(), "concise".to_string()])
@@ -628,7 +628,7 @@ interactive:
   - design
   - iterate
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.interactive, vec!["design", "iterate"]);
     }
 
@@ -640,7 +640,7 @@ ide:
   cursor: true
   workspace: myproject.code-workspace
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(!config.ide.warp);
         assert!(config.ide.cursor);
         assert_eq!(
@@ -655,7 +655,7 @@ ide:
 ide:
   cursor: false
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.ide.warp); // default true
         assert!(!config.ide.cursor);
         assert!(config.ide.workspace.is_none());
@@ -664,7 +664,7 @@ ide:
     #[test]
     fn config_from_yaml_autoprune_bool_true() {
         let yaml = "autoprune: true\n";
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
     }
@@ -672,7 +672,7 @@ ide:
     #[test]
     fn config_from_yaml_autoprune_bool_false() {
         let yaml = "autoprune: false\n";
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(!config.autoprune.enabled);
     }
 
@@ -683,7 +683,7 @@ autoprune:
   enabled: true
   poll_interval_seconds: 120
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 120);
     }
@@ -694,7 +694,7 @@ autoprune:
 autoprune:
   enabled: true
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.autoprune.enabled);
         assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
     }
@@ -707,7 +707,7 @@ budgets:
   docs: 50000
   diff: 30000
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.budgets.area, 100000);
         assert_eq!(config.budgets.docs, 50000);
         assert_eq!(config.budgets.diff, 30000);
@@ -719,7 +719,7 @@ budgets:
 budgets:
   area: 80000
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.budgets.area, 80000);
         assert_eq!(config.budgets.docs, 30000); // default
         assert_eq!(config.budgets.diff, 20000); // default
@@ -734,7 +734,7 @@ summaries:
     model: claude
   - path: tests/
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.summaries.len(), 2);
         assert_eq!(config.summaries[0].path, "src/");
         assert_eq!(config.summaries[0].tokens, Some(5000));
@@ -751,7 +751,7 @@ skill_sources:
     prefix: sp
     path: ~/.lf/skills/superpowers
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.skill_sources.len(), 1);
         assert_eq!(config.skill_sources[0].name, "superpowers");
         assert_eq!(config.skill_sources[0].prefix, "sp");
@@ -763,7 +763,7 @@ skill_sources:
 branch_names:
   schema: "{user}.{name}.{date}_{ts}"
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert!(config.branch_names.is_some());
         assert_eq!(
             config.branch_names.as_ref().unwrap().schema_,
@@ -777,7 +777,7 @@ branch_names:
 lint: "cargo fmt --check && cargo clippy -- -D warnings"
 test: "cargo test --all"
 "#;
-        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
             config.lint,
             Some("cargo fmt --check && cargo clippy -- -D warnings".to_string())
@@ -792,14 +792,14 @@ test: "cargo test --all"
     #[test]
     fn config_from_yaml_invalid_type() {
         let yaml = "summary_tokens: not_a_number\n";
-        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        let result: Result<Config, _> = serde_yaml_ng::from_str(yaml);
         assert!(result.is_err());
     }
 
     #[test]
     fn config_from_yaml_invalid_syntax() {
         let yaml = "foo: [invalid\n";
-        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        let result: Result<Config, _> = serde_yaml_ng::from_str(yaml);
         assert!(result.is_err());
     }
 
@@ -809,7 +809,7 @@ test: "cargo test --all"
 
     #[test]
     fn merge_config_values_repo_overrides_scalar() {
-        let global: serde_yaml::Value = serde_yaml::from_str(
+        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             r#"
 agent_model: claude:opus
 yolo: false
@@ -817,7 +817,7 @@ yolo: false
         )
         .unwrap();
 
-        let repo: serde_yaml::Value = serde_yaml::from_str(
+        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             r#"
 agent_model: codex
 "#,
@@ -825,7 +825,7 @@ agent_model: codex
         .unwrap();
 
         let merged = merge_config_values(Some(global), Some(repo));
-        let config: Config = serde_yaml::from_value(merged).unwrap();
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         assert_eq!(config.agent_model, "codex");
         assert!(!config.yolo); // preserved from global
@@ -833,7 +833,7 @@ agent_model: codex
 
     #[test]
     fn merge_config_values_additive_keys_combine() {
-        let global: serde_yaml::Value = serde_yaml::from_str(
+        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             r#"
 context:
   - global.md
@@ -843,7 +843,7 @@ exclude:
         )
         .unwrap();
 
-        let repo: serde_yaml::Value = serde_yaml::from_str(
+        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             r#"
 context:
   - local.md
@@ -854,7 +854,7 @@ exclude:
         .unwrap();
 
         let merged = merge_config_values(Some(global), Some(repo));
-        let config: Config = serde_yaml::from_value(merged).unwrap();
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         assert_eq!(config.context, vec!["global.md", "local.md"]);
         assert_eq!(config.exclude, vec!["*.log", "build/"]);
@@ -862,20 +862,21 @@ exclude:
 
     #[test]
     fn merge_config_values_global_only() {
-        let global: serde_yaml::Value = serde_yaml::from_str("agent_model: claude:opus\n").unwrap();
+        let global: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str("agent_model: claude:opus\n").unwrap();
 
         let merged = merge_config_values(Some(global), None);
-        let config: Config = serde_yaml::from_value(merged).unwrap();
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         assert_eq!(config.agent_model, "claude:opus");
     }
 
     #[test]
     fn merge_config_values_repo_only() {
-        let repo: serde_yaml::Value = serde_yaml::from_str("agent_model: codex\n").unwrap();
+        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str("agent_model: codex\n").unwrap();
 
         let merged = merge_config_values(None, Some(repo));
-        let config: Config = serde_yaml::from_value(merged).unwrap();
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         assert_eq!(config.agent_model, "codex");
     }
@@ -883,7 +884,7 @@ exclude:
     #[test]
     fn merge_config_values_both_none() {
         let merged = merge_config_values(None, None);
-        let config: Config = serde_yaml::from_value(merged).unwrap();
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         // Should get defaults
         assert_eq!(config.agent_model, "claude:opus");

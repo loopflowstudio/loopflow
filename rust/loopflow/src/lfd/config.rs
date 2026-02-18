@@ -55,7 +55,7 @@ impl LfdConfig {
     pub fn load() -> Result<Self> {
         let path = config_path();
         let mut config: RawLfdConfig = match std::fs::read_to_string(&path) {
-            Ok(content) => serde_yaml::from_str(&content)
+            Ok(content) => serde_yaml_ng::from_str(&content)
                 .with_context(|| format!("invalid lfd config at {}", path.display()))?,
             Err(err) if err.kind() == ErrorKind::NotFound => RawLfdConfig::default(),
             Err(err) => {
@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn mode_container_sets_container_profile() {
-        let config: RawLfdConfig = serde_yaml::from_str("mode: container").expect("yaml parses");
+        let config: RawLfdConfig = serde_yaml_ng::from_str("mode: container").expect("yaml parses");
         let resolved = config.resolve().expect("container resolves");
 
         assert_eq!(resolved.mode, Mode::Container);
@@ -442,7 +442,7 @@ mod tests {
 mode: container
 runtime_backend: native
 "#;
-        let config: RawLfdConfig = serde_yaml::from_str(raw).expect("yaml parses");
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let err = config.resolve().expect_err("override should fail");
         assert_eq!(
             err.to_string(),
@@ -456,7 +456,7 @@ runtime_backend: native
 executor:
   type: docker
 "#;
-        let config: RawLfdConfig = serde_yaml::from_str(raw).expect("yaml parses");
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let err = config
             .resolve()
             .expect_err("executor type override should fail");
@@ -474,7 +474,7 @@ executor:
     mounts:
       - ~/.claude:/home/agent/.claude
 "#;
-        let result = serde_yaml::from_str::<RawLfdConfig>(raw);
+        let result = serde_yaml_ng::from_str::<RawLfdConfig>(raw);
         assert!(result.is_err());
     }
 

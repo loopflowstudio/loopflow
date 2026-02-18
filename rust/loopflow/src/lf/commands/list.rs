@@ -1,7 +1,8 @@
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{
-    builtin_descriptions, builtin_steps, is_step_interactive, list_all_steps,
-    list_flows_with_steps, BUILTIN_CATEGORIES,
+    builtin_descriptions, builtin_flow_descriptions, builtin_flows, builtin_steps,
+    is_step_interactive, list_all_steps, list_user_flows, BUILTIN_CATEGORIES,
+    BUILTIN_FLOW_CATEGORIES,
 };
 use crate::lf::output::Colors;
 use anyhow::Result;
@@ -27,37 +28,90 @@ pub fn show_all() -> Result<()> {
     // =========================================================================
     // FLOWS section
     // =========================================================================
-    if let Some(ref repo) = repo_root {
-        let flows = list_flows_with_steps(repo);
-        if !flows.is_empty() {
-            println!(
-                "{cyan}{bold}FLOWS{reset}",
-                cyan = colors.cyan,
-                bold = colors.bold,
-                reset = colors.reset
-            );
-            for flow in flows {
-                let chain = flow
-                    .step_names
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(&format!(
-                        " {dim}→{reset} ",
-                        dim = colors.dim,
-                        reset = colors.reset
-                    ));
-                println!(
-                    "  {bold}{name:<14}{reset} {dim}{chain}{reset}",
-                    bold = colors.bold,
-                    name = flow.name,
-                    reset = colors.reset,
+    let flow_descriptions = builtin_flow_descriptions();
+    let builtin_flow_set = builtin_flows();
+
+    // Collect user-defined flows (may override builtins)
+    let user_flows: Vec<_> = repo_root
+        .as_ref()
+        .map(|r| list_user_flows(r))
+        .unwrap_or_default();
+    let user_flow_set: HashSet<String> = user_flows.iter().map(|f| f.name.clone()).collect();
+
+    println!(
+        "{cyan}{bold}FLOWS{reset}",
+        cyan = colors.cyan,
+        bold = colors.bold,
+        reset = colors.reset
+    );
+    println!();
+
+    // Builtin flows by category
+    for (category, flow_names) in BUILTIN_FLOW_CATEGORIES {
+        println!(
+            "{dim}{category}{reset}",
+            dim = colors.dim,
+            category = category,
+            reset = colors.reset
+        );
+
+        for name in *flow_names {
+            let desc = flow_descriptions.get(name).copied().unwrap_or("");
+            let custom_tag = if user_flow_set.contains(*name) {
+                format!(
+                    " {dim}(customized){reset}",
                     dim = colors.dim,
-                    chain = chain
-                );
-            }
-            println!();
+                    reset = colors.reset
+                )
+            } else {
+                String::new()
+            };
+            println!(
+                "  {bold}{name:<16}{reset} {dim}{desc}{reset}{custom_tag}",
+                bold = colors.bold,
+                name = name,
+                reset = colors.reset,
+                dim = colors.dim,
+                desc = desc,
+                custom_tag = custom_tag
+            );
         }
+        println!();
+    }
+
+    // User-defined flows not overriding builtins
+    let custom_flows: Vec<_> = user_flows
+        .iter()
+        .filter(|f| !builtin_flow_set.contains(&f.name))
+        .collect();
+
+    if !custom_flows.is_empty() {
+        println!(
+            "{green}Custom{reset}",
+            green = colors.green,
+            reset = colors.reset
+        );
+        for flow in custom_flows {
+            let chain = flow
+                .step_names
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(&format!(
+                    " {dim}→{reset} ",
+                    dim = colors.dim,
+                    reset = colors.reset
+                ));
+            println!(
+                "  {bold}{name:<16}{reset} {dim}{chain}{reset}",
+                bold = colors.bold,
+                name = flow.name,
+                reset = colors.reset,
+                dim = colors.dim,
+                chain = chain
+            );
+        }
+        println!();
     }
 
     // =========================================================================
@@ -242,7 +296,7 @@ pub fn show_all() -> Result<()> {
     // Footer
     // =========================================================================
     println!(
-        "{dim}Built-ins work anywhere. Run lf <step> or lf <step>: args{reset}",
+        "{dim}Run lf <step>, lf <flow>, or lf <step>: args{reset}",
         dim = colors.dim,
         reset = colors.reset
     );

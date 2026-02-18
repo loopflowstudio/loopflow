@@ -2,7 +2,7 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::lf::discovery::{
-    builtin_steps, discover_target, list_all_steps, list_directions, list_flows_with_steps, Target,
+    builtin_steps, discover_target, list_all_steps, list_directions, list_user_flows, Target,
     BUILTIN_CATEGORIES,
 };
 use tempfile::TempDir;
@@ -76,7 +76,7 @@ fn discover_repo_flows() {
     )
     .expect("write flow");
 
-    let flows = list_flows_with_steps(repo.path());
+    let flows = list_user_flows(repo.path());
     let flow = flows.iter().find(|f| f.name == "ship").expect("flow");
     assert_eq!(flow.step_names, vec!["implement", "gate"]);
 }

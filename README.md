@@ -61,9 +61,8 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
 | Step | What it does |
 |------|--------------|
-| `scan/cves` | Check dependencies for known vulnerabilities |
-| `scan/deps` | Check for major version bumps, deprecations |
-| `scan/upstream` | Check external APIs for breaking changes |
+| `scan/scan-report` | Scan deps and APIs for vulnerabilities, staleness, breaking changes |
+| `scan/scan-plan` | Turn scan report into actionable design doc |
 
 ### Ops steps (`ops/`)
 
@@ -109,7 +108,7 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `scan` | scan/cves → scan/deps → scan/upstream |
+| `scan` | scan/scan-report → scan/scan-plan → ship |
 
 ### Forks
 

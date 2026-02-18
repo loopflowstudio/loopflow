@@ -51,7 +51,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         &["implement", "iterate", "expand", "reduce", "compress"],
     ),
     ("Quality", &["review", "polish", "lint", "debug", "gate"]),
-    ("Scan", &["scan/cves", "scan/deps", "scan/upstream"]),
+    ("Scan", &["scan/scan-report", "scan/scan-plan"]),
     ("Git", &["commit", "rebase"]),
     (
         "Ops",
@@ -93,9 +93,8 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("consolidate", "Reorganize scratch/ for wave"),
         ("synthesize", "Combine multiple perspectives"),
         ("validate", "Validate flows, steps, and directions"),
-        ("scan/cves", "Check dependencies for CVEs"),
-        ("scan/deps", "Check for major version bumps"),
-        ("scan/upstream", "Check external APIs for changes"),
+        ("scan/scan-report", "Scan deps and APIs for issues"),
+        ("scan/scan-plan", "Turn scan report into action plan"),
     ])
 }
 
@@ -498,6 +497,62 @@ pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
 }
 
 // =============================================================================
+// Built-in flow metadata for formatted listing
+// =============================================================================
+
+pub const BUILTIN_FLOW_CATEGORIES: &[(&str, &[&str])] = &[
+    (
+        "Code",
+        &[
+            "ship",
+            "design-and-ship",
+            "pair",
+            "grind",
+            "incident",
+            "start",
+            "ship-wave",
+        ],
+    ),
+    (
+        "Plan",
+        &[
+            "research",
+            "wave-reduce",
+            "wave-polish",
+            "wave-expand",
+            "publish",
+        ],
+    ),
+    ("Scan", &["scan"]),
+];
+
+pub fn builtin_flow_descriptions() -> HashMap<&'static str, &'static str> {
+    HashMap::from([
+        ("ship", "implement → compress → gate → consolidate"),
+        ("design-and-ship", "design → implement → reduce → polish"),
+        ("pair", "design → ship"),
+        ("grind", "review → iterate → ship → gate"),
+        ("incident", "debug → 5whys → ship"),
+        ("start", "ingest → kickoff"),
+        ("ship-wave", "start → ship → update-wave"),
+        ("research", "explore → review → publish"),
+        ("wave-reduce", "review → fork(reduce×3) → publish"),
+        ("wave-polish", "review → fork(polish×3) → publish"),
+        ("wave-expand", "review → fork(expand×3) → publish"),
+        ("publish", "consolidate → add-to-wave"),
+        ("scan", "scan-report → scan-plan → ship"),
+    ])
+}
+
+/// All builtin flow names (from BUILTIN_FLOW_CATEGORIES).
+pub fn builtin_flows() -> HashSet<String> {
+    BUILTIN_FLOW_CATEGORIES
+        .iter()
+        .flat_map(|(_, flows)| flows.iter().map(|f| (*f).to_string()))
+        .collect()
+}
+
+// =============================================================================
 // Flow discovery and step chain extraction
 // =============================================================================
 
@@ -507,8 +562,8 @@ pub struct FlowInfo {
     pub step_names: Vec<String>,
 }
 
-/// List flows with their step names for display.
-pub fn list_flows_with_steps(repo: &Path) -> Vec<FlowInfo> {
+/// List user-defined flows with their step names for display.
+pub fn list_user_flows(repo: &Path) -> Vec<FlowInfo> {
     let mut flows = Vec::new();
     let flows_dir = repo.join(".lf/flows");
 
@@ -537,7 +592,7 @@ fn extract_flow_step_names(path: &Path) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
 
-    let value: serde_yaml::Value = match serde_yaml::from_str(&content) {
+    let value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(&content) {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
@@ -555,41 +610,41 @@ fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn extract_step_names_from_value(value: &serde_yaml::Value) -> Vec<String> {
+fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
     let mut names = Vec::new();
 
     match value {
-        serde_yaml::Value::String(s) => {
+        serde_yaml_ng::Value::String(s) => {
             names.push(s.clone());
         }
-        serde_yaml::Value::Sequence(seq) => {
+        serde_yaml_ng::Value::Sequence(seq) => {
             for item in seq {
                 names.extend(extract_step_names_from_value(item));
             }
         }
-        serde_yaml::Value::Mapping(map) => {
+        serde_yaml_ng::Value::Mapping(map) => {
             // Check for "steps" key first (common flow structure)
-            if let Some(steps) = map.get(serde_yaml::Value::String("steps".to_string())) {
+            if let Some(steps) = map.get(serde_yaml_ng::Value::String("steps".to_string())) {
                 return extract_step_names_from_value(steps);
             }
             // Check for "step" key (step definition)
-            if let Some(step) = map.get(serde_yaml::Value::String("step".to_string())) {
-                if let serde_yaml::Value::String(name) = step {
+            if let Some(step) = map.get(serde_yaml_ng::Value::String("step".to_string())) {
+                if let serde_yaml_ng::Value::String(name) = step {
                     names.push(name.clone());
-                } else if let serde_yaml::Value::Mapping(step_map) = step {
-                    if let Some(serde_yaml::Value::String(name)) =
-                        step_map.get(serde_yaml::Value::String("name".to_string()))
+                } else if let serde_yaml_ng::Value::Mapping(step_map) = step {
+                    if let Some(serde_yaml_ng::Value::String(name)) =
+                        step_map.get(serde_yaml_ng::Value::String("name".to_string()))
                     {
                         names.push(name.clone());
                     }
                 }
             }
             // Check for fork/choose/loop structures
-            if let Some(fork) = map.get(serde_yaml::Value::String("fork".to_string())) {
+            if let Some(fork) = map.get(serde_yaml_ng::Value::String("fork".to_string())) {
                 names.push("[fork]".to_string());
-                if let serde_yaml::Value::Mapping(fork_map) = fork {
+                if let serde_yaml_ng::Value::Mapping(fork_map) = fork {
                     if let Some(branches) =
-                        fork_map.get(serde_yaml::Value::String("branches".to_string()))
+                        fork_map.get(serde_yaml_ng::Value::String("branches".to_string()))
                     {
                         let branch_names = extract_step_names_from_value(branches);
                         if !branch_names.is_empty() {
@@ -599,10 +654,10 @@ fn extract_step_names_from_value(value: &serde_yaml::Value) -> Vec<String> {
                     }
                 }
             }
-            if map.contains_key(serde_yaml::Value::String("choose".to_string())) {
+            if map.contains_key(serde_yaml_ng::Value::String("choose".to_string())) {
                 names.push("[choose]".to_string());
             }
-            if map.contains_key(serde_yaml::Value::String("loop_until_empty".to_string())) {
+            if map.contains_key(serde_yaml_ng::Value::String("loop_until_empty".to_string())) {
                 names.push("[loop]".to_string());
             }
         }

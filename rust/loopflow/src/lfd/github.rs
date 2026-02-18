@@ -167,6 +167,7 @@ pub async fn poll_check_runs(
     let response = client
         .get(url)
         .header(ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
         .header(USER_AGENT, "loopflow-lfd")
         .bearer_auth(token)
         .send()
@@ -196,6 +197,7 @@ pub async fn fetch_pull_request(
     let response = client
         .get(url)
         .header(ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
         .header(USER_AGENT, "loopflow-lfd")
         .bearer_auth(token)
         .send()

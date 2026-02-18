@@ -51,7 +51,7 @@ fn golden_prompts_match_python() {
     let root = repo_root();
     for case_path in load_cases() {
         let yaml = fs::read_to_string(&case_path).expect("read golden yaml");
-        let case: GoldenCase = serde_yaml::from_str(&yaml).expect("parse golden yaml");
+        let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
 
         let repo = root.join(&case.repo);
         let opts = GatherContextOpts {

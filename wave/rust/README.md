@@ -15,7 +15,7 @@ lfd keeps both SQLite and Postgres. Store operations are async end-to-end. Promp
 | 03 | Shared SQL catalog | One query per operation; dialect rendering for `?`/`$N` | 02 | Shipped |
 | 04 | Prompt pipeline | `DocumentSource` enum; `gather_documents(specs)` | None | |
 
-Stage 04 is independent of the store work and can run in parallel with 03. Each stage deletes what it replaces — no deferred cleanup.
+Stages 01–03 (the store simplification arc) are complete. Stage 04 is independent — it touches `engine/prompt.rs`, not the store layer. Each stage deletes what it replaces — no deferred cleanup.
 
 ## What's shipped
 
@@ -43,16 +43,17 @@ Stage 04 is independent of the store work and can run in parallel with 03. Each 
 - Rendered SQL is cached via lazy static storage
 - Catalog parity tests enforce rendering coverage and contiguous placeholder numbering
 
-## Architecture (current → target)
+## Architecture
 
 ```
-Current (Stage 03 shipped):
+Store layer (shipped):
   HTTP routes ──await──▶ Arc<Store>
   Store dispatches to SqliteStore (spawn_blocking) or PostgresStore (async)
-  SQL comes from one catalog and is rendered per dialect once
+  SQL comes from one catalog, rendered per dialect once
 
-Target (Stage 04 complete):
-  Documents typed by source, assembled declaratively
+Prompt layer (next):
+  Documents typed by DocumentSource enum, assembled via gather_documents(spec)
+  Formatting consolidated into one entry point with mode parameter
 ```
 
 ## Out of scope

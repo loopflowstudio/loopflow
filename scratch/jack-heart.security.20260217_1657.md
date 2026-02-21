@@ -5,7 +5,7 @@
 This branch consolidated security hardening for `lfd` with two goals:
 
 1. Prevent filesystem escape from user-controlled identifiers/paths.
-2. Require local mutation auth via session token without breaking local developer UX.
+2. Require auth via session token on all protected routes.
 
 ## Shipped in this branch
 
@@ -21,7 +21,7 @@ This branch consolidated security hardening for `lfd` with two goals:
   - git hook repo path canonicalization and validation
 - Added local session-token generation and enforcement:
   - token persisted at `~/.lf/session-token` with mode `0600`
-  - local loopback reads remain allowed, but mutation methods require token
+  - all protected routes require token (no loopback read bypass)
 - Updated clients for local token discovery:
   - Python: `LFD_TOKEN` first, then `~/.lf/session-token` for local base URLs
   - Swift: explicit token → static token → local file fallback
@@ -35,7 +35,7 @@ This branch consolidated security hardening for `lfd` with two goals:
 
 - Use centralized fail-closed validation for filesystem paths instead of handler-local checks.
 - Canonicalize and enforce root boundaries to block symlink-based escape.
-- Treat auth by method tier (read-only vs mutation) in middleware.
+- Require token on all protected routes — no method-based or loopback bypass.
 - Keep local token fallback local-only to avoid credential leakage to remote hosts.
 - Reject absolute sqlite override paths and constrain DB location under `~/.lf`.
 
@@ -43,7 +43,7 @@ This branch consolidated security hardening for `lfd` with two goals:
 
 - Phase 03: container/runtime isolation hardening.
 - Phase 04: rate limits and API surface limiting.
-- Phase 06: provider-isolated loopback policy and JWKS hardening.
+- Phase 06: JWKS hardening and token format pre-validation (loopback bypass already removed).
 - Phase 08: file API implementation (path-validation contract is documented, endpoint not yet shipped).
 
 ## Verification run

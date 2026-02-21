@@ -10,17 +10,16 @@ lfd generates a random 32-byte hex token on startup and writes it to `~/.lf/sess
 
 Implementation: `session_token::generate_and_write()` in `rust/loopflow/src/lfd/session_token.rs`. Token stored in `HttpState.session_token`.
 
-### Auth tiering
+### Auth enforcement
 
-The middleware uses HTTP method to classify requests rather than per-route tagging:
+All protected routes require a valid bearer token. No loopback bypass.
 
 | Tier | Auth required | Classification |
 |------|--------------|----------------|
 | **Public** | None | Health, metrics, webhooks (outside auth middleware) |
-| **Read** | Loopback OR token | `GET`, `HEAD`, `OPTIONS` on protected routes |
-| **Mutate** | Token always | `POST`, `PATCH`, `DELETE` on protected routes |
+| **Protected** | Token always | All routes under `/v0`, `/status`, `/ws` |
 
-Method-based classification turned out simpler than the planned route-tagging approach. `should_bypass_auth()` and `is_mutation()` in `auth.rs` handle it in two functions.
+Originally shipped with a loopback read bypass (GET/HEAD/OPTIONS without token from localhost). Removed in favor of uniform token requirement — clients auto-discover the token, so the bypass only benefited bare `curl` at the cost of a wider attack surface.
 
 ### Client integration
 
@@ -30,7 +29,7 @@ Method-based classification turned out simpler than the planned route-tagging ap
 
 ### Test coverage
 
-- Rust: `should_bypass_auth`, `authorize_local` (loopback read bypass, loopback mutation forbidden, valid token allowed, remote without token forbidden), token generation/persistence/permissions.
+- Rust: `authorize_local` (valid token allowed, invalid/missing token rejected, unconfigured token forbidden), token generation/persistence/permissions.
 - Python: `_resolve_token` (env precedence, file fallback, missing file, remote non-fallback).
 - Swift: `FileTokenProvider` (trimmed reads, missing file, async token resolution).
 
@@ -48,7 +47,7 @@ This phase does not prevent:
 
 ## What this doesn't do
 
-- Loopback read bypass applies to all providers, not just Local. Phase 06 removes it for Static/Studio.
+- No loopback read bypass — all providers require credentials on all protected routes.
 - No TLS on local connections — loopback traffic is machine-local.
 - No per-wave or per-user authorization — all token holders have full access.
 - No rate limiting on auth failures — that's Phase 04.

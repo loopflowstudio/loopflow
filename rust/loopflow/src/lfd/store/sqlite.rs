@@ -13,7 +13,7 @@ use crate::lfd::store::rows::{
     map_live_pr_state_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
     map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
-use crate::lfd::store::{ForkRun, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
@@ -634,6 +634,37 @@ impl SqliteStore {
         let rows = stmt.query_map(params![wave_run_id, step_index as i64], |row| {
             Ok(map_fork_run_row(row))
         })?;
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
+    pub fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT fr.id, fr.wave_run_id, fr.step_index, fr.branch_index, fr.status, fr.worktree
+             FROM fork_runs fr
+             LEFT JOIN wave_runs wr ON wr.id = fr.wave_run_id
+             WHERE fr.status IN (?1, ?2)
+               AND (
+                 wr.id IS NULL
+                 OR wr.status NOT IN (?3, ?4, ?5)
+                 OR fr.step_index != wr.step_index
+               )
+             ORDER BY fr.wave_run_id ASC, fr.step_index ASC, fr.branch_index ASC",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                ForkRunStatus::Pending as i32 as i64,
+                ForkRunStatus::Running as i32 as i64,
+                WaveRunStatus::Pending.as_i32() as i64,
+                WaveRunStatus::Running.as_i32() as i64,
+                WaveRunStatus::Waiting.as_i32() as i64
+            ],
+            |row| Ok(map_fork_run_row(row)),
+        )?;
         let mut runs = Vec::new();
         for run in rows {
             runs.push(run??);

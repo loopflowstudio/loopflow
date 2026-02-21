@@ -35,23 +35,8 @@ impl Step {
 #[serde(tag = "type", content = "data")]
 pub enum FlowItem {
     Step(Step),
-    Fork {
-        branches: Vec<FlowItem>,
-        #[serde(default)]
-        select: ForkSelect,
-    },
+    Fork { branches: Vec<FlowItem> },
     FlowRef(String),
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ForkSelect {
-    #[default]
-    All,
-    One,
-    Prompt {
-        prompt: String,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +76,6 @@ impl ConcreteStep {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteFork {
     pub branches: Vec<ConcreteStep>,
-    pub select: ForkSelect,
     pub flow_parents: Vec<String>,
 }
 
@@ -439,8 +423,17 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         ));
     };
 
-    let select = parse_fork_select(map)?;
-    Ok(FlowItem::Fork { branches, select })
+    if map.get(key("select")).is_some() {
+        return Err(LoadError::InvalidFlow(
+            "fork select modes are not supported; forks always run all branches".to_string(),
+        ));
+    }
+    if map.get(key("prompt")).is_some() {
+        return Err(LoadError::InvalidFlow(
+            "fork prompts are not supported; forks always run all branches".to_string(),
+        ));
+    }
+    Ok(FlowItem::Fork { branches })
 }
 
 fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
@@ -448,30 +441,6 @@ fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
         .as_str()
         .ok_or_else(|| LoadError::InvalidFlow("flow ref must be string".to_string()))?;
     Ok(FlowItem::FlowRef(name.to_string()))
-}
-
-fn parse_fork_select(map: &serde_yaml_ng::Mapping) -> Result<ForkSelect, LoadError> {
-    let select_value = map.get(key("select"));
-    let select = match select_value.and_then(|val| val.as_str()) {
-        None => ForkSelect::All,
-        Some("all") => ForkSelect::All,
-        Some("one") => ForkSelect::One,
-        Some("prompt") => {
-            let prompt = map
-                .get(key("prompt"))
-                .and_then(|val| val.as_str())
-                .ok_or_else(|| LoadError::InvalidFlow("fork select prompt missing".to_string()))?;
-            ForkSelect::Prompt {
-                prompt: prompt.to_string(),
-            }
-        }
-        Some(other) => {
-            return Err(LoadError::InvalidFlow(format!(
-                "unknown fork select mode: {other}"
-            )))
-        }
-    };
-    Ok(select)
 }
 
 fn parse_string_list(value: Option<&Value>) -> Vec<String> {
@@ -545,8 +514,8 @@ fn expand_with_chain(
                 nested_chain.push(name.clone());
                 items.extend(expand_with_chain(&nested, repo, nested_chain, depth + 1)?);
             }
-            FlowItem::Fork { branches, select } => {
-                let fork = expand_fork(branches, select, repo, &chain, depth)?;
+            FlowItem::Fork { branches } => {
+                let fork = expand_fork(branches, repo, &chain, depth)?;
                 items.push(ConcreteItem::Fork(fork));
             }
         }
@@ -557,7 +526,6 @@ fn expand_with_chain(
 
 fn expand_fork(
     branches: &[FlowItem],
-    select: &ForkSelect,
     repo: &Path,
     chain: &[String],
     depth: usize,
@@ -592,7 +560,6 @@ fn expand_fork(
 
     Ok(ConcreteFork {
         branches: expanded_branches,
-        select: select.clone(),
         flow_parents: chain.to_vec(),
     })
 }

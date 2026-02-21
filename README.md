@@ -30,11 +30,11 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
 | Step | What it does |
 |------|--------------|
-| `review` | Research an area — architecture, complexity, quality, potential |
+| `research` | Map the territory — architecture, complexity, quality, potential |
 | `reduce` | Find simplification opportunities |
 | `polish` | Find polish priorities |
 | `expand` | Find expansion opportunities |
-| `iterate` | Read review, write design to address it |
+| `iterate` | Read research, write design to address it |
 | `ingest` | Pick wave item, move to scratch/ |
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `wave-plan` | Synthesize analysis into a wave plan proposal |
@@ -55,6 +55,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 |------|--------------|
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
+| `review` | Walk through the diff, evaluate model and decisions |
 | `refine` | Refine existing work |
 
 ### Scan steps (`scan/`)
@@ -89,7 +90,7 @@ Steps chain into flows. Flows feed into waves.
 | `ship` | implement → compress → gate → consolidate |
 | `design-and-ship` | design → implement → reduce → polish |
 | `pair` | design → ship |
-| `grind` | review → iterate → ship → gate |
+| `grind` | research → iterate → ship → gate |
 | `incident` | debug → 5whys → ship |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → ship → update-wave |
@@ -98,10 +99,9 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `wave-reduce` | review → fork(reduce×3) → publish |
-| `wave-polish` | review → fork(polish×3) → publish |
-| `wave-expand` | review → fork(expand×3) → publish |
-| `research` | explore → review → publish |
+| `wave-reduce` | research → fork(reduce×3) → publish |
+| `wave-polish` | research → fork(polish×3) → publish |
+| `wave-expand` | research → fork(expand×3) → publish |
 | `publish` | consolidate → add-to-wave |
 
 ### Scan flows (`scan/`)
@@ -143,8 +143,8 @@ PY
 You can compose multiple directions to add additional nuance or perspectives.
 
 ```bash
-lf review -d designer,product-engineer
-lf review -d ceo
+lf research -d designer,product-engineer
+lf research -d ceo
 ```
 
 ## Install

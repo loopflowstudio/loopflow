@@ -533,32 +533,33 @@ pub async fn run_wave_handler(
     let _ = set_wave_stimuli_enabled(&state, &wave.id, true, false).await;
 
     let run_id = LfdId::new();
-    let (acquired, _) = state.scheduler.acquire(run_id.as_str()).await;
-    if !acquired {
-        return Ok(Json(RunWaveResponse {
-            started: false,
-            wave_id: wave.id.to_string(),
-            wave_run_id: None,
-        }));
-    }
+    let slot_guard = match state.scheduler.acquire_guard(run_id.as_str()).await {
+        Ok(guard) => guard,
+        Err(_) => {
+            return Ok(Json(RunWaveResponse {
+                started: false,
+                wave_id: wave.id.to_string(),
+                wave_run_id: None,
+            }))
+        }
+    };
 
     let run = match create_wave_run_with_id(&state.store, &wave, &run_id).await {
         Ok(run) => run,
         Err(err) => {
-            state.scheduler.release(run_id.as_str());
             return Err(api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 err.to_string(),
-            ));
+            ))
         }
     };
 
     spawn_run_task_with_slot(
         state.store.clone(),
         (*state.executor).clone(),
-        state.scheduler.clone(),
         state.event_hub.clone(),
         run.clone(),
+        slot_guard,
     );
 
     Ok(Json(RunWaveResponse {
@@ -814,20 +815,23 @@ async fn respawn_run_task(
     state: &HttpState,
     run: WaveRun,
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
-    let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;
-    if !acquired {
-        return Err(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no scheduler slots available",
-        ));
-    }
+    let slot_guard = state
+        .scheduler
+        .acquire_guard(run.id.as_str())
+        .await
+        .map_err(|_| {
+            api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no scheduler slots available",
+            )
+        })?;
 
     spawn_run_task_with_slot(
         state.store.clone(),
         (*state.executor).clone(),
-        state.scheduler.clone(),
         state.event_hub.clone(),
         run,
+        slot_guard,
     );
 
     Ok(())

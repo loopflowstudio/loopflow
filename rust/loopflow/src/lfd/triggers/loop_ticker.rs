@@ -78,15 +78,17 @@ async fn tick_loop_waves(
         }
 
         let run_id = LfdId::new();
-        let (acquired, _) = scheduler.acquire(run_id.as_str()).await;
-        if !acquired {
-            continue;
-        }
+        let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
+            Ok(guard) => guard,
+            Err(reason) => {
+                tracing::warn!(wave_id = %wave.id, %reason, "scheduler at capacity; loop tick deferred");
+                continue;
+            }
+        };
 
         let run = match create_wave_run_with_id(store, &wave, &run_id).await {
             Ok(run) => run,
             Err(err) => {
-                scheduler.release(run_id.as_str());
                 tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
                 continue;
             }
@@ -95,9 +97,9 @@ async fn tick_loop_waves(
         spawn_run_task_with_slot(
             store.clone(),
             executor.clone(),
-            scheduler.clone(),
             event_hub.clone(),
             run,
+            slot_guard,
         );
     }
 }

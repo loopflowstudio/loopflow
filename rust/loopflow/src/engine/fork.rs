@@ -4,15 +4,19 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::error::CoreError;
+use crate::engine::flow::ConcreteStep;
 use crate::engine::worktree::remove_worktree;
 
 const FORK_MANIFEST_FILE: &str = ".lf/fork-manifest.json";
+pub const FORK_SYNTHESIZE_STEP: &str = "synthesize";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkManifest {
     pub branches: Vec<ForkManifestBranch>,
 }
 
+/// A single fork branch result. Used both as the execution outcome and the
+/// manifest entry persisted to `.lf/fork-manifest.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkManifestBranch {
     pub index: usize,
@@ -23,17 +27,25 @@ pub struct ForkManifestBranch {
     pub exit_code: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkBranchExecutionPlan {
+    pub index: usize,
+    pub label: String,
+    pub step: ConcreteStep,
+    pub directions: Vec<String>,
+}
+
 /// Compute sibling worktree path for a fork branch.
 ///
 /// Given `/tmp/myrepo` and index 2, returns `/tmp/myrepo.fork-2`.
 pub fn fork_worktree_path(repo: &Path, index: usize) -> PathBuf {
     let name = repo
         .file_name()
-        .unwrap_or_default()
+        .expect("repo path should have a file name")
         .to_string_lossy()
         .into_owned();
     repo.parent()
-        .unwrap_or(repo)
+        .expect("repo path should have a parent directory")
         .join(format!("{name}.fork-{index}"))
 }
 
@@ -49,6 +61,33 @@ pub fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
         }
     }
     combined
+}
+
+pub fn plan_fork_execution(
+    branches: &[ConcreteStep],
+    base_directions: &[String],
+) -> Result<Vec<ForkBranchExecutionPlan>, String> {
+    if branches.is_empty() {
+        return Err("fork has no branches".to_string());
+    }
+
+    let build_branch = |index: usize| -> Result<ForkBranchExecutionPlan, String> {
+        let step = branches
+            .get(index)
+            .cloned()
+            .ok_or_else(|| format!("fork selected branch {index}, but it does not exist"))?;
+        if step.step.interactive.unwrap_or(false) {
+            return Err("interactive fork branches are not supported".to_string());
+        }
+        Ok(ForkBranchExecutionPlan {
+            index,
+            label: format!("fork-{index}"),
+            directions: merge_directions(base_directions, &step.step.directions),
+            step,
+        })
+    };
+
+    (0..branches.len()).map(build_branch).collect()
 }
 
 /// Write fork manifest to `.lf/fork-manifest.json` in the repo root.
@@ -102,6 +141,7 @@ pub fn cleanup_fork_worktrees(manifest_path: Option<&Path>, worktrees: &[PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::flow::{ConcreteStep, Step};
     use tempfile::tempdir;
 
     #[test]
@@ -151,5 +191,67 @@ mod tests {
         let base = vec!["designer".to_string()];
         let merged = merge_directions(&base, &[]);
         assert_eq!(merged, base);
+    }
+
+    fn branch(name: &str) -> ConcreteStep {
+        ConcreteStep {
+            step: Step::named(name),
+            flow_parents: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn plan_fork_execution_returns_labeled_branches() {
+        let branches = vec![branch("a"), branch("b")];
+        let base = vec!["base".to_string()];
+        let planned = plan_fork_execution(&branches, &base).expect("planned");
+        assert_eq!(planned.len(), 2);
+        assert_eq!(planned[0].label, "fork-0");
+        assert_eq!(planned[0].directions, vec!["base".to_string()]);
+    }
+
+    #[test]
+    fn plan_fork_execution_rejects_interactive_branch() {
+        let mut step = Step::named("a");
+        step.interactive = Some(true);
+        let branches = vec![ConcreteStep {
+            step,
+            flow_parents: Vec::new(),
+        }];
+        let err = plan_fork_execution(&branches, &[]).expect_err("interactive branch should fail");
+        assert_eq!(err, "interactive fork branches are not supported");
+    }
+
+    #[test]
+    fn plan_fork_execution_rejects_empty_branches() {
+        let err = plan_fork_execution(&[], &[]).expect_err("empty branches should fail");
+        assert_eq!(err, "fork has no branches");
+    }
+
+    #[test]
+    fn fork_manifest_branch_counts_failures() {
+        let branches = [
+            ForkManifestBranch {
+                index: 0,
+                step: "reduce".to_string(),
+                direction: "designer".to_string(),
+                worktree: "/tmp/repo.fork-0".to_string(),
+                branch: "main-fork-0".to_string(),
+                exit_code: 0,
+            },
+            ForkManifestBranch {
+                index: 1,
+                step: "reduce".to_string(),
+                direction: "infra".to_string(),
+                worktree: "/tmp/repo.fork-1".to_string(),
+                branch: "main-fork-1".to_string(),
+                exit_code: 42,
+            },
+        ];
+
+        let failed = branches.iter().filter(|b| b.exit_code != 0).count();
+        assert_eq!(failed, 1);
+        assert_eq!(branches.len(), 2);
+        assert_eq!(branches[1].exit_code, 42);
     }
 }

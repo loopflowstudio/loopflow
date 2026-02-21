@@ -93,15 +93,17 @@ async fn check_cron_stimuli(
             if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id).await {
                 if !pending.is_empty() {
                     let run_id = LfdId::new();
-                    let (acquired, reason) = scheduler.acquire(run_id.as_str()).await;
-                    if !acquired {
-                        tracing::warn!(
-                            wave_id = %wave.id,
-                            reason = ?reason,
-                            "scheduler at capacity; cron activation deferred"
-                        );
-                        continue;
-                    }
+                    let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
+                        Ok(guard) => guard,
+                        Err(reason) => {
+                            tracing::warn!(
+                                wave_id = %wave.id,
+                                reason = %reason,
+                                "scheduler at capacity; cron activation deferred"
+                            );
+                            continue;
+                        }
+                    };
 
                     if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id).await {
                         let _ = store.delete_pending_activations(&stimulus.wave_id).await;
@@ -109,14 +111,14 @@ async fn check_cron_stimuli(
                         spawn_run_task_with_slot(
                             store.clone(),
                             executor.clone(),
-                            scheduler.clone(),
                             event_hub.clone(),
                             run,
+                            slot_guard,
                         );
                         continue;
                     }
 
-                    scheduler.release(run_id.as_str());
+                    drop(slot_guard);
                 }
             }
         }
@@ -136,20 +138,21 @@ async fn check_cron_stimuli(
             }
 
             let run_id = LfdId::new();
-            let (acquired, reason) = scheduler.acquire(run_id.as_str()).await;
-            if !acquired {
-                tracing::warn!(
-                    wave_id = %wave.id,
-                    reason = ?reason,
-                    "scheduler at capacity; cron activation deferred"
-                );
-                continue;
-            }
+            let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
+                Ok(guard) => guard,
+                Err(reason) => {
+                    tracing::warn!(
+                        wave_id = %wave.id,
+                        reason = %reason,
+                        "scheduler at capacity; cron activation deferred"
+                    );
+                    continue;
+                }
+            };
 
             let run = match create_wave_run_with_id(store, &wave, &run_id).await {
                 Ok(run) => run,
                 Err(err) => {
-                    scheduler.release(run_id.as_str());
                     tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
                     continue;
                 }
@@ -157,9 +160,9 @@ async fn check_cron_stimuli(
             spawn_run_task_with_slot(
                 store.clone(),
                 executor.clone(),
-                scheduler.clone(),
                 event_hub.clone(),
                 run,
+                slot_guard,
             );
         }
     }

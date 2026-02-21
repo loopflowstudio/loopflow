@@ -35,6 +35,16 @@ jobs:
       - name: Run E2E smoke test
         run: tests/e2e/test_smoke.sh
 
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify Docker is available
+        run: docker version
+      - name: Run Docker executor smoke tests
+        run: cargo test -p loopflow docker_ -- --nocapture
+
   swift-test:
     runs-on: macos-15
     steps:

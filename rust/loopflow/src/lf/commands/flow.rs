@@ -1,17 +1,16 @@
 use crate::engine::fork::{
-    cleanup_fork_worktrees, fork_worktree_path, merge_directions, write_fork_manifest,
-    ForkManifestBranch,
+    cleanup_fork_worktrees, fork_worktree_path, plan_fork_execution, write_fork_manifest,
+    ForkManifestBranch, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
-use crate::engine::{
-    expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction, ForkSelect,
-};
+use crate::engine::{expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use anyhow::{anyhow, Context, Result};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
@@ -85,26 +84,18 @@ struct ForkBranchTask {
 }
 
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    if !matches!(fork.select, ForkSelect::All) {
-        return Err(anyhow!(
-            "CLI fork execution only supports select: all (got {:?})",
-            fork.select
-        ));
-    }
-
-    if fork.branches.is_empty() {
-        return Ok(());
-    }
+    let planned =
+        plan_fork_execution(&fork.branches, &cli.direction).map_err(|err| anyhow!(err))?;
 
     let base_branch = current_branch(repo)?
         .ok_or_else(|| anyhow!("fork execution requires an active branch (detached HEAD)"))?;
     let mut tasks = Vec::new();
     let mut worktrees = Vec::new();
 
-    for (index, branch) in fork.branches.iter().enumerate() {
+    for branch in &planned {
+        let index = branch.index;
         let worktree = fork_worktree_path(repo, index);
         let branch_name = format!("{base_branch}-fork-{index}");
-        let directions = merge_directions(&cli.direction, &branch.step.directions);
         if let Err(err) = create_worktree(repo, &worktree, &branch_name).with_context(|| {
             format!(
                 "failed to create fork worktree {} for branch {}",
@@ -119,8 +110,8 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         worktrees.push(worktree.clone());
         tasks.push(ForkBranchTask {
             index,
-            step_name: branch.step.name.clone(),
-            directions,
+            step_name: branch.step.step.name.clone(),
+            directions: branch.directions.clone(),
             worktree,
             branch_name,
         });
@@ -131,15 +122,21 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         let worktree = task.worktree.clone();
         let step_name = task.step_name.clone();
         let directions = task.directions.clone();
+        let branch_label = format!("fork-{}", task.index);
         let msg = message.map(|value| value.to_string());
         let handle = std::thread::spawn(move || {
-            run_fork_branch(&worktree, &step_name, &directions, msg.as_deref())
+            run_fork_branch(
+                &worktree,
+                &step_name,
+                &directions,
+                msg.as_deref(),
+                branch_label.as_str(),
+            )
         });
         handles.push((task, handle));
     }
 
-    let mut manifest_branches = Vec::new();
-    let mut failed = 0usize;
+    let mut outcomes = Vec::new();
     for (task, handle) in handles {
         let (exit_code, err) = match handle.join() {
             Ok(Ok(code)) => (code, None),
@@ -148,7 +145,6 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         };
 
         if exit_code != 0 || err.is_some() {
-            failed += 1;
             if let Some(err) = err {
                 eprintln!(
                     "fork branch {} failed ({}): {}",
@@ -162,7 +158,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             }
         }
 
-        manifest_branches.push(ForkManifestBranch {
+        outcomes.push(ForkManifestBranch {
             index: task.index,
             step: task.step_name.clone(),
             direction: task.directions.join(","),
@@ -171,15 +167,16 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             exit_code,
         });
     }
+    let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
 
-    let manifest_path = match write_fork_manifest(repo, &manifest_branches) {
+    let manifest_path = match write_fork_manifest(repo, &outcomes) {
         Ok(path) => path,
         Err(err) => {
             cleanup_fork_worktrees(None, &worktrees);
             return Err(err.into());
         }
     };
-    let synthesize_result = crate::lf::commands::run::run(Some("synthesize"), message, cli);
+    let synthesize_result = crate::lf::commands::run::run(Some(FORK_SYNTHESIZE_STEP), message, cli);
     cleanup_fork_worktrees(Some(&manifest_path), &worktrees);
 
     synthesize_result?;
@@ -196,6 +193,7 @@ fn run_fork_branch(
     step: &str,
     directions: &[String],
     message: Option<&str>,
+    branch_label: &str,
 ) -> Result<i32> {
     let mut cmd = build_lf_command();
     cmd.arg(step).arg("-b");
@@ -206,12 +204,33 @@ fn run_fork_branch(
         cmd.arg(message);
     }
     cmd.current_dir(worktree);
-    let status = cmd.status().with_context(|| {
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn().with_context(|| {
         format!(
             "failed to execute fork branch command in {}",
             worktree.display()
         )
     })?;
+
+    let mut log_threads = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        let label = branch_label.to_string();
+        log_threads.push(std::thread::spawn(move || {
+            relay_fork_logs(stdout, &label, false);
+        }));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        let label = branch_label.to_string();
+        log_threads.push(std::thread::spawn(move || {
+            relay_fork_logs(stderr, &label, true);
+        }));
+    }
+
+    let status = child.wait()?;
+    for thread in log_threads {
+        let _ = thread.join();
+    }
     Ok(status.code().unwrap_or(1))
 }
 
@@ -220,4 +239,15 @@ fn build_lf_command() -> Command {
         return Command::new(path);
     }
     Command::new("lf")
+}
+
+fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool) {
+    let buffered = BufReader::new(reader);
+    for line in buffered.lines().map_while(|line| line.ok()) {
+        if stderr {
+            eprintln!("[{branch_label}] {line}");
+        } else {
+            println!("[{branch_label}] {line}");
+        }
+    }
 }

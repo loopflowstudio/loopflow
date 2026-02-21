@@ -84,6 +84,31 @@ struct ChatStateTests {
     }
 
     @MainActor
+    @Test("send refreshes from DB when SSE stream fails")
+    func sendRefreshesFromDBOnSSEFailure() async {
+        let records = [
+            ChatMessageRecord(id: "msg-1", role: "user", content: "Hello", createdAt: Date()),
+            ChatMessageRecord(id: "msg-2", role: "assistant", content: "Hi there!", createdAt: Date()),
+        ]
+        let service = MockChatService(
+            eventBatches: [[
+                .failure(.commandFailed("chat turn already completed")),
+            ]],
+            messageRecords: records
+        )
+
+        let state = ChatState(waveId: "wave-test", waveService: service)
+        await state.send("Hello")
+
+        #expect(state.turnState == .completed)
+        #expect(state.messages.count == 2)
+        #expect(state.messages[0].role == .user)
+        #expect(state.messages[0].content == "Hello")
+        #expect(state.messages[1].role == .assistant)
+        #expect(state.messages[1].content == "Hi there!")
+    }
+
+    @MainActor
     @Test("loadMemoryIfNeeded retries after a failed load")
     func loadMemoryRetriesAfterFailure() async {
         let service = MockChatService(

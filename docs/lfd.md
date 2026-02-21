@@ -84,6 +84,7 @@ LFD_MAX_SLOTS     # concurrent run slots
 LFD_AUTH_PROVIDER # local (default), static, or loopflow.studio
 LFD_AUTH_TOKEN    # required when LFD_AUTH_PROVIDER=static
 LFD_EXECUTOR_IMAGE # override agent image (default loopflow/agent:latest)
+LFD_EXECUTOR_AGENT_TIMEOUT # override per-agent timeout (default 45m)
 LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
 LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 ```
@@ -99,6 +100,7 @@ auth:
   base_url: https://auth.loopflow.studio # used by loopflow.studio provider
 executor:
   image: loopflow/agent:latest # base image for generated .lf/Dockerfile
+  agent_timeout: 45m # max runtime per agent step (process or container)
   credentials:
     env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
     mounts:
@@ -171,7 +173,7 @@ Docker mode also:
 - requires the `docker` CLI in `PATH` for repo image builds (`docker build`)
 - reattaches to running agent containers after daemon restart
 
-Current limitation: `fork` steps with `select: all` are not supported by the Docker executor yet.
+Current limitation: `fork` steps are not supported by the Docker executor yet.
 
 ## GitHub CI auto-fix
 

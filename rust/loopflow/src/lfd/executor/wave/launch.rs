@@ -9,6 +9,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::types::{AgentStatus, Event};
 
 use super::WaveExecutor;
+use crate::lfd::executor::AgentRunContext;
 
 #[derive(Debug, Clone)]
 pub(super) struct AgentLaunchRequest {
@@ -19,6 +20,7 @@ pub(super) struct AgentLaunchRequest {
     pub step: ConcreteStep,
     pub model: String,
     pub cmd: Vec<String>,
+    pub output_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,17 +55,31 @@ impl WaveExecutor {
             .run(
                 request.cmd,
                 Path::new(&request.worktree),
-                request.wave_id.as_str(),
-                agent_id.as_str(),
-                request.wave_run_id.as_str(),
-                &self.output,
+                AgentRunContext {
+                    wave_id: request.wave_id.as_str(),
+                    agent_id: agent_id.as_str(),
+                    wave_run_id: request.wave_run_id.as_str(),
+                    output: &self.output,
+                    output_prefix: request.output_prefix.as_deref(),
+                },
             )
-            .await?;
+            .await;
 
-        let status = if exit_code == 0 {
-            AgentStatus::Completed
-        } else {
-            AgentStatus::Failed
+        let (status, exit_code) = match exit_code {
+            Ok(0) => (AgentStatus::Completed, 0),
+            Ok(code) => (AgentStatus::Failed, code),
+            Err(err) => {
+                self.store
+                    .end_agent(
+                        &agent_id,
+                        AgentStatus::Failed.as_i32(),
+                        OffsetDateTime::now_utc().unix_timestamp(),
+                    )
+                    .await?;
+                self.event_hub
+                    .send(Event::agent_ended(agent_id.clone(), AgentStatus::Failed));
+                return Err(err);
+            }
         };
         self.store
             .end_agent(

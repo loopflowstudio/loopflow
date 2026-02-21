@@ -50,7 +50,10 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         "Implementation",
         &["implement", "iterate", "expand", "reduce", "compress"],
     ),
-    ("Quality", &["review", "polish", "lint", "debug", "gate"]),
+    (
+        "Quality",
+        &["review", "research", "polish", "lint", "debug", "gate"],
+    ),
     ("Scan", &["scan/scan-report", "scan/scan-plan"]),
     ("Git", &["commit", "rebase"]),
     (
@@ -75,7 +78,8 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("iterate", "Improve code on branch"),
         ("expand", "Explore ambitious extensions"),
         ("reduce", "Simplify while preserving behavior"),
-        ("review", "Assess code, write verdict"),
+        ("review", "Walk through the diff interactively"),
+        ("research", "Map the territory, understand what exists"),
         ("polish", "Fix issues, run tests"),
         ("lint", "Run linter, fix issues"),
         ("debug", "Fix errors from clipboard"),
@@ -271,37 +275,14 @@ pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
 // Step discovery (user, global, builtin)
 // =============================================================================
 
-/// Discover a step by name, checking skills → repo → global → builtins.
+/// Discover a step by name, checking skills first, then repo → global → builtins
+/// via `load_step`.
 pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
-    // Check if it's a skill reference (prefix:name)
     if name.contains(':') {
         if let Some(step) = find_skill(name, Some(repo)) {
             return Ok(step);
         }
     }
-
-    let repo_paths = [
-        repo.join(".lf/steps").join(format!("{name}.md")),
-        repo.join(".claude/commands").join(format!("{name}.md")),
-    ];
-    for path in repo_paths {
-        if path.exists() {
-            return crate::engine::load_step(name, repo).map_err(Into::into);
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        let global_paths = [
-            home.join(".lf/steps").join(format!("{name}.md")),
-            home.join(".claude/commands").join(format!("{name}.md")),
-        ];
-        for path in global_paths {
-            if path.exists() {
-                return crate::engine::load_step(name, &home).map_err(Into::into);
-            }
-        }
-    }
-
     crate::engine::load_step(name, repo).map_err(Into::into)
 }
 
@@ -368,48 +349,35 @@ fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<Path
 
 /// List repo-local steps (.lf/steps/, .claude/commands/).
 pub fn list_user_steps(repo: &Path) -> Vec<String> {
-    let mut steps = HashSet::new();
+    list_md_stems(&[repo.join(".lf/steps"), repo.join(".claude/commands")])
+}
 
-    for dir in [repo.join(".lf/steps"), repo.join(".claude/commands")] {
+/// List global steps (~/.lf/steps/, ~/.claude/commands/).
+pub fn list_global_steps() -> Vec<String> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    list_md_stems(&[home.join(".lf/steps"), home.join(".claude/commands")])
+}
+
+/// Collect sorted, deduplicated `.md` file stems from the given directories.
+fn list_md_stems(dirs: &[PathBuf]) -> Vec<String> {
+    let mut names = HashSet::new();
+    for dir in dirs {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "md").unwrap_or(false) {
                     if let Some(name) = path.file_stem() {
-                        steps.insert(name.to_string_lossy().to_string());
+                        names.insert(name.to_string_lossy().to_string());
                     }
                 }
             }
         }
     }
-
-    let mut steps: Vec<_> = steps.into_iter().collect();
-    steps.sort();
-    steps
-}
-
-/// List global steps (~/.lf/steps/, ~/.claude/commands/).
-pub fn list_global_steps() -> Vec<String> {
-    let mut steps = HashSet::new();
-
-    if let Some(home) = dirs::home_dir() {
-        for dir in [home.join(".lf/steps"), home.join(".claude/commands")] {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "md").unwrap_or(false) {
-                        if let Some(name) = path.file_stem() {
-                            steps.insert(name.to_string_lossy().to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let mut steps: Vec<_> = steps.into_iter().collect();
-    steps.sort();
-    steps
+    let mut sorted: Vec<_> = names.into_iter().collect();
+    sorted.sort();
+    sorted
 }
 
 /// Structured result from list_all_steps.
@@ -478,17 +446,7 @@ pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
         .collect();
 
     if let Some(repo) = repo {
-        let dir = repo.join(".lf/directions");
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(name) = path.file_stem() {
-                        directions.insert(name.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
+        directions.extend(list_md_stems(&[repo.join(".lf/directions")]));
     }
 
     let mut list: Vec<_> = directions.into_iter().collect();
@@ -500,48 +458,61 @@ pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
 // Built-in flow metadata for formatted listing
 // =============================================================================
 
-pub const BUILTIN_FLOW_CATEGORIES: &[(&str, &[&str])] = &[
-    (
-        "Code",
-        &[
-            "ship",
-            "design-and-ship",
-            "pair",
-            "grind",
-            "incident",
-            "start",
-            "ship-wave",
-        ],
-    ),
-    (
-        "Plan",
-        &[
-            "research",
-            "wave-reduce",
-            "wave-polish",
-            "wave-expand",
-            "publish",
-        ],
-    ),
-    ("Scan", &["scan"]),
-];
+// Generated by build.rs from the flows/ directory structure.
+pub use crate::engine::builtins::BUILTIN_FLOW_CATEGORIES;
 
-pub fn builtin_flow_descriptions() -> HashMap<&'static str, &'static str> {
-    HashMap::from([
-        ("ship", "implement → compress → gate → consolidate"),
-        ("design-and-ship", "design → implement → reduce → polish"),
-        ("pair", "design → ship"),
-        ("grind", "review → iterate → ship → gate"),
-        ("incident", "debug → 5whys → ship"),
-        ("start", "ingest → kickoff"),
-        ("ship-wave", "start → ship → update-wave"),
-        ("research", "explore → review → publish"),
-        ("wave-reduce", "review → fork(reduce×3) → publish"),
-        ("wave-polish", "review → fork(polish×3) → publish"),
-        ("wave-expand", "review → fork(expand×3) → publish"),
-        ("publish", "consolidate → add-to-wave"),
-        ("scan", "scan-report → scan-plan → ship"),
-    ])
+/// Derive flow descriptions from YAML content at runtime.
+pub fn builtin_flow_descriptions() -> HashMap<String, String> {
+    crate::engine::builtins::builtin_flow_entries()
+        .map(|(name, content)| {
+            let desc = format_flow_description(content);
+            (name.to_string(), desc)
+        })
+        .collect()
+}
+
+/// Format a flow's YAML content as a human-readable step chain (e.g., "implement → compress → gate").
+fn format_flow_description(yaml_content: &str) -> String {
+    let value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(yaml_content) {
+        Ok(v) => v,
+        Err(_) => return String::new(),
+    };
+
+    let names = extract_flow_summary(&value);
+    names.join(" → ")
+}
+
+/// Extract step names from a flow value, formatting forks as "fork(step×N)".
+fn extract_flow_summary(value: &serde_yaml_ng::Value) -> Vec<String> {
+    let serde_yaml_ng::Value::Sequence(seq) = value else {
+        return Vec::new();
+    };
+
+    let mut names = Vec::new();
+    for item in seq {
+        match item {
+            serde_yaml_ng::Value::String(s) => names.push(s.clone()),
+            serde_yaml_ng::Value::Mapping(map) => {
+                // Fork: { fork: { step: "reduce", drafts: [...] } }
+                if let Some(serde_yaml_ng::Value::Mapping(fork_map)) =
+                    map.get(serde_yaml_ng::Value::String("fork".into()))
+                {
+                    let step = fork_map
+                        .get(serde_yaml_ng::Value::String("step".into()))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let count = fork_map
+                        .get(serde_yaml_ng::Value::String("drafts".into()))
+                        .and_then(|v| v.as_sequence())
+                        .map(|s| s.len())
+                        .unwrap_or(0);
+                    names.push(format!("fork({step}×{count})"));
+                }
+            }
+            _ => {}
+        }
+    }
+    names
 }
 
 /// All builtin flow names (from BUILTIN_FLOW_CATEGORIES).
@@ -639,7 +610,7 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
                     }
                 }
             }
-            // Check for fork/choose/loop structures
+            // Check for fork structures
             if let Some(fork) = map.get(serde_yaml_ng::Value::String("fork".to_string())) {
                 names.push("[fork]".to_string());
                 if let serde_yaml_ng::Value::Mapping(fork_map) = fork {
@@ -653,12 +624,6 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
                         }
                     }
                 }
-            }
-            if map.contains_key(serde_yaml_ng::Value::String("choose".to_string())) {
-                names.push("[choose]".to_string());
-            }
-            if map.contains_key(serde_yaml_ng::Value::String("loop_until_empty".to_string())) {
-                names.push("[loop]".to_string());
             }
         }
         _ => {}

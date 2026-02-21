@@ -12,6 +12,21 @@ use crate::lfd::store::SharedStore;
 use crate::lfd::triggers;
 
 #[derive(Debug)]
+pub struct SchedulerSlotGuard {
+    scheduler: Arc<Scheduler>,
+    run_id: String,
+    release_on_drop: bool,
+}
+
+impl Drop for SchedulerSlotGuard {
+    fn drop(&mut self) {
+        if self.release_on_drop {
+            self.scheduler.release(&self.run_id);
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Scheduler {
     max_slots: usize,
     semaphore: Arc<Semaphore>,
@@ -38,19 +53,30 @@ impl Scheduler {
         active.len() as u32
     }
 
-    pub async fn acquire(&self, run_id: &str) -> (bool, Option<String>) {
+    pub async fn acquire_guard(
+        self: &Arc<Self>,
+        run_id: &str,
+    ) -> Result<SchedulerSlotGuard, String> {
         let mut active = self.active.lock().expect("scheduler mutex poisoned");
         if active.contains_key(run_id) {
-            return (true, None);
+            return Ok(SchedulerSlotGuard {
+                scheduler: self.clone(),
+                run_id: run_id.to_string(),
+                release_on_drop: false,
+            });
         }
         if let Ok(permit) = self.semaphore.clone().try_acquire_owned() {
             active.insert(run_id.to_string(), permit);
-            return (true, None);
+            return Ok(SchedulerSlotGuard {
+                scheduler: self.clone(),
+                run_id: run_id.to_string(),
+                release_on_drop: true,
+            });
         }
-        (false, Some("no slots available".to_string()))
+        Err("no slots available".to_string())
     }
 
-    pub fn release(&self, run_id: &str) -> u32 {
+    fn release(&self, run_id: &str) -> u32 {
         let mut active = self.active.lock().expect("scheduler mutex poisoned");
         active.remove(run_id);
         active.len() as u32
@@ -117,34 +143,53 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::Scheduler;
 
     #[tokio::test]
-    async fn acquire_respects_slot_limit_and_release() {
-        let scheduler = Scheduler::new(1);
-
-        let (acquired, _) = scheduler.acquire("run-1").await;
-        assert!(acquired);
-
-        let (acquired, _) = scheduler.acquire("run-2").await;
-        assert!(!acquired);
-
-        scheduler.release("run-1");
-
-        let (acquired, _) = scheduler.acquire("run-2").await;
-        assert!(acquired);
+    async fn acquire_guard_releases_slot_on_drop() {
+        let scheduler = Arc::new(Scheduler::new(1));
+        let guard = scheduler
+            .acquire_guard("run-1")
+            .await
+            .expect("first guard should acquire");
+        assert_eq!(scheduler.slots_used(), 1);
+        drop(guard);
+        assert_eq!(scheduler.slots_used(), 0);
     }
 
     #[tokio::test]
-    async fn acquire_is_idempotent_for_same_run_id() {
-        let scheduler = Scheduler::new(1);
-
-        let (acquired, _) = scheduler.acquire("run-1").await;
-        assert!(acquired);
-
-        let (acquired, _) = scheduler.acquire("run-1").await;
-        assert!(acquired);
+    async fn acquire_guard_is_noop_when_slot_already_held_for_run() {
+        let scheduler = Arc::new(Scheduler::new(1));
+        let first = scheduler
+            .acquire_guard("run-1")
+            .await
+            .expect("first guard should acquire");
+        let second = scheduler
+            .acquire_guard("run-1")
+            .await
+            .expect("second guard should be idempotent");
         assert_eq!(scheduler.slots_used(), 1);
+        drop(second);
+        assert_eq!(scheduler.slots_used(), 1);
+        drop(first);
+        assert_eq!(scheduler.slots_used(), 0);
+    }
+
+    #[tokio::test]
+    async fn acquire_guard_respects_slot_limit() {
+        let scheduler = Arc::new(Scheduler::new(1));
+        let guard = scheduler
+            .acquire_guard("run-1")
+            .await
+            .expect("first guard should acquire");
+        assert!(scheduler.acquire_guard("run-2").await.is_err());
+        drop(guard);
+        scheduler
+            .acquire_guard("run-2")
+            .await
+            .expect("should acquire after release");
     }
 
     #[test]

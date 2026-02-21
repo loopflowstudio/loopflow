@@ -11,13 +11,13 @@ use bollard::models::{
     VolumeCreateOptions,
 };
 use bollard::query_parameters::{
-    CreateContainerOptions, CreateImageOptions, InspectContainerOptions, ListContainersOptions,
-    LogsOptions, RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
-    WaitContainerOptions,
+    BuildImageOptions, BuilderVersion, CreateContainerOptions, CreateImageOptions,
+    InspectContainerOptions, ListContainersOptions, LogsOptions, RemoveContainerOptions,
+    StartContainerOptions, StopContainerOptions, WaitContainerOptions,
 };
 use bollard::Docker;
+use bytes::Bytes;
 use futures_util::StreamExt;
-use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -30,13 +30,14 @@ use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Agent, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
 
-use super::{handle_output_line, AgentExecutor, StartupRecovery};
+use super::{handle_output_line, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
 
 #[derive(Clone)]
 pub struct DockerExecutor {
     store: SharedStore,
     docker: Docker,
     image: String,
+    agent_timeout: std::time::Duration,
     credential_env: Vec<String>,
     credential_mounts: Vec<DockerCredentialMount>,
     active: Arc<Mutex<HashMap<String, String>>>,
@@ -347,6 +348,7 @@ impl DockerExecutor {
             store,
             docker,
             image: config.image.clone(),
+            agent_timeout: config.agent_timeout,
             credential_env: config.credentials.env.clone(),
             credential_mounts,
             active: Arc::new(Mutex::new(HashMap::new())),
@@ -530,10 +532,13 @@ impl DockerExecutor {
         let exit_code = self
             .wait_for_container_with_logs(
                 &container_id,
-                output,
-                wave_id.as_str(),
-                wave_run_id.as_str(),
-                agent.id.as_str(),
+                OutputContext {
+                    wave_id: wave_id.to_string(),
+                    wave_run_id: wave_run_id.to_string(),
+                    agent_id: agent.id.to_string(),
+                    output: output.clone(),
+                    output_prefix: None,
+                },
             )
             .await;
 
@@ -696,6 +701,7 @@ impl DockerExecutor {
             rehydrated_agents: plan.reattach.len() as u32,
             lost_agents_failed: plan.lost.len() as u32,
             orphaned_containers_removed,
+            ..Default::default()
         })
     }
 
@@ -779,39 +785,44 @@ impl DockerExecutor {
     async fn wait_for_container_with_logs(
         &self,
         container_id: &str,
-        output: &OutputHub,
-        wave_id: &str,
-        wave_run_id: &str,
-        agent_id: &str,
+        context: OutputContext,
     ) -> Result<i32> {
         let logs_task = tokio::spawn(Self::stream_logs(
             self.docker.clone(),
             container_id.to_string(),
-            output.clone(),
-            wave_id.to_string(),
-            wave_run_id.to_string(),
-            agent_id.to_string(),
+            context,
         ));
 
         let mut wait_stream = self
             .docker
             .wait_container(container_id, None::<WaitContainerOptions>);
-        let wait_result = wait_stream.next().await;
+        let wait_result = tokio::time::timeout(self.agent_timeout, wait_stream.next()).await;
 
-        let _ = logs_task.await;
-        let status =
-            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
-        Ok(status.status_code as i32)
+        match wait_result {
+            Ok(Some(result)) => {
+                let _ = logs_task.await;
+                let status = result?;
+                Ok(status.status_code as i32)
+            }
+            Ok(None) => {
+                let _ = logs_task.await;
+                Err(anyhow!("docker wait stream ended without status"))
+            }
+            Err(_) => {
+                let _ = self
+                    .docker
+                    .stop_container(container_id, Some(stop_container_options()))
+                    .await;
+                let _ = logs_task.await;
+                Err(anyhow!(
+                    "agent execution timed out after {}",
+                    humantime::format_duration(self.agent_timeout)
+                ))
+            }
+        }
     }
 
-    async fn stream_logs(
-        docker: Docker,
-        container_id: String,
-        output: OutputHub,
-        wave_id: String,
-        wave_run_id: String,
-        agent_id: String,
-    ) {
+    async fn stream_logs(docker: Docker, container_id: String, context: OutputContext) {
         let mut logs = docker.logs(&container_id, Some(logs_options(true)));
 
         let mut parser = StreamParser::new();
@@ -830,14 +841,7 @@ impl DockerExecutor {
                         if line.ends_with('\r') {
                             line.pop();
                         }
-                        handle_output_line(
-                            &line,
-                            &mut parser,
-                            &output,
-                            &wave_id,
-                            &wave_run_id,
-                            &agent_id,
-                        );
+                        handle_output_line(&line, &mut parser, &context);
                     }
                 }
                 Err(err) => {
@@ -849,14 +853,7 @@ impl DockerExecutor {
         }
 
         if !pending.is_empty() {
-            handle_output_line(
-                &pending,
-                &mut parser,
-                &output,
-                &wave_id,
-                &wave_run_id,
-                &agent_id,
-            );
+            handle_output_line(&pending, &mut parser, &context);
         }
     }
 
@@ -1001,27 +998,97 @@ impl DockerExecutor {
         !self.image_exists(image).await || stale_marker.exists()
     }
 
-    async fn build_repo_image(&self, repo_source: &Path, tag: &str) -> Result<()> {
-        let output = Command::new("docker")
-            .args(["build", "-t", tag, "-f", ".lf/Dockerfile", "."])
-            .current_dir(repo_source)
-            .output()
-            .await
-            .map_err(|err| {
-                anyhow!(
-                    "failed to run 'docker build': {}. Is docker CLI in PATH?",
-                    err
-                )
-            })?;
+    fn build_context_dockerignore(repo_source: &Path) -> ignore::gitignore::Gitignore {
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(repo_source);
+        let _ = builder.add(repo_source.join(".dockerignore"));
+        match builder.build() {
+            Ok(ignore) => ignore,
+            Err(_) => ignore::gitignore::Gitignore::empty(),
+        }
+    }
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!(
-                "docker build for '{}' failed (exit {}): {}",
-                tag,
-                output.status.code().unwrap_or(-1),
-                stderr.trim()
-            ));
+    fn list_context_paths(repo_source: &Path) -> Vec<PathBuf> {
+        let dockerignore = Self::build_context_dockerignore(repo_source);
+        let walker = ignore::WalkBuilder::new(repo_source)
+            .hidden(false)
+            .standard_filters(false)
+            .build();
+
+        let mut paths = Vec::new();
+        for entry in walker.flatten() {
+            let path = entry.path();
+            if path == repo_source {
+                continue;
+            }
+            let is_dir = path.is_dir();
+            if dockerignore
+                .matched_path_or_any_parents(path, is_dir)
+                .is_ignore()
+            {
+                continue;
+            }
+            let rel = match path.strip_prefix(repo_source) {
+                Ok(rel) if !rel.as_os_str().is_empty() => rel.to_path_buf(),
+                _ => continue,
+            };
+            paths.push(rel);
+        }
+        paths.sort();
+        paths
+    }
+
+    fn build_image_context(repo_source: &Path) -> Result<Bytes> {
+        let dockerfile_rel = PathBuf::from(".lf/Dockerfile");
+        let mut included = Self::list_context_paths(repo_source);
+        if repo_source.join(&dockerfile_rel).exists() && !included.contains(&dockerfile_rel) {
+            included.push(dockerfile_rel);
+            included.sort();
+        }
+
+        let mut archive = Vec::new();
+        {
+            let mut tar = tar::Builder::new(&mut archive);
+            for rel in included {
+                let abs = repo_source.join(&rel);
+                if abs.is_dir() {
+                    tar.append_dir(&rel, &abs)?;
+                } else {
+                    tar.append_path_with_name(&abs, &rel)?;
+                }
+            }
+            tar.finish()?;
+        }
+        Ok(Bytes::from(archive))
+    }
+
+    async fn build_repo_image(&self, repo_source: &Path, tag: &str) -> Result<()> {
+        let context = Self::build_image_context(repo_source)?;
+        let options = BuildImageOptions {
+            dockerfile: ".lf/Dockerfile".to_string(),
+            t: Some(tag.to_string()),
+            rm: true,
+            forcerm: true,
+            version: BuilderVersion::BuilderBuildKit,
+            ..Default::default()
+        };
+        let mut stream = self
+            .docker
+            .build_image(options, None, Some(bollard::body_full(context)));
+        let mut build_error = None;
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(info) => {
+                    if let Some(error) = info.error {
+                        build_error = Some(error);
+                    }
+                }
+                Err(err) => {
+                    build_error = Some(err.to_string());
+                }
+            }
+        }
+        if let Some(error) = build_error {
+            return Err(anyhow!("docker api build for '{}' failed: {}", tag, error));
         }
 
         Ok(())
@@ -1493,28 +1560,25 @@ fn container_host_config(mounts: Vec<Mount>) -> HostConfig {
 
 #[async_trait]
 impl AgentExecutor for DockerExecutor {
-    async fn run(
-        &self,
-        cmd: Vec<String>,
-        cwd: &Path,
-        wave_id: &str,
-        agent_id: &str,
-        wave_run_id: &str,
-        output: &OutputHub,
-    ) -> Result<i32> {
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32> {
         if cmd.is_empty() {
             return Err(anyhow!("empty agent command"));
         }
 
-        let workspace = self.resolve_workspace(wave_id, wave_run_id).await?;
+        let output_context: OutputContext = context.into();
+        let workspace = self
+            .resolve_workspace(context.wave_id, context.wave_run_id)
+            .await?;
         let agent_image = self.ensure_repo_image(&workspace.repo_source).await?;
-        self.prepare_workspace(&workspace, wave_run_id, cwd).await?;
+        self.prepare_workspace(&workspace, context.wave_run_id, cwd)
+            .await?;
 
-        let container_name = Self::build_container_name(agent_id);
+        let container_name = Self::build_container_name(context.agent_id);
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
         let env = self.collect_env();
         let mounts = self.build_mounts(&workspace.volume.volume_name);
-        let labels = Self::build_agent_labels(agent_id, wave_id, wave_run_id);
+        let labels =
+            Self::build_agent_labels(context.agent_id, context.wave_id, context.wave_run_id);
 
         let host_config = container_host_config(mounts);
 
@@ -1541,7 +1605,7 @@ impl AgentExecutor for DockerExecutor {
             .await?;
 
         let container_id = container.id;
-        let agent_lfd_id = LfdId::from_raw(agent_id);
+        let agent_lfd_id = LfdId::from_raw(context.agent_id);
         let _ = self
             .store
             .update_agent_status(
@@ -1554,22 +1618,22 @@ impl AgentExecutor for DockerExecutor {
         self.active
             .lock()
             .await
-            .insert(agent_id.to_string(), container_id.clone());
+            .insert(context.agent_id.to_string(), container_id.clone());
 
         if let Err(err) = self
             .docker
             .start_container(&container_id, None::<StartContainerOptions>)
             .await
         {
-            self.active.lock().await.remove(agent_id);
+            self.active.lock().await.remove(context.agent_id);
             self.remove_container(&container_id).await;
             return Err(err.into());
         }
 
         let exit_code = self
-            .wait_for_container_with_logs(&container_id, output, wave_id, wave_run_id, agent_id)
+            .wait_for_container_with_logs(&container_id, output_context)
             .await;
-        self.active.lock().await.remove(agent_id);
+        self.active.lock().await.remove(context.agent_id);
         self.remove_container(&container_id).await;
 
         self.sync_to_host_worktree(&workspace, cwd).await?;
@@ -1645,6 +1709,7 @@ mod tests {
     use crate::lfd::config::ExecutorType;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{WaveRunKind, WaveRunSnapshot};
+    use std::io::Cursor;
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
 
@@ -1700,6 +1765,46 @@ mod tests {
         assert_eq!(mounts[0].typ, Some(MountTypeEnum::VOLUME));
         assert_eq!(mounts[0].source, Some("lfd-repo-abc".to_string()));
         assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
+    }
+
+    fn list_archive_entries(bytes: Bytes) -> Vec<String> {
+        let cursor = Cursor::new(bytes);
+        let mut archive = tar::Archive::new(cursor);
+        let mut entries = Vec::new();
+        for entry in archive.entries().expect("tar entries") {
+            let entry = entry.expect("tar entry");
+            let path = entry.path().expect("entry path");
+            let normalized = path
+                .to_string_lossy()
+                .trim_start_matches("./")
+                .trim_end_matches('/')
+                .to_string();
+            entries.push(normalized);
+        }
+        entries.sort();
+        entries
+    }
+
+    #[test]
+    fn build_image_context_respects_dockerignore_but_keeps_dockerfile() {
+        let repo = tempdir().expect("tempdir");
+        std::fs::write(repo.path().join(".dockerignore"), ".lf/\n*.log\n")
+            .expect("write dockerignore");
+        std::fs::create_dir_all(repo.path().join(".lf")).expect("create .lf");
+        std::fs::write(repo.path().join(".lf/Dockerfile"), "FROM scratch\n")
+            .expect("write dockerfile");
+        std::fs::write(repo.path().join(".lf/secret.txt"), "ignored").expect("write ignored file");
+        std::fs::write(repo.path().join("kept.txt"), "keep").expect("write kept");
+        std::fs::write(repo.path().join("ignored.log"), "ignore").expect("write ignored");
+
+        let context = DockerExecutor::build_image_context(repo.path()).expect("context");
+        let entries = list_archive_entries(context);
+
+        assert!(entries.contains(&".dockerignore".to_string()));
+        assert!(entries.contains(&".lf/Dockerfile".to_string()));
+        assert!(entries.contains(&"kept.txt".to_string()));
+        assert!(!entries.contains(&".lf/secret.txt".to_string()));
+        assert!(!entries.contains(&"ignored.log".to_string()));
     }
 
     #[test]
@@ -1959,6 +2064,7 @@ mod tests {
             r#type: ExecutorType::Docker,
             image: "loopflow/agent:test".to_string(),
             credentials: Default::default(),
+            agent_timeout: std::time::Duration::from_secs(45 * 60),
         };
         let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
         let output_dir = tmp.path().join("output");
@@ -2108,6 +2214,7 @@ mod tests {
             r#type: ExecutorType::Docker,
             image: "loopflow/agent:test".to_string(),
             credentials: Default::default(),
+            agent_timeout: std::time::Duration::from_secs(45 * 60),
         };
         let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
         let output_dir = tmp.path().join("output");

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -13,11 +14,12 @@ use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::AgentStatus;
 
-use super::{read_stream, AgentExecutor, StartupRecovery};
+use super::{read_stream, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
 
 pub struct LocalProcessExecutor {
     store: SharedStore,
     active: Arc<Mutex<HashMap<String, u32>>>,
+    agent_timeout: Duration,
 }
 
 impl std::fmt::Debug for LocalProcessExecutor {
@@ -27,30 +29,24 @@ impl std::fmt::Debug for LocalProcessExecutor {
 }
 
 impl LocalProcessExecutor {
-    pub fn new(store: SharedStore) -> Self {
+    pub fn new(store: SharedStore, agent_timeout: Duration) -> Self {
         Self {
             store,
             active: Arc::new(Mutex::new(HashMap::new())),
+            agent_timeout,
         }
     }
 }
 
 #[async_trait]
 impl AgentExecutor for LocalProcessExecutor {
-    async fn run(
-        &self,
-        cmd: Vec<String>,
-        cwd: &Path,
-        wave_id: &str,
-        agent_id: &str,
-        wave_run_id: &str,
-        output: &OutputHub,
-    ) -> Result<i32> {
+    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32> {
         if cmd.is_empty() {
             return Err(anyhow!("empty agent command"));
         }
 
-        let agent_id_string = agent_id.to_string();
+        let agent_id_string = context.agent_id.to_string();
+        let output_context: OutputContext = context.into();
         let mut command = Command::new(&cmd[0]);
         command.args(&cmd[1..]);
         command.current_dir(cwd);
@@ -61,7 +57,7 @@ impl AgentExecutor for LocalProcessExecutor {
 
         // Record the PID so the process can be killed on stop.
         if let Some(pid) = child.id() {
-            let agent_lfd_id = LfdId::from_raw(agent_id);
+            let agent_lfd_id = LfdId::from_raw(context.agent_id);
             let _ = self
                 .store
                 .update_agent_status(
@@ -86,22 +82,23 @@ impl AgentExecutor for LocalProcessExecutor {
             .take()
             .ok_or_else(|| anyhow!("missing stderr"))?;
 
-        let stdout_task = tokio::spawn(read_stream(
-            stdout,
-            output.clone(),
-            wave_id.to_string(),
-            wave_run_id.to_string(),
-            agent_id.to_string(),
-        ));
-        let stderr_task = tokio::spawn(read_stream(
-            stderr,
-            output.clone(),
-            wave_id.to_string(),
-            wave_run_id.to_string(),
-            agent_id.to_string(),
-        ));
+        let stdout_task = tokio::spawn(read_stream(stdout, output_context.clone()));
+        let stderr_task = tokio::spawn(read_stream(stderr, output_context));
 
-        let status = child.wait().await?;
+        let status = match tokio::time::timeout(self.agent_timeout, child.wait()).await {
+            Ok(result) => result?,
+            Err(_) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                let _ = stdout_task.await;
+                let _ = stderr_task.await;
+                self.active.lock().await.remove(&agent_id_string);
+                return Err(anyhow!(
+                    "agent execution timed out after {}",
+                    humantime::format_duration(self.agent_timeout)
+                ));
+            }
+        };
         let _ = stdout_task.await;
         let _ = stderr_task.await;
         self.active.lock().await.remove(&agent_id_string);
@@ -123,5 +120,47 @@ impl AgentExecutor for LocalProcessExecutor {
             orphaned_runs_failed,
             ..Default::default()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lfd::output::OutputHub;
+    use crate::lfd::store::{open_store, StorageConfig};
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn local_executor_times_out_long_running_agent() {
+        let tmp = tempdir().expect("tempdir");
+        let db = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db))
+                .await
+                .expect("sqlite store"),
+        );
+        let executor = LocalProcessExecutor::new(store, Duration::from_millis(50));
+        let output = OutputHub::new(16, tmp.path().join("output"));
+
+        let result = executor
+            .run(
+                vec!["sh".to_string(), "-c".to_string(), "sleep 1".to_string()],
+                tmp.path(),
+                AgentRunContext {
+                    wave_id: "wave-timeout",
+                    agent_id: "agent-timeout",
+                    wave_run_id: "run-timeout",
+                    output: &output,
+                    output_prefix: None,
+                },
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .expect_err("timeout should fail")
+            .to_string()
+            .contains("timed out"));
     }
 }

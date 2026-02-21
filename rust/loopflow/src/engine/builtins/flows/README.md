@@ -10,7 +10,7 @@ Flows that produce code changes.
 |------|-------|----------|
 | `ship` | implement → compress → gate | Build from design, ship clean |
 | `pair` | design → ship | Interactive design then build |
-| `grind` | review → iterate → ship → gate | Review-driven iteration |
+| `grind` | research → iterate → ship → gate | Research-driven iteration |
 | `incident` | debug → 5whys → ship | Fix bug, analyze root cause, ship fixes |
 | `start` | ingest → kickoff | Pick wave item, elaborate design |
 | `ship-wave` | start → ship → update-wave | Pick wave item, elaborate, build, then update wave plan |
@@ -21,10 +21,9 @@ Flows that produce wave items and analysis.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `wave-reduce` | review → fork(reduce×3) → publish | Find simplification opportunities |
-| `wave-polish` | review → fork(polish×3) → publish | Find polish priorities |
-| `wave-expand` | review → fork(expand×3) → publish | Find expansion opportunities |
-| `research` | explore → review → publish | Investigate then propose |
+| `wave-reduce` | research → fork(reduce×3) → publish | Find simplification opportunities |
+| `wave-polish` | research → fork(polish×3) → publish | Find polish priorities |
+| `wave-expand` | research → fork(expand×3) → publish | Find expansion opportunities |
 | `publish` | consolidate → add-to-wave | Promote scratch/ to wave/ |
 
 ## Fork pattern
@@ -32,7 +31,7 @@ Flows that produce wave items and analysis.
 Plan flows use forks to get multiple perspectives:
 
 ```yaml
-- review
+- research
 - fork:
     step: reduce
     drafts:

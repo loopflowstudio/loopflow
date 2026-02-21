@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use time::OffsetDateTime;
 
 use crate::lfd::events::EventHub;
 pub use crate::lfd::executor::create_wave_run_with_id;
 use crate::lfd::executor::WaveExecutor;
-use crate::lfd::scheduler::Scheduler;
+use crate::lfd::scheduler::SchedulerSlotGuard;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, WaveRunStatus, WaveStatus};
 
@@ -13,15 +11,14 @@ use crate::lfd::types::{Event, WaveRunStatus, WaveStatus};
 pub fn spawn_run_task_with_slot(
     store: SharedStore,
     executor: WaveExecutor,
-    scheduler: Arc<Scheduler>,
     event_hub: EventHub,
     run: crate::lfd::types::WaveRun,
+    slot_guard: SchedulerSlotGuard,
 ) {
-    let run_id_for_release = run.id.clone();
     event_hub.send(Event::wave_started(run.wave_id.clone(), run.id.clone()));
     tokio::spawn(async move {
+        let _slot_guard = slot_guard;
         execute_run_inner(&store, &executor, &event_hub, &run).await;
-        scheduler.release(run_id_for_release.as_str());
     });
 }
 

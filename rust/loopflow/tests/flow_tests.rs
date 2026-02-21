@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::flow::{ConcreteItem, FlowItem, ForkSelect, Step};
+use loopflow::engine::flow::{ConcreteItem, FlowItem, Step};
 use loopflow::engine::{expand_flow, load_flow};
 use tempfile::TempDir;
 
@@ -70,13 +70,10 @@ fn golden_flows() {
     branches:
       - step: { name: implement }
       - step: { name: polish }
-    select: all
 - fork:
     branches:
       - step: { name: quick }
       - step: { name: deep }
-    select: prompt
-    prompt: Pick a path
 - flow: nested
 "#,
     );
@@ -84,22 +81,16 @@ fn golden_flows() {
     let flow = load_flow("forked", repo).unwrap();
     assert_eq!(flow.items.len(), 3);
     match &flow.items[0] {
-        FlowItem::Fork { branches, select } => {
+        FlowItem::Fork { branches } => {
             assert_eq!(branches.len(), 2);
-            assert_eq!(select, &ForkSelect::All);
         }
         _ => panic!("expected fork"),
     }
     match &flow.items[1] {
-        FlowItem::Fork { select, .. } => {
-            assert_eq!(
-                select,
-                &ForkSelect::Prompt {
-                    prompt: "Pick a path".to_string()
-                }
-            );
+        FlowItem::Fork { branches } => {
+            assert_eq!(branches.len(), 2);
         }
-        _ => panic!("expected prompt fork"),
+        _ => panic!("expected fork"),
     }
     match &flow.items[2] {
         FlowItem::FlowRef(name) => {
@@ -107,6 +98,26 @@ fn golden_flows() {
         }
         _ => panic!("expected flow ref"),
     }
+}
+
+#[test]
+fn fork_select_is_rejected() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    write_flow(
+        repo,
+        "forked",
+        r#"
+- fork:
+    branches:
+      - step: { name: implement }
+    select: all
+"#,
+    );
+
+    let err = load_flow("forked", repo).expect_err("fork select should fail");
+    let message = err.to_string();
+    assert!(message.contains("fork select modes are not supported"));
 }
 
 #[test]
@@ -239,17 +250,17 @@ fn builtin_wave_reduce_expands_publish_subflow() {
     let flow = load_flow("wave-reduce", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
 
-    // review + fork + consolidate + add-to-wave = 4
+    // research + fork + consolidate + add-to-wave = 4
     assert_eq!(
         items.len(),
         4,
         "wave-reduce should expand publish into consolidate + add-to-wave"
     );
 
-    // Step 0: review
+    // Step 0: research
     match &items[0] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "review"),
-        _ => panic!("expected review step"),
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "research"),
+        _ => panic!("expected research step"),
     }
     // Step 1: fork (reduce × 3 directions)
     assert!(

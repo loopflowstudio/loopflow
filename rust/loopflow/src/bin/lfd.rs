@@ -13,6 +13,7 @@ use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::scheduler::Scheduler;
+use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
 
 #[tokio::main]
@@ -194,11 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
         tracing::info!(addr = %http_addr, "listening");
-        axum::serve(
-            listener,
-            http_router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
+        axum::serve(listener, http_router).await
     });
 
     tokio::select! {
@@ -229,9 +226,26 @@ fn storage_config_from_config(
 ) -> Result<StorageConfig, Box<dyn std::error::Error>> {
     match config.storage {
         StorageType::Sqlite => {
-            let db_path = std::env::var("LFD_DB_PATH")
+            let db_root = loopflow::lfd::default_db_path()
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "failed to resolve sqlite root directory",
+                    )
+                })?;
+            std::fs::create_dir_all(&db_root)?;
+
+            let db_candidate = std::env::var("LFD_DB_PATH")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| loopflow::lfd::default_db_path());
+                .unwrap_or_else(|_| PathBuf::from("lfd.db"));
+            let db_path = path_within_root_planned(&db_root, &db_candidate).map_err(|err| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("invalid LFD_DB_PATH: {err}"),
+                )
+            })?;
             Ok(StorageConfig::sqlite(db_path))
         }
         StorageType::Postgres => {
@@ -266,8 +280,8 @@ fn generate_session_token_or_exit() -> String {
 mod tests {
     use super::{storage_config_from_config, LfdConfig, StorageConfig, StorageType};
     use std::ffi::OsString;
-    use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
+    use tempfile::{tempdir, TempDir};
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -301,40 +315,74 @@ mod tests {
         }
     }
 
-    #[test]
-    fn storage_config_defaults_to_sqlite() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::snapshot(&["LFD_DB_PATH", "LFD_DATABASE_URL"]);
+    fn setup_sqlite_env() -> TempDir {
+        let home = tempdir().expect("tempdir");
+        std::env::set_var("HOME", home.path());
         std::env::remove_var("LFD_DB_PATH");
         std::env::remove_var("LFD_DATABASE_URL");
-
-        let config =
-            storage_config_from_config(&LfdConfig::default()).expect("sqlite default should parse");
-        assert!(matches!(config, StorageConfig::Sqlite { .. }));
+        home
     }
 
     #[test]
-    fn storage_config_honors_db_path_override_for_sqlite() {
+    fn storage_config_defaults_to_sqlite() {
         let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::snapshot(&["LFD_DB_PATH", "LFD_DATABASE_URL"]);
-        std::env::remove_var("LFD_DB_PATH");
-        std::env::remove_var("LFD_DATABASE_URL");
-        std::env::set_var("LFD_DB_PATH", "/tmp/custom.db");
+        let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        let home = setup_sqlite_env();
 
         let config =
-            storage_config_from_config(&LfdConfig::default()).expect("sqlite config should parse");
+            storage_config_from_config(&LfdConfig::default()).expect("sqlite default should parse");
         match config {
             StorageConfig::Sqlite { path, .. } => {
-                assert_eq!(path, PathBuf::from("/tmp/custom.db"))
+                let expected_root = home
+                    .path()
+                    .join(".lf")
+                    .canonicalize()
+                    .expect("canonical root");
+                assert_eq!(path, expected_root.join("lfd.db"))
             }
             StorageConfig::Postgres { .. } => panic!("expected sqlite storage"),
         }
     }
 
     #[test]
+    fn storage_config_honors_relative_db_path_override_for_sqlite() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        let home = setup_sqlite_env();
+        std::fs::create_dir_all(home.path().join(".lf").join("db")).expect("create db dir");
+        std::env::set_var("LFD_DB_PATH", "db/custom.db");
+
+        let config =
+            storage_config_from_config(&LfdConfig::default()).expect("sqlite config should parse");
+        match config {
+            StorageConfig::Sqlite { path, .. } => {
+                let expected_root = home
+                    .path()
+                    .join(".lf")
+                    .canonicalize()
+                    .expect("canonical root");
+                assert_eq!(path, expected_root.join("db").join("custom.db"))
+            }
+            StorageConfig::Postgres { .. } => panic!("expected sqlite storage"),
+        }
+    }
+
+    #[test]
+    fn storage_config_rejects_absolute_db_path_override_for_sqlite() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        let _home = setup_sqlite_env();
+        std::env::set_var("LFD_DB_PATH", "/tmp/custom.db");
+
+        let err = storage_config_from_config(&LfdConfig::default())
+            .expect_err("absolute sqlite path should fail");
+        assert!(err.to_string().contains("invalid LFD_DB_PATH"));
+    }
+
+    #[test]
     fn storage_config_requires_database_url_for_postgres() {
         let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::snapshot(&["LFD_DB_PATH", "LFD_DATABASE_URL"]);
+        let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
         std::env::remove_var("LFD_DB_PATH");
         std::env::remove_var("LFD_DATABASE_URL");
 

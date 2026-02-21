@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tokio::sync::broadcast;
+use tracing::warn;
+
+use crate::lfd::security::{path_within_root_existing, path_within_root_planned, validate_safe_id};
 
 #[derive(Debug, Clone)]
 pub struct OutputEvent {
@@ -36,16 +39,30 @@ impl Writers {
     }
 
     fn append(&mut self, wave_run_id: &str, line: &str) {
-        let file = self
-            .files
-            .entry(wave_run_id.to_string())
-            .or_insert_with(|| {
-                OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(self.dir.join(format!("{wave_run_id}.log")))
-                    .expect("failed to open output log file")
-            });
+        let Some(relative) = relative_log_path(wave_run_id) else {
+            warn!(wave_run_id = %wave_run_id, "rejecting unsafe wave_run_id for output log");
+            return;
+        };
+
+        let file = if let Some(file) = self.files.get_mut(wave_run_id) {
+            file
+        } else {
+            let path = match path_within_root_planned(&self.dir, &relative) {
+                Ok(path) => path,
+                Err(err) => {
+                    warn!(wave_run_id = %wave_run_id, error = %err, "failed to resolve output log path");
+                    return;
+                }
+            };
+            let file = match OpenOptions::new().create(true).append(true).open(path) {
+                Ok(file) => file,
+                Err(err) => {
+                    warn!(wave_run_id = %wave_run_id, error = %err, "failed to open output log file");
+                    return;
+                }
+            };
+            self.files.entry(wave_run_id.to_string()).or_insert(file)
+        };
         let _ = writeln!(file, "{line}");
     }
 }
@@ -92,7 +109,8 @@ impl OutputHub {
     /// Read the log file for a wave run. Returns lines and the byte offset
     /// at end of read (for dedup with the broadcast stream).
     pub fn read_log(&self, wave_run_id: &str) -> Option<(Vec<String>, u64)> {
-        let path = self.output_dir.join(format!("{wave_run_id}.log"));
+        let relative = relative_log_path(wave_run_id)?;
+        let path = path_within_root_existing(&self.output_dir, &relative).ok()?;
         let file = File::open(&path).ok()?;
         let metadata = file.metadata().ok()?;
         let size = metadata.len();
@@ -104,5 +122,39 @@ impl OutputHub {
     /// Output directory path.
     pub fn output_dir(&self) -> &Path {
         &self.output_dir
+    }
+}
+
+fn relative_log_path(wave_run_id: &str) -> Option<PathBuf> {
+    validate_safe_id(wave_run_id).ok()?;
+    Some(PathBuf::from(format!("{wave_run_id}.log")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OutputEvent, OutputHub};
+    use tempfile::tempdir;
+
+    #[test]
+    fn read_log_returns_none_for_unsafe_wave_run_id() {
+        let tmp = tempdir().expect("tempdir");
+        let hub = OutputHub::new(8, tmp.path().to_path_buf());
+        assert!(hub.read_log("../escape").is_none());
+    }
+
+    #[test]
+    fn send_ignores_unsafe_wave_run_id_without_creating_file() {
+        let tmp = tempdir().expect("tempdir");
+        let hub = OutputHub::new(8, tmp.path().to_path_buf());
+        let outside = tmp.path().parent().expect("parent").join("escape.log");
+
+        hub.send(OutputEvent {
+            wave_id: "wave-1".to_string(),
+            wave_run_id: "../escape".to_string(),
+            agent_id: "agent-1".to_string(),
+            text: "nope".to_string(),
+        });
+
+        assert!(!outside.exists());
     }
 }

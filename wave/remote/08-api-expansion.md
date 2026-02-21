@@ -61,7 +61,8 @@ async fn list_files(
 ) -> Result<Json<FileListResponse>> {
     let wave = state.store.get_wave(&wave_id).await?;
     let worktree = infer_worktree(&wave)?;
-    let dir = worktree.join(params.path.unwrap_or_default());
+    let relative = PathBuf::from(params.path.unwrap_or_default());
+    let dir = path_within_root_existing(&worktree, &relative)?;
 
     let entries = fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
@@ -82,7 +83,7 @@ async fn read_file(
 ) -> Result<Json<FileContentResponse>> {
     let wave = state.store.get_wave(&wave_id).await?;
     let worktree = infer_worktree(&wave)?;
-    let file_path = worktree.join(&params.path);
+    let file_path = path_within_root_existing(&worktree, Path::new(&params.path))?;
 
     // Cap file size to prevent OOM
     let metadata = fs::metadata(&file_path)?;
@@ -96,6 +97,10 @@ async fn read_file(
     Ok(Json(FileContentResponse { path: params.path, content, size: metadata.len(), language }))
 }
 ```
+
+Before any `read_dir`, `metadata`, or file-content read, resolve user-supplied paths through
+`path_within_root_existing`/`path_within_root_planned`. Reject traversal attempts (`..`, absolute
+paths, symlink escapes, null bytes) with `400`.
 
 ## Step/flow/direction endpoints
 

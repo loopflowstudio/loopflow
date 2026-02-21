@@ -10,6 +10,12 @@ Constrain the lfd HTTP/WebSocket surface so malformed, oversized, or cross-bound
 - Outbound HTTP behavior cannot leak credentials across host boundaries.
 - Forwarded headers are trusted only from configured proxy CIDRs.
 
+## What we learned from phases 01 and 02
+
+- Method-tier auth (`read` vs `mutate`) is simpler than route tagging. This phase should reuse those tiers for throttling and caps where possible.
+- Session-token file fallback is now in Python and Swift local clients; leakage tests must cover both local session tokens and static tokens.
+- Path traversal defenses are already centralized in `lfd::security`, so this phase should not add duplicate path-validation code.
+
 ## Security boundary for this phase
 
 This phase prevents common API-surface failures:
@@ -30,7 +36,7 @@ This phase does not provide:
 
 - Global body size caps for JSON endpoints.
 - Stricter caps for high-risk surfaces (`/hooks/*`, future file APIs).
-- Per-client auth-failure throttling on hook/auth endpoints.
+- Per-client auth-failure throttling on hook/auth endpoints, keyed by source and auth context.
 - WebSocket caps:
   - max frame/message size
   - max queued outbound events per client
@@ -64,3 +70,26 @@ This phase does not provide:
 - Outbound redirect/cross-host header stripping is enforced with tests.
 - Sanitized error responses are consistent across endpoints.
 - Proxy header trust is CIDR-gated and covered by regression tests.
+
+## Open questions
+
+- Should default throttling keys be source IP only, token hash only, or a hybrid (for NAT-heavy deployments)?
+- What body/frame limits are safe for current webhook payloads without breaking legitimate use?
+- On WebSocket pressure, should we drop oldest queued events or disconnect immediately?
+
+## Checkpoints
+
+1. Body and WebSocket caps enforced with clear 4xx responses.
+2. Error/log redaction centralized so endpoints share one sanitization path.
+3. Cross-host redirect/header stripping and proxy CIDR trust rules covered by regression tests.
+
+## Try it
+
+- Fire oversized JSON and WebSocket payloads from a local script and verify predictable rejection behavior.
+- Simulate outbound redirect to a different host and confirm `Authorization` headers are stripped.
+- Send malformed requests repeatedly and verify throttling triggers before service instability.
+
+## What might change
+
+- If proxy deployments need richer trust modeling, CIDR-only rules may be split from this phase into a focused follow-up.
+- If real workloads require larger WS queues, caps may become configurable with conservative defaults.

@@ -17,6 +17,7 @@ use crate::lfd::github::{
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiResult};
 use crate::lfd::id::LfdId;
+use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, Wave, WaveRun};
 use time::format_description::well_known::Rfc3339;
@@ -43,13 +44,35 @@ pub async fn git_hook_handler(
     State(state): State<HttpState>,
     Json(payload): Json<GitHookRequest>,
 ) -> ApiResult<serde_json::Value> {
-    state.event_hub.send(Event::worktree_updated(
-        payload.repo.clone(),
-        payload.repo,
-        payload.branch,
-    ));
+    let repo = canonical_git_hook_repo(&payload.repo)?;
+    state
+        .event_hub
+        .send(Event::worktree_updated(repo.clone(), repo, payload.branch));
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn canonical_git_hook_repo(
+    repo: &str,
+) -> Result<String, (StatusCode, Json<crate::lfd::http::dto::ErrorResponse>)> {
+    let path = Path::new(repo.trim());
+    if !path.is_absolute() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "repo must be an absolute path",
+        ));
+    }
+
+    let canonical = canonicalize_existing_path(path)
+        .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+    if !canonical.is_dir() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "repo must be an existing directory",
+        ));
+    }
+
+    Ok(canonical.to_string_lossy().to_string())
 }
 
 pub async fn github_webhook_handler(
@@ -401,7 +424,110 @@ async fn emit_ci_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::auth::AuthProvider;
+    use crate::lfd::config::{ExecutorConfig, GitHubConfig};
+    use crate::lfd::events::EventHub;
+    use crate::lfd::executor::WaveExecutor;
+    use crate::lfd::http::state::{ChatTurnRegistry, HttpState};
+    use crate::lfd::output::OutputHub;
+    use crate::lfd::scheduler::Scheduler;
+    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{PullRequest, WaveRunKind, WaveRunSnapshot, WaveRunStatus};
+    use std::sync::Arc;
+    use tempfile::tempdir;
+    use time::OffsetDateTime;
+    use tokio::sync::Mutex;
+
+    async fn test_http_state() -> HttpState {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_hub = OutputHub::new(128, tmp.path().join("output"));
+        let event_hub = EventHub::new(128);
+        let executor = Arc::new(
+            WaveExecutor::new(
+                store.clone(),
+                scheduler.clone(),
+                output_hub.clone(),
+                event_hub.clone(),
+                ExecutorConfig::default(),
+                GitHubConfig::default(),
+            )
+            .expect("build executor"),
+        );
+        HttpState {
+            store,
+            scheduler,
+            executor,
+            event_hub,
+            output_hub,
+            auth: AuthProvider::Local,
+            session_token: None,
+            registration: None,
+            started_at: OffsetDateTime::now_utc(),
+            github: GitHubConfig::default(),
+            ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            chat_turns: ChatTurnRegistry::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn git_hook_handler_rejects_relative_repo_paths() {
+        let state = test_http_state().await;
+        let result = git_hook_handler(
+            State(state),
+            Json(GitHookRequest {
+                hook: "post-commit".to_string(),
+                repo: "../repo".to_string(),
+                branch: None,
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err((StatusCode::BAD_REQUEST, _))));
+    }
+
+    #[tokio::test]
+    async fn git_hook_handler_canonicalizes_repo_path() {
+        let state = test_http_state().await;
+        let repo_dir = tempdir().expect("repo tempdir");
+        let mut rx = state.event_hub.subscribe();
+        let alias_path = repo_dir.path().join("..").join(
+            repo_dir
+                .path()
+                .file_name()
+                .expect("tempdir should have file name"),
+        );
+        let result = git_hook_handler(
+            State(state),
+            Json(GitHookRequest {
+                hook: "post-commit".to_string(),
+                repo: alias_path.to_string_lossy().to_string(),
+                branch: Some("main".to_string()),
+            }),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        let event = rx.try_recv().expect("event emitted");
+        match event {
+            Event::WorktreeUpdated { repo, .. } => {
+                assert_eq!(
+                    repo,
+                    repo_dir
+                        .path()
+                        .canonicalize()
+                        .expect("canonical repo path")
+                        .to_string_lossy()
+                );
+            }
+            _ => panic!("expected worktree updated event"),
+        }
+    }
 
     fn wave_run_with_pr(
         run_kind: WaveRunKind,

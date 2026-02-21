@@ -1,9 +1,8 @@
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use std::net::SocketAddr;
 use subtle::ConstantTimeEq;
 
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
@@ -25,35 +24,29 @@ pub enum AuthProvider {
     Studio { validator: ConnectionValidator },
 }
 
-/// Axum middleware that enforces auth.
-///
-/// Loopback connections bypass auth entirely. Remote connections
-/// require a valid token (static or studio) — Local mode rejects them.
+/// Axum middleware that enforces auth on all requests.
 pub async fn auth_middleware(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     request: Request,
     next: Next,
 ) -> Response {
-    // Loopback connections bypass auth entirely, regardless of provider.
-    if let Some(ConnectInfo(addr)) = request.extensions().get::<ConnectInfo<SocketAddr>>() {
-        if addr.ip().is_loopback() {
-            return next.run(request).await;
-        }
-    }
+    let provided_token = extract_token(&headers);
 
-    let headers = request.headers();
     match &state.auth {
-        AuthProvider::Local => auth_error(
-            StatusCode::FORBIDDEN,
-            "remote access requires auth configuration",
-        ),
-        AuthProvider::Static { token } => match extract_token(headers) {
+        AuthProvider::Local => {
+            match authorize_local(state.session_token.as_deref(), provided_token) {
+                Ok(()) => next.run(request).await,
+                Err((status, message)) => auth_error(status, message),
+            }
+        }
+        AuthProvider::Static { token } => match provided_token {
             Some(provided) if constant_time_eq(provided, token) => next.run(request).await,
             Some(_) => auth_error(StatusCode::UNAUTHORIZED, "invalid token"),
             None => auth_error(StatusCode::UNAUTHORIZED, "missing token"),
         },
         AuthProvider::Studio { validator } => {
-            let token = match extract_token(headers) {
+            let token = match provided_token {
                 Some(t) => t,
                 None => {
                     return auth_error(StatusCode::UNAUTHORIZED, "missing connection token");
@@ -66,6 +59,21 @@ pub async fn auth_middleware(
                 auth_error(StatusCode::UNAUTHORIZED, "invalid connection token")
             }
         }
+    }
+}
+
+fn authorize_local(
+    session_token: Option<&str>,
+    provided_token: Option<&str>,
+) -> Result<(), (StatusCode, &'static str)> {
+    let Some(expected) = session_token else {
+        return Err((StatusCode::FORBIDDEN, "session token not configured"));
+    };
+
+    match provided_token {
+        Some(provided) if constant_time_eq(provided, expected) => Ok(()),
+        Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
+        None => Err((StatusCode::UNAUTHORIZED, "missing token")),
     }
 }
 
@@ -126,5 +134,32 @@ mod tests {
     fn extract_token_missing() {
         let headers = HeaderMap::new();
         assert_eq!(extract_token(&headers), None);
+    }
+
+    #[test]
+    fn valid_token_is_allowed() {
+        let result = authorize_local(Some("session-token"), Some("session-token"));
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn invalid_token_is_rejected() {
+        let result = authorize_local(Some("session-token"), Some("wrong"));
+        assert_eq!(result, Err((StatusCode::UNAUTHORIZED, "invalid token")));
+    }
+
+    #[test]
+    fn missing_token_is_rejected() {
+        let result = authorize_local(Some("session-token"), None);
+        assert_eq!(result, Err((StatusCode::UNAUTHORIZED, "missing token")));
+    }
+
+    #[test]
+    fn unconfigured_session_token_is_forbidden() {
+        let result = authorize_local(None, Some("any-token"));
+        assert_eq!(
+            result,
+            Err((StatusCode::FORBIDDEN, "session token not configured"))
+        );
     }
 }

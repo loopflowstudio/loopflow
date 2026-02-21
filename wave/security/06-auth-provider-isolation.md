@@ -6,9 +6,7 @@ Depends on remote/07 (Studio auth client wiring) since it hardens the `Studio` a
 
 ## What exists today
 
-Phase 01 shipped a clean auth middleware structure: `should_bypass_auth()` allows loopback reads without a token, then the middleware matches on `AuthProvider` enum with each variant handling its own validation. No fallthrough between providers.
-
-The key gap Phase 01 left open: **loopback read bypass applies to all providers**. `should_bypass_auth(is_loopback, method)` runs before the provider match — so a loopback `GET` bypasses auth even when `Static` or `Studio` is configured. For `Local` mode this is intentional (monitoring scripts query status without auth). For `Static`/`Studio` deployments it's a residual weakness: a co-located process can read wave status, run logs, and event streams without credentials.
+Phase 01 shipped a clean auth middleware: all protected routes require a valid bearer token regardless of provider or source. No loopback bypass. The middleware matches on `AuthProvider` enum with each variant handling its own validation. No fallthrough between providers.
 
 Other gaps:
 
@@ -37,19 +35,9 @@ This phase does not provide:
 
 ## Implementation
 
-### Remove loopback bypass for non-Local providers
+### Loopback bypass — already removed
 
-The current `should_bypass_auth(is_loopback, method)` runs before the provider match. Change it to take the provider into account:
-
-```rust
-fn should_bypass_auth(is_loopback: bool, method: &Method, provider: &AuthProvider) -> bool {
-    matches!(provider, AuthProvider::Local) && is_loopback && !is_mutation(method)
-}
-```
-
-Only `AuthProvider::Local` gets the loopback read bypass. `Static` and `Studio` require credentials on all requests, including loopback reads.
-
-Rationale: if you've configured `Static` or `Studio` auth, you've opted into requiring credentials. The deployment is either remote or explicitly secured. Loopback bypass defeats the purpose.
+Phase 01 removed the loopback read bypass entirely. All providers require credentials on all protected routes. No further work needed here.
 
 ### JWKS fail-closed
 

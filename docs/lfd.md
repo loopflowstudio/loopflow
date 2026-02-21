@@ -78,7 +78,7 @@ Environment variables:
 ```
 LFD_MODE          # optional mode override: native or container
 LFD_HTTP_ADDR     # daemon listen address (default 127.0.0.1:2486)
-LFD_DB_PATH       # sqlite path override (native mode)
+LFD_DB_PATH       # sqlite path override relative to ~/.lf (native mode)
 LFD_DATABASE_URL  # required for container mode (postgres)
 LFD_MAX_SLOTS     # concurrent run slots
 LFD_AUTH_PROVIDER # local (default), static, or loopflow.studio
@@ -157,10 +157,9 @@ LFD_GITHUB_TOKEN=ghp_xxx
 Auth behavior:
 
 - `auth.provider=local` (default) writes a startup session token to `~/.lf/session-token` (`0600` on Unix).
-- Loopback reads (`GET`, `HEAD`, `OPTIONS`) on protected routes are allowed without a token.
-- Mutations (`POST`, `PATCH`, `DELETE`) on protected routes always require `Authorization: Bearer <token>`, including loopback requests.
-- In `auth.provider=local`, non-loopback requests also require the session token.
-- In `auth.provider=static` or `auth.provider=loopflow.studio`, any request that is not a loopback read requires that provider's bearer token.
+- All protected routes require `Authorization: Bearer <token>`.
+- Clients (`lfq`, Concerto) auto-discover the local session token from `~/.lf/session-token`. Set `LFD_TOKEN` for shell use.
+- In `auth.provider=static` or `auth.provider=loopflow.studio`, the configured provider's bearer token is required.
 
 When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 

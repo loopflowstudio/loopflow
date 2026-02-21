@@ -195,11 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
         tracing::info!(addr = %http_addr, "listening");
-        axum::serve(
-            listener,
-            http_router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await
+        axum::serve(listener, http_router).await
     });
 
     tokio::select! {

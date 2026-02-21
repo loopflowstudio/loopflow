@@ -8,8 +8,8 @@ use tracing::{debug, error, info, warn};
 use crate::engine::agent::build_agent_command;
 use crate::engine::flow::{ConcreteFork, ConcreteItem, ConcreteStep, Step};
 use crate::engine::fork::{
-    cleanup_fork_worktrees, plan_fork_execution, summarize_fork_outcomes, write_fork_manifest,
-    ForkBranchOutcome, FORK_SYNTHESIZE_STEP,
+    cleanup_fork_worktrees, plan_fork_execution, write_fork_manifest, ForkManifestBranch,
+    FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::worktree::create_worktree;
 use crate::lfd::config::ExecutorType;
@@ -243,7 +243,7 @@ impl WaveExecutor {
                     1
                 }
             };
-            outcomes.push(ForkBranchOutcome {
+            outcomes.push(ForkManifestBranch {
                 index: execution.run.branch_index as usize,
                 step: execution.step.step.name.clone(),
                 direction: execution.directions.join(","),
@@ -252,10 +252,9 @@ impl WaveExecutor {
                 exit_code,
             });
         }
-        let (manifest_branches, failed) = summarize_fork_outcomes(&outcomes);
+        let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
 
-        let manifest_path = match write_fork_manifest(Path::new(&run.worktree), &manifest_branches)
-        {
+        let manifest_path = match write_fork_manifest(Path::new(&run.worktree), &outcomes) {
             Ok(path) => path,
             Err(err) => {
                 self.cleanup_fork(run, &fork_runs, None).await;

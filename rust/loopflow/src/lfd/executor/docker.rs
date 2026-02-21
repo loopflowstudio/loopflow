@@ -998,11 +998,64 @@ impl DockerExecutor {
         !self.image_exists(image).await || stale_marker.exists()
     }
 
+    fn build_context_dockerignore(repo_source: &Path) -> ignore::gitignore::Gitignore {
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(repo_source);
+        let _ = builder.add(repo_source.join(".dockerignore"));
+        match builder.build() {
+            Ok(ignore) => ignore,
+            Err(_) => ignore::gitignore::Gitignore::empty(),
+        }
+    }
+
+    fn list_context_paths(repo_source: &Path) -> Vec<PathBuf> {
+        let dockerignore = Self::build_context_dockerignore(repo_source);
+        let walker = ignore::WalkBuilder::new(repo_source)
+            .hidden(false)
+            .standard_filters(false)
+            .build();
+
+        let mut paths = Vec::new();
+        for entry in walker.flatten() {
+            let path = entry.path();
+            if path == repo_source {
+                continue;
+            }
+            let is_dir = path.is_dir();
+            if dockerignore
+                .matched_path_or_any_parents(path, is_dir)
+                .is_ignore()
+            {
+                continue;
+            }
+            let rel = match path.strip_prefix(repo_source) {
+                Ok(rel) if !rel.as_os_str().is_empty() => rel.to_path_buf(),
+                _ => continue,
+            };
+            paths.push(rel);
+        }
+        paths.sort();
+        paths
+    }
+
     fn build_image_context(repo_source: &Path) -> Result<Bytes> {
+        let dockerfile_rel = PathBuf::from(".lf/Dockerfile");
+        let mut included = Self::list_context_paths(repo_source);
+        if repo_source.join(&dockerfile_rel).exists() && !included.contains(&dockerfile_rel) {
+            included.push(dockerfile_rel);
+            included.sort();
+        }
+
         let mut archive = Vec::new();
         {
             let mut tar = tar::Builder::new(&mut archive);
-            tar.append_dir_all(".", repo_source)?;
+            for rel in included {
+                let abs = repo_source.join(&rel);
+                if abs.is_dir() {
+                    tar.append_dir(&rel, &abs)?;
+                } else {
+                    tar.append_path_with_name(&abs, &rel)?;
+                }
+            }
             tar.finish()?;
         }
         Ok(Bytes::from(archive))
@@ -1656,6 +1709,7 @@ mod tests {
     use crate::lfd::config::ExecutorType;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{WaveRunKind, WaveRunSnapshot};
+    use std::io::Cursor;
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
 
@@ -1711,6 +1765,46 @@ mod tests {
         assert_eq!(mounts[0].typ, Some(MountTypeEnum::VOLUME));
         assert_eq!(mounts[0].source, Some("lfd-repo-abc".to_string()));
         assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
+    }
+
+    fn list_archive_entries(bytes: Bytes) -> Vec<String> {
+        let cursor = Cursor::new(bytes);
+        let mut archive = tar::Archive::new(cursor);
+        let mut entries = Vec::new();
+        for entry in archive.entries().expect("tar entries") {
+            let entry = entry.expect("tar entry");
+            let path = entry.path().expect("entry path");
+            let normalized = path
+                .to_string_lossy()
+                .trim_start_matches("./")
+                .trim_end_matches('/')
+                .to_string();
+            entries.push(normalized);
+        }
+        entries.sort();
+        entries
+    }
+
+    #[test]
+    fn build_image_context_respects_dockerignore_but_keeps_dockerfile() {
+        let repo = tempdir().expect("tempdir");
+        std::fs::write(repo.path().join(".dockerignore"), ".lf/\n*.log\n")
+            .expect("write dockerignore");
+        std::fs::create_dir_all(repo.path().join(".lf")).expect("create .lf");
+        std::fs::write(repo.path().join(".lf/Dockerfile"), "FROM scratch\n")
+            .expect("write dockerfile");
+        std::fs::write(repo.path().join(".lf/secret.txt"), "ignored").expect("write ignored file");
+        std::fs::write(repo.path().join("kept.txt"), "keep").expect("write kept");
+        std::fs::write(repo.path().join("ignored.log"), "ignore").expect("write ignored");
+
+        let context = DockerExecutor::build_image_context(repo.path()).expect("context");
+        let entries = list_archive_entries(context);
+
+        assert!(entries.contains(&".dockerignore".to_string()));
+        assert!(entries.contains(&".lf/Dockerfile".to_string()));
+        assert!(entries.contains(&"kept.txt".to_string()));
+        assert!(!entries.contains(&".lf/secret.txt".to_string()));
+        assert!(!entries.contains(&"ignored.log".to_string()));
     }
 
     #[test]

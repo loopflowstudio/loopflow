@@ -173,7 +173,7 @@ Docker mode also:
 - requires the `docker` CLI in `PATH` for repo image builds (`docker build`)
 - reattaches to running agent containers after daemon restart
 
-Current limitation: `fork` steps with `select: all` are not supported by the Docker executor yet.
+Current limitation: `fork` steps are not supported by the Docker executor yet.
 
 ## GitHub CI auto-fix
 

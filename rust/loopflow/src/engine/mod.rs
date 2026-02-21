@@ -25,7 +25,7 @@ pub use config::{load_config, load_config_or_default, parse_model, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use flow::{
     expand_flow, load_direction, load_flow, load_step, next_action, ConcreteFork, ConcreteItem,
-    ConcreteStep, Direction, Flow, FlowAction, FlowItem, ForkSelect, Step,
+    ConcreteStep, Direction, Flow, FlowAction, FlowItem, Step,
 };
 pub use prompt::{
     count_tokens, drop_native_instruction_docs, format_context_prompt, format_prompt,

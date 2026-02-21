@@ -1,16 +1,14 @@
 use crate::engine::fork::{
-    cleanup_fork_worktrees, fork_worktree_path, plan_fork_execution, write_fork_manifest,
-    ForkManifestBranch,
+    cleanup_fork_worktrees, fork_worktree_path, plan_fork_execution, summarize_fork_outcomes,
+    write_fork_manifest, ForkBranchOutcome, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
-use crate::engine::{
-    expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction, ForkSelect,
-};
+use crate::engine::{expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use anyhow::{anyhow, Context, Result};
-use std::io::{BufRead, BufReader, IsTerminal, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -86,41 +84,8 @@ struct ForkBranchTask {
 }
 
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    let mut chooser = |prompt: &str, branches: &[crate::engine::ConcreteStep]| {
-        choose_fork_branch(prompt, branches)
-    };
-    let planned = plan_fork_execution(
-        &fork.select,
-        &fork.branches,
-        &cli.direction,
-        if std::io::stdin().is_terminal() {
-            Some(&mut chooser)
-        } else {
-            None
-        },
-    )
-    .map_err(|err| anyhow!(err))?;
-
-    if !matches!(fork.select, ForkSelect::All) {
-        let selected = planned
-            .first()
-            .ok_or_else(|| anyhow!("selected fork branch missing"))?;
-        let exit_code = run_fork_branch(
-            repo,
-            &selected.step.step.name,
-            &selected.directions,
-            message,
-            selected.label.as_str(),
-        )?;
-        if exit_code != 0 {
-            return Err(anyhow!(
-                "fork branch {} exited with {}",
-                selected.step.step.name,
-                exit_code
-            ));
-        }
-        return Ok(());
-    }
+    let planned =
+        plan_fork_execution(&fork.branches, &cli.direction).map_err(|err| anyhow!(err))?;
 
     let base_branch = current_branch(repo)?
         .ok_or_else(|| anyhow!("fork execution requires an active branch (detached HEAD)"))?;
@@ -171,8 +136,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         handles.push((task, handle));
     }
 
-    let mut manifest_branches = Vec::new();
-    let mut failed = 0usize;
+    let mut outcomes = Vec::new();
     for (task, handle) in handles {
         let (exit_code, err) = match handle.join() {
             Ok(Ok(code)) => (code, None),
@@ -181,7 +145,6 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         };
 
         if exit_code != 0 || err.is_some() {
-            failed += 1;
             if let Some(err) = err {
                 eprintln!(
                     "fork branch {} failed ({}): {}",
@@ -195,7 +158,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             }
         }
 
-        manifest_branches.push(ForkManifestBranch {
+        outcomes.push(ForkBranchOutcome {
             index: task.index,
             step: task.step_name.clone(),
             direction: task.directions.join(","),
@@ -204,6 +167,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             exit_code,
         });
     }
+    let (manifest_branches, failed) = summarize_fork_outcomes(&outcomes);
 
     let manifest_path = match write_fork_manifest(repo, &manifest_branches) {
         Ok(path) => path,
@@ -212,7 +176,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             return Err(err.into());
         }
     };
-    let synthesize_result = crate::lf::commands::run::run(Some("synthesize"), message, cli);
+    let synthesize_result = crate::lf::commands::run::run(Some(FORK_SYNTHESIZE_STEP), message, cli);
     cleanup_fork_worktrees(Some(&manifest_path), &worktrees);
 
     synthesize_result?;
@@ -275,44 +239,6 @@ fn build_lf_command() -> Command {
         return Command::new(path);
     }
     Command::new("lf")
-}
-
-fn choose_fork_branch(
-    prompt: &str,
-    branches: &[crate::engine::ConcreteStep],
-) -> std::result::Result<usize, String> {
-    if !std::io::stdin().is_terminal() {
-        return Err("fork(select=prompt) requires an interactive TTY".to_string());
-    }
-
-    eprintln!("{prompt}");
-    for (index, branch) in branches.iter().enumerate() {
-        let dirs = if branch.step.directions.is_empty() {
-            String::new()
-        } else {
-            format!(" [{}]", branch.step.directions.join(","))
-        };
-        eprintln!("  {}. {}{}", index + 1, branch.step.name, dirs);
-    }
-    eprint!("Select branch [1-{}]: ", branches.len());
-    let _ = std::io::stderr().flush();
-
-    let mut line = String::new();
-    std::io::stdin()
-        .read_line(&mut line)
-        .map_err(|err| format!("failed reading fork selection: {err}"))?;
-    let raw = line.trim();
-    let parsed = raw
-        .parse::<usize>()
-        .map_err(|_| format!("invalid fork selection '{raw}'"))?;
-    if parsed == 0 || parsed > branches.len() {
-        return Err(format!(
-            "fork selection out of range: {} (expected 1-{})",
-            parsed,
-            branches.len()
-        ));
-    }
-    Ok(parsed - 1)
 }
 
 fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool) {

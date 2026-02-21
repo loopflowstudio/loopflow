@@ -14,7 +14,7 @@ use time::OffsetDateTime;
 
 use crate::engine::agent::build_agent_command;
 use crate::engine::flow::{
-    expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction, ForkSelect,
+    expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
 };
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
@@ -324,27 +324,18 @@ impl WaveExecutor {
                     ));
                     return Ok(());
                 }
-                FlowAction::Fork { fork } => match &fork.select {
-                    ForkSelect::All => {
-                        info!(
-                            run_id = %run.id,
-                            branches = fork.branches.len(),
-                            step_index = run.step_index,
-                            "running fork (all branches)"
-                        );
-                        self.run_fork(&wave, &mut run, &plan, &fork).await?;
-                        if run.status == WaveRunStatus::Failed {
-                            return Ok(());
-                        }
+                FlowAction::Fork { fork } => {
+                    info!(
+                        run_id = %run.id,
+                        branches = fork.branches.len(),
+                        step_index = run.step_index,
+                        "running fork (all branches)"
+                    );
+                    self.run_fork(&wave, &mut run, &plan, &fork).await?;
+                    if run.status == WaveRunStatus::Failed {
+                        return Ok(());
                     }
-                    ForkSelect::One | ForkSelect::Prompt { .. } => {
-                        info!(run_id = %run.id, step_index = run.step_index, "running fork (choose)");
-                        self.run_choose(&wave, &mut run, &plan, &fork).await?;
-                        if run.status == WaveRunStatus::Failed {
-                            return Ok(());
-                        }
-                    }
-                },
+                }
                 FlowAction::Complete => {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
@@ -776,7 +767,6 @@ mod tests {
     branches:
       - step: { name: step-a }
       - step: { name: step-b }
-    select: all
 "#,
         )
         .expect("flow file should be written");
@@ -822,7 +812,7 @@ mod tests {
         assert_eq!(updated_run.status, WaveRunStatus::Failed);
         assert_eq!(
             updated_run.error.as_deref(),
-            Some("fork(select=all) is not supported by the docker executor yet")
+            Some("fork is not supported by the docker executor yet")
         );
     }
 
@@ -835,7 +825,6 @@ mod tests {
             r#"
 - fork:
     branches: []
-    select: all
 "#,
         );
 
@@ -880,7 +869,6 @@ mod tests {
     branches:
       - step: { name: step-a }
       - step: { name: step-b }
-    select: all
 "#,
         );
 
@@ -935,7 +923,6 @@ mod tests {
     branches:
       - step: { name: step-a }
       - step: { name: step-b }
-    select: all
 "#,
         );
 
@@ -972,7 +959,7 @@ mod tests {
         assert_eq!(updated_run.status, WaveRunStatus::Failed);
         assert_eq!(
             updated_run.error.as_deref(),
-            Some("fork branch fork-1 exited with code 42")
+            Some("1 fork branch(es) failed")
         );
         assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-0")).exists());
         assert!(!Path::new(&(updated_run.worktree.clone() + "-fork-1")).exists());
@@ -999,7 +986,6 @@ mod tests {
       - step:
           name: step-a
           directions: [branch]
-    select: all
 "#,
         );
         repo.create_file(".lf/directions/base.md", "BASE_DIRECTION_MARKER");
@@ -1048,11 +1034,21 @@ mod tests {
             .expect("execution should finish");
 
         let calls = runner_ref.calls.lock().expect("runner mutex");
-        assert_eq!(calls.len(), 1);
-        assert!(calls[0].cwd.ends_with("-fork-0"));
-        assert_eq!(calls[0].output_prefix.as_deref(), Some("[fork-0] "));
-        assert!(calls[0].prompt_logs.contains("BASE_DIRECTION_MARKER"));
-        assert!(calls[0].prompt_logs.contains("BRANCH_DIRECTION_MARKER"));
+        assert_eq!(calls.len(), 2);
+
+        let fork_call = calls
+            .iter()
+            .find(|call| call.output_prefix.as_deref() == Some("[fork-0] "))
+            .expect("fork call should be recorded");
+        assert!(fork_call.cwd.ends_with("-fork-0"));
+        assert!(fork_call.prompt_logs.contains("BASE_DIRECTION_MARKER"));
+        assert!(fork_call.prompt_logs.contains("BRANCH_DIRECTION_MARKER"));
+
+        let synth_call = calls
+            .iter()
+            .find(|call| call.output_prefix.is_none() && !call.cwd.ends_with("-fork-0"))
+            .expect("synthesize call should be recorded");
+        assert_eq!(synth_call.cwd, repo.path().to_string_lossy());
     }
 
     #[tokio::test]

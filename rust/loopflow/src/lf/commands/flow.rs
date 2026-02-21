@@ -1,6 +1,6 @@
 use crate::engine::fork::{
-    cleanup_fork_worktrees, fork_worktree_path, plan_fork_execution, write_fork_manifest,
-    ForkManifestBranch, FORK_SYNTHESIZE_STEP,
+    cleanup_fork_worktrees, fork_worktree_path, plan_fork_execution, summarize_fork_outcomes,
+    write_fork_manifest, ForkBranchOutcome, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
@@ -158,7 +158,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             }
         }
 
-        outcomes.push(ForkManifestBranch {
+        outcomes.push(ForkBranchOutcome {
             index: task.index,
             step: task.step_name.clone(),
             direction: task.directions.join(","),
@@ -167,7 +167,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
             exit_code,
         });
     }
-    let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
+    let (manifest_branches, failed) = summarize_fork_outcomes(&outcomes);
 
     let manifest_path = match write_fork_manifest(repo, &outcomes) {
         Ok(path) => path,

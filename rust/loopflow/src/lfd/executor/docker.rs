@@ -1774,6 +1774,46 @@ mod tests {
         assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
     }
 
+    fn list_archive_entries(bytes: Bytes) -> Vec<String> {
+        let cursor = Cursor::new(bytes);
+        let mut archive = tar::Archive::new(cursor);
+        let mut entries = Vec::new();
+        for entry in archive.entries().expect("tar entries") {
+            let entry = entry.expect("tar entry");
+            let path = entry.path().expect("entry path");
+            let normalized = path
+                .to_string_lossy()
+                .trim_start_matches("./")
+                .trim_end_matches('/')
+                .to_string();
+            entries.push(normalized);
+        }
+        entries.sort();
+        entries
+    }
+
+    #[test]
+    fn build_image_context_respects_dockerignore_but_keeps_dockerfile() {
+        let repo = tempdir().expect("tempdir");
+        std::fs::write(repo.path().join(".dockerignore"), ".lf/\n*.log\n")
+            .expect("write dockerignore");
+        std::fs::create_dir_all(repo.path().join(".lf")).expect("create .lf");
+        std::fs::write(repo.path().join(".lf/Dockerfile"), "FROM scratch\n")
+            .expect("write dockerfile");
+        std::fs::write(repo.path().join(".lf/secret.txt"), "ignored").expect("write ignored file");
+        std::fs::write(repo.path().join("kept.txt"), "keep").expect("write kept");
+        std::fs::write(repo.path().join("ignored.log"), "ignore").expect("write ignored");
+
+        let context = DockerExecutor::build_image_context(repo.path()).expect("context");
+        let entries = list_archive_entries(context);
+
+        assert!(entries.contains(&".dockerignore".to_string()));
+        assert!(entries.contains(&".lf/Dockerfile".to_string()));
+        assert!(entries.contains(&"kept.txt".to_string()));
+        assert!(!entries.contains(&".lf/secret.txt".to_string()));
+        assert!(!entries.contains(&"ignored.log".to_string()));
+    }
+
     #[test]
     fn docker_host_config_applies_limits_and_no_new_privileges() {
         let limits = ExecutorLimitsConfig::default();

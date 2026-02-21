@@ -28,6 +28,16 @@ pub struct ForkManifestBranch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkBranchOutcome {
+    pub index: usize,
+    pub step: String,
+    pub direction: String,
+    pub worktree: String,
+    pub branch: String,
+    pub exit_code: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForkBranchExecutionPlan {
     pub index: usize,
     pub label: String,
@@ -88,6 +98,25 @@ pub fn plan_fork_execution(
     };
 
     (0..branches.len()).map(build_branch).collect()
+}
+
+pub fn summarize_fork_outcomes(outcomes: &[ForkBranchOutcome]) -> (Vec<ForkManifestBranch>, usize) {
+    let failed = outcomes
+        .iter()
+        .filter(|outcome| outcome.exit_code != 0)
+        .count();
+    let branches = outcomes
+        .iter()
+        .map(|outcome| ForkManifestBranch {
+            index: outcome.index,
+            step: outcome.step.clone(),
+            direction: outcome.direction.clone(),
+            worktree: outcome.worktree.clone(),
+            branch: outcome.branch.clone(),
+            exit_code: outcome.exit_code,
+        })
+        .collect();
+    (branches, failed)
 }
 
 /// Write fork manifest to `.lf/fork-manifest.json` in the repo root.
@@ -229,9 +258,9 @@ mod tests {
     }
 
     #[test]
-    fn fork_manifest_branch_counts_failures() {
-        let branches = [
-            ForkManifestBranch {
+    fn summarize_fork_outcomes_builds_manifest_and_counts_failures() {
+        let outcomes = vec![
+            ForkBranchOutcome {
                 index: 0,
                 step: "reduce".to_string(),
                 direction: "designer".to_string(),
@@ -239,7 +268,7 @@ mod tests {
                 branch: "main-fork-0".to_string(),
                 exit_code: 0,
             },
-            ForkManifestBranch {
+            ForkBranchOutcome {
                 index: 1,
                 step: "reduce".to_string(),
                 direction: "infra".to_string(),
@@ -249,9 +278,9 @@ mod tests {
             },
         ];
 
-        let failed = branches.iter().filter(|b| b.exit_code != 0).count();
+        let (manifest, failed) = summarize_fork_outcomes(&outcomes);
         assert_eq!(failed, 1);
-        assert_eq!(branches.len(), 2);
-        assert_eq!(branches[1].exit_code, 42);
+        assert_eq!(manifest.len(), 2);
+        assert_eq!(manifest[1].exit_code, 42);
     }
 }

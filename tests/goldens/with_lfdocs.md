@@ -183,7 +183,7 @@ You are building toward the rust program of work.
 Wave context is included in docs below.
 </lf:wave>
 
-Repository documentation. Follow STYLE carefully. May include design artifacts (scratch/) and internal docs (reports/).
+Repository documentation. Follow STYLE carefully. May include design artifacts (scratch/).
 
 <lf:docs>
 <lf:design>

@@ -6,12 +6,12 @@ Synthesize analysis into a wave plan — a sequenced plan for building something
 
 ## Scope
 
-The included context defines your area. Propose items that belong to this area. When promoted via `add-to-wave`, actionable items go to `wave/<wave>/` and reference material goes to `reports/`.
+The included context defines your area. Propose items that belong to this area. When promoted via `add-to-wave`, items go to `wave/<wave>/`.
 
 ## Workflow
 
 1. Read analysis in `scratch/` (research, simplification opportunities, polish priorities, etc.)
-2. Read `reports/` to understand project direction and existing items
+2. Read `wave/` to understand existing waves and project direction
 3. Identify what you're building and why it matters — the core vision
 4. Name the invariants, design decisions, and differentiators — what makes this system *this system* and not something generic
 5. Identify the highest-leverage work that emerges from the analysis
@@ -34,11 +34,13 @@ This section is the anchor. When phases shift and plans change, this stays. If y
 
 ## Sequencing principles
 
+**Frontload the risk.** Start with the thing you need to try to see if it works. Don't pre-build infrastructure, protocols, or abstractions before you've proven the core idea. If the whole wave depends on "can we talk to X?", make that Phase 1 — not Phase 3 after you've built storage, types, and routes for a protocol you haven't validated yet.
+
 **Build outward.** Start with the smallest thing that works end-to-end. Get concrete results, then expand. Don't build the foundation for a system you haven't proven yet.
 
 **Sequence by learning, not dependencies.** What are you most uncertain about? Build that first. A dependency graph tells you what *could* go first. Learning tells you what *should* go first.
 
-**Defer abstractions.** Traits, interfaces, and generic layers emerge from working code. Don't design them in advance. Build the concrete thing, then extract the pattern.
+**Defer abstractions.** Traits, interfaces, and generic layers emerge from working code. Don't design them in advance. Build the concrete thing, then extract the pattern. Build just enough plumbing to support the first real use case — storage, API, and types emerge from making it work, not from upfront design.
 
 **Encode uncertainty.** Mark what you're unsure about. Open questions aren't gaps in the plan — they're the most important part. Each phase should state what you expect to learn.
 

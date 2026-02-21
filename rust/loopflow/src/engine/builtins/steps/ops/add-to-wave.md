@@ -1,12 +1,12 @@
 ---
 requires: scratch/ files to promote
-produces: wave/ or reports/ files
+produces: wave/ files
 ---
-Route files from scratch/ to wave/ or reports/ based on content type.
+Route files from scratch/ to wave/.
 
-## Two destinations
+## Destination
 
-**wave/<wave>/** — Actionable work items. Things to build next.
+**wave/<wave>/** — Work items. Things to build, fix, or investigate.
 ```
 wave/
   lfflow/
@@ -14,31 +14,9 @@ wave/
     auth-redesign.md
 ```
 
-**reports/** — Reference material. Context for understanding, not immediately actionable.
-```
-reports/
-  landscape.md
-  target-customer.md
-```
-
-## Routing logic
-
-For each file in scratch/, decide:
-
-**Is this actionable follow-up work?**
-- Has clear scope and next steps
-- Someone should build this
-- → `wave/<wave>/<slug>.md`
-
-**Is this reference/context?**
-- Research with lasting value
-- Decisions that should be remembered
-- Context for future work
-- → `reports/<topic>.md`
+Reference material and architectural decisions belong in the wave README or the relevant milestone doc — not in a separate directory.
 
 ## Determining the wave name
-
-For actionable items going to `wave/`:
 
 1. Use explicit `--wave` flag if provided
 2. Use wave name from wave configuration (if running as a wave)
@@ -46,34 +24,28 @@ For actionable items going to `wave/`:
 
 **Examples:**
 ```
---wave lfflow + actionable item → wave/lfflow/<slug>.md
-(no flag, worktree=loopflow.lfflow) + actionable item → wave/lfflow/<slug>.md
-reference material → reports/<topic>.md
+--wave lfflow + item → wave/lfflow/<slug>.md
+(no flag, worktree=loopflow.lfflow) + item → wave/lfflow/<slug>.md
 ```
 
 ## Workflow
 
 1. Read everything in scratch/
 2. For each file worth promoting:
-   - Decide: actionable (wave/) or reference (reports/)
-   - Determine destination path
+   - Determine destination path under `wave/<wave>/`
    - Move content (don't just copy—remove from scratch/)
 3. Skip temporary analysis files that shouldn't persist
 
 ## What to promote
 
-**To wave/ (actionable):**
 - Proposals with clear scope
 - Follow-up work items from this diff
 - Bugs or issues discovered during work
+- Research or decisions that inform future wave work (fold into README or milestone doc)
 
-**To reports/ (reference):**
-- Research with lasting value
-- Architectural decisions
-- Analysis that informs future work
+## Skip entirely
 
-**Skip entirely:**
-- Working notes that informed decisions
+- Working notes that informed decisions already captured elsewhere
 - Intermediate analysis superseded by synthesis
 - Branch-specific design docs (cleared on merge anyway)
 

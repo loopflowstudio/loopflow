@@ -1134,7 +1134,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
         let docs_body = doc_parts.join("\n\n");
         parts.push(format!(
             "Repository documentation. Follow STYLE carefully. \
-             May include design artifacts (scratch/) and internal docs (reports/).\n\n\
+             May include design artifacts (scratch/).\n\n\
              <lf:docs>\n{}\n</lf:docs>",
             docs_body
         ));

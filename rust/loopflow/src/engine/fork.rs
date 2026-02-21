@@ -41,11 +41,11 @@ pub struct ForkBranchExecutionPlan {
 pub fn fork_worktree_path(repo: &Path, index: usize) -> PathBuf {
     let name = repo
         .file_name()
-        .unwrap_or_default()
+        .expect("repo path should have a file name")
         .to_string_lossy()
         .into_owned();
     repo.parent()
-        .unwrap_or(repo)
+        .expect("repo path should have a parent directory")
         .join(format!("{name}.fork-{index}"))
 }
 

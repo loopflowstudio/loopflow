@@ -610,7 +610,7 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
                     }
                 }
             }
-            // Check for fork/choose/loop structures
+            // Check for fork structures
             if let Some(fork) = map.get(serde_yaml_ng::Value::String("fork".to_string())) {
                 names.push("[fork]".to_string());
                 if let serde_yaml_ng::Value::Mapping(fork_map) = fork {
@@ -624,12 +624,6 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
                         }
                     }
                 }
-            }
-            if map.contains_key(serde_yaml_ng::Value::String("choose".to_string())) {
-                names.push("[choose]".to_string());
-            }
-            if map.contains_key(serde_yaml_ng::Value::String("loop_until_empty".to_string())) {
-                names.push("[loop]".to_string());
             }
         }
         _ => {}

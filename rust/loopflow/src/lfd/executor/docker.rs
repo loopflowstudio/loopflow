@@ -6,15 +6,14 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bollard::container::LogOutput;
 use bollard::errors::Error as DockerError;
-use bollard::image::BuilderVersion;
 use bollard::models::{
     ContainerCreateBody, ContainerInspectResponse, HostConfig, Mount, MountTypeEnum,
     VolumeCreateOptions,
 };
 use bollard::query_parameters::{
-    BuildImageOptions, CreateContainerOptions, CreateImageOptions, InspectContainerOptions,
-    ListContainersOptions, LogsOptions, RemoveContainerOptions, StartContainerOptions,
-    StopContainerOptions, WaitContainerOptions,
+    BuildImageOptions, BuilderVersion, CreateContainerOptions, CreateImageOptions,
+    InspectContainerOptions, ListContainersOptions, LogsOptions, RemoveContainerOptions,
+    StartContainerOptions, StopContainerOptions, WaitContainerOptions,
 };
 use bollard::Docker;
 use bytes::Bytes;
@@ -1011,16 +1010,17 @@ impl DockerExecutor {
 
     async fn build_repo_image(&self, repo_source: &Path, tag: &str) -> Result<()> {
         let context = Self::build_image_context(repo_source)?;
-        let options = BuildImageOptions::<String> {
+        let options = BuildImageOptions {
             dockerfile: ".lf/Dockerfile".to_string(),
-            t: tag.to_string(),
+            t: Some(tag.to_string()),
             rm: true,
             forcerm: true,
-            pull: false,
             version: BuilderVersion::BuilderBuildKit,
             ..Default::default()
         };
-        let mut stream = self.docker.build_image(options, None, Some(context));
+        let mut stream = self
+            .docker
+            .build_image(options, None, Some(bollard::body_full(context)));
         let mut build_error = None;
         while let Some(result) = stream.next().await {
             match result {

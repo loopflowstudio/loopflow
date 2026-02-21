@@ -275,37 +275,14 @@ pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
 // Step discovery (user, global, builtin)
 // =============================================================================
 
-/// Discover a step by name, checking skills → repo → global → builtins.
+/// Discover a step by name, checking skills first, then repo → global → builtins
+/// via `load_step`.
 pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
-    // Check if it's a skill reference (prefix:name)
     if name.contains(':') {
         if let Some(step) = find_skill(name, Some(repo)) {
             return Ok(step);
         }
     }
-
-    let repo_paths = [
-        repo.join(".lf/steps").join(format!("{name}.md")),
-        repo.join(".claude/commands").join(format!("{name}.md")),
-    ];
-    for path in repo_paths {
-        if path.exists() {
-            return crate::engine::load_step(name, repo).map_err(Into::into);
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        let global_paths = [
-            home.join(".lf/steps").join(format!("{name}.md")),
-            home.join(".claude/commands").join(format!("{name}.md")),
-        ];
-        for path in global_paths {
-            if path.exists() {
-                return crate::engine::load_step(name, &home).map_err(Into::into);
-            }
-        }
-    }
-
     crate::engine::load_step(name, repo).map_err(Into::into)
 }
 
@@ -372,48 +349,35 @@ fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<Path
 
 /// List repo-local steps (.lf/steps/, .claude/commands/).
 pub fn list_user_steps(repo: &Path) -> Vec<String> {
-    let mut steps = HashSet::new();
+    list_md_stems(&[repo.join(".lf/steps"), repo.join(".claude/commands")])
+}
 
-    for dir in [repo.join(".lf/steps"), repo.join(".claude/commands")] {
+/// List global steps (~/.lf/steps/, ~/.claude/commands/).
+pub fn list_global_steps() -> Vec<String> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    list_md_stems(&[home.join(".lf/steps"), home.join(".claude/commands")])
+}
+
+/// Collect sorted, deduplicated `.md` file stems from the given directories.
+fn list_md_stems(dirs: &[PathBuf]) -> Vec<String> {
+    let mut names = HashSet::new();
+    for dir in dirs {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "md").unwrap_or(false) {
                     if let Some(name) = path.file_stem() {
-                        steps.insert(name.to_string_lossy().to_string());
+                        names.insert(name.to_string_lossy().to_string());
                     }
                 }
             }
         }
     }
-
-    let mut steps: Vec<_> = steps.into_iter().collect();
-    steps.sort();
-    steps
-}
-
-/// List global steps (~/.lf/steps/, ~/.claude/commands/).
-pub fn list_global_steps() -> Vec<String> {
-    let mut steps = HashSet::new();
-
-    if let Some(home) = dirs::home_dir() {
-        for dir in [home.join(".lf/steps"), home.join(".claude/commands")] {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "md").unwrap_or(false) {
-                        if let Some(name) = path.file_stem() {
-                            steps.insert(name.to_string_lossy().to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let mut steps: Vec<_> = steps.into_iter().collect();
-    steps.sort();
-    steps
+    let mut sorted: Vec<_> = names.into_iter().collect();
+    sorted.sort();
+    sorted
 }
 
 /// Structured result from list_all_steps.
@@ -482,17 +446,7 @@ pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
         .collect();
 
     if let Some(repo) = repo {
-        let dir = repo.join(".lf/directions");
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(name) = path.file_stem() {
-                        directions.insert(name.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
+        directions.extend(list_md_stems(&[repo.join(".lf/directions")]));
     }
 
     let mut list: Vec<_> = directions.into_iter().collect();

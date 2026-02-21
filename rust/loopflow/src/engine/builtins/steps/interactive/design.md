@@ -18,7 +18,7 @@ The design doc is scaffolding—a checkpoint for recovery, not documentation for
 ## Setup
 
 1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
-2. Check `reports/` for architecture notes, prior decisions, or context that informs this design
+2. Check `wave/` for existing waves, architecture notes, or context that informs this design
 3. Create `scratch/<branch>.md` early—after the first exchange or two
 
 ## Workflow

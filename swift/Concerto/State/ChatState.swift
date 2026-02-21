@@ -191,20 +191,37 @@ final class ChatState {
                 }
             }
 
+            // Always refresh from persisted messages after a turn — the DB
+            // is the source of truth, SSE is just a live optimization.
+            await refreshMessagesFromStore()
+
             if hasLocalFailure {
                 turnState = .failed
                 return
             }
 
             guard let terminalState else {
-                messages.append(ChatMessage(role: .error, content: "Turn ended before completion."))
                 turnState = .failed
                 return
             }
             turnState = terminalState
         } catch {
-            messages.append(ChatMessage(role: .error, content: error.localizedDescription))
-            turnState = .failed
+            // SSE stream failed or completed before we subscribed — refresh
+            // from persisted messages so we don't lose the turn result.
+            await refreshMessagesFromStore()
+            turnState = .completed
+        }
+    }
+
+    private func refreshMessagesFromStore() async {
+        do {
+            let records = try await waveService.listChatMessages(waveId: waveId)
+            let persisted = records.compactMap(Self.chatMessageFromRecord)
+            if !persisted.isEmpty {
+                messages = persisted
+            }
+        } catch {
+            // Best-effort — the local messages from the user input are still visible.
         }
     }
 

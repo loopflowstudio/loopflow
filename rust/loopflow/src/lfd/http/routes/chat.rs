@@ -9,7 +9,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 use crate::agent::{tools, turn};
 use crate::chat::{validate_turn_completion, AgentEvent, CompletionError, ContextSnapshot};
@@ -86,6 +86,7 @@ pub async fn upsert_memory_block_handler(
         .await
         .map_err(map_store_error)?;
 
+    debug!(wave_id = %wave_id, name = %block.name, position, "upserted memory block");
     Ok(Json(chat_memory_block_dto(block)))
 }
 
@@ -102,6 +103,7 @@ pub async fn delete_memory_block_handler(
         .await
         .map_err(map_store_error)?;
 
+    debug!(wave_id = %wave_id, name = %name, "deleted memory block");
     Ok(Json(DeletedResourceResponse {
         id: name,
         object: "memory_block".to_string(),
@@ -149,6 +151,8 @@ pub async fn start_chat_handler(
         return Err(map_store_error(err));
     }
 
+    info!(wave_id = %wave_id, "chat turn started");
+
     let store = state.store.clone();
     let spawn_wave_id = wave_id.clone();
     tokio::spawn(async move {
@@ -165,6 +169,14 @@ pub async fn start_chat_handler(
 
         match run_result {
             Ok(result) => {
+                info!(
+                    wave_id = %spawn_wave_id,
+                    iterations = result.iterations,
+                    input_tokens = result.input_tokens,
+                    output_tokens = result.output_tokens,
+                    events = result.events.len(),
+                    "chat turn completed"
+                );
                 persist_turn_events(&store, &spawn_wave_id, &result.events).await;
                 publish_terminal_event(
                     &store,
@@ -175,6 +187,7 @@ pub async fn start_chat_handler(
                 .await;
             }
             Err(err) => {
+                warn!(wave_id = %spawn_wave_id, error = %err, "chat turn failed");
                 publish_terminal_event(
                     &store,
                     &spawn_wave_id,
@@ -213,7 +226,9 @@ pub async fn stream_chat_events_handler(
     }
 
     let live_rx = turn_stream.subscribe();
+    debug!(wave_id = %wave_id, "SSE client subscribed to chat events");
 
+    let sse_wave_id = wave_id.clone();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<SseEvent, Infallible>>(256);
     tokio::spawn(async move {
         let mut stream = BroadcastStream::new(live_rx);
@@ -223,9 +238,11 @@ pub async fn stream_chat_events_handler(
             };
             let terminal = is_terminal_agent_event(&event);
             if tx.send(Ok(agent_event_sse(&event))).await.is_err() {
+                debug!(wave_id = %sse_wave_id, "SSE client disconnected");
                 break;
             }
             if terminal {
+                debug!(wave_id = %sse_wave_id, "SSE stream ended (terminal event)");
                 break;
             }
         }

@@ -26,6 +26,11 @@ fn main() {
         &out_dir.join("builtin_flows.rs"),
     );
 
+    generate_flow_categories(
+        &builtins_dir.join("flows"),
+        &out_dir.join("builtin_flow_categories.rs"),
+    );
+
     generate_map(
         &builtins_dir.join("directions"),
         "md",
@@ -96,6 +101,80 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
     writeln!(code, "}});").expect("write to String");
 
     fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+}
+
+/// Generate `BUILTIN_FLOW_CATEGORIES` from the flows directory structure.
+/// Each subdirectory becomes a category (title-cased), containing its flow names.
+fn generate_flow_categories(flows_dir: &Path, out_path: &Path) {
+    let mut categories: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    let Ok(entries) = fs::read_dir(flows_dir) else {
+        fs::write(
+            out_path,
+            "pub const BUILTIN_FLOW_CATEGORIES: &[(&str, &[&str])] = &[];\n",
+        )
+        .expect("write empty flow categories");
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = path
+            .file_name()
+            .expect("dir has no name")
+            .to_string_lossy()
+            .to_string();
+        let category = title_case(&dir_name);
+
+        let mut flows = Vec::new();
+        if let Ok(files) = fs::read_dir(&path) {
+            for file in files.flatten() {
+                let file_path = file.path();
+                if file_path
+                    .extension()
+                    .is_some_and(|e| e == "yaml" || e == "yml")
+                {
+                    let name = file_path
+                        .file_stem()
+                        .expect("file has no stem")
+                        .to_string_lossy()
+                        .to_string();
+                    flows.push(name);
+                }
+            }
+        }
+        flows.sort();
+        if !flows.is_empty() {
+            categories.insert(category, flows);
+        }
+    }
+
+    let mut code = String::new();
+    writeln!(
+        code,
+        "pub const BUILTIN_FLOW_CATEGORIES: &[(&str, &[&str])] = &["
+    )
+    .expect("write to String");
+    for (category, flows) in &categories {
+        let flow_list: Vec<String> = flows.iter().map(|f| format!("\"{f}\"")).collect();
+        writeln!(code, "    (\"{category}\", &[{}]),", flow_list.join(", "))
+            .expect("write to String");
+    }
+    writeln!(code, "];").expect("write to String");
+
+    fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+}
+
+fn title_case(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
 }
 
 /// Recursively collect files with the given extension. The key is the file stem.

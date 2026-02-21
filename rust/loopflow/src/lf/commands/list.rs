@@ -4,6 +4,7 @@ use crate::lf::discovery::{
     is_step_interactive, list_all_steps, list_user_flows, BUILTIN_CATEGORIES,
     BUILTIN_FLOW_CATEGORIES,
 };
+
 use crate::lf::output::Colors;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -56,7 +57,10 @@ pub fn show_all() -> Result<()> {
         );
 
         for name in *flow_names {
-            let desc = flow_descriptions.get(name).copied().unwrap_or("");
+            let desc = flow_descriptions
+                .get(*name)
+                .map(|s| s.as_str())
+                .unwrap_or("");
             let custom_tag = if user_flow_set.contains(*name) {
                 format!(
                     " {dim}(customized){reset}",

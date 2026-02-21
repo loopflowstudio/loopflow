@@ -239,17 +239,17 @@ fn builtin_wave_reduce_expands_publish_subflow() {
     let flow = load_flow("wave-reduce", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
 
-    // review + fork + consolidate + add-to-wave = 4
+    // research + fork + consolidate + add-to-wave = 4
     assert_eq!(
         items.len(),
         4,
         "wave-reduce should expand publish into consolidate + add-to-wave"
     );
 
-    // Step 0: review
+    // Step 0: research
     match &items[0] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "review"),
-        _ => panic!("expected review step"),
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "research"),
+        _ => panic!("expected research step"),
     }
     // Step 1: fork (reduce × 3 directions)
     assert!(

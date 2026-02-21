@@ -210,6 +210,9 @@ def cmd_lfd(docker: bool = False) -> int:
             pass
         pid_file.unlink(missing_ok=True)
 
+    # Stop Docker containers holding the lfd port
+    _stop_docker_on_port(2486)
+
     # Suppress gRPC fork handler spam
     os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
     os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -242,6 +245,16 @@ def cmd_agent_image() -> int:
         cwd=REPO_ROOT,
         check=False,
     ).returncode
+
+
+def _stop_docker_on_port(port: int) -> None:
+    """Stop any Docker containers bound to the given port."""
+    result = run_capture(["docker", "ps", "--filter", f"publish={port}", "-q"])
+    if result.returncode != 0 or not result.stdout.strip():
+        return
+    for container_id in result.stdout.strip().splitlines():
+        print(f"Stopping Docker container {container_id} on port {port}...")
+        run(["docker", "stop", container_id], check=False)
 
 
 def _install_dev_app() -> None:

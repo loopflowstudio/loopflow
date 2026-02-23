@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::{format_prompt, gather_context, GatherContextOpts};
+use loopflow::engine::{
+    format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptFormatMode,
+};
 use tempfile::TempDir;
 
 fn init_repo(dir: &Path) {
@@ -67,10 +69,7 @@ fn gather_context_with_step() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
@@ -94,10 +93,7 @@ fn gather_context_with_inline_prompt() {
         run_mode: Some("interactive".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
@@ -125,10 +121,7 @@ fn gather_context_with_directions() {
         run_mode: Some("auto".to_string()),
         directions: vec!["concise".to_string(), "security".to_string()],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
@@ -158,10 +151,7 @@ fn gather_context_includes_readme() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: None,
     })
@@ -198,10 +188,7 @@ fn gather_context_includes_scratch_docs() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: None,
     })
@@ -238,10 +225,7 @@ fn gather_context_with_wave() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("auth".to_string()),
     })
@@ -269,10 +253,7 @@ fn gather_context_preserves_run_mode() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
@@ -285,10 +266,7 @@ fn gather_context_preserves_run_mode() {
         run_mode: Some("interactive".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
@@ -318,16 +296,13 @@ fn format_prompt_includes_step_content() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
     .unwrap();
 
-    let prompt = format_prompt(&components);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     assert!(prompt.contains("Build the feature now."));
 }
 
@@ -347,16 +322,13 @@ fn format_prompt_includes_auto_mode_header() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
     .unwrap();
 
-    let prompt = format_prompt(&components);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     assert!(prompt.contains("auto"));
 }
 
@@ -377,16 +349,13 @@ fn format_prompt_includes_directions() {
         run_mode: Some("auto".to_string()),
         directions: vec!["concise".to_string()],
         files: vec![],
-        lfdocs: false,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![],
         area: None,
         wave: None,
     })
     .unwrap();
 
-    let prompt = format_prompt(&components);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     assert!(prompt.contains("Be brief."));
 }
 
@@ -412,16 +381,13 @@ fn format_prompt_includes_wave_context() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("payments".to_string()),
     })
     .unwrap();
 
-    let prompt = format_prompt(&components);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     assert!(prompt.contains("payments"));
 }
 
@@ -482,10 +448,7 @@ fn wave_filtering_includes_only_specified_wave() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("auth".to_string()),
     })
@@ -539,10 +502,7 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: None, // No wave specified
     })
@@ -587,10 +547,7 @@ fn wave_filtering_handles_nonexistent_wave() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("nonexistent".to_string()),
     })
@@ -653,10 +610,7 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: true,
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("features".to_string()),
     })
@@ -666,7 +620,7 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
     let wave_docs: Vec<_> = components
         .docs
         .iter()
-        .filter(|d| d.category == "wave")
+        .filter(|d| d.source == DocumentSource::Wave)
         .collect();
 
     assert_eq!(
@@ -697,10 +651,7 @@ fn loopflow_doc_always_included() {
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
-        lfdocs: false, // Even with lfdocs=false
-        diff_files: false,
-        diff: false,
-        clipboard: false,
+        sources: vec![], // Even with lfdocs=false
         area: None,
         wave: None,
     })

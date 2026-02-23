@@ -2,7 +2,9 @@ use std::path::Path;
 
 use crate::engine::builtins::get_builtin_step;
 use crate::engine::git::{fetch, rebase};
-use crate::engine::prompt::{format_prompt, gather_context, GatherContextOpts};
+use crate::engine::prompt::{
+    default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+};
 use crate::engine::{launch_agent, load_config_or_default, LaunchConfig};
 
 use crate::ops::error::{OpsError, OpsResult};
@@ -63,15 +65,16 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
         run_mode: Some("auto".to_string()),
         directions: config.direction.unwrap_or_default(),
         files: Vec::new(),
-        lfdocs: config.lfdocs,
-        diff_files: config.diff_files,
-        diff: config.diff,
-        clipboard: config.paste,
+        sources: default_gather_sources(
+            config.lfdocs,
+            config.diff_files || config.diff,
+            config.paste,
+        ),
         area: config.area,
         wave: None,
     };
     let components = gather_context(&opts)?;
-    let base_prompt = format_prompt(&components);
+    let base_prompt = format_prompt(PromptFormatMode::Full, &components);
     let prompt = format!(
         "{}\n\n<lf:step>\n{}\n</lf:step>\n\nRebase onto: {}\n",
         base_prompt, step_content, onto

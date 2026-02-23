@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use loopflow::engine::{format_prompt, gather_context, GatherContextOpts};
+use loopflow::engine::{
+    default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -61,16 +63,17 @@ fn golden_prompts_match_python() {
             run_mode: case.run_mode.clone(),
             directions: case.directions.clone(),
             files: Vec::new(),
-            lfdocs: case.lfdocs,
-            diff_files: case.diff_files,
-            diff: case.diff,
-            clipboard: case.clipboard,
+            sources: default_gather_sources(
+                case.lfdocs,
+                case.diff_files || case.diff,
+                case.clipboard,
+            ),
             area: case.area.clone(),
             wave: case.wave.clone(),
         };
 
         let components = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         let actual = normalize_prompt(&prompt, &repo);
 
         let expected_path = case_path.with_extension("md");

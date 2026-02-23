@@ -15,9 +15,9 @@ use crate::engine::git::{
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::{
-    drop_native_instruction_docs, format_context_prompt, format_prompt, format_task_prompt,
-    gather_context, trim_context_with_breakdown, write_prompt_log, Document, GatherContextOpts,
-    DEFAULT_CONTEXT_BUDGET,
+    default_gather_sources, drop_native_instruction_docs, format_context_prompt, format_prompt,
+    format_task_prompt, gather_context, trim_context_with_breakdown, write_prompt_log, Document,
+    DocumentSource, GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{
@@ -270,10 +270,11 @@ pub(crate) async fn build_step_prompt(
         run_mode: Some("auto".to_string()),
         directions,
         files: Vec::new(),
-        lfdocs: config.lfdocs,
-        diff_files: config.diff_files,
-        diff: config.diff,
-        clipboard: config.paste,
+        sources: default_gather_sources(
+            config.lfdocs,
+            config.diff_files || config.diff,
+            config.paste,
+        ),
         area: config.area.clone(),
         wave: wave.map(str::to_string),
     };
@@ -288,7 +289,7 @@ pub(crate) async fn build_step_prompt(
             components.summaries.push(Document {
                 path: "wave-summary".to_string(),
                 content: summary.content,
-                category: "summaries".to_string(),
+                source: DocumentSource::Summary,
             });
         }
     }
@@ -297,7 +298,7 @@ pub(crate) async fn build_step_prompt(
     // Log full prompt, then write context/task split for --append-system-prompt-file
     let _ = write_prompt_log(
         &repo_root,
-        &format_prompt(&components),
+        &format_prompt(PromptFormatMode::Full, &components),
         &step.step.name,
         None,
     );

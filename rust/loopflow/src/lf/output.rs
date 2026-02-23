@@ -41,11 +41,19 @@ impl Default for Colors {
     }
 }
 
-use crate::engine::prompt::{ContextBreakdown, DiffTier};
+use crate::engine::prompt::{ContextBreakdown, DiffTier, DocumentSource};
 
 /// Format the context header table for stderr output.
 pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> String {
     let mut lines = Vec::new();
+    let step_tokens = breakdown.source_tokens(DocumentSource::Step);
+    let direction_tokens = breakdown.source_tokens(DocumentSource::Direction);
+    let diff_tokens = breakdown.source_tokens(DocumentSource::Diff);
+    let docs_tokens = breakdown.source_tokens(DocumentSource::RepoDoc)
+        + breakdown.source_tokens(DocumentSource::Wave)
+        + breakdown.source_tokens(DocumentSource::Summary);
+    let area_tokens = breakdown.source_tokens(DocumentSource::Area);
+    let clipboard_tokens = breakdown.source_tokens(DocumentSource::Clipboard);
 
     // Step name as prominent header
     let title = breakdown.step_name.as_deref().unwrap_or("context");
@@ -57,7 +65,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     ));
 
     // Step tokens
-    lines.push(format_row("step", breakdown.step, ""));
+    lines.push(format_row("step", step_tokens, ""));
 
     // Direction
     let dir_detail = if breakdown.direction_names.is_empty() {
@@ -65,10 +73,10 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     } else {
         breakdown.direction_names.join(", ")
     };
-    lines.push(format_row("direction", breakdown.direction, &dir_detail));
+    lines.push(format_row("direction", direction_tokens, &dir_detail));
 
     // System
-    lines.push(format_row("system", breakdown.system, "loopflow"));
+    lines.push(format_row("system", breakdown.system_tokens, "loopflow"));
 
     // Diff
     let diff_detail = match breakdown.diff_tier {
@@ -76,12 +84,12 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
         DiffTier::StatOnly => format!("stat ({} files)", breakdown.diff_file_count),
         DiffTier::None => "\u{2014}".to_string(),
     };
-    lines.push(format_row("diff", breakdown.diff, &diff_detail));
+    lines.push(format_row("diff", diff_tokens, &diff_detail));
 
     // Docs
     if breakdown.doc_count > 0 {
         let docs_detail = format!("{} files", breakdown.doc_count);
-        lines.push(format_row("docs", breakdown.docs, &docs_detail));
+        lines.push(format_row("docs", docs_tokens, &docs_detail));
     }
 
     // Area
@@ -90,7 +98,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
             Some(name) => format!("{} ({} files)", name, breakdown.area_doc_count),
             None => format!("{} files", breakdown.area_doc_count),
         };
-        lines.push(format_row("area", breakdown.area, &area_detail));
+        lines.push(format_row("area", area_tokens, &area_detail));
     }
 
     // Wave
@@ -100,7 +108,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
 
     // Clipboard
     if breakdown.has_clipboard {
-        lines.push(format_row("clipboard", breakdown.clipboard, ""));
+        lines.push(format_row("clipboard", clipboard_tokens, ""));
     }
 
     // Separator + total
@@ -198,11 +206,13 @@ mod tests {
     #[test]
     fn format_context_header_with_content() {
         let breakdown = ContextBreakdown {
-            step: 1000,
-            direction: 500,
-            system: 3000,
-            diff: 5000,
-            docs: 2000,
+            source_tokens: std::collections::HashMap::from([
+                (DocumentSource::Step, 1000),
+                (DocumentSource::Direction, 500),
+                (DocumentSource::Diff, 5000),
+                (DocumentSource::RepoDoc, 2000),
+            ]),
+            system_tokens: 3000,
             step_name: Some("implement".to_string()),
             direction_names: vec!["product-engineer".to_string()],
             diff_tier: DiffTier::UnifiedDiff,

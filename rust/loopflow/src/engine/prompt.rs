@@ -15,12 +15,25 @@ use once_cell::sync::Lazy;
 use tiktoken_rs::CoreBPE;
 use tracing::debug;
 
+/// Source of a context document or context token bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DocumentSource {
+    Step,
+    Direction,
+    Wave,
+    Area,
+    Diff,
+    Clipboard,
+    RepoDoc,
+    Summary,
+}
+
 /// A document included in context.
 #[derive(Debug, Clone)]
 pub struct Document {
     pub path: String,
     pub content: String,
-    pub category: String,
+    pub source: DocumentSource,
 }
 
 /// Default maximum tokens for pre-fill context.
@@ -38,16 +51,11 @@ pub enum DiffTier {
     None,
 }
 
-/// Per-category token counts for the assembled context.
+/// Per-source token counts for the assembled context.
 #[derive(Debug, Clone, Default)]
 pub struct ContextBreakdown {
-    pub step: usize,
-    pub direction: usize,
-    pub system: usize,
-    pub diff: usize,
-    pub docs: usize,
-    pub area: usize,
-    pub clipboard: usize,
+    pub source_tokens: HashMap<DocumentSource, usize>,
+    pub system_tokens: usize,
     /// Display metadata
     pub step_name: Option<String>,
     pub direction_names: Vec<String>,
@@ -62,14 +70,81 @@ pub struct ContextBreakdown {
 
 impl ContextBreakdown {
     pub fn total(&self) -> usize {
-        self.step
-            + self.direction
-            + self.system
-            + self.diff
-            + self.docs
-            + self.area
-            + self.clipboard
+        self.system_tokens + self.source_tokens.values().sum::<usize>()
     }
+
+    pub fn source_tokens(&self, source: DocumentSource) -> usize {
+        self.source_tokens.get(&source).copied().unwrap_or(0)
+    }
+
+    fn add_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
+        *self.source_tokens.entry(source).or_insert(0) += tokens;
+    }
+
+    fn subtract_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
+        let entry = self.source_tokens.entry(source).or_insert(0);
+        *entry = entry.saturating_sub(tokens);
+    }
+
+    fn set_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
+        self.source_tokens.insert(source, tokens);
+    }
+}
+
+/// Specification for which context sources to gather.
+#[derive(Debug, Clone, Default)]
+pub struct GatherSpec {
+    pub sources: Vec<DocumentSource>,
+    pub repo_root: PathBuf,
+    /// Specific files to include in context.
+    pub files: Vec<String>,
+    /// Area path for scoped context.
+    pub area: Option<String>,
+    /// Wave name for wave/ scoping.
+    pub wave: Option<String>,
+}
+
+impl GatherSpec {
+    fn includes(&self, source: DocumentSource) -> bool {
+        self.sources.contains(&source)
+    }
+
+    fn include_source(&mut self, source: DocumentSource) {
+        if !self.includes(source) {
+            self.sources.push(source);
+        }
+    }
+
+    fn normalize(&mut self) {
+        if self.wave.is_some() && self.includes(DocumentSource::RepoDoc) {
+            self.include_source(DocumentSource::Wave);
+        }
+        if self.area.is_some() {
+            self.include_source(DocumentSource::Area);
+        }
+        if !self.files.is_empty() {
+            self.include_source(DocumentSource::Diff);
+        }
+    }
+}
+
+/// Build a canonical list of context sources from high-level switches.
+pub fn default_gather_sources(
+    include_repo_docs: bool,
+    include_diff: bool,
+    include_clipboard: bool,
+) -> Vec<DocumentSource> {
+    let mut sources = Vec::new();
+    if include_repo_docs {
+        sources.push(DocumentSource::RepoDoc);
+    }
+    if include_diff {
+        sources.push(DocumentSource::Diff);
+    }
+    if include_clipboard {
+        sources.push(DocumentSource::Clipboard);
+    }
+    sources
 }
 
 /// Options for gathering context.
@@ -81,20 +156,34 @@ pub struct GatherContextOpts {
     pub message: Option<String>,
     pub run_mode: Option<String>,
     pub directions: Vec<String>,
-    /// Specific files to include in context
+    /// Specific files to include in context.
     pub files: Vec<String>,
-    /// Include lfdocs (wave/, scratch/, root .md files)
-    pub lfdocs: bool,
-    /// Include files changed on branch
-    pub diff_files: bool,
-    /// Include raw diff
-    pub diff: bool,
-    /// Include clipboard
-    pub clipboard: bool,
-    /// Area path for scoped context
+    /// Explicit sources to include in the prompt context pipeline.
+    pub sources: Vec<DocumentSource>,
+    /// Area path for scoped context.
     pub area: Option<String>,
-    /// Wave name for wave/ scoping
+    /// Wave name for wave/ scoping.
     pub wave: Option<String>,
+}
+
+impl GatherContextOpts {
+    pub fn gather_spec(&self) -> GatherSpec {
+        GatherSpec {
+            sources: self.sources.clone(),
+            repo_root: self.repo_root.clone(),
+            files: self.files.clone(),
+            area: self.area.clone(),
+            wave: self.wave.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PromptFormatMode {
+    #[default]
+    Full,
+    Context,
+    Task,
 }
 
 /// All components of a prompt before assembly.
@@ -191,24 +280,24 @@ pub fn trim_context_with_breakdown(
     let mut breakdown = ContextBreakdown::default();
 
     if let Some(ref doc) = components.loopflow_doc {
-        breakdown.system = count_tokens(doc);
+        breakdown.system_tokens = count_tokens(doc);
     }
 
     if let Some(ref step) = components.step {
         if let Some(ref content) = step.content {
-            breakdown.step = count_tokens(content);
+            breakdown.add_source_tokens(DocumentSource::Step, count_tokens(content));
         }
         breakdown.step_name = Some(step.name.clone());
     }
 
     for dir in &components.directions {
-        breakdown.direction += count_tokens(&dir.content);
+        breakdown.add_source_tokens(DocumentSource::Direction, count_tokens(&dir.content));
         breakdown.direction_names.push(dir.name.clone());
     }
 
     let diff_string_tokens = if let Some(ref diff) = components.diff {
         let tokens = count_tokens(diff);
-        breakdown.diff += tokens;
+        breakdown.add_source_tokens(DocumentSource::Diff, tokens);
         tokens
     } else {
         0
@@ -219,7 +308,7 @@ pub fn trim_context_with_breakdown(
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
         .collect();
-    breakdown.diff += diff_file_tokens.iter().sum::<usize>();
+    breakdown.add_source_tokens(DocumentSource::Diff, diff_file_tokens.iter().sum::<usize>());
     breakdown.diff_file_count = components.diff_file_count;
     breakdown.diff_tier = components.diff_tier.clone();
 
@@ -233,8 +322,13 @@ pub fn trim_context_with_breakdown(
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
         .collect();
-    breakdown.docs += summary_tokens.iter().sum::<usize>();
-    breakdown.docs += doc_tokens.iter().sum::<usize>();
+    breakdown.add_source_tokens(
+        DocumentSource::Summary,
+        summary_tokens.iter().sum::<usize>(),
+    );
+    for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
+        breakdown.add_source_tokens(doc.source, tokens);
+    }
     breakdown.doc_count = components.docs.len() + components.summaries.len();
 
     // Area
@@ -243,12 +337,12 @@ pub fn trim_context_with_breakdown(
         .iter()
         .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
         .collect();
-    breakdown.area += area_doc_tokens.iter().sum::<usize>();
+    breakdown.add_source_tokens(DocumentSource::Area, area_doc_tokens.iter().sum::<usize>());
     breakdown.area_name = components.area.clone();
     breakdown.area_doc_count = components.area_docs.len();
 
     if let Some(ref clip) = components.clipboard {
-        breakdown.clipboard = count_tokens(clip);
+        breakdown.set_source_tokens(DocumentSource::Clipboard, count_tokens(clip));
     }
     breakdown.has_clipboard = components.clipboard.is_some();
     breakdown.wave_name = components.wave.clone();
@@ -259,7 +353,7 @@ pub fn trim_context_with_breakdown(
         while total > max_tokens && !components.area_docs.is_empty() {
             components.area_docs.pop();
             if let Some(tokens) = area_doc_tokens.pop() {
-                breakdown.area = breakdown.area.saturating_sub(tokens);
+                breakdown.subtract_source_tokens(DocumentSource::Area, tokens);
                 total = total.saturating_sub(tokens);
                 breakdown.area_doc_count = breakdown.area_doc_count.saturating_sub(1);
             }
@@ -269,15 +363,17 @@ pub fn trim_context_with_breakdown(
         while total > max_tokens && !components.summaries.is_empty() {
             components.summaries.pop();
             if let Some(tokens) = summary_tokens.pop() {
-                breakdown.docs = breakdown.docs.saturating_sub(tokens);
+                breakdown.subtract_source_tokens(DocumentSource::Summary, tokens);
                 total = total.saturating_sub(tokens);
                 breakdown.doc_count = breakdown.doc_count.saturating_sub(1);
             }
         }
         while total > max_tokens && !components.docs.is_empty() {
-            components.docs.pop();
+            let removed = components.docs.pop();
             if let Some(tokens) = doc_tokens.pop() {
-                breakdown.docs = breakdown.docs.saturating_sub(tokens);
+                if let Some(doc) = removed {
+                    breakdown.subtract_source_tokens(doc.source, tokens);
+                }
                 total = total.saturating_sub(tokens);
                 breakdown.doc_count = breakdown.doc_count.saturating_sub(1);
             }
@@ -287,7 +383,7 @@ pub fn trim_context_with_breakdown(
         while total > max_tokens && !components.diff_files.is_empty() {
             components.diff_files.pop();
             if let Some(tokens) = diff_file_tokens.pop() {
-                breakdown.diff = breakdown.diff.saturating_sub(tokens);
+                breakdown.subtract_source_tokens(DocumentSource::Diff, tokens);
                 total = total.saturating_sub(tokens);
                 breakdown.diff_file_count = breakdown.diff_file_count.saturating_sub(1);
             }
@@ -295,14 +391,14 @@ pub fn trim_context_with_breakdown(
         if total > max_tokens && components.diff.is_some() {
             components.diff = None;
             breakdown.diff_tier = DiffTier::None;
-            breakdown.diff = breakdown.diff.saturating_sub(diff_string_tokens);
+            breakdown.subtract_source_tokens(DocumentSource::Diff, diff_string_tokens);
             total = total.saturating_sub(diff_string_tokens);
         }
 
         // 4. Drop clipboard as last resort
         if total > max_tokens && components.clipboard.is_some() {
             components.clipboard = None;
-            breakdown.clipboard = 0;
+            breakdown.set_source_tokens(DocumentSource::Clipboard, 0);
         }
     }
 
@@ -314,8 +410,6 @@ pub fn trim_context_with_breakdown(
     (components, breakdown)
 }
 
-/// Trim context to fit within token budget.
-///
 /// Gather all prompt components.
 pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, CoreError> {
     let start = Instant::now();
@@ -346,22 +440,37 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         "loaded directions"
     );
 
-    // Gather docs
+    let mut spec = opts.gather_spec();
+    let include_branch_diff = opts.sources.contains(&DocumentSource::Diff);
+    spec.normalize();
+
+    // Gather document sources through a single pipeline.
     let docs_start = Instant::now();
-    let docs = if opts.lfdocs {
-        gather_docs(repo_root, opts.wave.as_deref())?
-    } else {
-        Vec::new()
-    };
+    let gathered_docs = gather_documents(&spec)?;
     debug!(
         elapsed_ms = docs_start.elapsed().as_millis(),
-        count = docs.len(),
-        "gathered docs"
+        count = gathered_docs.len(),
+        "gathered documents"
     );
+
+    let mut docs = Vec::new();
+    let mut summaries = Vec::new();
+    let mut diff_files = Vec::new();
+    let mut area_docs = Vec::new();
+    for doc in gathered_docs {
+        match doc.source {
+            DocumentSource::RepoDoc | DocumentSource::Wave => docs.push(doc),
+            DocumentSource::Summary => summaries.push(doc),
+            DocumentSource::Area => area_docs.push(doc),
+            DocumentSource::Diff => diff_files.push(doc),
+            DocumentSource::Step | DocumentSource::Direction | DocumentSource::Clipboard => {}
+        }
+    }
+    dedup_documents(&mut diff_files);
 
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
-    let (diff, diff_tier, diff_file_count) = if opts.diff_files || opts.diff {
+    let (diff, diff_tier, diff_file_count) = if include_branch_diff {
         gather_diff_tiered(repo_root)?
     } else {
         (None, DiffTier::None, 0)
@@ -373,22 +482,9 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         "gathered diff"
     );
 
-    // Gather explicitly requested files
-    let files_start = Instant::now();
-    let mut diff_files = Vec::new();
-    if !opts.files.is_empty() {
-        diff_files.extend(gather_files(repo_root, &opts.files)?);
-        dedup_documents(&mut diff_files);
-    }
-    debug!(
-        elapsed_ms = files_start.elapsed().as_millis(),
-        count = diff_files.len(),
-        "gathered explicit files"
-    );
-
     // Gather clipboard
     let clipboard_start = Instant::now();
-    let clipboard = if opts.clipboard {
+    let clipboard = if spec.includes(DocumentSource::Clipboard) {
         read_clipboard()
     } else {
         None
@@ -402,19 +498,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     // Load bundled LOOPFLOW.md (system instructions, always included)
     let loopflow_doc = Some(crate::engine::builtins::LOOPFLOW_DOC.to_string());
 
-    // Gather area docs (parent READMEs when -a is set)
-    let area_start = Instant::now();
-    let area_docs = if let Some(ref area) = opts.area {
-        gather_area_docs(repo_root, area)
-    } else {
-        Vec::new()
-    };
-    debug!(
-        elapsed_ms = area_start.elapsed().as_millis(),
-        count = area_docs.len(),
-        "gathered area docs"
-    );
-
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         run_mode: opts.run_mode.clone(),
@@ -425,7 +508,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
         directions,
-        summaries: Vec::new(), // TODO: implement summary loading
+        summaries, // TODO: implement summary loading
         wave: opts.wave.clone(),
         loopflow_doc,
         message: opts.message.clone(),
@@ -436,22 +519,46 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     })
 }
 
-/// Gather docs from repo (scratch/, wave/<wave>/, root .md files).
-///
-/// Matches Python's gather_lfdocs behavior:
-/// 1. scratch/ (design docs, ephemeral per-PR)
-/// 2. wave/<wave>/ (only if wave is set)
-/// 3. Root .md files
-fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
+/// Gather all requested document sources in stable prompt order.
+pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // 1. scratch/ (design docs, ephemeral per-PR)
-    let scratch_dir = repo_root.join("scratch");
-    if scratch_dir.is_dir() {
-        gather_md_files(&scratch_dir, &mut docs, "scratch")?;
+    // Preserve legacy ordering exactly: scratch -> wave -> root docs.
+    if spec.includes(DocumentSource::RepoDoc) {
+        docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    }
+    if spec.includes(DocumentSource::Wave) {
+        docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
+    }
+    if spec.includes(DocumentSource::RepoDoc) {
+        docs.extend(gather_repo_root_docs(&spec.repo_root)?);
     }
 
-    // 2. wave/<wave>/ (only if wave is set)
+    if spec.includes(DocumentSource::Area) {
+        if let Some(ref area) = spec.area {
+            docs.extend(gather_area_docs(&spec.repo_root, area));
+        }
+    }
+
+    if spec.includes(DocumentSource::Diff) && !spec.files.is_empty() {
+        docs.extend(gather_files(&spec.repo_root, &spec.files)?);
+    }
+
+    Ok(docs)
+}
+
+fn gather_scratch_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
+    let mut docs = Vec::new();
+    let scratch_dir = repo_root.join("scratch");
+    if scratch_dir.is_dir() {
+        gather_md_files(&scratch_dir, &mut docs, DocumentSource::RepoDoc)?;
+    }
+    Ok(docs)
+}
+
+fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
+    let mut docs = Vec::new();
+
     if let Some(wave_name) = wave {
         let wave_dir = repo_root.join("wave").join(wave_name);
         if wave_dir.is_dir() {
@@ -462,7 +569,7 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
                     docs.push(Document {
                         path: format!("wave/{}/README.md", wave_name),
                         content,
-                        category: "wave".to_string(),
+                        source: DocumentSource::Wave,
                     });
                 }
             }
@@ -487,14 +594,18 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
                             path.file_name().unwrap_or_default().to_string_lossy()
                         ),
                         content,
-                        category: "wave".to_string(),
+                        source: DocumentSource::Wave,
                     });
                 }
             }
         }
     }
 
-    // 3. Root .md files (sorted)
+    Ok(docs)
+}
+
+fn gather_repo_root_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
+    let mut docs = Vec::new();
     let mut entries: Vec<_> = fs::read_dir(repo_root)?
         .filter_map(|e| e.ok())
         .filter(|e| {
@@ -513,11 +624,10 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
                     .to_string_lossy()
                     .to_string(),
                 content,
-                category: "docs".to_string(),
+                source: DocumentSource::RepoDoc,
             });
         }
     }
-
     Ok(docs)
 }
 
@@ -528,7 +638,7 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
 /// - src/api/ (e.g., src/api/README.md)
 /// - src/api/handlers/ (e.g., src/api/handlers/README.md)
 ///
-/// Does NOT include the repo root (already gathered by gather_docs).
+/// Does NOT include the repo root (already gathered by `gather_repo_root_docs`).
 fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
     let area_path = Path::new(area);
     let mut ancestors = Vec::new();
@@ -587,7 +697,7 @@ fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
                 docs.push(Document {
                     path: rel_path,
                     content,
-                    category: "area".to_string(),
+                    source: DocumentSource::Area,
                 });
             }
         }
@@ -597,7 +707,11 @@ fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
 }
 
 /// Recursively gather .md files from a directory.
-fn gather_md_files(dir: &Path, docs: &mut Vec<Document>, category: &str) -> Result<(), CoreError> {
+fn gather_md_files(
+    dir: &Path,
+    docs: &mut Vec<Document>,
+    source: DocumentSource,
+) -> Result<(), CoreError> {
     if !dir.is_dir() {
         return Ok(());
     }
@@ -607,7 +721,7 @@ fn gather_md_files(dir: &Path, docs: &mut Vec<Document>, category: &str) -> Resu
         let path = entry.path();
 
         if path.is_dir() {
-            gather_md_files(&path, docs, category)?;
+            gather_md_files(&path, docs, source)?;
         } else if path.extension().map(|e| e == "md").unwrap_or(false) {
             if let Ok(content) = fs::read_to_string(&path) {
                 docs.push(Document {
@@ -617,7 +731,7 @@ fn gather_md_files(dir: &Path, docs: &mut Vec<Document>, category: &str) -> Resu
                         .to_string_lossy()
                         .to_string(),
                     content,
-                    category: category.to_string(),
+                    source,
                 });
             }
         }
@@ -673,7 +787,7 @@ fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, Cor
         docs.push(Document {
             path: rel_path,
             content,
-            category: "diff_files".to_string(),
+            source: DocumentSource::Diff,
         });
     }
 
@@ -725,7 +839,7 @@ fn gather_dir_files(
         docs.push(Document {
             path: rel_path,
             content,
-            category: "diff_files".to_string(),
+            source: DocumentSource::Diff,
         });
     }
 
@@ -763,7 +877,7 @@ fn gather_all_text_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
             docs.push(Document {
                 path: rel_path,
                 content,
-                category: "diff_files".to_string(),
+                source: DocumentSource::Diff,
             });
         }
     }
@@ -1215,87 +1329,90 @@ fn format_step_tag(step: &Step) -> String {
     }
 }
 
-/// Format all components into the final prompt string.
+/// Format prompt content for the requested mode.
 ///
-/// Used by the daemon, ops callers, and for prompt logging.
-pub fn format_prompt(components: &PromptComponents) -> String {
-    let mut parts = format_reference_sections(components);
+/// Used by the daemon, ops callers, and prompt log writers.
+pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> String {
+    match mode {
+        PromptFormatMode::Full => {
+            let mut parts = format_reference_sections(components);
 
-    // Task sections: step, directions, clipboard, message
-    if let Some(ref step) = components.step {
-        parts.push(format!("The step.\n\n{}", format_step_tag(step)));
+            // Task sections: step, directions, clipboard, message
+            if let Some(ref step) = components.step {
+                parts.push(format!("The step.\n\n{}", format_step_tag(step)));
+            }
+
+            if !components.directions.is_empty() {
+                let label = if components.directions.len() == 1 {
+                    "Direction"
+                } else {
+                    "Directions"
+                };
+                parts.push(format!(
+                    "{label} for this work.\n\n{}",
+                    format_direction_tags(&components.directions)
+                ));
+            }
+
+            if let Some(ref clipboard) = components.clipboard {
+                parts.push(format!(
+                    "Content from clipboard.\n\n\
+                     <lf:clipboard>\n{}\n</lf:clipboard>",
+                    clipboard
+                ));
+            }
+
+            if let Some(ref message) = components.message {
+                parts.push(format!(
+                    "Additional instructions from user.\n\n\
+                     <lf:message>\n{}\n</lf:message>",
+                    message
+                ));
+            }
+
+            parts.join("\n\n")
+        }
+        PromptFormatMode::Context => {
+            let mut parts = format_reference_sections(components);
+
+            if let Some(ref clipboard) = components.clipboard {
+                parts.push(format!(
+                    "Content from clipboard.\n\n\
+                     <lf:clipboard>\n{}\n</lf:clipboard>",
+                    clipboard
+                ));
+            }
+
+            parts.join("\n\n")
+        }
+        PromptFormatMode::Task => {
+            let mut parts = Vec::new();
+
+            if !components.directions.is_empty() {
+                parts.push(format_direction_tags(&components.directions));
+            }
+
+            if let Some(ref step) = components.step {
+                parts.push(format_step_tag(step));
+            }
+
+            if let Some(ref message) = components.message {
+                parts.push(message.clone());
+            }
+
+            parts.join("\n\n")
+        }
     }
-
-    if !components.directions.is_empty() {
-        let label = if components.directions.len() == 1 {
-            "Direction"
-        } else {
-            "Directions"
-        };
-        parts.push(format!(
-            "{label} for this work.\n\n{}",
-            format_direction_tags(&components.directions)
-        ));
-    }
-
-    if let Some(ref clipboard) = components.clipboard {
-        parts.push(format!(
-            "Content from clipboard.\n\n\
-             <lf:clipboard>\n{}\n</lf:clipboard>",
-            clipboard
-        ));
-    }
-
-    if let Some(ref message) = components.message {
-        parts.push(format!(
-            "Additional instructions from user.\n\n\
-             <lf:message>\n{}\n</lf:message>",
-            message
-        ));
-    }
-
-    parts.join("\n\n")
 }
 
 /// Format context components for system prompt (everything except task).
-///
-/// This is used with `--append-system-prompt-file` to load context into the
-/// system prompt, keeping input history clean. Step, directions, and message
-/// go in the task prompt instead.
 pub fn format_context_prompt(components: &PromptComponents) -> String {
-    let mut parts = format_reference_sections(components);
-
-    if let Some(ref clipboard) = components.clipboard {
-        parts.push(format!(
-            "Content from clipboard.\n\n\
-             <lf:clipboard>\n{}\n</lf:clipboard>",
-            clipboard
-        ));
-    }
-
-    parts.join("\n\n")
+    format_prompt(PromptFormatMode::Context, components)
 }
 
 /// Format task prompt for user message (directions + step + free text).
-///
-/// This is passed as the CLI argument when using `--append-system-prompt-file`.
-/// Order: direction(s), step, message.
 pub fn format_task_prompt(components: &PromptComponents) -> String {
-    let mut parts = Vec::new();
-
-    if !components.directions.is_empty() {
-        parts.push(format_direction_tags(&components.directions));
-    }
-
-    if let Some(ref step) = components.step {
-        parts.push(format_step_tag(step));
-    }
-
-    if let Some(ref message) = components.message {
-        parts.push(message.clone());
-    }
-
-    parts.join("\n\n")
+    format_prompt(PromptFormatMode::Task, components)
 }
 
 /// Write prompt to log file and return the path.
@@ -1401,7 +1518,7 @@ mod tests {
         components.docs.push(Document {
             path: "test.md".to_string(),
             content: "Short content".to_string(),
-            category: "docs".to_string(),
+            source: DocumentSource::RepoDoc,
         });
 
         let trimmed = trim_context_with_breakdown(components.clone(), 1000000).0;
@@ -1414,12 +1531,12 @@ mod tests {
             docs: vec![Document {
                 path: "doc.md".to_string(),
                 content: "Doc content".to_string(),
-                category: "docs".to_string(),
+                source: DocumentSource::RepoDoc,
             }],
             summaries: vec![Document {
                 path: "summary.md".to_string(),
                 content: "Summary content that is long enough to matter".to_string(),
-                category: "summaries".to_string(),
+                source: DocumentSource::Summary,
             }],
             ..Default::default()
         };
@@ -1440,12 +1557,12 @@ mod tests {
                     path: "doc1.md".to_string(),
                     content: "First document with enough content to exceed token budget easily"
                         .to_string(),
-                    category: "docs".to_string(),
+                    source: DocumentSource::RepoDoc,
                 },
                 Document {
                     path: "doc2.md".to_string(),
                     content: "Second document also has substantial content for testing".to_string(),
-                    category: "docs".to_string(),
+                    source: DocumentSource::RepoDoc,
                 },
             ],
             summaries: vec![],
@@ -1503,7 +1620,7 @@ mod tests {
             docs: vec![Document {
                 path: "doc.md".to_string(),
                 content: "Doc content that will exceed budget".to_string(),
-                category: "docs".to_string(),
+                source: DocumentSource::RepoDoc,
             }],
             ..Default::default()
         };
@@ -1524,7 +1641,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("Run mode is auto"));
         assert!(prompt.contains("headless"));
         assert!(prompt.contains("scratch/questions.md"));
@@ -1537,7 +1654,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(!prompt.contains("Run mode is auto"));
     }
 
@@ -1548,7 +1665,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:wave"));
         assert!(prompt.contains("name=\"rust\""));
         assert!(prompt.contains("rust program of work"));
@@ -1562,18 +1679,18 @@ mod tests {
                 Document {
                     path: "README.md".to_string(),
                     content: "# Test Project".to_string(),
-                    category: "docs".to_string(),
+                    source: DocumentSource::RepoDoc,
                 },
                 Document {
                     path: "STYLE.md".to_string(),
                     content: "# Style Guide".to_string(),
-                    category: "docs".to_string(),
+                    source: DocumentSource::RepoDoc,
                 },
             ],
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:docs>"));
         assert!(prompt.contains("</lf:docs>"));
         assert!(prompt.contains("<lf:README>"));
@@ -1590,11 +1707,11 @@ mod tests {
             docs: vec![Document {
                 path: "CLAUDE.md".to_string(),
                 content: "# Instructions".to_string(),
-                category: "docs".to_string(),
+                source: DocumentSource::RepoDoc,
             }],
             ..Default::default()
         };
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("CLAUDE"));
         assert!(prompt.contains("Follow") || prompt.contains("carefully"));
     }
@@ -1605,11 +1722,11 @@ mod tests {
             docs: vec![Document {
                 path: "STYLE.md".to_string(),
                 content: "# Style Guide".to_string(),
-                category: "docs".to_string(),
+                source: DocumentSource::RepoDoc,
             }],
             ..Default::default()
         };
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("STYLE"));
         assert!(prompt.contains("Follow") || prompt.contains("carefully"));
     }
@@ -1625,7 +1742,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:direction:concise>"));
         assert!(prompt.contains("Be concise and direct."));
         assert!(prompt.contains("</lf:direction:concise>"));
@@ -1652,7 +1769,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:directions>"));
         assert!(prompt.contains("</lf:directions>"));
         assert!(prompt.contains("<lf:direction:concise>"));
@@ -1673,7 +1790,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:step:implement>"));
         assert!(prompt.contains("Implement the feature described."));
         assert!(prompt.contains("</lf:step:implement>"));
@@ -1693,7 +1810,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:step:review>"));
         assert!(prompt.contains("</lf:step:review>"));
     }
@@ -1705,7 +1822,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:diff>"));
         assert!(prompt.contains("+added line"));
         assert!(prompt.contains("</lf:diff>"));
@@ -1718,12 +1835,12 @@ mod tests {
             diff_files: vec![Document {
                 path: "src/main.rs".to_string(),
                 content: "fn main() { println!(\"hello\"); }".to_string(),
-                category: "diff_files".to_string(),
+                source: DocumentSource::Diff,
             }],
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:files>"));
         assert!(prompt.contains("<lf:file path=\"src/main.rs\">"));
         assert!(prompt.contains("fn main()"));
@@ -1738,7 +1855,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:clipboard>"));
         assert!(prompt.contains("Error: connection refused"));
         assert!(prompt.contains("</lf:clipboard>"));
@@ -1751,12 +1868,12 @@ mod tests {
             summaries: vec![Document {
                 path: "src/".to_string(),
                 content: "Source code summary".to_string(),
-                category: "summaries".to_string(),
+                source: DocumentSource::Summary,
             }],
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         assert!(prompt.contains("<lf:summaries>"));
         assert!(prompt.contains("<lf:summary path=\"src/\">"));
         assert!(prompt.contains("Source code summary"));
@@ -1774,7 +1891,7 @@ mod tests {
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
-                category: "docs".to_string(),
+                source: DocumentSource::RepoDoc,
             }],
             directions: vec![Direction {
                 name: "concise".to_string(),
@@ -1793,7 +1910,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
 
         // Verify order: loopflow -> run_mode -> wave -> docs -> diff -> step -> direction -> clipboard
         let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
@@ -1817,7 +1934,7 @@ mod tests {
     #[test]
     fn format_prompt_empty_components() {
         let components = PromptComponents::default();
-        let prompt = format_prompt(&components);
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
         // Should not crash, just return empty or minimal content
         assert!(prompt.is_empty() || prompt.len() < 100);
     }
@@ -1872,14 +1989,11 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
             files: vec!["src/a.rs".to_string(), "src/c.rs".to_string()],
-            lfdocs: false,
-            diff_files: false,
-            diff: false,
-            clipboard: false,
+            sources: vec![],
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(&ctx);
+        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
 
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
@@ -1906,6 +2020,40 @@ mod tests {
             .filter(|f| f.path.ends_with("src/main.rs"))
             .count();
         assert_eq!(main_count, 1);
+    }
+
+    #[test]
+    fn gather_context_with_specific_files_does_not_pull_branch_diff() {
+        let repo = init_git_repo();
+        Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git checkout");
+        write_file(repo.path(), "src/a.rs", "mod a;");
+        write_file(repo.path(), "src/unrelated.rs", "mod unrelated;");
+        Command::new("git")
+            .args(["add", "src/a.rs", "src/unrelated.rs"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git add");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            files: vec!["src/a.rs".to_string()],
+            sources: vec![],
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
+
+        assert!(
+            ctx.diff.is_none(),
+            "files-only context should not include branch diff"
+        );
+        assert!(!prompt.contains("<lf:diff>"));
+        assert!(prompt.contains("mod a;"));
+        assert!(!prompt.contains("mod unrelated;"));
     }
 
     #[test]
@@ -1940,10 +2088,7 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             step: Some("test".to_string()),
-            lfdocs: false,
-            diff_files: false,
-            diff: false,
-            clipboard: false,
+            sources: vec![],
             ..Default::default()
         };
 
@@ -1966,10 +2111,7 @@ mod tests {
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            lfdocs: true,
-            diff_files: false,
-            diff: false,
-            clipboard: false,
+            sources: vec![DocumentSource::RepoDoc],
             ..Default::default()
         };
 
@@ -1997,10 +2139,7 @@ mod tests {
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             directions: vec!["concise".to_string()],
-            lfdocs: false,
-            diff_files: false,
-            diff: false,
-            clipboard: false,
+            sources: vec![],
             ..Default::default()
         };
 
@@ -2032,10 +2171,7 @@ directions:
             repo_root: repo.path().to_path_buf(),
             step: Some("impl".to_string()),
             directions: vec!["fast".to_string()],
-            lfdocs: false,
-            diff_files: false,
-            diff: false,
-            clipboard: false,
+            sources: vec![],
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
@@ -2053,10 +2189,7 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             run_mode: Some("auto".to_string()),
-            lfdocs: false,
-            diff_files: false,
-            diff: false,
-            clipboard: false,
+            sources: vec![],
             ..Default::default()
         };
 
@@ -2074,10 +2207,7 @@ directions:
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
             wave: Some("rust-migration".to_string()),
-            lfdocs: false,
-            diff_files: false,
-            diff: false,
-            clipboard: false,
+            sources: vec![],
             ..Default::default()
         };
 
@@ -2193,7 +2323,7 @@ directions:
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
-                category: "docs".to_string(),
+                source: DocumentSource::RepoDoc,
             }],
             directions: vec![Direction {
                 name: "concise".to_string(),

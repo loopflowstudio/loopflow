@@ -28,9 +28,10 @@ pub use flow::{
     ConcreteStep, Direction, Flow, FlowAction, FlowItem, Step,
 };
 pub use prompt::{
-    count_tokens, drop_native_instruction_docs, format_context_prompt, format_prompt,
-    format_task_prompt, gather_context, trim_context_with_breakdown, write_prompt_log,
-    ContextBreakdown, DiffTier, Document, GatherContextOpts, PromptComponents,
+    count_tokens, default_gather_sources, drop_native_instruction_docs, format_context_prompt,
+    format_prompt, format_task_prompt, gather_context, gather_documents,
+    trim_context_with_breakdown, write_prompt_log, ContextBreakdown, DiffTier, Document,
+    DocumentSource, GatherContextOpts, GatherSpec, PromptComponents, PromptFormatMode,
     DEFAULT_CONTEXT_BUDGET,
 };
 pub use stream::{

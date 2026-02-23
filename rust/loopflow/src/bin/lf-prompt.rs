@@ -2,7 +2,9 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use clap::Parser;
-use loopflow::engine::{format_prompt, gather_context, GatherContextOpts};
+use loopflow::engine::{
+    default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "lf-prompt")]
@@ -59,16 +61,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         run_mode: args.run_mode,
         directions: args.directions,
         files: Vec::new(),
-        lfdocs: args.lfdocs,
-        diff_files: args.diff_files,
-        diff: args.diff,
-        clipboard: args.clipboard,
+        sources: default_gather_sources(args.lfdocs, args.diff_files || args.diff, args.clipboard),
         area: args.area,
         wave: args.wave,
     };
 
     let components = gather_context(&opts)?;
-    let prompt = format_prompt(&components);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     println!("{prompt}");
 
     Ok(())

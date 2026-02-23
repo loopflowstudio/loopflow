@@ -85,6 +85,10 @@ LFD_AUTH_PROVIDER # local (default), static, or loopflow.studio
 LFD_AUTH_TOKEN    # required when LFD_AUTH_PROVIDER=static
 LFD_EXECUTOR_IMAGE # override agent image (default loopflow/agent:latest)
 LFD_EXECUTOR_AGENT_TIMEOUT # override per-agent timeout (default 45m)
+LFD_EXECUTOR_LIMITS_MEMORY # override docker memory bytes (default 8589934592)
+LFD_EXECUTOR_LIMITS_MEMORY_SWAP # override docker memory+swap bytes (default 8589934592)
+LFD_EXECUTOR_LIMITS_CPU_QUOTA # override docker CPU quota (default 400000 = 4 vCPU)
+LFD_EXECUTOR_LIMITS_PIDS_LIMIT # override docker PID limit (default 1024)
 LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
 LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 ```
@@ -101,6 +105,11 @@ auth:
 executor:
   image: loopflow/agent:latest # base image for generated .lf/Dockerfile
   agent_timeout: 45m # max runtime per agent step (process or container)
+  limits:
+    memory: 8589934592 # 8 GiB
+    memory_swap: 8589934592 # no swap above memory
+    cpu_quota: 400000 # 4 vCPU
+    pids_limit: 1024
   credentials:
     env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
     mounts:
@@ -172,6 +181,7 @@ Docker mode also:
 - treats `.lf/env-setup.sh` as project-owned setup; call `install-loopflow.sh "$@"` first in that script to keep loopflow base tooling aligned
 - requires the `docker` CLI in `PATH` for repo image builds (`docker build`)
 - reattaches to running agent containers after daemon restart
+- enforces default container hardening (`user=agent`, memory/CPU/PID limits, `no-new-privileges`)
 
 Current limitation: `fork` steps are not supported by the Docker executor yet.
 

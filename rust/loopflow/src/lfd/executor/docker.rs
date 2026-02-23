@@ -24,7 +24,7 @@ use tracing::{info, warn};
 use time::OffsetDateTime;
 
 use crate::engine::stream::StreamParser;
-use crate::lfd::config::{CredentialMount, ExecutorConfig};
+use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
@@ -38,6 +38,7 @@ pub struct DockerExecutor {
     docker: Docker,
     image: String,
     agent_timeout: std::time::Duration,
+    limits: ExecutorLimitsConfig,
     credential_env: Vec<String>,
     credential_mounts: Vec<DockerCredentialMount>,
     active: Arc<Mutex<HashMap<String, String>>>,
@@ -106,6 +107,7 @@ const CONTAINER_WORKSPACE: &str = "/workspace";
 const CONTAINER_REPOS_ROOT: &str = "/workspace/repos";
 const LOCAL_REPO_MOUNT: &str = "/host-repo";
 const HOST_WORKTREE_MOUNT: &str = "/host-worktree";
+const AGENT_USER: &str = "agent";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RepoVolumeIdentity {
@@ -215,7 +217,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
             .await
         {
             Ok(details) => Ok(inspected_container(details)),
-            Err(err) if is_container_not_found(&err) => Ok(None),
+            Err(err) if is_docker_not_found(&err) => Ok(None),
             Err(err) => Err(err.into()),
         }
     }
@@ -248,7 +250,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
             .await
         {
             Ok(_) => Ok(()),
-            Err(err) if is_container_not_found(&err) => Ok(()),
+            Err(err) if is_docker_not_found(&err) => Ok(()),
             Err(err) => Err(err.into()),
         }
     }
@@ -260,7 +262,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
             .await
         {
             Ok(_) => Ok(()),
-            Err(err) if is_container_not_found(&err) => Ok(()),
+            Err(err) if is_docker_not_found(&err) => Ok(()),
             Err(err) => Err(err.into()),
         }
     }
@@ -349,6 +351,7 @@ impl DockerExecutor {
             docker,
             image: config.image.clone(),
             agent_timeout: config.agent_timeout,
+            limits: config.limits.clone(),
             credential_env: config.credentials.env.clone(),
             credential_mounts,
             active: Arc::new(Mutex::new(HashMap::new())),
@@ -876,8 +879,8 @@ impl DockerExecutor {
                     cmd: Some(cmd),
                     working_dir,
                     env: Some(self.collect_env()),
-                    user: Some("root".to_string()),
-                    host_config: Some(container_host_config(mounts)),
+                    user: Some(AGENT_USER.to_string()),
+                    host_config: Some(container_host_config(mounts, &self.limits)),
                     labels: Some(HashMap::from([(
                         "io.loopflow.managed".to_string(),
                         "true".to_string(),
@@ -940,15 +943,14 @@ impl DockerExecutor {
             return Ok(());
         }
 
-        let mut labels = HashMap::new();
-        labels.insert("io.loopflow.managed".to_string(), "true".to_string());
-        labels.insert("io.loopflow.kind".to_string(), "repo-volume".to_string());
-
         let _ = self
             .docker
             .create_volume(VolumeCreateOptions {
                 name: Some(volume_name.to_string()),
-                labels: Some(labels),
+                labels: Some(HashMap::from([
+                    ("io.loopflow.managed".to_string(), "true".to_string()),
+                    ("io.loopflow.kind".to_string(), "repo-volume".to_string()),
+                ])),
                 ..Default::default()
             })
             .await?;
@@ -1511,7 +1513,7 @@ fn inspected_container(details: ContainerInspectResponse) -> Option<InspectedCon
     Some(InspectedContainer { id, running })
 }
 
-fn is_container_not_found(err: &DockerError) -> bool {
+fn is_docker_not_found(err: &DockerError) -> bool {
     matches!(
         err,
         DockerError::DockerResponseServerError {
@@ -1547,12 +1549,17 @@ fn logs_options(follow: bool) -> LogsOptions {
     }
 }
 
-fn container_host_config(mounts: Vec<Mount>) -> HostConfig {
+fn container_host_config(mounts: Vec<Mount>, limits: &ExecutorLimitsConfig) -> HostConfig {
     HostConfig {
         mounts: Some(mounts),
         network_mode: Some("bridge".to_string()),
         privileged: Some(false),
         cap_drop: Some(vec!["ALL".to_string()]),
+        memory: Some(limits.memory),
+        memory_swap: Some(limits.memory_swap),
+        cpu_quota: Some(limits.cpu_quota),
+        pids_limit: Some(limits.pids_limit),
+        security_opt: Some(vec!["no-new-privileges:true".to_string()]),
         auto_remove: Some(false),
         ..Default::default()
     }
@@ -1580,7 +1587,7 @@ impl AgentExecutor for DockerExecutor {
         let labels =
             Self::build_agent_labels(context.agent_id, context.wave_id, context.wave_run_id);
 
-        let host_config = container_host_config(mounts);
+        let host_config = container_host_config(mounts, &self.limits);
 
         let container = self
             .docker
@@ -1594,7 +1601,7 @@ impl AgentExecutor for DockerExecutor {
                     cmd: Some(cmd),
                     working_dir: Some(workspace.container_worktree.clone()),
                     env: Some(env),
-                    user: Some("root".to_string()),
+                    user: Some(AGENT_USER.to_string()),
                     host_config: Some(host_config),
                     labels: Some(labels),
                     attach_stdout: Some(true),
@@ -1706,7 +1713,7 @@ impl AgentExecutor for DockerExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::config::ExecutorType;
+    use crate::lfd::config::{ExecutorLimitsConfig, ExecutorType};
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{WaveRunKind, WaveRunSnapshot};
     use std::io::Cursor;
@@ -1765,6 +1772,21 @@ mod tests {
         assert_eq!(mounts[0].typ, Some(MountTypeEnum::VOLUME));
         assert_eq!(mounts[0].source, Some("lfd-repo-abc".to_string()));
         assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
+    }
+
+    #[test]
+    fn docker_host_config_applies_limits_and_no_new_privileges() {
+        let limits = ExecutorLimitsConfig::default();
+        let host_config = container_host_config(vec![], &limits);
+
+        assert_eq!(host_config.memory, Some(limits.memory));
+        assert_eq!(host_config.memory_swap, Some(limits.memory_swap));
+        assert_eq!(host_config.cpu_quota, Some(limits.cpu_quota));
+        assert_eq!(host_config.pids_limit, Some(limits.pids_limit));
+        assert_eq!(
+            host_config.security_opt,
+            Some(vec!["no-new-privileges:true".to_string()])
+        );
     }
 
     fn list_archive_entries(bytes: Bytes) -> Vec<String> {
@@ -2065,6 +2087,7 @@ mod tests {
             image: "loopflow/agent:test".to_string(),
             credentials: Default::default(),
             agent_timeout: std::time::Duration::from_secs(45 * 60),
+            limits: ExecutorLimitsConfig::default(),
         };
         let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
         let output_dir = tmp.path().join("output");
@@ -2215,6 +2238,7 @@ mod tests {
             image: "loopflow/agent:test".to_string(),
             credentials: Default::default(),
             agent_timeout: std::time::Duration::from_secs(45 * 60),
+            limits: ExecutorLimitsConfig::default(),
         };
         let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
         let output_dir = tmp.path().join("output");

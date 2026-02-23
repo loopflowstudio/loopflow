@@ -67,9 +67,11 @@ Thin. The script does the work.
 
 ```dockerfile
 FROM loopflow/agent:latest
+USER root
 RUN if command -v install-loopflow.sh >/dev/null 2>&1; then install-loopflow.sh --install; fi
 COPY .lf/env-setup.sh /tmp/env-setup.sh
 RUN if [ -f /tmp/env-setup.sh ]; then sh /tmp/env-setup.sh --install; fi
+USER agent
 WORKDIR /workspace
 ```
 
@@ -78,6 +80,7 @@ WORKDIR /workspace
 - **Correct versions.** Read version pins from manifests (`rust-toolchain.toml`, `.python-version`, `.nvmrc`, `package.json` engines). Install exactly those versions.
 - **Idempotent.** Running the script on a fresh base image gives a working environment. Running it again changes nothing. Running it after adding a dependency installs only the new dependency.
 - **Delegate baseline.** `env-setup.sh` should call `install-loopflow.sh "$@"` first when available, then apply project-specific setup.
+- **Drop privileges after setup.** Build-time installs may need `USER root`; switch back to `USER agent` before runtime.
 - **Fast re-runs.** Don't re-download or rebuild what's already there. Use `--no-install-recommends`, check before installing runtimes, let package managers deduplicate.
 
 ## What doesn't matter

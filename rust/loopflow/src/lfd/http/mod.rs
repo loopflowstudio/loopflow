@@ -11,7 +11,7 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    chat, flows, hooks, repos, system, wave_runs, wave_schemas, waves, worktrees, ws,
+    chat, flows, hooks, repos, sessions, system, wave_runs, wave_schemas, waves, worktrees, ws,
 };
 use crate::lfd::store::StoreError;
 
@@ -24,6 +24,19 @@ pub fn router(state: HttpState) -> Router {
     let api_routes = Router::new()
         .route("/flows", get(flows::list_flows_handler))
         .route("/repos", get(repos::list_repos_handler))
+        .route("/sessions", post(sessions::create_session_handler))
+        .route(
+            "/sessions/{id}",
+            get(sessions::get_session_handler).delete(sessions::delete_session_handler),
+        )
+        .route(
+            "/sessions/{id}/input",
+            post(sessions::send_session_input_handler),
+        )
+        .route(
+            "/sessions/{id}/events",
+            get(sessions::stream_session_events_handler),
+        )
         .route(
             "/wave/schemas",
             get(wave_schemas::list_wave_schemas_handler),

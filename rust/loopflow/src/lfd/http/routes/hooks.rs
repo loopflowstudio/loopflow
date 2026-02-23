@@ -431,6 +431,7 @@ mod tests {
     use crate::lfd::http::state::{ChatTurnRegistry, HttpState};
     use crate::lfd::output::OutputHub;
     use crate::lfd::scheduler::Scheduler;
+    use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{PullRequest, WaveRunKind, WaveRunSnapshot, WaveRunStatus};
     use std::sync::Arc;
@@ -461,7 +462,7 @@ mod tests {
             .expect("build executor"),
         );
         HttpState {
-            store,
+            store: store.clone(),
             scheduler,
             executor,
             event_hub,
@@ -473,6 +474,7 @@ mod tests {
             github: GitHubConfig::default(),
             ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
             chat_turns: ChatTurnRegistry::new(),
+            sessions: SessionManager::new(store.clone()),
         }
     }
 

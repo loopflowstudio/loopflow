@@ -1,25 +1,26 @@
 # 04: Hardening
 
-Edge cases, reconnect durability, and production readiness for the agent runtime.
+Edge cases, reconnect durability, wave integration, and production readiness.
 
 ## What exists after this
 
-Interactive agents handle real-world failure modes gracefully. Reconnect is reliable. Concurrent clients don't corrupt state. Provider auth interruptions don't kill sessions.
+Interactive sessions handle real-world failure modes gracefully. Reconnect is reliable. Concurrent clients don't corrupt state. Session end triggers wave advancement.
 
 ## What to address
 
-- **Reconnect durability**: cursor-based event replay, handle gaps, stale connections
-- **Concurrent clients**: multiple Concerto instances viewing same agent, single input owner
-- **Double-end**: idempotent end with first-win terminal status
-- **Provider auth interruption**: `AuthStatus` events, keep session alive when possible
-- **Wave state mismatch**: guard against end when wave run no longer waits on this agent
-- **lfd restart**: persisted history readable, active agent recovery best-effort
-- **Process crash recovery**: detect dead adapter process, transition to failed state
+- **SSE lagged receiver backfill**: `tokio::broadcast` with 256-entry buffer drops messages for slow receivers. Current behavior: skip and continue. Needs in-stream store fallback — detect `Lagged`, read missed events from store, resume broadcast. This is the highest-priority item since it affects basic reliability.
+- **Reconnect durability**: `after_seq` cursor-based replay works for clean reconnects. Handle: stale SSE connections (keep-alive timeout detection), client reconnect after broadcast lag (seamless store backfill).
+- **Concurrent clients**: multiple Concerto instances can subscribe to the same broadcast channel. Input routing is already single-adapter — no conflict. Need to verify broadcast fan-out works under load.
+- **Double-end**: idempotent end is already implemented (first-win terminal status). Verify edge case: end during `starting` state.
+- **Wave integration**: session end triggers existing continue/commit logic; wave run state guards
+- **lfd restart**: `SessionRuntime` lives in a `HashMap` in memory — active sessions become orphans on restart. Events and session metadata survive in the store. Need a startup recovery pass to mark orphaned `active`/`starting` sessions as `failed`.
+- **Process crash recovery**: detect dead adapter process (child process exit), transition to `failed` state, emit `Error` event. The Codex adapter's reader task will see EOF on stdout — use that as the crash signal.
+- **Provider auth interruption**: keep session alive when possible, emit error events
 
 ## Done when
 
 - Reconnect replays events correctly from any cursor position
-- Two Concerto clients can view the same agent without corruption
-- Auth interruptions emit events instead of killing sessions
-- lfd restart preserves event history for ended agents
+- Two Concerto clients can view the same session without corruption
+- lfd restart preserves event history for ended sessions
 - Dead adapter processes detected and marked failed within reasonable time
+- Session end advances wave run when appropriate

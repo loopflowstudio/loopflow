@@ -4,6 +4,9 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
 use crate::lfd::id::LfdId;
+use crate::lfd::sessions::types::{
+    PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
+};
 use crate::lfd::store::catalog::{
     list_agent_history_query, list_stimuli_query, list_wave_runs_query, list_waves_query, sql,
     Query, SqlDialect,
@@ -102,6 +105,25 @@ impl SqliteStore {
         )?;
         Ok(())
     }
+
+    fn map_session_row(row: &rusqlite::Row<'_>) -> Result<Session, rusqlite::Error> {
+        let config_text: String = row.get(5)?;
+        let config: SessionConfig = serde_json::from_str(&config_text).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(err))
+        })?;
+        Ok(Session {
+            id: row.get(0)?,
+            provider: row.get(1)?,
+            status: SessionStatus::from_i32(row.get::<_, i64>(2)? as i32),
+            wave_run_id: row.get(3)?,
+            provider_session_id: row.get(4)?,
+            config,
+            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)?),
+            ended_at: row
+                .get::<_, Option<i64>>(7)?
+                .map(crate::lfd::store::rows::unix_to_datetime),
+        })
+    }
 }
 
 impl SqliteStore {
@@ -114,6 +136,146 @@ impl SqliteStore {
     pub fn schema_version(&self) -> StoreResult<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         super::migrations::latest_version_sqlite(&conn)
+    }
+
+    pub fn create_session(&self, session: &Session) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO sessions (id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                session.id,
+                session.provider,
+                session.status.as_i32() as i64,
+                session.wave_run_id,
+                session.provider_session_id,
+                serde_json::to_string(&session.config)?,
+                session.created_at.unix_timestamp(),
+                session.ended_at.map(|dt| dt.unix_timestamp()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+             FROM sessions WHERE id = ?1",
+        )?;
+        let row = stmt
+            .query_row(params![session_id], Self::map_session_row)
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn get_active_session_for_wave_run(
+        &self,
+        wave_run_id: &str,
+    ) -> StoreResult<Option<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+             FROM sessions
+             WHERE wave_run_id = ?1 AND status IN (?2, ?3, ?4)
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )?;
+        let row = stmt
+            .query_row(
+                params![
+                    wave_run_id,
+                    SessionStatus::Starting.as_i32() as i64,
+                    SessionStatus::Active.as_i32() as i64,
+                    SessionStatus::Ending.as_i32() as i64
+                ],
+                Self::map_session_row,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn update_session_status(
+        &self,
+        session_id: &LfdId,
+        status: SessionStatus,
+        ended_at: Option<i64>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE sessions
+             SET status = ?2, ended_at = COALESCE(?3, ended_at)
+             WHERE id = ?1",
+            params![session_id, status.as_i32() as i64, ended_at],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn append_session_event(
+        &self,
+        session_id: &LfdId,
+        seq: i64,
+        event: &SessionEvent,
+        created_at: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_events (session_id, seq, event_type, data, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                session_id,
+                seq,
+                event.event_type(),
+                serde_json::to_string(event)?,
+                created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_session_events(
+        &self,
+        session_id: &LfdId,
+        after_seq: Option<i64>,
+    ) -> StoreResult<Vec<PersistedSessionEvent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = if after_seq.is_some() {
+            conn.prepare(
+                "SELECT session_id, seq, data, created_at
+                 FROM session_events
+                 WHERE session_id = ?1 AND seq > ?2
+                 ORDER BY seq ASC",
+            )?
+        } else {
+            conn.prepare(
+                "SELECT session_id, seq, data, created_at
+                 FROM session_events
+                 WHERE session_id = ?1
+                 ORDER BY seq ASC",
+            )?
+        };
+
+        let mut rows = if let Some(after_seq) = after_seq {
+            stmt.query(params![session_id, after_seq])?
+        } else {
+            stmt.query(params![session_id])?
+        };
+
+        let mut events = Vec::new();
+        while let Some(row) = rows.next()? {
+            let data: String = row.get(2)?;
+            let event: SessionEvent = serde_json::from_str(&data)?;
+            events.push(PersistedSessionEvent {
+                session_id: row.get(0)?,
+                seq: row.get(1)?,
+                event,
+                created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)?),
+            });
+        }
+        Ok(events)
     }
 
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

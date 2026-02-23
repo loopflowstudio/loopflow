@@ -30,9 +30,15 @@ wave/rust/
 - README.md provides principles and success criteria—use it to evaluate priority, but don't pick it
 
 **Using README.md:**
-- Follow the wave's principles when evaluating items
-- Check success criteria to understand what "done" means
-- Respect non-goals—don't pick items that conflict
+- Read **Vision** to understand what the wave is trying to achieve
+- Read **Goals** to evaluate priority — what moves success criteria most?
+- Read **Risks** to evaluate urgency — is something blocked or at risk?
+- Read **Metrics** to understand what signals matter
+- Respect scope boundaries stated in Vision — don't pick items that conflict
+
+**Using the roadmap (`##-*.md` files):**
+- The roadmap is the numbered files alongside the README — their prefixes define sequencing
+- Read them to understand dependencies and what's been shipped
 
 ## Selection criteria
 
@@ -52,7 +58,8 @@ If multiple items score similarly, prefer smaller scope—ship something.
 
 1. Get wave name from `<lf:wave>` in context
 2. Find `wave/<wave>/` in the docs
-3. Read README.md for strategic context (principles, success criteria)
+3. Read README.md for strategic context (Vision, Goals, Risks, Metrics)
+   Read the roadmap (`##-*.md`) for sequencing and dependencies
 4. Identify the current stage (lowest numbered prefix with items)
 5. Pick the highest-priority item from that stage
 6. Move it to `scratch/<wave>-<slug>.md`

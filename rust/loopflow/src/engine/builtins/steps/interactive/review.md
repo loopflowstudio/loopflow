@@ -21,7 +21,7 @@ Propose specific commands to run, workflows to walk through, UX to exercise. The
 
 ### 3. Core model
 
-Walk through the central data structures and APIs at the heart of the change. Explain the model, then ask: is this the clearest possible expression of the product semantics? Are names right? Are boundaries between types right? Does the type hierarchy match how users think about this?
+Walk through the central data structures and APIs at the heart of the change. Explain the model, then ask: is this the clearest possible expression of the product semantics? Are names right? Are boundaries between types right? Does the type hierarchy match how users think about this? If this wave has a Vision, does the model serve it?
 
 ### 4. Simplify
 
@@ -29,11 +29,11 @@ Propose concrete alternatives that could shrink or clarify the model. Show what 
 
 ### 5. Contentious calls
 
-Surface decisions that reasonable people would disagree on. Naming, scope boundaries, error handling strategies, public API shape, performance tradeoffs. Frame each as "here's the tradeoff" not "here's what's wrong."
+Surface decisions that reasonable people would disagree on. Naming, scope boundaries, error handling strategies, public API shape, performance tradeoffs. Frame each as "here's the tradeoff" not "here's what's wrong." Check against the wave's Goals and Risks — do any decisions conflict?
 
 ### 6. Learnings
 
-What did building this reveal? About the codebase, the product model, the approach. What would we do differently next time? What assumptions were validated or invalidated?
+What did building this reveal? About the codebase, the product model, the approach. What would we do differently next time? What assumptions were validated or invalidated? Should the wave's Risks, Goals, or Metrics be updated based on what we learned?
 
 ## Guidance
 

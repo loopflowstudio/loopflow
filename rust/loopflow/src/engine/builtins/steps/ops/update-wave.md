@@ -30,12 +30,11 @@ After shipping a wave item, the plan should reflect what we learned. A wave plan
 
 ## What to update
 
-- **Phase descriptions** — revise scope and approach based on what we learned
-- **Open questions** — add new ones, resolve answered ones
-- **Checkpoints** — update if the definition of "done" changed
-- **Try it** — update if we now know better how to test the feel
-- **What might change** — update with new information about where the plan is fragile
-- **README.md** — update north star or invariants if they've evolved
+- **Roadmap** (`##-*.md`) — update status, revise scope based on what we learned, add new items if the plan grew
+- **Risks** — add new risks discovered during implementation, resolve answered questions
+- **Goals** — refine success criteria if they evolved, update invariants if new ones emerged
+- **Metrics** — note any observable signals from what we shipped
+- **Vision** — should rarely change. If it does, flag it explicitly — vision drift is a design decision, not a side effect
 
 ## What not to do
 

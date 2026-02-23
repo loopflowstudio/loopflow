@@ -59,11 +59,10 @@ Update `scratch/<slug>.md`:
 
 If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 
-- Design must follow the wave's principles
-- Scope must exclude wave non-goals
-- "Done when" must contribute to wave success criteria
-
-Quote the specific principles you're following in "Key decisions".
+- **Vision** — design must serve the wave's north star
+- **Goals** — "Done when" must contribute to wave success criteria. Quote the specific goals you're advancing.
+- **Risks** — "Imagine wild failure" should check against known risks. If this design introduces a new risk, name it.
+- Scope must exclude what Vision marks as "not here"
 
 ## Principles
 

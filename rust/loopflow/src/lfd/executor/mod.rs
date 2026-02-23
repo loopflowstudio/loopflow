@@ -17,6 +17,37 @@ use crate::lfd::types::Wave;
 pub use helpers::{create_wave_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
+fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
+    let path = cwd.join(relative_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+fn remove_workspace_file(cwd: &Path, relative_path: &str) -> Result<()> {
+    let path = cwd.join(relative_path);
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn cleanup_host_worktree(worktree: &Path) -> Result<()> {
+    if !worktree.exists() {
+        return Ok(());
+    }
+
+    if worktree.join(".git").exists() {
+        crate::engine::worktree::remove_worktree(worktree, true)?;
+    } else {
+        std::fs::remove_dir_all(worktree)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct AgentRunContext<'a> {
     pub wave_id: &'a str,
@@ -51,6 +82,20 @@ impl<'a> From<AgentRunContext<'a>> for OutputContext {
 pub trait AgentExecutor: Send + Sync {
     async fn run(&self, cmd: Vec<String>, cwd: &Path, context: AgentRunContext<'_>) -> Result<i32>;
     async fn terminate(&self, agent_id: &str) -> Result<()>;
+    async fn write_to_workspace(
+        &self,
+        cwd: &Path,
+        relative_path: &str,
+        content: &[u8],
+    ) -> Result<()> {
+        write_workspace_file(cwd, relative_path, content)
+    }
+    async fn remove_from_workspace(&self, cwd: &Path, relative_path: &str) -> Result<()> {
+        remove_workspace_file(cwd, relative_path)
+    }
+    async fn cleanup_ephemeral_worktree(&self, _repo: &Path, worktree: &Path) -> Result<()> {
+        cleanup_host_worktree(worktree)
+    }
     async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
         Ok(StartupRecovery::default())
     }

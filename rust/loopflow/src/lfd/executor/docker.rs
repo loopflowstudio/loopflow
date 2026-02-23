@@ -23,6 +23,7 @@ use tracing::{info, warn};
 
 use time::OffsetDateTime;
 
+use crate::engine::git::current_branch;
 use crate::engine::stream::StreamParser;
 use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig};
 use crate::lfd::id::LfdId;
@@ -530,7 +531,11 @@ impl DockerExecutor {
             .ok_or_else(|| anyhow!("active container missing for reattach"))?;
 
         let workspace = self
-            .resolve_workspace(wave_id.as_str(), wave_run_id.as_str())
+            .resolve_workspace(
+                wave_id.as_str(),
+                wave_run_id.as_str(),
+                Path::new(&agent.worktree),
+            )
             .await?;
         let exit_code = self
             .wait_for_container_with_logs(
@@ -1148,25 +1153,38 @@ impl DockerExecutor {
         Ok(repo_image)
     }
 
-    fn docker_workspace_for_wave(
+    fn worktree_slug_from_host_path(host_worktree: &Path) -> String {
+        let fallback = host_worktree.to_string_lossy().to_string();
+        let slug = host_worktree
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(sanitize_token)
+            .unwrap_or_default();
+        if slug.is_empty() {
+            short_hash(&fallback, 12)
+        } else {
+            slug
+        }
+    }
+
+    fn infer_fork_branch_from_worktree(host_worktree: &Path, wave_run_id: &str) -> Option<String> {
+        let name = host_worktree.file_name()?.to_str()?;
+        let index = name.rsplit_once("-fork-")?.1.parse::<u32>().ok()?;
+        Some(format!("{wave_run_id}-fork-{index}"))
+    }
+
+    fn docker_workspace_for_host_worktree(
         repo_source: &Path,
-        wave_name: &str,
+        host_worktree: &Path,
         branch: &str,
     ) -> DockerWorkspace {
         let repo_identity = RepoIdentity::from_repo(repo_source);
         let volume = RepoVolumeIdentity::from_identity(&repo_identity);
-        let wave_slug = {
-            let slug = sanitize_token(wave_name);
-            if slug.is_empty() {
-                short_hash(wave_name, 12)
-            } else {
-                slug
-            }
-        };
+        let worktree_slug = Self::worktree_slug_from_host_path(host_worktree);
         DockerWorkspace {
             container_shared_clone: format!("{CONTAINER_REPOS_ROOT}/{}/main", volume.repo_key),
             container_worktree: format!(
-                "{CONTAINER_REPOS_ROOT}/{}/worktrees/{wave_slug}",
+                "{CONTAINER_REPOS_ROOT}/{}/worktrees/{worktree_slug}",
                 volume.repo_key
             ),
             volume,
@@ -1193,7 +1211,32 @@ impl DockerExecutor {
         crate::engine::worktrees::main_repo_root(&repo_path).unwrap_or(repo_path)
     }
 
-    async fn resolve_workspace(&self, wave_id: &str, wave_run_id: &str) -> Result<DockerWorkspace> {
+    fn resolve_workspace_branch(cwd: &Path, wave_run_id: &str, fallback: &str) -> String {
+        if cwd.join(".git").exists() {
+            if let Ok(Some(branch)) = current_branch(cwd) {
+                if !branch.trim().is_empty() && branch != "HEAD" {
+                    return branch;
+                }
+            }
+        }
+
+        if let Some(branch) = Self::infer_fork_branch_from_worktree(cwd, wave_run_id) {
+            return branch;
+        }
+
+        if fallback.trim().is_empty() {
+            "main".to_string()
+        } else {
+            fallback.to_string()
+        }
+    }
+
+    async fn resolve_workspace(
+        &self,
+        wave_id: &str,
+        wave_run_id: &str,
+        cwd: &Path,
+    ) -> Result<DockerWorkspace> {
         let wave_id = LfdId::from_raw(wave_id);
         let wave = self
             .store
@@ -1206,11 +1249,12 @@ impl DockerExecutor {
             .get_wave_run(&run_id)
             .await?
             .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
-        let repo_source = Self::resolve_host_repo(&wave.repo);
-        let branch = Self::resolve_wave_run_branch(&run, &wave);
-        Ok(Self::docker_workspace_for_wave(
+        let repo_source = Self::resolve_host_repo(&run.snapshot.repo);
+        let fallback_branch = Self::resolve_wave_run_branch(&run, &wave);
+        let branch = Self::resolve_workspace_branch(cwd, wave_run_id, &fallback_branch);
+        Ok(Self::docker_workspace_for_host_worktree(
             &repo_source,
-            &wave.name,
+            cwd,
             &branch,
         ))
     }
@@ -1470,14 +1514,18 @@ impl DockerExecutor {
     async fn prepare_workspace(
         &self,
         workspace: &DockerWorkspace,
-        wave_run_id: &str,
         host_worktree: &Path,
     ) -> Result<()> {
         self.ensure_volume(&workspace.volume.volume_name).await?;
 
+        let prepared_key = format!(
+            "{}:{}",
+            workspace.volume.repo_key,
+            host_worktree.to_string_lossy()
+        );
         let should_hygiene = {
             let mut prepared = self.prepared_runs.lock().await;
-            prepared.insert(wave_run_id.to_string())
+            prepared.insert(prepared_key)
         };
 
         let lock = self
@@ -1498,6 +1546,154 @@ impl DockerExecutor {
         }
 
         self.sync_to_host_worktree(workspace, host_worktree).await?;
+
+        Ok(())
+    }
+
+    fn normalize_relative_workspace_path(relative_path: &str) -> Result<PathBuf> {
+        let path = Path::new(relative_path);
+        if path.is_absolute() {
+            return Err(anyhow!("workspace path must be relative"));
+        }
+
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::Normal(segment) => normalized.push(segment),
+                _ => {
+                    return Err(anyhow!(
+                        "workspace path may not contain parent traversal components"
+                    ));
+                }
+            }
+        }
+
+        if normalized.as_os_str().is_empty() {
+            return Err(anyhow!("workspace path must not be empty"));
+        }
+        Ok(normalized)
+    }
+
+    async fn ensure_container_worktree(&self, workspace: &DockerWorkspace) -> Result<()> {
+        self.ensure_volume(&workspace.volume.volume_name).await?;
+        let lock = self
+            .mutation_locks
+            .for_key(&workspace.volume.repo_key)
+            .await;
+        let _guard = lock.lock().await;
+        self.ensure_shared_clone(workspace).await?;
+        self.ensure_worktree(workspace).await?;
+        Ok(())
+    }
+
+    async fn write_file_to_volume(
+        &self,
+        workspace: &DockerWorkspace,
+        host_worktree: &Path,
+        relative_path: &str,
+    ) -> Result<()> {
+        let normalized = Self::normalize_relative_workspace_path(relative_path)?;
+        let host_source = Path::new(HOST_WORKTREE_MOUNT).join(&normalized);
+        let container_target = Path::new(&workspace.container_worktree).join(&normalized);
+        let container_parent = container_target
+            .parent()
+            .ok_or_else(|| anyhow!("workspace file target has no parent"))?
+            .to_string_lossy()
+            .to_string();
+
+        let helper_mounts = self.helper_mounts(
+            workspace,
+            vec![Self::bind_mount(host_worktree, HOST_WORKTREE_MOUNT, true)],
+        );
+        self.run_helper_command(
+            "workspace-write-mkdir",
+            vec!["mkdir".to_string(), "-p".to_string(), container_parent],
+            helper_mounts.clone(),
+            None,
+        )
+        .await?;
+        self.run_helper_command(
+            "workspace-write-copy",
+            vec![
+                "cp".to_string(),
+                host_source.to_string_lossy().to_string(),
+                container_target.to_string_lossy().to_string(),
+            ],
+            helper_mounts,
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn remove_file_from_volume(
+        &self,
+        workspace: &DockerWorkspace,
+        relative_path: &str,
+    ) -> Result<()> {
+        let normalized = Self::normalize_relative_workspace_path(relative_path)?;
+        let container_target = Path::new(&workspace.container_worktree).join(&normalized);
+
+        self.run_helper_command(
+            "workspace-remove-file",
+            vec![
+                "rm".to_string(),
+                "-f".to_string(),
+                container_target.to_string_lossy().to_string(),
+            ],
+            self.build_mounts(&workspace.volume.volume_name),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn cleanup_container_worktree(&self, workspace: &DockerWorkspace) -> Result<()> {
+        if self
+            .docker
+            .inspect_volume(&workspace.volume.volume_name)
+            .await
+            .is_err()
+        {
+            return Ok(());
+        }
+
+        let lock = self
+            .mutation_locks
+            .for_key(&workspace.volume.repo_key)
+            .await;
+        let _guard = lock.lock().await;
+        if !self
+            .is_git_repo(workspace, &workspace.container_shared_clone)
+            .await
+        {
+            return Ok(());
+        }
+
+        if let Err(err) = self
+            .git_command(
+                workspace,
+                "git-worktree-remove",
+                vec![
+                    "git".to_string(),
+                    "-C".to_string(),
+                    workspace.container_shared_clone.clone(),
+                    "worktree".to_string(),
+                    "remove".to_string(),
+                    "--force".to_string(),
+                    workspace.container_worktree.clone(),
+                ],
+                false,
+            )
+            .await
+        {
+            warn!(
+                worktree = %workspace.container_worktree,
+                error = %err,
+                "failed removing docker fork worktree"
+            );
+        }
 
         Ok(())
     }
@@ -1574,11 +1770,10 @@ impl AgentExecutor for DockerExecutor {
 
         let output_context: OutputContext = context.into();
         let workspace = self
-            .resolve_workspace(context.wave_id, context.wave_run_id)
+            .resolve_workspace(context.wave_id, context.wave_run_id, cwd)
             .await?;
         let agent_image = self.ensure_repo_image(&workspace.repo_source).await?;
-        self.prepare_workspace(&workspace, context.wave_run_id, cwd)
-            .await?;
+        self.prepare_workspace(&workspace, cwd).await?;
 
         let container_name = Self::build_container_name(context.agent_id);
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
@@ -1660,6 +1855,54 @@ impl AgentExecutor for DockerExecutor {
         Ok(())
     }
 
+    async fn write_to_workspace(
+        &self,
+        cwd: &Path,
+        relative_path: &str,
+        content: &[u8],
+    ) -> Result<()> {
+        super::write_workspace_file(cwd, relative_path, content)?;
+
+        let repo_source = crate::engine::worktrees::main_repo_root(cwd)
+            .unwrap_or_else(|_| cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()));
+        let branch = Self::resolve_workspace_branch(cwd, "workspace", "main");
+        let workspace = Self::docker_workspace_for_host_worktree(&repo_source, cwd, &branch);
+        self.ensure_container_worktree(&workspace).await?;
+        let prepared_key = format!("{}:{}", workspace.volume.repo_key, cwd.to_string_lossy());
+        self.prepared_runs.lock().await.insert(prepared_key);
+        self.write_file_to_volume(&workspace, cwd, relative_path)
+            .await?;
+        Ok(())
+    }
+
+    async fn remove_from_workspace(&self, cwd: &Path, relative_path: &str) -> Result<()> {
+        super::remove_workspace_file(cwd, relative_path)?;
+
+        let repo_source = crate::engine::worktrees::main_repo_root(cwd)
+            .unwrap_or_else(|_| cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()));
+        let workspace = Self::docker_workspace_for_host_worktree(&repo_source, cwd, "main");
+        if self
+            .docker
+            .inspect_volume(&workspace.volume.volume_name)
+            .await
+            .is_ok()
+        {
+            let _ = self
+                .remove_file_from_volume(&workspace, relative_path)
+                .await;
+        }
+        Ok(())
+    }
+
+    async fn cleanup_ephemeral_worktree(&self, repo: &Path, worktree: &Path) -> Result<()> {
+        let repo_source =
+            crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+        let workspace = Self::docker_workspace_for_host_worktree(&repo_source, worktree, "main");
+        self.cleanup_container_worktree(&workspace).await?;
+        super::cleanup_host_worktree(worktree)?;
+        Ok(())
+    }
+
     async fn recover_startup(&self, output: &OutputHub) -> Result<StartupRecovery> {
         let backend = BollardRecoveryBackend::new(self.docker.clone());
         self.recover_startup_with_backend(&backend, output, true)
@@ -1668,7 +1911,8 @@ impl AgentExecutor for DockerExecutor {
 
     async fn cleanup_wave(&self, wave: &Wave) -> Result<()> {
         let repo = Self::resolve_host_repo(&wave.repo);
-        let workspace = Self::docker_workspace_for_wave(&repo, &wave.name, "main");
+        let host_worktree = crate::engine::worktrees::worktree_path(&repo, &wave.name);
+        let workspace = Self::docker_workspace_for_host_worktree(&repo, &host_worktree, "main");
         if self
             .docker
             .inspect_volume(&workspace.volume.volume_name)
@@ -1772,6 +2016,24 @@ mod tests {
         assert_eq!(mounts[0].typ, Some(MountTypeEnum::VOLUME));
         assert_eq!(mounts[0].source, Some("lfd-repo-abc".to_string()));
         assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
+    }
+
+    #[test]
+    fn docker_workspace_uses_host_worktree_name() {
+        let repo = Path::new("/tmp/repo");
+        let host_worktree = Path::new("/tmp/repo.wave-fork-1");
+        let workspace =
+            DockerExecutor::docker_workspace_for_host_worktree(repo, host_worktree, "branch");
+        assert!(workspace
+            .container_worktree
+            .ends_with("/worktrees/repo-wave-fork-1"));
+    }
+
+    #[test]
+    fn resolve_workspace_branch_infers_fork_branch_from_path() {
+        let cwd = Path::new("/tmp/repo.wave-fork-2");
+        let branch = DockerExecutor::resolve_workspace_branch(cwd, "run-123", "main");
+        assert_eq!(branch, "run-123-fork-2");
     }
 
     fn list_archive_entries(bytes: Bytes) -> Vec<String> {

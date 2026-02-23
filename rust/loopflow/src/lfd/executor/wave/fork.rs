@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use tokio::sync::mpsc;
@@ -8,11 +8,9 @@ use tracing::{debug, error, info, warn};
 use crate::engine::agent::build_agent_command;
 use crate::engine::flow::{ConcreteFork, ConcreteItem, ConcreteStep, Step};
 use crate::engine::fork::{
-    cleanup_fork_worktrees, plan_fork_execution, write_fork_manifest, ForkManifestBranch,
-    FORK_SYNTHESIZE_STEP,
+    plan_fork_execution, ForkManifest, ForkManifestBranch, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::worktree::create_worktree;
-use crate::lfd::config::ExecutorType;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus};
 use crate::lfd::types::{Wave, WaveRun};
@@ -20,6 +18,8 @@ use crate::lfd::types::{Wave, WaveRun};
 use super::launch::AgentLaunchRequest;
 use super::WaveExecutor;
 use crate::lfd::executor::helpers::{build_step_prompt, fork_worktree_path};
+
+const FORK_MANIFEST_RELATIVE_PATH: &str = ".lf/fork-manifest.json";
 
 #[derive(Debug, Clone)]
 struct ForkBranchExecution {
@@ -38,16 +38,6 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
-        if self.executor_type == ExecutorType::Docker {
-            self.fail_run(
-                run,
-                wave,
-                "fork is not supported by the docker executor yet".to_string(),
-            )
-            .await?;
-            return Ok(());
-        }
-
         let planned = match plan_fork_execution(&fork.branches, &run.snapshot.direction) {
             Ok(branches) => branches,
             Err(err) => {
@@ -254,15 +244,32 @@ impl WaveExecutor {
         }
         let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
 
-        let manifest_path = match write_fork_manifest(Path::new(&run.worktree), &outcomes) {
-            Ok(path) => path,
+        let manifest = ForkManifest {
+            branches: outcomes.clone(),
+        };
+        let manifest_json = match serde_json::to_vec_pretty(&manifest) {
+            Ok(json) => json,
             Err(err) => {
-                self.cleanup_fork(run, &fork_runs, None).await;
-                self.fail_run(run, wave, format!("failed writing fork manifest: {err}"))
+                self.cleanup_fork(run, &fork_runs, false).await;
+                self.fail_run(run, wave, format!("failed encoding fork manifest: {err}"))
                     .await?;
                 return Ok(());
             }
         };
+        if let Err(err) = self
+            .runner
+            .write_to_workspace(
+                Path::new(&run.worktree),
+                FORK_MANIFEST_RELATIVE_PATH,
+                &manifest_json,
+            )
+            .await
+        {
+            self.cleanup_fork(run, &fork_runs, false).await;
+            self.fail_run(run, wave, format!("failed writing fork manifest: {err}"))
+                .await?;
+            return Ok(());
+        }
 
         let synth_step = ConcreteStep {
             step: Step::named(FORK_SYNTHESIZE_STEP),
@@ -271,16 +278,14 @@ impl WaveExecutor {
         let synth_exit = match self.run_step(wave, run, &synth_step).await {
             Ok(code) => code,
             Err(err) => {
-                self.cleanup_fork(run, &fork_runs, Some(&manifest_path))
-                    .await;
+                self.cleanup_fork(run, &fork_runs, true).await;
                 self.fail_run(run, wave, format!("synthesize step failed: {err}"))
                     .await?;
                 return Ok(());
             }
         };
 
-        self.cleanup_fork(run, &fork_runs, Some(&manifest_path))
-            .await;
+        self.cleanup_fork(run, &fork_runs, true).await;
 
         if synth_exit != 0 {
             self.fail_run(
@@ -306,13 +311,40 @@ impl WaveExecutor {
         &self,
         run: &WaveRun,
         fork_runs: &[ForkBranchExecution],
-        manifest_path: Option<&Path>,
+        remove_manifest: bool,
     ) {
-        let worktrees: Vec<PathBuf> = fork_runs
-            .iter()
-            .map(|execution| PathBuf::from(&execution.run.worktree))
-            .collect();
-        cleanup_fork_worktrees(manifest_path, &worktrees);
+        if remove_manifest {
+            if let Err(err) = self
+                .runner
+                .remove_from_workspace(Path::new(&run.worktree), FORK_MANIFEST_RELATIVE_PATH)
+                .await
+            {
+                warn!(
+                    run_id = %run.id,
+                    error = %err,
+                    "failed removing fork manifest"
+                );
+            }
+        }
+
+        for execution in fork_runs {
+            if let Err(err) = self
+                .runner
+                .cleanup_ephemeral_worktree(
+                    Path::new(&run.snapshot.repo),
+                    Path::new(&execution.run.worktree),
+                )
+                .await
+            {
+                warn!(
+                    run_id = %run.id,
+                    worktree = %execution.run.worktree,
+                    error = %err,
+                    "failed cleaning fork worktree"
+                );
+            }
+        }
+
         let _ = self.store.delete_fork_runs(&run.id, run.step_index).await;
     }
 }

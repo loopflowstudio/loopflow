@@ -3,7 +3,7 @@ mod launch;
 mod sidecar;
 mod summary;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -217,15 +217,36 @@ impl WaveExecutor {
 
         let mut removed_worktrees = 0u32;
         let mut stale_groups = HashSet::new();
+        let mut repo_cache: HashMap<LfdId, Option<String>> = HashMap::new();
         for fork_run in &orphaned_runs {
             stale_groups.insert((fork_run.wave_run_id.clone(), fork_run.step_index));
 
             let worktree_path = Path::new(&fork_run.worktree);
-            if !worktree_path.join(".git").exists() {
+            let repo = if let Some(repo) = repo_cache.get(&fork_run.wave_run_id) {
+                repo.clone()
+            } else {
+                let run_repo = self
+                    .store
+                    .get_wave_run(&fork_run.wave_run_id)
+                    .await?
+                    .map(|run| run.snapshot.repo);
+                repo_cache.insert(fork_run.wave_run_id.clone(), run_repo.clone());
+                run_repo
+            };
+            let Some(repo) = repo else {
+                warn!(
+                    wave_run_id = %fork_run.wave_run_id,
+                    worktree = %worktree_path.display(),
+                    "unable to resolve repo for orphaned fork worktree cleanup"
+                );
                 continue;
-            }
+            };
 
-            match remove_worktree(worktree_path, true) {
+            match self
+                .runner
+                .cleanup_ephemeral_worktree(Path::new(&repo), worktree_path)
+                .await
+            {
                 Ok(()) => removed_worktrees += 1,
                 Err(err) => warn!(
                     worktree = %worktree_path.display(),
@@ -754,27 +775,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_fails_fork_all_with_docker_executor() {
+    async fn execute_runs_fork_with_docker_executor() {
+        let repo = TestRepo::new();
         let tmp = tempdir().expect("tempdir");
-        let repo = tmp.path();
-
-        let flow_dir = repo.join(".lf/flows");
-        std::fs::create_dir_all(&flow_dir).expect("flow dir should exist");
-        std::fs::write(
-            flow_dir.join("fork-flow.yaml"),
+        create_fork_flow_repo(
+            &repo,
             r#"
 - fork:
     branches:
       - step: { name: step-a }
       - step: { name: step-b }
 "#,
-        )
-        .expect("flow file should be written");
-
-        let step_dir = repo.join(".lf/steps");
-        std::fs::create_dir_all(&step_dir).expect("step dir should exist");
-        std::fs::write(step_dir.join("step-a.md"), "do step a").expect("step file should write");
-        std::fs::write(step_dir.join("step-b.md"), "do step b").expect("step file should write");
+        );
 
         let db_path = tmp.path().join("test.db");
         let store: SharedStore = Arc::new(
@@ -783,7 +795,7 @@ mod tests {
                 .expect("db should open"),
         );
 
-        let (_wave_id, run_id) = create_wave_and_run(&store, repo, "fork-flow").await;
+        let (_wave_id, run_id) = create_wave_and_run(&store, repo.path(), "fork-flow").await;
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -809,11 +821,8 @@ mod tests {
             .await
             .expect("run fetch should succeed")
             .expect("run should exist");
-        assert_eq!(updated_run.status, WaveRunStatus::Failed);
-        assert_eq!(
-            updated_run.error.as_deref(),
-            Some("fork is not supported by the docker executor yet")
-        );
+        assert_eq!(updated_run.status, WaveRunStatus::Completed);
+        assert!(updated_run.error.is_none());
     }
 
     #[tokio::test]

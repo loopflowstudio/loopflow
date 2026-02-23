@@ -12,11 +12,11 @@ Session lifecycle management for `lfd` with five HTTP endpoints, persistent even
 
 Storage layer: new `sessions` and `session_events` tables (migration `010_sessions.sql`), implemented for both SQLite and PostgreSQL.
 
-Codex adapter: spawns `codex --app-server`, communicates via JSON-RPC over stdin/stdout, maps notifications to flat `SessionEvent` variants, auto-accepts approval requests.
+Codex adapter: spawns `codex --app-server`, communicates via JSON-RPC over stdin/stdout, maps notifications to structured `SessionEvent` variants, auto-accepts approval requests.
 
 ## Key choices
 
-**Flat event stream over nested structures.** `SessionEvent` is a serde-tagged enum (`text_delta`, `tool_started`, `turn_completed`, etc.) rather than a nested hierarchy. Simpler to persist, replay, and extend.
+**Turn+item event model over flat deltas.** `SessionEvent` is a serde-tagged enum with structured variants: turn boundaries (`turn_started`, `turn_completed`), item lifecycle (`item_started`, `item_updated`, `item_completed`), high-frequency streaming deltas (`text_delta`, `reasoning_delta`), and session-level signals (`status_changed`, `error`). Items are typed (`Command`, `FileChange`, `McpToolCall`, `AgentMessage`, `Plan`, `Tool`) with a generic `Tool` fallback. All events persist as JSON in `session_events` — the stream is the single source of truth.
 
 **Async create with `starting` status.** Create returns immediately; adapter startup happens in a spawned task. Avoids blocking the HTTP handler on process spawn + initialize handshake (up to 15s timeout). Clients poll or subscribe to events to detect `active`.
 

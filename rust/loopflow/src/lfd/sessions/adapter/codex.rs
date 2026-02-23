@@ -35,6 +35,7 @@ pub struct CodexAdapter {
     stderr_task: Option<JoinHandle<()>>,
     next_request_id: i64,
     turn_in_progress: Arc<AtomicBool>,
+    shutdown_requested: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for CodexAdapter {
@@ -54,6 +55,7 @@ impl CodexAdapter {
             stderr_task: None,
             next_request_id: 1,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -189,6 +191,56 @@ impl SessionAdapter for CodexAdapter {
         if self.child.is_some() {
             return Ok(());
         }
+        self.shutdown_requested.store(false, Ordering::Relaxed);
+
+        let start_result = self.start_inner(config).await;
+        if let Err(err) = start_result {
+            let _ = self.stop().await;
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    async fn send_input(&mut self, content: &str) -> Result<()> {
+        let text = content.trim();
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        let method = if self.turn_in_progress.load(Ordering::Relaxed) {
+            "turn/steer"
+        } else {
+            "turn/start"
+        };
+
+        self.send_request(method, json!({ "content": text })).await
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        self.shutdown_requested.store(true, Ordering::Relaxed);
+
+        if self.turn_in_progress.load(Ordering::Relaxed) {
+            let _ = self.send_request("turn/interrupt", json!({})).await;
+        }
+
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+        }
+        self.child = None;
+        self.turn_in_progress.store(false, Ordering::Relaxed);
+
+        self.shutdown_tasks().await;
+
+        Ok(())
+    }
+}
+
+impl CodexAdapter {
+    async fn start_inner(&mut self, config: &SessionConfig) -> Result<()> {
+        if self.child.is_some() {
+            return Ok(());
+        }
 
         let mut child = Command::new("codex")
             .arg("--app-server")
@@ -240,6 +292,7 @@ impl SessionAdapter for CodexAdapter {
 
         let (initialized_tx, initialized_rx) = oneshot::channel::<()>();
         let turn_in_progress = self.turn_in_progress.clone();
+        let shutdown_requested = self.shutdown_requested.clone();
         let event_tx = self.events.clone();
         let approval_tx = outbound_tx.clone();
         let reader_task = tokio::spawn(async move {
@@ -298,10 +351,12 @@ impl SessionAdapter for CodexAdapter {
             }
 
             turn_in_progress.store(false, Ordering::Relaxed);
-            let _ = event_tx.send(SessionEvent::Error {
-                code: "codex_disconnected".to_string(),
-                message: "codex app-server disconnected".to_string(),
-            });
+            if !shutdown_requested.load(Ordering::Relaxed) {
+                let _ = event_tx.send(SessionEvent::Error {
+                    code: "codex_disconnected".to_string(),
+                    message: "codex app-server disconnected".to_string(),
+                });
+            }
         });
 
         let stderr_task = tokio::spawn(async move {
@@ -332,38 +387,6 @@ impl SessionAdapter for CodexAdapter {
         }
         self.send_request("thread/start", Value::Object(thread_params))
             .await?;
-
-        Ok(())
-    }
-
-    async fn send_input(&mut self, content: &str) -> Result<()> {
-        let text = content.trim();
-        if text.is_empty() {
-            return Ok(());
-        }
-
-        let method = if self.turn_in_progress.load(Ordering::Relaxed) {
-            "turn/steer"
-        } else {
-            "turn/start"
-        };
-
-        self.send_request(method, json!({ "content": text })).await
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        if self.turn_in_progress.load(Ordering::Relaxed) {
-            let _ = self.send_request("turn/interrupt", json!({})).await;
-        }
-
-        if let Some(child) = self.child.as_mut() {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-        }
-        self.child = None;
-        self.turn_in_progress.store(false, Ordering::Relaxed);
-
-        self.shutdown_tasks().await;
 
         Ok(())
     }

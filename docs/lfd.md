@@ -52,6 +52,43 @@ loopflow.create_wave("engbot", repo=".")
 loopflow.run_wave("engbot")
 ```
 
+## Agent sessions API
+
+Create a session:
+
+```bash
+curl -s -X POST "http://127.0.0.1:2486/v0/sessions" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"provider\": \"codex\",
+    \"wave_run_id\": \"run_abc\",
+    \"config\": {
+      \"model\": \"gpt-5.1-codex\",
+      \"cwd\": \"$(pwd)\"
+    }
+  }"
+```
+
+Send input:
+
+```bash
+curl -s -X POST "http://127.0.0.1:2486/v0/sessions/<session_id>/input" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"fix the failing tests"}'
+```
+
+Stream events (replay + live tail):
+
+```bash
+curl -N "http://127.0.0.1:2486/v0/sessions/<session_id>/events"
+```
+
+Stop the session:
+
+```bash
+curl -s -X DELETE "http://127.0.0.1:2486/v0/sessions/<session_id>"
+```
+
 ## Wave schemas
 
 ```bash

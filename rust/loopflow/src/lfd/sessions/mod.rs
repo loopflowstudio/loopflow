@@ -90,6 +90,9 @@ impl SessionManager {
         if provider.is_empty() {
             return Err(SessionManagerError::UnsupportedProvider(provider));
         }
+        if provider != "codex" {
+            return Err(SessionManagerError::UnsupportedProvider(provider));
+        }
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
             if self
@@ -120,13 +123,7 @@ impl SessionManager {
             .inner
             .adapter_factory
             .create(&provider, adapter_events_tx)
-            .map_err(|err| {
-                if err.to_string().contains("unsupported session provider") {
-                    SessionManagerError::UnsupportedProvider(provider.clone())
-                } else {
-                    SessionManagerError::Adapter(err.to_string())
-                }
-            })?;
+            .map_err(|err| SessionManagerError::Adapter(err.to_string()))?;
         self.inner.store.create_session(&session).await?;
 
         let (events_tx, _) = broadcast::channel(LIVE_EVENT_BUFFER);
@@ -558,5 +555,67 @@ mod tests {
             .await
             .expect("replay events");
         assert!(!replay.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_session_rejects_unsupported_provider() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+
+        let err = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect_err("unsupported provider should fail");
+
+        assert!(matches!(
+            err,
+            SessionManagerError::UnsupportedProvider(ref provider) if provider == "claude"
+        ));
+    }
+
+    #[tokio::test]
+    async fn create_session_enforces_single_active_session_per_wave_run() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "codex".to_string(),
+                wave_run_id: Some("run_1".to_string()),
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect("first session should create");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        let err = manager
+            .create_session(CreateSessionParams {
+                provider: "codex".to_string(),
+                wave_run_id: Some("run_1".to_string()),
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect_err("second active session should be rejected");
+
+        assert!(matches!(
+            err,
+            SessionManagerError::WaveRunSessionConflict(ref wave_run_id) if wave_run_id == "run_1"
+        ));
     }
 }

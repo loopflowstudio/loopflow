@@ -128,6 +128,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "removed orphaned managed docker containers on startup"
                 );
             }
+            if recovery.orphaned_fork_worktrees_removed > 0 {
+                tracing::info!(
+                    count = recovery.orphaned_fork_worktrees_removed,
+                    "removed orphaned fork worktrees on startup"
+                );
+            }
+            if recovery.orphaned_fork_runs_cleaned > 0 {
+                tracing::info!(
+                    count = recovery.orphaned_fork_runs_cleaned,
+                    "cleaned orphaned fork run records on startup"
+                );
+            }
         }
         Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
     }

@@ -64,8 +64,6 @@ If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 - **Risks** — "Imagine wild failure" should check against known risks. If this design introduces a new risk, name it.
 - Scope must exclude what Vision marks as "not here"
 
-Quote the specific goals you're advancing in "Key decisions".
-
 ## Principles
 
 **Bold over safe.** If you're not sure, pick the more ambitious option. Safe designs compound into mediocrity.

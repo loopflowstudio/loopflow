@@ -8,13 +8,7 @@ The chat system is one consumer of the harness. The harness doesn't know about U
 
 Ship a clean product/runtime boundary where the chat system owns user experience + durable memory and the harness owns turn execution + context management. Integration should let waves run multiple agent invocations while preserving memory continuity without coupling the harness to UI concerns.
 
-Core components in this vision:
-
-- **Agent harness** runs turn loops, dispatches tools, manages context windows, and emits structured events.
-- **Chat system** consumes harness events, renders conversation, and mediates memory edits.
-- **Memory** is durable and chat-owned across invocations.
-- **Context** is harness-local and ephemeral within a single session.
-- **Tools** define both internal runtime actions and boundary calls (`send_message`, `memory_edit`).
+The boundary is defined by five components: agent harness, chat system, memory, context, and tools (detailed in [Core components](#core-components)).
 
 ## Goals
 
@@ -53,8 +47,6 @@ A wave runs multiple agent invocations. Memory carries forward via the chat syst
 - Harness runtime stays UI-agnostic while chat UI remains harness-internal-state agnostic
 
 ## Roadmap
-
-### Two tracks
 
 ### Track A — Chat system
 

@@ -54,7 +54,7 @@ If multiple items score similarly, prefer smaller scope—ship something.
 
 1. Get wave name from `<lf:wave>` in context
 2. Find `wave/<wave>/` in the docs
-3. Read README.md for strategic context (principles, success criteria)
+3. Read README.md for strategic context (Vision, Goals, Risks, Roadmap)
 4. Identify the current stage (lowest numbered prefix with items)
 5. Pick the highest-priority item from that stage
 6. Move it to `scratch/<wave>-<slug>.md`

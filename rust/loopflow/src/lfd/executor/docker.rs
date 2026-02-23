@@ -1211,6 +1211,24 @@ impl DockerExecutor {
         crate::engine::worktrees::main_repo_root(&repo_path).unwrap_or(repo_path)
     }
 
+    fn resolve_host_repo_from_worktree(worktree: &Path) -> PathBuf {
+        crate::engine::worktrees::main_repo_root(worktree).unwrap_or_else(|_| {
+            worktree
+                .canonicalize()
+                .unwrap_or_else(|_| worktree.to_path_buf())
+        })
+    }
+
+    fn resolve_workspace_for_host_worktree(
+        host_worktree: &Path,
+        wave_run_id: &str,
+        fallback_branch: &str,
+    ) -> DockerWorkspace {
+        let repo_source = Self::resolve_host_repo_from_worktree(host_worktree);
+        let branch = Self::resolve_workspace_branch(host_worktree, wave_run_id, fallback_branch);
+        Self::docker_workspace_for_host_worktree(&repo_source, host_worktree, &branch)
+    }
+
     fn resolve_workspace_branch(cwd: &Path, wave_run_id: &str, fallback: &str) -> String {
         if cwd.join(".git").exists() {
             if let Ok(Some(branch)) = current_branch(cwd) {
@@ -1863,10 +1881,7 @@ impl AgentExecutor for DockerExecutor {
     ) -> Result<()> {
         super::write_workspace_file(cwd, relative_path, content)?;
 
-        let repo_source = crate::engine::worktrees::main_repo_root(cwd)
-            .unwrap_or_else(|_| cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()));
-        let branch = Self::resolve_workspace_branch(cwd, "workspace", "main");
-        let workspace = Self::docker_workspace_for_host_worktree(&repo_source, cwd, &branch);
+        let workspace = Self::resolve_workspace_for_host_worktree(cwd, "workspace", "main");
         self.ensure_container_worktree(&workspace).await?;
         let prepared_key = format!("{}:{}", workspace.volume.repo_key, cwd.to_string_lossy());
         self.prepared_runs.lock().await.insert(prepared_key);
@@ -1878,9 +1893,7 @@ impl AgentExecutor for DockerExecutor {
     async fn remove_from_workspace(&self, cwd: &Path, relative_path: &str) -> Result<()> {
         super::remove_workspace_file(cwd, relative_path)?;
 
-        let repo_source = crate::engine::worktrees::main_repo_root(cwd)
-            .unwrap_or_else(|_| cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf()));
-        let workspace = Self::docker_workspace_for_host_worktree(&repo_source, cwd, "main");
+        let workspace = Self::resolve_workspace_for_host_worktree(cwd, "workspace", "main");
         if self
             .docker
             .inspect_volume(&workspace.volume.volume_name)
@@ -1913,44 +1926,7 @@ impl AgentExecutor for DockerExecutor {
         let repo = Self::resolve_host_repo(&wave.repo);
         let host_worktree = crate::engine::worktrees::worktree_path(&repo, &wave.name);
         let workspace = Self::docker_workspace_for_host_worktree(&repo, &host_worktree, "main");
-        if self
-            .docker
-            .inspect_volume(&workspace.volume.volume_name)
-            .await
-            .is_err()
-        {
-            return Ok(());
-        }
-
-        let lock = self
-            .mutation_locks
-            .for_key(&workspace.volume.repo_key)
-            .await;
-        let _guard = lock.lock().await;
-        if !self
-            .is_git_repo(&workspace, &workspace.container_shared_clone)
-            .await
-        {
-            return Ok(());
-        }
-
-        let _ = self
-            .git_command(
-                &workspace,
-                "git-worktree-remove",
-                vec![
-                    "git".to_string(),
-                    "-C".to_string(),
-                    workspace.container_shared_clone.clone(),
-                    "worktree".to_string(),
-                    "remove".to_string(),
-                    "--force".to_string(),
-                    workspace.container_worktree.clone(),
-                ],
-                false,
-            )
-            .await;
-        Ok(())
+        self.cleanup_container_worktree(&workspace).await
     }
 }
 

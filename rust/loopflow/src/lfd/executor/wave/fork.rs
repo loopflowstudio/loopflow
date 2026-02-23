@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -98,6 +97,7 @@ impl WaveExecutor {
             let worktree = execution.run.worktree.clone();
             let fork_run_id = execution.run.id.clone();
             let branch_label = execution.label.clone();
+            let branch_index = execution.run.branch_index as usize;
             let fork_run = execution.run.clone();
             let step = execution.step.clone();
             let wave_directions = wave_directions.clone();
@@ -145,7 +145,7 @@ impl WaveExecutor {
                             error = %err,
                             "fork branch prompt build failed"
                         );
-                        let _ = tx.send((branch_label.clone(), Err(err))).await;
+                        let _ = tx.send((branch_index, Err(err))).await;
                         return;
                     }
                 };
@@ -193,22 +193,30 @@ impl WaveExecutor {
                         ..fork_run.clone()
                     })
                     .await;
-                let _ = tx.send((branch_label.clone(), result)).await;
+                let _ = tx.send((branch_index, result)).await;
             });
 
             handles.push(handle);
         }
         drop(tx);
 
-        let mut branch_results: HashMap<String, Result<i32>> = HashMap::new();
-        let mut completed = 0usize;
         let total = fork_runs.len();
+        let mut branch_results: Vec<Option<Result<i32>>> = (0..total).map(|_| None).collect();
+        let mut completed = 0usize;
         debug!(run_id = %run.id, total_branches = total, "waiting for fork results");
         while completed < total {
-            let Some((branch_label, result)) = rx.recv().await else {
+            let Some((branch_index, result)) = rx.recv().await else {
                 break;
             };
-            branch_results.insert(branch_label, result);
+            if let Some(slot) = branch_results.get_mut(branch_index) {
+                *slot = Some(result);
+            } else {
+                warn!(
+                    run_id = %run.id,
+                    branch_index,
+                    "received fork result for unknown branch index"
+                );
+            }
             completed += 1;
             debug!(run_id = %run.id, completed, total, "fork branch done");
         }
@@ -218,8 +226,10 @@ impl WaveExecutor {
 
         let mut outcomes = Vec::new();
         for execution in &fork_runs {
+            let branch_index = execution.run.branch_index as usize;
             let result = branch_results
-                .remove(&execution.label)
+                .get_mut(branch_index)
+                .and_then(|entry| entry.take())
                 .unwrap_or_else(|| Err(anyhow!("fork branch result missing")));
             let exit_code = match result {
                 Ok(code) => code,

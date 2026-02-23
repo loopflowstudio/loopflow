@@ -223,7 +223,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
             .await
         {
             Ok(details) => Ok(inspected_container(details)),
-            Err(err) if is_container_not_found(&err) => Ok(None),
+            Err(err) if is_docker_not_found(&err) => Ok(None),
             Err(err) => Err(err.into()),
         }
     }
@@ -256,7 +256,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
             .await
         {
             Ok(_) => Ok(()),
-            Err(err) if is_container_not_found(&err) => Ok(()),
+            Err(err) if is_docker_not_found(&err) => Ok(()),
             Err(err) => Err(err.into()),
         }
     }
@@ -268,7 +268,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
             .await
         {
             Ok(_) => Ok(()),
-            Err(err) if is_container_not_found(&err) => Ok(()),
+            Err(err) if is_docker_not_found(&err) => Ok(()),
             Err(err) => Err(err.into()),
         }
     }
@@ -949,15 +949,14 @@ impl DockerExecutor {
             return Ok(());
         }
 
-        let mut labels = HashMap::new();
-        labels.insert("io.loopflow.managed".to_string(), "true".to_string());
-        labels.insert("io.loopflow.kind".to_string(), "wave-volume".to_string());
-
         let _ = self
             .docker
             .create_volume(VolumeCreateOptions {
                 name: Some(volume_name.to_string()),
-                labels: Some(labels),
+                labels: Some(HashMap::from([
+                    ("io.loopflow.managed".to_string(), "true".to_string()),
+                    ("io.loopflow.kind".to_string(), "wave-volume".to_string()),
+                ])),
                 ..Default::default()
             })
             .await?;
@@ -1515,17 +1514,7 @@ fn inspected_container(details: ContainerInspectResponse) -> Option<InspectedCon
     Some(InspectedContainer { id, running })
 }
 
-fn is_container_not_found(err: &DockerError) -> bool {
-    matches!(
-        err,
-        DockerError::DockerResponseServerError {
-            status_code: 404,
-            ..
-        }
-    )
-}
-
-fn is_volume_not_found(err: &DockerError) -> bool {
+fn is_docker_not_found(err: &DockerError) -> bool {
     matches!(
         err,
         DockerError::DockerResponseServerError {
@@ -1726,7 +1715,7 @@ impl AgentExecutor for DockerExecutor {
             .await
         {
             Ok(_) => {}
-            Err(err) if is_volume_not_found(&err) => {}
+            Err(err) if is_docker_not_found(&err) => {}
             Err(err) => return Err(err.into()),
         }
         Ok(())

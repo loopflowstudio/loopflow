@@ -131,49 +131,26 @@ impl RawLfdConfig {
             }
         }
 
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_MEMORY") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.executor.limits.memory = parse_executor_limit_i64(
-                    trimmed,
-                    "LFD_EXECUTOR_LIMITS_MEMORY",
-                    "executor.limits.memory",
-                )?;
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_MEMORY_SWAP") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.executor.limits.memory_swap = parse_executor_limit_i64(
-                    trimmed,
-                    "LFD_EXECUTOR_LIMITS_MEMORY_SWAP",
-                    "executor.limits.memory_swap",
-                )?;
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_CPU_QUOTA") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.executor.limits.cpu_quota = parse_executor_limit_i64(
-                    trimmed,
-                    "LFD_EXECUTOR_LIMITS_CPU_QUOTA",
-                    "executor.limits.cpu_quota",
-                )?;
-            }
-        }
-
-        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_PIDS_LIMIT") {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                self.executor.limits.pids_limit = parse_executor_limit_i64(
-                    trimmed,
-                    "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
-                    "executor.limits.pids_limit",
-                )?;
-            }
-        }
+        Self::apply_limit_env_override(
+            &mut self.executor.limits.memory,
+            "LFD_EXECUTOR_LIMITS_MEMORY",
+            "executor.limits.memory",
+        )?;
+        Self::apply_limit_env_override(
+            &mut self.executor.limits.memory_swap,
+            "LFD_EXECUTOR_LIMITS_MEMORY_SWAP",
+            "executor.limits.memory_swap",
+        )?;
+        Self::apply_limit_env_override(
+            &mut self.executor.limits.cpu_quota,
+            "LFD_EXECUTOR_LIMITS_CPU_QUOTA",
+            "executor.limits.cpu_quota",
+        )?;
+        Self::apply_limit_env_override(
+            &mut self.executor.limits.pids_limit,
+            "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
+            "executor.limits.pids_limit",
+        )?;
 
         if let Ok(value) = std::env::var("LFD_GITHUB_WEBHOOK_SECRET") {
             self.github.webhook_secret = value;
@@ -188,6 +165,18 @@ impl RawLfdConfig {
             };
         }
 
+        Ok(())
+    }
+
+    fn apply_limit_env_override(target: &mut i64, env_key: &str, field: &str) -> Result<()> {
+        let Ok(value) = std::env::var(env_key) else {
+            return Ok(());
+        };
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        *target = parse_executor_limit_i64(trimmed, env_key, field)?;
         Ok(())
     }
 
@@ -472,24 +461,11 @@ struct RawExecutorLimitsConfig {
 
 impl RawExecutorLimitsConfig {
     fn resolve(self) -> Result<ExecutorLimitsConfig> {
-        if self.memory <= 0 {
-            bail!("executor.limits.memory must be greater than zero");
-        }
-        if self.memory_swap <= 0 {
-            bail!("executor.limits.memory_swap must be greater than zero");
-        }
-        if self.cpu_quota <= 0 {
-            bail!("executor.limits.cpu_quota must be greater than zero");
-        }
-        if self.pids_limit <= 0 {
-            bail!("executor.limits.pids_limit must be greater than zero");
-        }
-
         Ok(ExecutorLimitsConfig {
-            memory: self.memory,
-            memory_swap: self.memory_swap,
-            cpu_quota: self.cpu_quota,
-            pids_limit: self.pids_limit,
+            memory: require_positive_limit(self.memory, "executor.limits.memory")?,
+            memory_swap: require_positive_limit(self.memory_swap, "executor.limits.memory_swap")?,
+            cpu_quota: require_positive_limit(self.cpu_quota, "executor.limits.cpu_quota")?,
+            pids_limit: require_positive_limit(self.pids_limit, "executor.limits.pids_limit")?,
         })
     }
 }
@@ -543,8 +519,14 @@ fn parse_executor_limit_i64(raw: &str, env_key: &str, field: &str) -> Result<i64
     let value = raw
         .parse::<i64>()
         .map_err(|err| anyhow!("invalid {} value '{}' for {}: {}", env_key, raw, field, err))?;
+    require_positive_limit(value, field).map_err(|_| {
+        anyhow!("invalid {env_key} value '{raw}' for {field}: must be greater than zero")
+    })
+}
+
+fn require_positive_limit(value: i64, field: &str) -> Result<i64> {
     if value <= 0 {
-        bail!("invalid {env_key} value '{raw}' for {field}: must be greater than zero");
+        bail!("{field} must be greater than zero");
     }
     Ok(value)
 }

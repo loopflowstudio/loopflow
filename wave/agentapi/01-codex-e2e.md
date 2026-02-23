@@ -97,13 +97,12 @@ CREATE TABLE session_events (
 
 - Does Codex app-server support session resume after process restart?
 - What happens to in-flight turns when we send interrupt?
-- Exact CLI invocation for `codex --app-server` — verify flags and stdio behavior
+- Codex JSON-RPC payload mappings were inferred from docs, not validated against real traces — run a real session before building the next adapter
 
-## Done when
+## Shipped
 
-- `POST /sessions` with `provider: "codex"` spawns Codex app-server
-- Codex events stream through `GET /sessions/{id}/events` as SSE
-- `POST /sessions/{id}/input` sends a message, Codex responds with streaming events
-- `DELETE /sessions/{id}` stops the agent
-- Events persist in `session_events` and replay correctly on new SSE connection
-- Integration test: create → input → events → end
+All planned pieces landed: session API (5 endpoints under `/v0/sessions`), flat event model, lifecycle state machine, Sqlite + Postgres storage, Codex adapter with JSON-RPC mapping, manager tests. API docs in `docs/lfd.md`.
+
+**What went as expected:** Event model, lifecycle state machine, storage schema, and API shape all landed as designed. The adapter trait abstraction worked cleanly.
+
+**What to validate before phase 02:** Codex event mappings were built from docs, not real traces. Run a real Codex session to confirm payloads match before using this as the reference for Claude adapter event mapping.

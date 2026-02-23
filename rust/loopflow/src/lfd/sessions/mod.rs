@@ -1,5 +1,4 @@
 mod adapter;
-pub mod store;
 pub mod types;
 
 use std::collections::HashMap;
@@ -12,7 +11,6 @@ use crate::lfd::id::LfdId;
 use crate::lfd::sessions::adapter::{
     DefaultSessionAdapterFactory, SessionAdapter, SharedSessionAdapterFactory,
 };
-use crate::lfd::sessions::store::SessionStore;
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionEvent, SessionStatus,
 };
@@ -53,7 +51,7 @@ impl std::fmt::Debug for SessionRuntime {
 }
 
 struct SessionManagerInner {
-    store: SessionStore,
+    store: SharedStore,
     adapter_factory: SharedSessionAdapterFactory,
     runtimes: Mutex<HashMap<LfdId, Arc<SessionRuntime>>>,
 }
@@ -77,7 +75,7 @@ impl SessionManager {
     pub fn with_factory(store: SharedStore, adapter_factory: SharedSessionAdapterFactory) -> Self {
         Self {
             inner: Arc::new(SessionManagerInner {
-                store: SessionStore::new(store),
+                store,
                 adapter_factory,
                 runtimes: Mutex::new(HashMap::new()),
             }),
@@ -94,17 +92,16 @@ impl SessionManager {
         }
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
-            if let Some(existing) = self
+            if self
                 .inner
                 .store
                 .get_active_session_for_wave_run(wave_run_id)
                 .await?
+                .is_some()
             {
-                if !existing.status.is_terminal() {
-                    return Err(SessionManagerError::WaveRunSessionConflict(
-                        wave_run_id.to_string(),
-                    ));
-                }
+                return Err(SessionManagerError::WaveRunSessionConflict(
+                    wave_run_id.to_string(),
+                ));
             }
         }
 
@@ -335,14 +332,13 @@ impl SessionManager {
             return self.get_session(session_id).await;
         }
 
-        self.inner
-            .store
-            .update_session_status(
-                session_id,
-                SessionStatus::Ended,
-                Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-            )
-            .await?;
+        self.set_status(
+            session_id,
+            SessionStatus::Ended,
+            Some(time::OffsetDateTime::now_utc().unix_timestamp()),
+            None,
+        )
+        .await?;
         self.get_session(session_id).await
     }
 
@@ -353,7 +349,11 @@ impl SessionManager {
     ) -> Result<Vec<PersistedSessionEvent>, SessionManagerError> {
         // Ensure we return a clean 404 for unknown sessions.
         let _ = self.get_session(session_id).await?;
-        Ok(self.inner.store.list_events(session_id, after_seq).await?)
+        Ok(self
+            .inner
+            .store
+            .list_session_events(session_id, after_seq)
+            .await?)
     }
 
     pub async fn subscribe(
@@ -398,7 +398,7 @@ impl SessionManager {
 
         self.inner
             .store
-            .append_event(session_id, seq, &event, now.unix_timestamp())
+            .append_session_event(session_id, seq, &event, now.unix_timestamp())
             .await?;
 
         let persisted = PersistedSessionEvent {

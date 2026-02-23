@@ -105,6 +105,25 @@ impl SqliteStore {
         )?;
         Ok(())
     }
+
+    fn map_session_row(row: &rusqlite::Row<'_>) -> Result<Session, rusqlite::Error> {
+        let config_text: String = row.get(5)?;
+        let config: SessionConfig = serde_json::from_str(&config_text).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(err))
+        })?;
+        Ok(Session {
+            id: row.get(0)?,
+            provider: row.get(1)?,
+            status: SessionStatus::from_i32(row.get::<_, i64>(2)? as i32),
+            wave_run_id: row.get(3)?,
+            provider_session_id: row.get(4)?,
+            config,
+            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)?),
+            ended_at: row
+                .get::<_, Option<i64>>(7)?
+                .map(crate::lfd::store::rows::unix_to_datetime),
+        })
+    }
 }
 
 impl SqliteStore {
@@ -145,28 +164,7 @@ impl SqliteStore {
              FROM sessions WHERE id = ?1",
         )?;
         let row = stmt
-            .query_row(params![session_id], |row| {
-                let config_text: String = row.get(5)?;
-                let config: SessionConfig = serde_json::from_str(&config_text).map_err(|err| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        5,
-                        rusqlite::types::Type::Text,
-                        Box::new(err),
-                    )
-                })?;
-                Ok(Session {
-                    id: row.get(0)?,
-                    provider: row.get(1)?,
-                    status: SessionStatus::from_i32(row.get::<_, i64>(2)? as i32),
-                    wave_run_id: row.get(3)?,
-                    provider_session_id: row.get(4)?,
-                    config,
-                    created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)?),
-                    ended_at: row
-                        .get::<_, Option<i64>>(7)?
-                        .map(crate::lfd::store::rows::unix_to_datetime),
-                })
-            })
+            .query_row(params![session_id], Self::map_session_row)
             .optional()?;
         Ok(row)
     }
@@ -191,29 +189,7 @@ impl SqliteStore {
                     SessionStatus::Active.as_i32() as i64,
                     SessionStatus::Ending.as_i32() as i64
                 ],
-                |row| {
-                    let config_text: String = row.get(5)?;
-                    let config: SessionConfig =
-                        serde_json::from_str(&config_text).map_err(|err| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                5,
-                                rusqlite::types::Type::Text,
-                                Box::new(err),
-                            )
-                        })?;
-                    Ok(Session {
-                        id: row.get(0)?,
-                        provider: row.get(1)?,
-                        status: SessionStatus::from_i32(row.get::<_, i64>(2)? as i32),
-                        wave_run_id: row.get(3)?,
-                        provider_session_id: row.get(4)?,
-                        config,
-                        created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)?),
-                        ended_at: row
-                            .get::<_, Option<i64>>(7)?
-                            .map(crate::lfd::store::rows::unix_to_datetime),
-                    })
-                },
+                Self::map_session_row,
             )
             .optional()?;
         Ok(row)

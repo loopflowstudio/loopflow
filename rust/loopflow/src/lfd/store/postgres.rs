@@ -136,6 +136,22 @@ impl PostgresStore {
         })
         .await
     }
+
+    fn map_session_row(row: &tokio_postgres::Row) -> StoreResult<Session> {
+        let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
+        Ok(Session {
+            id: row.get(0),
+            provider: row.get(1),
+            status: SessionStatus::from_i32(row.get::<_, i32>(2)),
+            wave_run_id: row.get(3),
+            provider_session_id: row.get(4),
+            config,
+            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)),
+            ended_at: row
+                .get::<_, Option<i64>>(7)
+                .map(crate::lfd::store::rows::unix_to_datetime),
+        })
+    }
 }
 
 impl PostgresStore {
@@ -184,23 +200,7 @@ impl PostgresStore {
                     &[&session_id],
                 )
                 .await?;
-            row.as_ref()
-                .map(|row| {
-                    let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
-                    Ok(Session {
-                        id: row.get(0),
-                        provider: row.get(1),
-                        status: SessionStatus::from_i32(row.get::<_, i32>(2)),
-                        wave_run_id: row.get(3),
-                        provider_session_id: row.get(4),
-                        config,
-                        created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)),
-                        ended_at: row
-                            .get::<_, Option<i64>>(7)
-                            .map(crate::lfd::store::rows::unix_to_datetime),
-                    })
-                })
-                .transpose()
+            row.as_ref().map(Self::map_session_row).transpose()
         })
         .await
     }
@@ -228,23 +228,7 @@ impl PostgresStore {
                     ],
                 )
                 .await?;
-            row.as_ref()
-                .map(|row| {
-                    let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
-                    Ok(Session {
-                        id: row.get(0),
-                        provider: row.get(1),
-                        status: SessionStatus::from_i32(row.get::<_, i32>(2)),
-                        wave_run_id: row.get(3),
-                        provider_session_id: row.get(4),
-                        config,
-                        created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)),
-                        ended_at: row
-                            .get::<_, Option<i64>>(7)
-                            .map(crate::lfd::store::rows::unix_to_datetime),
-                    })
-                })
-                .transpose()
+            row.as_ref().map(Self::map_session_row).transpose()
         })
         .await
     }

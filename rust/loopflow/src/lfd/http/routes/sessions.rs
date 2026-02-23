@@ -14,7 +14,7 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{
-    CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionStatus,
+    CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
 };
 use crate::lfd::sessions::SessionManagerError;
 
@@ -115,7 +115,7 @@ pub async fn stream_session_events_handler(
     Query(query): Query<SessionEventsQuery>,
 ) -> Result<Sse<KeepAliveStream<ReceiverStream<Result<SseEvent, Infallible>>>>, ApiError> {
     let session_id = parse_session_id(&session_id)?;
-    let mut live_rx = state
+    let live_rx = state
         .sessions
         .subscribe(&session_id)
         .await
@@ -139,7 +139,7 @@ pub async fn stream_session_events_handler(
             }
         }
 
-        let Some(mut live_rx) = live_rx.take() else {
+        let Some(mut live_rx) = live_rx else {
             return;
         };
 
@@ -185,7 +185,7 @@ fn session_dto(session: Session) -> SessionDto {
         id: session.id.to_string(),
         object: "session".to_string(),
         provider: session.provider,
-        status: status_str(session.status).to_string(),
+        status: session.status.as_str().to_string(),
         wave_run_id: session.wave_run_id,
         provider_session_id: session.provider_session_id,
         config: session.config,
@@ -214,16 +214,6 @@ fn parse_session_id(value: &str) -> Result<LfdId, ApiError> {
     value
         .parse::<LfdId>()
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid session id"))
-}
-
-fn status_str(status: SessionStatus) -> &'static str {
-    match status {
-        SessionStatus::Starting => "starting",
-        SessionStatus::Active => "active",
-        SessionStatus::Ending => "ending",
-        SessionStatus::Ended => "ended",
-        SessionStatus::Failed => "failed",
-    }
 }
 
 fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorResponse>) {

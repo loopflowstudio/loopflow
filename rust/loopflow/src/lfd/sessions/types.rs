@@ -16,6 +16,16 @@ pub enum SessionStatus {
 }
 
 impl SessionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Active => "active",
+            Self::Ending => "ending",
+            Self::Ended => "ended",
+            Self::Failed => "failed",
+        }
+    }
+
     pub fn as_i32(self) -> i32 {
         match self {
             Self::Starting => 0,

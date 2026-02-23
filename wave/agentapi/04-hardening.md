@@ -8,13 +8,13 @@ Interactive sessions handle real-world failure modes gracefully. Reconnect is re
 
 ## What to address
 
-- **SSE lagged receiver backfill**: live broadcast currently drops messages for slow receivers instead of backfilling from store. Discovered in phase 01 — needs in-stream store fallback.
-- **Reconnect durability**: cursor-based event replay, handle gaps, stale connections
-- **Concurrent clients**: multiple Concerto instances viewing same session, single input owner
-- **Double-end**: idempotent end with first-win terminal status
+- **SSE lagged receiver backfill**: `tokio::broadcast` with 256-entry buffer drops messages for slow receivers. Current behavior: skip and continue. Needs in-stream store fallback — detect `Lagged`, read missed events from store, resume broadcast. This is the highest-priority item since it affects basic reliability.
+- **Reconnect durability**: `after_seq` cursor-based replay works for clean reconnects. Handle: stale SSE connections (keep-alive timeout detection), client reconnect after broadcast lag (seamless store backfill).
+- **Concurrent clients**: multiple Concerto instances can subscribe to the same broadcast channel. Input routing is already single-adapter — no conflict. Need to verify broadcast fan-out works under load.
+- **Double-end**: idempotent end is already implemented (first-win terminal status). Verify edge case: end during `starting` state.
 - **Wave integration**: session end triggers existing continue/commit logic; wave run state guards
-- **lfd restart**: persisted history readable, active session recovery best-effort (active runtimes are process-local, no restart rehydration yet)
-- **Process crash recovery**: detect dead adapter process, transition to failed state
+- **lfd restart**: `SessionRuntime` lives in a `HashMap` in memory — active sessions become orphans on restart. Events and session metadata survive in the store. Need a startup recovery pass to mark orphaned `active`/`starting` sessions as `failed`.
+- **Process crash recovery**: detect dead adapter process (child process exit), transition to `failed` state, emit `Error` event. The Codex adapter's reader task will see EOF on stdout — use that as the crash signal.
 - **Provider auth interruption**: keep session alive when possible, emit error events
 
 ## Done when

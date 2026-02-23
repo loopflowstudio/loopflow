@@ -24,19 +24,38 @@ Five HTTP endpoints:
 
 ### Event model
 
-Flat typed events. No nesting (items within turns). Adapters emit what they can.
+Turn+item model. Turns are first-class. Items are typed with lifecycles. High-frequency deltas stay top-level for streaming efficiency.
 
 ```rust
 enum SessionEvent {
-    TextDelta { content: String },
-    TextDone { content: String },
-    ToolStarted { tool_id: String, name: String, input: Option<Value> },
-    ToolOutput { tool_id: String, content: String },
-    ToolDone { tool_id: String },
-    TurnStarted,
-    TurnCompleted { status: TurnStatus },
-    SessionStatus { status: SessionStatus },
-    Error { code: String, message: String },
+    // Turn boundaries
+    TurnStarted { turn_id },
+    TurnCompleted { turn_id, status: TurnStatus },
+
+    // Item lifecycle (typed items)
+    ItemStarted { turn_id, item: SessionItem },
+    ItemUpdated { turn_id, item_id, data: ItemDelta },
+    ItemCompleted { turn_id, item: SessionItem },
+
+    // Streaming deltas (high-frequency, separate from items)
+    TextDelta { turn_id, content },
+    ReasoningDelta { turn_id, content },
+
+    // Turn-level aggregates
+    DiffUpdated { turn_id, diff },
+
+    // Session-level
+    StatusChanged { status: SessionStatus },
+    Error { code, message },
+}
+
+enum SessionItem {
+    Command { id, command, cwd, status, output, exit_code },
+    FileChange { id, changes, status },
+    McpToolCall { id, server, tool, status, arguments, result },
+    AgentMessage { id, text, phase },
+    Plan { id, text },
+    Tool { id, name, status, input, output }, // generic fallback
 }
 ```
 
@@ -79,12 +98,18 @@ CREATE TABLE session_events (
 - Create thread: `thread/start` with model and cwd
 - Per turn: `turn/start` with user input, stream notifications
 - Map Codex events to SessionEvent:
-  - `item/agentMessage/delta` → `TextDelta`
-  - `turn/started` → `TurnStarted`
-  - `turn/completed` → `TurnCompleted`
-  - `item/started` (commandExecution, fileChange, mcpToolCall) → `ToolStarted`
-  - `item/commandExecution/outputDelta`, `item/fileChange/outputDelta` → `ToolOutput`
-  - `item/completed` → `ToolDone`
+  - `turn/started` → `TurnStarted { turn_id }`
+  - `turn/completed` → `TurnCompleted { turn_id, status }`
+  - `item/started` (commandExecution) → `ItemStarted { turn_id, Command { .. } }`
+  - `item/started` (fileChange) → `ItemStarted { turn_id, FileChange { .. } }`
+  - `item/started` (mcpToolCall) → `ItemStarted { turn_id, McpToolCall { .. } }`
+  - `item/started` (plan) → `ItemStarted { turn_id, Plan { .. } }`
+  - `item/completed` → `ItemCompleted { turn_id, item }`
+  - `item/agentMessage/delta` → `TextDelta { turn_id, content }`
+  - `item/reasoning/summaryTextDelta` → `ReasoningDelta { turn_id, content }`
+  - `item/commandExecution/outputDelta` → `ItemUpdated { turn_id, item_id, Output }`
+  - `item/plan/delta` → `ItemUpdated { turn_id, item_id, PlanText }`
+  - `turn/diff/updated` → `DiffUpdated { turn_id, diff }`
 - Auto-approve all approval requests (respond `accept` to JSON-RPC requests)
 - Shutdown: `turn/interrupt`, kill process
 
@@ -101,8 +126,12 @@ CREATE TABLE session_events (
 
 ## Shipped
 
-All planned pieces landed: session API (5 endpoints under `/v0/sessions`), flat event model, lifecycle state machine, Sqlite + Postgres storage, Codex adapter with JSON-RPC mapping, manager tests. API docs in `docs/lfd.md`.
+All planned pieces landed: session API (5 endpoints under `/v0/sessions`), turn+item event model, lifecycle state machine, Sqlite + Postgres storage, Codex adapter with JSON-RPC mapping, manager tests. API docs in `docs/lfd.md`.
 
-**What went as expected:** Event model, lifecycle state machine, storage schema, and API shape all landed as designed. The adapter trait abstraction worked cleanly.
+**Event model evolved from plan.** Started with flat events (`TextDelta, ToolStarted, ToolDone`). Shipped with a richer turn+item model — typed items with lifecycles, `turn_id` on all turn-scoped events, and a generic `Tool` fallback. This is better for both the Claude adapter (structured tool mapping) and Concerto (typed item rendering).
+
+**Adapter trait is simpler than expected.** Three methods: `start()`, `send_input()`, `stop()`. Factory pattern for provider dispatch. The abstraction is clean enough that Phase 02 should be straightforward to wire up.
+
+**Event normalization is where complexity lives.** The Codex adapter (630 lines) spent most of its effort normalizing field name aliases (`turn.id` / `turnId` / `id`), status values (`cancelled` → `interrupted`), and item type detection from JSON-RPC payloads. Phase 02's Claude adapter will face similar normalization work against NDJSON.
 
 **What to validate before phase 02:** Codex event mappings were built from docs, not real traces. Run a real Codex session to confirm payloads match before using this as the reference for Claude adapter event mapping.

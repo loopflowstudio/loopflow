@@ -42,18 +42,29 @@ claude -p "follow-up message" \
   --include-partial-messages
 ```
 
-**Event mapping:**
-- `content_block_delta` (text_delta) → `TextDelta`
-- `content_block_start` (tool_use) → `ToolStarted`
-- `content_block_delta` (input_json_delta) → `ToolOutput`
-- `content_block_stop` → `ToolDone`
-- `message_stop` → `TurnCompleted`
+**Event mapping** (to shipped turn+item model):
+- `content_block_delta` (text_delta) → `TextDelta { turn_id, content }`
+- `content_block_delta` (thinking_delta) → `ReasoningDelta { turn_id, content }`
+- `content_block_start` (tool_use, name=bash) → `ItemStarted { turn_id, Command { .. } }`
+- `content_block_start` (tool_use, name=edit/write) → `ItemStarted { turn_id, FileChange { .. } }`
+- `content_block_start` (tool_use, other) → `ItemStarted { turn_id, Tool { .. } }`
+- `content_block_stop` → `ItemCompleted { turn_id, item }`
+- `message_stop` → `TurnCompleted { turn_id, status }`
+
+Note: Claude's tool events are less structured than Codex's — the adapter will need to infer item type from tool name (e.g., `bash` → `Command`, `edit` → `FileChange`). The generic `Tool` fallback handles unknown tools cleanly.
 
 ### Protocol validation
 
 - Same API endpoints, same SSE event stream, same input/end flow
 - If the session API needs changes to support Claude, those changes must also work for Codex
 - Any Claude-specific behavior goes in adapter internals, not the API surface
+
+## What we learned from Phase 01
+
+- **Adapter trait is small.** `start()`, `send_input()`, `stop()` — plus an event channel back to the manager. Wiring up a new adapter is straightforward.
+- **Event normalization is the hard part.** The Codex adapter spent most of its 630 lines normalizing JSON-RPC payloads to canonical events. Claude's NDJSON will need similar normalization, but the shapes are better documented.
+- **Item type inference from tool name.** Codex sends explicit item types (`commandExecution`, `fileChange`). Claude doesn't — the adapter must infer `Command` vs `FileChange` vs `Tool` from the tool name string. This is the main new challenge.
+- **Turn ID management.** The manager assigns turn IDs and emits `TurnStarted` before forwarding input to the adapter. The Claude adapter doesn't need to track turn boundaries itself — just emit item and delta events.
 
 ## Probes (gate before committing)
 

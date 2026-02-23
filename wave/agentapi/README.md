@@ -14,7 +14,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 
 **lfd owns the session lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
 
-**Structured events, flat stream.** Provider adapters translate native events (Codex JSON-RPC, Claude NDJSON, OpenCode SSE) into a canonical event model. Typed events (text deltas, tool calls, turn boundaries) — but flat, not nested. Client groups visually.
+**Turn+item event model.** Provider adapters translate native events (Codex JSON-RPC, Claude NDJSON, OpenCode SSE) into a canonical event model. Turns are first-class (every turn-scoped event carries `turn_id`). Items are typed (`Command`, `FileChange`, `McpToolCall`, `AgentMessage`, `Plan`, `Tool`) with lifecycles (`ItemStarted → ItemUpdated → ItemCompleted`). High-frequency deltas (`TextDelta`, `ReasoningDelta`) stay top-level for streaming efficiency.
 
 **Container-first safety.** All adapters run in yolo/bypass mode. Safety comes from the container, not tool-level permissions. No approval routing in v1.
 
@@ -44,8 +44,10 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 ```
 Concerto ──HTTP/SSE──▶ lfd session API
                          ├── SessionManager (lifecycle, state machine)
+                         │     └── SessionRuntime (adapter + broadcast + seq counter)
                          ├── session store (sessions + session_events tables)
                          └── adapter (Codex | Claude | OpenCode)
+                               ├── event bridge task (adapter → store + broadcast)
                                └── provider process
                                      Codex: codex --app-server (JSON-RPC stdio)
                                      Claude: claude -p --resume (NDJSON stdio)

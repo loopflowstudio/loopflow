@@ -1,83 +1,95 @@
 # 04: Prompt Pipeline
 
-Replace stringly-typed document categories with a typed pipeline.
+## Problem
 
-## What exists after this
+`engine/prompt.rs` still treats document origin as free-form strings and gathers context through scattered boolean gates. That makes prompt assembly brittle (typos become behavior), hard to extend (new source requires touching many branches), and risky to refactor in a 2400+ line file.
 
-`DocumentSource` enum replaces `category: String`. Documents gathered via `gather_documents(specs)` with explicit source specification. Formatting consolidated into `format_prompt(mode)`.
+Who benefits:
+- Contributors touching prompt assembly get compile-time guarantees instead of string matching.
+- Reviewers get a single gather pipeline and a single formatting entry point.
+- Users benefit from safer prompt evolution without parity regressions.
 
-## Current state
-
-`engine/prompt.rs` (2429 lines) uses `Document { path, content, category: String }` where category is one of: `"wave"`, `"docs"`, `"diff_files"`, `"summaries"`, `"area"`.
-
-Gathering happens procedurally across ~500 lines: wave docs, area docs, diff, clipboard, lfdocs each gathered by separate code paths with inline filtering. `GatherContextOpts` has boolean flags (`lfdocs`, `diff_files`, `diff`, `clipboard`) that control which paths run.
-
-`ContextBreakdown` tracks token counts per category for display. Formatting functions (`format_prompt`, `format_context_prompt`, `format_task_prompt`) handle different output modes.
+Why now: stage 04 is the remaining simplification item in the Rust wave, and it is intentionally independent of store work.
 
 ## Approach
 
-### Step 1 — DocumentSource enum
+Replace ad-hoc prompt assembly with a typed, declarative pipeline in one focused refactor:
 
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DocumentSource {
-    Step,
-    Direction,
-    Wave,
-    Area,
-    Diff,
-    Clipboard,
-    RepoDoc,
-    Summary,
-}
-```
+1. **Type document origin**
+   - Introduce `DocumentSource` enum:
+     `Step | Direction | Wave | Area | Diff | Clipboard | RepoDoc | Summary`.
+   - Change `Document.category: String` to `Document.source: DocumentSource`.
+   - Derive `Debug, Clone, PartialEq, Eq, Hash` for map/set use.
 
-Replace `category: String` on `Document`. Update `ContextBreakdown` to use `DocumentSource` keys.
+2. **Make gathering spec-driven**
+   - Replace `GatherContextOpts` booleans with `GatherSpec { sources, repo_root, area, wave, ... }`.
+   - Implement `gather_documents(spec: &GatherSpec) -> Vec<Document>` as ordered dispatch over explicit sources.
+   - Keep source-specific logic in focused helper functions (`gather_wave_docs`, `gather_area_docs`, etc.).
+   - Preserve output ordering exactly to keep parity stable.
 
-### Step 2 — Gather specs
+3. **Unify formatting path**
+   - Add `PromptFormatMode` enum (context/task/full).
+   - Consolidate existing formatters into `format_prompt(mode, ...)`.
+   - Remove duplicate branching across old formatter functions.
 
-Replace boolean flags with explicit gather specifications:
+4. **Move breakdown accounting to enum keys**
+   - Update `ContextBreakdown` to key by `DocumentSource`.
+   - Replace string literal category checks with enum matches.
 
-```rust
-pub struct GatherSpec {
-    pub sources: Vec<DocumentSource>,
-    pub repo_root: PathBuf,
-    pub area: Option<String>,
-    pub wave: Option<String>,
-    // ...
-}
+5. **Delete replaced paths in the same PR**
+   - Remove old string category literals and boolean-gated gathering branches.
+   - No compatibility shim layer.
 
-pub fn gather_documents(spec: &GatherSpec) -> Vec<Document> {
-    // Dispatch per source, collect results
-}
-```
+## Alternatives considered
 
-Each source has a focused gatherer. The top-level function dispatches and collects.
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep `String` categories but centralize constants | Lower migration cost | Still stringly-typed; typos remain runtime bugs |
+| Add enum but keep old gather booleans | Safer incremental rollout | Leaves duplicated control plane and complexity in place |
+| Split `prompt.rs` first, then refactor behavior | Better file ergonomics | Higher parity risk from structural + behavioral change together |
 
-### Step 3 — Format consolidation
+## Key decisions
 
-Merge `format_prompt`, `format_context_prompt`, `format_task_prompt` into one entry point with a mode parameter. Keep thin wrappers for backwards compatibility during migration if needed.
+- **Decision: one decisive refactor, not staged compatibility.**
+  - Follows wave principle: **"Each stage deletes what it replaces — no deferred cleanup."**
+  - We will remove legacy paths immediately after migrating callsites.
 
-### Step 4 — Delete string categories
+- **Decision: keep stage boundary strict.**
+  - Follows wave principle: **"Stage 04 is independent — it touches `engine/prompt.rs`, not the store layer."**
+  - No store/executor changes in this work.
 
-Remove all `"wave"`, `"docs"`, `"area"` string literals. Category filtering uses enum matching.
+- **Decision: parity is a hard gate.**
+  - Follows wave north star: **"Prompt assembly uses typed document sources."**
+  - Any refactor that changes output ordering/format is rejected.
 
-## Key files
+- **Wild success target:** adding a new source becomes one enum variant + one gatherer + one formatter match arm, with no string hunting.
+- **Wild failure to avoid:** enum exists but old booleans/literals survive, creating two competing pipelines.
 
-| File | Lines | What changes |
-|------|-------|-------------|
-| `engine/prompt.rs` | ~2429 | DocumentSource enum, gather_documents, format consolidation |
-| `engine/mod.rs` | | Export new types |
+## Scope
 
-## Risks
+- In scope:
+  - `DocumentSource` and `Document` field migration
+  - `GatherSpec` + `gather_documents(spec)` dispatch
+  - Consolidated formatter entry point with mode enum
+  - `ContextBreakdown` migration from string keys to enum keys
+  - Prompt parity test updates/fixes required by refactor
 
-- **Prompt parity**: `cargo test -p loopflow golden_prompt` and `tests/parity/test_prompt_parity.py` verify prompt output. Any refactor must preserve exact output. Run parity tests after each step.
-- **Large file**: 2400 lines in a single file. Refactoring in place is safer than splitting during this stage.
+- Out of scope:
+  - `lfd/executor.rs` decomposition
+  - Store/backends and SQL catalog work
+  - Product behavior changes to waves/flows/scheduler
+  - Non-parity prompt content redesign
 
 ## Done when
 
-- `Document.category` is `DocumentSource` enum, not `String`
-- No string category literals in prompt assembly
-- `gather_documents(spec)` replaces procedural gathering
-- Formatting consolidated (one entry point, mode parameter)
-- Golden prompt and parity tests pass
+- `Document` no longer has string category fields.
+- Prompt assembly contains no source string literals (`"wave"`, `"docs"`, `"area"`, etc.) for behavior routing.
+- `gather_documents(&GatherSpec)` is the single gathering entry point.
+- Formatting runs through one mode-based entry point.
+- Verification passes:
+
+```bash
+cargo test -p loopflow golden_prompt
+uv run pytest tests/parity/test_prompt_parity.py
+cargo test -p loopflow prompt
+```

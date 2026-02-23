@@ -8,10 +8,10 @@ use tracing::warn;
 const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
 const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 45 * 60;
-const DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES: i64 = 4 * 1024 * 1024 * 1024;
-const DEFAULT_EXECUTOR_MEMORY_SWAP_LIMIT_BYTES: i64 = 4 * 1024 * 1024 * 1024;
-const DEFAULT_EXECUTOR_CPU_QUOTA: i64 = 200_000;
-const DEFAULT_EXECUTOR_PIDS_LIMIT: i64 = 512;
+const DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES: i64 = 8 * 1024 * 1024 * 1024;
+const DEFAULT_EXECUTOR_MEMORY_SWAP_LIMIT_BYTES: i64 = 8 * 1024 * 1024 * 1024;
+const DEFAULT_EXECUTOR_CPU_QUOTA: i64 = 400_000;
+const DEFAULT_EXECUTOR_PIDS_LIMIT: i64 = 1024;
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
@@ -195,6 +195,7 @@ impl RawLfdConfig {
         }
 
         let profile = ModeProfile::for_mode(self.mode);
+        self.executor.limits.validate()?;
 
         Ok(LfdConfig {
             mode: self.mode,
@@ -207,7 +208,7 @@ impl RawLfdConfig {
                 image: self.executor.image,
                 credentials: self.executor.credentials,
                 agent_timeout: self.executor.agent_timeout,
-                limits: self.executor.limits.resolve()?,
+                limits: self.executor.limits,
             },
             github: self.github,
         })
@@ -400,7 +401,8 @@ impl Default for ExecutorConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
 pub struct ExecutorLimitsConfig {
     pub memory: i64,
     pub memory_swap: i64,
@@ -408,13 +410,23 @@ pub struct ExecutorLimitsConfig {
     pub pids_limit: i64,
 }
 
+impl ExecutorLimitsConfig {
+    fn validate(&self) -> Result<()> {
+        require_positive_limit(self.memory, "executor.limits.memory")?;
+        require_positive_limit(self.memory_swap, "executor.limits.memory_swap")?;
+        require_positive_limit(self.cpu_quota, "executor.limits.cpu_quota")?;
+        require_positive_limit(self.pids_limit, "executor.limits.pids_limit")?;
+        Ok(())
+    }
+}
+
 impl Default for ExecutorLimitsConfig {
     fn default() -> Self {
         Self {
-            memory: default_executor_memory_limit_bytes(),
-            memory_swap: default_executor_memory_swap_limit_bytes(),
-            cpu_quota: default_executor_cpu_quota(),
-            pids_limit: default_executor_pids_limit(),
+            memory: DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES,
+            memory_swap: DEFAULT_EXECUTOR_MEMORY_SWAP_LIMIT_BYTES,
+            cpu_quota: DEFAULT_EXECUTOR_CPU_QUOTA,
+            pids_limit: DEFAULT_EXECUTOR_PIDS_LIMIT,
         }
     }
 }
@@ -432,7 +444,7 @@ struct RawExecutorConfig {
     )]
     agent_timeout: Duration,
     #[serde(default)]
-    limits: RawExecutorLimitsConfig,
+    limits: ExecutorLimitsConfig,
 }
 
 impl Default for RawExecutorConfig {
@@ -442,41 +454,7 @@ impl Default for RawExecutorConfig {
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
             agent_timeout: default_agent_timeout(),
-            limits: RawExecutorLimitsConfig::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawExecutorLimitsConfig {
-    #[serde(default = "default_executor_memory_limit_bytes")]
-    memory: i64,
-    #[serde(default = "default_executor_memory_swap_limit_bytes")]
-    memory_swap: i64,
-    #[serde(default = "default_executor_cpu_quota")]
-    cpu_quota: i64,
-    #[serde(default = "default_executor_pids_limit")]
-    pids_limit: i64,
-}
-
-impl RawExecutorLimitsConfig {
-    fn resolve(self) -> Result<ExecutorLimitsConfig> {
-        Ok(ExecutorLimitsConfig {
-            memory: require_positive_limit(self.memory, "executor.limits.memory")?,
-            memory_swap: require_positive_limit(self.memory_swap, "executor.limits.memory_swap")?,
-            cpu_quota: require_positive_limit(self.cpu_quota, "executor.limits.cpu_quota")?,
-            pids_limit: require_positive_limit(self.pids_limit, "executor.limits.pids_limit")?,
-        })
-    }
-}
-
-impl Default for RawExecutorLimitsConfig {
-    fn default() -> Self {
-        Self {
-            memory: default_executor_memory_limit_bytes(),
-            memory_swap: default_executor_memory_swap_limit_bytes(),
-            cpu_quota: default_executor_cpu_quota(),
-            pids_limit: default_executor_pids_limit(),
+            limits: ExecutorLimitsConfig::default(),
         }
     }
 }
@@ -487,22 +465,6 @@ fn default_executor_image() -> String {
 
 fn default_agent_timeout() -> Duration {
     Duration::from_secs(DEFAULT_AGENT_TIMEOUT_SECS)
-}
-
-fn default_executor_memory_limit_bytes() -> i64 {
-    DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES
-}
-
-fn default_executor_memory_swap_limit_bytes() -> i64 {
-    DEFAULT_EXECUTOR_MEMORY_SWAP_LIMIT_BYTES
-}
-
-fn default_executor_cpu_quota() -> i64 {
-    DEFAULT_EXECUTOR_CPU_QUOTA
-}
-
-fn default_executor_pids_limit() -> i64 {
-    DEFAULT_EXECUTOR_PIDS_LIMIT
 }
 
 fn parse_agent_timeout_duration(raw: &str) -> std::result::Result<Duration, String> {
@@ -516,12 +478,13 @@ fn parse_agent_timeout_duration(raw: &str) -> std::result::Result<Duration, Stri
 }
 
 fn parse_executor_limit_i64(raw: &str, env_key: &str, field: &str) -> Result<i64> {
-    let value = raw
-        .parse::<i64>()
-        .map_err(|err| anyhow!("invalid {} value '{}' for {}: {}", env_key, raw, field, err))?;
-    require_positive_limit(value, field).map_err(|_| {
-        anyhow!("invalid {env_key} value '{raw}' for {field}: must be greater than zero")
-    })
+    let value: i64 = raw
+        .parse()
+        .map_err(|err| anyhow!("invalid {env_key} value '{raw}' for {field}: {err}"))?;
+    if value <= 0 {
+        bail!("invalid {env_key} value '{raw}' for {field}: must be greater than zero");
+    }
+    Ok(value)
 }
 
 fn require_positive_limit(value: i64, field: &str) -> Result<i64> {
@@ -609,10 +572,10 @@ mod tests {
         assert_eq!(
             config.executor.limits,
             ExecutorLimitsConfig {
-                memory: 4 * 1024 * 1024 * 1024,
-                memory_swap: 4 * 1024 * 1024 * 1024,
-                cpu_quota: 200_000,
-                pids_limit: 512,
+                memory: 8 * 1024 * 1024 * 1024,
+                memory_swap: 8 * 1024 * 1024 * 1024,
+                cpu_quota: 400_000,
+                pids_limit: 1024,
             }
         );
     }

@@ -441,6 +441,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     );
 
     let mut spec = opts.gather_spec();
+    let include_branch_diff = opts.sources.contains(&DocumentSource::Diff);
     spec.normalize();
 
     // Gather document sources through a single pipeline.
@@ -469,7 +470,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
-    let (diff, diff_tier, diff_file_count) = if spec.includes(DocumentSource::Diff) {
+    let (diff, diff_tier, diff_file_count) = if include_branch_diff {
         gather_diff_tiered(repo_root)?
     } else {
         (None, DiffTier::None, 0)
@@ -2019,6 +2020,40 @@ mod tests {
             .filter(|f| f.path.ends_with("src/main.rs"))
             .count();
         assert_eq!(main_count, 1);
+    }
+
+    #[test]
+    fn gather_context_with_specific_files_does_not_pull_branch_diff() {
+        let repo = init_git_repo();
+        Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git checkout");
+        write_file(repo.path(), "src/a.rs", "mod a;");
+        write_file(repo.path(), "src/unrelated.rs", "mod unrelated;");
+        Command::new("git")
+            .args(["add", "src/a.rs", "src/unrelated.rs"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git add");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            files: vec!["src/a.rs".to_string()],
+            sources: vec![],
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
+
+        assert!(
+            ctx.diff.is_none(),
+            "files-only context should not include branch diff"
+        );
+        assert!(!prompt.contains("<lf:diff>"));
+        assert!(prompt.contains("mod a;"));
+        assert!(!prompt.contains("mod unrelated;"));
     }
 
     #[test]

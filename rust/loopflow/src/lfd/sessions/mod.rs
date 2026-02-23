@@ -138,7 +138,7 @@ impl SessionManager {
         self.append_runtime_event(
             &session.id,
             &runtime,
-            SessionEvent::SessionStatus {
+            SessionEvent::StatusChanged {
                 status: SessionStatus::Starting,
             },
         )
@@ -364,7 +364,7 @@ impl SessionManager {
             .await?;
 
         if let Some(runtime) = runtime {
-            self.append_runtime_event(session_id, &runtime, SessionEvent::SessionStatus { status })
+            self.append_runtime_event(session_id, &runtime, SessionEvent::StatusChanged { status })
                 .await?;
         }
 
@@ -430,11 +430,16 @@ mod tests {
         }
 
         async fn send_input(&mut self, content: &str) -> Result<()> {
-            let _ = self.tx.send(SessionEvent::TurnStarted);
+            let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+            let _ = self.tx.send(SessionEvent::TurnStarted {
+                turn_id: turn_id.clone(),
+            });
             let _ = self.tx.send(SessionEvent::TextDelta {
+                turn_id: turn_id.clone(),
                 content: content.to_string(),
             });
             let _ = self.tx.send(SessionEvent::TurnCompleted {
+                turn_id,
                 status: TurnStatus::Completed,
             });
             Ok(())
@@ -518,10 +523,8 @@ mod tests {
                 .expect("list events");
             saw_text_delta = events.iter().any(|event| {
                 matches!(
-                    event.event,
-                    SessionEvent::TextDelta {
-                        ref content
-                    } if content == "fix the failing tests"
+                    &event.event,
+                    SessionEvent::TextDelta { content, .. } if content == "fix the failing tests"
                 )
             });
             if saw_text_delta {

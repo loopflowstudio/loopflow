@@ -25,7 +25,7 @@ This phase does not provide:
 ## What we learned from phases 01–03
 
 - Session token and static token paths are distinct since Phase 01. Remaining work is ensuring no silent fallback between them.
-- Per-wave volumes from Phase 03 mean credential file mounts are only visible to the wave they're mounted into. However, mount configuration (`executor.credentials.mounts`) is still global — all waves get the same credential mounts. Per-wave credential scoping is not in scope here but is worth tracking if multi-tenant needs arise.
+- Credential file mounts (`executor.credentials.mounts`) are global — all waves sharing a repo get the same credential mounts. Per-wave credential scoping is not in scope here but is worth tracking if multi-tenant needs arise.
 
 ## Scope (lightweight by design)
 

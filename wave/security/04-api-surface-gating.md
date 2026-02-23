@@ -15,8 +15,7 @@ Constrain the lfd HTTP/WebSocket surface so malformed, oversized, or cross-bound
 - Method-tier auth (`read` vs `mutate`) is simpler than route tagging. This phase should reuse those tiers for throttling and caps where possible.
 - Session-token file fallback is now in Python and Swift local clients; leakage tests must cover both local session tokens and static tokens.
 - Path traversal defenses are already centralized in `lfd::security`, so this phase should not add duplicate path-validation code.
-- Docker API access is already narrowed by the socket proxy in managed compose mode. This phase focuses on lfd's own HTTP/WS surface, not Docker API gating.
-- Error sanitization should cover wave-internal paths (volume names, worktree paths) that Phase 03 introduced — these are internal identifiers that shouldn't appear in error responses.
+- Error sanitization should cover internal identifiers (volume names, worktree paths) — these shouldn't appear in error responses.
 
 ## Security boundary for this phase
 

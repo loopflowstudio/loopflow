@@ -7,7 +7,6 @@ use crate::lfd::config::{CredentialMount, ExecutorType, LfdConfig, StorageType};
 
 const POSTGRES_DATABASE_URL: &str = "postgres://lfd:lfd@postgres:5432/lfd";
 const POSTGRES_IMAGE: &str = "postgres:16-alpine";
-const DOCKER_SOCKET_PROXY_IMAGE: &str = "tecnativa/docker-socket-proxy:0.3.0";
 
 #[derive(Debug, Clone)]
 struct ComposeServiceStatus {
@@ -217,12 +216,11 @@ fn render_compose_file(config: &LfdConfig) -> Result<String> {
     };
 
     Ok(format!(
-        "services:\n  lfd:\n    image: {image}\n    ports:\n      - \"${{LFD_PORT:-2486}}:2486\"\n    environment:\n      LFD_HTTP_ADDR: \"0.0.0.0:2486\"\n      LFD_MODE: \"{mode}\"\n      LFD_DATABASE_URL: \"{database_url}\"\n      LFD_EXECUTOR_IMAGE: \"{image}\"\n      LFD_AUTH_PROVIDER: \"${{LFD_AUTH_PROVIDER:-local}}\"\n      LFD_AUTH_TOKEN: \"${{LFD_AUTH_TOKEN:-}}\"\n      DOCKER_HOST: \"tcp://docker-socket-proxy:2375\"{extra_env}\n    env_file:\n      - path: .env\n        required: false\n    volumes:\n      - lfd-data:/root/.lf{extra_mounts}\n    depends_on:\n      postgres:\n        condition: service_healthy\n      docker-socket-proxy:\n        condition: service_started\n    healthcheck:\n      test: [\"CMD\", \"curl\", \"-sf\", \"http://localhost:2486/health\"]\n      interval: 10s\n      timeout: 5s\n      retries: 3\n      start_period: 30s\n    restart: unless-stopped\n\n  docker-socket-proxy:\n    image: {socket_proxy_image}\n    environment:\n      LOG_LEVEL: warning\n      CONTAINERS: 1\n      IMAGES: 1\n      VOLUMES: 1\n      BUILD: 1\n      POST: 1\n      PING: 1\n      VERSION: 1\n      INFO: 1\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n    restart: unless-stopped\n\n  postgres:\n    image: {postgres_image}\n    environment:\n      POSTGRES_USER: lfd\n      POSTGRES_PASSWORD: lfd\n      POSTGRES_DB: lfd\n    volumes:\n      - pgdata:/var/lib/postgresql/data\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U lfd\"]\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n\nvolumes:\n  pgdata:\n  lfd-data:\n",
+        "services:\n  lfd:\n    image: {image}\n    ports:\n      - \"${{LFD_PORT:-2486}}:2486\"\n    environment:\n      LFD_HTTP_ADDR: \"0.0.0.0:2486\"\n      LFD_MODE: \"{mode}\"\n      LFD_DATABASE_URL: \"{database_url}\"\n      LFD_EXECUTOR_IMAGE: \"{image}\"\n      LFD_AUTH_PROVIDER: \"${{LFD_AUTH_PROVIDER:-local}}\"\n      LFD_AUTH_TOKEN: \"${{LFD_AUTH_TOKEN:-}}\"{extra_env}\n    env_file:\n      - path: .env\n        required: false\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - lfd-data:/root/.lf{extra_mounts}\n    depends_on:\n      postgres:\n        condition: service_healthy\n    healthcheck:\n      test: [\"CMD\", \"curl\", \"-sf\", \"http://localhost:2486/health\"]\n      interval: 10s\n      timeout: 5s\n      retries: 3\n      start_period: 30s\n    restart: unless-stopped\n\n  postgres:\n    image: {postgres_image}\n    environment:\n      POSTGRES_USER: lfd\n      POSTGRES_PASSWORD: lfd\n      POSTGRES_DB: lfd\n    volumes:\n      - pgdata:/var/lib/postgresql/data\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U lfd\"]\n      interval: 5s\n      timeout: 5s\n      retries: 5\n    restart: unless-stopped\n\nvolumes:\n  pgdata:\n  lfd-data:\n",
         image = config.executor.image,
         mode = config.mode.as_str(),
         database_url = POSTGRES_DATABASE_URL,
         postgres_image = POSTGRES_IMAGE,
-        socket_proxy_image = DOCKER_SOCKET_PROXY_IMAGE,
         extra_env = extra_env,
         extra_mounts = extra_mounts,
     ))
@@ -269,38 +267,5 @@ impl From<ComposePsRow> for ComposeServiceStatus {
             state: value.state.unwrap_or_else(|| "unknown".to_string()),
             health: value.health,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lfd::config::Mode;
-
-    fn container_config() -> LfdConfig {
-        LfdConfig {
-            mode: Mode::Container,
-            storage: StorageType::Postgres,
-            executor: crate::lfd::config::ExecutorConfig {
-                r#type: ExecutorType::Docker,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn render_compose_uses_docker_socket_proxy() {
-        let content = render_compose_file(&container_config()).expect("compose should render");
-        let lfd_section = content
-            .split("  lfd:\n")
-            .nth(1)
-            .and_then(|section| section.split("\n  docker-socket-proxy:\n").next())
-            .expect("lfd section should exist");
-
-        assert!(content.contains("\n  docker-socket-proxy:\n"));
-        assert!(content.contains("DOCKER_HOST: \"tcp://docker-socket-proxy:2375\""));
-        assert!(content.contains("/var/run/docker.sock:/var/run/docker.sock:ro"));
-        assert!(!lfd_section.contains("/var/run/docker.sock:/var/run/docker.sock"));
     }
 }

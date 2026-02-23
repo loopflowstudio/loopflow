@@ -487,11 +487,11 @@ fn parse_executor_limit_i64(raw: &str, env_key: &str, field: &str) -> Result<i64
     Ok(value)
 }
 
-fn require_positive_limit(value: i64, field: &str) -> Result<i64> {
+fn require_positive_limit(value: i64, field: &str) -> Result<()> {
     if value <= 0 {
         bail!("{field} must be greater than zero");
     }
-    Ok(value)
+    Ok(())
 }
 
 fn deserialize_duration<'de, D>(deserializer: D) -> std::result::Result<Duration, D::Error>

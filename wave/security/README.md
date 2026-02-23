@@ -31,11 +31,9 @@ What changed after implementation:
 
 What changed after implementation:
 
-- **Per-wave volumes replaced subpath investigation.** The plan listed three isolation options (subpath bind mounts, workdir enforcement, accept risk). Implementation chose a fourth — full per-wave Docker volumes — which is stronger than any of the three. Trade-off is higher disk/clone cost per wave.
-- **Socket proxy API allowlist is broader than planned.** The original plan listed CONTAINERS, IMAGES, VOLUMES, POST. Implementation added BUILD, PING, VERSION, INFO. Phase 04/05 should note that proxy flags may need to grow if the Docker executor gains new capabilities.
-- **Default limits landed lower than the design doc.** Design doc proposed 8 GiB / 4 vCPU / 1024 PIDs. Shipped 4 GiB / 2 vCPU / 512 PIDs. The lower defaults leave more host headroom for concurrent waves and are configurable.
-- **Explicit Docker network isolation was unnecessary.** Agent containers created by lfd land on the default bridge, which is already isolated from Compose-internal services. No additional network configuration needed.
-- **Runtime isolation risk is now resolved.** The biggest uncertainty from Phase 03 (container limits + workspace isolation) shipped cleanly. Remaining security risk shifts to API surface (Phase 04) and credential handling (Phase 05).
+- **Scope narrowed to secure defaults only.** Per-wave volumes and Docker socket proxy were considered but cut — per-wave volumes add disk/clone overhead without proportionate security gain, and the socket proxy threat model (compromised lfd daemon) is narrow. Shipped non-root user, resource limits, and `no-new-privileges` as the core hardening.
+- **Default limits are generous.** Shipped 8 GiB / 4 vCPU / 1024 PIDs. Prevent runaway containers without constraining normal agent work. Configurable via YAML and env overrides.
+- **Runtime isolation risk is now resolved.** The biggest uncertainty from Phase 03 (container limits + non-root user) shipped cleanly. Remaining security risk shifts to API surface (Phase 04) and credential handling (Phase 05).
 
 Near-term sequencing stays:
 

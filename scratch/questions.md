@@ -1,3 +1,3 @@
 # Open questions
 
-- Docker fork branches still create host git worktrees (instead of empty host dirs) so `build_step_prompt` can resolve step files and context logs before container launch. If we want true host-dir placeholders, we likely need a pre-prompt container sync or a prompt build path that does not depend on host worktree content.
+- Should Docker fork branches continue using host-side git worktrees for prompt assembly, or should we add a path that allows host placeholder dirs with prompt data sourced directly from container state?

@@ -1,73 +1,127 @@
 # Annotation Layer
 
-Tag every LLM call loopflow makes with structured workflow metadata. The annotation is inert until a research partner can join it to activation data — but it's ready when one appears.
+## Problem
 
-## Design
+Loopflow currently emits rich prompts but loses the workflow labels that matter for mechanistic interpretability. A researcher can inspect API traffic, but cannot reliably answer: *what step was this, in what flow position, with what directives, and what happened after?*
 
-### Attachment point: the agent
+Who benefits:
+- **Mech interp collaborators** get labeled experiments instead of anonymous requests.
+- **Loopflow maintainers** get reproducible, queryable traces of agent behavior across steps.
 
-The agent invocation is the primary annotation surface. When loopflow spawns an agent (`lf implement`, `lf gate`, etc.), it wraps the invocation in a metadata envelope. Every API call the agent makes inherits that metadata.
+Why now:
+- `wave/mechinterp/README.md` sets this as a core wave goal for 2026 collaboration work.
+- Without instrumentation now, we cannot backfill trustworthy workflow metadata later.
 
-```
-loopflow spawns agent
-  → metadata envelope attached (step, direction, area, flow, context)
-    → agent makes N requests, all tagged
-    → agent completes, outcome signal attached retroactively
-```
+## Approach
 
-### Metadata envelope
+Build a **trace-first annotation system** that records one canonical envelope per agent run, then appends outcome signals after execution.
 
-At agent spawn (known before the agent runs):
+### 1) Define a versioned envelope schema
 
-| Field | Example | Why a researcher cares |
-|-------|---------|----------------------|
-| `step.type` | `gate` | Different task types may activate different circuits |
-| `step.direction` | `["designer"]` | Perspectives may create detectable activation shifts |
-| `step.area` | `src/api/` | Scope of the codebase the agent is working in |
-| `flow.name` | `ship` | Which process is being followed |
-| `flow.position` | `3/4` | Where in the chain this step falls |
-| `context.docs` | `["CLAUDE.md", "area/api.md"]` | Which documents were assembled into context |
-| `context.artifacts` | `["scratch/design.md"]` | Artifacts from previous steps in the flow |
-| `context.diff` | `true` | Whether the current branch diff was included |
-| `wave.name` | `engbot` | Which recurring workflow this belongs to |
-| `wave.iteration` | `5` | How many times this wave has run |
+Create `AnnotationEnvelopeV1` with two phases:
+- **Spawn fields** (known pre-run): `step`, `flow`, `direction`, `area`, `context`, `wave`, `trace`.
+- **Outcome fields** (known post-run): `exit_code`, `verdict`, `tests`, `duration_ms`, `turns`, `artifacts_produced`.
 
-At agent completion (known after):
+Core identity fields:
+- `trace.trace_id` (stable across one step run)
+- `trace.span_id` (unique per agent launch)
+- `trace.parent_span_id` (set for flow/fork relationships)
 
-| Field | Example | Why a researcher cares |
-|-------|---------|----------------------|
-| `outcome.verdict` | `SHIP` | Ground truth for studying gate calibration |
-| `outcome.tests` | `pass` | Objective signal for code quality |
-| `outcome.artifacts_produced` | `["src/api/handler.rs"]` | What the agent actually changed |
-| `outcome.turns` | `12` | How many agent iterations it took |
-| `outcome.duration_ms` | `45000` | Time to completion |
+### 2) Write sidecar files for every launch path
 
-### Propagation
+Before launching an agent, write:
+- `.lf/annotation/<trace_id>/envelope.json`
+- `.lf/annotation/<trace_id>/prompt_context.json` (doc list, diff tier, token breakdown)
 
-Open design question: how does the envelope travel from loopflow → coding agent → API calls?
+Cover both launch paths:
+- `lf` local runs (`rust/loopflow/src/lf/commands/run.rs`)
+- daemon wave runs (`rust/loopflow/src/lfd/executor/helpers.rs`, `.../wave/mod.rs`, `.../wave/fork.rs`)
 
-| Mechanism | Portability | Fidelity | Notes |
-|-----------|-------------|----------|-------|
-| Environment variables | High | Low | `LF_STEP_TYPE=gate` — agent must opt in to read and forward |
-| API metadata passthrough | Medium | High | Depends on agent supporting a metadata field |
-| Sidecar file | High | Medium | `.lf/context.json` — most portable, agent reads on startup |
-| Claude Code hooks | Low | High | Hooks inject metadata into API calls — Claude Code only |
+### 3) Propagate metadata to the spawned agent process
 
-The right answer depends on what Anthropic can consume. First collaboration question: "if we tag our traffic with structured workflow metadata, what mechanism lets your team join it to activation data?"
+Set env vars on every agent subprocess:
+- `LF_TRACE_ID`
+- `LF_SPAN_ID`
+- `LF_ANNOTATION_FILE`
+- `LF_STEP_TYPE`
+- `LF_FLOW_POSITION`
 
-### What this enables
+This keeps propagation model-agnostic and works for Claude/Codex/Gemini/OpenCode immediately.
 
-With the envelope attached, a researcher can query:
+### 4) Add provider adapters without blocking V1
 
-- "Show me all gate verdicts where the model said SHIP but tests later failed" → overconfidence circuits
-- "Compare activations across the same step with designer vs. infra-engineer direction" → perspective features
-- "Track activation patterns across steps 1-4 of a ship flow" → behavioral drift across chains
-- "Find cases where context included conflicting style guide and direction instructions" → conflict resolution circuits
+V1 ships with sidecar+env only. Then add adapters:
+- **Anthropic direct API calls**: include metadata header/body field when available.
+- **Claude Code hook**: read `LF_ANNOTATION_FILE` and attach metadata to outgoing requests.
 
-## Next Steps
+If provider passthrough is unavailable, sidecar data remains the source of truth.
 
-1. Define the envelope schema (JSON schema or protobuf)
-2. Implement sidecar file write at agent spawn (`.lf/context.json`)
-3. Implement outcome signal write at agent completion
-4. Add Claude Code hook that reads sidecar and attaches to API metadata header
-5. Validate round-trip: spawn agent → metadata written → API calls tagged → outcome recorded
+### 5) Append outcomes atomically
+
+After agent exit, update `envelope.json` with outcome fields:
+- `exit_code` and `duration_ms` from runner
+- `artifacts_produced` from `git diff --name-only`
+- `verdict` parsed only for gate-style steps (else `null`)
+
+Never overwrite spawn metadata; only append outcome section.
+
+### Research patterns this follows
+
+- **OpenTelemetry pattern**: trace/span identity + structured attributes.
+- **Event-sourcing pattern**: immutable pre-run record, append-only post-run outcome.
+- **Observability fallback pattern**: capture locally first, integrate remote joins later.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Prompt-inject metadata block on every request | Highest visibility, but contaminates model behavior and confounds research | We need inert instrumentation, not extra instructions in the prompt |
+| Env vars only, no sidecar | Easy to implement, but metadata disappears once process exits | Researchers need durable records keyed to outcomes |
+| Full OTEL collector/exporter first | Powerful long-term analytics | Too heavy for wave scope; violates "instrument first" priority |
+
+## Key decisions
+
+- **Decision: ship sidecar + env propagation as the hard requirement for V1.**
+  - Following wave goal: **"Build the annotation layer that makes collaboration valuable. Every LLM call carries structured metadata about its workflow context."**
+  - Rationale: this is the minimum implementation that is both durable and provider-agnostic.
+
+- **Decision: treat dashboards/analytics as out of scope.**
+  - Following wave non-goal: **"Not building analytics or dashboards."**
+  - Rationale: we are producing clean labeled data, not a product surface.
+
+- **Decision: avoid synthetic experiments in this phase.**
+  - Following wave non-goal: **"Not generating synthetic experiments with open-weight models."**
+  - Rationale: prioritize real workflow traces from actual loopflow runs.
+
+- **Decision: use versioned schema from day one (`schema_version: 1`).**
+  - Rationale: collaboration will evolve quickly; versioning prevents breaking rewrites.
+
+### Wild success (6 months)
+
+Researchers can join loopflow run traces with internal activation slices and answer one concrete question (for example, gate overconfidence) with labeled evidence in days, not weeks.
+
+### Wild failure (6 months)
+
+Instrumentation exists but is unusable: fields are inconsistent across run paths, no stable trace IDs, and outcome linkage is missing. Mitigation: one shared schema type + contract tests across both `lf` and `lfd` launch paths.
+
+## Scope
+
+- In scope:
+  - Versioned annotation schema
+  - Sidecar file write/read lifecycle
+  - Env var propagation for all agent subprocesses
+  - Outcome append on completion
+  - Tests that prove parity across local runs, wave runs, and fork runs
+
+- Out of scope:
+  - Dashboards, query UI, or metrics productization
+  - Anthropic-internal data warehouse integration work
+  - Model-behavior claims from this branch (instrumentation only)
+  - Backfill of historical runs before annotation exists
+
+## Done when
+
+- `cargo test -p loopflow annotation_` passes with new schema + lifecycle tests.
+- Running `lf implement -b "noop"` writes `.lf/annotation/<trace_id>/envelope.json` with spawn metadata and appended outcome.
+- Running a wave step and a forked flow step writes envelopes with correct `flow.position` and parent/child trace linkage.
+- For all supported agent backends, subprocess env includes `LF_TRACE_ID` and `LF_ANNOTATION_FILE`.

@@ -16,6 +16,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::registration::RegistrationClient;
 use crate::lfd::scheduler::Scheduler;
+use crate::lfd::sessions::SessionManager;
 use crate::lfd::store::SharedStore;
 
 #[derive(Debug)]
@@ -112,6 +113,7 @@ pub struct HttpState {
     pub github: GitHubConfig,
     pub ci_failure_cache: Arc<Mutex<std::collections::HashSet<String>>>,
     pub chat_turns: ChatTurnRegistry,
+    pub sessions: SessionManager,
 }
 
 #[cfg(test)]

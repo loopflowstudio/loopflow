@@ -5,6 +5,9 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::NoTls;
 
 use crate::lfd::id::LfdId;
+use crate::lfd::sessions::types::{
+    PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
+};
 use crate::lfd::store::catalog::{
     list_agent_history_query, list_stimuli_query, list_wave_runs_query, list_waves_query, sql,
     Query, SqlDialect,
@@ -146,6 +149,196 @@ impl PostgresStore {
 
     pub async fn schema_version(&self) -> StoreResult<String> {
         super::migrations::latest_version_postgres_pool(&self.pool).await
+    }
+
+    pub async fn create_session(&self, session: &Session) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "INSERT INTO sessions (id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    &[
+                        &session.id,
+                        &session.provider,
+                        &session.status.as_i32(),
+                        &session.wave_run_id,
+                        &session.provider_session_id,
+                        &serde_json::to_string(&session.config)?,
+                        &session.created_at.unix_timestamp(),
+                        &session.ended_at.map(|dt| dt.unix_timestamp()),
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                     FROM sessions
+                     WHERE id = $1",
+                    &[&session_id],
+                )
+                .await?;
+            row.as_ref()
+                .map(|row| {
+                    let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
+                    Ok(Session {
+                        id: row.get(0),
+                        provider: row.get(1),
+                        status: SessionStatus::from_i32(row.get::<_, i32>(2)),
+                        wave_run_id: row.get(3),
+                        provider_session_id: row.get(4),
+                        config,
+                        created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)),
+                        ended_at: row
+                            .get::<_, Option<i64>>(7)
+                            .map(crate::lfd::store::rows::unix_to_datetime),
+                    })
+                })
+                .transpose()
+        })
+        .await
+    }
+
+    pub async fn get_active_session_for_wave_run(
+        &self,
+        wave_run_id: &str,
+    ) -> StoreResult<Option<Session>> {
+        let wave_run_id = wave_run_id.to_string();
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                     FROM sessions
+                     WHERE wave_run_id = $1 AND status = ANY($2)
+                     ORDER BY created_at DESC
+                     LIMIT 1",
+                    &[
+                        &wave_run_id,
+                        &&[
+                            SessionStatus::Starting.as_i32(),
+                            SessionStatus::Active.as_i32(),
+                            SessionStatus::Ending.as_i32(),
+                        ][..],
+                    ],
+                )
+                .await?;
+            row.as_ref()
+                .map(|row| {
+                    let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
+                    Ok(Session {
+                        id: row.get(0),
+                        provider: row.get(1),
+                        status: SessionStatus::from_i32(row.get::<_, i32>(2)),
+                        wave_run_id: row.get(3),
+                        provider_session_id: row.get(4),
+                        config,
+                        created_at: crate::lfd::store::rows::unix_to_datetime(row.get(6)),
+                        ended_at: row
+                            .get::<_, Option<i64>>(7)
+                            .map(crate::lfd::store::rows::unix_to_datetime),
+                    })
+                })
+                .transpose()
+        })
+        .await
+    }
+
+    pub async fn update_session_status(
+        &self,
+        session_id: &LfdId,
+        status: SessionStatus,
+        ended_at: Option<i64>,
+    ) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let updated = client
+                .execute(
+                    "UPDATE sessions
+                     SET status = $2, ended_at = COALESCE($3, ended_at)
+                     WHERE id = $1",
+                    &[&session_id, &status.as_i32(), &ended_at],
+                )
+                .await?;
+            if updated == 0 {
+                return Err(StoreError::NotFound);
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn append_session_event(
+        &self,
+        session_id: &LfdId,
+        seq: i64,
+        event: &SessionEvent,
+        created_at: i64,
+    ) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "INSERT INTO session_events (session_id, seq, event_type, data, created_at)
+                     VALUES ($1, $2, $3, $4, $5)",
+                    &[
+                        &session_id,
+                        &seq,
+                        &event.event_type(),
+                        &serde_json::to_string(event)?,
+                        &created_at,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_session_events(
+        &self,
+        session_id: &LfdId,
+        after_seq: Option<i64>,
+    ) -> StoreResult<Vec<PersistedSessionEvent>> {
+        self.with_client(|client| async move {
+            let rows = if let Some(after_seq) = after_seq {
+                client
+                    .query(
+                        "SELECT session_id, seq, data, created_at
+                         FROM session_events
+                         WHERE session_id = $1 AND seq > $2
+                         ORDER BY seq ASC",
+                        &[&session_id, &after_seq],
+                    )
+                    .await?
+            } else {
+                client
+                    .query(
+                        "SELECT session_id, seq, data, created_at
+                         FROM session_events
+                         WHERE session_id = $1
+                         ORDER BY seq ASC",
+                        &[&session_id],
+                    )
+                    .await?
+            };
+
+            rows.iter()
+                .map(|row| {
+                    let event: SessionEvent = serde_json::from_str(row.get::<_, &str>(2))?;
+                    Ok(PersistedSessionEvent {
+                        session_id: row.get(0),
+                        seq: row.get(1),
+                        event,
+                        created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)),
+                    })
+                })
+                .collect()
+        })
+        .await
     }
 
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

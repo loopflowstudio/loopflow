@@ -14,6 +14,7 @@ use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::scheduler::Scheduler;
 use loopflow::lfd::security::path_within_root_planned;
+use loopflow::lfd::sessions::SessionManager;
 use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
 
 #[tokio::main]
@@ -201,6 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         github: lfd_config.github,
         ci_failure_cache,
         chat_turns: loopflow::lfd::http::state::ChatTurnRegistry::new(),
+        sessions: SessionManager::new(store),
     };
     let http_router = loopflow::lfd::http::router(http_state);
 

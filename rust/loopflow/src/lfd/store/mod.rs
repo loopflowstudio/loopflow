@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
+use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
     Agent, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PendingActivation,
     QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
@@ -361,6 +362,107 @@ impl Store {
 
     pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
         ExecutionStore::fail_orphaned_runs(self).await
+    }
+
+    pub async fn create_session(&self, session: &Session) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session = session.clone();
+                run_sqlite(store, move |store| store.create_session(&session)).await
+            }
+            StoreBackend::Postgres(store) => store.create_session(session).await,
+        }
+    }
+
+    pub async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                run_sqlite(store, move |store| store.get_session(&session_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_session(session_id).await,
+        }
+    }
+
+    pub async fn get_active_session_for_wave_run(
+        &self,
+        wave_run_id: &str,
+    ) -> StoreResult<Option<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_run_id = wave_run_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.get_active_session_for_wave_run(&wave_run_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store.get_active_session_for_wave_run(wave_run_id).await
+            }
+        }
+    }
+
+    pub async fn update_session_status(
+        &self,
+        session_id: &LfdId,
+        status: SessionStatus,
+        ended_at: Option<i64>,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                run_sqlite(store, move |store| {
+                    store.update_session_status(&session_id, status, ended_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_session_status(session_id, status, ended_at)
+                    .await
+            }
+        }
+    }
+
+    pub async fn append_session_event(
+        &self,
+        session_id: &LfdId,
+        seq: i64,
+        event: &SessionEvent,
+        created_at: i64,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                let event = event.clone();
+                run_sqlite(store, move |store| {
+                    store.append_session_event(&session_id, seq, &event, created_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .append_session_event(session_id, seq, event, created_at)
+                    .await
+            }
+        }
+    }
+
+    pub async fn list_session_events(
+        &self,
+        session_id: &LfdId,
+        after_seq: Option<i64>,
+    ) -> StoreResult<Vec<PersistedSessionEvent>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                run_sqlite(store, move |store| {
+                    store.list_session_events(&session_id, after_seq)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_session_events(session_id, after_seq).await,
+        }
     }
 
     pub async fn health_check(&self) -> StoreResult<()> {

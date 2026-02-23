@@ -2,11 +2,13 @@
 
 Make stacked wave iterations landable, observable, and recoverable.
 
-## North Star
+## Vision
 
 Stack lineage is explicit, GitHub live PR state is current truth, and queue advancement is deterministic (`Draft -> Ready -> Merged`) with exactly one Ready PR at a time.
 
-## Locked v1 decisions
+## Goals
+
+### Locked v1 decisions
 
 - Keep stacked iterations and track ancestry explicitly.
 - Make GitHub live PR state authoritative for current status.
@@ -17,29 +19,17 @@ Stack lineage is explicit, GitHub live PR state is current truth, and queue adva
 - Keep **Combine PRs** as explicit escape hatch and model it in run history.
 - Treat `scratch/` as working memory; publish review artifacts to PR-managed output.
 
-## Status after shipping 01 + 02
+### Done when (wave complete)
 
-- Explicit lineage is in place (`parent_run_id`, `parent_pr_number`, `stack_position`, `stack_group_id`, `stack_status`).
-- Live PR cache now drives current-state projection (`open_pr_count`, stale signaling).
-- Queue reconciliation is centralized and idempotent (`reconcile_wave_queue`, `handle_pr_merged`).
-- Queue block reasons and merge-event dedupe are persisted.
-- Promotion enforces lazy rebase and scratch-clean gating.
-- Webhook and polling merge paths now run the same advancement logic.
-- `QueueRole::Superseded` and `WaveRunStackStatus::Superseded` are already inferred from `LivePrState::Closed`.
-- `QueueNextAction::CombinePrs` is projected for superseded runs — the UI hint exists before the backing operation.
-- `QueueOps` trait provides a clean extension point for combine operations.
-- `LivePrSnapshot` is shared infrastructure (`live_pr.rs`) used by both reconciliation and API routes.
+- Stack ancestry is explicit in storage and API.
+- Open PR counts and badges match GitHub state, including out-of-band merges.
+- Queue-head merge auto-advances exactly one next item or marks blocked on conflict.
+- Combine PRs produces coherent run history with supersession links.
+- Ready PRs are scratch-clean while review context remains visible on GitHub.
 
-## Remaining phases
+## Risks
 
-| # | Item | Focus | Est. impl LOC | Status |
-|---|------|-------|---------------|--------|
-| 01 | Foundations + Live State | Explicit stack model and live PR sync | 350-700 | Shipped |
-| 02 | Queue Lifecycle + Merge Advancement | Draft/Ready invariant and lazy rebase flow | 450-900 | Shipped |
-| 03 | Combine PRs Reconciliation | Durable combine audit + supersession reconciliation | 300-700 | Next |
-| 04 | Queue UX + Review Artifacts | Queue-first Concerto + PR-managed review output | 250-650 | Planned |
-
-## Plan adjustments from shipped work
+### Plan adjustments from shipped work
 
 - `queue_role` is projected, not historically persisted. Phase 03 must add durable combine event/supersession facts if we want explainable history.
 - Queue fields (`queue_role`, `queue_block_reason`, `queue_blocked_at`, `next_action`) already exist in run DTOs. Phase 04 should consume, not redesign, backend queue semantics.
@@ -52,16 +42,37 @@ Stack lineage is explicit, GitHub live PR state is current truth, and queue adva
 - `QueueOps` trait currently has five methods (checkout, mark_ready, mark_draft, rebase, scratch_clean). Phase 03 must add `close_pr` and `create_combined_pr` — the trait was designed for extension but these methods don't exist yet.
 - Poll-based reconciliation runs on a 60-second interval. Phase 04 UX should account for this latency in poll-only setups; webhook path provides near-instant updates when configured.
 
-## What might change
+### What might change
 
 - If stale-state noise in no-token setups is too high, we may need stronger UI/system guardrails around queue confidence.
 - Combine may require a stricter reconciliation state machine if GitHub operations and DB writes cannot be made sufficiently atomic.
 - `QueueBlockReason` parsing is strict — adding new reasons requires coordinated binary + migration updates. If this becomes a pain point, consider a fallback `Unknown(String)` variant.
 
-## Done when (wave complete)
+## Metrics
 
-- Stack ancestry is explicit in storage and API.
-- Open PR counts and badges match GitHub state, including out-of-band merges.
-- Queue-head merge auto-advances exactly one next item or marks blocked on conflict.
-- Combine PRs produces coherent run history with supersession links.
-- Ready PRs are scratch-clean while review context remains visible on GitHub.
+- Queue projection always yields exactly one Ready PR when unblocked
+- Merge reconciliation advances or blocks deterministically with clear persisted reasons
+- Superseded/combine states are explainable from durable run history, not only live inference
+- Review artifacts remain visible on GitHub while promotion enforces scratch-clean readiness
+
+## Roadmap
+
+| # | Item | Focus | Est. impl LOC | Status |
+|---|------|-------|---------------|--------|
+| 01 | Foundations + Live State | Explicit stack model and live PR sync | 350-700 | Shipped |
+| 02 | Queue Lifecycle + Merge Advancement | Draft/Ready invariant and lazy rebase flow | 450-900 | Shipped |
+| 03 | Combine PRs Reconciliation | Durable combine audit + supersession reconciliation | 300-700 | Next |
+| 04 | Queue UX + Review Artifacts | Queue-first Concerto + PR-managed review output | 250-650 | Planned |
+
+### Status after shipping 01 + 02
+
+- Explicit lineage is in place (`parent_run_id`, `parent_pr_number`, `stack_position`, `stack_group_id`, `stack_status`).
+- Live PR cache now drives current-state projection (`open_pr_count`, stale signaling).
+- Queue reconciliation is centralized and idempotent (`reconcile_wave_queue`, `handle_pr_merged`).
+- Queue block reasons and merge-event dedupe are persisted.
+- Promotion enforces lazy rebase and scratch-clean gating.
+- Webhook and polling merge paths now run the same advancement logic.
+- `QueueRole::Superseded` and `WaveRunStackStatus::Superseded` are already inferred from `LivePrState::Closed`.
+- `QueueNextAction::CombinePrs` is projected for superseded runs — the UI hint exists before the backing operation.
+- `QueueOps` trait provides a clean extension point for combine operations.
+- `LivePrSnapshot` is shared infrastructure (`live_pr.rs`) used by both reconciliation and API routes.

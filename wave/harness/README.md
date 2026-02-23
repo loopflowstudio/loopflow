@@ -4,19 +4,21 @@ Two systems that work together: a **chat system** (the product — users send me
 
 The chat system is one consumer of the harness. The harness doesn't know about UI. The chat system doesn't know about context windows.
 
-## Core components
+## Vision
 
-**Agent harness.** Runs turn loops: takes a prompt, calls a model, dispatches tool calls, feeds results back, loops until done. Manages its own context window in-memory. Emits structured events. Guardrails (max iterations, timeouts) from day one.
+Ship a clean product/runtime boundary where the chat system owns user experience + durable memory and the harness owns turn execution + context management. Integration should let waves run multiple agent invocations while preserving memory continuity without coupling the harness to UI concerns.
 
-**Chat system.** The user-facing product. Receives events from the harness (via tool call callbacks like `send_message`). Displays conversation, lets users read/edit memory. Provides the harness with user input and memory state. Doesn't reach into harness internals.
+Core components in this vision:
 
-**Memory.** Long-term knowledge that persists across invocations. Owned and displayed by the chat system. Provided to the harness as input — the harness reads it at session start to seed its context, and can request edits via tool calls. The chat system decides whether to apply those edits.
+- **Agent harness** runs turn loops, dispatches tools, manages context windows, and emits structured events.
+- **Chat system** consumes harness events, renders conversation, and mediates memory edits.
+- **Memory** is durable and chat-owned across invocations.
+- **Context** is harness-local and ephemeral within a single session.
+- **Tools** define both internal runtime actions and boundary calls (`send_message`, `memory_edit`).
 
-**Context.** The harness's in-memory working state during a session. A vec of messages, token-counted, managed by the harness. Seeded from memory at startup. Not persisted — it lives and dies with the session.
+## Goals
 
-**Tools.** The harness dispatches tool calls from the model. Some tools are internal to the harness (file ops, shell). Some are provided by the consumer — `send_message` and `memory_edit` are tool calls that cross the harness→chat boundary.
-
-## Invariants
+### Invariants
 
 - **`send_message` is the only user-output mechanism.** The harness produces user-visible output exclusively through explicit `send_message` tool calls, not by streaming raw LLM output.
 - **Exactly one `send_message(phase="final")` on successful turns.** Zero or more `progress` messages, exactly one `final`. This is the completion contract.
@@ -25,19 +27,34 @@ The chat system is one consumer of the harness. The harness doesn't know about U
 - **Filesystem effects are ephemeral by default.** Agent file operations happen in an isolated workspace. Nothing is committed to the real repo without explicit action.
 - **The harness doesn't know about the chat system.** It emits events and calls tools. Who's listening is not its concern.
 
-## Design decisions
+### Completion criteria (B3 checkpoint)
 
-**The harness is a runtime, not a service.** Unlike Letta (where the agent is a persistent stateful service), the harness is a runtime that runs a session and exits. State crosses session boundaries via the consumer (chat system), not via the harness's own persistence. This keeps the harness simple and reusable.
+A wave runs multiple agent invocations. Memory carries forward via the chat system. lfd orchestrates it.
 
-**Memory belongs to the chat system, not the harness.** The harness can *request* memory edits via tool calls, but the chat system decides whether to apply them. The chat system is the authority on what gets remembered.
+## Risks
 
-**Structured semantic events, not opaque streams.** The harness emits `AgentEvent`s (Message, ToolCall, ToolResult, MemoryEdit, Done, Failed) — not raw token deltas. The consumer sees what happened at a meaningful level.
+### Open questions (from B3)
 
-**Tool calls as the harness→consumer boundary.** `send_message` and `memory_edit` aren't special internal operations — they're tool calls that the consumer handles. This makes the boundary explicit and extensible.
+- Should chat turn streams persist across lfd restarts? Currently in-memory only. For single-turn chat this is fine, but wave runs spanning hours may need bounded persistence for restart resilience.
+- What's the approval UX for `memory_edit`? Auto-apply (current) vs. user confirms before persisting.
 
-**No model SDK dependency.** Raw HTTP + serde for model calls. The adapter is isolated and thin.
+### What might change
 
-## Two tracks
+- **In-memory turn streams** are the main operational risk for B3. A2's `HttpState.chat_turns` HashMap works for single turns but has no eviction. Wave runs with many invocations will accumulate unbounded state. Options: TTL-based eviction, bounded ring buffer, or persist to SQLite and evict from memory.
+- **Memory ownership** held up through A2 — the chat system persists, the harness requests edits. But auto-applying `memory_edit` without user approval may not survive real usage. B3 should decide: always auto-apply, always confirm, or let the wave config choose.
+- **Sync tool dispatch** works for B2 but shell commands that block for 30s may need async dispatch in B3. The `Tool` trait is sync (`fn call`) — changing to async would touch every tool impl.
+- **The two-track approach collapses into one.** A2 and B2 are both shipped; B3 is where they converge. The separation was useful for building the boundary — both sides are now proven and the remaining work is integration, not parallel discovery.
+
+## Metrics
+
+- Successful turns emit exactly one final `send_message` event
+- Memory blocks persist across invocations and seed subsequent turns
+- Turn stream lifecycle remains bounded (no unbounded in-memory growth)
+- Harness runtime stays UI-agnostic while chat UI remains harness-internal-state agnostic
+
+## Roadmap
+
+### Two tracks
 
 ### Track A — Chat system
 
@@ -83,12 +100,6 @@ Remaining work:
 - What crosses the invocation boundary? Memory blocks — A2 shipped the persistence layer (`007_chat_memory_blocks.sql`) and CRUD APIs. The harness reads them at turn start, requests edits via tool calls.
 - Does the harness need to know it's in a wave? No — confirmed by both B2 and A2. lfd provides memory and prompt; the harness runs a turn and emits events.
 
-**Open questions:**
-- Should chat turn streams persist across lfd restarts? Currently in-memory only. For single-turn chat this is fine, but wave runs spanning hours may need bounded persistence for restart resilience.
-- What's the approval UX for `memory_edit`? Auto-apply (current) vs. user confirms before persisting.
-
-**Checkpoint:** A wave runs multiple agent invocations. Memory carries forward via the chat system. lfd orchestrates it.
-
 ### Later
 
 - Model abstraction (extract `Model` trait when we add a second provider)
@@ -96,9 +107,26 @@ Remaining work:
 - MemGPT-style memory policies (evidence-based experiment harness)
 - E2E hardening (chat turn lifecycle, SSE reconnect, memory consistency across failures)
 
-## What might change
+## Core components
 
-- **In-memory turn streams** are the main operational risk for B3. A2's `HttpState.chat_turns` HashMap works for single turns but has no eviction. Wave runs with many invocations will accumulate unbounded state. Options: TTL-based eviction, bounded ring buffer, or persist to SQLite and evict from memory.
-- **Memory ownership** held up through A2 — the chat system persists, the harness requests edits. But auto-applying `memory_edit` without user approval may not survive real usage. B3 should decide: always auto-apply, always confirm, or let the wave config choose.
-- **Sync tool dispatch** works for B2 but shell commands that block for 30s may need async dispatch in B3. The `Tool` trait is sync (`fn call`) — changing to async would touch every tool impl.
-- **The two-track approach collapses into one.** A2 and B2 are both shipped; B3 is where they converge. The separation was useful for building the boundary — both sides are now proven and the remaining work is integration, not parallel discovery.
+**Agent harness.** Runs turn loops: takes a prompt, calls a model, dispatches tool calls, feeds results back, loops until done. Manages its own context window in-memory. Emits structured events. Guardrails (max iterations, timeouts) from day one.
+
+**Chat system.** The user-facing product. Receives events from the harness (via tool call callbacks like `send_message`). Displays conversation, lets users read/edit memory. Provides the harness with user input and memory state. Doesn't reach into harness internals.
+
+**Memory.** Long-term knowledge that persists across invocations. Owned and displayed by the chat system. Provided to the harness as input — the harness reads it at session start to seed its context, and can request edits via tool calls. The chat system decides whether to apply those edits.
+
+**Context.** The harness's in-memory working state during a session. A vec of messages, token-counted, managed by the harness. Seeded from memory at startup. Not persisted — it lives and dies with the session.
+
+**Tools.** The harness dispatches tool calls from the model. Some tools are internal to the harness (file ops, shell). Some are provided by the consumer — `send_message` and `memory_edit` are tool calls that cross the harness→chat boundary.
+
+## Design decisions
+
+**The harness is a runtime, not a service.** Unlike Letta (where the agent is a persistent stateful service), the harness is a runtime that runs a session and exits. State crosses session boundaries via the consumer (chat system), not via the harness's own persistence. This keeps the harness simple and reusable.
+
+**Memory belongs to the chat system, not the harness.** The harness can *request* memory edits via tool calls, but the chat system decides whether to apply them. The chat system is the authority on what gets remembered.
+
+**Structured semantic events, not opaque streams.** The harness emits `AgentEvent`s (Message, ToolCall, ToolResult, MemoryEdit, Done, Failed) — not raw token deltas. The consumer sees what happened at a meaningful level.
+
+**Tool calls as the harness→consumer boundary.** `send_message` and `memory_edit` aren't special internal operations — they're tool calls that the consumer handles. This makes the boundary explicit and extensible.
+
+**No model SDK dependency.** Raw HTTP + serde for model calls. The adapter is isolated and thin.

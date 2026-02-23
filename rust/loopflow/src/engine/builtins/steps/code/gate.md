@@ -69,6 +69,11 @@ Make the change easy to review.
    - Add comments where the "why" isn't obvious
    - Don't document the obvious. `# increment counter` above `counter += 1` is noise.
 
+4. **Wave alignment** (if running in a wave context)
+   - Does the shipped code advance the wave's Goals?
+   - Were any known Risks from the wave README introduced or ignored?
+   - Are there observable Metrics to note in the review doc?
+
 ## Scope
 
 **Polish this branch.** Only code changed by this branch.

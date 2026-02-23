@@ -30,9 +30,11 @@ wave/rust/
 - README.md provides principles and success criteria—use it to evaluate priority, but don't pick it
 
 **Using README.md:**
-- Follow the wave's principles when evaluating items
-- Check success criteria to understand what "done" means
-- Respect non-goals—don't pick items that conflict
+- Read **Vision** to understand what the wave is trying to achieve
+- Read **Goals** to evaluate priority — what moves success criteria most?
+- Read **Risks** to evaluate urgency — is something blocked or at risk?
+- Read **Roadmap** to understand sequencing and dependencies
+- Respect scope boundaries stated in Vision — don't pick items that conflict
 
 ## Selection criteria
 

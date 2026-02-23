@@ -4,9 +4,54 @@ Unified session API for interactive coding agents. lfd spawns and manages provid
 
 `lf` is unchanged. This is purely a new lfd API surface.
 
-## North Star
+## Vision
 
 lfd exposes a provider-agnostic session API. Clients create sessions, send input, subscribe to events, and end sessions. lfd owns the agent lifecycle — spawning processes, translating events, persisting state. Clients connect and disconnect freely; sessions survive reconnect.
+
+### Scope boundaries (not here)
+
+- Advanced Concerto UI (tool visualization, diff views, multi-panel layouts)
+- Multi-agent per step (parallel agents within one interactive step)
+- Cross-wave agent sharing
+
+## Goals
+
+Concrete objectives and invariants for this wave:
+
+- Build a provider-agnostic interactive runtime that works end-to-end with real adapters
+- Keep lifecycle ownership in lfd so clients can disconnect/reconnect without losing state
+- Keep adapter capabilities explicit so UI behavior follows capabilities, not provider names
+
+### Invariants
+
+- At most one active interactive agent per wave run at a time
+- Agent end is idempotent (multiple calls safe)
+- UI disconnect does not affect agent state
+- Reconnect replays persisted events then follows live stream
+- Agent end triggers wave continue only when wave run still waits on that agent
+
+## Risks
+
+- Canonical event shape may drift as adapters expand beyond Codex/Claude/OpenCode assumptions
+- PTY/stream translation gaps can force raw fallbacks and reduce UI fidelity
+- Reconnect and persistence correctness can regress as more lifecycle edge cases are added
+
+## Metrics
+
+- End-to-end interactive flow works for each shipped adapter: launch → events → input → end
+- Reconnect replay is observable: persisted events appear first, then live follow continues
+- Wave advancement only occurs after valid agent end for the waiting wave run
+
+## Roadmap
+
+| # | Phase | What it unlocks | Status |
+|---|-------|----------------|--------|
+| 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first adapter. | shipped |
+| 02 | Claude Adapter | `-p --resume` with structured output. Probes agent personality. | |
+| 03 | Concerto UI | Minimal chat panel, input, End button against proven API | |
+| 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
+| 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
+| 06 | OpenCode Adapter | Third adapter validates the abstraction | |
 
 ## Design Decisions
 
@@ -19,25 +64,6 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 **Container-first safety.** All adapters run in yolo/bypass mode. Safety comes from the container, not tool-level permissions. No approval routing in v1.
 
 **Provider-owned auth.** Codex and Claude handle their own OAuth/login. lfd never collects raw credentials.
-
-## Invariants
-
-- At most one active session per wave run at a time
-- Session end is idempotent (multiple calls safe)
-- UI disconnect does not affect session state
-- Reconnect replays persisted events then follows live stream
-- Session end triggers wave continue only when wave run still waits on that session
-
-## Phases
-
-| # | Phase | What it unlocks | Status |
-|---|-------|----------------|--------|
-| 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first adapter. | shipped |
-| 02 | Claude Adapter | `-p --resume` with structured output. Probes agent personality. | |
-| 03 | Concerto UI | Minimal chat panel, input, End button against proven API | |
-| 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
-| 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
-| 06 | OpenCode Adapter | Third adapter validates the abstraction | |
 
 ## Architecture
 

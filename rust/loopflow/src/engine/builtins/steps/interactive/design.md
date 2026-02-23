@@ -60,12 +60,12 @@ This is the natural session exit point. The user's answer determines what to run
 **If wave plan:**
 
 1. Break the idea into staged wave items
-2. Write `scratch/wave-proposal.md` using the wave plan output format:
-   - `status: proposed`
-   - `# Title`
-   - `## Context`
-   - `## Scope`
-   - `## Approach` (list the staged plan here)
+2. Write `scratch/wave-proposal.md` using the wave content model:
+   - `## Vision` — from the Dream phase conversation
+   - `## Goals` — concrete objectives from the Detail phase
+   - `## Risks` — unknowns and failure modes surfaced during detailing
+   - `## Metrics` — observable signals discussed
+   - `## Roadmap` — the staged breakdown
 3. The first stage becomes the design doc for this branch (`scratch/<branch>.md`)
 
 Then:

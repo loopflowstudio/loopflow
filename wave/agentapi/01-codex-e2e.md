@@ -1,75 +1,109 @@
-# 01: Codex End-to-End
+# 01: Unified Session API + Codex Adapter
 
-Launch Codex app-server from lfd, stream structured events through a minimal agent API, persist event history, and prove the protocol with real interactive sessions.
+Build the session API, event model, storage, and SSE replay. Codex as first adapter to prove the design.
 
 ## What exists after this
 
-`lf design` (or any interactive step) launches a Codex agent via lfd. Events stream through an SSE endpoint. User input flows back. Ending the agent commits and advances the wave. Event history persists and replays on reconnect. The protocol, storage, and API all emerge from making this one adapter work.
+lfd exposes a session API. Clients create a Codex session, send input, receive structured events via SSE, and end the session. Events persist and replay on reconnect. The API, storage, and event model are provider-agnostic — Codex is just the first adapter.
 
 ## Why Codex first
 
-Codex app-server has the lowest impedance — it already emits structured JSON-RPC events for turns, items, approvals, and user-input requests. Building against it means the protocol design is informed by real structured events, not guesswork. Claude's PTY adapter requires parsing terminal output; that's harder and should prove the abstraction, not define it.
+Codex app-server has the lowest impedance — JSON-RPC over stdio with structured events for turns, items, and approvals. Building against it means the event model is informed by real structured events, not guesswork.
 
 ## What to build
 
-### Codex adapter
+### Session API
 
-- Spawn Codex in app-server mode (`codex --app-server` or equivalent stdio JSON-RPC)
-- Map Codex events to canonical agent events:
-  - `turn/started`, `turn/completed` → `session_status`
-  - `item/text.delta` → `message_delta`
-  - `item/text.done` → `message_final`
-  - `item/tool_call.*` → `tool_started`, `tool_delta`, `tool_finished`
-  - `tool/requestUserInput` → `input_requested` (free text)
-  - approval requests → `input_requested` (single choice: approve/deny)
-- Forward user input back to Codex via JSON-RPC responses
-- Handle graceful shutdown on end
+Five HTTP endpoints:
 
-### Agent lifecycle manager
+- `POST /sessions` — create session, launch adapter
+- `GET /sessions/{id}` — current status + metadata
+- `POST /sessions/{id}/input` — send user message
+- `GET /sessions/{id}/events` — SSE replay (from seq 0) + follow (live tail)
+- `DELETE /sessions/{id}` — graceful stop
 
-- State machine: `starting → running → waiting_for_user → ending → ended | failed`
+### Event model
+
+Flat typed events. No nesting (items within turns). Adapters emit what they can.
+
+```rust
+enum SessionEvent {
+    TextDelta { content: String },
+    TextDone { content: String },
+    ToolStarted { tool_id: String, name: String, input: Option<Value> },
+    ToolOutput { tool_id: String, content: String },
+    ToolDone { tool_id: String },
+    TurnStarted,
+    TurnCompleted { status: TurnStatus },
+    SessionStatus { status: SessionStatus },
+    Error { code: String, message: String },
+}
+```
+
+### Session lifecycle manager
+
+- State machine: `starting → active → ending → ended | failed`
 - Spawn adapter, wire event sink, track status transitions
 - Idempotent end (multiple calls safe)
-- At most one active agent per wave run
+- At most one active session per wave run
 
 ### Storage
 
-- `agent_events` table — persist every event with sequence number for replay
-- Extend existing `agents` table with interactive fields: `provider`, `provider_session_id`, `status`, capability flags
-- Align event model with harness `AgentEvent` patterns (message, tool_call, tool_result, done, failed)
+```sql
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    wave_run_id TEXT,
+    provider_session_id TEXT,
+    config TEXT,
+    created_at INTEGER NOT NULL,
+    ended_at INTEGER
+);
 
-### HTTP API
+CREATE TABLE session_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    seq INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(session_id, seq)
+);
+```
 
-- `POST /waves/{wave_id}/agents` — create agent, launch adapter
-- `GET /agents/{agent_id}` — current status + capabilities
-- `GET /agents/{agent_id}/events` — SSE replay (from seq 0) + follow (live tail)
-- `POST /agents/{agent_id}/input` — free text or option selection
-- `POST /agents/{agent_id}/end` — graceful stop, wave continue
+### Codex adapter
 
-### Wave integration
+- Spawn `codex --app-server` (JSON-RPC over stdio)
+- Initialize: send `initialize` request, await `initialized` notification
+- Create thread: `thread/start` with model and cwd
+- Per turn: `turn/start` with user input, stream notifications
+- Map Codex events to SessionEvent:
+  - `item/agentMessage/delta` → `TextDelta`
+  - `turn/started` → `TurnStarted`
+  - `turn/completed` → `TurnCompleted`
+  - `item/started` (commandExecution, fileChange, mcpToolCall) → `ToolStarted`
+  - `item/commandExecution/outputDelta`, `item/fileChange/outputDelta` → `ToolOutput`
+  - `item/completed` → `ToolDone`
+- Auto-approve all approval requests (respond `accept` to JSON-RPC requests)
+- Shutdown: `turn/interrupt`, kill process
 
-- `WaitInteractive` triggers agent creation + adapter launch
-- Agent end executes existing continue/commit logic
-- Wave run state guards: end only works when wave run still waits on this agent
+## Probes (run early)
 
-## What we'll learn
-
-- Whether the Codex app-server event taxonomy maps cleanly to our canonical model
-- What the right granularity is for `agent_events` (every delta? batched? final only?)
-- How approval flows and user-input requests actually behave in practice
-- Whether SSE replay + follow is sufficient or if we need cursor-based pagination
+1. Codex app-server auto-approve: confirm responding `accept` to all approval JSON-RPC requests works cleanly
+2. SSE replay + follow: is replaying from seq 0 then tailing sufficient, or do we need cursor-based pagination?
 
 ## Open questions
 
 - Does Codex app-server support session resume after process restart?
-- What happens to in-flight turns when we send end?
-- How do Codex approval timeouts interact with our lifecycle?
+- What happens to in-flight turns when we send interrupt?
+- Exact CLI invocation for `codex --app-server` — verify flags and stdio behavior
 
 ## Done when
 
-- `lf design` with Codex launches an interactive agent via lfd
-- Codex events stream through `GET /agents/{id}/events` as SSE
-- User input via `POST /agents/{id}/input` reaches Codex and produces a response turn
-- `POST /agents/{id}/end` stops the agent and advances the wave
-- Event history persists in `agent_events` and replays correctly on new SSE connection
-- Integration test covers: launch → input → events → end → wave advance
+- `POST /sessions` with `provider: "codex"` spawns Codex app-server
+- Codex events stream through `GET /sessions/{id}/events` as SSE
+- `POST /sessions/{id}/input` sends a message, Codex responds with streaming events
+- `DELETE /sessions/{id}` stops the agent
+- Events persist in `session_events` and replay correctly on new SSE connection
+- Integration test: create → input → events → end

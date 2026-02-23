@@ -1,27 +1,44 @@
-# 05: Claude SDK URL Upgrade
+# 05: Reference — Claude `--sdk-url` (not pursuing)
 
-Optional transport swap for Claude adapter — replace PTY with SDK URL WebSocket if parity is achieved.
+Notes on Claude's `--sdk-url` WebSocket transport. We're not using this approach, but keeping it as reference in case the landscape changes.
 
-## What exists after this
+## What `--sdk-url` does
 
-If Claude's `--sdk-url` WebSocket transport reaches behavioral parity with interactive TUI, the Claude adapter uses it instead of PTY. Same API, same capabilities (or better), no terminal scraping. If parity isn't achieved, this phase is skipped — PTY adapter continues working.
+Overrides Claude's output transport. Instead of rendering to a terminal, Claude sends events to a WebSocket URL. The flow is inverted — Claude pushes to a server you run, rather than you pulling from Claude.
 
-## Probe matrix (gate before implementation)
+```bash
+claude --sdk-url ws://localhost:8080
+```
 
-1. **Transport shape**: Point `--sdk-url` at capture server, detect protocol framing
-2. **Interactive semantics**: Compare event traces between TUI and SDK URL for same prompt
-3. **Input-request fidelity**: Verify typed request objects for approvals and option prompts
-4. **Session continuity**: Disconnect/reconnect, validate resume behavior
-5. **Auth ownership**: Confirm OAuth stays in Claude process
+## Why we're not using it
 
-## Decision gate
+- **Undocumented.** No official docs on the protocol, event types, or expected behavior.
+- **Untested for interactive use.** Early probes suggest it's a headless print-mode transport override, not an interactive session bridge.
+- **Unclear OAuth behavior.** May not preserve the OAuth flow that Claude Pro/Max users need.
+- **Unclear agent personality.** Likely degrades to non-interactive behavior similar to `-p` mode.
+- **Inverted architecture.** lfd would need to run a WebSocket server for Claude to connect to. Every other adapter has lfd as the client, not the server.
 
-- Probes 1-4 pass with acceptable parity → swap transport, keep same API
-- Transport works but choice/approval fidelity weak → gated beta with explicit limitations
-- Transport fails parity → skip this phase, PTY adapter remains
+## What would change our mind
 
-## Done when
+- Anthropic documents `--sdk-url` for interactive use with a stable protocol spec
+- Someone demonstrates it preserves conversational behavior + OAuth
+- The WebSocket protocol carries structured events equivalent to `-p --output-format stream-json`
+- Bidirectional communication works (input flows back over the same WebSocket)
 
-- Probe results documented with pass/fail per item
-- If passing: Claude adapter uses SDK URL transport, all existing tests pass
-- If failing: decision documented, PTY adapter confirmed as long-term path
+## If we pursued it
+
+1. lfd runs a WebSocket server on localhost
+2. Spawn `claude --sdk-url ws://localhost:$PORT`
+3. Claude sends structured events over WebSocket
+4. lfd receives events directly — no process-per-turn overhead
+5. Input flows back over the same WebSocket (bidirectional)
+
+This would be the cleanest Claude integration: structured, bidirectional, single long-lived process. But it's speculative until the protocol is documented and proven.
+
+## Probe matrix (if revisiting)
+
+1. **Transport shape**: point `--sdk-url` at a capture server, detect protocol framing
+2. **Interactive semantics**: compare event traces between TUI and `--sdk-url` for same prompt
+3. **Input fidelity**: verify typed request objects for tool calls and prompts
+4. **Session continuity**: disconnect/reconnect, validate resume behavior
+5. **Auth ownership**: confirm OAuth stays in Claude process

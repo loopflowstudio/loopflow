@@ -1,69 +1,78 @@
 # Agent API
 
-Interactive agents as first-class lfd runtime. Unified HTTP/SSE protocol for Concerto to interact with coding agents (Codex, Claude, OpenCode) during interactive wave steps.
+Unified session API for interactive coding agents. lfd spawns and manages provider processes (Codex, Claude, OpenCode), translates events into a canonical model, persists everything for replay. Concerto and future clients connect via HTTP/SSE.
+
+`lf` is unchanged. This is purely a new lfd API surface.
 
 ## North Star
 
-Wave reaches an interactive step. lfd launches the agent, owns its lifecycle, and exposes a provider-agnostic event stream. Concerto connects, shows a chat UI, sends input, and disconnects freely — the agent keeps running. User clicks End, lfd commits and advances the wave.
+lfd exposes a provider-agnostic session API. Clients create sessions, send input, subscribe to events, and end sessions. lfd owns the agent lifecycle — spawning processes, translating events, persisting state. Clients connect and disconnect freely; sessions survive reconnect.
 
 ## Design Decisions
 
 **Adapter-first, not protocol-first.** Build a working Codex adapter end-to-end before abstracting. The protocol emerges from real adapter behavior, not upfront design.
 
-**lfd owns the agent lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
+**lfd owns the session lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
 
-**Structured events over terminal bytes.** Provider adapters translate native events (Codex JSON-RPC, Claude PTY output) into a canonical event model. Raw fallback for anything the adapter can't parse.
+**Structured events, flat stream.** Provider adapters translate native events (Codex JSON-RPC, Claude NDJSON, OpenCode SSE) into a canonical event model. Typed events (text deltas, tool calls, turn boundaries) — but flat, not nested. Client groups visually.
 
-**Honest capability flags.** Each adapter advertises what it can do (structured input requests, tool events, interrupts). UI renders from capabilities, not provider name. Partial support is explicit.
+**Container-first safety.** All adapters run in yolo/bypass mode. Safety comes from the container, not tool-level permissions. No approval routing in v1.
 
 **Provider-owned auth.** Codex and Claude handle their own OAuth/login. lfd never collects raw credentials.
 
 ## Invariants
 
-- At most one active interactive agent per wave run at a time
-- Agent end is idempotent (multiple calls safe)
-- UI disconnect does not affect agent state
+- At most one active session per wave run at a time
+- Session end is idempotent (multiple calls safe)
+- UI disconnect does not affect session state
 - Reconnect replays persisted events then follows live stream
-- Agent end triggers wave continue only when wave run still waits on that agent
+- Session end triggers wave continue only when wave run still waits on that session
 
 ## Phases
 
 | # | Phase | What it unlocks | Status |
 |---|-------|----------------|--------|
-| 01 | Codex End-to-End | Working interactive agent: launch, events, input, end, persist, replay | |
-| 02 | Claude Adapter | Second adapter proves the abstraction; PTY translator with honest capabilities | |
+| 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first adapter. | |
+| 02 | Claude Adapter | `-p --resume` with structured output. Probes agent personality. | |
 | 03 | Concerto UI | Minimal chat panel, input, End button against proven API | |
-| 04 | Hardening | Reconnect, resume, edge cases, wave continue integration | |
-| 05 | Claude SDK URL | Optional transport upgrade if parity achieved | |
-| 06 | OpenCode Adapter | Third adapter validates protocol is truly provider-agnostic | |
+| 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
+| 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
+| 06 | OpenCode Adapter | Third adapter validates the abstraction | |
 
 ## Architecture
 
 ```
-wave_runs (orchestration parent)
-  └── agents (execution child, agents.wave_run_id)
-        └── agent_events (event history, agent_events.agent_id)
+Concerto ──HTTP/SSE──▶ lfd session API
+                         ├── SessionManager (lifecycle, state machine)
+                         ├── session store (sessions + session_events tables)
+                         └── adapter (Codex | Claude | OpenCode)
+                               └── provider process
+                                     Codex: codex --app-server (JSON-RPC stdio)
+                                     Claude: claude -p --resume (NDJSON stdio)
+                                     OpenCode: opencode serve (HTTP + SSE)
 ```
 
+## API
+
 ```
-Concerto ──HTTP/SSE──▶ lfd agent API
-                         ├── AgentManager (lifecycle, state machine)
-                         ├── agent store (agents + agent_events tables)
-                         └── adapter (Codex | Claude | OpenCode | Fake)
-                               └── provider process (Codex app-server | Claude PTY | ...)
+POST   /sessions              # create session (provider, config)
+GET    /sessions/{id}         # session status + metadata
+POST   /sessions/{id}/input   # send user message
+GET    /sessions/{id}/events  # SSE replay + follow
+DELETE /sessions/{id}         # end session
 ```
 
-## API (agent-centric)
+## Provider Comparison
 
-- `POST /waves/{wave_id}/agents` — create + launch
-- `GET /waves/{wave_id}/agents/active` — reconnect entrypoint
-- `GET /agents/{agent_id}` — status + metadata
-- `POST /agents/{agent_id}/input` — send user input
-- `POST /agents/{agent_id}/end` — graceful shutdown + wave continue
-- `GET /agents/{agent_id}/events` — SSE replay + follow
+| Provider | Process model | Output | Input | Auth |
+|----------|--------------|--------|-------|------|
+| Codex | subprocess stdio | JSON-RPC notifications | JSON-RPC requests | OAuth (provider-owned) |
+| Claude | subprocess stdio | NDJSON (stream-json) | New process per turn (`--resume`) | OAuth (provider-owned) |
+| OpenCode | HTTP client | SSE events | REST calls | Provider-owned |
 
 ## What's not here
 
+- Approval routing / permission management (container safety instead)
 - Advanced Concerto UI (tool visualization, diff views, multi-panel layouts)
 - Multi-agent per step (parallel agents within one interactive step)
-- Cross-wave agent sharing
+- Cross-wave session sharing

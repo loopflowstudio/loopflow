@@ -13,7 +13,7 @@ lfd keeps both SQLite and Postgres. Store operations are async end-to-end. Promp
 | 01 | Store trait scope reset | Capability traits, `StorageConfig`, `open_store`/`migrate_store` | None | Shipped |
 | 02 | Async store boundary | Routes call store directly; no `spawn_blocking` for DB ops | 01 | Shipped |
 | 03 | Shared SQL catalog | One query per operation; dialect rendering for `?`/`$N` | 02 | Shipped |
-| 04 | Prompt pipeline | `DocumentSource` enum; `gather_documents(specs)` | None | |
+| 04 | Prompt pipeline | `DocumentSource` enum; `gather_documents(specs)` | None | In progress |
 
 Stages 01–03 (the store simplification arc) are complete. Stage 04 is independent — it touches `engine/prompt.rs`, not the store layer. Each stage deletes what it replaces — no deferred cleanup.
 

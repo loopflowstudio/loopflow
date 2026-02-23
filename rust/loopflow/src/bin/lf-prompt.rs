@@ -61,13 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         run_mode: args.run_mode,
         directions: args.directions,
         files: Vec::new(),
-        sources: default_gather_sources(
-            args.lfdocs,
-            args.diff_files || args.diff,
-            args.clipboard,
-            args.area.as_deref(),
-            args.wave.as_deref(),
-        ),
+        sources: default_gather_sources(args.lfdocs, args.diff_files || args.diff, args.clipboard),
         area: args.area,
         wave: args.wave,
     };

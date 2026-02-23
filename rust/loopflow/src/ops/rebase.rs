@@ -69,8 +69,6 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
             config.lfdocs,
             config.diff_files || config.diff,
             config.paste,
-            config.area.as_deref(),
-            None,
         ),
         area: config.area,
         wave: None,

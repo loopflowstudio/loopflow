@@ -113,13 +113,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         ),
         directions,
         files: Vec::new(),
-        sources: default_gather_sources(
-            lfdocs,
-            diff_files || diff,
-            include_clipboard,
-            area.as_deref(),
-            cli.wave.as_deref(),
-        ),
+        sources: default_gather_sources(lfdocs, diff_files || diff, include_clipboard),
         area: area.clone(),
         wave: cli.wave.clone(),
     })?;

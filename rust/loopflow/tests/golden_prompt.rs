@@ -67,8 +67,6 @@ fn golden_prompts_match_python() {
                 case.lfdocs,
                 case.diff_files || case.diff,
                 case.clipboard,
-                case.area.as_deref(),
-                case.wave.as_deref(),
             ),
             area: case.area.clone(),
             wave: case.wave.clone(),

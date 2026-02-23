@@ -108,6 +108,24 @@ impl GatherSpec {
     fn includes(&self, source: DocumentSource) -> bool {
         self.sources.contains(&source)
     }
+
+    fn include_source(&mut self, source: DocumentSource) {
+        if !self.includes(source) {
+            self.sources.push(source);
+        }
+    }
+
+    fn normalize(&mut self) {
+        if self.wave.is_some() && self.includes(DocumentSource::RepoDoc) {
+            self.include_source(DocumentSource::Wave);
+        }
+        if self.area.is_some() {
+            self.include_source(DocumentSource::Area);
+        }
+        if !self.files.is_empty() {
+            self.include_source(DocumentSource::Diff);
+        }
+    }
 }
 
 /// Build a canonical list of context sources from high-level switches.
@@ -115,24 +133,16 @@ pub fn default_gather_sources(
     include_repo_docs: bool,
     include_diff: bool,
     include_clipboard: bool,
-    area: Option<&str>,
-    wave: Option<&str>,
 ) -> Vec<DocumentSource> {
     let mut sources = Vec::new();
     if include_repo_docs {
         sources.push(DocumentSource::RepoDoc);
-        if wave.is_some() {
-            sources.push(DocumentSource::Wave);
-        }
     }
     if include_diff {
         sources.push(DocumentSource::Diff);
     }
     if include_clipboard {
         sources.push(DocumentSource::Clipboard);
-    }
-    if area.is_some() {
-        sources.push(DocumentSource::Area);
     }
     sources
 }
@@ -431,14 +441,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     );
 
     let mut spec = opts.gather_spec();
-    // Explicit files are diff context; preserve legacy behavior even if Diff
-    // was omitted from sources.
-    if !spec.files.is_empty() && !spec.includes(DocumentSource::Diff) {
-        spec.sources.push(DocumentSource::Diff);
-    }
-    if spec.area.is_some() && !spec.includes(DocumentSource::Area) {
-        spec.sources.push(DocumentSource::Area);
-    }
+    spec.normalize();
 
     // Gather document sources through a single pipeline.
     let docs_start = Instant::now();
@@ -538,10 +541,6 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
 
     if spec.includes(DocumentSource::Diff) && !spec.files.is_empty() {
         docs.extend(gather_files(&spec.repo_root, &spec.files)?);
-    }
-
-    if spec.includes(DocumentSource::Summary) {
-        // Summaries are currently injected by higher-level callsites.
     }
 
     Ok(docs)

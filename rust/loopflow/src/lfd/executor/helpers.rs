@@ -274,8 +274,6 @@ pub(crate) async fn build_step_prompt(
             config.lfdocs,
             config.diff_files || config.diff,
             config.paste,
-            config.area.as_deref(),
-            wave,
         ),
         area: config.area.clone(),
         wave: wave.map(str::to_string),

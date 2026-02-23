@@ -762,8 +762,6 @@ fn copy_context(paths: &[String], exclude: &[String], lfdocs: bool, no_lfdocs: b
             include_lfdocs,
             !has_paths, // Use diff files if no paths specified
             false,
-            None,
-            None,
         ),
         ..Default::default()
     };

@@ -220,7 +220,7 @@ Docker mode also:
 - reattaches to running agent containers after daemon restart
 - enforces default container hardening (`user=agent`, memory/CPU/PID limits, `no-new-privileges`)
 
-Current limitation: `fork` steps are not supported by the Docker executor yet.
+Fork steps are supported in Docker mode. Branch worktrees are created inside the repo volume, then cleaned up after synthesize and run completion.
 
 ## GitHub CI auto-fix
 

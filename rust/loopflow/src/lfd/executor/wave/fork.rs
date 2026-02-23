@@ -86,7 +86,6 @@ impl WaveExecutor {
         let (tx, mut rx) = mpsc::channel(fork_runs.len());
         let mut handles = Vec::new();
 
-        let wave_directions = run.snapshot.direction.clone();
         for execution in fork_runs.iter() {
             let executor = self.clone();
             let scheduler = self.scheduler.clone();
@@ -100,7 +99,7 @@ impl WaveExecutor {
             let branch_index = execution.run.branch_index as usize;
             let fork_run = execution.run.clone();
             let step = execution.step.clone();
-            let wave_directions = wave_directions.clone();
+            let directions = execution.directions.clone();
 
             let handle = tokio::spawn(async move {
                 let _slot_guard = loop {
@@ -124,13 +123,13 @@ impl WaveExecutor {
                     fork_run_id = %fork_run_id,
                     step = %step.step.name,
                     worktree = %worktree,
-                    directions = ?wave_directions,
+                    directions = ?directions,
                     "building fork branch prompt"
                 );
                 let prompt = build_step_prompt(
                     &worktree,
                     &step,
-                    &wave_directions,
+                    &directions,
                     None,
                     Some((&executor.store, &fork_wave_id)),
                     None,

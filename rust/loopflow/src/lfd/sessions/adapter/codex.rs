@@ -238,10 +238,6 @@ impl SessionAdapter for CodexAdapter {
 
 impl CodexAdapter {
     async fn start_inner(&mut self, config: &SessionConfig) -> Result<()> {
-        if self.child.is_some() {
-            return Ok(());
-        }
-
         let mut child = Command::new("codex")
             .arg("--app-server")
             .stdin(std::process::Stdio::piped())

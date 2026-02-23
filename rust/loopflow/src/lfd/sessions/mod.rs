@@ -87,9 +87,6 @@ impl SessionManager {
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
         let provider = params.provider.trim().to_lowercase();
-        if provider.is_empty() {
-            return Err(SessionManagerError::UnsupportedProvider(provider));
-        }
         if provider != "codex" {
             return Err(SessionManagerError::UnsupportedProvider(provider));
         }
@@ -292,7 +289,7 @@ impl SessionManager {
                 .await?;
         }
 
-        if let Some(runtime) = runtime {
+        let final_status = if let Some(ref runtime) = runtime {
             let stop_result = {
                 let mut adapter = runtime.adapter.lock().await;
                 adapter.stop().await
@@ -300,42 +297,32 @@ impl SessionManager {
             if let Err(err) = stop_result {
                 self.append_runtime_event(
                     session_id,
-                    &runtime,
+                    runtime,
                     SessionEvent::Error {
                         code: "session_stop_failed".to_string(),
                         message: err.to_string(),
                     },
                 )
                 .await?;
-                self.set_status(
-                    session_id,
-                    SessionStatus::Failed,
-                    Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-                    Some(runtime.clone()),
-                )
-                .await?;
-                self.remove_runtime(session_id).await;
-                return self.get_session(session_id).await;
+                SessionStatus::Failed
+            } else {
+                SessionStatus::Ended
             }
+        } else {
+            SessionStatus::Ended
+        };
 
-            self.set_status(
-                session_id,
-                SessionStatus::Ended,
-                Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-                Some(runtime.clone()),
-            )
-            .await?;
-            self.remove_runtime(session_id).await;
-            return self.get_session(session_id).await;
-        }
-
+        let has_runtime = runtime.is_some();
         self.set_status(
             session_id,
-            SessionStatus::Ended,
+            final_status,
             Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-            None,
+            runtime,
         )
         .await?;
+        if has_runtime {
+            self.remove_runtime(session_id).await;
+        }
         self.get_session(session_id).await
     }
 

@@ -1,6 +1,6 @@
-# Fork follow-up priorities
+# Fork Executor Cleanup
 
-Follow-up improvements identified after 01E (Docker fork parity) shipped.
+Follow-up improvements after 01E (Docker fork parity) shipped. Ordered by dependency chain — each priority unblocks the next.
 
 ## Priority 1: Deduplicate fork constants and path computation
 

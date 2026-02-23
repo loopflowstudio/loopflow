@@ -2,6 +2,34 @@
 
 Build the session API, event model, storage, and SSE replay. Codex as first adapter to prove the design.
 
+## Design principles (wave-wide)
+
+**Adapter-first, not protocol-first.** Build a working Codex adapter end-to-end before abstracting. The protocol emerges from real adapter behavior, not upfront design.
+
+**lfd owns the agent lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
+
+**Structured events over terminal bytes.** Provider adapters translate native events (Codex JSON-RPC, Claude PTY output) into a canonical event model. Raw fallback for anything the adapter can't parse.
+
+**Honest capability flags.** Each adapter advertises what it can do (structured input requests, tool events, interrupts). UI renders from capabilities, not provider name. Partial support is explicit.
+
+**Provider-owned auth.** Codex and Claude handle their own OAuth/login. lfd never collects raw credentials.
+
+## Architecture
+
+```
+wave_runs (orchestration parent)
+  └── agents (execution child, agents.wave_run_id)
+        └── agent_events (event history, agent_events.agent_id)
+```
+
+```
+Concerto ──HTTP/SSE──▶ lfd agent API
+                         ├── AgentManager (lifecycle, state machine)
+                         ├── agent store (agents + agent_events tables)
+                         └── adapter (Codex | Claude | OpenCode | Fake)
+                               └── provider process (Codex app-server | Claude PTY | ...)
+```
+
 ## What exists after this
 
 lfd exposes a session API. Clients create a Codex session, send input, receive structured events via SSE, and end the session. Events persist and replay on reconnect. The API, storage, and event model are provider-agnostic — Codex is just the first adapter.

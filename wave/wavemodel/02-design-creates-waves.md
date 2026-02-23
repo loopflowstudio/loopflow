@@ -15,17 +15,17 @@ lf design → wave/<name>/ (README + YAML + items) + scratch/<branch>.md
 ```
 
 When the user chooses "wave plan" in Phase 4 (Fork), design creates:
-1. `wave/<name>/README.md` — five sections populated from conversation
+1. `wave/<name>/README.md` — four sections populated from conversation (Vision, Goals, Risks, Metrics)
 2. `wave/<name>/<name>.yaml` — flow, area, direction, stimulus (asked or inferred)
-3. `wave/<name>/01-*.md` etc. — first roadmap items
+3. `wave/<name>/01-*.md` etc. — the roadmap as numbered files
 4. `scratch/<branch>.md` — design doc for the first item (still needed for `lf implement`)
 
-The conversation naturally populates the sections:
+The conversation naturally populates the content:
 - Vision → Phase 1 (Dream) — "what are you trying to build?"
 - Goals → Phase 2 (Detail) — concrete objectives emerge during detailing
 - Risks → Phase 2 (Detail) — edge cases, unknowns, failure modes
 - Metrics → Phase 2 (Detail) — "how do we know it works?"
-- Roadmap → Phase 4 (Fork) — the staged breakdown
+- Roadmap (`01-*.md`, `02-*.md`) → Phase 4 (Fork) — the staged breakdown
 
 YAML configuration can be inferred or asked at the end:
 - flow: usually `ship-wave` for new waves
@@ -45,17 +45,17 @@ produces: wave/<child>/ directories
 ---
 ```
 
-When a wave's Roadmap grows beyond what a single wave should own:
+When a wave's roadmap grows beyond what a single wave should own:
 
-1. Read the wave README — understand Vision, Goals, Risks, Roadmap
+1. Read the wave README (Vision, Goals, Risks, Metrics) and roadmap (`##-*.md`)
 2. Identify natural boundaries (thematic clusters, dependency groups, independent workstreams)
 3. Propose child waves to the user — each with its own scoped Vision
 4. For each child wave, create:
    - `wave/<child>/README.md` — inherits parent context, gets its own scoped sections
    - `wave/<child>/<child>.yaml` — configuration (may differ from parent)
    - Move relevant phase .md files from parent to child
-5. Update parent README:
-   - Roadmap references children instead of listing phases directly
+5. Update parent wave:
+   - Roadmap items reference children instead of listing work directly
    - Parent becomes a coordination wave
 
 ## Files touched

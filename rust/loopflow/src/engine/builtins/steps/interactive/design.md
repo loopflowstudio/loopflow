@@ -65,7 +65,7 @@ This is the natural session exit point. The user's answer determines what to run
    - `## Goals` — concrete objectives from the Detail phase
    - `## Risks` — unknowns and failure modes surfaced during detailing
    - `## Metrics` — observable signals discussed
-   - `## Roadmap` — the staged breakdown
+   - Roadmap as `01-*.md`, `02-*.md`, ... — the staged breakdown, one file per item
 3. The first stage becomes the design doc for this branch (`scratch/<branch>.md`)
 
 Then:

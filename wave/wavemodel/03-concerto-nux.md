@@ -17,9 +17,10 @@ Reshape Concerto's new user experience to orient around design-first wave creati
 - Vision as subtitle under wave name
 - Goals visible when idle — what you're working toward
 - Risks visible when reviewing
-- Roadmap progress — which phases done, what's next
-- Read from disk via `{repo}/wave/{name}/README.md`. Parse sections client-side.
-- Note from Phase 01: scope boundaries appear in different locations across waves ("Not here" under Vision, "Security boundary" at the end, etc.). Parser should match `## Vision`, `## Goals`, `## Risks`, `## Metrics`, `## Roadmap` as primary sections and treat everything else as supplementary.
+- Roadmap progress — read `##-*.md` files alongside the README to show which items are done and what's next
+- Read README from disk via `{repo}/wave/{name}/README.md`. Parse sections client-side.
+- Read roadmap from disk via `{repo}/wave/{name}/##-*.md`. Parse status from file content or naming.
+- Note from Phase 01: scope boundaries appear in different locations across waves ("Not here" under Vision, "Security boundary" at the end, etc.). Parser should match `## Vision`, `## Goals`, `## Risks`, `## Metrics` as the four README sections and treat everything else as supplementary.
 
 **Empty state emphasizes design.** "No waves yet" + "Start designing" button instead of "Create Wave".
 

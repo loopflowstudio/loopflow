@@ -30,7 +30,7 @@ After shipping a wave item, the plan should reflect what we learned. A wave plan
 
 ## What to update
 
-- **Roadmap** — update phase status, revise scope based on what we learned
+- **Roadmap** (`##-*.md`) — update status, revise scope based on what we learned, add new items if the plan grew
 - **Risks** — add new risks discovered during implementation, resolve answered questions
 - **Goals** — refine success criteria if they evolved, update invariants if new ones emerged
 - **Metrics** — note any observable signals from what we shipped

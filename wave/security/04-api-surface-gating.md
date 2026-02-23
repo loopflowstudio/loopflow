@@ -94,3 +94,11 @@ This phase does not provide:
 
 - If proxy deployments need richer trust modeling, CIDR-only rules may be split from this phase into a focused follow-up.
 - If real workloads require larger WS queues, caps may become configurable with conservative defaults.
+
+## Reference frameworks (wave-wide)
+
+- **OWASP API Security Top 10 (2023)**: API1 (BOLA), API2 (Broken Auth), API4 (Unrestricted Resource Consumption), API7 (SSRF), API8 (Security Misconfiguration) are directly applicable.
+- **CIS Docker Benchmark**: Docker socket access, container user, capability dropping, resource limits, network isolation, image provenance.
+- **Supabase architecture**: Single gateway as sole external surface, tiered key model (anon/user/service), defense-in-depth layering, socket proxy for database access.
+- **Woodpecker CI / Drone**: Credential injection into pipeline containers, workspace isolation, Docker socket proxy pattern.
+- **Nomad security model**: Workload identity, namespace isolation, ACL system for job orchestration.

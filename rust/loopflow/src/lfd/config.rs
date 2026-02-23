@@ -8,6 +8,10 @@ use tracing::warn;
 const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
 const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 45 * 60;
+const DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES: i64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_EXECUTOR_MEMORY_SWAP_LIMIT_BYTES: i64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_EXECUTOR_CPU_QUOTA: i64 = 200_000;
+const DEFAULT_EXECUTOR_PIDS_LIMIT: i64 = 512;
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
@@ -127,6 +131,50 @@ impl RawLfdConfig {
             }
         }
 
+        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_MEMORY") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.executor.limits.memory = parse_executor_limit_i64(
+                    trimmed,
+                    "LFD_EXECUTOR_LIMITS_MEMORY",
+                    "executor.limits.memory",
+                )?;
+            }
+        }
+
+        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_MEMORY_SWAP") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.executor.limits.memory_swap = parse_executor_limit_i64(
+                    trimmed,
+                    "LFD_EXECUTOR_LIMITS_MEMORY_SWAP",
+                    "executor.limits.memory_swap",
+                )?;
+            }
+        }
+
+        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_CPU_QUOTA") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.executor.limits.cpu_quota = parse_executor_limit_i64(
+                    trimmed,
+                    "LFD_EXECUTOR_LIMITS_CPU_QUOTA",
+                    "executor.limits.cpu_quota",
+                )?;
+            }
+        }
+
+        if let Ok(value) = std::env::var("LFD_EXECUTOR_LIMITS_PIDS_LIMIT") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.executor.limits.pids_limit = parse_executor_limit_i64(
+                    trimmed,
+                    "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
+                    "executor.limits.pids_limit",
+                )?;
+            }
+        }
+
         if let Ok(value) = std::env::var("LFD_GITHUB_WEBHOOK_SECRET") {
             self.github.webhook_secret = value;
         }
@@ -170,6 +218,7 @@ impl RawLfdConfig {
                 image: self.executor.image,
                 credentials: self.executor.credentials,
                 agent_timeout: self.executor.agent_timeout,
+                limits: self.executor.limits.resolve()?,
             },
             github: self.github,
         })
@@ -347,6 +396,7 @@ pub struct ExecutorConfig {
     pub image: String,
     pub credentials: ExecutorCredentialsConfig,
     pub agent_timeout: Duration,
+    pub limits: ExecutorLimitsConfig,
 }
 
 impl Default for ExecutorConfig {
@@ -356,6 +406,26 @@ impl Default for ExecutorConfig {
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
             agent_timeout: default_agent_timeout(),
+            limits: ExecutorLimitsConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutorLimitsConfig {
+    pub memory: i64,
+    pub memory_swap: i64,
+    pub cpu_quota: i64,
+    pub pids_limit: i64,
+}
+
+impl Default for ExecutorLimitsConfig {
+    fn default() -> Self {
+        Self {
+            memory: default_executor_memory_limit_bytes(),
+            memory_swap: default_executor_memory_swap_limit_bytes(),
+            cpu_quota: default_executor_cpu_quota(),
+            pids_limit: default_executor_pids_limit(),
         }
     }
 }
@@ -372,6 +442,8 @@ struct RawExecutorConfig {
         deserialize_with = "deserialize_duration"
     )]
     agent_timeout: Duration,
+    #[serde(default)]
+    limits: RawExecutorLimitsConfig,
 }
 
 impl Default for RawExecutorConfig {
@@ -381,6 +453,54 @@ impl Default for RawExecutorConfig {
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
             agent_timeout: default_agent_timeout(),
+            limits: RawExecutorLimitsConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawExecutorLimitsConfig {
+    #[serde(default = "default_executor_memory_limit_bytes")]
+    memory: i64,
+    #[serde(default = "default_executor_memory_swap_limit_bytes")]
+    memory_swap: i64,
+    #[serde(default = "default_executor_cpu_quota")]
+    cpu_quota: i64,
+    #[serde(default = "default_executor_pids_limit")]
+    pids_limit: i64,
+}
+
+impl RawExecutorLimitsConfig {
+    fn resolve(self) -> Result<ExecutorLimitsConfig> {
+        if self.memory <= 0 {
+            bail!("executor.limits.memory must be greater than zero");
+        }
+        if self.memory_swap <= 0 {
+            bail!("executor.limits.memory_swap must be greater than zero");
+        }
+        if self.cpu_quota <= 0 {
+            bail!("executor.limits.cpu_quota must be greater than zero");
+        }
+        if self.pids_limit <= 0 {
+            bail!("executor.limits.pids_limit must be greater than zero");
+        }
+
+        Ok(ExecutorLimitsConfig {
+            memory: self.memory,
+            memory_swap: self.memory_swap,
+            cpu_quota: self.cpu_quota,
+            pids_limit: self.pids_limit,
+        })
+    }
+}
+
+impl Default for RawExecutorLimitsConfig {
+    fn default() -> Self {
+        Self {
+            memory: default_executor_memory_limit_bytes(),
+            memory_swap: default_executor_memory_swap_limit_bytes(),
+            cpu_quota: default_executor_cpu_quota(),
+            pids_limit: default_executor_pids_limit(),
         }
     }
 }
@@ -393,6 +513,22 @@ fn default_agent_timeout() -> Duration {
     Duration::from_secs(DEFAULT_AGENT_TIMEOUT_SECS)
 }
 
+fn default_executor_memory_limit_bytes() -> i64 {
+    DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES
+}
+
+fn default_executor_memory_swap_limit_bytes() -> i64 {
+    DEFAULT_EXECUTOR_MEMORY_SWAP_LIMIT_BYTES
+}
+
+fn default_executor_cpu_quota() -> i64 {
+    DEFAULT_EXECUTOR_CPU_QUOTA
+}
+
+fn default_executor_pids_limit() -> i64 {
+    DEFAULT_EXECUTOR_PIDS_LIMIT
+}
+
 fn parse_agent_timeout_duration(raw: &str) -> std::result::Result<Duration, String> {
     let trimmed = raw.trim();
     humantime::parse_duration(trimmed).map_err(|err| {
@@ -401,6 +537,16 @@ fn parse_agent_timeout_duration(raw: &str) -> std::result::Result<Duration, Stri
             raw, err
         )
     })
+}
+
+fn parse_executor_limit_i64(raw: &str, env_key: &str, field: &str) -> Result<i64> {
+    let value = raw
+        .parse::<i64>()
+        .map_err(|err| anyhow!("invalid {} value '{}' for {}: {}", env_key, raw, field, err))?;
+    if value <= 0 {
+        bail!("invalid {env_key} value '{raw}' for {field}: must be greater than zero");
+    }
+    Ok(value)
 }
 
 fn deserialize_duration<'de, D>(deserializer: D) -> std::result::Result<Duration, D::Error>
@@ -478,6 +624,15 @@ mod tests {
         assert_eq!(config.storage, StorageType::Sqlite);
         assert_eq!(config.executor.r#type, ExecutorType::Local);
         assert_eq!(config.executor.agent_timeout, Duration::from_secs(45 * 60));
+        assert_eq!(
+            config.executor.limits,
+            ExecutorLimitsConfig {
+                memory: 4 * 1024 * 1024 * 1024,
+                memory_swap: 4 * 1024 * 1024 * 1024,
+                cpu_quota: 200_000,
+                pids_limit: 512,
+            }
+        );
     }
 
     #[test]
@@ -542,6 +697,10 @@ executor:
             "LFD_AUTH_TOKEN",
             "LFD_EXECUTOR_IMAGE",
             "LFD_EXECUTOR_AGENT_TIMEOUT",
+            "LFD_EXECUTOR_LIMITS_MEMORY",
+            "LFD_EXECUTOR_LIMITS_MEMORY_SWAP",
+            "LFD_EXECUTOR_LIMITS_CPU_QUOTA",
+            "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
         ]);
@@ -550,6 +709,10 @@ executor:
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
         std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
         std::env::set_var("LFD_EXECUTOR_AGENT_TIMEOUT", "30m");
+        std::env::set_var("LFD_EXECUTOR_LIMITS_MEMORY", "2147483648");
+        std::env::set_var("LFD_EXECUTOR_LIMITS_MEMORY_SWAP", "2147483648");
+        std::env::set_var("LFD_EXECUTOR_LIMITS_CPU_QUOTA", "100000");
+        std::env::set_var("LFD_EXECUTOR_LIMITS_PIDS_LIMIT", "256");
         std::env::set_var("LFD_GITHUB_WEBHOOK_SECRET", "env-secret");
         std::env::set_var("LFD_GITHUB_TOKEN", "ghp_env");
 
@@ -566,6 +729,15 @@ executor:
         assert_eq!(
             resolved.executor.agent_timeout,
             Duration::from_secs(30 * 60)
+        );
+        assert_eq!(
+            resolved.executor.limits,
+            ExecutorLimitsConfig {
+                memory: 2 * 1024 * 1024 * 1024,
+                memory_swap: 2 * 1024 * 1024 * 1024,
+                cpu_quota: 100_000,
+                pids_limit: 256,
+            }
         );
         assert_eq!(resolved.github.webhook_secret, "env-secret");
         assert_eq!(resolved.github.token, Some("ghp_env".to_string()));
@@ -589,6 +761,23 @@ executor:
     }
 
     #[test]
+    fn invalid_executor_limits_env_override_is_rejected() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&["LFD_EXECUTOR_LIMITS_MEMORY"]);
+        std::env::set_var("LFD_EXECUTOR_LIMITS_MEMORY", "0");
+
+        let mut config = RawLfdConfig::default();
+        let err = config
+            .apply_env_overrides()
+            .expect_err("invalid executor limit should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "invalid LFD_EXECUTOR_LIMITS_MEMORY value '0' for executor.limits.memory: must be greater than zero"
+        );
+    }
+
+    #[test]
     fn load_invalid_yaml_returns_error() {
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
@@ -597,6 +786,10 @@ executor:
             "LFD_AUTH_TOKEN",
             "LFD_EXECUTOR_IMAGE",
             "LFD_EXECUTOR_AGENT_TIMEOUT",
+            "LFD_EXECUTOR_LIMITS_MEMORY",
+            "LFD_EXECUTOR_LIMITS_MEMORY_SWAP",
+            "LFD_EXECUTOR_LIMITS_CPU_QUOTA",
+            "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
         ]);
@@ -625,5 +818,43 @@ executor:
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("resolved");
         assert_eq!(resolved.executor.agent_timeout, Duration::from_secs(75));
+    }
+
+    #[test]
+    fn executor_limits_accept_yaml_override() {
+        let raw = r#"
+executor:
+  limits:
+    memory: 2147483648
+    memory_swap: 2147483648
+    cpu_quota: 100000
+    pids_limit: 256
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let resolved = config.resolve().expect("resolved");
+        assert_eq!(
+            resolved.executor.limits,
+            ExecutorLimitsConfig {
+                memory: 2 * 1024 * 1024 * 1024,
+                memory_swap: 2 * 1024 * 1024 * 1024,
+                cpu_quota: 100_000,
+                pids_limit: 256,
+            }
+        );
+    }
+
+    #[test]
+    fn executor_limits_reject_non_positive_yaml_values() {
+        let raw = r#"
+executor:
+  limits:
+    pids_limit: 0
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let err = config.resolve().expect_err("invalid limits should fail");
+        assert_eq!(
+            err.to_string(),
+            "executor.limits.pids_limit must be greater than zero"
+        );
     }
 }

@@ -13,7 +13,7 @@ use bollard::models::{
 use bollard::query_parameters::{
     BuildImageOptions, BuilderVersion, CreateContainerOptions, CreateImageOptions,
     InspectContainerOptions, ListContainersOptions, LogsOptions, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions, WaitContainerOptions,
+    RemoveVolumeOptionsBuilder, StartContainerOptions, StopContainerOptions, WaitContainerOptions,
 };
 use bollard::Docker;
 use bytes::Bytes;
@@ -24,7 +24,7 @@ use tracing::{info, warn};
 use time::OffsetDateTime;
 
 use crate::engine::stream::StreamParser;
-use crate::lfd::config::{CredentialMount, ExecutorConfig};
+use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
@@ -38,6 +38,7 @@ pub struct DockerExecutor {
     docker: Docker,
     image: String,
     agent_timeout: std::time::Duration,
+    limits: ExecutorLimitsConfig,
     credential_env: Vec<String>,
     credential_mounts: Vec<DockerCredentialMount>,
     active: Arc<Mutex<HashMap<String, String>>>,
@@ -106,6 +107,7 @@ const CONTAINER_WORKSPACE: &str = "/workspace";
 const CONTAINER_REPOS_ROOT: &str = "/workspace/repos";
 const LOCAL_REPO_MOUNT: &str = "/host-repo";
 const HOST_WORKTREE_MOUNT: &str = "/host-worktree";
+const AGENT_USER: &str = "agent";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RepoVolumeIdentity {
@@ -114,7 +116,7 @@ struct RepoVolumeIdentity {
 }
 
 impl RepoVolumeIdentity {
-    fn from_identity(identity: &RepoIdentity) -> Self {
+    fn repo_key(identity: &RepoIdentity) -> String {
         let repo_hash = short_hash(&identity.canonical, 16);
         let mut slug = sanitize_token(&identity.canonical);
         if slug.is_empty() {
@@ -123,9 +125,15 @@ impl RepoVolumeIdentity {
         if slug.len() > 36 {
             slug.truncate(36);
         }
+        format!("{slug}-{repo_hash}")
+    }
+
+    fn from_wave(identity: &RepoIdentity, wave_id: &LfdId) -> Self {
+        let repo_key = Self::repo_key(identity);
+        let volume_hash = short_hash(&format!("{}:{}", identity.canonical, wave_id), 32);
         Self {
-            repo_key: format!("{slug}-{repo_hash}"),
-            volume_name: format!("lfd-repo-{}", short_hash(&identity.canonical, 32)),
+            repo_key,
+            volume_name: format!("lfd-wave-{volume_hash}"),
         }
     }
 }
@@ -349,6 +357,7 @@ impl DockerExecutor {
             docker,
             image: config.image.clone(),
             agent_timeout: config.agent_timeout,
+            limits: config.limits.clone(),
             credential_env: config.credentials.env.clone(),
             credential_mounts,
             active: Arc::new(Mutex::new(HashMap::new())),
@@ -876,8 +885,8 @@ impl DockerExecutor {
                     cmd: Some(cmd),
                     working_dir,
                     env: Some(self.collect_env()),
-                    user: Some("root".to_string()),
-                    host_config: Some(container_host_config(mounts)),
+                    user: Some(AGENT_USER.to_string()),
+                    host_config: Some(container_host_config(mounts, &self.limits)),
                     labels: Some(HashMap::from([(
                         "io.loopflow.managed".to_string(),
                         "true".to_string(),
@@ -942,7 +951,7 @@ impl DockerExecutor {
 
         let mut labels = HashMap::new();
         labels.insert("io.loopflow.managed".to_string(), "true".to_string());
-        labels.insert("io.loopflow.kind".to_string(), "repo-volume".to_string());
+        labels.insert("io.loopflow.kind".to_string(), "wave-volume".to_string());
 
         let _ = self
             .docker
@@ -1103,8 +1112,10 @@ impl DockerExecutor {
         }
 
         let identity = RepoIdentity::from_repo(repo_source);
-        let volume_id = RepoVolumeIdentity::from_identity(&identity);
-        let repo_image = format!("lfd-agent-{}:latest", volume_id.repo_key);
+        let repo_image = format!(
+            "lfd-agent-{}:latest",
+            RepoVolumeIdentity::repo_key(&identity)
+        );
         let stale_marker = repo_source.join(".lf/.docker-stale");
         if !self
             .repo_image_needs_build(&repo_image, &stale_marker)
@@ -1148,19 +1159,12 @@ impl DockerExecutor {
 
     fn docker_workspace_for_wave(
         repo_source: &Path,
-        wave_name: &str,
+        wave_id: &LfdId,
         branch: &str,
     ) -> DockerWorkspace {
         let repo_identity = RepoIdentity::from_repo(repo_source);
-        let volume = RepoVolumeIdentity::from_identity(&repo_identity);
-        let wave_slug = {
-            let slug = sanitize_token(wave_name);
-            if slug.is_empty() {
-                short_hash(wave_name, 12)
-            } else {
-                slug
-            }
-        };
+        let volume = RepoVolumeIdentity::from_wave(&repo_identity, wave_id);
+        let wave_slug = short_hash(wave_id.as_str(), 12);
         DockerWorkspace {
             container_shared_clone: format!("{CONTAINER_REPOS_ROOT}/{}/main", volume.repo_key),
             container_worktree: format!(
@@ -1208,7 +1212,7 @@ impl DockerExecutor {
         let branch = Self::resolve_wave_run_branch(&run, &wave);
         Ok(Self::docker_workspace_for_wave(
             &repo_source,
-            &wave.name,
+            &wave.id,
             &branch,
         ))
     }
@@ -1480,7 +1484,7 @@ impl DockerExecutor {
 
         let lock = self
             .mutation_locks
-            .for_key(&workspace.volume.repo_key)
+            .for_key(&workspace.volume.volume_name)
             .await;
         {
             let _guard = lock.lock().await;
@@ -1521,6 +1525,16 @@ fn is_container_not_found(err: &DockerError) -> bool {
     )
 }
 
+fn is_volume_not_found(err: &DockerError) -> bool {
+    matches!(
+        err,
+        DockerError::DockerResponseServerError {
+            status_code: 404,
+            ..
+        }
+    )
+}
+
 fn stop_container_options() -> StopContainerOptions {
     StopContainerOptions {
         t: Some(1),
@@ -1547,12 +1561,17 @@ fn logs_options(follow: bool) -> LogsOptions {
     }
 }
 
-fn container_host_config(mounts: Vec<Mount>) -> HostConfig {
+fn container_host_config(mounts: Vec<Mount>, limits: &ExecutorLimitsConfig) -> HostConfig {
     HostConfig {
         mounts: Some(mounts),
         network_mode: Some("bridge".to_string()),
         privileged: Some(false),
         cap_drop: Some(vec!["ALL".to_string()]),
+        memory: Some(limits.memory),
+        memory_swap: Some(limits.memory_swap),
+        cpu_quota: Some(limits.cpu_quota),
+        pids_limit: Some(limits.pids_limit),
+        security_opt: Some(vec!["no-new-privileges:true".to_string()]),
         auto_remove: Some(false),
         ..Default::default()
     }
@@ -1580,7 +1599,7 @@ impl AgentExecutor for DockerExecutor {
         let labels =
             Self::build_agent_labels(context.agent_id, context.wave_id, context.wave_run_id);
 
-        let host_config = container_host_config(mounts);
+        let host_config = container_host_config(mounts, &self.limits);
 
         let container = self
             .docker
@@ -1594,7 +1613,7 @@ impl AgentExecutor for DockerExecutor {
                     cmd: Some(cmd),
                     working_dir: Some(workspace.container_worktree.clone()),
                     env: Some(env),
-                    user: Some("root".to_string()),
+                    user: Some(AGENT_USER.to_string()),
                     host_config: Some(host_config),
                     labels: Some(labels),
                     attach_stdout: Some(true),
@@ -1661,7 +1680,7 @@ impl AgentExecutor for DockerExecutor {
 
     async fn cleanup_wave(&self, wave: &Wave) -> Result<()> {
         let repo = Self::resolve_host_repo(&wave.repo);
-        let workspace = Self::docker_workspace_for_wave(&repo, &wave.name, "main");
+        let workspace = Self::docker_workspace_for_wave(&repo, &wave.id, "main");
         if self
             .docker
             .inspect_volume(&workspace.volume.volume_name)
@@ -1673,32 +1692,43 @@ impl AgentExecutor for DockerExecutor {
 
         let lock = self
             .mutation_locks
-            .for_key(&workspace.volume.repo_key)
+            .for_key(&workspace.volume.volume_name)
             .await;
         let _guard = lock.lock().await;
-        if !self
+        if self
             .is_git_repo(&workspace, &workspace.container_shared_clone)
             .await
         {
-            return Ok(());
+            let _ = self
+                .git_command(
+                    &workspace,
+                    "git-worktree-remove",
+                    vec![
+                        "git".to_string(),
+                        "-C".to_string(),
+                        workspace.container_shared_clone.clone(),
+                        "worktree".to_string(),
+                        "remove".to_string(),
+                        "--force".to_string(),
+                        workspace.container_worktree.clone(),
+                    ],
+                    false,
+                )
+                .await;
         }
 
-        let _ = self
-            .git_command(
-                &workspace,
-                "git-worktree-remove",
-                vec![
-                    "git".to_string(),
-                    "-C".to_string(),
-                    workspace.container_shared_clone.clone(),
-                    "worktree".to_string(),
-                    "remove".to_string(),
-                    "--force".to_string(),
-                    workspace.container_worktree.clone(),
-                ],
-                false,
+        match self
+            .docker
+            .remove_volume(
+                &workspace.volume.volume_name,
+                Some(RemoveVolumeOptionsBuilder::new().force(true).build()),
             )
-            .await;
+            .await
+        {
+            Ok(_) => {}
+            Err(err) if is_volume_not_found(&err) => {}
+            Err(err) => return Err(err.into()),
+        }
         Ok(())
     }
 }
@@ -1706,7 +1736,7 @@ impl AgentExecutor for DockerExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::config::ExecutorType;
+    use crate::lfd::config::{ExecutorLimitsConfig, ExecutorType};
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{WaveRunKind, WaveRunSnapshot};
     use std::io::Cursor;
@@ -1767,6 +1797,21 @@ mod tests {
         assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
     }
 
+    #[test]
+    fn docker_host_config_applies_limits_and_no_new_privileges() {
+        let limits = ExecutorLimitsConfig::default();
+        let host_config = container_host_config(vec![], &limits);
+
+        assert_eq!(host_config.memory, Some(limits.memory));
+        assert_eq!(host_config.memory_swap, Some(limits.memory_swap));
+        assert_eq!(host_config.cpu_quota, Some(limits.cpu_quota));
+        assert_eq!(host_config.pids_limit, Some(limits.pids_limit));
+        assert_eq!(
+            host_config.security_opt,
+            Some(vec!["no-new-privileges:true".to_string()])
+        );
+    }
+
     fn list_archive_entries(bytes: Bytes) -> Vec<String> {
         let cursor = Cursor::new(bytes);
         let mut archive = tar::Archive::new(cursor);
@@ -1808,13 +1853,19 @@ mod tests {
     }
 
     #[test]
-    fn repo_volume_identity_is_deterministic_and_safe() {
+    fn docker_repo_volume_identity_is_wave_scoped_and_deterministic() {
         let repo = tempdir().expect("tempdir");
-        let first = RepoVolumeIdentity::from_identity(&RepoIdentity::from_repo(repo.path()));
-        let second = RepoVolumeIdentity::from_identity(&RepoIdentity::from_repo(repo.path()));
+        let repo_identity = RepoIdentity::from_repo(repo.path());
+        let wave_a = LfdId::from_raw("wave-a");
+        let wave_b = LfdId::from_raw("wave-b");
+        let first = RepoVolumeIdentity::from_wave(&repo_identity, &wave_a);
+        let second = RepoVolumeIdentity::from_wave(&repo_identity, &wave_a);
+        let third = RepoVolumeIdentity::from_wave(&repo_identity, &wave_b);
 
         assert_eq!(first, second);
-        assert!(first.volume_name.starts_with("lfd-repo-"));
+        assert_eq!(first.repo_key, third.repo_key);
+        assert_ne!(first.volume_name, third.volume_name);
+        assert!(first.volume_name.starts_with("lfd-wave-"));
         assert!(first
             .volume_name
             .chars()
@@ -2065,6 +2116,7 @@ mod tests {
             image: "loopflow/agent:test".to_string(),
             credentials: Default::default(),
             agent_timeout: std::time::Duration::from_secs(45 * 60),
+            limits: ExecutorLimitsConfig::default(),
         };
         let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
         let output_dir = tmp.path().join("output");
@@ -2215,6 +2267,7 @@ mod tests {
             image: "loopflow/agent:test".to_string(),
             credentials: Default::default(),
             agent_timeout: std::time::Duration::from_secs(45 * 60),
+            limits: ExecutorLimitsConfig::default(),
         };
         let executor = DockerExecutor::new(store.clone(), &config).expect("executor");
         let output_dir = tmp.path().join("output");

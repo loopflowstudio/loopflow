@@ -85,6 +85,10 @@ LFD_AUTH_PROVIDER # local (default), static, or loopflow.studio
 LFD_AUTH_TOKEN    # required when LFD_AUTH_PROVIDER=static
 LFD_EXECUTOR_IMAGE # override agent image (default loopflow/agent:latest)
 LFD_EXECUTOR_AGENT_TIMEOUT # override per-agent timeout (default 45m)
+LFD_EXECUTOR_LIMITS_MEMORY # override docker memory bytes (default 4294967296)
+LFD_EXECUTOR_LIMITS_MEMORY_SWAP # override docker memory+swap bytes (default 4294967296)
+LFD_EXECUTOR_LIMITS_CPU_QUOTA # override docker CPU quota (default 200000 = 2 vCPU)
+LFD_EXECUTOR_LIMITS_PIDS_LIMIT # override docker PID limit (default 512)
 LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
 LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
 ```
@@ -101,6 +105,11 @@ auth:
 executor:
   image: loopflow/agent:latest # base image for generated .lf/Dockerfile
   agent_timeout: 45m # max runtime per agent step (process or container)
+  limits:
+    memory: 4294967296 # 4 GiB
+    memory_swap: 4294967296 # no swap above memory
+    cpu_quota: 200000 # 2 vCPU
+    pids_limit: 512
   credentials:
     env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
     mounts:
@@ -163,7 +172,7 @@ Auth behavior:
 - Clients (`lfq`, Concerto) auto-discover the local session token from `~/.lf/session-token`. Set `LFD_TOKEN` for shell use.
 - In `auth.provider=static` or `auth.provider=loopflow.studio`, the configured provider's bearer token is required.
 
-When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per repo (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside the volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
+When `executor.type` is `docker`, `lfd` runs steps from a persistent Docker volume per wave (not a host bind mount). Each run uses a shared clone plus per-wave worktrees inside that wave-scoped volume and applies hygiene before execution (`git fetch`, `git reset --hard`, `git clean -fdx`).
 
 Docker mode also:
 
@@ -172,6 +181,8 @@ Docker mode also:
 - treats `.lf/env-setup.sh` as project-owned setup; call `install-loopflow.sh "$@"` first in that script to keep loopflow base tooling aligned
 - requires the `docker` CLI in `PATH` for repo image builds (`docker build`)
 - reattaches to running agent containers after daemon restart
+- enforces default container hardening (`user=agent`, memory/CPU/PID limits, `no-new-privileges`)
+- uses `docker-socket-proxy` in managed container mode (`DOCKER_HOST=tcp://docker-socket-proxy:2375`) instead of direct docker socket access from `lfd`
 
 Current limitation: `fork` steps are not supported by the Docker executor yet.
 

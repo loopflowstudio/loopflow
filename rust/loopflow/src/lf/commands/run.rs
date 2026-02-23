@@ -1,8 +1,9 @@
 use crate::engine::{
-    check_cli_available, drop_native_instruction_docs, format_context_prompt, format_prompt,
-    format_task_prompt, gather_context, launch_agent, load_config_or_default, parse_model,
-    seed_rlm_env, trim_context_with_breakdown, write_prompt_log, Config, ContextBreakdown,
-    GatherContextOpts, LaunchConfig, PromptComponents, StreamFormat, DEFAULT_CONTEXT_BUDGET,
+    check_cli_available, default_gather_sources, drop_native_instruction_docs,
+    format_context_prompt, format_prompt, format_task_prompt, gather_context, launch_agent,
+    load_config_or_default, parse_model, seed_rlm_env, trim_context_with_breakdown,
+    write_prompt_log, Config, ContextBreakdown, GatherContextOpts, LaunchConfig, PromptComponents,
+    PromptFormatMode, StreamFormat, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -112,10 +113,13 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         ),
         directions,
         files: Vec::new(),
-        lfdocs,
-        diff_files,
-        diff,
-        clipboard: include_clipboard,
+        sources: default_gather_sources(
+            lfdocs,
+            diff_files || diff,
+            include_clipboard,
+            area.as_deref(),
+            cli.wave.as_deref(),
+        ),
         area: area.clone(),
         wave: cli.wave.clone(),
     })?;
@@ -140,7 +144,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     );
 
     let prompt_start = Instant::now();
-    let prompt = format_prompt(&components);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
     debug!(
         elapsed_ms = prompt_start.elapsed().as_millis(),
         "formatted prompt"

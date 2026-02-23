@@ -742,7 +742,9 @@ const SHELL_INSTALL_LINE_BASH: &str =
 // ==========================================================================
 
 fn copy_context(paths: &[String], exclude: &[String], lfdocs: bool, no_lfdocs: bool) -> Result<()> {
-    use crate::engine::prompt::{count_tokens, gather_context, Document, GatherContextOpts};
+    use crate::engine::prompt::{
+        count_tokens, default_gather_sources, gather_context, Document, GatherContextOpts,
+    };
     use std::collections::HashSet;
 
     let repo_root = find_repo_root()?;
@@ -755,9 +757,14 @@ fn copy_context(paths: &[String], exclude: &[String], lfdocs: bool, no_lfdocs: b
     // Gather context
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
-        lfdocs: include_lfdocs,
-        diff_files: !has_paths, // Use diff files if no paths specified
         files: paths.to_vec(),
+        sources: default_gather_sources(
+            include_lfdocs,
+            !has_paths, // Use diff files if no paths specified
+            false,
+            None,
+            None,
+        ),
         ..Default::default()
     };
 

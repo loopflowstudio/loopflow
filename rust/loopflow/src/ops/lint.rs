@@ -2,7 +2,9 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::engine::config::load_config_or_default;
-use crate::engine::prompt::{format_prompt, gather_context, GatherContextOpts};
+use crate::engine::prompt::{
+    default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+};
 use crate::engine::{launch_agent, LaunchConfig};
 
 use crate::ops::error::{OpsError, OpsResult};
@@ -51,16 +53,19 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
         run_mode: Some("auto".to_string()),
         directions: config.direction.unwrap_or_default(),
         files: Vec::new(),
-        lfdocs: config.lfdocs,
-        diff_files: config.diff_files,
-        diff: config.diff,
-        clipboard: config.paste,
+        sources: default_gather_sources(
+            config.lfdocs,
+            config.diff_files || config.diff,
+            config.paste,
+            config.area.as_deref(),
+            None,
+        ),
         area: config.area,
         wave: None,
     };
 
     let components = gather_context(&opts)?;
-    let prompt = format_prompt(&components);
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
 
     let launch_config = LaunchConfig {
         auto: true,

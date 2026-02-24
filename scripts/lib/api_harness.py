@@ -55,6 +55,10 @@ class ApiAssertions:
         return _json_dict(response)
 
     @staticmethod
+    def expect_json_object(response: httpx.Response) -> dict[str, Any]:
+        return _json_dict(response)
+
+    @staticmethod
     def expect_status(response: httpx.Response, status_code: int) -> None:
         if response.status_code == status_code:
             return

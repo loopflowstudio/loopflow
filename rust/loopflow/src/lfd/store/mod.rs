@@ -5,7 +5,8 @@ use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
     Agent, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PendingActivation,
-    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
+    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveData, WaveRun, WaveRunStackStatus,
+    WaveStatus,
 };
 
 pub mod catalog;
@@ -15,6 +16,40 @@ pub mod rows;
 pub mod sqlite;
 
 pub const MAX_CHORD_DEPTH: u32 = 8;
+
+pub(crate) fn reparented_wave(wave: &Wave, parent_id: Option<LfdId>, position: u32) -> Wave {
+    let mut data = wave.data().clone();
+    data.parent_id = parent_id;
+    data.position = position;
+    match wave {
+        Wave::Voice(_) => Wave::Voice(data),
+        Wave::Chord { .. } => Wave::Chord {
+            data,
+            children: Vec::new(),
+        },
+    }
+}
+
+pub(crate) fn new_chord_wave(template: &Wave, chord_id: LfdId, name: String) -> Wave {
+    Wave::Chord {
+        data: WaveData {
+            id: chord_id,
+            name,
+            repo: template.repo().clone(),
+            flow: template.flow().clone(),
+            direction: template.direction().clone(),
+            area: template.area().clone(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            schema_ref: None,
+            schema_name: None,
+            created_at: Some(time::OffsetDateTime::now_utc()),
+            parent_id: None,
+            position: 0,
+        },
+        children: Vec::new(),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

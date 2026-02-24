@@ -10,7 +10,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 
 ## Design Decisions
 
-**Harness-first, not protocol-first.** Build a working Codex harness end-to-end before abstracting. The protocol emerges from real provider behavior, not upfront design.
+**Harness-first, not protocol-first.** Build a working harness end-to-end before abstracting. The protocol emerged from real provider behavior — Codex first, then Claude validated the abstraction. Harness mapping modules (`codex_mapping.rs`, `claude_mapping.rs`) now live alongside harness logic.
 
 **lfd owns the session lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
 
@@ -34,7 +34,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 |---|-------|----------------|--------|
 | 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first harness. | shipped |
 | 02 | Claude Harness | `-p --resume` with structured output. Probes agent personality. | shipped |
-| 03 | Concerto UI | Minimal chat panel, input, End button against proven API | |
+| 03 | Concerto UI | Typed transcript, item cards, session lifecycle, reconnect/replay | shipped |
 | 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
 | 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
 | 06 | OpenCode Harness | Third provider harness validates the abstraction | |

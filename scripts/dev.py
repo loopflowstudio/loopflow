@@ -14,7 +14,8 @@ Commands:
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
     logs            Tail the app logs
-    lfd             Stop installed lfd and run from this branch
+    lfd             Stop installed lfd and run from this branch (native/sqlite)
+    lfd --docker    Run lfd with Docker executor (postgres in container)
     agent-image     Build the Docker agent image
 
     ghostty-build   Build GhosttyKit xcframework locally
@@ -191,14 +192,20 @@ def cmd_logs() -> int:
 
 def cmd_lfd(docker: bool = False) -> int:
     """Stop installed lfd and run from this branch."""
-    plist = Path.home() / "Library" / "LaunchAgents" / "com.loopflow.lfd.plist"
+    _stop_installed_lfd()
 
-    # Unload launchd service
+    if docker:
+        return _lfd_docker()
+    return _lfd_native()
+
+
+def _stop_installed_lfd() -> None:
+    """Stop any running lfd (launchd, pid file, compose, port)."""
+    plist = Path.home() / "Library" / "LaunchAgents" / "com.loopflow.lfd.plist"
     if plist.exists():
         print("Unloading lfd launchd service...")
         run(["launchctl", "unload", str(plist)], check=False)
 
-    # Stop lfd using PID file (avoids killing claude processes that have "lfd" in prompts)
     pid_file = Path.home() / ".lf" / "lfd.pid"
     if pid_file.exists():
         try:
@@ -210,31 +217,103 @@ def cmd_lfd(docker: bool = False) -> int:
             pass
         pid_file.unlink(missing_ok=True)
 
-    # Stop Docker containers holding the lfd port
     _stop_docker_on_port(2486)
 
-    # Suppress gRPC fork handler spam
+
+def _lfd_docker() -> int:
+    """Start postgres in a container, run lfd natively with Docker executor.
+
+    lfd needs host filesystem access to resolve repo paths and build agent
+    images, so it runs on the host. Only postgres is containerized.
+    """
+    # Start postgres
+    pg_container = "lfd-dev-postgres"
+    result = run_capture(["docker", "inspect", pg_container, "--format", "{{.State.Running}}"])
+    if result.returncode == 0 and result.stdout.strip() == "true":
+        print(f"Postgres already running ({pg_container})")
+    else:
+        print("Starting postgres...")
+        # Remove stopped container if it exists
+        run(["docker", "rm", "-f", pg_container], check=False)
+        result = run([
+            "docker", "run", "-d",
+            "--name", pg_container,
+            "-p", "5432:5432",
+            "-e", "POSTGRES_USER=lfd",
+            "-e", "POSTGRES_PASSWORD=lfd",
+            "-e", "POSTGRES_DB=lfd",
+            "--health-cmd", "pg_isready -U lfd",
+            "--health-interval", "2s",
+            "--health-retries", "10",
+            "postgres:16-alpine",
+        ], check=False)
+        if result.returncode != 0:
+            return result.returncode
+
+        # Wait for healthy
+        print("Waiting for postgres...")
+        for _ in range(30):
+            time.sleep(1)
+            check = run_capture([
+                "docker", "inspect", pg_container,
+                "--format", "{{.State.Health.Status}}",
+            ])
+            if check.stdout.strip() == "healthy":
+                break
+        else:
+            print("Postgres did not become healthy in time")
+            return 1
+        print("Postgres ready")
+
+    # Build agent image if needed (cached rebuilds are instant)
+    result = _ensure_agent_image()
+    if result != 0:
+        return result
+
+    # Build lfd from source
     os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
     os.environ["GRPC_VERBOSITY"] = "ERROR"
 
-    # Build lfd from this branch
     print("Building lfd...")
     result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
         return result.returncode
 
-    # Docker executor mode
-    if docker:
-        os.environ["LFD_MODE"] = "container"
-        print("Container mode enabled (requires postgres + LFD_DATABASE_URL)")
-
-    # Enable verbose logging
+    # Run lfd natively in container mode
+    os.environ["LFD_MODE"] = "container"
+    os.environ["LFD_DATABASE_URL"] = "postgres://lfd:lfd@127.0.0.1:5432/lfd"
+    os.environ["LFD_EXECUTOR_CREDENTIALS_MOUNTS"] = "claude,ssh,gitconfig"
     os.environ["RUST_LOG"] = "loopflow=debug,tower_http=debug"
 
-    # Run the local debug binary - use exec so Ctrl+C works
+    lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
+    print("Starting lfd (container mode, debug logging)...")
+    os.execv(lfd_bin, [lfd_bin, "serve"])
+
+
+def _lfd_native() -> int:
+    """Build and run lfd natively (sqlite, local executor)."""
+    os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+    os.environ["GRPC_VERBOSITY"] = "ERROR"
+
+    print("Building lfd...")
+    result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
+    if result.returncode != 0:
+        return result.returncode
+
+    os.environ["RUST_LOG"] = "loopflow=debug,tower_http=debug"
+
     lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
     print("Starting lfd from this branch (debug logging enabled)...")
     os.execv(lfd_bin, [lfd_bin, "serve"])
+
+
+def _ensure_agent_image() -> int:
+    """Build the agent image if it doesn't exist."""
+    result = run_capture(["docker", "image", "inspect", "loopflow/agent:latest"])
+    if result.returncode == 0:
+        print("Agent image exists (loopflow/agent:latest)")
+        return 0
+    return cmd_agent_image()
 
 
 def cmd_agent_image() -> int:
@@ -409,7 +488,7 @@ COMMANDS = {
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
     "logs": (cmd_logs, "Tail the app logs"),
-    "lfd": (cmd_lfd, "Stop installed lfd and run from this branch"),
+    "lfd": (cmd_lfd, "Stop installed lfd and run from this branch (--docker for compose)"),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
     "ghostty-update": (cmd_ghostty_update, "Build, upload to R2, update Package.swift"),

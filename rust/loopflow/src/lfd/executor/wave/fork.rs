@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -144,7 +144,7 @@ impl WaveExecutor {
                             error = %err,
                             "fork branch prompt build failed"
                         );
-                        let _ = tx.send((branch_index, Err(err))).await;
+                        let _ = tx.send((branch_index, 1)).await;
                         return;
                     }
                 };
@@ -157,7 +157,7 @@ impl WaveExecutor {
                     "launching fork branch agent"
                 );
 
-                let result = executor
+                let exit_code = match executor
                     .launch_agent(AgentLaunchRequest {
                         wave_id: fork_wave_id.clone(),
                         wave_run_id: wave_run_id.clone(),
@@ -169,19 +169,21 @@ impl WaveExecutor {
                         output_prefix: Some(format!("[{}] ", branch_label)),
                     })
                     .await
-                    .map(|outcome| outcome.exit_code);
+                {
+                    Ok(outcome) => outcome.exit_code,
+                    Err(err) => {
+                        error!(fork_run_id = %fork_run_id, step = %step.step.name, error = %err, "fork branch error");
+                        1
+                    }
+                };
 
-                let status = match &result {
-                    Ok(0) => {
+                let status = match exit_code {
+                    0 => {
                         info!(fork_run_id = %fork_run_id, step = %step.step.name, "fork branch completed");
                         ForkRunStatus::Completed
                     }
-                    Ok(code) => {
+                    code => {
                         warn!(fork_run_id = %fork_run_id, step = %step.step.name, exit_code = code, "fork branch failed");
-                        ForkRunStatus::Failed
-                    }
-                    Err(err) => {
-                        error!(fork_run_id = %fork_run_id, step = %step.step.name, error = %err, "fork branch error");
                         ForkRunStatus::Failed
                     }
                 };
@@ -192,7 +194,7 @@ impl WaveExecutor {
                         ..fork_run.clone()
                     })
                     .await;
-                let _ = tx.send((branch_index, result)).await;
+                let _ = tx.send((branch_index, exit_code)).await;
             });
 
             handles.push(handle);
@@ -200,7 +202,7 @@ impl WaveExecutor {
         drop(tx);
 
         let total = fork_runs.len();
-        let mut branch_results: Vec<Option<Result<i32>>> = (0..total).map(|_| None).collect();
+        let mut branch_results: Vec<Option<i32>> = (0..total).map(|_| None).collect();
         let mut completed = 0usize;
         debug!(run_id = %run.id, total_branches = total, "waiting for fork results");
         while completed < total {
@@ -226,22 +228,17 @@ impl WaveExecutor {
         let mut outcomes = Vec::new();
         for execution in &fork_runs {
             let branch_index = execution.run.branch_index as usize;
-            let result = branch_results
+            let exit_code = branch_results
                 .get_mut(branch_index)
                 .and_then(|entry| entry.take())
-                .unwrap_or_else(|| Err(anyhow!("fork branch result missing")));
-            let exit_code = match result {
-                Ok(code) => code,
-                Err(err) => {
+                .unwrap_or_else(|| {
                     warn!(
                         run_id = %run.id,
                         branch = %execution.label,
-                        error = %err,
-                        "fork branch errored"
+                        "fork branch result missing"
                     );
                     1
-                }
-            };
+                });
             outcomes.push(ForkManifestBranch {
                 index: execution.run.branch_index as usize,
                 step: execution.step.step.name.clone(),

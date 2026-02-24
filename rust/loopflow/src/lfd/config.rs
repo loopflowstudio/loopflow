@@ -117,6 +117,35 @@ impl RawLfdConfig {
             }
         }
 
+        if let Ok(value) = std::env::var("LFD_EXECUTOR_CREDENTIALS_ENV") {
+            let names: Vec<String> = value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !names.is_empty() {
+                self.executor.credentials.env = names;
+            }
+        }
+
+        if let Ok(value) = std::env::var("LFD_EXECUTOR_CREDENTIALS_MOUNTS") {
+            let names: Result<Vec<CredentialMount>, _> = value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .map(CredentialMount::try_from)
+                .collect();
+            match names {
+                Ok(mounts) if !mounts.is_empty() => {
+                    self.executor.credentials.mounts = mounts;
+                }
+                Err(err) => {
+                    return Err(anyhow!("invalid LFD_EXECUTOR_CREDENTIALS_MOUNTS: {err}"));
+                }
+                _ => {}
+            }
+        }
+
         if let Ok(value) = std::env::var("LFD_EXECUTOR_IMAGE") {
             if !value.trim().is_empty() {
                 self.executor.image = value;
@@ -640,6 +669,7 @@ executor:
             "LFD_MODE",
             "LFD_AUTH_PROVIDER",
             "LFD_AUTH_TOKEN",
+            "LFD_EXECUTOR_CREDENTIALS_ENV",
             "LFD_EXECUTOR_IMAGE",
             "LFD_EXECUTOR_AGENT_TIMEOUT",
             "LFD_EXECUTOR_LIMITS_MEMORY",
@@ -652,6 +682,10 @@ executor:
         std::env::set_var("LFD_MODE", "container");
         std::env::set_var("LFD_AUTH_PROVIDER", "static");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
+        std::env::set_var(
+            "LFD_EXECUTOR_CREDENTIALS_ENV",
+            "ANTHROPIC_API_KEY,OPENAI_API_KEY",
+        );
         std::env::set_var("LFD_EXECUTOR_IMAGE", "loopflow/agent:env");
         std::env::set_var("LFD_EXECUTOR_AGENT_TIMEOUT", "30m");
         std::env::set_var("LFD_EXECUTOR_LIMITS_MEMORY", "2147483648");
@@ -670,6 +704,10 @@ executor:
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
         assert_eq!(resolved.auth.provider, "static");
         assert_eq!(resolved.auth.token, Some("env-token-456".to_string()));
+        assert_eq!(
+            resolved.executor.credentials.env,
+            vec!["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+        );
         assert_eq!(resolved.executor.image, "loopflow/agent:env");
         assert_eq!(
             resolved.executor.agent_timeout,
@@ -729,6 +767,7 @@ executor:
             "LFD_MODE",
             "LFD_AUTH_PROVIDER",
             "LFD_AUTH_TOKEN",
+            "LFD_EXECUTOR_CREDENTIALS_ENV",
             "LFD_EXECUTOR_IMAGE",
             "LFD_EXECUTOR_AGENT_TIMEOUT",
             "LFD_EXECUTOR_LIMITS_MEMORY",

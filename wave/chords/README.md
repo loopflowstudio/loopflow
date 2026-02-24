@@ -49,9 +49,10 @@ Key properties:
 
 | # | Phase | Focus | Status |
 |---|-------|-------|--------|
-| 01 | Data Model | Wave enum (Voice/Chord), SQLite storage, voicing | shipped |
+| 01 | Data Model | Wave enum (Voice/Chord), SQLite storage, join/leave | shipped |
 | 02 | Execution | Inherited trigger tick → start all → wait all → mark failure if any | |
 | 03 | Listen Step | Inter-voice communication via PR digestion and plan adaptation | |
+| 04 | Beat Grid | Sequenced execution — drum machine grid of on/off per child per beat | |
 
 ### Phase 01 retrospective
 

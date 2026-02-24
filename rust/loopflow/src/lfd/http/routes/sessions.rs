@@ -232,6 +232,9 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
             StatusCode::CONFLICT,
             format!("wave run already has an active session: {wave_run_id}"),
         ),
+        SessionManagerError::TurnAlreadyInProgress => {
+            api_error(StatusCode::CONFLICT, "turn already in progress")
+        }
         SessionManagerError::Adapter(message) => {
             api_error(StatusCode::INTERNAL_SERVER_ERROR, message)
         }

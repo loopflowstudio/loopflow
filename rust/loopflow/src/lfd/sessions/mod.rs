@@ -32,6 +32,8 @@ pub enum SessionManagerError {
     UnsupportedProvider(String),
     #[error("wave run already has an active session: {0}")]
     WaveRunSessionConflict(String),
+    #[error("turn already in progress")]
+    TurnAlreadyInProgress,
     #[error("adapter error: {0}")]
     Adapter(String),
 }
@@ -151,6 +153,10 @@ impl SessionManager {
                             ref provider_session_id,
                         } = event
                         {
+                            {
+                                let mut adapter = bridge_runtime.adapter.lock().await;
+                                adapter.set_provider_session_id(Some(provider_session_id.clone()));
+                            }
                             if let Err(err) = manager
                                 .inner
                                 .store
@@ -267,6 +273,10 @@ impl SessionManager {
         };
 
         if let Err(err) = send_result {
+            if adapter::is_turn_in_progress(&err) {
+                return Err(SessionManagerError::TurnAlreadyInProgress);
+            }
+
             let _ = self
                 .append_runtime_event(
                     session_id,
@@ -424,7 +434,7 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::sessions::adapter::SessionAdapter;
+    use crate::lfd::sessions::adapter::{SessionAdapter, SessionAdapterError};
     use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
     use crate::lfd::store::{open_store, StorageConfig};
     use anyhow::Result;
@@ -471,6 +481,90 @@ mod tests {
         Ok(Box::new(FakeAdapter { tx: event_tx }))
     }
 
+    #[derive(Debug)]
+    struct BusyAdapter;
+
+    #[async_trait]
+    impl SessionAdapter for BusyAdapter {
+        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            Err(SessionAdapterError::TurnAlreadyInProgress.into())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn busy_create_adapter(
+        _provider: &str,
+        _event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionAdapter>> {
+        Ok(Box::new(BusyAdapter))
+    }
+
+    #[derive(Debug)]
+    struct ResumeAwareAdapter {
+        tx: broadcast::Sender<SessionEvent>,
+        send_count: usize,
+        provider_session_id: Option<String>,
+    }
+
+    #[async_trait]
+    impl SessionAdapter for ResumeAwareAdapter {
+        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            self.send_count += 1;
+            let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+            let _ = self.tx.send(SessionEvent::TurnStarted {
+                turn_id: turn_id.clone(),
+            });
+            if self.send_count == 1 {
+                let _ = self.tx.send(SessionEvent::ProviderSessionId {
+                    provider_session_id: "sess_resume_1".to_string(),
+                });
+            }
+            let resume = self
+                .provider_session_id
+                .clone()
+                .unwrap_or_else(|| "none".to_string());
+            let _ = self.tx.send(SessionEvent::TextDelta {
+                turn_id: turn_id.clone(),
+                content: format!("resume:{resume}"),
+            });
+            let _ = self.tx.send(SessionEvent::TurnCompleted {
+                turn_id,
+                status: TurnStatus::Completed,
+            });
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
+            self.provider_session_id = provider_session_id;
+        }
+    }
+
+    fn resume_aware_create_adapter(
+        _provider: &str,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionAdapter>> {
+        Ok(Box::new(ResumeAwareAdapter {
+            tx: event_tx,
+            send_count: 0,
+            provider_session_id: None,
+        }))
+    }
+
     async fn wait_for_status(
         manager: &SessionManager,
         session_id: &LfdId,
@@ -487,6 +581,24 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("session never reached expected status");
+    }
+
+    async fn wait_for_provider_session_id(
+        manager: &SessionManager,
+        session_id: &LfdId,
+        expected: &str,
+    ) {
+        for _ in 0..50 {
+            let session = manager
+                .get_session(session_id)
+                .await
+                .expect("session should exist");
+            if session.provider_session_id.as_deref() == Some(expected) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("session never captured expected provider session id");
     }
 
     #[tokio::test]
@@ -614,5 +726,91 @@ mod tests {
             err,
             SessionManagerError::WaveRunSessionConflict(ref wave_run_id) if wave_run_id == "run_1"
         ));
+    }
+
+    #[tokio::test]
+    async fn send_input_busy_error_does_not_fail_session() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_adapter(store, busy_create_adapter);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        let err = manager
+            .send_input(&created.id, "hello")
+            .await
+            .expect_err("busy adapter should reject concurrent turn");
+        assert!(matches!(err, SessionManagerError::TurnAlreadyInProgress));
+
+        let session = manager
+            .get_session(&created.id)
+            .await
+            .expect("session should still exist");
+        assert_eq!(session.status, SessionStatus::Active);
+    }
+
+    #[tokio::test]
+    async fn provider_session_id_is_applied_to_adapter_for_resume() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_adapter(store, resume_aware_create_adapter);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        manager
+            .send_input(&created.id, "first turn")
+            .await
+            .expect("first input should succeed");
+        wait_for_provider_session_id(&manager, &created.id, "sess_resume_1").await;
+
+        manager
+            .send_input(&created.id, "second turn")
+            .await
+            .expect("second input should succeed");
+
+        let mut saw_resume = false;
+        for _ in 0..50 {
+            let events = manager
+                .list_events(&created.id, None)
+                .await
+                .expect("list events");
+            saw_resume = events.iter().any(|event| {
+                matches!(
+                    &event.event,
+                    SessionEvent::TextDelta { content, .. } if content == "resume:sess_resume_1"
+                )
+            });
+            if saw_resume {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(saw_resume);
     }
 }

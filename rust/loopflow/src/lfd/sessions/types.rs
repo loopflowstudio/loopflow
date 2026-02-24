@@ -100,32 +100,20 @@ pub enum SessionItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,
     },
-    FileChange {
+    File {
         id: String,
         #[serde(default)]
         changes: Vec<FileEdit>,
         status: ItemStatus,
     },
-    McpToolCall {
-        id: String,
-        server: String,
-        tool: String,
-        status: ItemStatus,
-        #[serde(default)]
-        arguments: Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        result: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    AgentMessage {
+    Message {
         id: String,
         #[serde(default)]
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         phase: Option<String>,
     },
-    Plan {
+    Thought {
         id: String,
         #[serde(default)]
         text: String,
@@ -146,10 +134,9 @@ impl SessionItem {
     pub fn id(&self) -> &str {
         match self {
             Self::Command { id, .. }
-            | Self::FileChange { id, .. }
-            | Self::McpToolCall { id, .. }
-            | Self::AgentMessage { id, .. }
-            | Self::Plan { id, .. }
+            | Self::File { id, .. }
+            | Self::Message { id, .. }
+            | Self::Thought { id, .. }
             | Self::Tool { id, .. } => id,
         }
     }

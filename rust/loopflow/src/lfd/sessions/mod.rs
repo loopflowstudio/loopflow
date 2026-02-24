@@ -8,9 +8,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::lfd::id::LfdId;
-use crate::lfd::sessions::adapter::{
-    DefaultSessionAdapterFactory, SessionAdapter, SharedSessionAdapterFactory,
-};
+use crate::lfd::sessions::adapter::{CreateAdapterFn, SessionAdapter};
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionEvent, SessionStatus,
 };
@@ -52,7 +50,7 @@ impl std::fmt::Debug for SessionRuntime {
 
 struct SessionManagerInner {
     store: SharedStore,
-    adapter_factory: SharedSessionAdapterFactory,
+    create_adapter: CreateAdapterFn,
     runtimes: Mutex<HashMap<LfdId, Arc<SessionRuntime>>>,
 }
 
@@ -69,14 +67,14 @@ pub struct SessionManager {
 
 impl SessionManager {
     pub fn new(store: SharedStore) -> Self {
-        Self::with_factory(store, Arc::new(DefaultSessionAdapterFactory))
+        Self::with_create_adapter(store, adapter::default_create_adapter)
     }
 
-    pub fn with_factory(store: SharedStore, adapter_factory: SharedSessionAdapterFactory) -> Self {
+    fn with_create_adapter(store: SharedStore, create_adapter: CreateAdapterFn) -> Self {
         Self {
             inner: Arc::new(SessionManagerInner {
                 store,
-                adapter_factory,
+                create_adapter,
                 runtimes: Mutex::new(HashMap::new()),
             }),
         }
@@ -116,10 +114,7 @@ impl SessionManager {
             ended_at: None,
         };
         let (adapter_events_tx, mut adapter_events_rx) = broadcast::channel(ADAPTER_EVENT_BUFFER);
-        let adapter = self
-            .inner
-            .adapter_factory
-            .create(&provider, adapter_events_tx)
+        let adapter = (self.inner.create_adapter)(&provider, adapter_events_tx)
             .map_err(|err| SessionManagerError::Adapter(err.to_string()))?;
         self.inner.store.create_session(&session).await?;
 
@@ -409,10 +404,9 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::sessions::adapter::{SessionAdapter, SessionAdapterFactory};
+    use crate::lfd::sessions::adapter::SessionAdapter;
     use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
     use crate::lfd::store::{open_store, StorageConfig};
-    use anyhow::anyhow;
     use anyhow::Result;
     use async_trait::async_trait;
     use std::sync::Arc;
@@ -450,20 +444,11 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default)]
-    struct FakeFactory;
-
-    impl SessionAdapterFactory for FakeFactory {
-        fn create(
-            &self,
-            provider: &str,
-            event_tx: broadcast::Sender<SessionEvent>,
-        ) -> Result<Box<dyn SessionAdapter>> {
-            if provider != "codex" {
-                return Err(anyhow!("unsupported session provider: {provider}"));
-            }
-            Ok(Box::new(FakeAdapter { tx: event_tx }))
-        }
+    fn fake_create_adapter(
+        _provider: &str,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionAdapter>> {
+        Ok(Box::new(FakeAdapter { tx: event_tx }))
     }
 
     async fn wait_for_status(
@@ -494,7 +479,7 @@ mod tests {
                 .expect("open sqlite store"),
         );
 
-        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+        let manager = SessionManager::with_create_adapter(store, fake_create_adapter);
         let created = manager
             .create_session(CreateSessionParams {
                 provider: "codex".to_string(),
@@ -556,7 +541,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+        let manager = SessionManager::with_create_adapter(store, fake_create_adapter);
 
         let err = manager
             .create_session(CreateSessionParams {
@@ -582,7 +567,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+        let manager = SessionManager::with_create_adapter(store, fake_create_adapter);
 
         let created = manager
             .create_session(CreateSessionParams {

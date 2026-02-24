@@ -197,34 +197,28 @@ impl CodexAdapter {
                     None
                 },
             },
-            "fileChange" => SessionItem::FileChange {
+            "fileChange" => SessionItem::File {
                 id,
                 changes: parse_file_changes(item),
                 status,
             },
-            "mcpToolCall" => SessionItem::McpToolCall {
+            "mcpToolCall" => SessionItem::Tool {
                 id,
-                server: Self::required_text_field(item, "server"),
-                tool: Self::required_text_field(item, "tool"),
+                name: Self::mcp_tool_name(item),
                 status,
-                arguments: item.get("arguments").cloned().unwrap_or(json!({})),
-                result: if completed {
-                    Self::text_field(item, "result")
-                } else {
-                    None
-                },
-                error: if completed {
-                    Self::text_field(item, "error")
+                input: Some(item.get("arguments").cloned().unwrap_or_else(|| json!({}))),
+                output: if completed {
+                    Self::text_field(item, "result").or_else(|| Self::text_field(item, "error"))
                 } else {
                     None
                 },
             },
-            "agentMessage" => SessionItem::AgentMessage {
+            "agentMessage" => SessionItem::Message {
                 id,
                 text: Self::required_text_field(item, "text"),
                 phase: Self::text_field(item, "phase"),
             },
-            "plan" => SessionItem::Plan {
+            "plan" => SessionItem::Thought {
                 id,
                 text: Self::required_text_field(item, "text"),
             },
@@ -239,6 +233,22 @@ impl CodexAdapter {
                     None
                 },
             },
+        }
+    }
+
+    fn mcp_tool_name(item: &Value) -> String {
+        let tool = Self::required_text_field(item, "tool");
+        let server = Self::text_field(item, "server").unwrap_or_default();
+        if server.is_empty() {
+            if tool.is_empty() {
+                "mcp_tool_call".to_string()
+            } else {
+                tool
+            }
+        } else if tool.is_empty() {
+            server
+        } else {
+            format!("{server}/{tool}")
         }
     }
 
@@ -626,5 +636,114 @@ impl CodexAdapter {
             .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_item_maps_file_change_to_file() {
+        let params = json!({
+            "item": {
+                "id": "item_1",
+                "type": "fileChange",
+                "status": "completed",
+                "changes": [
+                    {"path": "src/main.rs", "kind": "update", "diff": "-a\n+b"}
+                ]
+            }
+        });
+
+        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        match item {
+            SessionItem::File {
+                id,
+                changes,
+                status,
+            } => {
+                assert_eq!(id, "item_1");
+                assert_eq!(status, ItemStatus::Completed);
+                assert_eq!(changes.len(), 1);
+                assert_eq!(changes[0].path, "src/main.rs");
+            }
+            other => panic!("expected file item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_item_maps_agent_message_to_message() {
+        let params = json!({
+            "item": {
+                "id": "item_2",
+                "type": "agentMessage",
+                "text": "Done",
+                "phase": "final"
+            }
+        });
+
+        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        match item {
+            SessionItem::Message { id, text, phase } => {
+                assert_eq!(id, "item_2");
+                assert_eq!(text, "Done");
+                assert_eq!(phase.as_deref(), Some("final"));
+            }
+            other => panic!("expected message item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_item_maps_plan_to_thought() {
+        let params = json!({
+            "item": {
+                "id": "item_3",
+                "type": "plan",
+                "text": "Run tests first"
+            }
+        });
+
+        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        match item {
+            SessionItem::Thought { id, text } => {
+                assert_eq!(id, "item_3");
+                assert_eq!(text, "Run tests first");
+            }
+            other => panic!("expected thought item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_item_maps_mcp_tool_call_to_generic_tool() {
+        let params = json!({
+            "item": {
+                "id": "item_4",
+                "type": "mcpToolCall",
+                "status": "completed",
+                "server": "github",
+                "tool": "search",
+                "arguments": { "query": "regression" },
+                "result": "ok"
+            }
+        });
+
+        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        match item {
+            SessionItem::Tool {
+                id,
+                name,
+                status,
+                input,
+                output,
+            } => {
+                assert_eq!(id, "item_4");
+                assert_eq!(name, "github/search");
+                assert_eq!(status, ItemStatus::Completed);
+                assert_eq!(input, Some(json!({ "query": "regression" })));
+                assert_eq!(output.as_deref(), Some("ok"));
+            }
+            other => panic!("expected tool item, got {other:?}"),
+        }
     }
 }

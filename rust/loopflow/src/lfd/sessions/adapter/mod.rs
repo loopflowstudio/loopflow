@@ -1,7 +1,5 @@
 pub mod codex;
 
-use std::sync::Arc;
-
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::broadcast;
@@ -15,28 +13,16 @@ pub trait SessionAdapter: Send + Sync {
     async fn stop(&mut self) -> Result<()>;
 }
 
-pub trait SessionAdapterFactory: Send + Sync {
-    fn create(
-        &self,
-        provider: &str,
-        event_tx: broadcast::Sender<SessionEvent>,
-    ) -> Result<Box<dyn SessionAdapter>>;
-}
+/// Constructor fn: `(provider, event_tx) -> adapter`.
+pub type CreateAdapterFn =
+    fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn SessionAdapter>>;
 
-#[derive(Debug, Default)]
-pub struct DefaultSessionAdapterFactory;
-
-impl SessionAdapterFactory for DefaultSessionAdapterFactory {
-    fn create(
-        &self,
-        provider: &str,
-        event_tx: broadcast::Sender<SessionEvent>,
-    ) -> Result<Box<dyn SessionAdapter>> {
-        match provider {
-            "codex" => Ok(Box::new(codex::CodexAdapter::new(event_tx))),
-            other => anyhow::bail!("unsupported session provider: {other}"),
-        }
+pub fn default_create_adapter(
+    provider: &str,
+    event_tx: broadcast::Sender<SessionEvent>,
+) -> Result<Box<dyn SessionAdapter>> {
+    match provider {
+        "codex" => Ok(Box::new(codex::CodexAdapter::new(event_tx))),
+        other => anyhow::bail!("unsupported session provider: {other}"),
     }
 }
-
-pub type SharedSessionAdapterFactory = Arc<dyn SessionAdapterFactory>;

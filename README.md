@@ -190,8 +190,8 @@ loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
 loopflow.create_wave("designer", repo=".", flow="ship", direction=["designer"], area=["docs/"])
 loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra-engineer"], area=["rust/"])
-loopflow.join("designer", "infra")  # creates a chord from two voices
-loopflow.run_wave("designer")       # run the chord
+loopflow.add_stimulus("designer", kind="listen", source_wave_id="infra")
+loopflow.run_wave("designer")
 ```
 
 [Documentation →](docs/index.md)

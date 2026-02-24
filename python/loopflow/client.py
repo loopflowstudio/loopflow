@@ -104,26 +104,6 @@ class Client:
         payload = self._request_json("POST", "/v0/waves", json=body)
         return Wave.model_validate(payload)
 
-    def join_waves(
-        self,
-        wave_a: str,
-        wave_b: str,
-        name: Optional[str] = None,
-        nest: bool = False,
-    ) -> Wave:
-        body: dict[str, Any] = {"wave_a": wave_a, "wave_b": wave_b}
-        if name is not None:
-            body["name"] = name
-        if nest:
-            body["nest"] = True
-        payload = self._request_json("POST", "/v0/waves/join", json=body)
-        return Wave.model_validate(payload)
-
-    def leave_wave(self, name_or_id: str) -> Wave:
-        body: dict[str, Any] = {"wave": name_or_id}
-        payload = self._request_json("POST", "/v0/waves/leave", json=body)
-        return Wave.model_validate(payload)
-
     def update_wave(
         self,
         name_or_id: str,
@@ -168,10 +148,13 @@ class Client:
         name_or_id: str,
         kind: str,
         cron: Optional[str] = None,
+        source_wave_id: Optional[str] = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"kind": kind}
         if cron is not None:
             body["cron"] = cron
+        if source_wave_id is not None:
+            body["source_wave_id"] = source_wave_id
         return self._request_json("POST", f"/v0/waves/{name_or_id}/stimulus", json=body)
 
     def remove_stimulus(self, name_or_id: str, stimulus_id: str) -> dict[str, Any]:

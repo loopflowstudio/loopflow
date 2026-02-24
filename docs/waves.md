@@ -18,26 +18,7 @@ PY
 
 This runs the `ship` flow on `src/api/` with the `product-engineer` direction—continuously, creating PRs until you stop it.
 
-## Chords
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("designer", repo=".", flow="ship", direction=["designer"], area=["docs/"])
-loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra-engineer"], area=["rust/"])
-loopflow.join("designer", "infra")  # creates a chord from two voices
-loopflow.run_wave("designer")       # run the chord
-PY
-```
-
-Voices are independent waves. `join` groups them into a chord. `leave` pulls a voice back out.
-
-```python
-loopflow.join("ensemble", "vocalist")  # add a voice to an existing chord
-loopflow.join("chord-a", "chord-b", nest=True)  # nest chord-b inside chord-a
-loopflow.leave("vocalist")             # vocalist becomes solo again (no stimulus)
-```
+Waves are independent by default. Use a `listen` stimulus when one wave should react to another.
 
 ## Stimulus Types
 
@@ -47,6 +28,7 @@ loopflow.leave("vocalist")             # vocalist becomes solo again (no stimulu
 | **Loop** | Continuously until stopped | `loopflow.run_wave(...)` with loop stimulus |
 | **Watch** | Area changes on main | `loopflow.update_wave(..., stimulus=watch)` |
 | **Cron** | On schedule | `loopflow.update_wave(..., stimulus=cron)` |
+| **Listen** | Another wave runs | `loopflow.add_stimulus(..., kind="listen", source_wave_id=...)` |
 
 ### Once
 
@@ -104,6 +86,21 @@ import loopflow.api as loopflow
 loopflow.create_wave("cronner", repo=".", flow="ship", area=["."])
 loopflow.update_wave("cronner", stimulus=loopflow.Stimulus(kind="cron", cron="0 9 * * *"))
 loopflow.run_wave("cronner")
+PY
+```
+
+### Listen
+
+Trigger a wave when another wave runs.
+
+```bash
+python - <<'PY'
+import loopflow.api as loopflow
+
+loopflow.create_wave("designer", repo=".", flow="ship", area=["docs/"])
+loopflow.create_wave("infra", repo=".", flow="grind", area=["rust/"])
+loopflow.add_stimulus("designer", kind="listen", source_wave_id="infra")
+loopflow.run_wave("designer")
 PY
 ```
 

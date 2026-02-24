@@ -42,14 +42,6 @@ def create_wave(
     return _client().create_wave(name, repo, flow=flow, direction=direction, area=area)
 
 
-def join(wave_a: str, wave_b: str, name: Optional[str] = None, nest: bool = False) -> Wave:
-    return _client().join_waves(wave_a, wave_b, name=name, nest=nest)
-
-
-def leave(wave: str) -> Wave:
-    return _client().leave_wave(wave)
-
-
 def update_wave(
     name_or_id: str,
     flow: Optional[str] = None,
@@ -88,8 +80,14 @@ def add_stimulus(
     name_or_id: str,
     kind: str,
     cron: Optional[str] = None,
+    source_wave_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    return _client().add_stimulus(name_or_id, kind, cron=cron)
+    return _client().add_stimulus(
+        name_or_id,
+        kind,
+        cron=cron,
+        source_wave_id=source_wave_id,
+    )
 
 
 def remove_stimulus(name_or_id: str, stimulus_id: str) -> dict[str, Any]:
@@ -146,8 +144,6 @@ __all__ = [
     "waves",
     "wave",
     "create_wave",
-    "join",
-    "leave",
     "update_wave",
     "delete_wave",
     "run_wave",

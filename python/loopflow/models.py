@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class Stimulus(BaseModel):
     id: Optional[str] = None
     kind: str
+    source_wave_id: Optional[str] = None
     cron: Optional[str] = None
 
 

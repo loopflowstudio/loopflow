@@ -428,7 +428,7 @@ mod tests {
     use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
-    use crate::lfd::http::state::{ChatTurnRegistry, HttpState};
+    use crate::lfd::http::state::HttpState;
     use crate::lfd::output::OutputHub;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
@@ -475,7 +475,6 @@ mod tests {
             http_security: HttpSecurityConfig::default(),
             auth_failure_throttle: AuthFailureThrottle::new(),
             ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            chat_turns: ChatTurnRegistry::new(),
             sessions: SessionManager::new(store.clone()),
         }
     }

@@ -12,8 +12,8 @@ from scripts.lib.fork_scenarios import (
     ensure_postgres,
     has_claude_credentials,
     start_lfd_container_mode,
+    wait_for_fork_launch,
     stop_process,
-    wait_for_completion,
 )
 
 
@@ -42,6 +42,6 @@ def fork_infra() -> Iterator[subprocess.Popen[str]]:
 
 
 def test_fork_execution(fork_infra: subprocess.Popen[str]) -> None:
-    create_and_run_wave("wave-reduce", "product-engineer")
-    success, output = wait_for_completion(fork_infra, timeout=300)
+    wave_name = create_and_run_wave("wave-reduce", "product-engineer")
+    success, output = wait_for_fork_launch(fork_infra, timeout=180, wave_name=wave_name)
     assert success, f"fork execution failed:\n{output[-2000:]}"

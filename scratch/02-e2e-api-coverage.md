@@ -25,12 +25,14 @@ Live HTTP API contract coverage for `lfd` using shared scenario logic with two r
    - CI path using shared fixtures in `tests/e2e/conftest.py`
    - `e2e` and `docker` markers configured in `pyproject.toml`
 
-4. **CI shell entrypoints (`tests/e2e/test_*.sh`)**
-   - Thin wrappers only; `test_api_smoke.sh` now runs pytest
+4. **CI entrypoints**
+   - `tests/e2e/test_smoke.sh` for CLI smoke
+   - `uv run pytest tests/e2e/test_api_smoke.py -v` for HTTP API smoke
 
 ### Covered now
 
 - `/v0/waves` CRUD happy + error paths (including auth and validation error envelopes)
+- Docker fork smoke via pytest (`tests/e2e/test_fork.py`) that verifies fork branches launch
 - Shared scenario implementation reused by pytest and standalone scripts
 
 ### Validation commands

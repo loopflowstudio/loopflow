@@ -1,3 +1,3 @@
 # Open questions
 
-- `uv run pytest tests/e2e/test_fork.py -v` did not complete in this environment (process exited with signal 143 while running the long Docker-backed scenario). Re-run in a dedicated Docker + Claude-credential environment to validate the new pytest wrapper end-to-end.
+- Should we add a separate nightly job that runs `uv run python scripts/test_fork.py --timeout 600` to validate full fork completion, while keeping pytest scoped to "fork launched" infrastructure coverage?

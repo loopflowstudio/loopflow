@@ -36,7 +36,7 @@ jobs:
       - name: Run E2E smoke test
         run: tests/e2e/test_smoke.sh
       - name: Run API smoke test
-        run: tests/e2e/test_api_smoke.sh
+        run: uv run pytest tests/e2e/test_api_smoke.py -v
 
   docker-smoke:
     runs-on: ubuntu-latest

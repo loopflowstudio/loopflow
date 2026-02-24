@@ -22,7 +22,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Test Docker fork execution")
     parser.add_argument("--flow", default="wave-reduce")
     parser.add_argument("--direction", default="product-engineer")
-    parser.add_argument("--timeout", type=int, default=300, help="Seconds to wait")
+    parser.add_argument("--timeout", type=int, default=600, help="Seconds to wait")
     parser.add_argument("--skip-build", action="store_true")
     args = parser.parse_args()
 
@@ -42,8 +42,8 @@ def main() -> int:
     except RuntimeError as exc:
         return _fail(str(exc))
     try:
-        create_and_run_wave(args.flow, args.direction)
-        success, output = wait_for_completion(process, args.timeout)
+        wave_name = create_and_run_wave(args.flow, args.direction)
+        success, output = wait_for_completion(process, args.timeout, wave_name=wave_name)
     except RuntimeError as exc:
         output = str(exc)
         success = False

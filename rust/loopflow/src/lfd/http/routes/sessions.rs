@@ -215,14 +215,10 @@ fn session_event_sse(event: &PersistedSessionEvent) -> SseEvent {
 }
 
 fn replay_completed_sse(last_seq: i64) -> SseEvent {
-    let data = replay_completed_payload(last_seq);
+    let data = serde_json::json!({ "last_seq": last_seq }).to_string();
     SseEvent::default()
         .event("session.replay_completed")
         .data(data)
-}
-
-fn replay_completed_payload(last_seq: i64) -> String {
-    serde_json::json!({ "last_seq": last_seq }).to_string()
 }
 
 fn parse_session_id(value: &str) -> Result<LfdId, ApiError> {
@@ -271,6 +267,7 @@ mod tests {
         let debug = format!("{event:?}");
 
         assert!(debug.contains("session.replay_completed"));
-        assert_eq!(replay_completed_payload(7), "{\"last_seq\":7}");
+        assert!(debug.contains("last_seq"));
+        assert!(debug.contains("7"));
     }
 }

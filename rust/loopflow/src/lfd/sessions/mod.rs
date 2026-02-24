@@ -187,8 +187,13 @@ impl SessionManager {
                 return Err(SessionManagerError::TurnAlreadyInProgress);
             }
 
-            self.mark_session_failed(session_id, &runtime, "send_input_failed", err.to_string())
-                .await;
+            self.mark_session_failed(
+                session_id,
+                &runtime,
+                Some("send_input_failed"),
+                Some(err.to_string()),
+            )
+            .await;
             return Err(SessionManagerError::Harness(err.to_string()));
         }
 
@@ -325,7 +330,7 @@ impl SessionManager {
 
                         if fatal {
                             manager
-                                .mark_session_failed_without_error(&session_id, &runtime)
+                                .mark_session_failed(&session_id, &runtime, None, None)
                                 .await;
                         }
                     }
@@ -393,8 +398,8 @@ impl SessionManager {
                         .mark_session_failed(
                             &session_id,
                             &runtime,
-                            "session_start_failed",
-                            err.to_string(),
+                            Some("session_start_failed"),
+                            Some(err.to_string()),
                         )
                         .await;
                 }
@@ -430,35 +435,21 @@ impl SessionManager {
         &self,
         session_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
-        code: &str,
-        message: String,
+        code: Option<&str>,
+        message: Option<String>,
     ) {
-        let _ = self
-            .append_runtime_event(
-                session_id,
-                runtime,
-                SessionEvent::Error {
-                    code: code.to_string(),
-                    message,
-                },
-            )
-            .await;
-        let _ = self
-            .set_status(
-                session_id,
-                SessionStatus::Failed,
-                Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-                Some(runtime.clone()),
-            )
-            .await;
-        self.remove_runtime(session_id).await;
-    }
-
-    async fn mark_session_failed_without_error(
-        &self,
-        session_id: &LfdId,
-        runtime: &Arc<SessionRuntime>,
-    ) {
+        if let (Some(code), Some(message)) = (code, message) {
+            let _ = self
+                .append_runtime_event(
+                    session_id,
+                    runtime,
+                    SessionEvent::Error {
+                        code: code.to_string(),
+                        message,
+                    },
+                )
+                .await;
+        }
         let _ = self
             .set_status(
                 session_id,

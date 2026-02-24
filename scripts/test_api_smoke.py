@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import uuid
+from functools import partial
 from typing import Any
 
 from lib.api_harness import ApiHarness
@@ -26,36 +27,25 @@ def main() -> int:
     with LfdRuntime() as runtime:
         harness = ApiHarness(base_url=runtime.base_url, token=runtime.token)
         state: dict[str, str] = {}
+        scenarios = [
+            ("create_wave_happy", partial(_create_wave_happy, harness, runtime, state)),
+            (
+                "create_wave_duplicate_name_error",
+                partial(_create_wave_duplicate_error, harness, runtime),
+            ),
+            ("list_waves_happy", partial(_list_waves_happy, harness, state)),
+            ("list_waves_auth_error", partial(_list_waves_auth_error, harness)),
+            ("get_wave_happy", partial(_get_wave_happy, harness, state)),
+            ("get_wave_missing_error", partial(_get_wave_missing_error, harness)),
+            ("update_wave_happy", partial(_update_wave_happy, harness, state)),
+            ("update_wave_invalid_status_error", partial(_update_wave_error, harness, state)),
+            ("delete_wave_happy", partial(_delete_wave_happy, harness, runtime, state)),
+            ("delete_wave_missing_error", partial(_delete_wave_missing_error, harness, state)),
+        ]
 
         try:
-            harness.run_scenario(
-                "create_wave_happy",
-                lambda: _create_wave_happy(harness, runtime, state),
-            )
-            harness.run_scenario(
-                "create_wave_duplicate_name_error",
-                lambda: _create_wave_duplicate_error(harness, runtime),
-            )
-            harness.run_scenario("list_waves_happy", lambda: _list_waves_happy(harness, state))
-            harness.run_scenario("list_waves_auth_error", lambda: _list_waves_auth_error(harness))
-            harness.run_scenario("get_wave_happy", lambda: _get_wave_happy(harness, state))
-            harness.run_scenario(
-                "get_wave_missing_error",
-                lambda: _get_wave_missing_error(harness),
-            )
-            harness.run_scenario("update_wave_happy", lambda: _update_wave_happy(harness, state))
-            harness.run_scenario(
-                "update_wave_invalid_status_error",
-                lambda: _update_wave_error(harness, state),
-            )
-            harness.run_scenario(
-                "delete_wave_happy",
-                lambda: _delete_wave_happy(harness, runtime, state),
-            )
-            harness.run_scenario(
-                "delete_wave_missing_error",
-                lambda: _delete_wave_missing_error(harness, state),
-            )
+            for name, check in scenarios:
+                harness.run_scenario(name, check)
         finally:
             harness.print_summary()
             harness.close()
@@ -68,29 +58,13 @@ def main() -> int:
 
 
 def _create_wave_happy(harness: ApiHarness, runtime: LfdRuntime, state: dict[str, str]) -> None:
-    name = _wave_name("api-smoke")
-    response = harness.request(
-        "POST",
-        "/v0/waves",
-        json={"repo": str(runtime.repo_dir), "name": name},
-    )
-    ApiHarness.expect_status(response, 200)
-    payload = response.json()
-    assert isinstance(payload, dict)
-    _expect_wave_shape(payload)
-    assert payload["name"] == name
-    assert payload["repo"] == str(runtime.repo_dir)
+    payload = _create_wave(harness, runtime, _wave_name("api-smoke"))
     state["primary_wave_id"] = str(payload["id"])
 
 
 def _create_wave_duplicate_error(harness: ApiHarness, runtime: LfdRuntime) -> None:
     name = _wave_name("api-dupe")
-    first = harness.request(
-        "POST",
-        "/v0/waves",
-        json={"repo": str(runtime.repo_dir), "name": name},
-    )
-    ApiHarness.expect_status(first, 200)
+    _create_wave(harness, runtime, name)
 
     second = harness.request(
         "POST",
@@ -103,8 +77,7 @@ def _create_wave_duplicate_error(harness: ApiHarness, runtime: LfdRuntime) -> No
 def _list_waves_happy(harness: ApiHarness, state: dict[str, str]) -> None:
     response = harness.request("GET", "/v0/waves")
     ApiHarness.expect_status(response, 200)
-    payload = response.json()
-    assert isinstance(payload, dict)
+    payload = ApiHarness.expect_json_object(response)
     ApiHarness.expect_fields(payload, ["object", "data", "has_more"])
     assert payload["object"] == "list"
 
@@ -123,8 +96,7 @@ def _list_waves_auth_error(harness: ApiHarness) -> None:
 def _get_wave_happy(harness: ApiHarness, state: dict[str, str]) -> None:
     response = harness.request("GET", f"/v0/waves/{state['primary_wave_id']}")
     ApiHarness.expect_status(response, 200)
-    payload = response.json()
-    assert isinstance(payload, dict)
+    payload = ApiHarness.expect_json_object(response)
     _expect_wave_shape(payload)
     assert payload["id"] == state["primary_wave_id"]
 
@@ -143,8 +115,7 @@ def _update_wave_happy(harness: ApiHarness, state: dict[str, str]) -> None:
     }
     response = harness.request("PATCH", f"/v0/waves/{state['primary_wave_id']}", json=payload)
     ApiHarness.expect_status(response, 200)
-    body = response.json()
-    assert isinstance(body, dict)
+    body = ApiHarness.expect_json_object(response)
     _expect_wave_shape(body)
     assert body["flow"] == payload["flow"]
     assert body["direction"] == payload["direction"]
@@ -162,21 +133,12 @@ def _update_wave_error(harness: ApiHarness, state: dict[str, str]) -> None:
 
 
 def _delete_wave_happy(harness: ApiHarness, runtime: LfdRuntime, state: dict[str, str]) -> None:
-    name = _wave_name("api-delete")
-    create_response = harness.request(
-        "POST",
-        "/v0/waves",
-        json={"repo": str(runtime.repo_dir), "name": name},
-    )
-    ApiHarness.expect_status(create_response, 200)
-    created = create_response.json()
-    assert isinstance(created, dict)
+    created = _create_wave(harness, runtime, _wave_name("api-delete"))
     wave_id = str(created["id"])
 
     delete_response = harness.request("DELETE", f"/v0/waves/{wave_id}")
     ApiHarness.expect_status(delete_response, 200)
-    deleted = delete_response.json()
-    assert isinstance(deleted, dict)
+    deleted = ApiHarness.expect_json_object(delete_response)
     ApiHarness.expect_fields(deleted, ["id", "object", "deleted"])
     assert deleted["id"] == wave_id
     assert deleted["object"] == "wave"
@@ -187,6 +149,20 @@ def _delete_wave_happy(harness: ApiHarness, runtime: LfdRuntime, state: dict[str
 def _delete_wave_missing_error(harness: ApiHarness, state: dict[str, str]) -> None:
     response = harness.request("DELETE", f"/v0/waves/{state['deleted_wave_id']}")
     ApiHarness.expect_error(response, 404, message_contains="wave not found")
+
+
+def _create_wave(harness: ApiHarness, runtime: LfdRuntime, name: str) -> dict[str, Any]:
+    response = harness.request(
+        "POST",
+        "/v0/waves",
+        json={"repo": str(runtime.repo_dir), "name": name},
+    )
+    ApiHarness.expect_status(response, 200)
+    payload = ApiHarness.expect_json_object(response)
+    _expect_wave_shape(payload)
+    assert payload["name"] == name
+    assert payload["repo"] == str(runtime.repo_dir)
+    return payload
 
 
 if __name__ == "__main__":

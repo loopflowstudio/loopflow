@@ -51,6 +51,10 @@ class ApiHarness:
         return client.request(method, path, **kwargs)
 
     @staticmethod
+    def expect_json_object(response: httpx.Response) -> dict[str, Any]:
+        return _json_dict(response)
+
+    @staticmethod
     def expect_status(response: httpx.Response, status_code: int) -> None:
         if response.status_code == status_code:
             return
@@ -97,7 +101,7 @@ class ApiHarness:
 
     def print_summary(self) -> None:
         total = len(self._results)
-        passed = len([result for result in self._results if result.passed])
+        passed = sum(result.passed for result in self._results)
         failed = total - passed
         print(f"SUMMARY total={total} passed={passed} failed={failed}")
 

@@ -70,7 +70,6 @@ DELETE /v0/sessions/{id}         # end session
 |----------|--------------|--------|-------|------|
 | Codex | subprocess stdio | JSON-RPC notifications | JSON-RPC requests | OAuth (provider-owned) |
 | Claude | subprocess stdio | NDJSON (stream-json) | New process per turn (`--resume`) | OAuth (provider-owned) |
-| LFHarness | in-process runtime | mapped `AgentEvent` stream | direct turn invocation | `ANTHROPIC_API_KEY` env |
 | OpenCode | HTTP client | SSE events | REST calls | Provider-owned |
 
 ## What's not here

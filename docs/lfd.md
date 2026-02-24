@@ -128,6 +128,14 @@ LFD_EXECUTOR_LIMITS_CPU_QUOTA # override docker CPU quota (default 400000 = 4 vC
 LFD_EXECUTOR_LIMITS_PIDS_LIMIT # override docker PID limit (default 1024)
 LFD_GITHUB_WEBHOOK_SECRET  # required for /v0/hooks/github signature verification
 LFD_GITHUB_TOKEN           # optional; enables startup/on-demand CI polling
+LFD_HTTP_MAX_JSON_BODY_BYTES      # max body size for /v0/*, /status, /ws handshake (default 1048576)
+LFD_HTTP_MAX_HOOK_BODY_BYTES      # max body size for /hooks/git and /v0/hooks/github (default 262144)
+LFD_HTTP_MAX_WS_FRAME_BYTES       # max websocket frame size (default 65536)
+LFD_HTTP_MAX_WS_MESSAGE_BYTES     # max websocket message size (default 262144)
+LFD_HTTP_MAX_WS_QUEUE             # max per-connection outbound WS queue depth (default 256)
+LFD_HTTP_MAX_WS_MALFORMED         # malformed WS messages allowed before disconnect (default 3)
+LFD_HTTP_AUTH_FAILURES_PER_MINUTE # auth failures per (source, auth context, endpoint group) window (default 12)
+LFD_HTTP_TRUSTED_PROXY_CIDRS      # comma-separated trusted proxy CIDRs for X-Forwarded-For parsing (default empty)
 ```
 
 `lfd` reads `~/.lf/lfd.yaml` for daemon settings:
@@ -156,6 +164,16 @@ executor:
 github:
   webhook_secret: your-webhook-secret
   token: ghp_xxx # optional, used for startup /check-ci polling
+api_security:
+  http:
+    max_json_body_bytes: 1048576
+    max_hook_body_bytes: 262144
+    max_ws_frame_bytes: 65536
+    max_ws_message_bytes: 262144
+    max_ws_queue: 256
+    max_ws_malformed: 3
+    auth_failures_per_minute: 12
+    trusted_proxy_cidrs: [] # e.g. ["127.0.0.1/32", "10.0.0.0/8"]
 ```
 
 `mode` (or `LFD_MODE`) selects a strict profile — `executor.type`, `storage`, `runtime_backend`, and

@@ -38,9 +38,7 @@ impl SafeHttpClient {
 
         for redirect_count in 0..=self.max_redirects {
             validate_scheme(current.url())?;
-            let Some(redirect_basis) = current.try_clone() else {
-                return Err(SafeHttpError::NonReplayableRequest);
-            };
+            let redirect_basis = current.try_clone();
             let response = self
                 .client
                 .execute(current)
@@ -54,6 +52,9 @@ impl SafeHttpClient {
             if redirect_count == self.max_redirects {
                 return Err(SafeHttpError::RedirectLimitExceeded(self.max_redirects));
             }
+            let Some(redirect_basis) = redirect_basis else {
+                return Err(SafeHttpError::NonReplayableRequest);
+            };
 
             let location = response
                 .headers()

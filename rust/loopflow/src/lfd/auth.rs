@@ -128,22 +128,16 @@ pub async fn auth_middleware(
             Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
             None => Err((StatusCode::UNAUTHORIZED, "missing token")),
         },
-        AuthProvider::Studio { validator } => {
-            let token = match provided_token {
-                Some(token) => token,
-                None => {
-                    return http::api_error_response(
-                        StatusCode::UNAUTHORIZED,
-                        "missing connection token",
-                    );
+        AuthProvider::Studio { validator } => match provided_token {
+            Some(token) => {
+                if validator.validate(token).await {
+                    Ok(())
+                } else {
+                    Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
                 }
-            };
-            if validator.validate(token).await {
-                Ok(())
-            } else {
-                Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
             }
-        }
+            None => Err((StatusCode::UNAUTHORIZED, "missing connection token")),
+        },
     };
 
     match auth_result {

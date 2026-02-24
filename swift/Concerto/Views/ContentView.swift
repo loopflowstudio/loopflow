@@ -153,16 +153,16 @@ struct ContentView: View {
             Task { await repoState.refreshWaves() }
         })
 
-        if !repoState.isRemoteTarget,
-           let wave = repoState.selectedWave,
+        if let wave = repoState.selectedWave,
            let worktreePath = wave.worktreePath {
             let terminalLauncher = TerminalLauncher()
             let terminal = TerminalApp.warp
             let ide = IDEApp.cursor
+            let remoteHost = repoState.repoTarget?.remoteHost
 
             actions.append(PaletteAction("Open Terminal", icon: "terminal", shortcut: "T") {
                 do {
-                    try terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktreePath))
+                    try terminalLauncher.openTerminal(terminal, at: worktreePath, remoteHost: remoteHost)
                 } catch {
                     repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
                 }
@@ -170,15 +170,21 @@ struct ContentView: View {
 
             actions.append(PaletteAction("Open \(ide.displayName)", icon: "curlybraces", shortcut: "I") {
                 do {
-                    try terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktreePath), workspace: nil)
+                    try terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktreePath), remoteHost: remoteHost)
                 } catch {
                     repoState.errorMessage = "Failed to open \(ide.displayName): \(error.localizedDescription)"
                 }
             })
 
-            actions.append(PaletteAction("Reveal in Finder", icon: "folder", shortcut: "F") {
-                terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktreePath))
-            })
+            if let host = remoteHost {
+                actions.append(PaletteAction("Copy SSH Command", icon: "doc.on.doc") {
+                    terminalLauncher.copySSHCommand(host: host, path: worktreePath)
+                })
+            } else {
+                actions.append(PaletteAction("Reveal in Finder", icon: "folder", shortcut: "F") {
+                    terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktreePath))
+                })
+            }
 
             if wave.prURL != nil {
                 actions.append(PaletteAction("View PR", icon: "arrow.up.right.square", shortcut: "P") {
@@ -285,17 +291,18 @@ struct ContentView: View {
 
     private func openTerminalForSelectedWave() {
         performLauncherAction(failureLabel: "open terminal") { launcher, worktreeURL in
-            try launcher.launchTerminal(.warp, at: worktreeURL)
+            try launcher.openTerminal(.warp, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
         }
     }
 
     private func openIDEForSelectedWave() {
         performLauncherAction(failureLabel: "open Cursor") { launcher, worktreeURL in
-            try launcher.openInIDE(.cursor, at: worktreeURL)
+            try launcher.openInIDE(.cursor, at: worktreeURL, remoteHost: repoState.repoTarget?.remoteHost)
         }
     }
 
     private func openFinderForSelectedWave() {
+        guard !repoState.isRemoteTarget else { return }
         guard let worktreeURL = selectedWorktreeURL else { return }
         let launcher = TerminalLauncher()
         launcher.openInFinder(at: worktreeURL)

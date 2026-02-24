@@ -274,6 +274,8 @@ public actor EventService {
             switch waveError {
             case .authRejected:
                 return .authRejected
+            case .daemonTimeout:
+                return .daemonTimeout
             case .timeout:
                 return .timeout
             case .networkUnavailable:

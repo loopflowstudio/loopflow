@@ -56,6 +56,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
 | `review` | Walk through the diff, evaluate model and decisions |
+| `review-design` | Walk through the design doc, evaluate before implementation |
 | `refine` | Refine existing work |
 
 ### Scan steps (`scan/`)
@@ -94,6 +95,7 @@ Steps chain into flows. Flows feed into waves.
 | `incident` | debug → 5whys → ship |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → ship → update-wave |
+| `ship-roadmap` | ingest → kickoff → review-design → ship → review |
 
 ### Plan flows (`plan/`)
 

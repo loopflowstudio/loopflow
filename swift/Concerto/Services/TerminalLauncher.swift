@@ -44,7 +44,20 @@ struct TerminalLauncher {
         }
     }
 
-    func openInIDE(_ ide: IDEApp, at path: URL, workspace: String? = nil) throws {
+    func openTerminal(_ terminal: TerminalApp, at path: String, remoteHost: String? = nil) throws {
+        if let host = remoteHost {
+            try openTerminalRemote(host: host, path: path, terminal: terminal)
+            return
+        }
+
+        try launchTerminal(terminal, at: URL(fileURLWithPath: path))
+    }
+
+    func openInIDE(_ ide: IDEApp, at path: URL, workspace: String? = nil, remoteHost: String? = nil) throws {
+        if let host = remoteHost {
+            try openIDERemote(ide, host: host, path: path.path())
+            return
+        }
         switch ide {
         case .cursor:
             try openCursor(at: path, workspace: workspace)
@@ -53,6 +66,29 @@ struct TerminalLauncher {
         case .zed:
             try openZed(at: path)
         }
+    }
+
+    private func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
+        let command = sshCommand(host: host, path: path)
+        switch terminal {
+        case .warp, .iterm, .terminal:
+            // Use AppleScript-based terminals with the ssh command
+            try launchTerminal(terminal, at: URL(fileURLWithPath: NSHomeDirectory()), command: command)
+        case .kitty:
+            guard let executableURL = findExecutable("kitty") else {
+                throw LaunchError.launchFailed("kitty not found. Install from https://sw.kovidgoyal.net/kitty/")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["--single-instance", "--", "zsh", "-c", command]
+            try process.run()
+        }
+    }
+
+    func copySSHCommand(host: String, path: String) {
+        let command = sshCommand(host: host, path: path)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
     }
 
     func openInFinder(at path: URL) {
@@ -260,6 +296,39 @@ struct TerminalLauncher {
         try process.run()
     }
 
+    // MARK: - Remote IDE Launchers
+
+    private func openIDERemote(_ ide: IDEApp, host: String, path: String) throws {
+        switch ide {
+        case .cursor:
+            guard let executableURL = findExecutable("cursor") else {
+                throw LaunchError.launchFailed("Cursor not found. Install from https://cursor.com")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["--remote", "ssh-remote+\(host)", path]
+            try process.run()
+
+        case .vscode:
+            guard let executableURL = findExecutable("code") else {
+                throw LaunchError.launchFailed("VS Code not found. Install from https://code.visualstudio.com")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["--remote", "ssh-remote+\(host)", path]
+            try process.run()
+
+        case .zed:
+            guard let executableURL = findExecutable("zed") else {
+                throw LaunchError.launchFailed("Zed not found. Install from https://zed.dev")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["ssh://\(host)\(path)"]
+            try process.run()
+        }
+    }
+
     // MARK: - Helpers
 
     private func runAppleScript(_ script: String) throws {
@@ -315,6 +384,10 @@ struct TerminalLauncher {
     /// Escape single quotes for shell: ' becomes '\''
     private func escapeShellSingleQuotes(_ string: String) -> String {
         string.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    private func sshCommand(host: String, path: String) -> String {
+        "ssh -t \(host) 'cd \(escapeShellSingleQuotes(path)) && exec $SHELL -l'"
     }
 
     /// Escape for AppleScript double-quoted string: \ becomes \\, " becomes \"

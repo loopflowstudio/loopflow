@@ -1,50 +1,75 @@
 # 05: Concerto Remote Connection
 
-Wave CRUD, event streaming, and log access over WAN. Concerto connects to a remote lfd the same way it connects to a local one — same HTTP/WS surface, different host.
+## Problem
 
-Implementation is intentionally capped to a single PR with a practical size guardrail. Any non-critical scope cut rolls forward into 06/08 docs instead of expanding this PR.
+Concerto can already talk to local `lfd`, and remote auth + infrastructure are in place, but remote use is not yet a first-class path end-to-end.
 
-## Architecture
+We need one reliable WAN path for:
 
-```
-Local (native, default):
-  Concerto ──HTTP/WS──▶ lfd (127.0.0.1:2486, native process)
-  lfd ──Docker API──▶ agent containers (sandboxed)   [Phase 01]
+- Wave CRUD over HTTPS
+- Run events over WSS (`/ws`)
+- Chat turn events over SSE (`/v0/waves/:id/chat/events`)
+- Live log streaming over HTTPS
 
-Containerized local (docker compose up):
-  Concerto ──HTTP/WS──▶ lfd (127.0.0.1:2486, Docker)   [Phase 02]
-  lfd ──Docker API──▶ agent containers (siblings via socket)
-  postgres (container, auto-migrated on startup)
+Who benefits: teams running `lfd` on remote Linux hosts (EC2 or similar) while using Concerto locally.
 
-Remote (Phase 04+):
-  Concerto ──HTTPS/WSS──▶ lfd (ec2-host:2486, Docker + Caddy TLS)
-  Cursor ──Remote SSH──▶ ec2-host:/path/to/worktree
-  Auth: static token (Phase 03) or JWT (Phase 07)
-```
+Why now: this is the phase that turns remote from "possible" into "daily-driver usable".
 
-lfd is already the remote server. Concerto is already a thin client. The protocol doesn't change — only the host and transport.
+## Approach
 
-## Design decisions
+Ship a **transport-parity contract**: local and remote use the same client services and API shapes; only host, scheme, and auth mode change.
 
-**Sandbox first.** Phase 01 gives you sandboxed agents locally — security without changing how lfd runs. Phase 02 packages the whole stack into Docker Compose for deployment.
+1. **Keep one client path in Concerto**
+   - Continue using `WaveService` + `EventService` for both local and remote.
+   - Remote is just `ServerConnection(host, port, useTLS=true, authMode=.staticToken)`.
+   - No remote-specific forked service layer.
 
-**File access:** Use each editor's native remote support (Cursor Remote SSH, JetBrains Gateway, Zed Remote). Loopflow owns the orchestration (which host, which worktree) — editors own the transport.
+2. **Harden the remote connection handshake**
+   - Keep phased connection checks: TLS trust check → auth check → repo discovery → WS probe.
+   - Add explicit remote error mapping for daemon timeout/fail-fast so users see execution failures, not generic request errors.
 
-**Auth sequence:** Pre-shared static token for dev testing (Phase 03, shipped). `AuthProvider` enum (`Local`, `Static`, `Studio`) is extensible — Phase 07 adds JWT validation to the existing `Studio` variant.
+3. **Make proxy streaming behavior explicit**
+   - Keep Caddy as TLS terminator in front of `lfd`.
+   - Validate both long-lived transports through Caddy in CI-like smoke coverage:
+     - WSS for run events
+     - SSE for chat events
+   - Ensure streaming is immediate (no proxy buffering regressions) and terminal events close cleanly.
 
-**No filesystem mounts.** lfd serves file data through API endpoints. Editors connect via their own remote protocols. No SSHFS, no Mutagen, no FUSE.
+4. **Add remote transport smoke coverage**
+   - Bring up compose + Caddy.
+   - Exercise: create wave, run, receive WS events, start chat, receive SSE events, stream logs.
+   - Fail the test if either stream stalls, downgrades, or drops auth headers.
 
-## Correctness checks (from Phase 01D)
+## Alternatives considered
 
-1. Timeout/fail-fast errors from daemon execution need clear surfacing in Concerto (not generic request failures).
-2. Chat events use SSE (`GET /waves/:id/chat/events`), not WebSocket. Must verify SSE works through the TLS proxy (Caddy) alongside the existing WebSocket path for run events.
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Build a separate “RemoteWaveService” client stack | Fast to isolate remote quirks | Duplicates logic and breaks protocol-parity goal |
+| Move chat events from SSE to WebSocket only | Single transport to test | Unnecessary protocol change; higher risk and bigger scope than Phase 05 |
+| Add filesystem mount/sync for remote workflows now | Could simplify some UX paths | Violates remote architecture direction; Phase 06 handles editor access via native remote tooling |
 
-## Dependencies
+## Key decisions
 
-- [Service installation](../rust/03-service.md) — systemd on Linux, optional if using Docker
+- **Decision: protocol parity is non-negotiable.** We are following the wave principle: _"Keep protocol parity: Concerto talks to local and remote lfd via the same HTTP/WS surface."_ This avoids remote-only drift and cuts long-term maintenance cost.
+- **Decision: correctness over convenience for streaming.** We will treat SSE + WSS through TLS proxy as release-blocking, with automated smoke coverage, not ad-hoc manual verification.
+- **Decision: timeout/fail-fast errors get first-class UX copy.** Wild failure for this phase is users seeing “request failed” when the daemon actually timed out. We will map these errors explicitly so recovery actions are obvious.
+- **Decision: keep scope tight to Phase 05.** We are following: _"Ship remote connectivity incrementally: secure auth first, then UX and API breadth."_ Remote IDE/file UX and JWT auth stay in later phases.
+
+## Scope
+
+- In scope:
+  - HTTPS/WSS remote connection flow in Concerto using static token auth
+  - Wave CRUD, WS run events, SSE chat events, and log streaming over WAN
+  - Clear timeout/fail-fast error surfacing in Concerto
+  - Proxy-path verification for both SSE and WSS
+- Out of scope:
+  - Remote editor/file actions (Phase 06)
+  - Studio JWT auth/sign-in/discovery UX (Phase 07)
+  - Broader API expansion (Phase 08)
 
 ## Done when
 
-- Concerto connects to a remote lfd over HTTPS/WSS
-- Wave CRUD, event streaming, and log access work over WAN
-- SSE chat events and WebSocket run events both succeed through TLS proxy
+- Concerto connects to remote `lfd` over HTTPS/WSS and stays stable across reconnects.
+- Wave CRUD, WS events, SSE chat events, and logs all work through Caddy TLS proxy.
+- Daemon timeout/fail-fast errors appear as explicit user-facing messages (not generic transport failures).
+- Remote transport smoke test passes with both stream types in one run (WSS + SSE).

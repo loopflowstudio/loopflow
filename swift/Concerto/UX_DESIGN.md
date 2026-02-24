@@ -44,12 +44,12 @@ New agents start here. The detail panel shows configuration requirements (area n
 
 ## Agent Creation Flow
 
-**Principle: Play around first, save later.**
+**Principle: Start from intent, not configuration.**
 
-1. Create agent with just a name (minimal friction)
-2. Configure area, goal, flow in the detail panel
-3. Run manually to experiment
-4. Save successful patterns for reuse
+1. Click **Start designing**
+2. Describe what you want to build
+3. Concerto launches `lf design -c "<prompt>"` in a terminal at the repo root
+4. The design session creates and configures the wave; Concerto picks it up on refresh
 
 ### Goals
 - Inline goals (typed ad-hoc) can be auto-saved after successful runs
@@ -95,6 +95,7 @@ Sections only appear when they have agents. Empty sections are hidden.
 
 When an agent is selected:
 - **Header**: Name, status, area/flow/stimulus summary
+- **Content Section**: Vision, goals, risks, and roadmap progress parsed from `wave/<name>/README.md` and numbered roadmap files
 - **Config Section** (idle): Area picker, goal selector, flow picker, run button
 - **Progress Section** (active): Current step, live output
 - **Files Section**: Changed files with diff stats

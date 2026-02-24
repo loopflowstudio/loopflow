@@ -54,6 +54,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | Step | What it does |
 |------|--------------|
 | `design` | Interactive design session |
+| `split-wave` | Break a large wave into scoped child waves |
 | `explore` | Investigate the codebase |
 | `review` | Walk through the diff, evaluate model and decisions |
 | `review-design` | Walk through the design doc, evaluate before implementation |

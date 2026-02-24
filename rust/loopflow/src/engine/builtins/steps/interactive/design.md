@@ -1,7 +1,7 @@
 ---
 interactive: true
 requires: none
-produces: scratch/<branch>.md | scratch/wave-proposal.md
+produces: scratch/<branch>.md | wave/<name>/
 ---
 Help the user dream big, detail the idea fully, then decide whether to implement or plan as a wave.
 
@@ -60,20 +60,28 @@ This is the natural session exit point. The user's answer determines what to run
 **If wave plan:**
 
 1. Break the idea into staged wave items
-2. Write `scratch/wave-proposal.md` using the wave content model:
+2. Choose a wave name and create `wave/<name>/`
+3. Write `wave/<name>/README.md` using the wave content model:
    - `## Vision` — from the Dream phase conversation
    - `## Goals` — concrete objectives from the Detail phase
    - `## Risks` — unknowns and failure modes surfaced during detailing
    - `## Metrics` — observable signals discussed
-   - Roadmap as `01-*.md`, `02-*.md`, ... — the staged breakdown, one file per item
-3. The first stage becomes the design doc for this branch (`scratch/<branch>.md`)
+   - Include `### Not here` under Vision when scope boundaries are important
+4. Write `wave/<name>/<name>.yaml`:
+   - `name`: wave name
+   - `flow`: default `ship-wave` unless user asks for something else
+   - `area`: inferred from the files/directories discussed (default `["."]`)
+   - `direction`: inferred from conversation perspective (optional)
+   - `stimulus`: ask if needed; omit for manual runs
+5. Write roadmap files as `wave/<name>/01-*.md`, `02-*.md`, ... — one stage per file
+6. The first stage becomes the design doc for this branch (`scratch/<branch>.md`)
 
 Then:
 
-1. Run `git add scratch/ && git commit -m "design: <branch>"`
+1. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
 2. End session and tell the user what to run next:
    - `lf implement` if they chose implement
-   - `lf add-to-wave` if they chose wave plan
+   - `lf implement` (for stage 1) or `lf flow ship-wave` if they chose wave plan
 
 Once breaking things up, be aggressive about commit boundaries—each stage should be independently shippable.
 

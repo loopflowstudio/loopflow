@@ -39,6 +39,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         "Planning & Design",
         &[
             "design",
+            "split-wave",
             "explore",
             "refine",
             "kickoff",
@@ -73,6 +74,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
     HashMap::from([
         ("init", "Set up loopflow in this repo"),
         ("design", "Plan what to build"),
+        ("split-wave", "Split a large wave into child waves"),
         ("explore", "Investigate current diff"),
         ("implement", "Build from design doc"),
         ("iterate", "Improve code on branch"),

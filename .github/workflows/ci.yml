@@ -32,8 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v4
       - name: Run E2E smoke test
         run: tests/e2e/test_smoke.sh
+      - name: Run API smoke test
+        run: uv run pytest tests/e2e/test_api_smoke.py -v
 
   docker-smoke:
     runs-on: ubuntu-latest

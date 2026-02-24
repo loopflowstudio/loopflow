@@ -44,6 +44,13 @@ source = "vcs"
 [tool.hatch.build.targets.wheel]
 packages = ["python/loopflow"]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = [
+    "e2e: end-to-end tests requiring lfd",
+    "docker: tests requiring Docker and Claude credentials",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

@@ -1,149 +1,56 @@
-# Unified Agent Harness
+# Wavemodel runtime + Concerto onboarding (current state)
 
-## Problem
+## Goal
 
-Loopflow currently has two agent runtimes that duplicate responsibility and diverge behavior:
+Keep one canonical agent runtime (`lfd` sessions) and one onboarding path (design-first Concerto).
 
-- `lf` assembles rich step context (repo docs, area docs, direction, clipboard, wave context) and launches provider CLIs directly.
-- `lfd` sessions provide lifecycle/state persistence + SSE events, but only accept flat `system_prompt` strings.
+## Current baseline
 
-Who benefits from fixing this:
+- Session startup is step-based only: callers send step context fields, and lfd assembles prompts server-side.
+- Session creation validates `repo_root` and requires a local repo with `.lf/`.
+- Harness startup takes a prepared prompt (`system_prompt`, `task_prompt`, `model`, `cwd`) instead of raw session config.
+- Concerto start-design launches inline sessions (no terminal detour) and sends the user prompt as the first turn.
+- Wave detail/sidebar UI is design-first: vision/goals/risks/roadmap are visible; schema UI paths are removed.
 
-- **Concerto users**: can run `design` inline instead of bouncing to a terminal.
-- **CLI users**: interactive runs gain persisted history and resumable session semantics.
-- **Maintainers**: one execution path instead of two drifting implementations.
+## Decisions to preserve
 
-Why now:
+1. Sessions are the orchestration boundary for interactive agent runs.
+2. Prompt assembly happens in lfd, not in UI/CLI callers.
+3. No raw `system_prompt` session mode.
+4. Unsupported providers fail clearly instead of silently degrading.
+5. Session prompt mode is interactive; wave executor remains auto/headless.
 
-- Phase 03 shipped design-first Concerto UX, but the critical path still detours through `TerminalLauncher.launchDesign(...)`.
+## Remaining work
 
-## Approach
+### Runtime convergence
 
-Make **lfd session orchestration the single runtime primitive** and move prompt assembly into that path.
+- Route wave executor step runs through the same session orchestration path.
+- Add `workspace_changed` signaling so UI content can refresh after file updates.
 
-### 1) Step-only session config
+### Concerto session UX
 
-Sessions always assemble prompts from step context. No raw `system_prompt` mode.
+- Stop defaulting all chat tabs to `step: design`; pick step context per tab/wave intent.
+- Add clearer provider capability messaging for non-Claude/Codex providers.
 
-`SessionConfig` requires step context fields:
+### Wave content freshness/perf
 
-```rust
-SessionConfig {
-    step: String,
-    repo_root: PathBuf,
-    directions: Vec<String>,
-    area: Option<String>,
-    wave: Option<String>,
-    message: Option<String>,
-    model: Option<String>,
-    cwd: Option<PathBuf>,
-    max_turns: Option<u32>,
-    yolo_mode: bool,
-}
-```
+- Add refresh triggers/watch behavior for README + roadmap changes.
+- Move heavy markdown parsing off main-actor UI paths.
 
-On the wire (HTTP API), these are flat JSON fields. Internally, the session manager validates `repo_root` exists and contains `.lf/` — fail loudly with a clear error if the path is wrong or stale.
+## Risks
 
-### 2) Shared prompt assembly helper
+- Divergence risk returns if executor and sessions continue evolving separately.
+- Design intent in UI can drift stale without content refresh events.
+- Large wave docs can cause UI hitching until parsing is moved off hot UI paths.
 
-Extract `build_step_prompt` logic from `lfd::executor::helpers` into a shared helper used by both wave execution and sessions.
+## Validation baseline
 
-The shared helper returns a narrower type than the current tuple:
+Recorded green run for this branch changes:
 
-```rust
-struct PreparedPrompt {
-    system_prompt: String,  // from format_context_prompt
-    task_prompt: String,    // from format_task_prompt
-    model: Option<String>,  // from step frontmatter
-    cwd: PathBuf,
-}
-```
-
-Session startup calls this helper, then passes `PreparedPrompt` to the harness.
-
-### 3) Harness trait takes PreparedPrompt
-
-Change `SessionHarness::start()` to take `PreparedPrompt` instead of `&SessionConfig`:
-
-```rust
-pub trait SessionHarness: Send + Sync {
-    async fn start(&mut self, prompt: &PreparedPrompt) -> Result<()>;
-    async fn send_input(&mut self, content: &str) -> Result<()>;
-    async fn stop(&mut self) -> Result<()>;
-}
-```
-
-Both Claude and Codex harnesses update. The harness no longer needs to know about step context — it receives assembled prompts and runs them.
-
-### 4) Wire Concerto start-design flow to inline sessions
-
-Replace terminal launch with session launch:
-
-- `StartWaveView` creates a `design` session (step-mode config)
-- initial user text is sent as first turn
-- `WaveChatView`/`ChatState` continues consuming session SSE stream
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Keep current split (lf runtime + lfd sessions) and only improve terminal launcher UX | Lowest short-term effort | Locks in duplicated behavior and keeps inline design blocked on ad hoc glue |
-| Caller assembles prompts and passes `system_prompt` into sessions | Minimal lfd changes | Prompt correctness becomes caller-dependent; drift between callers is guaranteed |
-| Rebuild sessions around `engine::agent` and drop harness abstraction | One unified subprocess model | Throws away working Claude/Codex event normalization and existing SSE persistence |
-| Support both `raw` (flat system_prompt) and `step` session modes | Flexibility for ad hoc use cases | Two modes means two paths to maintain; the whole point is one canonical assembly path |
-
-## Key decisions
-
-1. **Sessions become the single orchestration boundary.**
-   - Prevents a third runtime path from emerging.
-   - Aligns with wave intent: *"Waves start with `lf design`, not configuration."*
-
-2. **Prompt assembly happens inside the session runtime, not at callers.**
-   - Enforces one canonical context assembly path.
-   - Preserves wave intent consistency across Concerto, CLI, and wave runs.
-
-3. **Step-only, no raw mode.**
-   - One path. No branching. No escape hatch that drifts.
-
-4. **Harness receives `PreparedPrompt`, not config.**
-   - Clean separation: session manager owns context assembly, harness owns subprocess lifecycle.
-
-5. **`repo_root` validated at session creation.**
-   - Must exist and contain `.lf/`. Fail with a clear error, not silent empty context.
-
-6. **Provider rollout is staged: Claude + Codex first; Gemini/OpenCode return explicit not-implemented errors.**
-   - Ships user value now without blocking on all providers.
-
-### Wild success signal
-
-New users type a design prompt in Concerto and stay in one window while the design conversation runs.
-
-### Wild failure to avoid
-
-A partial bridge that only fixes StartWaveView while leaving wave executor and CLI on legacy runtime paths. That would reintroduce divergence within one release.
-
-## Scope
-
-- In scope:
-  - Step-only session config with required step context fields
-  - Shared prompt assembly helper (`PreparedPrompt`)
-  - `SessionHarness::start()` trait change to take `PreparedPrompt`
-  - `StartWaveView` migration from terminal launch to inline session
-
-- Out of scope (fast follows):
-  - `workspace_changed` session events + Concerto content refresh
-  - Wave executor step runs routed through sessions
-  - New database schema for wave content
-  - Mandatory README section validation
-  - Full Gemini/OpenCode provider harness implementations
-  - General-purpose filesystem watching for wave docs
-
-## Done when
-
-1. `StartWaveView` no longer calls `TerminalLauncher.launchDesign`; it starts a `design` session and streams output inline.
-2. Session create API requires step context fields, and lfd assembles prompt context server-side.
-3. `SessionHarness::start()` takes `PreparedPrompt`.
-4. Invalid `repo_root` at session creation returns a clear error.
-5. Validation passes:
-   - `cargo test --all`
-   - `swift test --package-path swift`
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test --all`
+- `uv run pytest python/tests/`
+- `swift test --package-path swift`
+- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'`
+- `tests/e2e/test_smoke.sh`

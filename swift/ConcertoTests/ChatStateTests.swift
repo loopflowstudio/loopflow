@@ -316,28 +316,23 @@ private final class MockChatService: ChatService, @unchecked Sendable {
 }
 
 private func activeSession(id: String) -> AgentSession {
-    AgentSession(
-        id: id,
-        provider: "claude",
-        status: "active",
-        waveRunId: nil,
-        providerSessionId: nil,
-        config: AgentSessionConfig(),
-        createdAt: nil,
-        endedAt: nil
-    )
+    session(id: id, status: "active")
 }
 
 private func endedSession(id: String) -> AgentSession {
+    session(id: id, status: "ended", endedAt: Date())
+}
+
+private func session(id: String, status: String, endedAt: Date? = nil) -> AgentSession {
     AgentSession(
         id: id,
         provider: "claude",
-        status: "ended",
+        status: status,
         waveRunId: nil,
         providerSessionId: nil,
         config: AgentSessionConfig(),
         createdAt: nil,
-        endedAt: Date()
+        endedAt: endedAt
     )
 }
 

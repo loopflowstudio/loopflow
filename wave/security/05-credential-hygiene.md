@@ -22,10 +22,12 @@ This phase does not provide:
 - A full IAM/key-management system.
 - Protection from same-user local process compromise reading locally stored secrets.
 
-## What we learned from phases 01–03
+## What we learned from phases 01–04
 
 - Session token and static token paths are distinct since Phase 01. Remaining work is ensuring no silent fallback between them.
 - Credential file mounts (`executor.credentials.mounts`) are global — all waves sharing a repo get the same credential mounts. Per-wave credential scoping is not in scope here but is worth tracking if multi-tenant needs arise.
+- Phase 04 shipped centralized error payload sanitization (redacts tokens, paths, host identifiers from HTTP error responses) and `SafeHttpClient` (strips auth headers on outbound redirect authority changes). Error payload redaction is done; remaining redaction work is logs and status/debug endpoints.
+- Phase 04 also added client-side token-leak prevention tests in Python and Swift suites.
 
 ## Scope (lightweight by design)
 
@@ -51,7 +53,7 @@ Phase 01 established the session token (`~/.lf/session-token`) as distinct from 
 - Redaction in:
   - logs
   - status/debug endpoints
-  - error payloads
+  - ~~error payloads~~ (done — shipped in Phase 04 via centralized error sanitization)
 - File permissions for persisted secret-bearing files remain strict (`0600`).
 
 ### Transport hygiene
@@ -63,5 +65,5 @@ Phase 01 established the session token (`~/.lf/session-token`) as distinct from 
 
 - Separation between daemon and user/session tokens is enforced in code.
 - Rotation path exists, is documented, and has regression coverage.
-- Config/log/status/error paths do not leak secrets.
+- Config/log/status paths do not leak secrets. (Error path redaction done in Phase 04.)
 - URL/query token submission is rejected on authenticated endpoints.

@@ -9,6 +9,7 @@ mod next;
 mod pr;
 mod progress;
 mod rebase;
+mod release;
 pub mod trace;
 mod util;
 
@@ -23,4 +24,5 @@ pub use next::{next_branch, NextOptions, NextResult};
 pub use pr::{create_or_update_pr, current_pr, update_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{rebase_with_recovery, RebaseOptions, RebaseResult};
+pub use release::release;
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

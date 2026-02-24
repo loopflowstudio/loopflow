@@ -230,6 +230,11 @@ pub enum OpsCommand {
     Lint,
     /// Run configured test checks
     Test,
+    /// Generate release notes and open release PR
+    Release {
+        /// Release version (for example: 0.9.1 or v0.9.1)
+        version: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

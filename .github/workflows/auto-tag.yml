@@ -1,0 +1,27 @@
+name: Auto Tag Release
+
+on:
+  push:
+    branches: [main]
+    paths: [RELEASE_NOTES.md]
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract version and create tag
+        run: |
+          version=$(head -1 RELEASE_NOTES.md | sed -n 's/^# v\(.*\)/v\1/p')
+          if [ -z "$version" ]; then
+            echo "No version found in RELEASE_NOTES.md header"
+            exit 0
+          fi
+          if git ls-remote --tags origin "$version" | grep -q .; then
+            echo "Tag $version already exists"
+            exit 0
+          fi
+          git tag "$version"
+          git push origin "$version"

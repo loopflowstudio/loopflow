@@ -68,7 +68,7 @@ struct TerminalLauncher {
         }
     }
 
-    func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
+    private func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
         let command = sshCommand(host: host, path: path)
         switch terminal {
         case .warp, .iterm, .terminal:

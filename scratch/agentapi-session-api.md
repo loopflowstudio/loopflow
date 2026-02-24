@@ -68,3 +68,7 @@ Tool/item mapping for Claude:
    - optional in-stream backfill for lagged SSE subscribers
    - stronger provider conformance tests (Codex + Claude)
 3. OpenCode harness implementation on the normalized schema.
+4. Provider layer convergence (planned):
+   - make harness + mapping the shared core for both `lf` CLI execution and Session HTTP
+   - keep CLI and HTTP as two API surfaces over one provider layer
+   - add cross-surface conformance tests to prevent drift

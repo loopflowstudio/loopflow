@@ -20,8 +20,10 @@ Implemented:
 
 ## Decisions and boundaries
 
-- Keep parent/child linkage at content level (roadmap references), not in Rust schema.
-- Keep `split-wave` interactive and confirmation-based before any file writes.
+- `split-wave` is mitosis: parent wave is fully consumed and deleted, children replace it entirely.
+- Default split count is 2; `lf split-wave N` splits into N children.
+- Every roadmap item and README section maps to exactly one child — nothing lost, nothing duplicated.
+- `split-wave` is non-interactive (ops step); review the result afterward.
 - Keep existing `wave-plan` and `add-to-wave` behavior unchanged for other workflows.
 - Keep wave schema discovery unchanged (`wave/<dir>/<dir>.yaml` layout remains compatible).
 
@@ -33,6 +35,6 @@ Implemented:
 
 ## Out of scope
 
-- Rust data model/schema changes for parent-child waves
+- Rust data model/schema changes for waves
 - Automated split-wave decomposition without human confirmation
 - Changes to `add-to-wave` or `wave-plan`

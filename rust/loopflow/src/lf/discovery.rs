@@ -39,7 +39,6 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         "Planning & Design",
         &[
             "design",
-            "split-wave",
             "explore",
             "refine",
             "kickoff",
@@ -62,6 +61,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         &[
             "ingest",
             "add-to-wave",
+            "split-wave",
             "update-wave",
             "consolidate",
             "synthesize",

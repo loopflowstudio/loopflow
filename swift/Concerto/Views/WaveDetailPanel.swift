@@ -17,6 +17,7 @@ struct WaveDetailPanel: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.screenshotTab) private var screenshotTab
 
     @State private var actionError: String?
@@ -34,6 +35,11 @@ struct WaveDetailPanel: View {
 
     private var waveRuns: [WaveRun] { repoState.runStore.runs(for: wave.id) }
     private var isSelectedWave: Bool { repoState.selectedWave?.id == wave.id }
+    private var waveContent: WaveContent? { wave.content }
+    private var isReviewStep: Bool {
+        guard let step = wave.activeRun?.currentStep?.lowercased() else { return false }
+        return step.contains("review")
+    }
 
     private var ideApp: IDEApp { .cursor }
     private var terminalApp: TerminalApp { .warp }
@@ -91,6 +97,7 @@ struct WaveDetailPanel: View {
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
             repoState.loadRuns(for: wave.id)
+            repoState.loadWaveContent(for: wave.id)
             if !hasAppliedScreenshotTab, let tab = screenshotTab {
                 hasAppliedScreenshotTab = true
                 if let match = DetailTab.allCases.first(where: { $0.rawValue.lowercased() == tab.lowercased() }) {
@@ -105,6 +112,14 @@ struct WaveDetailPanel: View {
             outputBuffer.stopStreaming(waveId: oldId)
             outputBuffer.startStreaming(waveId: newId)
             repoState.loadRuns(for: newId)
+            repoState.loadWaveContent(for: newId)
+        }
+        .onChange(of: wave.status) { _, _ in
+            repoState.loadWaveContent(for: wave.id)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, isSelectedWave else { return }
+            repoState.loadWaveContent(for: wave.id)
         }
     }
 
@@ -123,6 +138,10 @@ struct WaveDetailPanel: View {
                     VStack(spacing: Spacing.lg) {
                         if selectedTab == .current {
                             if wave.status == .idle || wave.status == .failed {
+                                if wave.status == .idle {
+                                    goalsSection
+                                }
+
                                 if wave.status == .failed {
                                     failedRunDetail
                                 }
@@ -149,8 +168,13 @@ struct WaveDetailPanel: View {
                                 }
                             } else {
                                 waveConfigSummary
+                                if isReviewStep {
+                                    risksSection
+                                }
                                 runProgressSection
                             }
+
+                            roadmapSection
 
                             if wave.worktreePath != nil {
                                 quickActionsBar
@@ -215,6 +239,14 @@ struct WaveDetailPanel: View {
                     if !waveRuns.isEmpty {
                         IterationTimeline(runs: waveRuns)
                     }
+                }
+
+                if let vision = waveContent?.vision, !vision.isEmpty {
+                    Text(vision)
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                 }
 
                 Text(wave.statusText)
@@ -308,6 +340,97 @@ struct WaveDetailPanel: View {
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
         }
+    }
+
+    private var goalsSection: some View {
+        contentCard(title: "Goals", icon: "target", text: waveContent?.goals)
+    }
+
+    private var risksSection: some View {
+        contentCard(title: "Risks", icon: "exclamationmark.triangle", text: waveContent?.risks)
+    }
+
+    @ViewBuilder
+    private var roadmapSection: some View {
+        if let roadmapItems = waveContent?.roadmapItems, !roadmapItems.isEmpty {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text("Roadmap")
+                    .font(Typography.caption())
+                    .fontWeight(.medium)
+                    .foregroundStyle(palette.textSecondary)
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(roadmapItems) { item in
+                        HStack(alignment: .top, spacing: Spacing.sm) {
+                            Image(systemName: item.isShipped ? "checkmark.circle.fill" : "circle")
+                                .font(Typography.caption())
+                                .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
+
+                            Text("\(String(format: "%02d", item.number)) · \(item.title)")
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.text)
+                                .lineLimit(1)
+
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(.vertical, Spacing.xs)
+            }
+            .padding(Spacing.md)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        }
+    }
+
+    @ViewBuilder
+    private func contentCard(title: String, icon: String, text: String?) -> some View {
+        if let text, !text.isEmpty {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Label(title, systemImage: icon)
+                    .font(Typography.caption())
+                    .fontWeight(.medium)
+                    .foregroundStyle(palette.textSecondary)
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(Array(contentLines(from: text).enumerated()), id: \.offset) { _, line in
+                        HStack(alignment: .top, spacing: Spacing.xs) {
+                            Circle()
+                                .fill(palette.textSecondary.opacity(0.6))
+                                .frame(width: 4, height: 4)
+                                .padding(.top, 6)
+
+                            Text(line)
+                                .font(Typography.caption())
+                                .foregroundStyle(palette.text)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(Spacing.md)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        }
+    }
+
+    private func contentLines(from text: String) -> [String] {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter {
+                !$0.isEmpty &&
+                    !$0.hasPrefix("## ") &&
+                    !$0.hasPrefix("### ")
+            }
+            .map { line in
+                if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                    return String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                }
+                return line
+            }
+
+        return Array(lines.prefix(6))
     }
 
     // MARK: - Quick Actions Bar

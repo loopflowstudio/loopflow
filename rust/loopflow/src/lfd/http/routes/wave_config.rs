@@ -15,10 +15,6 @@ pub(crate) struct WaveConfig {
     pub area: Vec<String>,
     pub stimulus: Option<StimulusDef>,
     pub direction: Option<Vec<String>>,
-    #[allow(dead_code)] // Parsed from YAML for future use.
-    pub owner: Option<String>,
-    #[allow(dead_code)] // Parsed from YAML for future use.
-    pub description: Option<String>,
 }
 
 /// Read wave config from `wave/<name>/<name>.yaml`.
@@ -26,6 +22,7 @@ pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     let path = repo.join("wave").join(name).join(format!("{name}.yaml"));
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
         Err(err) => {
             warn!(path = %path.display(), error = %err, "failed to read wave config");
             return None;

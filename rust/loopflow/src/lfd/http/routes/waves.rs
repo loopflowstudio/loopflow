@@ -87,11 +87,11 @@ impl<'de> serde::Deserialize<'de> for ExpandParam {
 #[derive(Debug, Deserialize)]
 pub struct CreateWaveRequest {
     repo: String,
+    #[serde(alias = "schema")]
     name: Option<String>,
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
-    schema: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,24 +173,21 @@ pub async fn create_wave_handler(
 ) -> ApiResult<WaveDto> {
     let CreateWaveRequest {
         repo,
-        name,
+        name: requested_name,
         flow,
         direction,
         area,
-        schema,
     } = payload;
     let repo_path = PathBuf::from(&repo);
-    let wave_config = schema
-        .as_deref()
-        .and_then(|name| read_wave_config(&repo_path, name));
+
+    let id = LfdId::new();
+    let name = requested_name.unwrap_or_else(|| format!("wave-{}", id));
+    let wave_config = read_wave_config(&repo_path, &name);
     let config_stimulus = wave_config
         .as_ref()
         .and_then(|config| config.stimulus.as_ref())
         .map(parse_stimulus)
         .transpose()?;
-
-    let id = LfdId::new();
-    let name = name.or(schema).unwrap_or_else(|| format!("wave-{}", id));
     let flow = flow
         .or_else(|| wave_config.as_ref().map(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship".to_string());
@@ -443,7 +440,7 @@ fn parse_stimulus(
         value => {
             return Err(api_error(
                 StatusCode::BAD_REQUEST,
-                format!("invalid schema stimulus kind '{value}'"),
+                format!("invalid wave config stimulus kind '{value}'"),
             ));
         }
     };
@@ -458,7 +455,7 @@ fn parse_stimulus(
             .ok_or_else(|| {
                 api_error(
                     StatusCode::BAD_REQUEST,
-                    "schema stimulus kind 'cron' requires a cron expression",
+                    "wave config stimulus kind 'cron' requires a cron expression",
                 )
             })?,
         _ => String::new(),

@@ -1,4 +1,4 @@
-use crate::engine::{Flow, Step};
+use crate::engine::{Flow, LoadError, Step};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -15,18 +15,25 @@ pub enum Target {
 
 /// Discover a step or flow by name. Tries step lookup first, falls back to flow.
 pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
-    if let Ok(step) = discover_step(repo, name) {
-        return Ok(Target::Step(step));
+    let step_error = match discover_step(repo, name) {
+        Ok(step) => return Ok(Target::Step(step)),
+        Err(err) => err,
+    };
+
+    if !matches!(
+        step_error.downcast_ref::<LoadError>(),
+        Some(LoadError::StepNotFound(_))
+    ) {
+        return Err(step_error);
     }
 
-    if let Ok(flow) = crate::engine::load_flow(name, repo) {
-        return Ok(Target::Flow(flow));
+    match crate::engine::load_flow(name, repo) {
+        Ok(flow) => Ok(Target::Flow(flow)),
+        Err(LoadError::FlowNotFound(_)) => Err(anyhow::anyhow!(
+            "step or flow not found: {name}. Run `lf --list` to see available steps."
+        )),
+        Err(err) => Err(err.into()),
     }
-
-    // Return the original step-not-found error for better messaging
-    Err(anyhow::anyhow!(
-        "step or flow not found: {name}. Run `lf --list` to see available steps."
-    ))
 }
 
 // =============================================================================

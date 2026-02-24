@@ -29,6 +29,8 @@ Two working adapters (Codex and Claude) are available for testing. This means th
 
 **`DiffUpdated` is provider-dependent.** Codex emits `DiffUpdated` with a turn-level diff; Claude does not. The UI should render diffs when available but not rely on them for core functionality. The chat transcript and typed item rendering are the universal building blocks.
 
+**Busy turn rejection is clean.** Sending input while a turn is in progress returns 409 without disrupting the session. Concerto should handle this gracefully — disable the input composer while a turn is active, or show a transient indicator if a 409 arrives.
+
 ## Done when
 
 - Session event transcript visible in Concerto

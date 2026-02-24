@@ -718,7 +718,8 @@ final class RepoState {
     }
 
     func selectRemoteRepo(path: String) {
-        repoTarget = .remote(path: path)
+        let host = connectionStore.activeConnection.host
+        repoTarget = .remote(path: path, host: host)
         currentRepo = URL(fileURLWithPath: path)
     }
 
@@ -762,6 +763,8 @@ final class RepoState {
                 return "Network unavailable"
             case .timeout:
                 return "Connection timed out"
+            case .daemonTimeout:
+                return "Agent timed out — check server logs"
             case .serverUnreachable:
                 return "Server unreachable"
             case .serverError(let status):
@@ -804,6 +807,8 @@ final class RepoState {
                         newFingerprint: newFingerprint
                     )
                 )
+            case .daemonTimeout:
+                return .disconnected(.daemonTimeout)
             case .timeout:
                 return .disconnected(.timeout)
             case .networkUnavailable:

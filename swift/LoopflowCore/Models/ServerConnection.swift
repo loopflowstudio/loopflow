@@ -98,13 +98,13 @@ extension ServerConnection: Codable {
 
 public enum RepoTarget: Hashable, Sendable {
     case local(URL)
-    case remote(path: String)
+    case remote(path: String, host: String)
 
     public var path: String {
         switch self {
         case .local(let url):
             return url.path
-        case .remote(let path):
+        case .remote(let path, _):
             return path
         }
     }
@@ -113,7 +113,7 @@ public enum RepoTarget: Hashable, Sendable {
         switch self {
         case .local(let url):
             return url.lastPathComponent
-        case .remote(let path):
+        case .remote(let path, _):
             let name = URL(fileURLWithPath: path).lastPathComponent
             return name.isEmpty ? path : name
         }
@@ -125,6 +125,15 @@ public enum RepoTarget: Hashable, Sendable {
             false
         case .remote:
             true
+        }
+    }
+
+    public var remoteHost: String? {
+        switch self {
+        case .local:
+            nil
+        case .remote(_, let host):
+            host
         }
     }
 
@@ -171,6 +180,7 @@ public enum ConnectionPhase: String, Sendable {
 public enum DisconnectReason: Equatable, Sendable {
     case networkUnavailable
     case timeout
+    case daemonTimeout
     case serverUnreachable
     case serverError(status: Int)
     case wsClosed(code: Int?)

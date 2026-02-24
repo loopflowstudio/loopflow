@@ -53,13 +53,14 @@ struct ServerConnectionTests {
 
 @Suite("RepoTarget")
 struct RepoTargetTests {
-    @Test("remote target exposes server path and display name")
+    @Test("remote target exposes server path, host, and display name")
     func remoteTargetDisplay() {
-        let target = RepoTarget.remote(path: "/srv/repos/loopflow")
+        let target = RepoTarget.remote(path: "/srv/repos/loopflow", host: "ec2-host.example.com")
 
         #expect(target.path == "/srv/repos/loopflow")
         #expect(target.displayName == "loopflow")
         #expect(target.isRemote)
+        #expect(target.remoteHost == "ec2-host.example.com")
         #expect(target.localURL == nil)
     }
 

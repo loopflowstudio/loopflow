@@ -243,7 +243,7 @@ struct ConnectionSettingsView: View {
             ?? repoState.connectionStore.token(for: connection)
             ?? ""
 
-        if case .remote(let path) = repoState.repoTarget {
+        if case .remote(let path, _) = repoState.repoTarget {
             selectedRepoPath = path
         }
     }

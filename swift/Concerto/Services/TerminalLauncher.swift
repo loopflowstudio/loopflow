@@ -44,7 +44,11 @@ struct TerminalLauncher {
         }
     }
 
-    func openInIDE(_ ide: IDEApp, at path: URL, workspace: String? = nil) throws {
+    func openInIDE(_ ide: IDEApp, at path: URL, workspace: String? = nil, remoteHost: String? = nil) throws {
+        if let host = remoteHost {
+            try openIDERemote(ide, host: host, path: path.path())
+            return
+        }
         switch ide {
         case .cursor:
             try openCursor(at: path, workspace: workspace)
@@ -52,6 +56,23 @@ struct TerminalLauncher {
             try openVSCode(at: path, workspace: workspace)
         case .zed:
             try openZed(at: path)
+        }
+    }
+
+    func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
+        let sshCommand = "ssh -t \(host) 'cd \(escapeShellSingleQuotes(path)) && exec $SHELL -l'"
+        switch terminal {
+        case .warp, .iterm, .terminal:
+            // Use AppleScript-based terminals with the ssh command
+            try launchTerminal(terminal, at: URL(fileURLWithPath: NSHomeDirectory()), command: sshCommand)
+        case .kitty:
+            guard let executableURL = findExecutable("kitty") else {
+                throw LaunchError.launchFailed("kitty not found. Install from https://sw.kovidgoyal.net/kitty/")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["--single-instance", "--", "zsh", "-c", sshCommand]
+            try process.run()
         }
     }
 
@@ -258,6 +279,39 @@ struct TerminalLauncher {
         process.executableURL = executableURL
         process.arguments = [path.path()]
         try process.run()
+    }
+
+    // MARK: - Remote IDE Launchers
+
+    private func openIDERemote(_ ide: IDEApp, host: String, path: String) throws {
+        switch ide {
+        case .cursor:
+            guard let executableURL = findExecutable("cursor") else {
+                throw LaunchError.launchFailed("Cursor not found. Install from https://cursor.com")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["--remote", "ssh-remote+\(host)", path]
+            try process.run()
+
+        case .vscode:
+            guard let executableURL = findExecutable("code") else {
+                throw LaunchError.launchFailed("VS Code not found. Install from https://code.visualstudio.com")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["--remote", "ssh-remote+\(host)", path]
+            try process.run()
+
+        case .zed:
+            guard let executableURL = findExecutable("zed") else {
+                throw LaunchError.launchFailed("Zed not found. Install from https://zed.dev")
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = ["ssh://\(host)\(path)"]
+            try process.run()
+        }
     }
 
     // MARK: - Helpers

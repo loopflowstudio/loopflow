@@ -153,11 +153,7 @@ struct WaveDetailPanel: View {
                             }
 
                             if wave.worktreePath != nil {
-                                if repoState.isRemoteTarget {
-                                    remoteActionsNotice
-                                } else {
-                                    quickActionsBar
-                                }
+                                quickActionsBar
                             }
                         } else {
                             WaveRunsTab(
@@ -316,22 +312,11 @@ struct WaveDetailPanel: View {
 
     // MARK: - Quick Actions Bar
 
-    private var remoteActionsNotice: some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "network")
-                .foregroundStyle(palette.textSecondary)
-            Text("Local Finder/terminal/editor actions are unavailable in remote mode.")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-            Spacer()
-        }
-        .padding(.horizontal, Spacing.md)
-    }
-
     private var quickActionsBar: some View {
         HStack(spacing: Spacing.md) {
             if let path = wave.worktreePath {
-                let hasWorktree = FileManager.default.fileExists(atPath: path)
+                let isRemote = repoState.isRemoteTarget
+                let hasWorktree = isRemote || FileManager.default.fileExists(atPath: path)
 
                 Button { openInTerminal(path: path) } label: {
                     Label(terminalApp.displayName, systemImage: "terminal")
@@ -347,10 +332,18 @@ struct WaveDetailPanel: View {
                 .disabled(!hasWorktree)
                 .help(hasWorktree ? "Open in \(ideApp.displayName) (I)" : "Worktree path no longer exists")
 
-                if !hasWorktree {
-                    Label("Worktree missing", systemImage: "exclamationmark.triangle")
-                        .font(Typography.caption())
-                        .foregroundStyle(Color.statusWarning)
+                if isRemote {
+                    Button { copySSHCommand(path: path) } label: {
+                        Label("Copy SSH", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                    .help("Copy SSH command to clipboard")
+                } else {
+                    if !hasWorktree {
+                        Label("Worktree missing", systemImage: "exclamationmark.triangle")
+                            .font(Typography.caption())
+                            .foregroundStyle(Color.statusWarning)
+                    }
                 }
 
                 Spacer()
@@ -660,7 +653,11 @@ struct WaveDetailPanel: View {
 
     private func openInTerminal(path: String) {
         do {
-            try terminalLauncher.launchTerminal(terminalApp, at: URL(fileURLWithPath: path))
+            if let host = repoState.repoTarget?.remoteHost {
+                try terminalLauncher.openTerminalRemote(host: host, path: path, terminal: terminalApp)
+            } else {
+                try terminalLauncher.launchTerminal(terminalApp, at: URL(fileURLWithPath: path))
+            }
         } catch {
             actionError = "Failed to open terminal: \(error.localizedDescription)"
             showingActionError = true
@@ -669,11 +666,22 @@ struct WaveDetailPanel: View {
 
     private func openInIDE(path: String) {
         do {
-            try terminalLauncher.openInIDE(ideApp, at: URL(fileURLWithPath: path))
+            try terminalLauncher.openInIDE(
+                ideApp,
+                at: URL(fileURLWithPath: path),
+                remoteHost: repoState.repoTarget?.remoteHost
+            )
         } catch {
             actionError = "Failed to open \(ideApp.displayName): \(error.localizedDescription)"
             showingActionError = true
         }
+    }
+
+    private func copySSHCommand(path: String) {
+        guard let host = repoState.repoTarget?.remoteHost else { return }
+        let command = "ssh -t \(host) 'cd \(path) && exec $SHELL -l'"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
     }
 
     private func combinePRs() async throws -> CombinePRsResult {

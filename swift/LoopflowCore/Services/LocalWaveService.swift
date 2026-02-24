@@ -212,6 +212,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         switch statusCode {
         case 401, 403:
             return .authRejected(errorMessage)
+        case 502:
+            return .serverUnreachable
+        case 504:
+            return .daemonTimeout(errorMessage)
         default:
             return .serverError(status: statusCode, message: errorMessage)
         }
@@ -504,7 +508,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let schema {
             body["schema"] = schema
         } else {
-            body["flow"] = "design"  // Default flow (single step)
+            body["flow"] = "ship-roadmap"  // Default flow: ingest → kickoff → review-design → ship → review
             body["direction"] = []
         }
         let request = try makeRequest(
@@ -1386,6 +1390,7 @@ public enum WaveServiceError: LocalizedError {
     case commandFailed(String)
     case authRejected(String?)
     case serverError(status: Int, message: String?)
+    case daemonTimeout(String?)
     case timeout
     case networkUnavailable
     case serverUnreachable
@@ -1399,6 +1404,8 @@ public enum WaveServiceError: LocalizedError {
             return message ?? "Authentication failed"
         case .serverError(let status, let message):
             return message ?? "Server error (\(status))"
+        case .daemonTimeout(let message):
+            return message ?? "Agent timed out — check server logs"
         case .timeout:
             return "Connection timed out"
         case .networkUnavailable:

@@ -162,11 +162,7 @@ struct ContentView: View {
 
             actions.append(PaletteAction("Open Terminal", icon: "terminal", shortcut: "T") {
                 do {
-                    if let host = remoteHost {
-                        try terminalLauncher.openTerminalRemote(host: host, path: worktreePath, terminal: terminal)
-                    } else {
-                        try terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktreePath))
-                    }
+                    try terminalLauncher.openTerminal(terminal, at: worktreePath, remoteHost: remoteHost)
                 } catch {
                     repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
                 }
@@ -180,11 +176,9 @@ struct ContentView: View {
                 }
             })
 
-            if remoteHost != nil {
+            if let host = remoteHost {
                 actions.append(PaletteAction("Copy SSH Command", icon: "doc.on.doc") {
-                    let command = "ssh -t \(remoteHost!) 'cd \(worktreePath) && exec $SHELL -l'"
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(command, forType: .string)
+                    terminalLauncher.copySSHCommand(host: host, path: worktreePath)
                 })
             } else {
                 actions.append(PaletteAction("Reveal in Finder", icon: "folder", shortcut: "F") {
@@ -296,18 +290,8 @@ struct ContentView: View {
     }
 
     private func openTerminalForSelectedWave() {
-        if let host = repoState.repoTarget?.remoteHost,
-           let path = repoState.selectedWave?.worktreePath {
-            let launcher = TerminalLauncher()
-            do {
-                try launcher.openTerminalRemote(host: host, path: path, terminal: .warp)
-            } catch {
-                repoState.errorMessage = "Failed to open terminal: \(error.localizedDescription)"
-            }
-            return
-        }
         performLauncherAction(failureLabel: "open terminal") { launcher, worktreeURL in
-            try launcher.launchTerminal(.warp, at: worktreeURL)
+            try launcher.openTerminal(.warp, at: worktreeURL.path(), remoteHost: repoState.repoTarget?.remoteHost)
         }
     }
 

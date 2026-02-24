@@ -316,6 +316,7 @@ struct WaveDetailPanel: View {
         HStack(spacing: Spacing.md) {
             if let path = wave.worktreePath {
                 let isRemote = repoState.isRemoteTarget
+                let remoteHost = repoState.repoTarget?.remoteHost
                 let hasWorktree = isRemote || FileManager.default.fileExists(atPath: path)
 
                 Button { openInTerminal(path: path) } label: {
@@ -332,18 +333,16 @@ struct WaveDetailPanel: View {
                 .disabled(!hasWorktree)
                 .help(hasWorktree ? "Open in \(ideApp.displayName) (I)" : "Worktree path no longer exists")
 
-                if isRemote {
-                    Button { copySSHCommand(path: path) } label: {
+                if let host = remoteHost {
+                    Button { terminalLauncher.copySSHCommand(host: host, path: path) } label: {
                         Label("Copy SSH", systemImage: "doc.on.doc")
                     }
                     .buttonStyle(GhostButtonStyle())
                     .help("Copy SSH command to clipboard")
-                } else {
-                    if !hasWorktree {
-                        Label("Worktree missing", systemImage: "exclamationmark.triangle")
-                            .font(Typography.caption())
-                            .foregroundStyle(Color.statusWarning)
-                    }
+                } else if !hasWorktree {
+                    Label("Worktree missing", systemImage: "exclamationmark.triangle")
+                        .font(Typography.caption())
+                        .foregroundStyle(Color.statusWarning)
                 }
 
                 Spacer()
@@ -653,11 +652,7 @@ struct WaveDetailPanel: View {
 
     private func openInTerminal(path: String) {
         do {
-            if let host = repoState.repoTarget?.remoteHost {
-                try terminalLauncher.openTerminalRemote(host: host, path: path, terminal: terminalApp)
-            } else {
-                try terminalLauncher.launchTerminal(terminalApp, at: URL(fileURLWithPath: path))
-            }
+            try terminalLauncher.openTerminal(terminalApp, at: path, remoteHost: repoState.repoTarget?.remoteHost)
         } catch {
             actionError = "Failed to open terminal: \(error.localizedDescription)"
             showingActionError = true
@@ -675,13 +670,6 @@ struct WaveDetailPanel: View {
             actionError = "Failed to open \(ideApp.displayName): \(error.localizedDescription)"
             showingActionError = true
         }
-    }
-
-    private func copySSHCommand(path: String) {
-        guard let host = repoState.repoTarget?.remoteHost else { return }
-        let command = "ssh -t \(host) 'cd \(path) && exec $SHELL -l'"
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
     }
 
     private func combinePRs() async throws -> CombinePRsResult {

@@ -44,6 +44,15 @@ struct TerminalLauncher {
         }
     }
 
+    func openTerminal(_ terminal: TerminalApp, at path: String, remoteHost: String? = nil) throws {
+        if let host = remoteHost {
+            try openTerminalRemote(host: host, path: path, terminal: terminal)
+            return
+        }
+
+        try launchTerminal(terminal, at: URL(fileURLWithPath: path))
+    }
+
     func openInIDE(_ ide: IDEApp, at path: URL, workspace: String? = nil, remoteHost: String? = nil) throws {
         if let host = remoteHost {
             try openIDERemote(ide, host: host, path: path.path())
@@ -60,20 +69,26 @@ struct TerminalLauncher {
     }
 
     func openTerminalRemote(host: String, path: String, terminal: TerminalApp) throws {
-        let sshCommand = "ssh -t \(host) 'cd \(escapeShellSingleQuotes(path)) && exec $SHELL -l'"
+        let command = sshCommand(host: host, path: path)
         switch terminal {
         case .warp, .iterm, .terminal:
             // Use AppleScript-based terminals with the ssh command
-            try launchTerminal(terminal, at: URL(fileURLWithPath: NSHomeDirectory()), command: sshCommand)
+            try launchTerminal(terminal, at: URL(fileURLWithPath: NSHomeDirectory()), command: command)
         case .kitty:
             guard let executableURL = findExecutable("kitty") else {
                 throw LaunchError.launchFailed("kitty not found. Install from https://sw.kovidgoyal.net/kitty/")
             }
             let process = Process()
             process.executableURL = executableURL
-            process.arguments = ["--single-instance", "--", "zsh", "-c", sshCommand]
+            process.arguments = ["--single-instance", "--", "zsh", "-c", command]
             try process.run()
         }
+    }
+
+    func copySSHCommand(host: String, path: String) {
+        let command = sshCommand(host: host, path: path)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
     }
 
     func openInFinder(at path: URL) {
@@ -369,6 +384,10 @@ struct TerminalLauncher {
     /// Escape single quotes for shell: ' becomes '\''
     private func escapeShellSingleQuotes(_ string: String) -> String {
         string.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    private func sshCommand(host: String, path: String) -> String {
+        "ssh -t \(host) 'cd \(escapeShellSingleQuotes(path)) && exec $SHELL -l'"
     }
 
     /// Escape for AppleScript double-quoted string: \ becomes \\, " becomes \"

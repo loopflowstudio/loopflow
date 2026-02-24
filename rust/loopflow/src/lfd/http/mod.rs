@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn api_message_untrusted_sanitizes_paths() {
-        let raw = format!("error at /tmp/private/data.db");
+        let raw = "error at /tmp/private/data.db".to_string();
         let (_, json) = api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiMessage::Untrusted(raw),

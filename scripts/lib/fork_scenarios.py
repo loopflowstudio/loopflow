@@ -6,9 +6,11 @@ from __future__ import annotations
 import os
 import re
 import select
+import secrets
 import signal
 import subprocess
 import shutil
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -92,6 +94,8 @@ def build_lfd() -> None:
 
 
 def kill_existing_lfd() -> None:
+    _stop_launchd_lfd()
+
     result = _run(["lsof", "-ti", ":2486"], capture_output=True)
     if result.returncode != 0 or not result.stdout.strip():
         return
@@ -104,15 +108,27 @@ def kill_existing_lfd() -> None:
     time.sleep(1)
 
 
+def _stop_launchd_lfd() -> None:
+    if sys.platform != "darwin":
+        return
+
+    uid = str(os.getuid())
+    _run(["launchctl", "bootout", f"gui/{uid}/com.loopflow.lfd"], capture_output=True)
+
+
 def start_lfd_container_mode() -> subprocess.Popen[str]:
     global _SESSION_TOKEN
 
     kill_existing_lfd()
-    _SESSION_TOKEN = None
-    previous_token = _read_session_token()
+    _SESSION_TOKEN = secrets.token_hex(32)
 
     env = os.environ.copy()
     env["LFD_MODE"] = "container"
+    # lfd currently forces local-token auth on loopback binds.
+    # Use a non-loopback bind so deterministic static auth works in tests.
+    env["LFD_HTTP_ADDR"] = "0.0.0.0:2486"
+    env["LFD_AUTH_PROVIDER"] = "static"
+    env["LFD_AUTH_TOKEN"] = _SESSION_TOKEN
     env["LFD_DATABASE_URL"] = "postgres://lfd:lfd@127.0.0.1:5432/lfd"
     env["LFD_EXECUTOR_CREDENTIALS_MOUNTS"] = "claude,ssh,gitconfig"
     env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
@@ -135,9 +151,15 @@ def start_lfd_container_mode() -> subprocess.Popen[str]:
             capture_output=True,
         )
         if check.returncode == 0:
-            _SESSION_TOKEN = _wait_for_session_token(previous=previous_token)
-            print("lfd ready")
-            return process
+            client = Client(timeout=2.0, token=_SESSION_TOKEN)
+            try:
+                client.status()
+                print("lfd ready")
+                return process
+            except Exception:
+                pass
+            finally:
+                client.close()
 
     stop_process(process)
     stdout = process.stdout.read() if process.stdout else ""

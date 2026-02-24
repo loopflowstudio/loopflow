@@ -12,6 +12,7 @@ Usage:
 import argparse
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -24,6 +25,7 @@ from loopflow.models import SessionEventEnvelope
 
 REPO_ROOT = Path(__file__).parent.parent
 LFD_BIN = REPO_ROOT / "target" / "debug" / "lfd"
+SESSION_TOKEN: str | None = None
 
 
 def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -56,6 +58,8 @@ def build_lfd() -> None:
 
 
 def kill_existing_lfd() -> None:
+    _stop_launchd_lfd()
+
     result = run_capture(["lsof", "-ti", ":2486"])
     if result.returncode == 0 and result.stdout.strip():
         for pid in result.stdout.strip().splitlines():
@@ -66,10 +70,26 @@ def kill_existing_lfd() -> None:
         time.sleep(1)
 
 
+def _stop_launchd_lfd() -> None:
+    if sys.platform != "darwin":
+        return
+
+    uid = str(os.getuid())
+    run_capture(["launchctl", "bootout", f"gui/{uid}/com.loopflow.lfd"])
+
+
 def start_lfd() -> subprocess.Popen:
+    global SESSION_TOKEN
+
     kill_existing_lfd()
+    SESSION_TOKEN = secrets.token_hex(32)
 
     env = os.environ.copy()
+    # lfd currently forces local-token auth on loopback binds.
+    # Use a non-loopback bind so deterministic static auth works in this script.
+    env["LFD_HTTP_ADDR"] = "0.0.0.0:2486"
+    env["LFD_AUTH_PROVIDER"] = "static"
+    env["LFD_AUTH_TOKEN"] = SESSION_TOKEN
     env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
     env["GRPC_ENABLE_FORK_SUPPORT"] = "0"
     env["GRPC_VERBOSITY"] = "ERROR"
@@ -84,22 +104,15 @@ def start_lfd() -> subprocess.Popen:
     )
 
     # Wait for lfd to be ready.
-    # Token file is written at startup; re-read each iteration since the
-    # file may not exist yet on the first few tries.
     for attempt in range(30):
         time.sleep(0.5)
-        token = read_token()
-        if not token:
-            continue
-        probe = Client(base_url="http://127.0.0.1:2486", timeout=2, token=token)
+        probe = Client(base_url="http://127.0.0.1:2486", timeout=2, token=SESSION_TOKEN)
         try:
             probe.status()
-            log(f"lfd ready (token: {token[:8]}...)")
+            log(f"lfd ready (token: {SESSION_TOKEN[:8]}...)")
             return proc
         except (ConnectionError, LoopflowError):
             if attempt < 5:
-                # Token file may have been written by a dying old process;
-                # wait for the new lfd to overwrite it.
                 continue
         finally:
             probe.close()
@@ -110,17 +123,10 @@ def start_lfd() -> subprocess.Popen:
     raise SystemExit(1)
 
 
-def read_token() -> str | None:
-    token_path = Path.home() / ".lf" / "session-token"
-    try:
-        t = token_path.read_text().strip()
-        return t or None
-    except OSError:
-        return None
-
-
 def make_client() -> Client:
-    return Client(base_url="http://127.0.0.1:2486", timeout=10)
+    if SESSION_TOKEN is None:
+        raise RuntimeError("session token not initialized")
+    return Client(base_url="http://127.0.0.1:2486", timeout=10, token=SESSION_TOKEN)
 
 
 # ---------------------------------------------------------------------------

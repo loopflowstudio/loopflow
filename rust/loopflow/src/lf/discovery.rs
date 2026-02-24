@@ -15,18 +15,18 @@ pub enum Target {
 
 /// Discover a step or flow by name. Tries step lookup first, falls back to flow.
 pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
-    match discover_step(repo, name) {
-        Ok(step) => Ok(Target::Step(step)),
-        Err(_) => match crate::engine::load_flow(name, repo) {
-            Ok(flow) => Ok(Target::Flow(flow)),
-            Err(_) => {
-                // Return the original step-not-found error for better messaging
-                Err(anyhow::anyhow!(
-                    "step or flow not found: {name}. Run `lf --list` to see available steps."
-                ))
-            }
-        },
+    if let Ok(step) = discover_step(repo, name) {
+        return Ok(Target::Step(step));
     }
+
+    if let Ok(flow) = crate::engine::load_flow(name, repo) {
+        return Ok(Target::Flow(flow));
+    }
+
+    // Return the original step-not-found error for better messaging
+    Err(anyhow::anyhow!(
+        "step or flow not found: {name}. Run `lf --list` to see available steps."
+    ))
 }
 
 // =============================================================================

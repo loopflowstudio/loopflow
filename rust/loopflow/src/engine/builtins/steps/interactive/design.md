@@ -56,6 +56,8 @@ This is the natural session exit point. The user's answer determines what to run
 **If implement:**
 
 1. Tighten the scratch doc into the standard design spec (see "Design doc sections" below)
+2. Run `git add scratch/ && git commit -m "design: <branch>"`
+3. End session and tell the user to run `lf implement`
 
 **If wave plan:**
 
@@ -75,13 +77,10 @@ This is the natural session exit point. The user's answer determines what to run
    - `stimulus`: ask if needed; omit for manual runs
 5. Write roadmap files as `wave/<name>/01-*.md`, `02-*.md`, ... — one stage per file
 6. The first stage becomes the design doc for this branch (`scratch/<branch>.md`)
-
-Then:
-
-1. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
-2. End session and tell the user what to run next:
-   - `lf implement` if they chose implement
-   - `lf implement` (for stage 1) or `lf flow ship-wave` if they chose wave plan
+7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
+8. End session and tell the user what to run next:
+   - `lf implement` (for stage 1)
+   - `lf flow ship-wave`
 
 Once breaking things up, be aggressive about commit boundaries—each stage should be independently shippable.
 

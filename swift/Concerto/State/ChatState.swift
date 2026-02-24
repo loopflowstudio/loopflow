@@ -133,6 +133,7 @@ final class ChatState {
     private var sessionId: String?
     private var lastAppliedSeq: Int?
     private var currentTurnId: String?
+    private var turnDiffs: [String: String] = [:]
 
     private var itemEntryIdByItemId: [String: UUID] = [:]
     private var assistantEntryIdByTurnId: [String: UUID] = [:]
@@ -231,6 +232,7 @@ final class ChatState {
         guard let storedSessionId = userDefaults.string(forKey: sessionIdKey) else { return }
 
         streamPhase = .reconnecting
+        appendMessage(role: .system, content: "Reconnecting…")
 
         do {
             let session = try await waveService.getSession(storedSessionId)
@@ -276,50 +278,7 @@ final class ChatState {
         sessionId = session.id
         persistSessionId(session.id)
         appendMessage(role: .system, content: "Session started")
-
-        if !isSessionActiveStatus(session.status) {
-            try await waitForActiveSession(sessionId: session.id)
-        }
         return session.id
-    }
-
-    private func waitForActiveSession(sessionId: String) async throws {
-        var lastStatus: String = "starting"
-        for attempt in 0..<20 {
-            let session = try await waveService.getSession(sessionId)
-            lastStatus = session.status
-
-            if isSessionActiveStatus(session.status) {
-                return
-            }
-
-            if isSessionTerminalStatus(session.status) {
-                throw NSError(
-                    domain: "ChatState",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "Session ended before becoming active (\(session.status))"]
-                )
-            }
-
-            if attempt < 19 {
-                try await Task.sleep(for: .milliseconds(150))
-            }
-        }
-
-        throw NSError(
-            domain: "ChatState",
-            code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "Session is still \(lastStatus). Please retry in a moment."]
-        )
-    }
-
-    private func isSessionActiveStatus(_ status: String) -> Bool {
-        status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "active"
-    }
-
-    private func isSessionTerminalStatus(_ status: String) -> Bool {
-        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalized == "ended" || normalized == "failed"
     }
 
     private func startStream(sessionId: String, afterSeq: Int?, phase: StreamPhase) {
@@ -411,6 +370,7 @@ final class ChatState {
         itemsById.removeAll()
         itemEntryIdByItemId.removeAll()
         assistantEntryIdByTurnId.removeAll()
+        turnDiffs.removeAll()
     }
 
     private func appendMessage(role: ChatRole, content: String) {
@@ -448,16 +408,16 @@ final class ChatState {
             appendAssistantDelta(turnId: turnId, delta: content)
 
         case .itemStarted(let turnId, let item):
-            upsertItem(turnId: turnId, item: item)
+            upsertItemStart(turnId: turnId, item: item)
 
         case .itemUpdated(let turnId, let itemId, let delta):
             applyItemUpdate(turnId: turnId, itemId: itemId, delta: delta)
 
         case .itemCompleted(let turnId, let item):
-            upsertItem(turnId: turnId, item: item)
+            upsertItemCompletion(turnId: turnId, item: item)
 
-        case .diffUpdated(_, _):
-            return
+        case .diffUpdated(let turnId, let diff):
+            turnDiffs[turnId] = trimDetail(diff)
 
         case .statusChanged(let status):
             if status == "ended" || status == "failed" {
@@ -496,7 +456,7 @@ final class ChatState {
         assistantEntryIdByTurnId[turnId] = message.id
     }
 
-    private func upsertItem(turnId: String, item: SessionItem) {
+    private func upsertItemStart(turnId: String, item: SessionItem) {
         guard let itemId = itemIdentifier(item) else { return }
         let boundedItem = boundedSessionItem(item)
         itemsById[itemId] = boundedItem
@@ -521,6 +481,25 @@ final class ChatState {
         let updated = boundedSessionItem(apply(delta: delta, to: existing))
         itemsById[itemId] = updated
         updateTranscriptItem(itemId: itemId, turnId: turnId, item: updated)
+    }
+
+    private func upsertItemCompletion(turnId: String, item: SessionItem) {
+        guard let itemId = itemIdentifier(item) else { return }
+        let boundedItem = boundedSessionItem(item)
+        itemsById[itemId] = boundedItem
+
+        if itemEntryIdByItemId[itemId] == nil {
+            let entry = TranscriptItem(
+                turnId: turnId,
+                itemId: itemId,
+                card: projectCard(from: boundedItem)
+            )
+            itemEntryIdByItemId[itemId] = entry.id
+            transcript.append(.item(entry))
+            return
+        }
+
+        updateTranscriptItem(itemId: itemId, turnId: turnId, item: boundedItem)
     }
 
     private func updateTranscriptItem(itemId: String, turnId: String, item: SessionItem) {

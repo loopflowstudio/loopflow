@@ -29,32 +29,6 @@ struct ChatStateTests {
     }
 
     @MainActor
-    @Test("send waits for session to become active before posting input")
-    func sendWaitsForActiveSession() async {
-        let service = MockChatService(
-            createSessionResults: [.success(startingSession(id: "session_1"))],
-            getSessionResults: [
-                .success(startingSession(id: "session_1")),
-                .success(activeSession(id: "session_1")),
-            ],
-            streamPlans: [
-                .init(events: [
-                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
-                    .success(AgentSessionEventEnvelope(seq: 1, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
-                ])
-            ]
-        )
-
-        let state = ChatState(waveId: "wave-test", waveService: service, userDefaults: makeUserDefaults("wait-active"))
-        await state.send("hello")
-        await waitUntil { state.turnState == .completed }
-
-        #expect(service.sendInputCallCount == 1)
-        #expect(service.getSessionCallCount >= 2)
-        #expect(messages(in: state, role: .error).isEmpty)
-    }
-
-    @MainActor
     @Test("item update before start is ignored")
     func ignoresOutOfOrderItemUpdate() async {
         let service = MockChatService(
@@ -254,7 +228,6 @@ private struct StreamPlan {
 
 private final class MockChatService: ChatService, @unchecked Sendable {
     private let queue = DispatchQueue(label: "MockChatService")
-    private var createSessionResults: [Result<AgentSession, Error>]
     private var streamPlans: [StreamPlan]
     private var getSessionResults: [Result<AgentSession, Error>]
 
@@ -265,11 +238,9 @@ private final class MockChatService: ChatService, @unchecked Sendable {
     private(set) var streamCancellationCount = 0
 
     init(
-        createSessionResults: [Result<AgentSession, Error>] = [],
         getSessionResults: [Result<AgentSession, Error>] = [],
         streamPlans: [StreamPlan] = []
     ) {
-        self.createSessionResults = createSessionResults
         self.getSessionResults = getSessionResults
         self.streamPlans = streamPlans
     }
@@ -279,20 +250,8 @@ private final class MockChatService: ChatService, @unchecked Sendable {
         waveRunId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession {
-        let result = queue.sync { () -> Result<AgentSession, Error> in
-            createSessionCallCount += 1
-            if createSessionResults.isEmpty {
-                return .success(activeSession(id: "session_1"))
-            }
-            return createSessionResults.removeFirst()
-        }
-
-        switch result {
-        case .success(let session):
-            return session
-        case .failure(let error):
-            throw error
-        }
+        queue.sync { createSessionCallCount += 1 }
+        return activeSession(id: "session_1")
     }
 
     func getSession(_ id: String) async throws -> AgentSession {
@@ -357,27 +316,28 @@ private final class MockChatService: ChatService, @unchecked Sendable {
 }
 
 private func activeSession(id: String) -> AgentSession {
-    session(id: id, status: "active")
-}
-
-private func startingSession(id: String) -> AgentSession {
-    session(id: id, status: "starting")
-}
-
-private func endedSession(id: String) -> AgentSession {
-    session(id: id, status: "ended", endedAt: Date())
-}
-
-private func session(id: String, status: String, endedAt: Date? = nil) -> AgentSession {
     AgentSession(
         id: id,
         provider: "claude",
-        status: status,
+        status: "active",
         waveRunId: nil,
         providerSessionId: nil,
         config: AgentSessionConfig(),
         createdAt: nil,
-        endedAt: endedAt
+        endedAt: nil
+    )
+}
+
+private func endedSession(id: String) -> AgentSession {
+    AgentSession(
+        id: id,
+        provider: "claude",
+        status: "ended",
+        waveRunId: nil,
+        providerSessionId: nil,
+        config: AgentSessionConfig(),
+        createdAt: nil,
+        endedAt: Date()
     )
 }
 

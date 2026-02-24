@@ -99,9 +99,9 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `wave-reduce` | research → fork(reduce×3) → publish |
-| `wave-polish` | research → fork(polish×3) → publish |
-| `wave-expand` | research → fork(expand×3) → publish |
+| `wave-reduce` | fork(reduce×3) → publish |
+| `wave-polish` | fork(polish×3) → publish |
+| `wave-expand` | fork(expand×3) → publish |
 | `publish` | consolidate → add-to-wave |
 
 ### Scan flows (`scan/`)

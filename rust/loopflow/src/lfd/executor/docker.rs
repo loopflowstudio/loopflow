@@ -75,29 +75,41 @@ impl RepoMutationLocks {
 struct DockerCredentialMount {
     host_path: PathBuf,
     container_path: String,
+    read_only: bool,
 }
 
 impl DockerCredentialMount {
-    fn from_config(mount: &CredentialMount) -> std::result::Result<Self, String> {
-        let relative = resolve_credential_mount(mount.name())?;
+    fn from_config(mount: &CredentialMount) -> std::result::Result<Vec<Self>, String> {
+        let (paths, read_only) = resolve_credential_mount(mount.name())?;
         let home = dirs::home_dir().ok_or_else(|| "home directory not available".to_string())?;
-        Ok(Self {
-            host_path: home.join(relative),
-            container_path: format!("/home/agent/{relative}"),
-        })
+        Ok(paths
+            .iter()
+            .map(|relative| Self {
+                host_path: home.join(relative),
+                container_path: format!("/home/agent/{relative}"),
+                read_only,
+            })
+            .collect())
     }
 }
 
-fn resolve_credential_mount(name: &str) -> std::result::Result<&'static str, String> {
+/// Map a credential mount name to paths under $HOME and a read-only flag.
+/// Some agents need multiple files (e.g. Claude needs both .claude/ and .claude.json).
+/// Agent config dirs are read-write (agents write debug/session data); keys are read-only.
+fn resolve_credential_mount(
+    name: &str,
+) -> std::result::Result<(&'static [&'static str], bool), String> {
     let normalized = name.trim().to_ascii_lowercase();
     let key = normalized.strip_prefix("~/").unwrap_or(&normalized);
     match key {
-        "claude" | ".claude" => Ok(".claude"),
-        "codex" | ".codex" => Ok(".codex"),
-        "gemini" | ".config/gemini" => Ok(".config/gemini"),
-        "gitconfig" | ".gitconfig" => Ok(".gitconfig"),
-        "ssh" | ".ssh" => Ok(".ssh"),
-        "gnupg" | ".gnupg" => Ok(".gnupg"),
+        // read-write: agents write debug/session files
+        "claude" | ".claude" => Ok((&[".claude", ".claude.json"], false)),
+        "codex" | ".codex" => Ok((&[".codex"], false)),
+        "gemini" | ".config/gemini" => Ok((&[".config/gemini"], false)),
+        // read-only: keys and config
+        "gitconfig" | ".gitconfig" => Ok((&[".gitconfig"], true)),
+        "ssh" | ".ssh" => Ok((&[".ssh"], true)),
+        "gnupg" | ".gnupg" => Ok((&[".gnupg"], true)),
         _ => Err(format!(
             "unknown credential mount '{name}'. allowed mounts: claude, codex, gemini, gitconfig, ssh, gnupg"
         )),
@@ -109,6 +121,11 @@ const CONTAINER_REPOS_ROOT: &str = "/workspace/repos";
 const LOCAL_REPO_MOUNT: &str = "/host-repo";
 const HOST_WORKTREE_MOUNT: &str = "/host-worktree";
 const AGENT_USER: &str = "agent";
+
+/// API keys auto-forwarded to containers when present in host environment.
+/// OAuth tokens live in the OS keychain and can't be mounted, so API keys
+/// are the primary auth mechanism for containerized agents.
+const AGENT_API_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RepoVolumeIdentity {
@@ -330,22 +347,42 @@ fn canonical_repo_url(repo: &Path) -> Option<String> {
 impl DockerExecutor {
     pub fn new(store: SharedStore, config: &ExecutorConfig) -> Result<Self> {
         let docker = Docker::connect_with_local_defaults()?;
-        let credential_mounts = config
+        let credential_mounts: Vec<_> = config
             .credentials
             .mounts
             .iter()
-            .filter_map(|spec| match DockerCredentialMount::from_config(spec) {
-                Ok(mount) => Some(mount),
+            .flat_map(|spec| match DockerCredentialMount::from_config(spec) {
+                Ok(mounts) => mounts
+                    .into_iter()
+                    .filter(|mount| {
+                        if !mount.host_path.exists() {
+                            warn!(
+                                mount = %spec.name(),
+                                host_path = %mount.host_path.display(),
+                                "credential mount host path not found; skipping"
+                            );
+                            return false;
+                        }
+                        true
+                    })
+                    .collect::<Vec<_>>(),
                 Err(err) => {
                     warn!(
                         mount = %spec.name(),
                         error = %err,
                         "invalid docker credential mount; skipping"
                     );
-                    None
+                    vec![]
                 }
             })
             .collect();
+
+        info!(
+            image = %config.image,
+            credential_env = ?config.credentials.env,
+            credential_mounts = credential_mounts.len(),
+            "docker executor initialized"
+        );
 
         Ok(Self {
             store,
@@ -725,14 +762,73 @@ impl DockerExecutor {
     }
 
     fn collect_env(&self) -> Vec<String> {
-        self.credential_env
+        let mut env: Vec<String> = self
+            .credential_env
             .iter()
             .filter_map(|name| {
                 std::env::var(name)
                     .ok()
                     .map(|value| format!("{name}={value}"))
             })
-            .collect()
+            .collect();
+
+        // Auto-forward well-known agent API keys when present in host env.
+        // OAuth tokens live in the macOS keychain and can't be mounted into containers,
+        // so API keys are the primary auth mechanism for containerized agents.
+        for key in AGENT_API_KEYS {
+            if self.credential_env.iter().any(|e| e == key) {
+                continue; // Already included via explicit config
+            }
+            if let Ok(value) = std::env::var(key) {
+                env.push(format!("{key}={value}"));
+            }
+        }
+
+        // When SSH credentials are mounted, build a GIT_SSH_COMMAND that:
+        // - Bypasses the host SSH config (may have macOS-only options like UseKeychain)
+        // - Accepts new host keys so first-contact clones succeed
+        // - Explicitly lists available private keys from the mounted .ssh dir
+        if let Some(ssh_mount) = self
+            .credential_mounts
+            .iter()
+            .find(|m| m.container_path.ends_with(".ssh"))
+        {
+            let key_args = Self::discover_ssh_keys(&ssh_mount.host_path, &ssh_mount.container_path);
+            env.push(format!(
+                "GIT_SSH_COMMAND=ssh -F /dev/null \
+                 -o StrictHostKeyChecking=accept-new \
+                 -o UserKnownHostsFile=/tmp/.ssh_known_hosts{}",
+                key_args,
+            ));
+        }
+
+        env
+    }
+
+    /// Scan host SSH directory for private key files, returning `-i <path>` args
+    /// using container paths.
+    fn discover_ssh_keys(host_ssh_dir: &Path, container_ssh_dir: &str) -> String {
+        let mut key_args = String::new();
+        if let Ok(entries) = std::fs::read_dir(host_ssh_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                // Skip public keys, config, known_hosts, and other non-key files
+                if name_str.ends_with(".pub")
+                    || name_str.starts_with("known_hosts")
+                    || name_str == "config"
+                    || name_str == "authorized_keys"
+                    || name_str.starts_with('.')
+                {
+                    continue;
+                }
+                // Only include regular files
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    key_args.push_str(&format!(" -i {container_ssh_dir}/{name_str}"));
+                }
+            }
+        }
+        key_args
     }
 
     fn build_mounts_for(
@@ -752,7 +848,7 @@ impl DockerExecutor {
                 target: Some(credential_mount.container_path.clone()),
                 source: Some(credential_mount.host_path.to_string_lossy().to_string()),
                 typ: Some(MountTypeEnum::BIND),
-                read_only: Some(true),
+                read_only: Some(credential_mount.read_only),
                 ..Default::default()
             });
         }
@@ -808,12 +904,57 @@ impl DockerExecutor {
 
         match wait_result {
             Ok(Some(result)) => {
-                let _ = logs_task.await;
-                let status = result?;
-                Ok(status.status_code as i32)
+                let tail_lines = logs_task.await.unwrap_or_default();
+                match result {
+                    Ok(status) => {
+                        let code = status.status_code as i32;
+                        if code != 0 && !tail_lines.is_empty() {
+                            let tail = tail_lines.join("\n");
+                            warn!(
+                                container_id,
+                                exit_code = code,
+                                tail = %tail,
+                                "agent container exited with non-zero code"
+                            );
+                        }
+                        Ok(code)
+                    }
+                    Err(err) => {
+                        // Log tail output for diagnostics
+                        if !tail_lines.is_empty() {
+                            let tail = tail_lines.join("\n");
+                            warn!(
+                                container_id,
+                                tail = %tail,
+                                "agent container output before failure"
+                            );
+                        }
+                        // Inspect the container for more context on failure
+                        let inspect = self
+                            .docker
+                            .inspect_container(container_id, None::<InspectContainerOptions>)
+                            .await;
+                        let detail = match inspect {
+                            Ok(info) => {
+                                let state = info.state.as_ref();
+                                format!(
+                                    "status={} exit_code={} error={} oom={}",
+                                    state
+                                        .and_then(|s| s.status.as_ref().map(|v| format!("{v:?}")))
+                                        .unwrap_or_default(),
+                                    state.and_then(|s| s.exit_code).unwrap_or(-1),
+                                    state.and_then(|s| s.error.as_deref()).unwrap_or(""),
+                                    state.and_then(|s| s.oom_killed).unwrap_or(false),
+                                )
+                            }
+                            Err(inspect_err) => format!("(inspect failed: {inspect_err})"),
+                        };
+                        Err(anyhow!("Docker container wait error: {err} [{detail}]"))
+                    }
+                }
             }
             Ok(None) => {
-                let _ = logs_task.await;
+                let _tail = logs_task.await;
                 Err(anyhow!("docker wait stream ended without status"))
             }
             Err(_) => {
@@ -821,7 +962,7 @@ impl DockerExecutor {
                     .docker
                     .stop_container(container_id, Some(stop_container_options()))
                     .await;
-                let _ = logs_task.await;
+                let _tail = logs_task.await;
                 Err(anyhow!(
                     "agent execution timed out after {}",
                     humantime::format_duration(self.agent_timeout)
@@ -830,8 +971,16 @@ impl DockerExecutor {
         }
     }
 
-    async fn stream_logs(docker: Docker, container_id: String, context: OutputContext) {
+    /// Stream container logs to the output hub, returning the last 20 lines
+    /// for diagnostic logging on failure.
+    async fn stream_logs(
+        docker: Docker,
+        container_id: String,
+        context: OutputContext,
+    ) -> Vec<String> {
         let mut logs = docker.logs(&container_id, Some(logs_options(true)));
+        const TAIL_SIZE: usize = 20;
+        let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
 
         let mut parser = StreamParser::new();
         let mut pending = String::new();
@@ -849,6 +998,10 @@ impl DockerExecutor {
                         if line.ends_with('\r') {
                             line.pop();
                         }
+                        if tail.len() >= TAIL_SIZE {
+                            tail.pop_front();
+                        }
+                        tail.push_back(line.clone());
                         handle_output_line(&line, &mut parser, &context);
                     }
                 }
@@ -861,8 +1014,14 @@ impl DockerExecutor {
         }
 
         if !pending.is_empty() {
+            if tail.len() >= TAIL_SIZE {
+                tail.pop_front();
+            }
+            tail.push_back(pending.clone());
             handle_output_line(&pending, &mut parser, &context);
         }
+
+        tail.into()
     }
 
     async fn run_helper_command(
@@ -930,11 +1089,19 @@ impl DockerExecutor {
 
         self.remove_container(&container_id).await;
 
-        let status =
-            wait_result.ok_or_else(|| anyhow!("docker wait stream ended without status"))??;
+        let status = wait_result
+            .ok_or_else(|| anyhow!("docker wait stream ended without status"))?
+            .map_err(|err| {
+                anyhow!(
+                    "docker helper '{}' wait failed: {:?} output={}",
+                    label,
+                    err,
+                    output.trim()
+                )
+            })?;
         if status.status_code != 0 {
             return Err(anyhow!(
-                "docker helper '{}' failed ({}): {}",
+                "docker helper '{}' failed (exit {}): {}",
                 label,
                 status.status_code,
                 output.trim()
@@ -1221,7 +1388,7 @@ impl DockerExecutor {
 
     fn resolve_workspace_for_host_worktree(
         host_worktree: &Path,
-        wave_run_id: &str,
+        wave_run_id: Option<&str>,
         fallback_branch: &str,
     ) -> DockerWorkspace {
         let repo_source = Self::resolve_host_repo_from_worktree(host_worktree);
@@ -1229,7 +1396,7 @@ impl DockerExecutor {
         Self::docker_workspace_for_host_worktree(&repo_source, host_worktree, &branch)
     }
 
-    fn resolve_workspace_branch(cwd: &Path, wave_run_id: &str, fallback: &str) -> String {
+    fn resolve_workspace_branch(cwd: &Path, wave_run_id: Option<&str>, fallback: &str) -> String {
         if cwd.join(".git").exists() {
             if let Ok(Some(branch)) = current_branch(cwd) {
                 if !branch.trim().is_empty() && branch != "HEAD" {
@@ -1238,8 +1405,10 @@ impl DockerExecutor {
             }
         }
 
-        if let Some(branch) = Self::infer_fork_branch_from_worktree(cwd, wave_run_id) {
-            return branch;
+        if let Some(wave_run_id) = wave_run_id {
+            if let Some(branch) = Self::infer_fork_branch_from_worktree(cwd, wave_run_id) {
+                return branch;
+            }
         }
 
         if fallback.trim().is_empty() {
@@ -1269,7 +1438,7 @@ impl DockerExecutor {
             .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
         let repo_source = Self::resolve_host_repo(&run.snapshot.repo);
         let fallback_branch = Self::resolve_wave_run_branch(&run, &wave);
-        let branch = Self::resolve_workspace_branch(cwd, wave_run_id, &fallback_branch);
+        let branch = Self::resolve_workspace_branch(cwd, Some(wave_run_id), &fallback_branch);
         Ok(Self::docker_workspace_for_host_worktree(
             &repo_source,
             cwd,
@@ -1513,7 +1682,7 @@ impl DockerExecutor {
         host_worktree: &Path,
     ) -> Result<()> {
         let script = format!(
-            "set -eu\nfind {HOST_WORKTREE_MOUNT} -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {{}} +\ntar -C '{}' --exclude=.git -cf - . | tar -C {HOST_WORKTREE_MOUNT} -xf -",
+            "set -eu\nfind {HOST_WORKTREE_MOUNT} -mindepth 1 -maxdepth 1 ! -name .git ! -name .lf -exec rm -rf {{}} +\ntar -C '{}' --exclude=.git --exclude=.lf -cf - . | tar -C {HOST_WORKTREE_MOUNT} -xf -",
             workspace.container_worktree
         );
         self.run_helper_command(
@@ -1529,6 +1698,35 @@ impl DockerExecutor {
         Ok(())
     }
 
+    /// Copy .lf/ directory from host worktree into the container volume.
+    /// Prompt and context files are written to the host before the executor runs;
+    /// this step ensures they're available inside the container.
+    async fn sync_lf_to_volume(
+        &self,
+        workspace: &DockerWorkspace,
+        host_worktree: &Path,
+    ) -> Result<()> {
+        let host_lf = host_worktree.join(".lf");
+        if !host_lf.exists() {
+            return Ok(());
+        }
+        let script = format!(
+            "set -eu\nrm -rf '{0}/.lf'\ncp -a {HOST_WORKTREE_MOUNT}/.lf '{0}/.lf'",
+            workspace.container_worktree
+        );
+        self.run_helper_command(
+            "sync-lf",
+            vec!["sh".to_string(), "-lc".to_string(), script],
+            self.helper_mounts(
+                workspace,
+                vec![Self::bind_mount(host_worktree, HOST_WORKTREE_MOUNT, true)],
+            ),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn prepare_workspace(
         &self,
         workspace: &DockerWorkspace,
@@ -1536,14 +1734,9 @@ impl DockerExecutor {
     ) -> Result<()> {
         self.ensure_volume(&workspace.volume.volume_name).await?;
 
-        let prepared_key = format!(
-            "{}:{}",
-            workspace.volume.repo_key,
-            host_worktree.to_string_lossy()
-        );
         let should_hygiene = {
             let mut prepared = self.prepared_runs.lock().await;
-            prepared.insert(prepared_key)
+            prepared.insert(Self::prepared_workspace_key(workspace, host_worktree))
         };
 
         let lock = self
@@ -1715,6 +1908,14 @@ impl DockerExecutor {
 
         Ok(())
     }
+
+    fn prepared_workspace_key(workspace: &DockerWorkspace, host_worktree: &Path) -> String {
+        format!(
+            "{}:{}",
+            workspace.volume.repo_key,
+            host_worktree.to_string_lossy()
+        )
+    }
 }
 
 fn inspected_container(details: ContainerInspectResponse) -> Option<InspectedContainer> {
@@ -1789,16 +1990,45 @@ impl AgentExecutor for DockerExecutor {
         let output_context: OutputContext = context.into();
         let workspace = self
             .resolve_workspace(context.wave_id, context.wave_run_id, cwd)
-            .await?;
-        let agent_image = self.ensure_repo_image(&workspace.repo_source).await?;
-        self.prepare_workspace(&workspace, cwd).await?;
+            .await
+            .inspect_err(
+                |e| warn!(agent_id = context.agent_id, error = %e, "resolve_workspace failed"),
+            )?;
+        let agent_image = self
+            .ensure_repo_image(&workspace.repo_source)
+            .await
+            .inspect_err(
+                |e| warn!(agent_id = context.agent_id, error = %e, "ensure_repo_image failed"),
+            )?;
+        self.prepare_workspace(&workspace, cwd).await.inspect_err(
+            |e| warn!(agent_id = context.agent_id, error = %e, "prepare_workspace failed"),
+        )?;
+
+        // Sync .lf/ from host worktree to container volume — prompt/context files
+        // are written to the host worktree before the executor is called, but
+        // prepare_workspace creates the container worktree from git which doesn't
+        // have these runtime artifacts.
+        self.sync_lf_to_volume(&workspace, cwd).await.inspect_err(
+            |e| warn!(agent_id = context.agent_id, error = %e, "sync_lf_to_volume failed"),
+        )?;
 
         let container_name = Self::build_container_name(context.agent_id);
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
+        // Strip flags that require host-side services unavailable in containers
+        let cmd: Vec<String> = cmd.into_iter().filter(|arg| arg != "--chrome").collect();
         let env = self.collect_env();
         let mounts = self.build_mounts(&workspace.volume.volume_name);
         let labels =
             Self::build_agent_labels(context.agent_id, context.wave_id, context.wave_run_id);
+
+        info!(
+            agent_id = context.agent_id,
+            image = %agent_image,
+            workdir = %workspace.container_worktree,
+            volume = %workspace.volume.volume_name,
+            cmd = ?cmd,
+            "creating agent container"
+        );
 
         let host_config = container_host_config(mounts, &self.limits);
 
@@ -1881,10 +2111,12 @@ impl AgentExecutor for DockerExecutor {
     ) -> Result<()> {
         super::write_workspace_file(cwd, relative_path, content)?;
 
-        let workspace = Self::resolve_workspace_for_host_worktree(cwd, "workspace", "main");
+        let workspace = Self::resolve_workspace_for_host_worktree(cwd, None, "main");
         self.ensure_container_worktree(&workspace).await?;
-        let prepared_key = format!("{}:{}", workspace.volume.repo_key, cwd.to_string_lossy());
-        self.prepared_runs.lock().await.insert(prepared_key);
+        self.prepared_runs
+            .lock()
+            .await
+            .insert(Self::prepared_workspace_key(&workspace, cwd));
         self.write_file_to_volume(&workspace, cwd, relative_path)
             .await?;
         Ok(())
@@ -1893,7 +2125,7 @@ impl AgentExecutor for DockerExecutor {
     async fn remove_from_workspace(&self, cwd: &Path, relative_path: &str) -> Result<()> {
         super::remove_workspace_file(cwd, relative_path)?;
 
-        let workspace = Self::resolve_workspace_for_host_worktree(cwd, "workspace", "main");
+        let workspace = Self::resolve_workspace_for_host_worktree(cwd, None, "main");
         if self
             .docker
             .inspect_volume(&workspace.volume.volume_name)
@@ -1942,12 +2174,17 @@ mod tests {
 
     #[test]
     fn docker_mount_spec_resolves_allowlisted_credentials() {
-        let mount = DockerCredentialMount::from_config(
+        let mounts = DockerCredentialMount::from_config(
             &CredentialMount::try_from("claude".to_string()).expect("claude mount should parse"),
         )
         .expect("mount spec should parse");
-        assert!(mount.host_path.ends_with(".claude"));
-        assert_eq!(mount.container_path, "/home/agent/.claude");
+        // "claude" expands to both .claude/ and .claude.json
+        assert_eq!(mounts.len(), 2);
+        assert!(mounts[0].host_path.ends_with(".claude"));
+        assert_eq!(mounts[0].container_path, "/home/agent/.claude");
+        assert!(!mounts[0].read_only);
+        assert!(mounts[1].host_path.ends_with(".claude.json"));
+        assert_eq!(mounts[1].container_path, "/home/agent/.claude.json");
         assert!(DockerCredentialMount::from_config(
             &CredentialMount::try_from("unknown".to_string())
                 .expect("unknown mount name is still valid syntax"),
@@ -2008,8 +2245,32 @@ mod tests {
     #[test]
     fn resolve_workspace_branch_infers_fork_branch_from_path() {
         let cwd = Path::new("/tmp/repo.wave-fork-2");
-        let branch = DockerExecutor::resolve_workspace_branch(cwd, "run-123", "main");
+        let branch = DockerExecutor::resolve_workspace_branch(cwd, Some("run-123"), "main");
         assert_eq!(branch, "run-123-fork-2");
+    }
+
+    #[test]
+    fn normalize_relative_workspace_path_rejects_traversal() {
+        assert!(DockerExecutor::normalize_relative_workspace_path("../etc/passwd").is_err());
+        assert!(DockerExecutor::normalize_relative_workspace_path("/absolute/path").is_err());
+        assert!(DockerExecutor::normalize_relative_workspace_path("").is_err());
+        assert_eq!(
+            DockerExecutor::normalize_relative_workspace_path(".lf/fork-manifest.json")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            ".lf/fork-manifest.json"
+        );
+        // CurDir components are stripped
+        assert_eq!(
+            DockerExecutor::normalize_relative_workspace_path("./file.txt")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "file.txt"
+        );
+        // Parent traversal after normal component is still rejected
+        assert!(DockerExecutor::normalize_relative_workspace_path("nested/../file.txt").is_err());
     }
 
     fn list_archive_entries(bytes: Bytes) -> Vec<String> {

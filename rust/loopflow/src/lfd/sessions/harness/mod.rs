@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod claude;
 mod claude_mapping;
 pub mod codex;
@@ -36,7 +37,7 @@ pub type CreateHarnessFn =
     fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn SessionHarness>>;
 
 pub fn supports_provider(provider: &str) -> bool {
-    matches!(provider, "codex" | "claude")
+    matches!(provider, "codex" | "claude" | "chat")
 }
 
 pub fn default_create_harness(
@@ -46,6 +47,24 @@ pub fn default_create_harness(
     match provider {
         "codex" => Ok(Box::new(codex::CodexHarness::new(event_tx))),
         "claude" => Ok(Box::new(claude::ClaudeHarness::new(event_tx))),
+        "chat" => Ok(Box::new(chat::ChatHarness::new(event_tx))),
         other => anyhow::bail!("unsupported session provider: {other}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supports_provider_includes_chat() {
+        assert!(supports_provider("chat"));
+    }
+
+    #[test]
+    fn default_create_harness_supports_chat() {
+        let (tx, _rx) = broadcast::channel(16);
+        let harness = default_create_harness("chat", tx).expect("chat harness should construct");
+        drop(harness);
     }
 }

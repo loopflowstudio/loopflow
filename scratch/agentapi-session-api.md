@@ -41,6 +41,18 @@ Tool/item mapping for Claude:
 - `Edit` / `Write` / `NotebookEdit` → `File`
 - everything else → `Tool`
 
+### Chat
+
+`chat` is supported as an internal third harness using the existing loopflow turn runtime:
+
+- Invocation: in-process `turn::run_with_event_handler(...)` (no provider subprocess)
+- Tools: default boundary tools (`send_message`, `memory_edit`, plus built-ins)
+- Event mapping:
+  - `send_message` tool events → `TextDelta`
+  - `memory_edit` tool events → `ItemCompleted(Tool{name=memory_edit})`
+- Completion: `validate_turn_completion(...)` governs `TurnCompleted(Completed|Failed)`
+- Concurrency: single in-flight turn per session (`409 busy` on concurrent input)
+
 ## Claude integration notes
 
 - Adapter events flow over `broadcast::Sender<SessionEvent>` and are bridged into persistence + SSE broadcast by `SessionManager`.

@@ -1,5 +1,8 @@
 pub mod claude;
+mod claude_mapping;
 pub mod codex;
+mod codex_mapping;
+mod common;
 
 use anyhow::Result;
 use async_trait::async_trait;

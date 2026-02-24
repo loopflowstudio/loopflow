@@ -128,8 +128,17 @@ impl Store {
         WaveStateStore::create_wave(self, wave).await
     }
 
-    pub async fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()> {
-        WaveStateStore::create_chord(self, chord, voices).await
+    pub async fn join_waves(
+        &self,
+        wave_a: &Wave,
+        wave_b: &Wave,
+        chord_name: Option<String>,
+    ) -> StoreResult<LfdId> {
+        WaveStateStore::join_waves(self, wave_a, wave_b, chord_name).await
+    }
+
+    pub async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+        WaveStateStore::leave_wave(self, wave_id).await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -492,7 +501,13 @@ pub trait WaveStateStore: Send + Sync {
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
-    async fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()>;
+    async fn join_waves(
+        &self,
+        wave_a: &Wave,
+        wave_b: &Wave,
+        chord_name: Option<String>,
+    ) -> StoreResult<LfdId>;
+    async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
 
@@ -641,14 +656,32 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()> {
+    async fn join_waves(
+        &self,
+        wave_a: &Wave,
+        wave_b: &Wave,
+        chord_name: Option<String>,
+    ) -> StoreResult<LfdId> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let chord = chord.clone();
-                let voices = voices.to_vec();
-                run_sqlite(store, move |store| store.create_chord(&chord, &voices)).await
+                let wave_a = wave_a.clone();
+                let wave_b = wave_b.clone();
+                run_sqlite(store, move |store| {
+                    store.join_waves(&wave_a, &wave_b, chord_name)
+                })
+                .await
             }
-            StoreBackend::Postgres(store) => store.create_chord(chord, voices).await,
+            StoreBackend::Postgres(store) => store.join_waves(wave_a, wave_b, chord_name).await,
+        }
+    }
+
+    async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| store.leave_wave(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.leave_wave(wave_id).await,
         }
     }
 
@@ -2040,5 +2073,158 @@ mod tests {
         assert!(!second);
 
         store.delete_wave(wave.id()).await.expect("delete wave");
+    }
+
+    #[tokio::test]
+    async fn sqlite_join_voice_voice_creates_chord() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let a = make_voice("/repo", "designer", None, 0);
+        let b = make_voice("/repo", "infra", None, 0);
+        store.create_wave(&a).await.expect("create a");
+        store.create_wave(&b).await.expect("create b");
+
+        let chord_id = store
+            .join_waves(&a, &b, Some("ensemble".to_string()))
+            .await
+            .expect("join");
+        let chord = store
+            .get_wave(&chord_id)
+            .await
+            .expect("load")
+            .expect("exists");
+        assert!(chord.is_chord());
+        assert_eq!(chord.name(), "ensemble");
+        assert_eq!(chord.children().len(), 2);
+        assert_eq!(chord.children()[0].name(), "designer");
+        assert_eq!(chord.children()[1].name(), "infra");
+
+        // Top-level list should show only the chord
+        let listed = store.list_waves(None).await.expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name(), "ensemble");
+    }
+
+    #[tokio::test]
+    async fn sqlite_join_chord_voice_absorbs() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let a = make_voice("/repo", "designer", None, 0);
+        let b = make_voice("/repo", "infra", None, 0);
+        store.create_wave(&a).await.expect("create a");
+        store.create_wave(&b).await.expect("create b");
+
+        let chord_id = store
+            .join_waves(&a, &b, Some("ensemble".to_string()))
+            .await
+            .expect("join a+b");
+
+        // Now add a third voice
+        let c = make_voice("/repo", "vocalist", None, 0);
+        store.create_wave(&c).await.expect("create c");
+
+        let chord = store
+            .get_wave(&chord_id)
+            .await
+            .expect("load")
+            .expect("exists");
+        let result_id = store
+            .join_waves(&chord, &c, None)
+            .await
+            .expect("join chord+c");
+        assert_eq!(result_id, chord_id);
+
+        let reloaded = store
+            .get_wave(&chord_id)
+            .await
+            .expect("load")
+            .expect("exists");
+        assert_eq!(reloaded.children().len(), 3);
+        assert_eq!(reloaded.children()[2].name(), "vocalist");
+    }
+
+    #[tokio::test]
+    async fn sqlite_join_chord_chord_merges() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let a = make_voice("/repo", "v1", None, 0);
+        let b = make_voice("/repo", "v2", None, 0);
+        let c = make_voice("/repo", "v3", None, 0);
+        let d = make_voice("/repo", "v4", None, 0);
+        store.create_wave(&a).await.unwrap();
+        store.create_wave(&b).await.unwrap();
+        store.create_wave(&c).await.unwrap();
+        store.create_wave(&d).await.unwrap();
+
+        let chord_a_id = store
+            .join_waves(&a, &b, Some("chord-a".to_string()))
+            .await
+            .unwrap();
+        let chord_b_id = store
+            .join_waves(&c, &d, Some("chord-b".to_string()))
+            .await
+            .unwrap();
+
+        let chord_a = store.get_wave(&chord_a_id).await.unwrap().unwrap();
+        let chord_b = store.get_wave(&chord_b_id).await.unwrap().unwrap();
+
+        let result_id = store.join_waves(&chord_a, &chord_b, None).await.unwrap();
+        assert_eq!(result_id, chord_a_id);
+
+        let merged = store.get_wave(&chord_a_id).await.unwrap().unwrap();
+        assert_eq!(merged.children().len(), 4);
+
+        // chord_b should be deleted
+        assert!(store.get_wave(&chord_b_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn sqlite_leave_wave_becomes_solo() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let a = make_voice("/repo", "designer", None, 0);
+        let b = make_voice("/repo", "infra", None, 0);
+        store.create_wave(&a).await.unwrap();
+        store.create_wave(&b).await.unwrap();
+
+        let chord_id = store
+            .join_waves(&a, &b, Some("ensemble".to_string()))
+            .await
+            .unwrap();
+
+        store.leave_wave(b.id()).await.expect("leave");
+
+        let solo = store.get_wave(b.id()).await.unwrap().unwrap();
+        assert!(solo.parent_id().is_none());
+        assert_eq!(solo.name(), "infra");
+
+        // Chord should still exist with one child
+        let chord = store.get_wave(&chord_id).await.unwrap().unwrap();
+        assert_eq!(chord.children().len(), 1);
+        assert_eq!(chord.children()[0].name(), "designer");
+    }
+
+    #[tokio::test]
+    async fn sqlite_leave_top_level_rejected() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let wave = make_voice("/repo", "solo", None, 0);
+        store.create_wave(&wave).await.unwrap();
+
+        let err = store
+            .leave_wave(wave.id())
+            .await
+            .expect_err("should reject");
+        assert!(matches!(err, super::StoreError::InvalidData(_)));
     }
 }

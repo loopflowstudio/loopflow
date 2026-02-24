@@ -154,7 +154,7 @@ class TestClientResponses:
         assert "area" not in received
         client.close()
 
-    def test_create_chord_sends_correct_body(self):
+    def test_join_waves_sends_correct_body(self):
         received = {}
 
         def handler(request):
@@ -162,15 +162,22 @@ class TestClientResponses:
             return httpx.Response(200, json=WAVE_MINIMAL)
 
         client = _mock_client(handler)
-        client.create_chord(
-            "ensemble",
-            "/tmp/repo",
-            voices=[{"name": "designer", "flow": "ship", "direction": ["designer"], "area": []}],
-            direction=["product-engineer"],
-        )
+        client.join_waves("designer", "infra", name="ensemble")
+        assert received["wave_a"] == "designer"
+        assert received["wave_b"] == "infra"
         assert received["name"] == "ensemble"
-        assert received["voices"][0]["name"] == "designer"
-        assert received["direction"] == ["product-engineer"]
+        client.close()
+
+    def test_leave_wave_sends_correct_body(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=WAVE_MINIMAL)
+
+        client = _mock_client(handler)
+        client.leave_wave("designer")
+        assert received["wave"] == "designer"
         client.close()
 
     def test_next_wave(self):

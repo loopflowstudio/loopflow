@@ -2,7 +2,6 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
-use std::collections::HashSet;
 use std::path::{Path as FsPath, PathBuf};
 use std::str::FromStr;
 use time::OffsetDateTime;
@@ -96,21 +95,15 @@ pub struct CreateWaveRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateChordVoiceRequest {
-    name: String,
-    flow: Option<String>,
-    direction: Option<Vec<String>>,
-    area: Option<Vec<String>>,
+pub struct JoinWavesRequest {
+    wave_a: String,
+    wave_b: String,
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateChordRequest {
-    repo: String,
-    name: Option<String>,
-    flow: Option<String>,
-    direction: Option<Vec<String>>,
-    area: Option<Vec<String>>,
-    voices: Vec<CreateChordVoiceRequest>,
+pub struct LeaveWaveRequest {
+    wave: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -307,133 +300,147 @@ async fn ensure_local_wave_worktree(
     .await
 }
 
-fn build_chord_voice(
-    repo: &str,
-    chord_id: &LfdId,
-    chord_flow: &str,
-    chord_direction: &[String],
-    chord_area: &[String],
-    position: usize,
-    voice: CreateChordVoiceRequest,
-) -> Wave {
-    Wave::Voice(WaveData {
-        id: LfdId::new(),
-        name: voice.name,
-        repo: repo.to_string(),
-        flow: voice.flow.unwrap_or_else(|| chord_flow.to_string()),
-        direction: voice.direction.unwrap_or_else(|| chord_direction.to_vec()),
-        area: voice.area.unwrap_or_else(|| chord_area.to_vec()),
-        status: WaveStatus::Idle,
-        iteration: 0,
-        schema_ref: None,
-        schema_name: None,
-        created_at: Some(OffsetDateTime::now_utc()),
-        parent_id: Some(chord_id.clone()),
-        position: position as u32,
-    })
-}
-
-pub async fn create_chord_handler(
+pub async fn join_waves_handler(
     State(state): State<HttpState>,
-    Json(payload): Json<CreateChordRequest>,
+    Json(payload): Json<JoinWavesRequest>,
 ) -> ApiResult<WaveDto> {
-    if payload.voices.is_empty() {
+    let wave_a_id = resolve_wave_id(&state, &payload.wave_a).await?;
+    let wave_b_id = resolve_wave_id(&state, &payload.wave_b).await?;
+
+    if wave_a_id == wave_b_id {
         return Err(api_error(
             StatusCode::BAD_REQUEST,
-            "chord requires at least one voice",
+            "cannot join a wave with itself",
         ));
     }
 
-    let mut seen_voice_names = HashSet::new();
-    for voice in &payload.voices {
-        if voice.name.trim().is_empty() {
-            return Err(api_error(
-                StatusCode::BAD_REQUEST,
-                "voice name cannot be empty",
-            ));
-        }
-        if !seen_voice_names.insert(voice.name.clone()) {
+    let wave_a = state
+        .store
+        .get_wave(&wave_a_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave_a not found"))?;
+    let wave_b = state
+        .store
+        .get_wave(&wave_b_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave_b not found"))?;
+
+    if wave_a.parent_id().is_some() || wave_b.parent_id().is_some() {
+        return Err(api_error(StatusCode::CONFLICT, "cannot join nested waves"));
+    }
+
+    if wave_a.repo() != wave_b.repo() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "waves must be in the same repo",
+        ));
+    }
+
+    if state
+        .store
+        .get_active_wave_run(&wave_a_id)
+        .await
+        .map_err(map_store_error)?
+        .is_some()
+    {
+        return Err(api_error(
+            StatusCode::PRECONDITION_FAILED,
+            "wave_a has an active run",
+        ));
+    }
+    if state
+        .store
+        .get_active_wave_run(&wave_b_id)
+        .await
+        .map_err(map_store_error)?
+        .is_some()
+    {
+        return Err(api_error(
+            StatusCode::PRECONDITION_FAILED,
+            "wave_b has an active run",
+        ));
+    }
+
+    if let Some(ref name) = payload.name {
+        let existing = wave_name_exists(&state, wave_a.repo(), name)
+            .await
+            .map_err(map_store_error)?;
+        if existing {
             return Err(api_error(
                 StatusCode::CONFLICT,
-                format!("duplicate chord voice name '{}'", voice.name),
+                format!("wave '{}' already exists in this repo", name),
             ));
         }
     }
 
-    let chord_id = LfdId::new();
-    let chord_name = payload
-        .name
-        .unwrap_or_else(|| format!("chord-{}", chord_id));
-    let chord_flow = payload.flow.unwrap_or_else(|| "ship".to_string());
-    let chord_direction = payload.direction.unwrap_or_default();
-    let chord_area = payload.area.unwrap_or_default();
-
-    let existing = wave_name_exists(&state, &payload.repo, &chord_name)
+    let result_id = state
+        .store
+        .join_waves(&wave_a, &wave_b, payload.name)
         .await
         .map_err(map_store_error)?;
-    if existing {
-        return Err(api_error(
-            StatusCode::CONFLICT,
-            format!("wave '{}' already exists in this repo", chord_name),
-        ));
-    }
 
-    let chord = Wave::Chord {
-        data: WaveData {
-            id: chord_id.clone(),
-            name: chord_name.clone(),
-            repo: payload.repo.clone(),
-            flow: chord_flow.clone(),
-            direction: chord_direction.clone(),
-            area: chord_area.clone(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            schema_ref: None,
-            schema_name: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        },
-        children: Vec::new(),
-    };
+    state.event_hub.send(Event::wave_updated(result_id.clone()));
 
-    let voices = payload
-        .voices
-        .into_iter()
-        .enumerate()
-        .map(|(position, voice)| {
-            build_chord_voice(
-                &payload.repo,
-                &chord_id,
-                &chord_flow,
-                &chord_direction,
-                &chord_area,
-                position,
-                voice,
-            )
-        })
-        .collect::<Vec<_>>();
-
-    if let Err(err) = state.store.create_chord(&chord, &voices).await {
-        let _ = state.store.delete_wave(&chord_id).await;
-        return Err(map_store_error(err));
-    }
-
-    if let Err(err) = ensure_local_wave_worktree(&state, &chord).await {
-        let _ = state.store.delete_wave(chord.id()).await;
-        return Err(err);
-    }
-
-    state
-        .event_hub
-        .send(Event::wave_created(chord_id.clone(), chord_name));
     let wave = state
         .store
-        .get_wave(&chord_id)
+        .get_wave(&result_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "resulting chord not found"))?;
+    let view = build_wave_dto(&state.store, &state.github, wave, false)
+        .await
+        .map_err(map_store_error)?;
+    Ok(Json(view))
+}
+
+pub async fn leave_wave_handler(
+    State(state): State<HttpState>,
+    Json(payload): Json<LeaveWaveRequest>,
+) -> ApiResult<WaveDto> {
+    let wave_id = resolve_wave_id(&state, &payload.wave).await?;
+
+    let wave = state
+        .store
+        .get_wave(&wave_id)
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-    let view = build_wave_dto(&state.store, &state.github, wave, false)
+
+    if wave.parent_id().is_none() {
+        return Err(api_error(StatusCode::CONFLICT, "wave is not in a chord"));
+    }
+
+    let parent_id = wave.parent_id().as_ref().expect("checked above");
+    if state
+        .store
+        .get_active_wave_run(parent_id)
+        .await
+        .map_err(map_store_error)?
+        .is_some()
+    {
+        return Err(api_error(
+            StatusCode::PRECONDITION_FAILED,
+            "parent chord has an active run",
+        ));
+    }
+
+    state
+        .store
+        .leave_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?;
+
+    state.event_hub.send(Event::wave_updated(wave_id.clone()));
+
+    let updated = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found after leave"))?;
+    let view = build_wave_dto(&state.store, &state.github, updated, false)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))

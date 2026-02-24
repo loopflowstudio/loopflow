@@ -12,7 +12,8 @@ pub mod ws;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
+    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveChildDto,
+    WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -141,6 +142,24 @@ pub async fn build_wave_dto(
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
         stimuli,
         active_run,
+        children: wave
+            .children()
+            .iter()
+            .map(|child| WaveChildDto {
+                id: child.id().to_string(),
+                wave_type: if child.is_chord() {
+                    "chord".to_string()
+                } else {
+                    "voice".to_string()
+                },
+                name: child.name().clone(),
+                flow: child.flow().clone(),
+                direction: child.direction().clone(),
+                area: child.area().clone(),
+                status: child.status().as_str().to_string(),
+                position: child.position(),
+            })
+            .collect(),
     })
 }
 

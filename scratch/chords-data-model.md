@@ -18,7 +18,7 @@ This document is the canonical scratch note for the branch. It replaces earlier 
 
 ### Persistence and invariants
 
-Migration `010_chords_data_model.sql` rebuilds wave/stimulus storage with chord fields and constraints:
+Migration `011_chords_data_model.sql` rebuilds wave/stimulus storage with chord fields and constraints:
 
 - `wave_type`, `parent_wave_id`, `position`
 - Parent/child tree as self-referential FK (`ON DELETE CASCADE`)
@@ -32,15 +32,75 @@ Migration `010_chords_data_model.sql` rebuilds wave/stimulus storage with chord 
 - Subtrees load via one recursive CTE, then assemble in memory.
 - Depth is capped (`MAX_CHORD_DEPTH = 8`) and overflow is rejected.
 
-### API and route surface
-
-- Python API gained `create_chord(...)`.
-- Client/model/DTO support includes chord metadata (`wave_type`, `parent_id`, `position`) and nested children.
-- HTTP route support includes chord creation (`POST /v0/chords`).
-
 ### Run entrypoint guard
 
 - Nested waves are explicitly rejected for direct run (`409`) rather than rerouted.
+
+## API redesign: join/leave
+
+### Motivation
+
+The original `create_chord` API was top-down: declare the full chord with all voices upfront. This is cumbersome — voices are independent agents with their own flows, and grouping should be bottoms-up.
+
+### `join(wave_a, wave_b)` — the only creation primitive
+
+One verb. Two waves in, one chord out. Behavior depends on inputs:
+
+| Input A | Input B | Result |
+|---------|---------|--------|
+| Voice | Voice | New chord created, both reparented into it |
+| Chord | Voice | Voice absorbed into existing chord |
+| Voice | Chord | Voice absorbed into existing chord |
+| Chord | Chord | All children of B merged into A, B deleted |
+
+**Absorb, not nest.** `join` always produces a flat chord. Nesting (sub-chords) would be a separate explicit operation if ever needed.
+
+**Store operation:** `UPDATE waves SET parent_id = ?, position = ? WHERE id = ?`. No tree recreation — just reparent.
+
+### `leave(wave)` — pull a voice out
+
+Removes a voice from its chord. The voice becomes solo and inert (no stimulus).
+
+- If the chord drops to one remaining child, it becomes a single-voice chord (not auto-dissolved).
+- The leaving voice has no stimulus by default — add one explicitly to make it run independently.
+
+### Stimulus invariants (unchanged)
+
+- Chord owns the stimulus, voices never do.
+- Joining strips any existing stimulus from the voice.
+- Leaving produces a solo voice with no stimulus.
+- A solo voice needs an explicit stimulus to become runnable.
+
+### Store simplification
+
+`create_chord` disappears from the store trait. `create_wave` walks children:
+
+```rust
+pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
+    self.upsert_wave(wave)?;
+    for child in wave.children() {
+        self.create_wave(child)?;
+    }
+    Ok(())
+}
+```
+
+`join` and `leave` are reparenting operations, not creation operations.
+
+### Python API
+
+```python
+join("designer", "infra")           # creates chord, both absorbed
+join("ensemble", "vocalist")        # vocalist joins existing chord
+leave("vocalist")                   # vocalist becomes solo, no stimulus
+```
+
+### HTTP routes
+
+```
+POST /v0/waves/join    { "wave_a": "designer", "wave_b": "infra" }
+POST /v0/waves/leave   { "wave": "vocalist" }
+```
 
 ## Current invariants (source of truth)
 
@@ -49,13 +109,14 @@ Migration `010_chords_data_model.sql` rebuilds wave/stimulus storage with chord 
 - Nested waves cannot own triggers/stimuli.
 - Runs begin from top-level trigger-owning waves/chords.
 - Unknown/invalid wave kind data fails loudly.
+- Joining strips stimulus from the absorbed voice.
+- Leaving produces a solo voice with no stimulus.
+- A single-voice chord is valid (not auto-dissolved).
 
 ## Remaining work
 
-1. **Execution semantics completion (phase 02):** ensure full best-effort descendant execution behavior is consistently enforced and documented.
-2. **Listen-step behavior (phase 03):** descendant awareness/orchestration is still pending.
-3. **HTTP-level coverage:** add more route tests for chord behavior (most deep validation is currently store-level).
-4. **Concerto UI CI flake:** `ConcertoUITests.ScreenshotPipelineTests testCapture` remained environment-sensitive in prior validation.
+1. **Execution semantics completion (phase 02):** best-effort descendant execution.
+2. **Listen-step behavior (phase 03):** inter-voice communication.
 
 ## Out of scope for this branch
 

@@ -53,7 +53,8 @@ pub fn router(state: HttpState) -> Router {
             "/waves",
             get(waves::list_waves_handler).post(waves::create_wave_handler),
         )
-        .route("/chords", post(waves::create_chord_handler))
+        .route("/waves/join", post(waves::join_waves_handler))
+        .route("/waves/leave", post(waves::leave_wave_handler))
         .route(
             "/waves/{wave_id}",
             get(waves::get_wave_handler)

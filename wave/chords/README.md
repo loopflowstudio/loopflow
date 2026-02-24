@@ -28,6 +28,8 @@ A chord fires its stimulus, all child voices execute in parallel, each voice lis
 
 **Instantiated waves, not schemas.** For now, chords contain concrete instantiated waves, not abstract templates. An instantiated wave has at most one parent chord (or none if solo).
 
+**Bottoms-up composition via join/leave.** Voices exist independently with their own flows. `join(a, b)` absorbs both into a chord. `leave(v)` pulls a voice out as solo with no stimulus. No top-down `create_chord` — chords emerge from grouping existing waves.
+
 ## Data Model
 
 ```rust
@@ -78,7 +80,6 @@ Theoretically compelling but alternating execution semantics need more thought. 
 
 ## Open Questions
 
-- CLI/API surface for chord management beyond creation: update children, reorder, remove. Creation exists (`create_chord()` API, `POST /v0/chords`), but management is unbuilt.
 - Cleanup policy between iterations
 - Failure status detail beyond `has_failure`: do we also store per-child failure summary?
 - First iteration: no listen step (nothing to listen to), or a "hello" step?

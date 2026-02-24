@@ -19,8 +19,8 @@ use crate::lfd::store::rows::{
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult, MAX_CHORD_DEPTH};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
-    QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
-    WaveStatus,
+    QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveData, WaveRun,
+    WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -360,19 +360,119 @@ impl SqliteStore {
     }
 
     pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        self.upsert_wave(wave)
+        self.upsert_wave(wave)?;
+        for child in wave.children() {
+            self.create_wave(child)?;
+        }
+        Ok(())
     }
 
-    pub fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()> {
-        if !chord.is_chord() {
+    pub fn join_waves(
+        &self,
+        wave_a: &Wave,
+        wave_b: &Wave,
+        chord_name: Option<String>,
+    ) -> StoreResult<LfdId> {
+        match (wave_a.is_chord(), wave_b.is_chord()) {
+            // Voice + Voice → create new chord, reparent both
+            (false, false) => {
+                let chord_id = LfdId::new();
+                let name = chord_name.unwrap_or_else(|| format!("chord-{}", chord_id));
+                let chord = Wave::Chord {
+                    data: WaveData {
+                        id: chord_id.clone(),
+                        name,
+                        repo: wave_a.repo().clone(),
+                        flow: wave_a.flow().clone(),
+                        direction: wave_a.direction().clone(),
+                        area: wave_a.area().clone(),
+                        status: WaveStatus::Idle,
+                        iteration: 0,
+                        schema_ref: None,
+                        schema_name: None,
+                        created_at: Some(time::OffsetDateTime::now_utc()),
+                        parent_id: None,
+                        position: 0,
+                    },
+                    children: Vec::new(),
+                };
+                self.upsert_wave(&chord)?;
+                self.delete_stimuli_for_wave(wave_a.id())?;
+                self.delete_stimuli_for_wave(wave_b.id())?;
+                let mut a_data = wave_a.data().clone();
+                a_data.parent_id = Some(chord_id.clone());
+                a_data.position = 0;
+                self.upsert_wave(&Wave::Voice(a_data))?;
+                let mut b_data = wave_b.data().clone();
+                b_data.parent_id = Some(chord_id.clone());
+                b_data.position = 1;
+                self.upsert_wave(&Wave::Voice(b_data))?;
+                Ok(chord_id)
+            }
+            // Chord + Voice → absorb voice into chord A
+            (true, false) => {
+                self.delete_stimuli_for_wave(wave_b.id())?;
+                let next_pos = wave_a.children().len() as u32;
+                let mut b_data = wave_b.data().clone();
+                b_data.parent_id = Some(wave_a.id().clone());
+                b_data.position = next_pos;
+                self.upsert_wave(&Wave::Voice(b_data))?;
+                Ok(wave_a.id().clone())
+            }
+            // Voice + Chord → absorb voice into chord B
+            (false, true) => {
+                self.delete_stimuli_for_wave(wave_a.id())?;
+                let next_pos = wave_b.children().len() as u32;
+                let mut a_data = wave_a.data().clone();
+                a_data.parent_id = Some(wave_b.id().clone());
+                a_data.position = next_pos;
+                self.upsert_wave(&Wave::Voice(a_data))?;
+                Ok(wave_b.id().clone())
+            }
+            // Chord + Chord → merge B's children into A, delete B
+            (true, true) => {
+                let base_pos = wave_a.children().len() as u32;
+                for (i, child) in wave_b.children().iter().enumerate() {
+                    let mut child_data = child.data().clone();
+                    child_data.parent_id = Some(wave_a.id().clone());
+                    child_data.position = base_pos + i as u32;
+                    if child.is_chord() {
+                        self.upsert_wave(&Wave::Chord {
+                            data: child_data,
+                            children: Vec::new(),
+                        })?;
+                    } else {
+                        self.upsert_wave(&Wave::Voice(child_data))?;
+                    }
+                }
+                // B's children are reparented; safe to delete the empty shell
+                self.delete_wave(wave_b.id())?;
+                Ok(wave_a.id().clone())
+            }
+        }
+    }
+
+    pub fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+        let wave = self
+            .load_wave_tree(wave_id)?
+            .ok_or_else(|| StoreError::InvalidData("wave not found".to_string()))?;
+        if wave.parent_id().is_none() {
             return Err(StoreError::InvalidData(
-                "create_chord requires a chord wave".to_string(),
+                "wave is not in a chord".to_string(),
             ));
         }
-        self.create_wave(chord)?;
-        for voice in voices {
-            self.create_wave(voice)?;
+        let mut data = wave.data().clone();
+        data.parent_id = None;
+        data.position = 0;
+        if wave.is_chord() {
+            self.upsert_wave(&Wave::Chord {
+                data,
+                children: Vec::new(),
+            })?;
+        } else {
+            self.upsert_wave(&Wave::Voice(data))?;
         }
+        self.delete_stimuli_for_wave(wave_id)?;
         Ok(())
     }
 

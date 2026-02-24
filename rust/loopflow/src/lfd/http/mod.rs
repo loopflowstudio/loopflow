@@ -2,8 +2,13 @@ pub mod dto;
 pub mod routes;
 pub mod state;
 
+use std::path::PathBuf;
+
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::StatusCode;
 use axum::middleware;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use tower_http::trace::TraceLayer;
@@ -20,6 +25,9 @@ pub use state::HttpState;
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
 
 pub fn router(state: HttpState) -> Router {
+    let max_json_body_bytes = state.api_security.http.max_json_body_bytes;
+    let max_hook_body_bytes = state.api_security.http.max_hook_body_bytes;
+
     // API routes — protected by auth middleware.
     let api_routes = Router::new()
         .route("/flows", get(flows::list_flows_handler))
@@ -104,6 +112,7 @@ pub fn router(state: HttpState) -> Router {
         .route("/waves/{wave_id}/logs", get(wave_runs::wave_logs_handler))
         .route("/wave_runs", get(wave_runs::list_wave_runs_handler))
         .route("/worktrees", get(worktrees::list_worktrees_handler))
+        .layer(DefaultBodyLimit::max(max_json_body_bytes))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
@@ -113,10 +122,16 @@ pub fn router(state: HttpState) -> Router {
     let protected_routes = Router::new()
         .route("/status", get(system::status_handler))
         .route("/ws", get(ws::ws_handler))
+        .layer(DefaultBodyLimit::max(max_json_body_bytes))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
         ));
+
+    let hook_routes = Router::new()
+        .route("/hooks/git", post(hooks::git_hook_handler))
+        .route("/v0/hooks/github", post(hooks::github_webhook_handler))
+        .layer(DefaultBodyLimit::max(max_hook_body_bytes));
 
     Router::new()
         // Unauthenticated: health probes, metrics, git hooks.
@@ -124,8 +139,8 @@ pub fn router(state: HttpState) -> Router {
         .route("/metrics", get(system::metrics_handler))
         .nest("/v0", api_routes)
         .merge(protected_routes)
-        .route("/hooks/git", post(hooks::git_hook_handler))
-        .route("/v0/hooks/github", post(hooks::github_webhook_handler))
+        .merge(hook_routes)
+        .layer(middleware::from_fn(normalize_payload_too_large))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -134,16 +149,25 @@ pub fn api_error(
     status: StatusCode,
     message: impl Into<String>,
 ) -> (StatusCode, Json<ErrorResponse>) {
+    let raw = message.into();
+    let sanitized = sanitize_error_message(&raw);
+    if status.is_server_error() {
+        tracing::warn!(status = %status, error = %raw, "internal API error");
+    }
     (
         status,
         Json(ErrorResponse {
             error: ErrorDetail {
                 error_type: "invalid_request_error".to_string(),
-                message: message.into(),
+                message: sanitized,
                 param: None,
             },
         }),
     )
+}
+
+pub fn api_error_response(status: StatusCode, message: impl Into<String>) -> Response {
+    api_error(status, message).into_response()
 }
 
 pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
@@ -156,5 +180,176 @@ pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
         StoreError::PostgresPool(err) => {
             api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
         }
+    }
+}
+
+fn sanitize_error_message(message: &str) -> String {
+    let mut sanitized = redact_known_paths(message);
+    sanitized = redact_bearer_token_segments(&sanitized);
+    sanitized = redact_long_secret_segments(&sanitized);
+    sanitized = redact_internal_identifiers(&sanitized);
+    sanitized
+}
+
+fn redact_known_paths(message: &str) -> String {
+    let mut sanitized = message.to_string();
+    if let Some(home) = dirs::home_dir() {
+        let home = home.to_string_lossy().to_string();
+        if !home.is_empty() {
+            sanitized = sanitized.replace(&home, "[REDACTED_PATH]");
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd = cwd.to_string_lossy().to_string();
+        if !cwd.is_empty() {
+            sanitized = sanitized.replace(&cwd, "[REDACTED_PATH]");
+        }
+    }
+
+    for token in extract_absolute_path_tokens(message) {
+        sanitized = sanitized.replace(&token, "[REDACTED_PATH]");
+    }
+    sanitized
+}
+
+fn redact_bearer_token_segments(message: &str) -> String {
+    let mut result = String::new();
+    let mut remaining = message;
+    while let Some(idx) = remaining.find("Bearer ") {
+        result.push_str(&remaining[..idx]);
+        let after = &remaining[idx + "Bearer ".len()..];
+        let token = after.split_whitespace().next().unwrap_or_default();
+        if token.is_empty() {
+            result.push_str("Bearer");
+            remaining = after;
+        } else {
+            result.push_str("Bearer [REDACTED_TOKEN]");
+            remaining = &after[token.len()..];
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
+fn redact_long_secret_segments(message: &str) -> String {
+    message
+        .split_whitespace()
+        .map(redact_word_if_secret)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn redact_word_if_secret(word: &str) -> String {
+    let trimmed = word.trim_matches(|ch: char| ch == '"' || ch == '\'' || ch == ',');
+    let looks_secret = trimmed.len() >= 24
+        && trimmed.chars().any(|ch| ch.is_ascii_alphabetic())
+        && trimmed.chars().any(|ch| ch.is_ascii_digit())
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.');
+    if looks_secret {
+        word.replace(trimmed, "[REDACTED_TOKEN]")
+    } else {
+        word.to_string()
+    }
+}
+
+fn redact_internal_identifiers(message: &str) -> String {
+    let mut sanitized = message.to_string();
+    for marker in [
+        "docker://",
+        "/var/lib/docker/volumes/",
+        "volume ",
+        "container ",
+    ] {
+        if sanitized.contains(marker) {
+            sanitized = sanitized.replace(marker, "[REDACTED_INTERNAL] ");
+        }
+    }
+    sanitized
+}
+
+fn extract_absolute_path_tokens(message: &str) -> Vec<String> {
+    message
+        .split_whitespace()
+        .map(|word| word.trim_matches(|ch: char| ch == '"' || ch == '\'' || ch == ','))
+        .filter(|word| is_absolute_path_token(word))
+        .map(str::to_string)
+        .collect()
+}
+
+fn is_absolute_path_token(word: &str) -> bool {
+    if word.is_empty() {
+        return false;
+    }
+    if word.starts_with('/') {
+        return PathBuf::from(word).is_absolute();
+    }
+    false
+}
+
+async fn normalize_payload_too_large(request: Request, next: Next) -> Response {
+    let response = next.run(request).await;
+    if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return api_error_response(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
+    }
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::routing::post;
+    use axum::Router;
+    use tokio::net::TcpListener;
+
+    #[test]
+    fn sanitize_error_message_redacts_paths_and_tokens() {
+        let raw = "failed at /tmp/worktree with Bearer abcdef0123456789abcdef0123456789";
+        let sanitized = sanitize_error_message(raw);
+        assert!(!sanitized.contains("/tmp/worktree"));
+        assert!(!sanitized.contains("abcdef0123456789abcdef0123456789"));
+        assert!(sanitized.contains("[REDACTED_PATH]"));
+        assert!(sanitized.contains("[REDACTED_TOKEN]"));
+    }
+
+    #[test]
+    fn sanitize_error_message_redacts_home_path() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let raw = format!("cannot open {}", home.display());
+        let sanitized = sanitize_error_message(&raw);
+        assert!(!sanitized.contains(&home.to_string_lossy().to_string()));
+        assert!(sanitized.contains("[REDACTED_PATH]"));
+    }
+
+    #[tokio::test]
+    async fn oversized_payload_returns_json_413() {
+        let app = Router::new()
+            .route("/limited", post(|_body: bytes::Bytes| async { "ok" }))
+            .layer(DefaultBodyLimit::max(8))
+            .layer(middleware::from_fn(normalize_payload_too_large));
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve app");
+        });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/limited"))
+            .body("0123456789abcdef")
+            .send()
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let payload: serde_json::Value = response.json().await.expect("json response");
+        assert_eq!(
+            payload["error"]["message"],
+            serde_json::Value::String("request body too large".to_string())
+        );
     }
 }

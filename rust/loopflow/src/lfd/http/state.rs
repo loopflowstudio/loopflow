@@ -8,8 +8,8 @@ use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 
 use crate::chat::AgentEvent;
-use crate::lfd::auth::AuthProvider;
-use crate::lfd::config::GitHubConfig;
+use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
+use crate::lfd::config::{ApiSecurityConfig, GitHubConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
@@ -111,6 +111,8 @@ pub struct HttpState {
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
     pub github: GitHubConfig,
+    pub api_security: ApiSecurityConfig,
+    pub auth_failure_throttle: AuthFailureThrottle,
     pub ci_failure_cache: Arc<Mutex<std::collections::HashSet<String>>>,
     pub chat_turns: ChatTurnRegistry,
     pub sessions: SessionManager,

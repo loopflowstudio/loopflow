@@ -43,4 +43,26 @@ final class FileTokenProviderTests: XCTestCase {
         let token = try await provider.token()
         XCTAssertEqual(token, "session-token")
     }
+
+    func testResolveTokenUsesFallbackForLocalConnection() {
+        let token = FileTokenProvider.resolveToken(
+            connection: .local,
+            tokenProvider: { "provider-token" }
+        )
+        XCTAssertEqual(token, "provider-token")
+    }
+
+    func testResolveTokenSkipsFileFallbackForRemoteConnection() {
+        let remote = ServerConnection(
+            host: "lfd.example.com",
+            port: 443,
+            useTLS: true,
+            authMode: .staticToken
+        )
+        let token = FileTokenProvider.resolveToken(
+            connection: remote,
+            tokenProvider: { nil }
+        )
+        XCTAssertNil(token)
+    }
 }

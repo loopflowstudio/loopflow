@@ -5,6 +5,8 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::lfd::http_client::SafeHttpClient;
+
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -27,6 +29,7 @@ struct RegisterResponse {
 #[derive(Debug, Clone)]
 pub struct RegistrationClient {
     base_url: String,
+    http: SafeHttpClient,
     state: Arc<RwLock<RegistrationState>>,
     connection_token: Arc<RwLock<Option<String>>>,
 }
@@ -35,6 +38,7 @@ impl RegistrationClient {
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            http: SafeHttpClient::new().expect("safe HTTP client should initialize"),
             state: Arc::new(RwLock::new(RegistrationState::default())),
             connection_token: Arc::new(RwLock::new(None)),
         }
@@ -50,7 +54,6 @@ impl RegistrationClient {
         machine_id: &str,
         machine_name: &str,
     ) -> Result<String, RegistrationError> {
-        let client = reqwest::Client::new();
         let url = format!("{}/api/v1/daemons/register", self.base_url);
 
         let payload = serde_json::json!({
@@ -59,12 +62,16 @@ impl RegistrationClient {
             "capabilities": ["waves", "terminal"],
         });
 
-        let response = client
-            .post(&url)
-            .header("Authorization", format!("Bearer {jwt}"))
-            .json(&payload)
-            .timeout(Duration::from_secs(10))
-            .send()
+        let response = self
+            .http
+            .send(
+                self.http
+                    .request(reqwest::Method::POST, &url)
+                    .map_err(|e| RegistrationError::Network(e.to_string()))?
+                    .header("Authorization", format!("Bearer {jwt}"))
+                    .json(&payload)
+                    .timeout(Duration::from_secs(10)),
+            )
             .await
             .map_err(|e| RegistrationError::Network(e.to_string()))?;
 
@@ -117,19 +124,22 @@ impl RegistrationClient {
     }
 
     async fn send_heartbeat(&self, jwt: &str, machine_id: &str) -> Result<(), RegistrationError> {
-        let client = reqwest::Client::new();
         let url = format!("{}/api/v1/daemons/heartbeat", self.base_url);
 
         let payload = serde_json::json!({
             "machine_id": machine_id,
         });
 
-        let response = client
-            .post(&url)
-            .header("Authorization", format!("Bearer {jwt}"))
-            .json(&payload)
-            .timeout(Duration::from_secs(10))
-            .send()
+        let response = self
+            .http
+            .send(
+                self.http
+                    .request(reqwest::Method::POST, &url)
+                    .map_err(|e| RegistrationError::Network(e.to_string()))?
+                    .header("Authorization", format!("Bearer {jwt}"))
+                    .json(&payload)
+                    .timeout(Duration::from_secs(10)),
+            )
             .await
             .map_err(|e| RegistrationError::Network(e.to_string()))?;
 
@@ -152,20 +162,23 @@ impl RegistrationClient {
             return;
         }
 
-        let client = reqwest::Client::new();
         let url = format!("{}/api/v1/daemons/deregister", self.base_url);
 
         let payload = serde_json::json!({
             "machine_id": machine_id,
         });
 
-        let _ = client
-            .post(&url)
-            .header("Authorization", format!("Bearer {jwt}"))
-            .json(&payload)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await;
+        if let Ok(builder) = self.http.request(reqwest::Method::POST, &url) {
+            let _ = self
+                .http
+                .send(
+                    builder
+                        .header("Authorization", format!("Bearer {jwt}"))
+                        .json(&payload)
+                        .timeout(Duration::from_secs(5)),
+                )
+                .await;
+        }
 
         {
             let mut state = self.state.write().await;
@@ -178,6 +191,7 @@ impl RegistrationClient {
 #[derive(Debug, Clone)]
 pub struct ConnectionValidator {
     base_url: String,
+    http: SafeHttpClient,
     cache: Arc<RwLock<std::collections::HashMap<String, (bool, Instant)>>>,
 }
 
@@ -185,6 +199,7 @@ impl ConnectionValidator {
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            http: SafeHttpClient::new().expect("safe HTTP client should initialize"),
             cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
@@ -217,18 +232,21 @@ impl ConnectionValidator {
     }
 
     async fn validate_remote(&self, token: &str) -> Result<bool, RegistrationError> {
-        let client = reqwest::Client::new();
         let url = format!("{}/api/v1/daemons/validate-connection", self.base_url);
 
         let payload = serde_json::json!({
             "connection_token": token,
         });
 
-        let response = client
-            .post(&url)
-            .json(&payload)
-            .timeout(Duration::from_secs(5))
-            .send()
+        let response = self
+            .http
+            .send(
+                self.http
+                    .request(reqwest::Method::POST, &url)
+                    .map_err(|e| RegistrationError::Network(e.to_string()))?
+                    .json(&payload)
+                    .timeout(Duration::from_secs(5)),
+            )
             .await
             .map_err(|e| RegistrationError::Network(e.to_string()))?;
 

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
+use ipnet::IpNet;
 use serde::Deserialize;
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -12,6 +13,13 @@ const DEFAULT_EXECUTOR_MEMORY_LIMIT_BYTES: i64 = 8 * 1024 * 1024 * 1024;
 const DEFAULT_EXECUTOR_MEMORY_SWAP_LIMIT_BYTES: i64 = 8 * 1024 * 1024 * 1024;
 const DEFAULT_EXECUTOR_CPU_QUOTA: i64 = 400_000;
 const DEFAULT_EXECUTOR_PIDS_LIMIT: i64 = 1024;
+const DEFAULT_HTTP_MAX_JSON_BODY_BYTES: usize = 1_048_576;
+const DEFAULT_HTTP_MAX_HOOK_BODY_BYTES: usize = 262_144;
+const DEFAULT_HTTP_MAX_WS_FRAME_BYTES: usize = 65_536;
+const DEFAULT_HTTP_MAX_WS_MESSAGE_BYTES: usize = 262_144;
+const DEFAULT_HTTP_MAX_WS_QUEUE: usize = 256;
+const DEFAULT_HTTP_MAX_WS_MALFORMED: u32 = 3;
+const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 
 /// Auth config from `~/.lf/lfd.yaml`.
 ///
@@ -55,6 +63,7 @@ pub struct LfdConfig {
     pub auth: AuthConfig,
     pub executor: ExecutorConfig,
     pub github: GitHubConfig,
+    pub api_security: ApiSecurityConfig,
 }
 
 impl LfdConfig {
@@ -92,6 +101,8 @@ struct RawLfdConfig {
     executor: RawExecutorConfig,
     #[serde(default)]
     github: GitHubConfig,
+    #[serde(default)]
+    api_security: RawApiSecurityConfig,
 }
 
 impl RawLfdConfig {
@@ -194,6 +205,56 @@ impl RawLfdConfig {
             };
         }
 
+        Self::apply_usize_env_override(
+            &mut self.api_security.http.max_json_body_bytes,
+            "LFD_HTTP_MAX_JSON_BODY_BYTES",
+            "http.max_json_body_bytes",
+        )?;
+        Self::apply_usize_env_override(
+            &mut self.api_security.http.max_hook_body_bytes,
+            "LFD_HTTP_MAX_HOOK_BODY_BYTES",
+            "http.max_hook_body_bytes",
+        )?;
+        Self::apply_usize_env_override(
+            &mut self.api_security.http.max_ws_frame_bytes,
+            "LFD_HTTP_MAX_WS_FRAME_BYTES",
+            "http.max_ws_frame_bytes",
+        )?;
+        Self::apply_usize_env_override(
+            &mut self.api_security.http.max_ws_message_bytes,
+            "LFD_HTTP_MAX_WS_MESSAGE_BYTES",
+            "http.max_ws_message_bytes",
+        )?;
+        Self::apply_usize_env_override(
+            &mut self.api_security.http.max_ws_queue,
+            "LFD_HTTP_MAX_WS_QUEUE",
+            "http.max_ws_queue",
+        )?;
+        Self::apply_u32_env_override(
+            &mut self.api_security.http.max_ws_malformed,
+            "LFD_HTTP_MAX_WS_MALFORMED",
+            "http.max_ws_malformed",
+        )?;
+        Self::apply_u32_env_override(
+            &mut self.api_security.http.auth_failures_per_minute,
+            "LFD_HTTP_AUTH_FAILURES_PER_MINUTE",
+            "http.auth_failures_per_minute",
+        )?;
+
+        if let Ok(value) = std::env::var("LFD_HTTP_TRUSTED_PROXY_CIDRS") {
+            let trimmed = value.trim();
+            self.api_security.http.trusted_proxy_cidrs = if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                trimmed
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            };
+        }
+
         Ok(())
     }
 
@@ -206,6 +267,30 @@ impl RawLfdConfig {
             return Ok(());
         }
         *target = parse_executor_limit_i64(trimmed, env_key, field)?;
+        Ok(())
+    }
+
+    fn apply_usize_env_override(target: &mut usize, env_key: &str, field: &str) -> Result<()> {
+        let Ok(value) = std::env::var(env_key) else {
+            return Ok(());
+        };
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        *target = parse_positive_usize(trimmed, env_key, field)?;
+        Ok(())
+    }
+
+    fn apply_u32_env_override(target: &mut u32, env_key: &str, field: &str) -> Result<()> {
+        let Ok(value) = std::env::var(env_key) else {
+            return Ok(());
+        };
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        *target = parse_positive_u32(trimmed, env_key, field)?;
         Ok(())
     }
 
@@ -240,6 +325,7 @@ impl RawLfdConfig {
                 limits: self.executor.limits,
             },
             github: self.github,
+            api_security: self.api_security.resolve()?,
         })
     }
 }
@@ -276,6 +362,119 @@ pub struct GitHubConfig {
     #[serde(default)]
     pub webhook_secret: String,
     pub token: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ApiSecurityConfig {
+    pub http: ApiHttpSecurityConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiHttpSecurityConfig {
+    pub max_json_body_bytes: usize,
+    pub max_hook_body_bytes: usize,
+    pub max_ws_frame_bytes: usize,
+    pub max_ws_message_bytes: usize,
+    pub max_ws_queue: usize,
+    pub max_ws_malformed: u32,
+    pub auth_failures_per_minute: u32,
+    pub trusted_proxy_cidrs: Vec<IpNet>,
+}
+
+impl Default for ApiHttpSecurityConfig {
+    fn default() -> Self {
+        Self {
+            max_json_body_bytes: DEFAULT_HTTP_MAX_JSON_BODY_BYTES,
+            max_hook_body_bytes: DEFAULT_HTTP_MAX_HOOK_BODY_BYTES,
+            max_ws_frame_bytes: DEFAULT_HTTP_MAX_WS_FRAME_BYTES,
+            max_ws_message_bytes: DEFAULT_HTTP_MAX_WS_MESSAGE_BYTES,
+            max_ws_queue: DEFAULT_HTTP_MAX_WS_QUEUE,
+            max_ws_malformed: DEFAULT_HTTP_MAX_WS_MALFORMED,
+            auth_failures_per_minute: DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE,
+            trusted_proxy_cidrs: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct RawApiSecurityConfig {
+    http: RawApiHttpSecurityConfig,
+}
+
+impl RawApiSecurityConfig {
+    fn resolve(self) -> Result<ApiSecurityConfig> {
+        Ok(ApiSecurityConfig {
+            http: self.http.resolve()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+struct RawApiHttpSecurityConfig {
+    max_json_body_bytes: usize,
+    max_hook_body_bytes: usize,
+    max_ws_frame_bytes: usize,
+    max_ws_message_bytes: usize,
+    max_ws_queue: usize,
+    max_ws_malformed: u32,
+    auth_failures_per_minute: u32,
+    trusted_proxy_cidrs: Vec<String>,
+}
+
+impl Default for RawApiHttpSecurityConfig {
+    fn default() -> Self {
+        let default = ApiHttpSecurityConfig::default();
+        Self {
+            max_json_body_bytes: default.max_json_body_bytes,
+            max_hook_body_bytes: default.max_hook_body_bytes,
+            max_ws_frame_bytes: default.max_ws_frame_bytes,
+            max_ws_message_bytes: default.max_ws_message_bytes,
+            max_ws_queue: default.max_ws_queue,
+            max_ws_malformed: default.max_ws_malformed,
+            auth_failures_per_minute: default.auth_failures_per_minute,
+            trusted_proxy_cidrs: Vec::new(),
+        }
+    }
+}
+
+impl RawApiHttpSecurityConfig {
+    fn resolve(self) -> Result<ApiHttpSecurityConfig> {
+        require_positive_usize(self.max_json_body_bytes, "http.max_json_body_bytes")?;
+        require_positive_usize(self.max_hook_body_bytes, "http.max_hook_body_bytes")?;
+        require_positive_usize(self.max_ws_frame_bytes, "http.max_ws_frame_bytes")?;
+        require_positive_usize(self.max_ws_message_bytes, "http.max_ws_message_bytes")?;
+        require_positive_usize(self.max_ws_queue, "http.max_ws_queue")?;
+        require_positive_u32(self.max_ws_malformed, "http.max_ws_malformed")?;
+        require_positive_u32(
+            self.auth_failures_per_minute,
+            "http.auth_failures_per_minute",
+        )?;
+
+        let mut trusted_proxy_cidrs = Vec::with_capacity(self.trusted_proxy_cidrs.len());
+        for cidr in self.trusted_proxy_cidrs {
+            let trimmed = cidr.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let parsed = trimmed
+                .parse::<IpNet>()
+                .map_err(|err| anyhow!("invalid trusted proxy CIDR '{trimmed}': {err}"))?;
+            trusted_proxy_cidrs.push(parsed);
+        }
+
+        Ok(ApiHttpSecurityConfig {
+            max_json_body_bytes: self.max_json_body_bytes,
+            max_hook_body_bytes: self.max_hook_body_bytes,
+            max_ws_frame_bytes: self.max_ws_frame_bytes,
+            max_ws_message_bytes: self.max_ws_message_bytes,
+            max_ws_queue: self.max_ws_queue,
+            max_ws_malformed: self.max_ws_malformed,
+            auth_failures_per_minute: self.auth_failures_per_minute,
+            trusted_proxy_cidrs,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
@@ -516,8 +715,42 @@ fn parse_executor_limit_i64(raw: &str, env_key: &str, field: &str) -> Result<i64
     Ok(value)
 }
 
+fn parse_positive_usize(raw: &str, env_key: &str, field: &str) -> Result<usize> {
+    let value: usize = raw
+        .parse()
+        .map_err(|err| anyhow!("invalid {env_key} value '{raw}' for {field}: {err}"))?;
+    if value == 0 {
+        bail!("invalid {env_key} value '{raw}' for {field}: must be greater than zero");
+    }
+    Ok(value)
+}
+
+fn parse_positive_u32(raw: &str, env_key: &str, field: &str) -> Result<u32> {
+    let value: u32 = raw
+        .parse()
+        .map_err(|err| anyhow!("invalid {env_key} value '{raw}' for {field}: {err}"))?;
+    if value == 0 {
+        bail!("invalid {env_key} value '{raw}' for {field}: must be greater than zero");
+    }
+    Ok(value)
+}
+
 fn require_positive_limit(value: i64, field: &str) -> Result<()> {
     if value <= 0 {
+        bail!("{field} must be greater than zero");
+    }
+    Ok(())
+}
+
+fn require_positive_usize(value: usize, field: &str) -> Result<()> {
+    if value == 0 {
+        bail!("{field} must be greater than zero");
+    }
+    Ok(())
+}
+
+fn require_positive_u32(value: u32, field: &str) -> Result<()> {
+    if value == 0 {
         bail!("{field} must be greater than zero");
     }
     Ok(())
@@ -607,6 +840,14 @@ mod tests {
                 pids_limit: 1024,
             }
         );
+        assert_eq!(config.api_security.http.max_json_body_bytes, 1_048_576);
+        assert_eq!(config.api_security.http.max_hook_body_bytes, 262_144);
+        assert_eq!(config.api_security.http.max_ws_frame_bytes, 65_536);
+        assert_eq!(config.api_security.http.max_ws_message_bytes, 262_144);
+        assert_eq!(config.api_security.http.max_ws_queue, 256);
+        assert_eq!(config.api_security.http.max_ws_malformed, 3);
+        assert_eq!(config.api_security.http.auth_failures_per_minute, 12);
+        assert!(config.api_security.http.trusted_proxy_cidrs.is_empty());
     }
 
     #[test]
@@ -678,6 +919,14 @@ executor:
             "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
+            "LFD_HTTP_MAX_JSON_BODY_BYTES",
+            "LFD_HTTP_MAX_HOOK_BODY_BYTES",
+            "LFD_HTTP_MAX_WS_FRAME_BYTES",
+            "LFD_HTTP_MAX_WS_MESSAGE_BYTES",
+            "LFD_HTTP_MAX_WS_QUEUE",
+            "LFD_HTTP_MAX_WS_MALFORMED",
+            "LFD_HTTP_AUTH_FAILURES_PER_MINUTE",
+            "LFD_HTTP_TRUSTED_PROXY_CIDRS",
         ]);
         std::env::set_var("LFD_MODE", "container");
         std::env::set_var("LFD_AUTH_PROVIDER", "static");
@@ -694,6 +943,14 @@ executor:
         std::env::set_var("LFD_EXECUTOR_LIMITS_PIDS_LIMIT", "256");
         std::env::set_var("LFD_GITHUB_WEBHOOK_SECRET", "env-secret");
         std::env::set_var("LFD_GITHUB_TOKEN", "ghp_env");
+        std::env::set_var("LFD_HTTP_MAX_JSON_BODY_BYTES", "2097152");
+        std::env::set_var("LFD_HTTP_MAX_HOOK_BODY_BYTES", "131072");
+        std::env::set_var("LFD_HTTP_MAX_WS_FRAME_BYTES", "32768");
+        std::env::set_var("LFD_HTTP_MAX_WS_MESSAGE_BYTES", "131072");
+        std::env::set_var("LFD_HTTP_MAX_WS_QUEUE", "64");
+        std::env::set_var("LFD_HTTP_MAX_WS_MALFORMED", "5");
+        std::env::set_var("LFD_HTTP_AUTH_FAILURES_PER_MINUTE", "9");
+        std::env::set_var("LFD_HTTP_TRUSTED_PROXY_CIDRS", "127.0.0.1/32,10.0.0.0/8");
 
         let mut config = RawLfdConfig::default();
         config.apply_env_overrides().expect("overrides apply");
@@ -724,6 +981,14 @@ executor:
         );
         assert_eq!(resolved.github.webhook_secret, "env-secret");
         assert_eq!(resolved.github.token, Some("ghp_env".to_string()));
+        assert_eq!(resolved.api_security.http.max_json_body_bytes, 2_097_152);
+        assert_eq!(resolved.api_security.http.max_hook_body_bytes, 131_072);
+        assert_eq!(resolved.api_security.http.max_ws_frame_bytes, 32_768);
+        assert_eq!(resolved.api_security.http.max_ws_message_bytes, 131_072);
+        assert_eq!(resolved.api_security.http.max_ws_queue, 64);
+        assert_eq!(resolved.api_security.http.max_ws_malformed, 5);
+        assert_eq!(resolved.api_security.http.auth_failures_per_minute, 9);
+        assert_eq!(resolved.api_security.http.trusted_proxy_cidrs.len(), 2);
     }
 
     #[test]
@@ -761,6 +1026,38 @@ executor:
     }
 
     #[test]
+    fn invalid_http_limit_env_override_is_rejected() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&["LFD_HTTP_MAX_WS_QUEUE"]);
+        std::env::set_var("LFD_HTTP_MAX_WS_QUEUE", "0");
+
+        let mut config = RawLfdConfig::default();
+        let err = config
+            .apply_env_overrides()
+            .expect_err("invalid HTTP limit should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "invalid LFD_HTTP_MAX_WS_QUEUE value '0' for http.max_ws_queue: must be greater than zero"
+        );
+    }
+
+    #[test]
+    fn invalid_trusted_proxy_cidr_is_rejected() {
+        let raw = r#"
+api_security:
+  http:
+    trusted_proxy_cidrs:
+      - not-a-cidr
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let err = config.resolve().expect_err("invalid cidr should fail");
+        assert!(err
+            .to_string()
+            .contains("invalid trusted proxy CIDR 'not-a-cidr'"));
+    }
+
+    #[test]
     fn load_invalid_yaml_returns_error() {
         let _lock = env_lock().lock().expect("env lock");
         let _guard = EnvGuard::snapshot(&[
@@ -776,6 +1073,14 @@ executor:
             "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
             "LFD_GITHUB_WEBHOOK_SECRET",
             "LFD_GITHUB_TOKEN",
+            "LFD_HTTP_MAX_JSON_BODY_BYTES",
+            "LFD_HTTP_MAX_HOOK_BODY_BYTES",
+            "LFD_HTTP_MAX_WS_FRAME_BYTES",
+            "LFD_HTTP_MAX_WS_MESSAGE_BYTES",
+            "LFD_HTTP_MAX_WS_QUEUE",
+            "LFD_HTTP_MAX_WS_MALFORMED",
+            "LFD_HTTP_AUTH_FAILURES_PER_MINUTE",
+            "LFD_HTTP_TRUSTED_PROXY_CIDRS",
         ]);
         let tmp = tempdir().expect("tempdir");
         let lf_dir = tmp.path().join(".lf");

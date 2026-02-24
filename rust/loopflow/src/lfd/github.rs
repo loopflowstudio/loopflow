@@ -3,11 +3,13 @@ use std::process::Command;
 
 use hmac::{Hmac, Mac};
 use reqwest::header::{ACCEPT, USER_AGENT};
+use reqwest::Method;
 use serde::Deserialize;
 use sha2::Sha256;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::lfd::http_client::SafeHttpClient;
 use crate::lfd::types::{LivePrState, LivePullRequestState};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -197,14 +199,17 @@ pub async fn poll_check_runs(
 ) -> Result<Vec<CheckRun>, String> {
     let branch = branch.replace('/', "%2F");
     let url = format!("https://api.github.com/repos/{repo_full_name}/commits/{branch}/check-runs");
-    let client = reqwest::Client::new();
+    let client = SafeHttpClient::new().map_err(|err| err.to_string())?;
     let response = client
-        .get(url)
-        .header(ACCEPT, "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header(USER_AGENT, "loopflow-lfd")
-        .bearer_auth(token)
-        .send()
+        .send(
+            client
+                .request(Method::GET, &url)
+                .map_err(|err| err.to_string())?
+                .header(ACCEPT, "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header(USER_AGENT, "loopflow-lfd")
+                .bearer_auth(token),
+        )
         .await
         .map_err(|err| err.to_string())?;
 
@@ -227,14 +232,17 @@ pub async fn fetch_pull_request(
     token: &str,
 ) -> Result<Option<GitHubPullRequestState>, String> {
     let url = format!("https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}");
-    let client = reqwest::Client::new();
+    let client = SafeHttpClient::new().map_err(|err| err.to_string())?;
     let response = client
-        .get(url)
-        .header(ACCEPT, "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header(USER_AGENT, "loopflow-lfd")
-        .bearer_auth(token)
-        .send()
+        .send(
+            client
+                .request(Method::GET, &url)
+                .map_err(|err| err.to_string())?
+                .header(ACCEPT, "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header(USER_AGENT, "loopflow-lfd")
+                .bearer_auth(token),
+        )
         .await
         .map_err(|err| err.to_string())?;
 

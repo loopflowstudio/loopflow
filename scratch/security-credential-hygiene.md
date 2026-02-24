@@ -2,196 +2,151 @@
 
 ## Problem
 
-Credentials leak through side channels: log output, unauthenticated health endpoints, query strings, and runtime type misuse. The auth middleware correctly separates token providers (Phase 01) and sanitizes error payloads (Phase 04), but secrets can still surface in operator-visible output and the type system doesn't prevent it.
+lfd already blocks obvious auth bypasses, but credentials can still leak through operator-visible paths and weak typing.
 
-Concretely:
+Who benefits:
+- Operators running local or remote lfd get safer defaults and a clear rotation workflow.
+- Loopflow users get fewer accidental auth failures from client misconfiguration.
+- Security reviewers get enforceable invariants instead of log-callsite discipline.
 
-- `/health` is unauthenticated and returns `RegistrationState` including `machine_id`, `machine_name`, and `last_error` — the last of which can contain server URLs and error details from failed registration attempts.
-- Token values are `String` throughout: `AuthProvider::Static { token: String }`, `session_token: Option<String>`, `connection_token: Arc<RwLock<Option<String>>>`. Nothing prevents `tracing::warn!(..., token = %token)` from compiling and running.
-- No query-param rejection exists. Token extraction is header-only, but a request like `GET /v0/waves?token=abc123` passes without error — the token lands in access logs, proxy logs, and browser history while being silently ignored.
-- Static token rotation requires manual config editing with no supported tooling or documentation.
+Why now:
+- Phase 04 already shipped API error sanitization and outbound header stripping.
+- The remaining leaks are narrow, high-impact, and locally fixable in lfd.
+- Phase 06 (provider isolation) depends on tightening token boundaries now.
 
 ## Approach
 
-Five workstreams, each independently shippable:
+Build a fail-closed credential boundary across **types, endpoints, middleware ordering, generated config, and operator workflow**.
 
-### 1. Opaque token types (`SecretString`)
+### 1) Opaque token type (`SecretString`) as the default credential carrier
 
-Introduce a `SecretString` newtype that wraps token values. `Display` and `Debug` emit `[REDACTED]`. Access requires explicit `.expose_secret()`.
+Add `lfd::secret_string::SecretString` and migrate token-bearing fields away from `String`:
 
-```rust
-#[derive(Clone)]
-pub struct SecretString(String);
+- `AuthProvider::Static { token }`
+- `HttpState.session_token`
+- `RegistrationClient.connection_token`
+- `AuthConfig.token`
+- `RegisterResponse.connection_token`
 
-impl SecretString {
-    pub fn new(s: impl Into<String>) -> Self { Self(s.into()) }
-    pub fn expose_secret(&self) -> &str { &self.0 }
-}
+`SecretString` behavior:
+- `Debug`/`Display` return `[REDACTED]`
+- explicit `expose_secret()` for use sites that must read the token
+- constant-time equality for secret comparison
+- zeroize internal bytes on drop
 
-impl fmt::Debug for SecretString { ... } // => "[REDACTED]"
-impl fmt::Display for SecretString { ... } // => "[REDACTED]"
-impl PartialEq for SecretString { ... } // constant-time via subtle
-impl Drop for SecretString { ... } // zeroize on drop
-```
+Design guardrail: no blanket `From<SecretString> for String`. Secret extraction must remain explicit.
 
-Migrate all token-bearing fields:
+### 2) Split public vs authenticated registration status
 
-| Field | Current | After |
-|-------|---------|-------|
-| `AuthProvider::Static { token }` | `String` | `SecretString` |
-| `HttpState.session_token` | `Option<String>` | `Option<SecretString>` |
-| `RegistrationClient.connection_token` | `Arc<RwLock<Option<String>>>` | `Arc<RwLock<Option<SecretString>>>` |
-| `AuthConfig.token` | `Option<String>` | `Option<SecretString>` |
-| `RegisterResponse.connection_token` | `String` | `SecretString` |
+Keep `/health` probe-safe and move sensitive registration details to `/status`:
 
-After this migration, accidentally logging a token via structured tracing emits `[REDACTED]` instead of the token value. The compiler doesn't prevent the mistake, but the runtime output is safe.
+- `/health` returns only `{ enabled, registered }`
+- `/status` keeps full registration state, but sanitizes `last_error`
 
-### 2. Health endpoint redaction
+Implementation shape:
+- add `RegistrationState::public_summary()`
+- add shared redaction module used by both API errors and status redaction
+- status serialization sanitizes `last_error` before response encoding
 
-Strip identifying and potentially-secret fields from the unauthenticated `/health` response. Move them to the authenticated `/status` endpoint.
+### 3) Reject auth-like query params globally before URI tracing
 
-**Before:**
-```
-GET /health (unauthenticated)
-→ { registration: { machine_id, machine_name, last_error, ... } }
-```
+Add middleware that rejects requests with these query keys (case-insensitive):
 
-**After:**
-```
-GET /health (unauthenticated)
-→ { registration: { enabled, registered } }
+`token`, `access_token`, `auth_token`, `api_key`, `bearer`, `secret`, `password`, `credential`
 
-GET /status (authenticated)
-→ { registration: { enabled, registered, machine_id, machine_name, last_error, ... } }
-```
+Behavior:
+- response: `400 Bad Request`
+- message: `authentication credentials must not appear in query parameters`
+- applied to all routes (`/v0/*`, `/status`, `/ws`, `/health`, `/metrics`, hooks)
+- ordered before request tracing so secrets in query strings are never logged
 
-Introduce `RegistrationState::public_summary()` that returns only non-sensitive fields. Health handler uses the summary; status handler uses the full state.
+### 4) Preserve env placeholders in generated compose/config output
 
-Also sanitize `last_error` in the full state before returning it — apply the same `sanitize_error_message()` pipeline from Phase 04's error handling, since registration errors can contain server URLs and error details.
+Lock in secret-safe rendering for generated artifacts:
 
-Extract the sanitizer into a shared module (instead of keeping it private to `http/mod.rs`) so `/status` redaction and API error redaction cannot drift.
+- managed compose keeps `LFD_AUTH_TOKEN: "${LFD_AUTH_TOKEN:-}"`
+- no interpolation of runtime token values into generated files
+- add regression tests for compose output and credential env passthrough
 
-### 3. Query parameter rejection
+### 5) Add explicit static token rotation command
 
-Add Axum middleware that rejects requests containing auth-like query parameters with `400 Bad Request`.
+Add `lfd token rotate`:
 
-Rejected parameter names: `token`, `access_token`, `auth_token`, `api_key`, `bearer`, `secret`, `password`, `credential`.
+- generates a new 32-byte random token (hex, 64 chars)
+- prints token once
+- prints restart instructions: update `LFD_AUTH_TOKEN`, restart `lfd`
+- does not write token into config files
 
-```
-GET /v0/waves?token=abc → 400 {"error": {"message": "authentication credentials must not appear in query parameters"}}
-GET /v0/waves → 200 (normal)
-```
+Document runbook in `docs/lfd.md` with exact sequence:
+1. generate token
+2. update secret source (`.env`, secret manager, systemd/launchd env)
+3. restart daemon
+4. verify old token rejected and new token accepted
 
-This is defense-in-depth. The server already doesn't read tokens from query params, but rejecting them prevents tokens from landing in access logs, proxy logs, and browser history while being silently ignored.
+### 6) Regression coverage for provider separation and leak resistance
 
-Applied to all routes (authenticated and unauthenticated) so that a misconfigured client gets an immediate, clear error rather than a silent auth failure.
-
-Implementation guardrail: this middleware must run before request tracing/logging that records URIs, so rejected query tokens are never written to logs.
-
-### 4. Config write secret preservation
-
-Keep secrets out of generated config artifacts:
-
-- Preserve `${ENV_VAR}` references in generated compose/config files (never resolve and persist secret values).
-- Add regression coverage for managed compose output to ensure `LFD_AUTH_TOKEN` remains an env placeholder rather than plaintext.
-
-This keeps phase 05 aligned with the security roadmap item "config write secret preservation."
-
-### 5. Static token rotation
-
-Provide a documented restart-based rotation path with a CLI command that generates a new token and prints the operational steps.
-
-```bash
-lfd token rotate
-# → Generates new token
-# → Prints: "New token: <64-char hex>"
-# → Prints: "Update LFD_AUTH_TOKEN and restart lfd to activate"
-```
-
-No dual-token grace period. lfd is typically local or single-operator; restart-based rotation is sufficient. If zero-downtime rotation is needed, container orchestrators handle rolling restarts.
-
-The command:
-1. Generates a 32-byte random token, hex-encoded (same entropy as session tokens).
-2. Prints the token once. Does not write it to config files (operator chooses where to store it).
-3. Documents the swap procedure in a runbook section.
-
-Add regression test: generate token, configure lfd with it, verify auth succeeds; rotate, restart, verify old token is rejected and new token is accepted.
+Add tests for:
+- accidental token logging (`Debug`/`Display` redaction)
+- cross-provider rejection (local token rejected by static provider and vice versa)
+- `/health` redaction and `/status` sanitized `last_error`
+- query-param rejection and middleware ordering
+- compose placeholder preservation
+- rotation flow (old token invalid after restart)
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
-| `secrecy` crate for opaque tokens | Battle-tested, zeroize-on-drop built in | Adds a dependency for ~30 lines of code. Implement inline; adopt `secrecy` later if needed. |
-| Dual-token grace period for rotation | Zero-downtime rotation | Over-engineered for single-operator daemon. Container orchestrators solve this at the infrastructure layer. |
-| Structured tracing redaction layer | Catches all log output automatically | Invasive, hard to test, false positives on non-secret strings. Opaque types are simpler and catch the problem at the source. |
-| Strip query params silently instead of rejecting | More forgiving to misconfigured clients | Silent stripping masks bugs. A 400 error forces the client to fix its behavior. Follows the wave's "fail closed on ambiguity" principle. |
-| Full `tracing` subscriber filter | Redact any field named "token" in structured logs | Over-broad (not all "token" fields are secrets), under-specific (secrets in unstructured strings slip through). Type-level protection is more precise. |
+| Tracing-subscriber redaction rules | Catches some leaks at logging sink | Misses non-tracing output and string interpolation; weaker than type boundary |
+| Accept query tokens but ignore them | More tolerant clients | Silent failure keeps secrets in logs/history; violates fail-closed posture |
+| Dual-token grace window for rotation | Zero-downtime swaps | Adds state complexity and revocation ambiguity for little local-daemon value |
+| Keep one `RegistrationState` payload everywhere | Simpler DTOs | Exposes machine identity and error details on unauthenticated endpoint |
+| Use `secrecy` crate immediately | Mature ergonomics | Defers to a later cleanup; inline type is enough for this phase |
 
 ## Key decisions
 
-**Opaque types over runtime redaction.** Security invariant 4 from the wave README: "No secret in operator-visible output." A newtype that can't accidentally render as plaintext upholds this at the type boundary rather than relying on every log callsite to remember redaction.
-
-**Reject query params, don't strip them.** Security invariant 5: "Fail closed on auth/trust ambiguity." A token in a query param is ambiguous intent — reject it rather than silently ignoring it.
-
-**Health endpoint minimalism.** The health endpoint exists for load balancers and monitoring. It doesn't need machine identity or error details. Following the principle of least privilege, expose only what probes need.
-
-**Restart-based rotation over live reload.** The wave scope says "lightweight by design." A restart-based path with a CLI helper is simpler to implement, simpler to reason about, and simpler to test than signal-based config reloading.
+- We enforce wave invariant **"No secret in operator-visible output"** at the type boundary, not by hoping every logging callsite redacts correctly.
+- We enforce wave invariant **"Fail closed on auth/trust ambiguity"** by rejecting query credentials instead of silently stripping/ignoring them.
+- We follow wave vision **"No 'it's just localhost' exceptions"** by applying query-param rejection to unauthenticated routes too, not only protected API routes.
+- We choose restart-based rotation now: simple, testable, and sufficient for single-operator deployments.
+- We keep implementation modular so Phase 06 can build on these boundaries without refactoring auth again.
 
 ## Scope
 
-**In scope:**
-- `SecretString` newtype in `lfd/` with `Debug`/`Display` redaction, constant-time equality, zeroize-on-drop
-- Migrate all token fields to `SecretString`
-- Health endpoint: strip `machine_id`, `machine_name`, `last_error` from unauthenticated response
-- Sanitize `RegistrationState.last_error` before returning in authenticated `/status`
-- Query param rejection middleware for auth-like parameter names
-- Middleware/layer ordering so query-token requests are rejected before URI logging
-- Config write secret preservation checks for generated artifacts (`${LFD_AUTH_TOKEN}` remains placeholder)
-- `lfd token rotate` CLI subcommand (generates token, prints instructions)
-- Rotation runbook documentation
-- Regression tests for all five workstreams
-- Cross-provider rejection tests (Local token rejected by Static provider, Static token rejected by Local provider)
+- In scope:
+  - `SecretString` type and token field migration in lfd
+  - `/health` registration summary + `/status` error sanitization
+  - global auth-like query-param rejection middleware, pre-trace ordering
+  - compose/config secret placeholder preservation regression tests
+  - `lfd token rotate` command + runbook docs
+  - cross-provider rejection and leak-resistance regression tests
 
-**Out of scope:**
-- Full IAM / key management system (wave non-goal)
-- Per-wave credential scoping (tracked for multi-tenant, not this phase)
-- Signal-based live config reload
-- `secrecy` crate adoption (implement inline first)
-- Client-side (Python/Swift) changes beyond verifying no credential mixing — client token resolution was tested in Phase 04
-
-## Implementation order
-
-1. **`SecretString` type + field migration** — foundational; other workstreams benefit from it
-2. **Health endpoint redaction** — small, independent, immediate security improvement
-3. **Query param rejection middleware** — small, independent
-4. **Config write secret preservation checks** — lock in existing env-placeholder behavior
-5. **Static token rotation CLI + tests** — depends on `SecretString` for the generated token
-
-## Documentation bookkeeping
-
-Keep `wave/security/README.md` links valid while phase 05 is in progress (either restore a stub `wave/security/05-credential-hygiene.md` that points here, or update the phase table doc link accordingly).
+- Out of scope:
+  - full key-management or IAM system
+  - per-wave credential scoping / multi-tenant policy model
+  - live config reload or no-restart token hot swap
+  - broad client API redesign in Python/Swift
 
 ## Done when
 
 ```bash
-# SecretString prevents accidental logging
+# token wrapper redacts debug/display and preserves constant-time compare behavior
 cargo test -p loopflow secret_string
 
-# Health endpoint doesn't leak machine identity or errors
-curl http://localhost:2486/health | jq '.registration'
-# → { "enabled": true, "registered": true }  (no machine_id, machine_name, last_error)
+# unauthenticated health endpoint does not expose machine identity or error details
+curl -s http://127.0.0.1:2486/health | jq '.registration'
+# => {"enabled":true,"registered":true}
 
-# Query params with auth tokens are rejected
-curl -s 'http://localhost:2486/v0/waves?token=foo' | jq '.error.message'
-# → "authentication credentials must not appear in query parameters"
+# auth-like query params are rejected before normal request handling
+curl -s 'http://127.0.0.1:2486/v0/waves?token=abc' | jq '.error.message'
+# => "authentication credentials must not appear in query parameters"
 
-# Token rotation generates valid token
+# rotation command emits a valid token and operational instructions
 lfd token rotate
-# → prints new token
 
-# Cross-provider rejection holds
+# auth provider separation remains strict
 cargo test -p loopflow auth_cross_provider
 
-# Full suite green
+# full regression baseline
 cargo test --all && uv run pytest python/tests/
 ```

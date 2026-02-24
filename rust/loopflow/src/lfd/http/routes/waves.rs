@@ -252,25 +252,10 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    if state.executor.executor_type() == ExecutorType::Local {
-        // Create worktree eagerly so it exists immediately for local execution.
-        let repo_for_wt = wave.repo().clone();
-        let name_for_wt = wave.name().clone();
-        let wt_result = tokio::task::spawn_blocking(move || {
-            ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
-        })
-        .await
-        .map_err(|err| err.to_string())
-        .and_then(|r| r.map_err(|err| err.to_string()));
-
-        if let Err(err) = wt_result {
-            let wave_id = wave.id().clone();
-            let _ = state.store.delete_wave(&wave_id).await;
-            return Err(api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to create worktree: {err}"),
-            ));
-        }
+    if let Err(err) = ensure_local_wave_worktree(&state, &wave).await {
+        let wave_id = wave.id().clone();
+        let _ = state.store.delete_wave(&wave_id).await;
+        return Err(err);
     }
 
     if let Some((kind, cron)) = schema_stimulus {
@@ -299,6 +284,53 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
+}
+
+async fn ensure_local_wave_worktree(
+    state: &HttpState,
+    wave: &Wave,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    if state.executor.executor_type() != ExecutorType::Local {
+        return Ok(());
+    }
+
+    let repo_for_wt = wave.repo().clone();
+    let name_for_wt = wave.name().clone();
+    run_blocking_result(
+        move || {
+            ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
+                .map(|_| ())
+                .map_err(|err| format!("failed to create worktree: {err}"))
+        },
+        StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await
+}
+
+fn build_chord_voice(
+    repo: &str,
+    chord_id: &LfdId,
+    chord_flow: &str,
+    chord_direction: &[String],
+    chord_area: &[String],
+    position: usize,
+    voice: CreateChordVoiceRequest,
+) -> Wave {
+    Wave::Voice(WaveData {
+        id: LfdId::new(),
+        name: voice.name,
+        repo: repo.to_string(),
+        flow: voice.flow.unwrap_or_else(|| chord_flow.to_string()),
+        direction: voice.direction.unwrap_or_else(|| chord_direction.to_vec()),
+        area: voice.area.unwrap_or_else(|| chord_area.to_vec()),
+        status: WaveStatus::Idle,
+        iteration: 0,
+        schema_ref: None,
+        schema_name: None,
+        created_at: Some(OffsetDateTime::now_utc()),
+        parent_id: Some(chord_id.clone()),
+        position: position as u32,
+    })
 }
 
 pub async fn create_chord_handler(
@@ -364,56 +396,44 @@ pub async fn create_chord_handler(
         },
         children: Vec::new(),
     };
-    state
-        .store
-        .create_wave(&chord)
-        .await
-        .map_err(map_store_error)?;
 
-    if state.executor.executor_type() == ExecutorType::Local {
-        let repo_for_wt = chord.repo().clone();
-        let name_for_wt = chord.name().clone();
-        let wt_result = tokio::task::spawn_blocking(move || {
-            ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
+    let voices = payload
+        .voices
+        .into_iter()
+        .enumerate()
+        .map(|(position, voice)| {
+            build_chord_voice(
+                &payload.repo,
+                &chord_id,
+                &chord_flow,
+                &chord_direction,
+                &chord_area,
+                position,
+                voice,
+            )
         })
-        .await
-        .map_err(|err| err.to_string())
-        .and_then(|r| r.map_err(|err| err.to_string()));
-        if let Err(err) = wt_result {
-            let _ = state.store.delete_wave(chord.id()).await;
-            return Err(api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to create worktree: {err}"),
-            ));
-        }
+        .collect::<Vec<_>>();
+
+    if let Err(err) = state.store.create_chord(&chord, &voices).await {
+        let _ = state.store.delete_wave(&chord_id).await;
+        return Err(map_store_error(err));
     }
 
-    for (position, voice) in payload.voices.into_iter().enumerate() {
-        let child = Wave::Voice(WaveData {
-            id: LfdId::new(),
-            name: voice.name,
-            repo: payload.repo.clone(),
-            flow: voice.flow.unwrap_or_else(|| chord_flow.clone()),
-            direction: voice.direction.unwrap_or_else(|| chord_direction.clone()),
-            area: voice.area.unwrap_or_else(|| chord_area.clone()),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            schema_ref: None,
-            schema_name: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: Some(chord_id.clone()),
-            position: position as u32,
-        });
-        if let Err(err) = state.store.create_wave(&child).await {
-            let _ = state.store.delete_wave(&chord_id).await;
-            return Err(map_store_error(err));
-        }
+    if let Err(err) = ensure_local_wave_worktree(&state, &chord).await {
+        let _ = state.store.delete_wave(chord.id()).await;
+        return Err(err);
     }
 
     state
         .event_hub
         .send(Event::wave_created(chord_id.clone(), chord_name));
-    let view = build_wave_dto(&state.store, &state.github, chord, false)
+    let wave = state
+        .store
+        .get_wave(&chord_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let view = build_wave_dto(&state.store, &state.github, wave, false)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))

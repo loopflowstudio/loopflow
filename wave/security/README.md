@@ -12,7 +12,7 @@ Every lfd deployment — local, containerized, remote — enforces auth, validat
 | 02 | Path Validation | Traversal in wave IDs, worktree paths, future file APIs | None | [02-path-validation.md](02-path-validation.md) | done |
 | 03 | Container Hardening | Resource limits, non-root agent user, cross-worktree isolation | None | [03-container-hardening.md](03-container-hardening.md) | done |
 | 04 | API Surface Gating | Rate limiting, body size limits, error sanitization, WebSocket caps, outbound token/header leakage prevention, proxy trust | 01 | — (shipped, see scratch/) | done |
-| 05 | Credential Hygiene | Token separation/rotation, config write secret preservation, log/status redaction, transport hygiene | None | [05-credential-hygiene.md](05-credential-hygiene.md) | in progress |
+| 05 | Credential Hygiene | Token separation/rotation, config write secret preservation, log/status redaction, transport hygiene | None | — (in progress, see [scratch/security-credential-hygiene.md](../../scratch/security-credential-hygiene.md)) | in progress |
 | 06 | Auth Provider Isolation | Fallthrough bypass, JWKS fail-open, token format validation | remote/07 | [06-auth-provider-isolation.md](06-auth-provider-isolation.md) | |
 
 ## Goals

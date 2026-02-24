@@ -13,7 +13,7 @@ Concretely:
 
 ## Approach
 
-Four workstreams, each independently shippable:
+Five workstreams, each independently shippable:
 
 ### 1. Opaque token types (`SecretString`)
 
@@ -69,6 +69,8 @@ Introduce `RegistrationState::public_summary()` that returns only non-sensitive 
 
 Also sanitize `last_error` in the full state before returning it — apply the same `sanitize_error_message()` pipeline from Phase 04's error handling, since registration errors can contain server URLs and error details.
 
+Extract the sanitizer into a shared module (instead of keeping it private to `http/mod.rs`) so `/status` redaction and API error redaction cannot drift.
+
 ### 3. Query parameter rejection
 
 Add Axum middleware that rejects requests containing auth-like query parameters with `400 Bad Request`.
@@ -84,14 +86,25 @@ This is defense-in-depth. The server already doesn't read tokens from query para
 
 Applied to all routes (authenticated and unauthenticated) so that a misconfigured client gets an immediate, clear error rather than a silent auth failure.
 
-### 4. Static token rotation
+Implementation guardrail: this middleware must run before request tracing/logging that records URIs, so rejected query tokens are never written to logs.
+
+### 4. Config write secret preservation
+
+Keep secrets out of generated config artifacts:
+
+- Preserve `${ENV_VAR}` references in generated compose/config files (never resolve and persist secret values).
+- Add regression coverage for managed compose output to ensure `LFD_AUTH_TOKEN` remains an env placeholder rather than plaintext.
+
+This keeps phase 05 aligned with the security roadmap item "config write secret preservation."
+
+### 5. Static token rotation
 
 Provide a documented restart-based rotation path with a CLI command that generates a new token and prints the operational steps.
 
 ```bash
 lfd token rotate
 # → Generates new token
-# → Prints: "New token: lfd_xxxxx"
+# → Prints: "New token: <64-char hex>"
 # → Prints: "Update LFD_AUTH_TOKEN and restart lfd to activate"
 ```
 
@@ -132,9 +145,11 @@ Add regression test: generate token, configure lfd with it, verify auth succeeds
 - Health endpoint: strip `machine_id`, `machine_name`, `last_error` from unauthenticated response
 - Sanitize `RegistrationState.last_error` before returning in authenticated `/status`
 - Query param rejection middleware for auth-like parameter names
+- Middleware/layer ordering so query-token requests are rejected before URI logging
+- Config write secret preservation checks for generated artifacts (`${LFD_AUTH_TOKEN}` remains placeholder)
 - `lfd token rotate` CLI subcommand (generates token, prints instructions)
 - Rotation runbook documentation
-- Regression tests for all four workstreams
+- Regression tests for all five workstreams
 - Cross-provider rejection tests (Local token rejected by Static provider, Static token rejected by Local provider)
 
 **Out of scope:**
@@ -149,7 +164,12 @@ Add regression test: generate token, configure lfd with it, verify auth succeeds
 1. **`SecretString` type + field migration** — foundational; other workstreams benefit from it
 2. **Health endpoint redaction** — small, independent, immediate security improvement
 3. **Query param rejection middleware** — small, independent
-4. **Static token rotation CLI + tests** — depends on `SecretString` for the generated token
+4. **Config write secret preservation checks** — lock in existing env-placeholder behavior
+5. **Static token rotation CLI + tests** — depends on `SecretString` for the generated token
+
+## Documentation bookkeeping
+
+Keep `wave/security/README.md` links valid while phase 05 is in progress (either restore a stub `wave/security/05-credential-hygiene.md` that points here, or update the phase table doc link accordingly).
 
 ## Done when
 

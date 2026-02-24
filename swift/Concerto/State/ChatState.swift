@@ -125,6 +125,9 @@ final class ChatState {
 
     private(set) var itemsById: [String: SessionItem] = [:]
 
+    private let sessionProvider: String
+    private let sessionWaveRunId: String?
+    private let sessionConfig: AgentSessionConfig
     private let waveService: any ChatService
     private let userDefaults: UserDefaults
     private let detailLimit = 16_000
@@ -142,10 +145,16 @@ final class ChatState {
 
     init(
         waveId: String,
+        sessionProvider: String = "claude",
+        sessionWaveRunId: String? = nil,
+        sessionConfig: AgentSessionConfig,
         waveService: any ChatService = LocalWaveService(),
         userDefaults: UserDefaults = .standard
     ) {
         self.waveId = waveId
+        self.sessionProvider = sessionProvider
+        self.sessionWaveRunId = sessionWaveRunId
+        self.sessionConfig = sessionConfig
         self.waveService = waveService
         self.userDefaults = userDefaults
     }
@@ -269,9 +278,9 @@ final class ChatState {
 
         resetSessionCaches()
         let session = try await waveService.createSession(
-            provider: "claude",
-            waveRunId: nil,
-            config: AgentSessionConfig()
+            provider: sessionProvider,
+            waveRunId: sessionWaveRunId,
+            config: sessionConfig
         )
         sessionId = session.id
         persistSessionId(session.id)

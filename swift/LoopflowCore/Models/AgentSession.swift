@@ -163,22 +163,37 @@ public enum ItemDelta: Sendable, Hashable {
 }
 
 public struct AgentSessionConfig: Sendable, Hashable {
+    public var step: String
+    public var repoRoot: String
+    public var directions: [String]
+    public var area: String?
+    public var wave: String?
+    public var message: String?
     public var model: String?
     public var cwd: String?
-    public var systemPrompt: String?
     public var maxTurns: Int?
     public var yoloMode: Bool
 
     public init(
+        step: String,
+        repoRoot: String,
+        directions: [String] = [],
+        area: String? = nil,
+        wave: String? = nil,
+        message: String? = nil,
         model: String? = nil,
         cwd: String? = nil,
-        systemPrompt: String? = nil,
         maxTurns: Int? = nil,
         yoloMode: Bool = false
     ) {
+        self.step = step
+        self.repoRoot = repoRoot
+        self.directions = directions
+        self.area = area
+        self.wave = wave
+        self.message = message
         self.model = model
         self.cwd = cwd
-        self.systemPrompt = systemPrompt
         self.maxTurns = maxTurns
         self.yoloMode = yoloMode
     }

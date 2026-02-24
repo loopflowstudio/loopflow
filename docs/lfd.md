@@ -87,10 +87,11 @@ curl -s -X POST "http://127.0.0.1:2486/v0/sessions" \
   -d "{
     \"provider\": \"claude\",
     \"wave_run_id\": \"run_abc\",
-    \"config\": {
-      \"model\": \"claude-sonnet-4-6\",
-      \"cwd\": \"$(pwd)\"
-    }
+    \"step\": \"design\",
+    \"repo_root\": \"$(pwd)\",
+    \"directions\": [\"product-engineer\"],
+    \"model\": \"claude-sonnet-4-6\",
+    \"cwd\": \"$(pwd)\"
   }"
 ```
 

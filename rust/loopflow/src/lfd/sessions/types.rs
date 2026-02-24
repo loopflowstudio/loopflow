@@ -221,12 +221,22 @@ impl SessionEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SessionConfig {
+    #[serde(default)]
+    pub step: String,
+    #[serde(default)]
+    pub repo_root: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub area: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
     #[serde(default)]

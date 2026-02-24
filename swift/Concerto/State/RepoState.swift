@@ -78,7 +78,19 @@ final class RepoState {
         if let state = chatStates[waveId] {
             return state
         }
-        let state = ChatState(waveId: waveId, waveService: waveService)
+        let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
+        let wave = waveStore.wave(for: waveId)
+        let state = ChatState(
+            waveId: waveId,
+            sessionConfig: AgentSessionConfig(
+                step: "design",
+                repoRoot: repoRoot,
+                directions: wave?.direction ?? [],
+                area: wave?.area.first,
+                wave: wave?.name.isEmpty == false ? wave?.name : nil
+            ),
+            waveService: waveService
+        )
         chatStates[waveId] = state
         return state
     }

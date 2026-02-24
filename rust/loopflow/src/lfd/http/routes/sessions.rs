@@ -23,7 +23,7 @@ pub struct CreateSessionRequest {
     pub provider: String,
     #[serde(default)]
     pub wave_run_id: Option<String>,
-    #[serde(default)]
+    #[serde(flatten)]
     pub config: SessionConfig,
 }
 
@@ -230,11 +230,22 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
             StatusCode::BAD_REQUEST,
             ApiMessage::Safe(format!("unsupported provider: {provider}")),
         ),
+        SessionManagerError::ProviderNotImplemented(provider) => api_error(
+            StatusCode::NOT_IMPLEMENTED,
+            ApiMessage::Safe(format!("provider not implemented yet: {provider}")),
+        ),
         SessionManagerError::WaveRunSessionConflict(wave_run_id) => api_error(
             StatusCode::CONFLICT,
             ApiMessage::Safe(format!(
                 "wave run already has an active session: {wave_run_id}"
             )),
+        ),
+        SessionManagerError::InvalidConfig(message) => {
+            api_error(StatusCode::BAD_REQUEST, ApiMessage::Safe(message))
+        }
+        SessionManagerError::InvalidRepoRoot(message) => api_error(
+            StatusCode::BAD_REQUEST,
+            ApiMessage::Safe(format!("invalid repo_root: {message}")),
         ),
         SessionManagerError::TurnAlreadyInProgress => {
             api_error(StatusCode::CONFLICT, "turn already in progress")

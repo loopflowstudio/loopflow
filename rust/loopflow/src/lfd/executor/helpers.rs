@@ -9,22 +9,18 @@ use time::OffsetDateTime;
 use crate::engine::agent::LaunchConfig;
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{ConcreteItem, ConcreteStep};
-use crate::engine::fork::merge_directions;
 use crate::engine::git::{
     commit, create_branch, current_branch, is_clean, push_with_upstream, stage_all,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
-use crate::engine::prompt::{
-    default_gather_sources, drop_native_instruction_docs, format_context_prompt, format_prompt,
-    format_task_prompt, gather_context, trim_context_with_breakdown, write_prompt_log, Document,
-    DocumentSource, GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
-};
+use crate::engine::prompt::write_prompt_log;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{
     branch_exists, create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
 };
 
 use crate::lfd::id::LfdId;
+use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
 use crate::lfd::security::{sanitize_fs_component, validate_safe_id};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
@@ -262,72 +258,38 @@ pub(crate) async fn build_step_prompt(
     message: Option<String>,
 ) -> Result<(String, String, LaunchConfig)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
-    let directions = merge_directions(directions, &step.step.directions);
-    let opts = GatherContextOpts {
-        repo_root: PathBuf::from(worktree),
-        step: Some(step.step.name.clone()),
-        message,
-        run_mode: Some("auto".to_string()),
+    let prepared = prepare_step_prompt(PrepareStepPromptConfig {
+        repo_root: Path::new(worktree),
+        step: &step.step.name,
         directions,
-        files: Vec::new(),
-        sources: default_gather_sources(
-            config.lfdocs,
-            config.diff_files || config.diff,
-            config.paste,
-        ),
-        area: config.area.clone(),
+        area: None,
         wave: wave.map(str::to_string),
-    };
-
-    let mut components = gather_context(&opts)?;
-    let repo_root = PathBuf::from(worktree);
-    drop_native_instruction_docs(&mut components, &repo_root);
-
-    // Inject wave summary if available
-    if let Some((store, wave_id)) = summary_source {
-        if let Ok(Some(summary)) = store.get_summary(wave_id).await {
-            components.summaries.push(Document {
-                path: "wave-summary".to_string(),
-                content: summary.content,
-                source: DocumentSource::Summary,
-            });
-        }
-    }
-    let (components, _breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
-
-    // Log full prompt, then write context/task split for --append-system-prompt-file
-    let _ = write_prompt_log(
-        &repo_root,
-        &format_prompt(PromptFormatMode::Full, &components),
-        &step.step.name,
-        None,
-    );
-    let task_prompt = format_task_prompt(&components);
+        message,
+        model: None,
+        cwd: None,
+        summary_source,
+    })
+    .await?;
     let context_file = write_prompt_log(
-        &repo_root,
-        &format_context_prompt(&components),
+        &prepared.cwd,
+        &prepared.system_prompt,
         &format!("{}.context", step.step.name),
         None,
     )
     .ok();
-
-    let model = step
-        .step
-        .model
-        .clone()
-        .unwrap_or_else(|| config.agent_model.clone());
+    let model = prepared.model.unwrap_or_else(|| config.agent_model.clone());
     let launch = LaunchConfig {
         auto: true,
         stream: true,
         skip_permissions: config.yolo,
         model_variant: None,
         chrome: config.chrome,
-        cwd: Some(repo_root),
+        cwd: Some(prepared.cwd),
         context_file,
         ..Default::default()
     };
 
-    Ok((task_prompt, model, launch))
+    Ok((prepared.task_prompt, model, launch))
 }
 
 pub(crate) fn build_agent_for_step(

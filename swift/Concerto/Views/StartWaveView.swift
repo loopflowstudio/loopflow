@@ -10,44 +10,49 @@ struct StartWaveView: View {
     @State private var designPrompt = ""
     @State private var isLaunching = false
     @State private var errorMessage: String?
+    @State private var chatState: ChatState?
     @FocusState private var isTextFieldFocused: Bool
 
-    private let terminalLauncher = TerminalLauncher()
-
     var body: some View {
-        VStack(spacing: Spacing.xxl) {
-            Spacer()
+        Group {
+            if let state = chatState {
+                WaveChatView(state: state)
+            } else {
+                VStack(spacing: Spacing.xxl) {
+                    Spacer()
 
-            VStack(spacing: Spacing.lg) {
-                Text("Start designing")
-                    .font(Typography.heroTitle())
-                    .foregroundStyle(palette.accent)
+                    VStack(spacing: Spacing.lg) {
+                        Text("Start designing")
+                            .font(Typography.heroTitle())
+                            .foregroundStyle(palette.accent)
 
-                TextField("Describe what you want to build...", text: $designPrompt)
-                    .textFieldStyle(.plain)
-                    .font(Typography.body())
-                    .padding(Spacing.md)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                    .frame(maxWidth: 400)
-                    .focused($isTextFieldFocused)
-                    .onSubmit { startDesigning() }
-                    .disabled(isLaunching)
+                        TextField("Describe what you want to build...", text: $designPrompt)
+                            .textFieldStyle(.plain)
+                            .font(Typography.body())
+                            .padding(Spacing.md)
+                            .background(palette.surfaceMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                            .frame(maxWidth: 400)
+                            .focused($isTextFieldFocused)
+                            .onSubmit { startDesigning() }
+                            .disabled(isLaunching)
 
-                Button("Start designing") {
-                    startDesigning()
-                }
-                .buttonStyle(DarkButtonStyle())
-                .disabled(isLaunching || trimmedPrompt.isEmpty)
+                        Button("Start designing") {
+                            startDesigning()
+                        }
+                        .buttonStyle(DarkButtonStyle())
+                        .disabled(isLaunching || trimmedPrompt.isEmpty)
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(Typography.caption())
-                        .foregroundStyle(Color.statusError)
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(Typography.caption())
+                                .foregroundStyle(Color.statusError)
+                        }
+                    }
+
+                    Spacer()
                 }
             }
-
-            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { isTextFieldFocused = true }
@@ -74,14 +79,14 @@ struct StartWaveView: View {
         isLaunching = true
         errorMessage = nil
 
+        let prompt = trimmedPrompt
+        let state = chatState ?? repoState.chatState(for: "__start_design__")
+        chatState = state
+        designPrompt = ""
+
         Task {
             defer { isLaunching = false }
-
-            do {
-                try terminalLauncher.launchDesign(prompt: trimmedPrompt, at: repoRoot)
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            await state.send(prompt)
         }
     }
 }

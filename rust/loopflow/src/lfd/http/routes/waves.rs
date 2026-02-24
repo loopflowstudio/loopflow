@@ -19,7 +19,7 @@ use crate::lfd::http::dto::{
     DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
     RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
-use crate::lfd::http::routes::wave_schemas::{read_wave_config, StimulusDef};
+use crate::lfd::http::routes::wave_config::{read_wave_config, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
@@ -183,10 +183,10 @@ pub async fn create_wave_handler(
     let wave_config = schema
         .as_deref()
         .and_then(|name| read_wave_config(&repo_path, name));
-    let schema_stimulus = wave_config
+    let config_stimulus = wave_config
         .as_ref()
         .and_then(|config| config.stimulus.as_ref())
-        .map(parse_schema_stimulus)
+        .map(parse_stimulus)
         .transpose()?;
 
     let id = LfdId::new();
@@ -237,7 +237,7 @@ pub async fn create_wave_handler(
         return Err(err);
     }
 
-    if let Some((kind, cron)) = schema_stimulus {
+    if let Some((kind, cron)) = config_stimulus {
         let stimulus = Stimulus {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
@@ -432,7 +432,7 @@ pub async fn leave_wave_handler(
     Ok(Json(view))
 }
 
-fn parse_schema_stimulus(
+fn parse_stimulus(
     stimulus: &StimulusDef,
 ) -> Result<(StimulusKind, String), (StatusCode, Json<ErrorResponse>)> {
     let kind = match stimulus.kind.as_str() {
@@ -1387,24 +1387,24 @@ mod tests {
     use time::OffsetDateTime;
 
     #[test]
-    fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
+    fn parse_stimulus_requires_cron_expression_for_cron_kind() {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
             cron: None,
         };
 
-        let result = parse_schema_stimulus(&stimulus);
+        let result = parse_stimulus(&stimulus);
         assert!(result.is_err());
     }
 
     #[test]
-    fn parse_schema_stimulus_accepts_valid_cron_expression() {
+    fn parse_stimulus_accepts_valid_cron_expression() {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
             cron: Some("0 8 * * *".to_string()),
         };
 
-        let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
+        let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
         assert_eq!(parsed.0, StimulusKind::Cron);
         assert_eq!(parsed.1, "0 8 * * *");
     }

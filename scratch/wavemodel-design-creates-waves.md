@@ -2,39 +2,40 @@
 
 ## Objective
 
-Make `lf design` the direct wave creation path and add a dedicated `split-wave` step to decompose oversized waves without changing Rust wave schema models.
+Make `lf design` the direct wave creation path. Add `split-wave` to decompose oversized waves. Simplify wave data model — YAML on disk is the source of truth, no schema abstraction.
 
 ## Current state
 
 Implemented:
 
-- `design` wave-plan path now creates `wave/<name>/` directly:
-  - `README.md` with Vision / Goals / Risks / Metrics
-  - `<name>.yaml` with wave config
-  - numbered roadmap files (`01-*.md`, `02-*.md`, ...)
-  - `scratch/<branch>.md` for stage 1 implementation
-- `design` implement path still exits with `lf implement` guidance
-- New interactive `split-wave` step added at `steps/interactive/split-wave.md`
-- `split-wave` is registered in built-in discovery metadata and descriptions
-- README interactive step table now documents `split-wave`
+- `design` wave-plan path creates `wave/<name>/` directly (README, YAML, roadmap files, scratch doc)
+- `design` implement path exits with `lf implement` guidance
+- `split-wave` ops step: mitosis semantics, parent fully consumed
+- Wave schema abstraction removed: no built-in waves, no schema discovery/resolution, no `schema_ref`/`schema_name` in database
+- `name` field removed from wave YAML — directory name is canonical
+- `read_wave_config()` reads YAML once at creation time
 
-## Decisions and boundaries
+## Decisions
 
-- `split-wave` is mitosis: parent wave is fully consumed and deleted, children replace it entirely.
-- Default split count is 2; `lf split-wave N` splits into N children.
-- Every roadmap item and README section maps to exactly one child — nothing lost, nothing duplicated.
+- Wave YAML on disk is the source of truth. `lfd` reads it at creation, doesn't store a separate copy.
+- `lfd` tracks which waves it's operating, not wave state. Config updates write back to YAML.
+- `split-wave` is mitosis: parent deleted, children replace it. Default 2, argument overrides.
+- Roadmap items move as-is; Vision/Goals/Risks/Metrics are rewritten per child.
 - `split-wave` is non-interactive (ops step); review the result afterward.
-- Keep existing `wave-plan` and `add-to-wave` behavior unchanged for other workflows.
-- Keep wave schema discovery unchanged (`wave/<dir>/<dir>.yaml` layout remains compatible).
+
+## Future direction
+
+- `lfd` becomes fully stateless for wave config — `flow`, `direction`, `area` columns on `waves` table are runtime-only, not persistent store
+- Import from YAML or default configs for wave creation
+- Config updates via API write back to `wave/<name>/<name>.yaml`
 
 ## Remaining risks
 
-- Prompt-driven file creation quality depends on agent adherence to the wave conventions.
-- `discover_target` still falls back from step lookup to flow lookup on any step-load error, which can mask malformed-step diagnostics.
-- Local Concerto UI test instability remains in this environment (`ScreenshotPipelineTests.testCapture`, window-not-found).
+- Prompt-driven file creation quality depends on agent adherence to wave conventions
+- `discover_target` falls back from step to flow lookup on any error, can mask diagnostics
 
 ## Out of scope
 
-- Rust data model/schema changes for waves
-- Automated split-wave decomposition without human confirmation
+- Making `lfd` fully stateless (future branch)
+- Automated split-wave without human confirmation
 - Changes to `add-to-wave` or `wave-plan`

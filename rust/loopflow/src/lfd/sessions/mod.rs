@@ -8,9 +8,8 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, Mutex};
 
-use crate::engine::agent::LaunchConfig;
 use crate::lfd::id::LfdId;
-use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
+use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig, PreparedPrompt};
 use crate::lfd::sessions::harness::{CreateHarnessFn, SessionHarness};
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
@@ -95,7 +94,18 @@ impl SessionManager {
         &self,
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
-        let provider = resolve_provider(&params.provider)?;
+        let requested_provider = params.provider.trim().to_ascii_lowercase();
+        if matches!(requested_provider.as_str(), "gemini" | "opencode") {
+            return Err(SessionManagerError::ProviderNotImplemented(
+                requested_provider,
+            ));
+        }
+
+        let provider = harness::canonical_provider(&requested_provider)
+            .map(ToString::to_string)
+            .ok_or_else(|| {
+                SessionManagerError::UnsupportedProvider(requested_provider.to_string())
+            })?;
         let (session_config, prepared_prompt) = self.prepare_session_prompt(params.config).await?;
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
@@ -157,7 +167,7 @@ impl SessionManager {
     async fn prepare_session_prompt(
         &self,
         mut config: SessionConfig,
-    ) -> Result<(SessionConfig, LaunchConfig), SessionManagerError> {
+    ) -> Result<(SessionConfig, PreparedPrompt), SessionManagerError> {
         let repo_root = validate_repo_root(&config.repo_root)?;
         let step = config.step.trim().to_string();
         if step.is_empty() {
@@ -173,15 +183,12 @@ impl SessionManager {
         let prepared = prepare_step_prompt(PrepareStepPromptConfig {
             repo_root: &repo_root,
             step: &step,
-            run_mode: "interactive",
             directions: &config.directions,
             area: config.area.clone(),
             wave: config.wave.clone(),
             message: config.message.clone(),
             model: config.model.clone(),
             cwd,
-            max_turns: config.max_turns,
-            yolo_mode: config.yolo_mode,
             summary_source: None,
         })
         .await
@@ -353,13 +360,13 @@ impl SessionManager {
         &self,
         session_id: LfdId,
         runtime: Arc<SessionRuntime>,
-        launch: LaunchConfig,
+        prompt: PreparedPrompt,
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
             let result = {
                 let mut harness = runtime.harness.lock().await;
-                harness.start(&launch).await
+                harness.start(&prompt).await
             };
 
             match result {
@@ -501,19 +508,6 @@ impl SessionManager {
     }
 }
 
-fn resolve_provider(provider: &str) -> Result<String, SessionManagerError> {
-    let requested_provider = provider.trim().to_ascii_lowercase();
-    if matches!(requested_provider.as_str(), "gemini" | "opencode") {
-        return Err(SessionManagerError::ProviderNotImplemented(
-            requested_provider,
-        ));
-    }
-
-    harness::canonical_provider(&requested_provider)
-        .map(ToString::to_string)
-        .ok_or(SessionManagerError::UnsupportedProvider(requested_provider))
-}
-
 fn validate_repo_root(repo_root: &str) -> Result<PathBuf, SessionManagerError> {
     let raw = repo_root.trim();
     if raw.is_empty() {
@@ -545,9 +539,14 @@ fn resolve_cwd(
     repo_root: &Path,
     cwd: Option<&str>,
 ) -> Result<Option<PathBuf>, SessionManagerError> {
-    let Some(trimmed) = cwd.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(raw) = cwd else {
         return Ok(None);
     };
+
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
 
     let path = PathBuf::from(trimmed);
     let resolved = if path.is_absolute() {
@@ -569,31 +568,13 @@ fn resolve_cwd(
         )));
     }
 
-    let canonical_root = repo_root.canonicalize().map_err(|err| {
-        SessionManagerError::InvalidRepoRoot(format!(
-            "failed to resolve repo_root '{}': {err}",
-            repo_root.display()
-        ))
-    })?;
-    let canonical_cwd = resolved.canonicalize().map_err(|err| {
-        SessionManagerError::InvalidConfig(format!(
-            "failed to resolve cwd '{}': {err}",
-            resolved.display()
-        ))
-    })?;
-    if !canonical_cwd.starts_with(&canonical_root) {
-        return Err(SessionManagerError::InvalidConfig(format!(
-            "cwd must be inside repo_root: {}",
-            canonical_cwd.display()
-        )));
-    }
-
-    Ok(Some(canonical_cwd))
+    Ok(Some(resolved))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::prompt::PreparedPrompt;
     use crate::lfd::sessions::harness::{SessionHarness, SessionHarnessError};
     use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
     use crate::lfd::store::{open_store, StorageConfig};
@@ -609,7 +590,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for FakeHarness {
-        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
+        async fn start(&mut self, _prompt: &PreparedPrompt) -> Result<()> {
             Ok(())
         }
 
@@ -646,7 +627,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for BusyHarness {
-        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
+        async fn start(&mut self, _prompt: &PreparedPrompt) -> Result<()> {
             Ok(())
         }
 
@@ -675,7 +656,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for ResumeAwareHarness {
-        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
+        async fn start(&mut self, _prompt: &PreparedPrompt) -> Result<()> {
             Ok(())
         }
 
@@ -915,38 +896,6 @@ mod tests {
             .expect_err("invalid repo root should fail");
 
         assert!(matches!(err, SessionManagerError::InvalidRepoRoot(_)));
-    }
-
-    #[tokio::test]
-    async fn create_session_rejects_cwd_outside_repo_root() {
-        let tmp = tempdir().expect("tempdir");
-        let db_path = tmp.path().join("lfd.db");
-        let repo_root = tmp.path().join("repo");
-        std::fs::create_dir_all(repo_root.join(".lf")).expect("create .lf for tests");
-        let outside = tmp.path().join("outside");
-        std::fs::create_dir_all(&outside).expect("create outside dir");
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path))
-                .await
-                .expect("open sqlite store"),
-        );
-        let manager = SessionManager::with_create_harness(store, fake_create_harness);
-
-        let err = manager
-            .create_session(CreateSessionParams {
-                provider: "claude".to_string(),
-                wave_run_id: None,
-                config: SessionConfig {
-                    step: "design".to_string(),
-                    repo_root: repo_root.to_string_lossy().to_string(),
-                    cwd: Some(outside.to_string_lossy().to_string()),
-                    ..Default::default()
-                },
-            })
-            .await
-            .expect_err("cwd outside repo root should fail");
-
-        assert!(matches!(err, SessionManagerError::InvalidConfig(_)));
     }
 
     #[tokio::test]

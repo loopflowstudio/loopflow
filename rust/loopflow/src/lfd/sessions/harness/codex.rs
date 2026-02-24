@@ -10,8 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::LaunchConfig;
-use crate::engine::config::parse_model;
+use crate::lfd::prompt::PreparedPrompt;
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
 use crate::lfd::sessions::harness::{codex_mapping, SessionHarness};
@@ -55,7 +54,7 @@ pub struct CodexHarness {
     turn_in_progress: Arc<AtomicBool>,
     current_turn_id: Arc<Mutex<Option<String>>>,
     shutdown_requested: Arc<AtomicBool>,
-    launch: Option<LaunchConfig>,
+    prompt: Option<PreparedPrompt>,
     should_seed_prompt: bool,
 }
 
@@ -78,7 +77,7 @@ impl CodexHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             current_turn_id: Arc::new(Mutex::new(None)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
-            launch: None,
+            prompt: None,
             should_seed_prompt: true,
         }
     }
@@ -117,15 +116,15 @@ impl CodexHarness {
 
 #[async_trait]
 impl SessionHarness for CodexHarness {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()> {
+    async fn start(&mut self, prompt: &PreparedPrompt) -> Result<()> {
         if self.child.is_some() {
             return Ok(());
         }
         self.shutdown_requested.store(false, Ordering::Relaxed);
-        self.launch = Some(config.clone());
+        self.prompt = Some(prompt.clone());
         self.should_seed_prompt = true;
 
-        let start_result = self.start_inner(config).await;
+        let start_result = self.start_inner(prompt).await;
         if let Err(err) = start_result {
             let _ = self.stop().await;
             return Err(err);
@@ -140,13 +139,13 @@ impl SessionHarness for CodexHarness {
         }
         let turn_content = if self.should_seed_prompt {
             self.should_seed_prompt = false;
-            if let Some(launch) = &self.launch {
+            if let Some(prompt) = &self.prompt {
                 let mut parts = Vec::new();
-                if !launch.system_prompt.trim().is_empty() {
-                    parts.push(launch.system_prompt.trim().to_string());
+                if !prompt.system_prompt.trim().is_empty() {
+                    parts.push(prompt.system_prompt.trim().to_string());
                 }
-                if !launch.task_prompt.trim().is_empty() {
-                    parts.push(launch.task_prompt.trim().to_string());
+                if !prompt.task_prompt.trim().is_empty() {
+                    parts.push(prompt.task_prompt.trim().to_string());
                 }
                 parts.push(text.to_string());
                 parts.join("\n\n")
@@ -189,7 +188,7 @@ impl SessionHarness for CodexHarness {
 }
 
 impl CodexHarness {
-    async fn start_inner(&mut self, launch: &LaunchConfig) -> Result<()> {
+    async fn start_inner(&mut self, prompt: &PreparedPrompt) -> Result<()> {
         let mut child = Command::new("codex")
             .arg("--app-server")
             .stdin(std::process::Stdio::piped())
@@ -412,19 +411,13 @@ impl CodexHarness {
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
 
         let mut thread_params = serde_json::Map::new();
-        if let Some(model) = launch.model.as_deref() {
-            let (backend, variant) = parse_model(model);
-            let model = if backend == "codex" {
-                variant.unwrap_or_else(|| model.to_string())
-            } else {
-                model.to_string()
-            };
-            thread_params.insert("model".to_string(), Value::String(model));
+        if let Some(model) = prompt.model.as_deref() {
+            thread_params.insert("model".to_string(), Value::String(model.to_string()));
         }
-        if let Some(cwd) = launch.cwd.as_ref() {
+        if !prompt.cwd.as_os_str().is_empty() {
             thread_params.insert(
                 "cwd".to_string(),
-                Value::String(cwd.to_string_lossy().to_string()),
+                Value::String(prompt.cwd.to_string_lossy().to_string()),
             );
         }
         self.send_request("thread/start", Value::Object(thread_params))

@@ -16,40 +16,64 @@ Who benefits from fixing this:
 Why now:
 
 - Phase 03 shipped design-first Concerto UX, but the critical path still detours through `TerminalLauncher.launchDesign(...)`.
-- Wave content now has first-class UI surfaces (Vision/Goals/Risks/Roadmap), so inline sessions need a way to trigger timely content refresh.
 
 ## Approach
 
 Make **lfd session orchestration the single runtime primitive** and move prompt assembly into that path.
 
-### 1) Add step-aware session input (not just flat system prompts)
+### 1) Step-only session config
 
-Extend session config with an explicit prompt source:
+Sessions always assemble prompts from step context. No raw `system_prompt` mode.
 
-- `raw` (existing behavior): caller supplies `system_prompt`
-- `step` (new): caller supplies `step`, `repo_root/cwd`, `direction[]`, `area`, `wave`, and optional initial `message`
+`SessionConfig` requires step context fields:
 
-The session runtime assembles context using existing engine prompt code (`gather_context`, `trim_context_with_breakdown`, `format_context_prompt`, `format_task_prompt`) before provider harness startup.
+```rust
+SessionConfig {
+    step: String,
+    repo_root: PathBuf,
+    directions: Vec<String>,
+    area: Option<String>,
+    wave: Option<String>,
+    message: Option<String>,
+    model: Option<String>,
+    cwd: Option<PathBuf>,
+    max_turns: Option<u32>,
+    yolo_mode: bool,
+}
+```
 
-### 2) Introduce a unified session runner above provider harnesses
+On the wire (HTTP API), these are flat JSON fields. Internally, the session manager validates `repo_root` exists and contains `.lf/` — fail loudly with a clear error if the path is wrong or stale.
 
-Add a thin runtime layer in `lfd::sessions` that:
+### 2) Shared prompt assembly helper
 
-1. Resolves step config into a prepared prompt package (task text + system/context text + cwd)
-2. Normalizes provider launch config
-3. Delegates turn streaming to the existing Claude/Codex harnesses unchanged
+Extract `build_step_prompt` logic from `lfd::executor::helpers` into a shared helper used by both wave execution and sessions.
 
-Key implementation choice: extract `build_step_prompt` logic from `lfd::executor::helpers` into a shared helper used by both wave execution and sessions.
+The shared helper returns a narrower type than the current tuple:
 
-### 3) Emit workspace-change events from session turns
+```rust
+struct PreparedPrompt {
+    system_prompt: String,  // from format_context_prompt
+    task_prompt: String,    // from format_task_prompt
+    model: Option<String>,  // from step frontmatter
+    cwd: PathBuf,
+}
+```
 
-Add a new session event for UI cache invalidation:
+Session startup calls this helper, then passes `PreparedPrompt` to the harness.
 
-- `workspace_changed { paths: [] }`
+### 3) Harness trait takes PreparedPrompt
 
-Emit it when file edits/diff updates include `wave/<name>/README.md` or `wave/<name>/NN-*.md`. Concerto listens and calls `loadWaveContent` for the active wave.
+Change `SessionHarness::start()` to take `PreparedPrompt` instead of `&SessionConfig`:
 
-This avoids adding a filesystem watcher and keeps updates tied to persisted session events.
+```rust
+pub trait SessionHarness: Send + Sync {
+    async fn start(&mut self, prompt: &PreparedPrompt) -> Result<()>;
+    async fn send_input(&mut self, content: &str) -> Result<()>;
+    async fn stop(&mut self) -> Result<()>;
+}
+```
+
+Both Claude and Codex harnesses update. The harness no longer needs to know about step context — it receives assembled prompts and runs them.
 
 ### 4) Wire Concerto start-design flow to inline sessions
 
@@ -59,12 +83,6 @@ Replace terminal launch with session launch:
 - initial user text is sent as first turn
 - `WaveChatView`/`ChatState` continues consuming session SSE stream
 
-### 5) Move wave step execution onto sessions
-
-Wave executor creates one session per step (`wave_run_id` attached), sends step task input, and waits for terminal turn status.
-
-Result: wave runs, CLI interactive runs, and Concerto interactive runs share the same lifecycle/event model.
-
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
@@ -72,6 +90,7 @@ Result: wave runs, CLI interactive runs, and Concerto interactive runs share the
 | Keep current split (lf runtime + lfd sessions) and only improve terminal launcher UX | Lowest short-term effort | Locks in duplicated behavior and keeps inline design blocked on ad hoc glue |
 | Caller assembles prompts and passes `system_prompt` into sessions | Minimal lfd changes | Prompt correctness becomes caller-dependent; drift between callers is guaranteed |
 | Rebuild sessions around `engine::agent` and drop harness abstraction | One unified subprocess model | Throws away working Claude/Codex event normalization and existing SSE persistence |
+| Support both `raw` (flat system_prompt) and `step` session modes | Flexibility for ad hoc use cases | Two modes means two paths to maintain; the whole point is one canonical assembly path |
 
 ## Key decisions
 
@@ -79,20 +98,25 @@ Result: wave runs, CLI interactive runs, and Concerto interactive runs share the
    - Prevents a third runtime path from emerging.
    - Aligns with wave intent: *"Waves start with `lf design`, not configuration."*
 
-2. **Prompt assembly happens inside the harness runtime, not at callers.**
+2. **Prompt assembly happens inside the session runtime, not at callers.**
    - Enforces one canonical context assembly path.
    - Preserves wave intent consistency across Concerto, CLI, and wave runs.
 
-3. **Use event-driven content refresh (`workspace_changed`) instead of file watching.**
-   - Matches existing session event architecture and persistence.
-   - Supports wave goal: *"Wave content (Vision, Goals) is visible in the Concerto UI"* with timely updates.
+3. **Step-only, no raw mode.**
+   - One path. No branching. No escape hatch that drifts.
 
-4. **Provider rollout is staged: Claude + Codex first; Gemini/OpenCode return explicit not-implemented errors.**
+4. **Harness receives `PreparedPrompt`, not config.**
+   - Clean separation: session manager owns context assembly, harness owns subprocess lifecycle.
+
+5. **`repo_root` validated at session creation.**
+   - Must exist and contain `.lf/`. Fail with a clear error, not silent empty context.
+
+6. **Provider rollout is staged: Claude + Codex first; Gemini/OpenCode return explicit not-implemented errors.**
    - Ships user value now without blocking on all providers.
 
 ### Wild success signal
 
-New users type a design prompt in Concerto, stay in one window, and see wave Vision/Roadmap update while the design conversation runs.
+New users type a design prompt in Concerto and stay in one window while the design conversation runs.
 
 ### Wild failure to avoid
 
@@ -101,13 +125,14 @@ A partial bridge that only fixes StartWaveView while leaving wave executor and C
 ## Scope
 
 - In scope:
-  - Step-aware session config + shared prompt assembly helper
-  - Unified session runtime layer above provider harnesses
-  - `workspace_changed` session events + Concerto refresh handling
+  - Step-only session config with required step context fields
+  - Shared prompt assembly helper (`PreparedPrompt`)
+  - `SessionHarness::start()` trait change to take `PreparedPrompt`
   - `StartWaveView` migration from terminal launch to inline session
-  - Wave executor step runs routed through sessions
 
-- Out of scope:
+- Out of scope (fast follows):
+  - `workspace_changed` session events + Concerto content refresh
+  - Wave executor step runs routed through sessions
   - New database schema for wave content
   - Mandatory README section validation
   - Full Gemini/OpenCode provider harness implementations
@@ -116,9 +141,9 @@ A partial bridge that only fixes StartWaveView while leaving wave executor and C
 ## Done when
 
 1. `StartWaveView` no longer calls `TerminalLauncher.launchDesign`; it starts a `design` session and streams output inline.
-2. Session create API accepts step-mode config, and lfd assembles prompt context server-side.
-3. Wave executor steps run through session lifecycle/events rather than direct `engine::agent::launch_agent` calls.
-4. Editing `wave/<name>/README.md` during a live design session triggers `workspace_changed` and refreshes the visible Wave content panel.
+2. Session create API requires step context fields, and lfd assembles prompt context server-side.
+3. `SessionHarness::start()` takes `PreparedPrompt`.
+4. Invalid `repo_root` at session creation returns a clear error.
 5. Validation passes:
    - `cargo test --all`
    - `swift test --package-path swift`

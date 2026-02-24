@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 
-use crate::engine::agent::LaunchConfig;
+use crate::lfd::prompt::PreparedPrompt;
 use crate::lfd::sessions::types::SessionEvent;
 
 #[derive(Debug, thiserror::Error)]
@@ -26,7 +26,7 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
 
 #[async_trait]
 pub trait SessionHarness: Send + Sync {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()>;
+    async fn start(&mut self, prompt: &PreparedPrompt) -> Result<()>;
     async fn send_input(&mut self, content: &str) -> Result<()>;
     async fn stop(&mut self) -> Result<()>;
     fn set_provider_session_id(&mut self, _provider_session_id: Option<String>) {}

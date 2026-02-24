@@ -694,10 +694,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         config: AgentSessionConfig
     ) async throws -> AgentSession {
         let url = sessionURL()
-        var payload: [String: Any] = [
-            "provider": provider,
-            "config": Self.sessionConfigJSON(config),
-        ]
+        var payload = Self.sessionConfigJSON(config)
+        payload["provider"] = provider
         if let waveRunId {
             payload["wave_run_id"] = waveRunId
         }
@@ -1082,9 +1080,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
         let configJSON = json["config"] as? [String: Any] ?? [:]
         let config = AgentSessionConfig(
+            step: configJSON["step"] as? String ?? "",
+            repoRoot: configJSON["repo_root"] as? String ?? "",
+            directions: configJSON["directions"] as? [String] ?? [],
+            area: configJSON["area"] as? String,
+            wave: configJSON["wave"] as? String,
+            message: configJSON["message"] as? String,
             model: configJSON["model"] as? String,
             cwd: configJSON["cwd"] as? String,
-            systemPrompt: configJSON["system_prompt"] as? String,
             maxTurns: normalizeOptionalInt(configJSON["max_turns"]),
             yoloMode: configJSON["yolo_mode"] as? Bool ?? false
         )
@@ -1102,10 +1105,17 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     private static func sessionConfigJSON(_ config: AgentSessionConfig) -> [String: Any] {
-        var json: [String: Any] = ["yolo_mode": config.yoloMode]
+        var json: [String: Any] = [
+            "step": config.step,
+            "repo_root": config.repoRoot,
+            "directions": config.directions,
+            "yolo_mode": config.yoloMode,
+        ]
+        if let area = config.area { json["area"] = area }
+        if let wave = config.wave { json["wave"] = wave }
+        if let message = config.message { json["message"] = message }
         if let model = config.model { json["model"] = model }
         if let cwd = config.cwd { json["cwd"] = cwd }
-        if let systemPrompt = config.systemPrompt { json["system_prompt"] = systemPrompt }
         if let maxTurns = config.maxTurns { json["max_turns"] = maxTurns }
         return json
     }

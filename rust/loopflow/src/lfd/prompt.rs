@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::engine::agent::LaunchConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::flow::load_step;
 use crate::engine::fork::merge_directions;
@@ -14,22 +13,27 @@ use crate::engine::prompt::{
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
 
+#[derive(Debug, Clone)]
+pub struct PreparedPrompt {
+    pub system_prompt: String,
+    pub task_prompt: String,
+    pub model: Option<String>,
+    pub cwd: PathBuf,
+}
+
 pub struct PrepareStepPromptConfig<'a> {
     pub repo_root: &'a Path,
     pub step: &'a str,
-    pub run_mode: &'a str,
     pub directions: &'a [String],
     pub area: Option<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
     pub model: Option<String>,
     pub cwd: Option<PathBuf>,
-    pub max_turns: Option<u32>,
-    pub yolo_mode: bool,
     pub summary_source: Option<(&'a SharedStore, &'a LfdId)>,
 }
 
-pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<LaunchConfig> {
+pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<PreparedPrompt> {
     let repo_root = config.repo_root;
     let loaded_step = load_step(config.step, repo_root)?;
     let file_config = load_config_or_default(Some(repo_root));
@@ -39,7 +43,7 @@ pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<
         repo_root: repo_root.to_path_buf(),
         step: Some(config.step.to_string()),
         message: config.message,
-        run_mode: Some(config.run_mode.to_string()),
+        run_mode: Some("auto".to_string()),
         directions,
         files: Vec::new(),
         sources: default_gather_sources(
@@ -81,12 +85,10 @@ pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<
         .or(Some(file_config.agent_model.clone()));
     let cwd = config.cwd.unwrap_or_else(|| repo_root.to_path_buf());
 
-    Ok(LaunchConfig {
+    Ok(PreparedPrompt {
         system_prompt,
         task_prompt,
         model,
-        cwd: Some(cwd),
-        max_turns: config.max_turns,
-        skip_permissions: config.yolo_mode,
+        cwd,
     })
 }

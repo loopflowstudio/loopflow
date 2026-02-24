@@ -295,9 +295,10 @@ pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {
 
     if let Some(stripped) = step.strip_suffix(':') {
         step = stripped.to_string();
-    } else if let Some((name, rest)) = step.split_once(':') {
-        let name = name.to_string();
-        let rest = rest.to_string();
+    } else if let Some((name, rest)) = step
+        .split_once(':')
+        .map(|(name, rest)| (name.to_string(), rest.to_string()))
+    {
         step = name;
         if !rest.is_empty() {
             step_args.insert(0, rest);

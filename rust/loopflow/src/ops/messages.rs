@@ -209,29 +209,20 @@ fn extract_inline_json(text: &str) -> Option<MessagePayload> {
 }
 
 fn get_staged_diff(repo: &Path) -> OpsResult<Option<String>> {
-    let output = std::process::Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-    if diff.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(diff))
-    }
+    run_git_diff(repo, &["diff", "--cached"])
 }
 
 fn get_branch_diff(repo: &Path) -> OpsResult<Option<String>> {
     let main_repo =
         crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let base_branch = crate::engine::git::get_default_branch(&main_repo)?;
+    let range = format!("origin/{base_branch}...HEAD");
+    run_git_diff(repo, &["diff", &range])
+}
+
+fn run_git_diff(repo: &Path, args: &[&str]) -> OpsResult<Option<String>> {
     let output = std::process::Command::new("git")
-        .arg("diff")
-        .arg(format!("origin/{}...HEAD", base_branch))
+        .args(args)
         .current_dir(repo)
         .output()?;
     if !output.status.success() {

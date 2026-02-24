@@ -237,7 +237,7 @@ pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&st
 /// Build the `OPENCODE_CONFIG_CONTENT` env var JSON string.
 ///
 /// Returns `None` when no config overrides are needed (interactive mode, no context).
-pub fn build_opencode_env(_launch: &LaunchConfig, process: &ProcessConfig) -> Option<String> {
+pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     let mut oc_config = serde_json::Map::new();
     if process.auto {
         oc_config.insert(
@@ -349,7 +349,7 @@ pub fn launch_agent(
 
     // For OpenCode, set OPENCODE_CONFIG_CONTENT env var for permissions and context
     if backend == "opencode" {
-        if let Some(env_val) = build_opencode_env(launch, process) {
+        if let Some(env_val) = build_opencode_env(process) {
             cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
         }
     }
@@ -821,13 +821,12 @@ mod tests {
 
     #[test]
     fn build_opencode_env_auto_and_context() {
-        let launch = default_launch();
         let process = ProcessConfig {
             auto: true,
             context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
             ..Default::default()
         };
-        let env = build_opencode_env(&launch, &process).unwrap();
+        let env = build_opencode_env(&process).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert_eq!(v["permission"], "allow");
         assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
@@ -835,12 +834,11 @@ mod tests {
 
     #[test]
     fn build_opencode_env_auto_only() {
-        let launch = default_launch();
         let process = ProcessConfig {
             auto: true,
             ..Default::default()
         };
-        let env = build_opencode_env(&launch, &process).unwrap();
+        let env = build_opencode_env(&process).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert_eq!(v["permission"], "allow");
         assert!(v.get("instructions").is_none());
@@ -848,12 +846,11 @@ mod tests {
 
     #[test]
     fn build_opencode_env_context_only() {
-        let launch = default_launch();
         let process = ProcessConfig {
             context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
             ..Default::default()
         };
-        let env = build_opencode_env(&launch, &process).unwrap();
+        let env = build_opencode_env(&process).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert!(v.get("permission").is_none());
         assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
@@ -861,7 +858,7 @@ mod tests {
 
     #[test]
     fn build_opencode_env_neither() {
-        assert!(build_opencode_env(&LaunchConfig::default(), &ProcessConfig::default()).is_none());
+        assert!(build_opencode_env(&ProcessConfig::default()).is_none());
     }
 
     // ── build_agent_command: opencode integration ───────────────

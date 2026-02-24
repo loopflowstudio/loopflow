@@ -288,7 +288,9 @@ impl WaveExecutor {
                         warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
                     }
                     info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
-                    let exit_code = self.run_step(&wave, &mut run, &step).await?;
+                    let exit_code = self
+                        .run_step(&wave, &mut run, &step, plan.len() as u32)
+                        .await?;
                     if exit_code == 0 {
                         self.advance_run_step(&mut run, &plan, &wave.id).await?;
                     } else {
@@ -486,7 +488,13 @@ impl WaveExecutor {
         Ok(())
     }
 
-    async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
+    async fn run_step(
+        &self,
+        wave: &Wave,
+        run: &mut WaveRun,
+        step: &ConcreteStep,
+        total_steps: u32,
+    ) -> Result<i32> {
         let worktree = run.worktree.clone();
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
         let (prompt, model, launch) = build_step_prompt(
@@ -512,7 +520,7 @@ impl WaveExecutor {
                     area: run.snapshot.area.first().map(String::as_str),
                     wave: &wave.name,
                     step_index: run.step_index,
-                    total_steps: 0,
+                    total_steps,
                     parent_span_id: None,
                 },
             ),

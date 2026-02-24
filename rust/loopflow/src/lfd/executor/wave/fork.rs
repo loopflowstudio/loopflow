@@ -98,11 +98,13 @@ impl WaveExecutor {
         let mut handles = Vec::new();
 
         let wave_directions = run.snapshot.direction.clone();
+        let fork_branch_count = fork_runs.len() as u32;
         for execution in fork_runs.iter() {
             let executor = self.clone();
             let scheduler = self.scheduler.clone();
             let tx = tx.clone();
             let fork_wave_id = wave.id.clone();
+            let fork_wave_name = wave.name.clone();
             let wave_run_id = run.id.clone();
             let wave_repo = run.snapshot.repo.clone();
             let worktree = execution.run.worktree.clone();
@@ -169,7 +171,6 @@ impl WaveExecutor {
                 );
 
                 // Write annotation sidecar for fork branch.
-                let wave_id_str = fork_wave_id.to_string();
                 let ann_context = crate::engine::annotation::write_sidecar(
                     std::path::Path::new(&worktree),
                     crate::engine::annotation::build_wave_envelope(
@@ -179,9 +180,9 @@ impl WaveExecutor {
                             model: &model,
                             directions: &wave_directions,
                             area: None,
-                            wave: &wave_id_str,
+                            wave: &fork_wave_name,
                             step_index: fork_run.branch_index,
-                            total_steps: 0,
+                            total_steps: fork_branch_count,
                             parent_span_id: None,
                         },
                     ),
@@ -288,7 +289,10 @@ impl WaveExecutor {
             step: Step::named(FORK_SYNTHESIZE_STEP),
             flow_parents: fork.flow_parents.clone(),
         };
-        let synth_exit = match self.run_step(wave, run, &synth_step).await {
+        let synth_exit = match self
+            .run_step(wave, run, &synth_step, plan.len() as u32)
+            .await
+        {
             Ok(code) => code,
             Err(err) => {
                 self.cleanup_fork(run, &fork_runs, Some(&manifest_path))

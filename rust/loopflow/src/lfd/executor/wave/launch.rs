@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::Result;
 use time::OffsetDateTime;
@@ -37,6 +38,7 @@ impl WaveExecutor {
         &self,
         request: AgentLaunchRequest,
     ) -> Result<AgentLaunchOutcome> {
+        let start = Instant::now();
         let agent = build_agent_for_step(
             &request.wave_run_id,
             &request.repo,
@@ -98,12 +100,8 @@ impl WaveExecutor {
         // Append outcome to annotation sidecar if present.
         if let Some(ref ann) = request.annotation {
             let repo_root = Path::new(&request.worktree);
-            let outcome = crate::engine::annotation::Outcome {
-                exit_code,
-                duration_ms: 0, // Duration tracked at higher level
-                verdict: None,
-                artifacts_produced: None,
-            };
+            let outcome =
+                crate::engine::annotation::build_outcome(exit_code, start, Some(repo_root));
             if let Err(err) = crate::engine::annotation::append_outcome(
                 repo_root,
                 &ann.envelope.trace.trace_id,

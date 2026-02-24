@@ -278,7 +278,7 @@ fn list_changed_files(repo_root: &Path) -> std::io::Result<Vec<String>> {
 }
 
 /// Ensure `.lf/annotation/` is in `.gitignore`.
-pub fn ensure_annotation_gitignored(repo_root: &Path) -> std::io::Result<()> {
+fn ensure_annotation_gitignored(repo_root: &Path) -> std::io::Result<()> {
     let gitignore = repo_root.join(".gitignore");
     let entry = ".lf/annotation/";
 

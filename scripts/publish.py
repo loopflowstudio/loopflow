@@ -602,6 +602,11 @@ def major(
 @app.command()
 def local(
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+    service: bool = typer.Option(
+        False,
+        "--service",
+        help="Install/restart lfd as a launchd service after local install",
+    ),
 ):
     """Build and install locally (no publish)."""
     if dry_run:
@@ -609,7 +614,10 @@ def local(
         typer.echo("Would install wheel with uv pip install")
         typer.echo("Would install lf/lfd binaries")
         typer.echo("Would install Concerto to /Applications")
-        typer.echo("Would restart lfd")
+        if service:
+            typer.echo("Would install/restart lfd service")
+        else:
+            typer.echo("Would NOT install/restart lfd service (pass --service to enable)")
         return
 
     typer.echo("Building wheel...")
@@ -654,7 +662,10 @@ def local(
     else:
         typer.echo(output)
 
-    _restart_lfd()
+    if service:
+        _restart_lfd()
+    else:
+        typer.echo("Skipping lfd service install/restart. Pass --service to enable.")
 
 
 @app.command()

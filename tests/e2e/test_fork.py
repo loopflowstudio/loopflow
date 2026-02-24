@@ -7,6 +7,8 @@ import pytest
 
 from scripts.lib.fork_scenarios import (
     build_lfd,
+    cleanup_wave_artifacts,
+    create_test_wave_name,
     create_and_run_wave,
     ensure_agent_image,
     ensure_postgres,
@@ -42,6 +44,10 @@ def fork_infra() -> Iterator[subprocess.Popen[str]]:
 
 
 def test_fork_execution(fork_infra: subprocess.Popen[str]) -> None:
-    wave_name = create_and_run_wave("wave-reduce", "product-engineer")
-    success, output = wait_for_fork_launch(fork_infra, timeout=180, wave_name=wave_name)
-    assert success, f"fork execution failed:\n{output[-2000:]}"
+    wave_name = create_test_wave_name()
+    try:
+        create_and_run_wave("wave-reduce", "product-engineer", wave_name=wave_name)
+        success, output = wait_for_fork_launch(fork_infra, timeout=180, wave_name=wave_name)
+        assert success, f"fork execution failed:\n{output[-2000:]}"
+    finally:
+        cleanup_wave_artifacts(wave_name)

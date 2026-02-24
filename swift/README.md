@@ -35,6 +35,13 @@ The `./dev` script is the primary build tool. It uses Swift Package Manager (`Pa
 | `./dev release` | Build release .app and .dmg |
 | `./dev clean` | Remove dev app and reset permissions |
 
+### Stream Logs
+
+Long-running dev commands tee stdout to stable files under `~/.lf/logs/dev/`:
+
+- `uv run python scripts/dev.py lfd` → `~/.lf/logs/dev/<repo>.lfd.log`
+- `uv run python scripts/dev.py run-debug` → `~/.lf/logs/dev/<repo>.concerto-run-debug.log`
+
 ### Xcode Project
 
 The `project.yml` (XcodeGen) generates `LoopflowSwift.xcodeproj` for Xcode development and UI tests. Both build systems (SPM and XcodeGen) should stay in sync.

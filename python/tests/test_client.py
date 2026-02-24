@@ -7,10 +7,11 @@ import json
 import httpx
 import pytest
 
-from conftest import WAVE_MINIMAL, WAVE_RUN_MINIMAL
+from conftest import SESSION_MINIMAL, WAVE_MINIMAL, WAVE_RUN_MINIMAL
 
 from loopflow.client import Client, _extract_error_message, _resolve_base_url, _resolve_token
 from loopflow.errors import LoopflowError, WaveAlreadyRunning
+from loopflow.models import SessionConfig
 
 
 class TestUrlResolution:
@@ -176,6 +177,87 @@ class TestClientResponses:
         client = _mock_client(handler)
         result = client.next_wave("reduce")
         assert result["new_branch"] == "wave/reduce.2"
+        client.close()
+
+    def test_create_session_sends_correct_body(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=SESSION_MINIMAL)
+
+        client = _mock_client(handler)
+        config = SessionConfig(model="claude-sonnet", yolo_mode=True)
+        session = client.create_session("claude", wave_run_id="run-1", config=config)
+
+        assert received["provider"] == "claude"
+        assert received["wave_run_id"] == "run-1"
+        assert received["config"]["model"] == "claude-sonnet"
+        assert received["config"]["yolo_mode"] is True
+        assert session.id == "session-1"
+        client.close()
+
+    def test_session_404_returns_none(self):
+        def handler(request):
+            return httpx.Response(404, json={"error": "not found"})
+
+        client = _mock_client(handler)
+        assert client.session("missing") is None
+        client.close()
+
+    def test_send_session_input_sends_correct_body(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=SESSION_MINIMAL)
+
+        client = _mock_client(handler)
+        client.send_session_input("session-1", "hello")
+        assert received["content"] == "hello"
+        client.close()
+
+    def test_stream_session_events_parses_sse(self):
+        def handler(request):
+            return httpx.Response(
+                200,
+                text='\n'.join([
+                    "id: 0",
+                    'data: {"type":"status_changed","status":"starting"}',
+                    "",
+                    "id: 1",
+                    'data: {"type":"turn_completed","status":"completed"}',
+                    "",
+                ]),
+            )
+
+        client = _mock_client(handler)
+        events = list(client.stream_session_events("session-1", timeout=1))
+
+        assert len(events) == 2
+        assert events[0].seq == 0
+        assert events[0].event["type"] == "status_changed"
+        assert events[1].seq == 1
+        assert events[1].event["type"] == "turn_completed"
+        client.close()
+
+    def test_stream_session_events_sends_after_seq(self):
+        def handler(request):
+            assert request.url.params.get("after_seq") == "10"
+            return httpx.Response(200, text='data: {"type":"turn_completed"}\n')
+
+        client = _mock_client(handler)
+        events = list(client.stream_session_events("session-1", after_seq=10, timeout=1))
+        assert len(events) == 1
+        client.close()
+
+    def test_stream_session_events_errors(self):
+        def handler(request):
+            return httpx.Response(500, json={"error": "boom"})
+
+        client = _mock_client(handler)
+        with pytest.raises(LoopflowError, match="boom"):
+            list(client.stream_session_events("session-1", timeout=1))
         client.close()
 
 

@@ -9,17 +9,24 @@ Commands:
     build           Build the app
     test            Build and run tests
     run             Build and launch the app
-    run-debug       Build and run with stdout visible
+    run-debug       Build and run with stdout visible (default: one-shot local lfd + UI)
+    run-debug --no-lfd
+                    Run UI only (skip automatic lfd lifecycle)
     release         Build release .app and .dmg
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
     logs            Tail the app logs
     lfd             Stop installed lfd and run from this branch (native/sqlite)
+    lfd -k          Aggressive preflight kill before starting lfd
     lfd --docker    Run lfd with Docker executor (postgres in container)
     agent-image     Build the Docker agent image
 
     ghostty-build   Build GhosttyKit xcframework locally
     ghostty-update  Build, upload to R2, and update Package.swift
+
+Streaming logs (long-running commands):
+    ~/.lf/logs/dev/<repo>.lfd.log
+    ~/.lf/logs/dev/<repo>.concerto-run-debug.log
 """
 
 import argparse
@@ -30,7 +37,10 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
+from typing import TextIO
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -38,6 +48,9 @@ GHOSTTY_DIR = REPO_ROOT / "vendor" / "ghostty"
 DEV_APP = Path.home() / "Applications" / "Concerto Dev.app"
 R2_URL = "https://bin.loopflow.studio"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
+DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
+LFD_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.lfd.log"
+CONCERTO_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.concerto-run-debug.log"
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -48,6 +61,123 @@ def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subproce
 def run_capture(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     """Run a command and capture output."""
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
+def stream_with_log(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    log_path: Path,
+) -> int:
+    """Run a long-lived command, streaming stdout and teeing to a known log file."""
+    DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log_file:
+        log_file.write(f"\n\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+        log_file.write(f"$ {' '.join(cmd)}\n\n")
+        log_file.flush()
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        try:
+            if process.stdout is None:
+                return process.wait()
+            for line in process.stdout:
+                print(line, end="")
+                log_file.write(line)
+                log_file.flush()
+        except KeyboardInterrupt:
+            print("\nStopping process...")
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        return process.wait()
+
+
+def _read_session_token() -> str | None:
+    token_path = Path.home() / ".lf" / "session-token"
+    if not token_path.exists():
+        return None
+    token = token_path.read_text(encoding="utf-8").strip()
+    return token or None
+
+
+def _status_ok(token: str | None) -> bool:
+    request = urllib.request.Request("http://127.0.0.1:2486/status")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=1.5) as response:
+            return response.status == 200
+    except (urllib.error.URLError, TimeoutError):
+        return False
+
+
+def _wait_for_lfd_ready(timeout_seconds: float = 20.0) -> bool:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if _status_ok(_read_session_token()):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _start_lfd_background(docker: bool = False) -> tuple[subprocess.Popen[str], TextIO]:
+    if docker:
+        raise RuntimeError("run-debug --with-lfd currently supports native lfd only")
+
+    env = os.environ.copy()
+    env["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+    env["GRPC_VERBOSITY"] = "ERROR"
+    env.setdefault("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
+    env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
+
+    print("Building lfd...")
+    result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
+    if result.returncode != 0:
+        raise RuntimeError("Failed to build lfd")
+
+    lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
+    DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LFD_STREAM_LOG.open("a", encoding="utf-8")
+    log_file.write(f"\n\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    log_file.write(f"$ {lfd_bin} serve\n\n")
+    log_file.flush()
+
+    print(f"Using sqlite DB: ~/.lf/{env['LFD_DB_PATH']}")
+    print(f"Stream log: {LFD_STREAM_LOG}")
+    print("Starting lfd from this branch (debug logging enabled)...")
+    process = subprocess.Popen(
+        [lfd_bin, "serve"],
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return process, log_file
+
+
+def _stop_process(process: subprocess.Popen[str], name: str) -> None:
+    if process.poll() is not None:
+        return
+    print(f"Stopping {name}...")
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        print(f"Force-killing {name}...")
+        process.kill()
 
 
 # --- Swift commands ---
@@ -93,20 +223,53 @@ def cmd_run() -> int:
     return 0
 
 
-def cmd_run_debug() -> int:
+def cmd_run_debug(with_lfd: bool = True, docker_lfd: bool = False) -> int:
     """Build and run with stdout visible."""
+    lfd_process: subprocess.Popen[str] | None = None
+    lfd_log: TextIO | None = None
+
+    if with_lfd:
+        _stop_installed_lfd()
+        if docker_lfd:
+            print("run-debug --docker-lfd is not supported yet")
+            return 1
+        try:
+            lfd_process, lfd_log = _start_lfd_background(docker=False)
+        except RuntimeError as error:
+            print(str(error))
+            return 1
+
+        if not _wait_for_lfd_ready():
+            print("lfd did not become ready in time. Check:")
+            print(f"  {LFD_STREAM_LOG}")
+            if lfd_process is not None:
+                _stop_process(lfd_process, "lfd")
+            if lfd_log is not None:
+                lfd_log.close()
+            return 1
+
     print("Building and running Concerto (debug mode with logs)...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
     if result.returncode != 0:
+        if lfd_process is not None:
+            _stop_process(lfd_process, "lfd")
+        if lfd_log is not None:
+            lfd_log.close()
         return result.returncode
 
     _install_dev_app()
     print("Logs: ~/Library/Logs/Concerto/")
+    print(f"Stream log: {CONCERTO_STREAM_LOG}")
     print("Press Ctrl+C to quit")
     print("---")
-    # Use exec so Ctrl+C goes directly to Concerto
     executable = str(DEV_APP / "Contents" / "MacOS" / "Concerto")
-    os.execv(executable, [executable])
+    app_exit = stream_with_log([executable], log_path=CONCERTO_STREAM_LOG)
+
+    if lfd_process is not None:
+        _stop_process(lfd_process, "lfd")
+    if lfd_log is not None:
+        lfd_log.close()
+    return app_exit
 
 
 def cmd_release() -> int:
@@ -190,9 +353,12 @@ def cmd_logs() -> int:
     return 1
 
 
-def cmd_lfd(docker: bool = False) -> int:
+def cmd_lfd(docker: bool = False, kill: bool = False) -> int:
     """Stop installed lfd and run from this branch."""
     _stop_installed_lfd()
+
+    if kill:
+        print("Preflight kill complete; starting lfd from this branch...")
 
     if docker:
         return _lfd_docker()
@@ -201,10 +367,30 @@ def cmd_lfd(docker: bool = False) -> int:
 
 def _stop_installed_lfd() -> None:
     """Stop any running lfd (launchd, pid file, compose, port)."""
-    plist = Path.home() / "Library" / "LaunchAgents" / "com.loopflow.lfd.plist"
+    label = "com.loopflow.lfd"
+    plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    domain_label = f"gui/{os.getuid()}/{label}"
+
+    # bootout fully detaches the job from launchd ("spawn scheduled" can keep
+    # clobbering ~/.lf/session-token even when the daemon itself fails).
+    launchd_status = run_capture(["launchctl", "print", domain_label])
+    if launchd_status.returncode == 0:
+        print("Stopping lfd launchd service...")
+        run(["launchctl", "bootout", domain_label], check=False)
+
+    # Some environments can keep the label registered after bootout.
+    if run_capture(["launchctl", "print", domain_label]).returncode == 0:
+        print("Forcing launchd label removal for lfd...")
+        run(["launchctl", "remove", label], check=False)
+
     if plist.exists():
-        print("Unloading lfd launchd service...")
-        run(["launchctl", "unload", str(plist)], check=False)
+        disabled = plist.with_suffix(".plist.disabled")
+        if disabled.exists():
+            print(f"Removing active launchd plist at {plist} (already disabled once)...")
+            plist.unlink(missing_ok=True)
+        else:
+            print(f"Disabling launchd plist at {plist}...")
+            plist.rename(disabled)
 
     pid_file = Path.home() / ".lf" / "lfd.pid"
     if pid_file.exists():
@@ -218,6 +404,7 @@ def _stop_installed_lfd() -> None:
         pid_file.unlink(missing_ok=True)
 
     _stop_docker_on_port(2486)
+    _stop_lfd_on_port(2486)
 
 
 def _lfd_docker() -> int:
@@ -280,31 +467,38 @@ def _lfd_docker() -> int:
         return result.returncode
 
     # Run lfd natively in container mode
-    os.environ["LFD_MODE"] = "container"
-    os.environ["LFD_DATABASE_URL"] = "postgres://lfd:lfd@127.0.0.1:5432/lfd"
-    os.environ["LFD_EXECUTOR_CREDENTIALS_MOUNTS"] = "claude,ssh,gitconfig"
-    os.environ["RUST_LOG"] = "loopflow=debug,tower_http=debug"
+    env = os.environ.copy()
+    env["LFD_MODE"] = "container"
+    env["LFD_DATABASE_URL"] = "postgres://lfd:lfd@127.0.0.1:5432/lfd"
+    env["LFD_EXECUTOR_CREDENTIALS_MOUNTS"] = "claude,ssh,gitconfig"
+    env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
 
     lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
+    print(f"Stream log: {LFD_STREAM_LOG}")
     print("Starting lfd (container mode, debug logging)...")
-    os.execv(lfd_bin, [lfd_bin, "serve"])
+    return stream_with_log([lfd_bin, "serve"], env=env, log_path=LFD_STREAM_LOG)
 
 
 def _lfd_native() -> int:
     """Build and run lfd natively (sqlite, local executor)."""
-    os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
-    os.environ["GRPC_VERBOSITY"] = "ERROR"
+    env = os.environ.copy()
+    env["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+    env["GRPC_VERBOSITY"] = "ERROR"
+    # Isolate sqlite state per repo to avoid schema drift across sibling repos.
+    env.setdefault("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
 
     print("Building lfd...")
     result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
         return result.returncode
 
-    os.environ["RUST_LOG"] = "loopflow=debug,tower_http=debug"
+    env["RUST_LOG"] = "loopflow=debug,tower_http=debug"
 
     lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
+    print(f"Using sqlite DB: ~/.lf/{env['LFD_DB_PATH']}")
+    print(f"Stream log: {LFD_STREAM_LOG}")
     print("Starting lfd from this branch (debug logging enabled)...")
-    os.execv(lfd_bin, [lfd_bin, "serve"])
+    return stream_with_log([lfd_bin, "serve"], env=env, log_path=LFD_STREAM_LOG)
 
 
 def _ensure_agent_image() -> int:
@@ -334,6 +528,116 @@ def _stop_docker_on_port(port: int) -> None:
     for container_id in result.stdout.strip().splitlines():
         print(f"Stopping Docker container {container_id} on port {port}...")
         run(["docker", "stop", container_id], check=False)
+
+
+def _stop_lfd_on_port(port: int) -> None:
+    """Stop any local process listening on the given port and print wave context."""
+    pids = _list_pids_on_port(port)
+    if not pids:
+        return
+
+    for pid in pids:
+        print(_describe_lfd_process(pid, port))
+
+    for pid in pids:
+        try:
+            print(f"Stopping local process {pid} on port {port}...")
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+    time.sleep(1.0)
+
+    for pid in _list_pids_on_port(port):
+        try:
+            print(f"Force-killing local process {pid} on port {port}...")
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _list_pids_on_port(port: int) -> list[int]:
+    result = run_capture(["lsof", "-nP", "-iTCP:" + str(port), "-sTCP:LISTEN", "-t"])
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+
+    pids: list[int] = []
+    for raw in result.stdout.strip().splitlines():
+        try:
+            pids.append(int(raw.strip()))
+        except ValueError:
+            continue
+    return sorted(set(pids))
+
+
+def _describe_lfd_process(pid: int, port: int) -> str:
+    cmd = run_capture(["ps", "-p", str(pid), "-o", "command="]).stdout.strip()
+    repo = _infer_repo_for_pid(pid, cmd)
+    branch = _git_branch(repo) if repo else None
+    wave = _wave_name_from_branch(branch) if branch else None
+
+    parts = [f"Found local process on :{port}", f"pid={pid}"]
+    if wave:
+        parts.append(f"wave={wave}")
+    if branch:
+        parts.append(f"branch={branch}")
+    if repo:
+        parts.append(f"repo={repo}")
+    if cmd:
+        parts.append(f"cmd={cmd}")
+    return " | ".join(parts)
+
+
+def _infer_repo_for_pid(pid: int, cmd: str) -> str | None:
+    cwd = _cwd_for_pid(pid)
+    if cwd and (Path(cwd) / ".git").exists():
+        return cwd
+
+    if not cmd:
+        return None
+    executable = cmd.split()[0]
+    try:
+        path = Path(executable).resolve()
+    except OSError:
+        return None
+
+    if path.name != "lfd":
+        return None
+    # .../<repo>/target/{debug,release}/lfd
+    if len(path.parents) >= 3 and path.parents[1].name == "target":
+        repo = path.parents[2]
+        if (repo / ".git").exists():
+            return str(repo)
+    return None
+
+
+def _cwd_for_pid(pid: int) -> str | None:
+    result = run_capture(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"])
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("n"):
+            return line[1:]
+    return None
+
+
+def _git_branch(repo: str) -> str | None:
+    result = run_capture(["git", "-C", repo, "branch", "--show-current"])
+    branch = result.stdout.strip()
+    if result.returncode != 0 or not branch:
+        return None
+    return branch
+
+
+def _wave_name_from_branch(branch: str) -> str | None:
+    if branch.startswith("jack-heart."):
+        parts = branch.split(".")
+        if len(parts) > 1 and parts[1]:
+            return parts[1]
+    if branch.startswith("wave/"):
+        wave = branch.removeprefix("wave/").split(".")[0]
+        return wave or None
+    return None
 
 
 def _install_dev_app() -> None:
@@ -483,12 +787,12 @@ COMMANDS = {
     "build": (cmd_build, "Build the app"),
     "test": (cmd_test, "Build and run tests"),
     "run": (cmd_run, "Build and launch the app"),
-    "run-debug": (cmd_run_debug, "Build and run with stdout visible"),
+    "run-debug": (cmd_run_debug, "Build and run with stdout visible (default includes one-shot local lfd stack)"),
     "release": (cmd_release, "Build release .app and .dmg"),
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
     "logs": (cmd_logs, "Tail the app logs"),
-    "lfd": (cmd_lfd, "Stop installed lfd and run from this branch (--docker for compose)"),
+    "lfd": (cmd_lfd, "Stop local lfd and run from this branch (--docker or -k)"),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
     "ghostty-update": (cmd_ghostty_update, "Build, upload to R2, update Package.swift"),
@@ -506,6 +810,29 @@ def main() -> int:
         sub = subparsers.add_parser(name, help=help_text)
         if name == "lfd":
             sub.add_argument("--docker", action="store_true", help="Use Docker executor")
+            sub.add_argument(
+                "-k",
+                "--kill",
+                action="store_true",
+                help="Aggressive preflight kill before starting (default behavior also kills port 2486 listeners)",
+            )
+        if name == "run-debug":
+            mode_group = sub.add_mutually_exclusive_group()
+            mode_group.add_argument(
+                "--with-lfd",
+                action="store_true",
+                help="Explicitly enable one-shot lfd lifecycle (default)",
+            )
+            mode_group.add_argument(
+                "--no-lfd",
+                action="store_true",
+                help="Run UI only (skip automatic lfd lifecycle)",
+            )
+            sub.add_argument(
+                "--docker-lfd",
+                action="store_true",
+                help="Reserved for future container lfd support with --with-lfd",
+            )
         if name == "setup":
             sub.add_argument(
                 "--install",
@@ -526,7 +853,10 @@ def main() -> int:
 
     func, _ = COMMANDS[args.command]
     if args.command == "lfd":
-        return func(docker=args.docker)
+        return func(docker=args.docker, kill=args.kill)
+    if args.command == "run-debug":
+        with_lfd = True if args.with_lfd else not args.no_lfd
+        return func(with_lfd=with_lfd, docker_lfd=args.docker_lfd)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
     return func()

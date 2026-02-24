@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from conftest import WAVE_FULL, WAVE_MINIMAL, WAVE_RUN_MINIMAL
+from conftest import SESSION_FULL, SESSION_MINIMAL, WAVE_FULL, WAVE_MINIMAL, WAVE_RUN_MINIMAL
 
-from loopflow.models import CommitEntry, Wave, WaveRun
+from loopflow.models import CommitEntry, Session, SessionEventEnvelope, Wave, WaveRun
 
 
 class TestWaveModel:
@@ -65,3 +65,28 @@ class TestWaveRunModel:
         data = {**WAVE_RUN_MINIMAL, "error": "rebase conflict"}
         run = WaveRun.model_validate(data)
         assert run.error == "rebase conflict"
+
+
+class TestSessionModel:
+    def test_minimal_payload(self):
+        session = Session.model_validate(SESSION_MINIMAL)
+        assert session.provider == "claude"
+        assert session.config.yolo_mode is False
+        assert session.created_at is None
+
+    def test_full_payload(self):
+        session = Session.model_validate(SESSION_FULL)
+        assert session.wave_run_id == "run-1"
+        assert session.provider_session_id == "provider-1"
+        assert session.config.model == "claude-sonnet-4-5-20250929"
+        assert session.created_at is not None
+        assert session.ended_at is not None
+
+
+class TestSessionEventEnvelopeModel:
+    def test_parse(self):
+        event = SessionEventEnvelope.model_validate(
+            {"seq": 12, "event": {"type": "turn_completed", "status": "completed"}}
+        )
+        assert event.seq == 12
+        assert event.event["type"] == "turn_completed"

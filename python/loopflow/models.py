@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -62,3 +62,28 @@ class Wave(BaseModel):
     branch: Optional[str] = None
     pr_url: Optional[str] = None
     pr_state: Optional[str] = None
+
+
+class SessionConfig(BaseModel):
+    model: Optional[str] = None
+    cwd: Optional[str] = None
+    system_prompt: Optional[str] = None
+    max_turns: Optional[int] = None
+    yolo_mode: bool = False
+
+
+class Session(BaseModel):
+    id: str
+    object: str = "session"
+    provider: str
+    status: str
+    wave_run_id: Optional[str] = None
+    provider_session_id: Optional[str] = None
+    config: SessionConfig = Field(default_factory=SessionConfig)
+    created_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+
+
+class SessionEventEnvelope(BaseModel):
+    seq: Optional[int] = None
+    event: dict[str, Any]

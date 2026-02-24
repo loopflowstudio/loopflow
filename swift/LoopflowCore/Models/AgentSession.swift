@@ -1,5 +1,167 @@
 import Foundation
 
+public enum JSONValue: Sendable, Hashable {
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    public var stringValue: String? {
+        if case .string(let value) = self {
+            return value
+        }
+        return nil
+    }
+
+    public var objectValue: [String: JSONValue]? {
+        if case .object(let value) = self {
+            return value
+        }
+        return nil
+    }
+}
+
+public enum ItemStatus: String, Sendable, Hashable {
+    case inProgress = "in_progress"
+    case completed
+    case failed
+    case declined
+}
+
+public struct FileEdit: Sendable, Hashable {
+    public let path: String
+    public let kind: String?
+    public let diff: String?
+
+    public init(path: String, kind: String? = nil, diff: String? = nil) {
+        self.path = path
+        self.kind = kind
+        self.diff = diff
+    }
+}
+
+public struct CommandItem: Sendable, Hashable {
+    public let id: String
+    public let command: [String]
+    public let cwd: String
+    public let status: ItemStatus
+    public let output: String?
+    public let exitCode: Int?
+    public let durationMs: UInt64?
+
+    public init(
+        id: String,
+        command: [String] = [],
+        cwd: String = "",
+        status: ItemStatus,
+        output: String? = nil,
+        exitCode: Int? = nil,
+        durationMs: UInt64? = nil
+    ) {
+        self.id = id
+        self.command = command
+        self.cwd = cwd
+        self.status = status
+        self.output = output
+        self.exitCode = exitCode
+        self.durationMs = durationMs
+    }
+}
+
+public struct FileItem: Sendable, Hashable {
+    public let id: String
+    public let changes: [FileEdit]
+    public let status: ItemStatus
+
+    public init(id: String, changes: [FileEdit] = [], status: ItemStatus) {
+        self.id = id
+        self.changes = changes
+        self.status = status
+    }
+}
+
+public struct MessageItem: Sendable, Hashable {
+    public let id: String
+    public let text: String
+    public let phase: String?
+
+    public init(id: String, text: String = "", phase: String? = nil) {
+        self.id = id
+        self.text = text
+        self.phase = phase
+    }
+}
+
+public struct ThoughtItem: Sendable, Hashable {
+    public let id: String
+    public let text: String
+
+    public init(id: String, text: String = "") {
+        self.id = id
+        self.text = text
+    }
+}
+
+public struct ToolItem: Sendable, Hashable {
+    public let id: String
+    public let name: String
+    public let status: ItemStatus
+    public let input: JSONValue?
+    public let output: String?
+
+    public init(
+        id: String,
+        name: String,
+        status: ItemStatus,
+        input: JSONValue? = nil,
+        output: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.status = status
+        self.input = input
+        self.output = output
+    }
+}
+
+public enum SessionItem: Sendable, Hashable {
+    case command(CommandItem)
+    case file(FileItem)
+    case message(MessageItem)
+    case thought(ThoughtItem)
+    case tool(ToolItem)
+    case unknown(type: String, payload: JSONValue)
+
+    public var id: String? {
+        switch self {
+        case .command(let item): return item.id
+        case .file(let item): return item.id
+        case .message(let item): return item.id
+        case .thought(let item): return item.id
+        case .tool(let item): return item.id
+        case .unknown: return nil
+        }
+    }
+
+    public var status: ItemStatus? {
+        switch self {
+        case .command(let item): return item.status
+        case .file(let item): return item.status
+        case .tool(let item): return item.status
+        case .message, .thought, .unknown:
+            return nil
+        }
+    }
+}
+
+public enum ItemDelta: Sendable, Hashable {
+    case output(content: String)
+    case planText(content: String)
+    case unknown(type: String, payload: JSONValue)
+}
+
 public struct AgentSessionConfig: Sendable, Hashable {
     public var model: String?
     public var cwd: String?
@@ -56,11 +218,15 @@ public struct AgentSession: Sendable, Hashable {
 public enum AgentSessionEvent: Sendable, Hashable {
     case turnStarted(turnId: String)
     case turnCompleted(turnId: String, status: String)
+    case itemStarted(turnId: String, item: SessionItem)
+    case itemUpdated(turnId: String, itemId: String, delta: ItemDelta)
+    case itemCompleted(turnId: String, item: SessionItem)
     case textDelta(turnId: String, content: String)
     case reasoningDelta(turnId: String, content: String)
+    case diffUpdated(turnId: String, diff: String)
     case statusChanged(status: String)
     case error(code: String, message: String)
-    case other(type: String, payload: [String: String])
+    case other(type: String, payload: JSONValue)
 }
 
 public struct AgentSessionEventEnvelope: Sendable, Hashable {

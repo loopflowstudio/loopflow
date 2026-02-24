@@ -58,6 +58,11 @@ All planned pieces landed: Claude adapter (828 lines), NDJSON stream parser, too
 - Process-per-turn startup latency exists but hasn't been measured in interactive use. Pooling is possible future work if it's a problem.
 - `--append-system-prompt` is wired but not yet validated in real interactive sessions.
 
+**Post-shipment hardening.** Three follow-up commits after initial ship:
+- Busy turns now return 409 without failing the session — concurrent `send_input` is cleanly rejected at the adapter level, and `SessionManager` distinguishes this from real errors.
+- Tool state tracking simplified — removed intermediate state machine, direct tracking instead.
+- Turn parsing hardened against NDJSON edge cases in `content_block_delta` handling.
+
 **Known gaps for Phase 04:**
 - Reader-task-stop race: `stop()` kills the child and aborts the reader, but a normal exit between kill and abort can produce a stale `TurnCompleted(Completed)` event. The `AtomicBool` guard prevents state corruption but event ordering may be off.
 - Accumulated `input_json_delta` parsing drops malformed JSON silently (`.ok()`). A crash mid-tool produces no error event for that tool.

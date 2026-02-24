@@ -109,8 +109,6 @@ impl SqliteStore {
                 wave.status().as_i32() as i64,
                 wave.iteration() as i64,
                 created_at,
-                wave.schema_ref().clone(),
-                wave.schema_name().clone(),
                 wave.wave_type_i32() as i64,
                 wave.parent_id().as_ref(),
                 wave.position() as i64,
@@ -166,7 +164,7 @@ impl SqliteStore {
             )
             SELECT
                 w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status,
-                w.iteration, w.created_at, w.schema_ref, w.schema_name, w.wave_type,
+                w.iteration, w.created_at, w.wave_type,
                 w.parent_wave_id, w.position, tree.depth
             FROM tree
             JOIN waves AS w ON w.id = tree.id
@@ -177,7 +175,7 @@ impl SqliteStore {
         while let Some(row) = rows.next()? {
             tree_rows.push(WaveTreeRow {
                 wave: map_wave_row(row)?,
-                depth: row.get::<_, i64>(15)? as u32,
+                depth: row.get::<_, i64>(13)? as u32,
             });
         }
         Ok(tree_rows)

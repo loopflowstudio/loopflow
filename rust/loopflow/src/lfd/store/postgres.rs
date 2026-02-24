@@ -139,8 +139,6 @@ impl PostgresStore {
                         &wave.status().as_i32(),
                         &(wave.iteration() as i32),
                         &created_at,
-                        wave.schema_ref(),
-                        wave.schema_name(),
                         &wave.wave_type_i32(),
                         &wave.parent_id(),
                         &(wave.position() as i32),
@@ -197,7 +195,7 @@ impl PostgresStore {
                     )
                     SELECT
                         w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status,
-                        w.iteration, w.created_at, w.schema_ref, w.schema_name, w.wave_type,
+                        w.iteration, w.created_at, w.wave_type,
                         w.parent_wave_id, w.position, tree.depth
                     FROM tree
                     JOIN waves AS w ON w.id = tree.id
@@ -209,7 +207,7 @@ impl PostgresStore {
                 .map(|row| {
                     Ok(WaveTreeRow {
                         wave: map_wave_row(&row)?,
-                        depth: row.get::<_, i32>(15) as u32,
+                        depth: row.get::<_, i32>(13) as u32,
                     })
                 })
                 .collect()

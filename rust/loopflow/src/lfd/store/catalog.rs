@@ -146,27 +146,27 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, schema_ref, schema_name, wave_type, parent_wave_id, position\n             FROM waves\n             WHERE parent_wave_id IS NULL\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, wave_type, parent_wave_id, position\n             FROM waves\n             WHERE parent_wave_id IS NULL\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, schema_ref, schema_name, wave_type, parent_wave_id, position\n             FROM waves\n             WHERE repo = {p1} AND parent_wave_id IS NULL\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, wave_type, parent_wave_id, position\n             FROM waves\n             WHERE repo = {p1} AND parent_wave_id IS NULL\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, repo, flow, direction, area, paused, status, iteration, created_at,\n                schema_ref, schema_name, wave_type, parent_wave_id, position\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14}, {p15})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                flow = excluded.flow,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                created_at = excluded.created_at,\n                schema_ref = excluded.schema_ref,\n                schema_name = excluded.schema_name,\n                wave_type = excluded.wave_type,\n                parent_wave_id = excluded.parent_wave_id,\n                position = excluded.position",
+        template: "INSERT INTO waves (\n                id, name, repo, flow, direction, area, paused, status, iteration, created_at,\n                wave_type, parent_wave_id, position\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                flow = excluded.flow,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                created_at = excluded.created_at,\n                wave_type = excluded.wave_type,\n                parent_wave_id = excluded.parent_wave_id,\n                position = excluded.position",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, schema_ref, schema_name, wave_type, parent_wave_id, position\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, wave_type, parent_wave_id, position\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, schema_ref, schema_name, wave_type, parent_wave_id, position\n             FROM waves\n             WHERE name = {p1} AND parent_wave_id IS NULL",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, wave_type, parent_wave_id, position\n             FROM waves\n             WHERE name = {p1} AND parent_wave_id IS NULL",
         sqlite_override: None,
         postgres_override: None,
     },

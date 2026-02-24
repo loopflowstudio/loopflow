@@ -19,7 +19,7 @@ use crate::lfd::http::dto::{
     DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
     RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
-use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
+use crate::lfd::http::routes::wave_schemas::{read_wave_config, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
@@ -180,44 +180,26 @@ pub async fn create_wave_handler(
         schema,
     } = payload;
     let repo_path = PathBuf::from(&repo);
-    let resolved_schema = if let Some(schema_input) = schema.as_deref() {
-        Some(
-            resolve_wave_schema(&repo_path, schema_input)
-                .map_err(|err| api_error(err.status_code(), err.message()))?,
-        )
-    } else {
-        None
-    };
-    let schema_stimulus = resolved_schema
+    let wave_config = schema
+        .as_deref()
+        .and_then(|name| read_wave_config(&repo_path, name));
+    let schema_stimulus = wave_config
         .as_ref()
-        .and_then(|schema| schema.schema.stimulus.as_ref())
+        .and_then(|config| config.stimulus.as_ref())
         .map(parse_schema_stimulus)
         .transpose()?;
-    let schema_defaults = resolved_schema.as_ref().map(|resolved| &resolved.schema);
 
     let id = LfdId::new();
-    let name = name
-        .or_else(|| {
-            resolved_schema
-                .as_ref()
-                .map(|resolved| resolved.name.clone())
-        })
-        .unwrap_or_else(|| format!("wave-{}", id));
+    let name = name.or(schema).unwrap_or_else(|| format!("wave-{}", id));
     let flow = flow
-        .or_else(|| schema_defaults.map(|schema| schema.flow.clone()))
+        .or_else(|| wave_config.as_ref().map(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship".to_string());
     let direction = direction
-        .or_else(|| schema_defaults.and_then(|schema| schema.direction.clone()))
+        .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();
     let area = area
-        .or_else(|| schema_defaults.map(|schema| schema.area.clone()))
+        .or_else(|| wave_config.as_ref().map(|c| c.area.clone()))
         .unwrap_or_default();
-    let schema_ref = resolved_schema
-        .as_ref()
-        .map(|schema| schema.schema_ref.clone());
-    let schema_name = resolved_schema
-        .as_ref()
-        .map(|resolved| resolved.name.clone());
 
     // Check for duplicate wave name in the same repo.
     let existing = wave_name_exists(&state, &repo, &name)
@@ -239,8 +221,6 @@ pub async fn create_wave_handler(
         area,
         status: WaveStatus::Idle,
         iteration: 0,
-        schema_ref,
-        schema_name,
         created_at: Some(OffsetDateTime::now_utc()),
         parent_id: None,
         position: 0,
@@ -1439,8 +1419,6 @@ mod tests {
             area: vec![],
             status: WaveStatus::Idle,
             iteration: 0,
-            schema_ref: None,
-            schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
             parent_id,
             position: 0,

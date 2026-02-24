@@ -1,312 +1,43 @@
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::Json;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use serde::Deserialize;
+use std::path::Path;
 use tracing::warn;
 
-use crate::lfd::http::dto::{ListResponse, StimulusDefDto, WaveSchemaDto};
-use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiResult};
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct StimulusDef {
     pub kind: String,
     pub cron: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct WaveSchema {
-    #[serde(default)]
-    pub name: Option<String>,
+/// Config read from `wave/<name>/<name>.yaml` during wave creation.
+#[derive(Debug, Deserialize)]
+pub(crate) struct WaveConfig {
     pub flow: String,
     pub area: Vec<String>,
     pub stimulus: Option<StimulusDef>,
     pub direction: Option<Vec<String>>,
+    #[allow(dead_code)] // Parsed from YAML for future use.
     pub owner: Option<String>,
+    #[allow(dead_code)] // Parsed from YAML for future use.
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedWaveSchema {
-    pub(crate) schema_ref: String,
-    pub(crate) name: String,
-    pub(crate) schema: WaveSchema,
-}
-
-#[derive(Debug)]
-pub(crate) enum SchemaDiscoveryError {
-    DuplicateLocalNames {
-        names: Vec<String>,
-        files: Vec<String>,
-    },
-}
-
-impl SchemaDiscoveryError {
-    pub(crate) fn message(&self) -> String {
-        match self {
-            Self::DuplicateLocalNames { names, files } => format!(
-                "duplicate local schema names found ({}) in: {}",
-                names.join(", "),
-                files.join(", ")
-            ),
+/// Read wave config from `wave/<name>/<name>.yaml`.
+pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
+    let path = repo.join("wave").join(name).join(format!("{name}.yaml"));
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(err) => {
+            warn!(path = %path.display(), error = %err, "failed to read wave config");
+            return None;
         }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum SchemaResolveError {
-    NotFound {
-        input: String,
-    },
-    Ambiguous {
-        input: String,
-        candidates: Vec<String>,
-    },
-    Discovery(SchemaDiscoveryError),
-}
-
-impl SchemaResolveError {
-    pub(crate) fn status_code(&self) -> StatusCode {
-        match self {
-            Self::NotFound { .. } => StatusCode::NOT_FOUND,
-            Self::Ambiguous { .. } | Self::Discovery(_) => StatusCode::CONFLICT,
-        }
-    }
-
-    pub(crate) fn message(&self) -> String {
-        match self {
-            Self::NotFound { input } => format!("wave schema '{input}' not found"),
-            Self::Ambiguous { input, candidates } => format!(
-                "wave schema '{input}' is ambiguous; candidates: {}",
-                candidates.join(", ")
-            ),
-            Self::Discovery(err) => err.message(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ListWaveSchemasQuery {
-    repo: Option<String>,
-}
-
-pub async fn list_wave_schemas_handler(
-    State(state): State<HttpState>,
-    Query(query): Query<ListWaveSchemasQuery>,
-) -> ApiResult<ListResponse<WaveSchemaDto>> {
-    let repo = query.repo.unwrap_or_else(|| ".".to_string());
-    let repo_path = PathBuf::from(&repo);
-
-    let schemas = discover_wave_schemas(&repo_path)
-        .map_err(|err| api_error(StatusCode::CONFLICT, err.message()))?;
-
-    let waves = state
-        .store
-        .list_waves(Some(&repo))
-        .await
-        .map_err(map_store_error)?;
-
-    let mut active_by_ref: HashMap<String, String> = HashMap::new();
-    let mut fallback_schema_by_name: HashMap<String, &ResolvedWaveSchema> = HashMap::new();
-    for schema in &schemas {
-        fallback_schema_by_name
-            .entry(schema.name.clone())
-            .or_insert(schema);
-    }
-
-    for wave in &waves {
-        if let Some(schema_ref) = wave.schema_ref() {
-            active_by_ref
-                .entry(schema_ref.clone())
-                .or_insert_with(|| wave.id().to_string());
-        }
-    }
-
-    for wave in waves.iter().filter(|wave| wave.schema_ref().is_none()) {
-        let fallback_name = wave.schema_name().as_deref().unwrap_or(wave.name());
-        if let Some(schema) = fallback_schema_by_name.get(fallback_name) {
-            active_by_ref
-                .entry(schema.schema_ref.clone())
-                .or_insert_with(|| wave.id().to_string());
-        }
-    }
-
-    let data = schemas
-        .into_iter()
-        .map(|resolved| {
-            let WaveSchema {
-                name: _,
-                flow,
-                area,
-                stimulus,
-                direction,
-                owner,
-                description,
-            } = resolved.schema;
-            WaveSchemaDto {
-                name: resolved.name,
-                schema_ref: resolved.schema_ref.clone(),
-                flow,
-                area,
-                stimulus: stimulus.map(|stimulus| StimulusDefDto {
-                    kind: stimulus.kind,
-                    cron: stimulus.cron,
-                }),
-                direction: direction.unwrap_or_default(),
-                owner,
-                description,
-                active_wave_id: active_by_ref.get(&resolved.schema_ref).cloned(),
-            }
-        })
-        .collect();
-
-    Ok(Json(ListResponse::new(data, false)))
-}
-
-pub(crate) fn discover_wave_schemas(
-    repo: &Path,
-) -> Result<Vec<ResolvedWaveSchema>, SchemaDiscoveryError> {
-    let mut schemas = load_local_wave_schemas(repo)?;
-    schemas.sort_by(|a, b| {
-        a.name
-            .cmp(&b.name)
-            .then_with(|| a.schema_ref.cmp(&b.schema_ref))
-    });
-    Ok(schemas)
-}
-
-pub(crate) fn resolve_wave_schema(
-    repo: &Path,
-    input: &str,
-) -> Result<ResolvedWaveSchema, SchemaResolveError> {
-    let schemas = discover_wave_schemas(repo).map_err(SchemaResolveError::Discovery)?;
-    let candidates: Vec<ResolvedWaveSchema> = if input.starts_with("file://") {
-        let canonical_input = canonical_schema_ref_from_input(input);
-        schemas
-            .into_iter()
-            .filter(|schema| {
-                schema.schema_ref == input
-                    || canonical_input
-                        .as_ref()
-                        .is_some_and(|value| schema.schema_ref == *value)
-            })
-            .collect()
-    } else {
-        schemas
-            .into_iter()
-            .filter(|schema| schema.name == input)
-            .collect()
     };
-
-    match candidates.as_slice() {
-        [] => Err(SchemaResolveError::NotFound {
-            input: input.to_string(),
-        }),
-        [schema] => Ok(schema.clone()),
-        _ => Err(SchemaResolveError::Ambiguous {
-            input: input.to_string(),
-            candidates: candidates
-                .iter()
-                .map(|schema| schema.schema_ref.clone())
-                .collect(),
-        }),
-    }
-}
-
-fn canonical_schema_ref_from_input(input: &str) -> Option<String> {
-    let path = std::path::Path::new(input.strip_prefix("file://")?);
-    let canonical = path.canonicalize().ok()?;
-    let display = canonical.to_string_lossy().replace('\\', "/");
-    Some(format!("file://{display}"))
-}
-
-fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, SchemaDiscoveryError> {
-    let mut schemas = Vec::new();
-    let mut schema_files_by_name: HashMap<String, Vec<String>> = HashMap::new();
-    let waves_dir = repo.join("wave");
-    let Ok(entries) = std::fs::read_dir(&waves_dir) else {
-        return Ok(schemas);
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
+    match serde_yaml_ng::from_str(&content) {
+        Ok(config) => Some(config),
+        Err(err) => {
+            warn!(path = %path.display(), error = %err, "invalid wave config");
+            None
         }
-
-        let Some(dir_name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let schema_path = path.join(format!("{dir_name}.yaml"));
-        if !schema_path.is_file() {
-            continue;
-        }
-
-        let canonical_schema_path = match schema_path.canonicalize() {
-            Ok(path) => path,
-            Err(err) => {
-                warn!(path = %schema_path.display(), error = %err, "failed to canonicalize wave schema path");
-                continue;
-            }
-        };
-
-        let raw = match std::fs::read_to_string(&canonical_schema_path) {
-            Ok(content) => content,
-            Err(err) => {
-                warn!(path = %canonical_schema_path.display(), error = %err, "failed to read local wave schema");
-                continue;
-            }
-        };
-
-        let mut schema = match serde_yaml_ng::from_str::<WaveSchema>(&raw) {
-            Ok(schema) => schema,
-            Err(err) => {
-                warn!(path = %canonical_schema_path.display(), error = %err, "invalid local wave schema");
-                continue;
-            }
-        };
-
-        let name = schema.name.take().unwrap_or_else(|| dir_name.to_string());
-
-        let canonical_display = canonical_schema_path.to_string_lossy().replace('\\', "/");
-        schema_files_by_name
-            .entry(name.clone())
-            .or_default()
-            .push(canonical_display.clone());
-
-        schemas.push(ResolvedWaveSchema {
-            schema_ref: format!("file://{canonical_display}"),
-            name,
-            schema,
-        });
     }
-
-    let mut duplicate_names = Vec::new();
-    let mut duplicate_files = Vec::new();
-    for (name, mut files) in schema_files_by_name {
-        if files.len() < 2 {
-            continue;
-        }
-        files.sort();
-        files.dedup();
-        if files.len() < 2 {
-            continue;
-        }
-        duplicate_names.push(name);
-        duplicate_files.extend(files);
-    }
-    if !duplicate_names.is_empty() {
-        duplicate_names.sort();
-        duplicate_files.sort();
-        return Err(SchemaDiscoveryError::DuplicateLocalNames {
-            names: duplicate_names,
-            files: duplicate_files,
-        });
-    }
-
-    Ok(schemas)
 }
 
 #[cfg(test)]
@@ -316,107 +47,20 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn discover_wave_schemas_finds_local() {
+    fn read_wave_config_parses_yaml() {
         let temp = tempdir().expect("temp dir");
-        let local_dir = temp.path().join("wave").join("local-scan");
-        fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(
-            local_dir.join("local-scan.yaml"),
-            "flow: ship\narea: ['.']\n",
-        )
-        .expect("write schema");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(dir.join("scan.yaml"), "flow: ship\narea: ['.']\n").expect("write");
 
-        let schemas = discover_wave_schemas(temp.path()).expect("discover schemas");
-        assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0].name, "local-scan");
-        assert!(schemas[0].schema_ref.starts_with("file://"));
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        assert_eq!(config.flow, "ship");
+        assert_eq!(config.area, vec!["."]);
     }
 
     #[test]
-    fn resolve_by_name() {
+    fn read_wave_config_returns_none_for_missing() {
         let temp = tempdir().expect("temp dir");
-        let local_dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(local_dir.join("scan.yaml"), "flow: ship\narea: ['.']\n").expect("write schema");
-
-        let schema = resolve_wave_schema(temp.path(), "scan").expect("resolve schema");
-        assert_eq!(schema.name, "scan");
-        assert!(schema.schema_ref.starts_with("file://"));
-    }
-
-    #[test]
-    fn resolve_supports_explicit_file_reference_with_non_canonical_path() {
-        let temp = tempdir().expect("temp dir");
-        let local_dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(local_dir.join("scan.yaml"), "flow: ship\narea: ['.']\n").expect("write schema");
-
-        let non_canonical = local_dir.join("..").join("scan").join("scan.yaml");
-        let input = format!("file://{}", non_canonical.to_string_lossy());
-        let schema = resolve_wave_schema(temp.path(), &input).expect("resolve local schema");
-
-        assert_eq!(schema.name, "scan");
-        assert!(schema.schema_ref.starts_with("file://"));
-    }
-
-    #[test]
-    fn resolve_unknown_schema_returns_not_found() {
-        let temp = tempdir().expect("temp dir");
-        let result = resolve_wave_schema(temp.path(), "does-not-exist");
-        assert!(matches!(result, Err(SchemaResolveError::NotFound { .. })));
-    }
-
-    #[test]
-    fn discover_duplicate_local_names_returns_conflict() {
-        let temp = tempdir().expect("temp dir");
-        let first_dir = temp.path().join("wave").join("alpha");
-        let second_dir = temp.path().join("wave").join("beta");
-        fs::create_dir_all(&first_dir).expect("create first dir");
-        fs::create_dir_all(&second_dir).expect("create second dir");
-        fs::write(
-            first_dir.join("alpha.yaml"),
-            "name: duplicate\nflow: ship\narea: ['.']\n",
-        )
-        .expect("write first schema");
-        fs::write(
-            second_dir.join("beta.yaml"),
-            "name: duplicate\nflow: scan\narea: ['.']\n",
-        )
-        .expect("write second schema");
-
-        let result = discover_wave_schemas(temp.path());
-        assert!(matches!(
-            result,
-            Err(SchemaDiscoveryError::DuplicateLocalNames { .. })
-        ));
-    }
-
-    #[test]
-    fn name_defaults_to_directory_name() {
-        let temp = tempdir().expect("temp dir");
-        let local_dir = temp.path().join("wave").join("my-wave");
-        fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(local_dir.join("my-wave.yaml"), "flow: ship\narea: ['.']\n")
-            .expect("write schema");
-
-        let schemas = discover_wave_schemas(temp.path()).expect("discover schemas");
-        assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0].name, "my-wave");
-    }
-
-    #[test]
-    fn explicit_name_in_yaml_overrides_directory() {
-        let temp = tempdir().expect("temp dir");
-        let local_dir = temp.path().join("wave").join("dir-name");
-        fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(
-            local_dir.join("dir-name.yaml"),
-            "name: custom-name\nflow: ship\narea: ['.']\n",
-        )
-        .expect("write schema");
-
-        let schemas = discover_wave_schemas(temp.path()).expect("discover schemas");
-        assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0].name, "custom-name");
+        assert!(read_wave_config(temp.path(), "nonexistent").is_none());
     }
 }

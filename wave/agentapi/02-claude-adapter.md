@@ -1,6 +1,6 @@
 # 02: Claude Adapter
 
-Second adapter using `claude -p --resume` with NDJSON streaming. Validates that the adapter abstraction works for a non-JSON-RPC provider.
+Second harness using `claude -p --resume` with NDJSON streaming. Validates that the harness abstraction works for a non-JSON-RPC provider.
 
 ## What exists after this
 
@@ -10,9 +10,9 @@ Detailed design: `scratch/agentapi-claude-adapter.md`
 
 ## What Phase 01 taught us
 
-**Adapter wiring is trivial.** `CreateAdapterFn` is a function pointer — adding Claude means adding one match arm and implementing the three-method trait. No factory ceremony.
+**Harness wiring is trivial.** `HarnessProvider` enum dispatches directly — adding Claude means adding one enum variant and implementing the three-method trait. No factory ceremony.
 
-**Event normalization is the real work.** The Codex adapter spent most of its 630 lines normalizing JSON-RPC payloads. Claude's NDJSON events are better documented but need similar mapping — especially tool name → item type inference (`Bash` → `Command`, `Edit`/`Write` → `File`, everything else → `Tool`).
+**Event normalization is the real work.** The Codex harness spent most of its lines normalizing JSON-RPC payloads. Claude's NDJSON events are better documented but need similar mapping — especially tool name → item type inference (`Bash` → `Command`, `Edit`/`Write` → `File`, everything else → `Tool`).
 
 **Item schema is ready.** The normalized types (`Command`, `File`, `Message`, `Thought`, `Tool`) were designed with Claude in mind. No schema changes expected.
 
@@ -20,7 +20,7 @@ Detailed design: `scratch/agentapi-claude-adapter.md`
 
 ## What to build
 
-- Claude adapter implementing `SessionAdapter` trait
+- Claude harness implementing `SessionHarness` trait
 - NDJSON stream parser (`stream_event.event` unwrapping)
 - Event mapping: content deltas, tool lifecycle, turn boundaries
 - Provider session id persistence for `--resume` continuity
@@ -43,11 +43,11 @@ Detailed design: `scratch/agentapi-claude-adapter.md`
 
 ## Shipped
 
-All planned pieces landed: Claude adapter (828 lines), NDJSON stream parser, tool name → item type inference, `--resume` continuity via persisted `provider_session_id`, config passthrough, and provider dispatch. Design review in `scratch/jack-heart.agentapi.20260223_1429-review.md`.
+All planned pieces landed: Claude harness (828 lines), NDJSON stream parser, tool name → item type inference, `--resume` continuity via persisted `provider_session_id`, config passthrough, and provider dispatch. Design review in `scratch/jack-heart.agentapi.20260223_1429-review.md`.
 
-**Process-per-turn is simpler than expected.** `start()` validates the binary; `send_input()` spawns a fresh process each turn. No persistent subprocess management, no custom IPC. `--resume` handles continuity. The model maps cleanly to the existing `SessionAdapter` trait — `stop()` just kills the current process if one is running.
+**Process-per-turn is simpler than expected.** `start()` validates the binary; `send_input()` spawns a fresh process each turn. No persistent subprocess management, no custom IPC. `--resume` handles continuity. The model maps cleanly to the existing `SessionHarness` trait — `stop()` just kills the current process if one is running.
 
-**Adapter abstraction held.** Adding Claude required one new match arm in `default_create_adapter()` and implementing the three-method trait. No changes to `SessionManager`, the bridge task, or the event persistence layer. The function pointer dispatch (`CreateAdapterFn`) worked exactly as Phase 01 designed it.
+**Harness abstraction held.** Adding Claude required one new `HarnessProvider` variant and implementing the three-method trait. No changes to `SessionManager`, the bridge task, or the event persistence layer.
 
 **No `DiffUpdated` for Claude.** Claude doesn't emit a turn-level diff like Codex's `turn/diff/updated`. Concerto UI (Phase 03) must not rely on `DiffUpdated` for core functionality — it's provider-dependent.
 
@@ -59,7 +59,7 @@ All planned pieces landed: Claude adapter (828 lines), NDJSON stream parser, too
 - `--append-system-prompt` is wired but not yet validated in real interactive sessions.
 
 **Post-shipment hardening.** Three follow-up commits after initial ship:
-- Busy turns now return 409 without failing the session — concurrent `send_input` is cleanly rejected at the adapter level, and `SessionManager` distinguishes this from real errors.
+- Busy turns now return 409 without failing the session — concurrent `send_input` is cleanly rejected at the harness level, and `SessionManager` distinguishes this from real errors.
 - Tool state tracking simplified — removed intermediate state machine, direct tracking instead.
 - Turn parsing hardened against NDJSON edge cases in `content_block_delta` handling.
 

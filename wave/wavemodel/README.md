@@ -13,6 +13,7 @@ The full experience: open Concerto, describe what you want to build, and the des
 - Database schema changes for wave content (stays in markdown)
 - Enforced validation of "at least one section" in tooling (convention first)
 - Per-tab step routing in Concerto (all chat tabs default to `step: design` for now)
+- Runtime convergence between wave executor and session orchestration (executor stays auto/headless; sessions are interactive — separate concerns until convergence work lands)
 - Real-time wave content refresh via filesystem watcher (on-demand loading works, live updates don't)
 
 ## Goals

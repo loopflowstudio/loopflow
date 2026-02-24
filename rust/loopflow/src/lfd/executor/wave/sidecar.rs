@@ -12,8 +12,8 @@ use crate::lfd::types::{SidecarKind, Wave, WaveRun, WaveRunKind, WaveRunStatus};
 use super::launch::AgentLaunchRequest;
 use super::WaveExecutor;
 use crate::lfd::executor::helpers::{
-    build_step_prompt, ci_fix_worktree_path, cleanup_ci_fix_worktree, commit_and_push_ci_fix,
-    create_ci_fix_worktree, format_ci_failure_message, short_hash,
+    build_agent_capabilities, build_step_prompt, ci_fix_worktree_path, cleanup_ci_fix_worktree,
+    commit_and_push_ci_fix, create_ci_fix_worktree, format_ci_failure_message, short_hash,
 };
 use crate::lfd::executor::CiFailure;
 
@@ -126,7 +126,7 @@ impl WaveExecutor {
             flow_parents: Vec::new(),
         };
         let message = format_ci_failure_message(failure);
-        let (prompt, model, launch) = build_step_prompt(
+        let (launch, process) = build_step_prompt(
             &run.worktree,
             &step,
             &run.snapshot.direction,
@@ -135,6 +135,8 @@ impl WaveExecutor {
             Some(message),
         )
         .await?;
+        let capabilities = build_agent_capabilities(&run.worktree);
+        let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
 
         let outcome = self
             .launch_agent(AgentLaunchRequest {
@@ -144,7 +146,7 @@ impl WaveExecutor {
                 worktree: run.worktree.clone(),
                 step,
                 model: model.clone(),
-                cmd: build_agent_command(&model, &prompt, &launch),
+                cmd: build_agent_command(&launch, &process, &capabilities),
                 output_prefix: None,
             })
             .await?;

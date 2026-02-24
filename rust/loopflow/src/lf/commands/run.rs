@@ -2,8 +2,8 @@ use crate::engine::{
     check_cli_available, default_gather_sources, drop_native_instruction_docs,
     format_context_prompt, format_prompt, format_task_prompt, gather_context, launch_agent,
     load_config_or_default, parse_model, seed_rlm_env, trim_context_with_breakdown,
-    write_prompt_log, Config, ContextBreakdown, GatherContextOpts, LaunchConfig, PromptComponents,
-    PromptFormatMode, StreamFormat, DEFAULT_CONTEXT_BUDGET,
+    write_prompt_log, AgentCapabilities, Config, ContextBreakdown, GatherContextOpts, LaunchConfig,
+    ProcessConfig, PromptComponents, PromptFormatMode, StreamFormat, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -32,14 +32,14 @@ pub fn run(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
 struct PromptBuild {
     repo_root: PathBuf,
     config: Config,
+    launch: LaunchConfig,
+    process: ProcessConfig,
+    capabilities: AgentCapabilities,
     components: PromptComponents,
     breakdown: ContextBreakdown,
     prompt: String,
-    model: String,
     backend: String,
-    variant: Option<String>,
     area: Option<String>,
-    is_interactive: bool,
     step_name: Option<String>,
     log_name: String,
 }
@@ -126,7 +126,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .as_deref()
         .unwrap_or(&config.agent_model)
         .to_string();
-    let (backend, variant) = parse_model(&model);
+    let (backend, _variant) = parse_model(&model);
 
     let mut components = components;
     drop_native_instruction_docs(&mut components, &repo_root);
@@ -149,18 +149,32 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .as_deref()
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
         .to_string();
+    let launch = LaunchConfig {
+        model: Some(model),
+        cwd: Some(repo_root.clone()),
+        skip_permissions: cli.yolo || config.yolo,
+        ..Default::default()
+    };
+    let process = ProcessConfig {
+        auto: !is_interactive,
+        stream: !is_interactive,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: cli.chrome_setting().unwrap_or(config.chrome),
+    };
 
     Ok(PromptBuild {
         repo_root,
         config,
+        launch,
+        process,
+        capabilities,
         components,
         breakdown,
         prompt,
-        model,
         backend,
-        variant,
         area,
-        is_interactive,
         step_name,
         log_name,
     })
@@ -176,7 +190,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         .map(|d| d.name.clone())
         .collect();
     let cli_model = if cli.model.is_some() {
-        Some(built.model.as_str())
+        built.launch.model.as_deref()
     } else {
         None
     };
@@ -244,23 +258,20 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote context log"
     );
 
+    let mut launch = built.launch.clone();
+    launch.system_prompt = context_prompt;
+    launch.task_prompt = task_prompt;
+
     let use_color = std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal();
-    let launch_config = LaunchConfig {
-        auto: !built.is_interactive,
-        stream: !built.is_interactive,
-        skip_permissions: cli.yolo || built.config.yolo,
-        model_variant: built.variant.clone(),
-        chrome: cli.chrome_setting().unwrap_or(built.config.chrome),
-        cwd: Some(built.repo_root.clone()),
-        context_file,
-        stream_format: StreamFormat::Human(use_color),
-    };
-    debug!(?launch_config, "launching agent");
+    let mut process = built.process.clone();
+    process.context_file = context_file;
+    process.stream_format = StreamFormat::Human(use_color);
+    debug!(?launch, ?process, ?built.capabilities, "launching agent");
 
     seed_rlm_env(&built.config);
     info!(backend = built.backend, "launching agent");
     let launch_start = Instant::now();
-    let result = launch_agent(&built.model, &task_prompt, &launch_config)?;
+    let result = launch_agent(&launch, &process, &built.capabilities)?;
     debug!(
         elapsed_ms = launch_start.elapsed().as_millis(),
         "agent finished"

@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use time::OffsetDateTime;
 use tracing::{debug, info, warn};
 
-use crate::engine::agent::{build_agent_command, LaunchConfig};
+use crate::engine::agent::{build_agent_command, AgentCapabilities, LaunchConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::load_config_or_default;
 use crate::engine::flow::{ConcreteStep, Step};
@@ -67,17 +67,22 @@ impl WaveExecutor {
 
         let model = config.agent_model.clone();
         let launch = LaunchConfig {
-            auto: true,
-            stream: true,
-            skip_permissions: config.yolo,
-            model_variant: None,
-            chrome: false,
+            task_prompt: prompt,
+            model: Some(model.clone()),
             cwd: Some(PathBuf::from(&run.worktree)),
-            context_file: None,
+            skip_permissions: config.yolo,
             ..Default::default()
         };
+        let process = ProcessConfig {
+            auto: true,
+            stream: true,
+            ..Default::default()
+        };
+        let capabilities = AgentCapabilities {
+            chrome: config.chrome,
+        };
 
-        let cmd = build_agent_command(&model, &prompt, &launch);
+        let cmd = build_agent_command(&launch, &process, &capabilities);
         info!(wave = %wave.name(), model = %model, "running internal summarize step");
 
         let step = ConcreteStep {

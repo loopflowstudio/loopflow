@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::{AgentCapabilities, LaunchConfig, ProcessConfig};
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{ConcreteItem, ConcreteStep};
 use crate::engine::git::{
@@ -256,9 +256,9 @@ pub(crate) async fn build_step_prompt(
     wave: Option<&str>,
     summary_source: Option<(&SharedStore, &LfdId)>,
     message: Option<String>,
-) -> Result<(String, String, LaunchConfig)> {
+) -> Result<(LaunchConfig, ProcessConfig)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
-    let prepared = prepare_step_prompt(PrepareStepPromptConfig {
+    let mut launch = prepare_step_prompt(PrepareStepPromptConfig {
         repo_root: Path::new(worktree),
         step: &step.step.name,
         run_mode: "auto",
@@ -273,26 +273,38 @@ pub(crate) async fn build_step_prompt(
         summary_source,
     })
     .await?;
+    let cwd = launch
+        .cwd
+        .clone()
+        .unwrap_or_else(|| Path::new(worktree).to_path_buf());
     let context_file = write_prompt_log(
-        &prepared.cwd,
-        &prepared.system_prompt,
+        &cwd,
+        &launch.system_prompt,
         &format!("{}.context", step.step.name),
         None,
     )
     .ok();
-    let model = prepared.model.unwrap_or_else(|| config.agent_model.clone());
-    let launch = LaunchConfig {
+    if launch.model.is_none() {
+        launch.model = Some(config.agent_model.clone());
+    }
+    launch.cwd = Some(cwd);
+    launch.skip_permissions = config.yolo;
+
+    let process = ProcessConfig {
         auto: true,
         stream: true,
-        skip_permissions: config.yolo,
-        model_variant: None,
-        chrome: config.chrome,
-        cwd: Some(prepared.cwd),
         context_file,
         ..Default::default()
     };
 
-    Ok((prepared.task_prompt, model, launch))
+    Ok((launch, process))
+}
+
+pub(crate) fn build_agent_capabilities(worktree: &str) -> AgentCapabilities {
+    let config = load_config_or_default(Some(Path::new(worktree)));
+    AgentCapabilities {
+        chrome: config.chrome,
+    }
 }
 
 pub(crate) fn build_agent_for_step(

@@ -5,7 +5,7 @@ use crate::engine::config::load_config_or_default;
 use crate::engine::prompt::{
     default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
 };
-use crate::engine::{launch_agent, LaunchConfig};
+use crate::engine::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -65,19 +65,24 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let components = gather_context(&opts)?;
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
-    let launch_config = LaunchConfig {
+    let launch = LaunchConfig {
+        task_prompt: prompt,
+        model: Some(config.agent_model.clone()),
+        cwd: Some(repo.to_path_buf()),
+        skip_permissions: true,
+        ..Default::default()
+    };
+    let process = ProcessConfig {
         auto: true,
         stream: false,
-        skip_permissions: true,
-        model_variant: None,
-        chrome: config.chrome,
-        cwd: Some(repo.to_path_buf()),
-        context_file: None,
         ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
     };
 
     progress.status("Launching lint fixer...");
-    let result = launch_agent(&config.agent_model, &prompt, &launch_config)
+    let result = launch_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
     if result.exit_code != 0 {
         return Err(OpsError::AgentFailed(result.stderr));

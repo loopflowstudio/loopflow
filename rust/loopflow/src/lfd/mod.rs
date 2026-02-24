@@ -5,6 +5,7 @@ pub mod events;
 pub mod executor;
 pub mod github;
 pub mod http;
+pub mod http_client;
 pub mod id;
 pub mod live_pr;
 pub mod machine_id;

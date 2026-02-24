@@ -200,6 +200,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
         github: lfd_config.github,
+        http_security: lfd_config.http_security,
+        auth_failure_throttle: loopflow::lfd::auth::AuthFailureThrottle::new(),
         ci_failure_cache,
         chat_turns: loopflow::lfd::http::state::ChatTurnRegistry::new(),
         sessions: SessionManager::new(store),
@@ -209,7 +211,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
         tracing::info!(addr = %http_addr, "listening");
-        axum::serve(listener, http_router).await
+        axum::serve(
+            listener,
+            http_router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
     });
 
     tokio::select! {

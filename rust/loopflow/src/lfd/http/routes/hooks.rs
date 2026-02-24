@@ -424,8 +424,8 @@ async fn emit_ci_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::auth::AuthProvider;
-    use crate::lfd::config::{ExecutorConfig, GitHubConfig};
+    use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
+    use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::http::state::{ChatTurnRegistry, HttpState};
@@ -472,6 +472,8 @@ mod tests {
             registration: None,
             started_at: OffsetDateTime::now_utc(),
             github: GitHubConfig::default(),
+            http_security: HttpSecurityConfig::default(),
+            auth_failure_throttle: AuthFailureThrottle::new(),
             ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
             chat_turns: ChatTurnRegistry::new(),
             sessions: SessionManager::new(store.clone()),

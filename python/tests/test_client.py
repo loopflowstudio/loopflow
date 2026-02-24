@@ -237,6 +237,11 @@ class TestClientToken:
         assert "authorization" not in headers
         client.close()
 
+    def test_client_does_not_follow_redirects(self):
+        client = Client(base_url="https://lfd.example.com", token="redirect-safe-token")
+        assert client._client.follow_redirects is False
+        client.close()
+
 
 class TestExtractErrorMessage:
     def test_nested_error_message(self):

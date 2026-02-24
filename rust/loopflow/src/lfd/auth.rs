@@ -1,13 +1,22 @@
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use axum::extract::connect_info::ConnectInfo;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::response::Response;
+use ipnet::IpNet;
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
-use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
+use crate::lfd::http;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::registration::ConnectionValidator;
+
+const THROTTLE_WINDOW: Duration = Duration::from_secs(60);
 
 /// Auth provider for lfd connections.
 ///
@@ -24,6 +33,69 @@ pub enum AuthProvider {
     Studio { validator: ConnectionValidator },
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct AuthFailureThrottle {
+    buckets: Arc<Mutex<HashMap<AuthThrottleKey, AuthThrottleBucket>>>,
+}
+
+impl AuthFailureThrottle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_throttled(&self, key: &AuthThrottleKey, limit: u32) -> bool {
+        let Ok(mut buckets) = self.buckets.lock() else {
+            return false;
+        };
+        let now = Instant::now();
+        buckets.retain(|_, bucket| now.duration_since(bucket.window_started) < THROTTLE_WINDOW);
+        buckets
+            .get(key)
+            .is_some_and(|bucket| bucket.failures_in_window >= limit)
+    }
+
+    pub fn record_failure(&self, key: AuthThrottleKey, limit: u32) -> bool {
+        let Ok(mut buckets) = self.buckets.lock() else {
+            return false;
+        };
+        let now = Instant::now();
+        buckets.retain(|_, bucket| now.duration_since(bucket.window_started) < THROTTLE_WINDOW);
+        let bucket = buckets.entry(key).or_insert(AuthThrottleBucket {
+            window_started: now,
+            failures_in_window: 0,
+        });
+        if now.duration_since(bucket.window_started) >= THROTTLE_WINDOW {
+            bucket.window_started = now;
+            bucket.failures_in_window = 0;
+        }
+        bucket.failures_in_window = bucket.failures_in_window.saturating_add(1);
+        bucket.failures_in_window > limit
+    }
+}
+
+#[derive(Debug)]
+struct AuthThrottleBucket {
+    window_started: Instant,
+    failures_in_window: u32,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct AuthThrottleKey {
+    source: IpAddr,
+    auth_context_hash: String,
+    endpoint_group: &'static str,
+}
+
+impl AuthThrottleKey {
+    pub fn new(source: IpAddr, auth_context_hash: String, endpoint_group: &'static str) -> Self {
+        Self {
+            source,
+            auth_context_hash,
+            endpoint_group,
+        }
+    }
+}
+
 /// Axum middleware that enforces auth on all requests.
 pub async fn auth_middleware(
     State(state): State<HttpState>,
@@ -32,31 +104,53 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Response {
     let provided_token = extract_token(&headers);
+    let throttle_limit = state.http_security.auth_failures_per_minute;
+    let source = resolved_source(&request, &headers, &state.http_security.trusted_proxy_cidrs);
+    let endpoint_group = endpoint_group(request.method(), request.uri().path());
+    let throttle_key =
+        AuthThrottleKey::new(source, auth_context_hash(provided_token), endpoint_group);
 
-    match &state.auth {
-        AuthProvider::Local => {
-            match authorize_local(state.session_token.as_deref(), provided_token) {
-                Ok(()) => next.run(request).await,
-                Err((status, message)) => auth_error(status, message),
-            }
-        }
+    if state
+        .auth_failure_throttle
+        .is_throttled(&throttle_key, throttle_limit)
+    {
+        return throttled_response();
+    }
+
+    let auth_result = match &state.auth {
+        AuthProvider::Local => authorize_local(state.session_token.as_deref(), provided_token),
         AuthProvider::Static { token } => match provided_token {
-            Some(provided) if constant_time_eq(provided, token) => next.run(request).await,
-            Some(_) => auth_error(StatusCode::UNAUTHORIZED, "invalid token"),
-            None => auth_error(StatusCode::UNAUTHORIZED, "missing token"),
+            Some(provided) if constant_time_eq(provided, token) => Ok(()),
+            Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
+            None => Err((StatusCode::UNAUTHORIZED, "missing token")),
         },
-        AuthProvider::Studio { validator } => {
-            let token = match provided_token {
-                Some(t) => t,
-                None => {
-                    return auth_error(StatusCode::UNAUTHORIZED, "missing connection token");
+        AuthProvider::Studio { validator } => match provided_token {
+            Some(token) => {
+                if validator.validate(token).await {
+                    Ok(())
+                } else {
+                    Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
                 }
-            };
+            }
+            None => Err((StatusCode::UNAUTHORIZED, "missing connection token")),
+        },
+    };
 
-            if validator.validate(token).await {
-                next.run(request).await
+    match auth_result {
+        Ok(()) => next.run(request).await,
+        Err((status, message)) => {
+            if state
+                .auth_failure_throttle
+                .record_failure(throttle_key, throttle_limit)
+            {
+                tracing::warn!(
+                    source = %source,
+                    endpoint_group,
+                    "auth failures exceeded limit; throttling"
+                );
+                throttled_response()
             } else {
-                auth_error(StatusCode::UNAUTHORIZED, "invalid connection token")
+                http::api_error_response(status, message)
             }
         }
     }
@@ -89,18 +183,79 @@ fn extract_token(headers: &HeaderMap) -> Option<&str> {
     Some(token.trim())
 }
 
-fn auth_error(status: StatusCode, message: &str) -> Response {
-    (
-        status,
-        Json(ErrorResponse {
-            error: ErrorDetail {
-                error_type: "invalid_request_error".to_string(),
-                message: message.to_string(),
-                param: None,
-            },
-        }),
+fn auth_context_hash(token: Option<&str>) -> String {
+    let Some(token) = token else {
+        return "missing".to_string();
+    };
+    if token.is_empty() {
+        return "empty".to_string();
+    }
+    let digest = Sha256::digest(token.as_bytes());
+    hex::encode(digest)[..16].to_string()
+}
+
+fn endpoint_group(method: &Method, path: &str) -> &'static str {
+    if path == "/ws" {
+        return "ws";
+    }
+    if method == Method::GET || method == Method::HEAD {
+        "read"
+    } else {
+        "mutate"
+    }
+}
+
+fn resolved_source(
+    request: &Request,
+    headers: &HeaderMap,
+    trusted_proxy_cidrs: &[IpNet],
+) -> IpAddr {
+    let peer_ip = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|connect_info| connect_info.0.ip())
+        .unwrap_or(IpAddr::from([0, 0, 0, 0]));
+
+    resolve_client_source(peer_ip, headers, trusted_proxy_cidrs)
+}
+
+fn resolve_client_source(
+    peer_ip: IpAddr,
+    headers: &HeaderMap,
+    trusted_proxy_cidrs: &[IpNet],
+) -> IpAddr {
+    if !trusted_proxy_cidrs
+        .iter()
+        .any(|cidr| cidr.contains(&peer_ip))
+    {
+        return peer_ip;
+    }
+
+    let forwarded_for = headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(forwarded_for) = forwarded_for else {
+        return peer_ip;
+    };
+    let first_hop = forwarded_for
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(first_hop) = first_hop else {
+        return peer_ip;
+    };
+
+    first_hop.parse::<IpAddr>().unwrap_or(peer_ip)
+}
+
+fn throttled_response() -> Response {
+    http::api_error_response(
+        StatusCode::TOO_MANY_REQUESTS,
+        "too many authentication failures",
     )
-        .into_response()
 }
 
 #[cfg(test)]
@@ -161,5 +316,52 @@ mod tests {
             result,
             Err((StatusCode::FORBIDDEN, "session token not configured"))
         );
+    }
+
+    #[test]
+    fn trusted_forwarded_for_is_used_for_source() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.9, 10.0.0.1".parse().unwrap());
+        let source = resolve_client_source(
+            IpAddr::from([127, 0, 0, 1]),
+            &headers,
+            &["127.0.0.1/32".parse::<IpNet>().expect("cidr")],
+        );
+        assert_eq!(source, IpAddr::from([203, 0, 113, 9]));
+    }
+
+    #[test]
+    fn untrusted_peer_ignores_forwarded_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        let source = resolve_client_source(
+            IpAddr::from([10, 0, 0, 5]),
+            &headers,
+            &["127.0.0.1/32".parse::<IpNet>().expect("cidr")],
+        );
+        assert_eq!(source, IpAddr::from([10, 0, 0, 5]));
+    }
+
+    #[test]
+    fn malformed_forwarded_header_falls_back_to_peer_ip() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "not-an-ip".parse().unwrap());
+        let source = resolve_client_source(
+            IpAddr::from([127, 0, 0, 1]),
+            &headers,
+            &["127.0.0.1/32".parse::<IpNet>().expect("cidr")],
+        );
+        assert_eq!(source, IpAddr::from([127, 0, 0, 1]));
+    }
+
+    #[test]
+    fn auth_failure_throttle_limits_after_threshold() {
+        let throttle = AuthFailureThrottle::new();
+        let key = AuthThrottleKey::new(IpAddr::from([127, 0, 0, 1]), "hash".to_string(), "mutate");
+
+        assert!(!throttle.record_failure(key.clone(), 2));
+        assert!(!throttle.record_failure(key.clone(), 2));
+        assert!(throttle.record_failure(key.clone(), 2));
+        assert!(throttle.is_throttled(&key, 2));
     }
 }

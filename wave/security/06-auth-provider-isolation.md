@@ -8,7 +8,9 @@ Depends on remote/07 (Studio auth client wiring) since it hardens the `Studio` a
 
 Phase 01 shipped a clean auth middleware: all protected routes require a valid bearer token regardless of provider or source. No loopback bypass. The middleware matches on `AuthProvider` enum with each variant handling its own validation. No fallthrough between providers.
 
-Other gaps:
+Phase 04 shipped proxy-aware source IP handling: `trusted_proxy_cidrs` defaults to `[]` (fail-closed), `X-Forwarded-*` honored only when peer IP is in configured trusted CIDRs, malformed/ambiguous forwarded headers fall back to peer IP. Also shipped auth-failure rate throttling per source IP.
+
+Remaining gaps:
 
 **Studio validator caching**: `ConnectionValidator` caches validation results for 60 seconds. If a token is revoked server-side, it remains valid in lfd for up to 60 seconds. Acceptable for the threat model, but should be documented.
 
@@ -18,7 +20,7 @@ Other gaps:
 
 ## What exists after this
 
-Auth providers enforce strict boundaries: no loopback bypass for `Static` or `Studio` providers, JWKS validation fails closed, and proxy-aware source IP handling is explicit.
+Auth providers enforce strict boundaries: no loopback bypass for `Static` or `Studio` providers, JWKS validation fails closed, and token format is pre-validated. (Proxy-aware source IP already shipped in Phase 04.)
 
 ## Security boundary for this phase
 
@@ -71,21 +73,9 @@ fn extract_token(headers: &HeaderMap) -> Option<&str> {
 
 The 4096-byte cap prevents memory abuse from pathologically large Authorization headers. Null byte rejection prevents injection.
 
-### Proxy-aware source IP (future consideration)
+### Proxy-aware source IP — done (Phase 04)
 
-If lfd needs to support trusted proxy headers (`X-Forwarded-For`, `X-Real-IP`), add an explicit config option:
-
-```yaml
-auth:
-  provider: static
-  trust_proxy_headers: true
-  trusted_proxies:
-    - "172.18.0.0/16"  # Docker network
-```
-
-Do not trust proxy headers by default. Only resolve source IP from headers when `trust_proxy_headers` is true and the direct connection comes from a trusted proxy CIDR. This prevents an attacker from spoofing `X-Forwarded-For: 127.0.0.1` to trigger loopback bypass.
-
-This is not needed today (Caddy doesn't set forwarded headers in the default config, and lfd doesn't read them). Document as a constraint: "lfd uses direct connection source IP for auth decisions, not forwarded headers."
+Shipped in Phase 04 as part of HTTP security hardening. `trusted_proxy_cidrs` defaults to `[]` (fail-closed). `X-Forwarded-*` honored only when peer IP is in configured CIDRs. Malformed/ambiguous forwarded headers fall back to peer IP. Auth-failure throttle keys on resolved source IP. No further work needed.
 
 ### Document token revocation latency
 

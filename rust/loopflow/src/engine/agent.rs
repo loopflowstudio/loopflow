@@ -10,7 +10,7 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::Instant;
 
-use crate::engine::annotation::{self, AnnotationEnvelopeV1};
+use crate::engine::annotation;
 use crate::engine::config::parse_model;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
@@ -53,13 +53,6 @@ pub struct LaunchResult {
     pub stderr: String,
 }
 
-/// Annotation envelope and its sidecar file path, attached to a launch for env propagation.
-#[derive(Debug, Clone)]
-pub struct LaunchAnnotation {
-    pub envelope: AnnotationEnvelopeV1,
-    pub envelope_path: std::path::PathBuf,
-}
-
 /// Configuration for launching an agent.
 #[derive(Debug, Clone, Default)]
 pub struct LaunchConfig {
@@ -81,7 +74,7 @@ pub struct LaunchConfig {
     /// How to display streaming output (Raw = dump JSON, Human = formatted).
     pub stream_format: StreamFormat,
     /// Annotation envelope for trace propagation to the agent subprocess.
-    pub annotation: Option<LaunchAnnotation>,
+    pub annotation: Option<annotation::AnnotationContext>,
 }
 
 /// Build Claude CLI command.
@@ -330,7 +323,9 @@ pub fn launch_agent(
     propagate_rlm_env(&mut cmd);
 
     if let Some(ref ann) = config.annotation {
-        annotation::set_annotation_env(&mut cmd, &ann.envelope, &ann.envelope_path);
+        for (key, value) in annotation::annotation_env_pairs(&ann.envelope, &ann.envelope_path) {
+            cmd.env(key, value);
+        }
     }
 
     if config.auto && config.stream {

@@ -1,6 +1,4 @@
-use crate::engine::annotation::{
-    self, build_lf_envelope, build_outcome, ensure_annotation_gitignored,
-};
+use crate::engine::annotation::{self, build_lf_envelope, build_outcome};
 use crate::engine::{
     check_cli_available, default_gather_sources, drop_native_instruction_docs,
     format_context_prompt, format_prompt, format_task_prompt, gather_context, launch_agent,
@@ -270,19 +268,8 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         built.components.wave.as_deref(),
         run_mode,
     );
-    let annotation = match annotation::write_envelope(&built.repo_root, &envelope) {
-        Ok(path) => {
-            let _ = ensure_annotation_gitignored(&built.repo_root);
-            Some(crate::engine::agent::LaunchAnnotation {
-                envelope: envelope.clone(),
-                envelope_path: path,
-            })
-        }
-        Err(err) => {
-            debug!(?err, "annotation sidecar write failed, continuing without");
-            None
-        }
-    };
+    let trace_id = envelope.trace.trace_id.clone();
+    let annotation = annotation::write_sidecar(&built.repo_root, envelope);
 
     let launch_config = LaunchConfig {
         auto: !built.is_interactive,
@@ -309,9 +296,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     // Append outcome to annotation sidecar.
     let outcome = build_outcome(result.exit_code, launch_start, Some(&built.repo_root));
-    if let Err(err) =
-        annotation::append_outcome(&built.repo_root, &envelope.trace.trace_id, outcome)
-    {
+    if let Err(err) = annotation::append_outcome(&built.repo_root, &trace_id, outcome) {
         debug!(?err, "annotation outcome append failed");
     }
 

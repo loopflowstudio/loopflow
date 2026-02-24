@@ -169,9 +169,10 @@ impl WaveExecutor {
                 );
 
                 // Write annotation sidecar for fork branch.
-                let ann_context = {
-                    let wave_id_str = fork_wave_id.to_string();
-                    let envelope = crate::engine::annotation::build_wave_envelope(
+                let wave_id_str = fork_wave_id.to_string();
+                let ann_context = crate::engine::annotation::write_sidecar(
+                    std::path::Path::new(&worktree),
+                    crate::engine::annotation::build_wave_envelope(
                         &crate::engine::annotation::WaveEnvelopeParams {
                             step: &step.step.name,
                             flow: "fork",
@@ -183,22 +184,8 @@ impl WaveExecutor {
                             total_steps: 0,
                             parent_span_id: None,
                         },
-                    );
-                    crate::engine::annotation::write_envelope(
-                        std::path::Path::new(&worktree),
-                        &envelope,
-                    )
-                    .ok()
-                    .map(|path| {
-                        let _ = crate::engine::annotation::ensure_annotation_gitignored(
-                            std::path::Path::new(&worktree),
-                        );
-                        crate::lfd::executor::AnnotationContext {
-                            envelope,
-                            envelope_path: path,
-                        }
-                    })
-                };
+                    ),
+                );
 
                 let result = executor
                     .launch_agent(AgentLaunchRequest {

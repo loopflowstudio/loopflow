@@ -12,6 +12,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 use uuid::Uuid;
 
 // ── Env var names ────────────────────────────────────────────────────────────
@@ -189,45 +190,40 @@ pub fn build_wave_envelope(params: &WaveEnvelopeParams<'_>) -> AnnotationEnvelop
     }
 }
 
+// ── Annotation context ──────────────────────────────────────────────────────
+
+/// Envelope and sidecar path, carried through the launch pipeline.
+#[derive(Debug, Clone)]
+pub struct AnnotationContext {
+    pub envelope: AnnotationEnvelopeV1,
+    pub envelope_path: PathBuf,
+}
+
+/// Write the sidecar envelope and gitignore entry, returning the context.
+///
+/// Returns `None` if the write fails (non-fatal).
+pub fn write_sidecar(
+    repo_root: &Path,
+    envelope: AnnotationEnvelopeV1,
+) -> Option<AnnotationContext> {
+    match write_envelope(repo_root, &envelope) {
+        Ok(path) => {
+            let _ = ensure_annotation_gitignored(repo_root);
+            Some(AnnotationContext {
+                envelope,
+                envelope_path: path,
+            })
+        }
+        Err(err) => {
+            debug!(?err, "annotation sidecar write failed, continuing without");
+            None
+        }
+    }
+}
+
 // ── Env var propagation ──────────────────────────────────────────────────────
 
-/// Set annotation env vars on a `std::process::Command` (used by `lf` local runs).
-pub fn set_annotation_env(
-    cmd: &mut Command,
-    envelope: &AnnotationEnvelopeV1,
-    envelope_path: &Path,
-) {
-    cmd.env(LF_TRACE_ID, &envelope.trace.trace_id);
-    cmd.env(LF_SPAN_ID, &envelope.trace.span_id);
-    cmd.env(LF_ANNOTATION_FILE, envelope_path.to_string_lossy().as_ref());
-    cmd.env(LF_STEP_TYPE, &envelope.spawn.step);
-    if let Some(ref pos) = envelope.spawn.flow_position {
-        cmd.env(
-            LF_FLOW_POSITION,
-            format!("{}/{}", pos.step_index, pos.total_steps),
-        );
-    }
-}
-
-/// Set annotation env vars on a `tokio::process::Command` (used by `lfd` daemon runs).
-pub fn set_annotation_env_async(
-    cmd: &mut tokio::process::Command,
-    envelope: &AnnotationEnvelopeV1,
-    envelope_path: &Path,
-) {
-    cmd.env(LF_TRACE_ID, &envelope.trace.trace_id);
-    cmd.env(LF_SPAN_ID, &envelope.trace.span_id);
-    cmd.env(LF_ANNOTATION_FILE, envelope_path.to_string_lossy().as_ref());
-    cmd.env(LF_STEP_TYPE, &envelope.spawn.step);
-    if let Some(ref pos) = envelope.spawn.flow_position {
-        cmd.env(
-            LF_FLOW_POSITION,
-            format!("{}/{}", pos.step_index, pos.total_steps),
-        );
-    }
-}
-
-/// Collect annotation env vars as key-value pairs (for Docker or other executors).
+/// Collect annotation env vars as key-value pairs.
 pub fn annotation_env_pairs(
     envelope: &AnnotationEnvelopeV1,
     envelope_path: &Path,

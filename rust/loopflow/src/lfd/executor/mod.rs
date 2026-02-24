@@ -9,6 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+use crate::engine::annotation::AnnotationContext;
 use crate::engine::stream::{render_event, ParseResult, StreamParser};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
@@ -25,13 +26,6 @@ pub struct AgentRunContext<'a> {
     pub output: &'a OutputHub,
     pub output_prefix: Option<&'a str>,
     pub annotation: Option<AnnotationContext>,
-}
-
-/// Annotation metadata to propagate to agent subprocesses.
-#[derive(Debug, Clone)]
-pub struct AnnotationContext {
-    pub envelope: crate::engine::annotation::AnnotationEnvelopeV1,
-    pub envelope_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone)]

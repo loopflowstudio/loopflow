@@ -56,7 +56,10 @@ impl AgentExecutor for LocalProcessExecutor {
         command.stderr(std::process::Stdio::piped());
 
         if let Some(ref ann) = annotation_ctx {
-            annotation::set_annotation_env_async(&mut command, &ann.envelope, &ann.envelope_path);
+            for (key, value) in annotation::annotation_env_pairs(&ann.envelope, &ann.envelope_path)
+            {
+                command.env(key, value);
+            }
         }
 
         let mut child = command.spawn()?;

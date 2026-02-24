@@ -1,55 +1,70 @@
-# Agent API Sessions: Baseline and Next Work
+# Agent API Sessions: Current State and Next Work
 
-This document is the current source of truth for session-api work in `lfd`.
+This document is the source of truth for session API work in `lfd`.
 
-## Baseline (already in branch)
+## Current state
 
-- `/v0/sessions` lifecycle endpoints exist: create/get/input/events/delete.
-- Sessions persist to `sessions`; event stream persists append-only to `session_events`.
-- SSE `/events` replays persisted history, then tails live broadcast events.
+- `/v0/sessions` lifecycle endpoints are implemented: create/get/input/events/delete.
+- Sessions persist to `sessions`; event streams persist append-only to `session_events`.
+- SSE `/events` replays persisted history, then tails live events.
 - `SessionManager` enforces lifecycle transitions (`starting → active → ending → ended|failed`).
-- Codex adapter (`codex --app-server`) is wired through the adapter abstraction.
-- One active/non-terminal session per `wave_run_id` is enforced.
-- Session item schema is normalized across providers:
-  - `FileChange` → `File`
-  - `AgentMessage` → `Message`
-  - `Plan` → `Thought`
-  - MCP calls map to generic `Tool`
+- One active non-terminal session per `wave_run_id` is enforced.
+- Normalized `SessionEvent` stream is in place:
+  - Turn: `TurnStarted`, `TurnCompleted`
+  - Item lifecycle: `ItemStarted`, `ItemUpdated`, `ItemCompleted`
+  - Streaming: `TextDelta`, `ReasoningDelta`
+  - Turn aggregate: `DiffUpdated` (provider-dependent)
+  - Session: `StatusChanged`, `Error`
+- Normalized `SessionItem` variants are used by clients: `Command`, `File`, `Message`, `Thought`, `Tool`.
 
-## Event model (normalized)
+## Provider support
 
-`SessionEvent` keeps turn boundaries, item lifecycles, streaming deltas, and session-level signals in one replayable stream.
+### Codex
 
-- Turn: `TurnStarted`, `TurnCompleted`
-- Item lifecycle: `ItemStarted`, `ItemUpdated`, `ItemCompleted`
-- Streaming: `TextDelta`, `ReasoningDelta`
-- Turn aggregate: `DiffUpdated` (provider-dependent)
-- Session: `StatusChanged`, `Error`
+- `codex --app-server` adapter is wired through the shared adapter abstraction.
+- Codex-specific JSON-RPC payloads are mapped into normalized session events.
 
-`SessionItem` variants used by clients:
+### Claude
 
-- `Command`
-- `File`
-- `Message`
-- `Thought`
-- `Tool`
+Claude is now supported as a second provider using process-per-turn execution:
 
-## Known gaps
+- Invocation: `claude -p ... --output-format stream-json`
+- Continuation: `--resume <provider_session_id>` on subsequent turns
+- Provider session id durability: Claude `system.session_id` is persisted immediately to `sessions.provider_session_id`
+- Concurrency: single in-flight turn per session (`409 busy` on concurrent input)
+- Event parsing: supports both wrapped (`stream_event.event`) and top-level NDJSON events
+- Error handling: `result.is_error` maps to `TurnCompleted(Failed)`
+
+Tool/item mapping for Claude:
+
+- `Bash` → `Command`
+- `Edit` / `Write` / `NotebookEdit` → `File`
+- everything else → `Tool`
+
+## Claude integration notes
+
+- Adapter events flow over `broadcast::Sender<SessionEvent>` and are bridged into persistence + SSE broadcast by `SessionManager`.
+- `ProviderSessionId` is treated as an internal event: persisted for resume, not emitted to SSE clients.
+- Setup failures release the in-flight turn guard to avoid stuck busy sessions.
+
+## Remaining gaps
 
 1. **No restart rehydration**
-   - Active runtimes are process-local; daemon restart leaves persisted sessions without live adapter processes.
+   - Active runtimes are process-local; daemon restart loses live adapter processes.
 2. **SSE lag handling is reconnect-based**
-   - Lagged receivers can miss broadcast events; clients must reconnect to replay from store.
-3. **Provider expansion still pending**
-   - Claude and OpenCode adapters are not yet implemented in this branch.
-4. **Codex mapping assumptions need ongoing validation**
-   - JSON-RPC payload handling is inferred and should keep being validated against real traces.
+   - Lagged subscribers can miss broadcast events and must reconnect for replay.
+3. **No Claude turn diff synthesis**
+   - Claude does not emit turn-level diffs; `DiffUpdated` is generally absent for Claude sessions.
+4. **No incremental Claude tool output streaming**
+   - Tool output arrives at completion, not as streaming stdout/stderr.
+5. **Codex mapping still needs trace validation**
+   - Keep validating inferred payload mapping against real traces.
 
 ## Next milestones
 
-1. Claude adapter on top of normalized schema (`scratch/agentapi-claude-adapter.md`).
-2. Concerto UI integration against the session API event stream.
-3. Hardening pass:
+1. Concerto UI integration against session API streams.
+2. Hardening pass:
    - restart recovery/rehydration
    - optional in-stream backfill for lagged SSE subscribers
-   - stronger provider conformance tests
+   - stronger provider conformance tests (Codex + Claude)
+3. OpenCode adapter implementation on the normalized schema.

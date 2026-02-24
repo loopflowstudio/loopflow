@@ -38,6 +38,15 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 | 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
 | 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
 | 06 | OpenCode Harness | Third provider harness validates the abstraction | |
+| 07 | Provider Layer Unification | Make provider harnesses the shared core used by both `lf` CLI runs and `/v0/sessions` HTTP sessions | planned |
+
+## Future direction
+
+After Phase 06, unify the provider layer so `lf` and Session HTTP are explicitly two API surfaces over the same harness core:
+
+- one provider execution/mapping core
+- two entry points (`lf` CLI and `lfd` Session HTTP)
+- shared conformance tests across both surfaces
 
 ## Architecture
 

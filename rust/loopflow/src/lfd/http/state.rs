@@ -10,6 +10,7 @@ use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
 use crate::lfd::registration::RegistrationClient;
 use crate::lfd::scheduler::Scheduler;
+use crate::lfd::secret_string::SecretString;
 use crate::lfd::sessions::SessionManager;
 use crate::lfd::store::SharedStore;
 
@@ -22,7 +23,7 @@ pub struct HttpState {
     #[allow(dead_code)] // Reserved for output streaming endpoints.
     pub output_hub: OutputHub,
     pub auth: AuthProvider,
-    pub session_token: Option<String>,
+    pub session_token: Option<SecretString>,
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
     pub github: GitHubConfig,

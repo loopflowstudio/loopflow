@@ -23,6 +23,21 @@ lfd migrate --status  # print schema_version=<version>
 `lfd migrate` uses the `mode` setting in `~/.lf/lfd.yaml` to choose backend (`sqlite` for native,
 `postgres` for container). `LFD_DATABASE_URL` is required for postgres migrations.
 
+## Rotate static auth token
+
+```bash
+lfd token rotate
+```
+
+`lfd token rotate` prints a new 32-byte hex token once and does not write it to disk.
+
+Rotation runbook:
+
+1. Generate a new token with `lfd token rotate`.
+2. Update `LFD_AUTH_TOKEN` in your secret source (`.env`, secret manager, or systemd/launchd env).
+3. Restart `lfd`.
+4. Verify the old token is rejected and the new token is accepted.
+
 ## Install
 
 ```bash

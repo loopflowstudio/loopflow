@@ -13,6 +13,7 @@ use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::scheduler::Scheduler;
+use loopflow::lfd::secret_string::SecretString;
 use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfd::sessions::SessionManager;
 use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
@@ -42,6 +43,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "start" => return loopflow::lfd::service::start(force),
             "stop" => return loopflow::lfd::service::stop(),
             "status" => return loopflow::lfd::service::status(),
+            "token" => {
+                if matches!(args.get(2).map(String::as_str), Some("rotate")) {
+                    let token = rotate_static_auth_token();
+                    println!("{}", format_token_rotation_output(token.as_str()));
+                    return Ok(());
+                }
+                return Err("unknown token subcommand; expected `lfd token rotate`"
+                    .to_string()
+                    .into());
+            }
             _ => {} // fall through to serve
         }
     }
@@ -279,14 +290,14 @@ fn storage_config_from_config(
     }
 }
 
-fn generate_session_token_or_exit() -> String {
+fn generate_session_token_or_exit() -> SecretString {
     match loopflow::lfd::session_token::generate_and_write() {
         Ok(token) => {
             tracing::info!(
                 path = %loopflow::lfd::session_token::token_path().display(),
                 "session token written"
             );
-            token
+            SecretString::from(token)
         }
         Err(err) => {
             tracing::error!(error = %err, "failed to write session token");
@@ -295,9 +306,22 @@ fn generate_session_token_or_exit() -> String {
     }
 }
 
+fn rotate_static_auth_token() -> String {
+    loopflow::lfd::session_token::generate()
+}
+
+fn format_token_rotation_output(token: &str) -> String {
+    format!(
+        "new static auth token (shown once):\n{token}\n\nnext steps:\n1. update LFD_AUTH_TOKEN in your secret source (.env, secret manager, systemd/launchd env)\n2. restart lfd\n3. verify old token is rejected and new token is accepted",
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{storage_config_from_config, LfdConfig, StorageConfig, StorageType};
+    use super::{
+        format_token_rotation_output, rotate_static_auth_token, storage_config_from_config,
+        LfdConfig, StorageConfig, StorageType,
+    };
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
     use tempfile::{tempdir, TempDir};
@@ -415,5 +439,21 @@ mod tests {
             err.to_string(),
             "LFD_DATABASE_URL required for postgres storage"
         );
+    }
+
+    #[test]
+    fn rotate_static_auth_token_returns_hex_32_byte_token() {
+        let token = rotate_static_auth_token();
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn format_token_rotation_output_prints_token_once_with_runbook_steps() {
+        let output = format_token_rotation_output("abc123");
+        assert_eq!(output.matches("abc123").count(), 1);
+        assert!(output.contains("update LFD_AUTH_TOKEN"));
+        assert!(output.contains("restart lfd"));
+        assert!(output.contains("verify old token is rejected and new token is accepted"));
     }
 }

@@ -109,10 +109,13 @@ class Client:
         wave_a: str,
         wave_b: str,
         name: Optional[str] = None,
+        nest: bool = False,
     ) -> Wave:
         body: dict[str, Any] = {"wave_a": wave_a, "wave_b": wave_b}
         if name is not None:
             body["name"] = name
+        if nest:
+            body["nest"] = True
         payload = self._request_json("POST", "/v0/waves/join", json=body)
         return Wave.model_validate(payload)
 

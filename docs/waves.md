@@ -35,6 +35,7 @@ Voices are independent waves. `join` groups them into a chord. `leave` pulls a v
 
 ```python
 loopflow.join("ensemble", "vocalist")  # add a voice to an existing chord
+loopflow.join("chord-a", "chord-b", nest=True)  # nest chord-b inside chord-a
 loopflow.leave("vocalist")             # vocalist becomes solo again (no stimulus)
 ```
 

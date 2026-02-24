@@ -13,15 +13,16 @@ A chord can optionally have a beat grid — a sequence of beats where each beat 
 ```rust
 enum Wave {
     Voice(WaveData),
-    Chord { data, children, beats: Option<Vec<Beat>> },
+    Chord { data: WaveData, children: Vec<Wave>, beats: Option<Vec<Vec<bool>>> },
 }
-
-struct Beat {
-    active: Vec<bool>,  // positional, one per child
-}
+// beats[beat_index][child_index] = active
 ```
 
 **No grid = all-on every tick.** Backwards compatible. Existing chords behave exactly as before.
+
+**Single-child beat grids are valid.** A chord with one child and a beat grid is a repeat loop — run the same voice N times in sequence.
+
+**No silent beats.** Every beat must have at least one active child. A fully silent beat is wasted execution. Invariant: `beat.active.iter().any(|&on| on)` for every beat.
 
 **The full grid plays as one unit.** A 4-beat grid with 3 voices: the chord runs 4 sequential steps, each step firing the active voices in parallel. When all 4 beats complete, the chord signals "done" to its parent. From the parent's perspective, the grid is one atomic execution — like a single voice that happens to take longer.
 
@@ -69,7 +70,7 @@ Beat grid stored as JSON in the waves table or a separate `beat_grids` table:
 
 ```sql
 -- Option A: column on waves table
-ALTER TABLE waves ADD COLUMN beats TEXT;  -- JSON: [{"active": [true, false, true]}, ...]
+ALTER TABLE waves ADD COLUMN beats TEXT;  -- JSON: [[true, false, true], [false, true, false], ...]
 
 -- Option B: separate table
 CREATE TABLE beat_grids (
@@ -85,10 +86,10 @@ Option A is simpler. The column is NULL for voices and chords without grids.
 ```python
 # Set a 4-beat grid on an existing chord
 loopflow.set_beats("ensemble", [
-    {"active": [True, False, True]},   # beat 1: designer + reviewer
-    {"active": [False, True, False]},  # beat 2: infra only
-    {"active": [True, True, False]},   # beat 3: designer + infra
-    {"active": [False, False, True]},  # beat 4: reviewer only
+    [True,  False, True ],  # beat 1: designer + reviewer
+    [False, True,  False],  # beat 2: infra only
+    [True,  True,  False],  # beat 3: designer + infra
+    [False, False, True ],  # beat 4: reviewer only
 ])
 
 # Clear the grid (back to all-on)
@@ -96,7 +97,7 @@ loopflow.set_beats("ensemble", None)
 ```
 
 ```
-PUT /v0/waves/{wave_id}/beats   { "beats": [...] }
+PUT /v0/waves/{wave_id}/beats   { "beats": [[true, false], [false, true]] }
 DELETE /v0/waves/{wave_id}/beats
 ```
 
@@ -108,6 +109,13 @@ DELETE /v0/waves/{wave_id}/beats
 | 2 | Execution | sequential beat playback in the chord executor |
 | 3 | UI | drum machine grid view in Concerto |
 
+## Invariants
+
+- Every beat has at least one `true` (no silent beats)
+- `beats[i].len() == children.len()` for all `i` (grid width matches child count)
+- Single-child beat grids are valid (repeat semantics)
+- Children can be any Wave variant (Voice, Chord, nested Chord with its own beats)
+
 ## Open questions
 
 - Should beats have names/labels? ("setup", "build", "review" vs just beat 1, 2, 3)
@@ -115,11 +123,13 @@ DELETE /v0/waves/{wave_id}/beats
 - Should the grid auto-resize when children are added/removed via join?
 - Looping: does the grid always loop, or can it play once and stop?
 - Tempo: is every beat one tick, or can beats have different durations?
+- How does `join` interact with BeatGrid? Does joining a voice into a beat grid auto-extend all beats with a new `false` slot?
 
 ## Done when
 
 - Chords can have optional beat grids defining per-beat voice activation
 - Beat grids play sequentially, firing active children in parallel per beat
+- No beat is fully silent
 - Full grid completion counts as one tick from the parent's perspective
-- Nesting works: a beat grid containing a chord plays the child chord's full sequence
-- Default behavior (no grid) is unchanged
+- Nesting works: a beat containing a chord plays the child chord's full sequence
+- Single-voice beat grids work as repeat loops

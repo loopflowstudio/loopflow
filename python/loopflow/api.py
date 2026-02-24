@@ -42,8 +42,8 @@ def create_wave(
     return _client().create_wave(name, repo, flow=flow, direction=direction, area=area)
 
 
-def join(wave_a: str, wave_b: str, name: Optional[str] = None) -> Wave:
-    return _client().join_waves(wave_a, wave_b, name=name)
+def join(wave_a: str, wave_b: str, name: Optional[str] = None, nest: bool = False) -> Wave:
+    return _client().join_waves(wave_a, wave_b, name=name, nest=nest)
 
 
 def leave(wave: str) -> Wave:

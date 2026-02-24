@@ -99,6 +99,8 @@ pub struct JoinWavesRequest {
     wave_a: String,
     wave_b: String,
     name: Option<String>,
+    #[serde(default)]
+    nest: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -377,7 +379,7 @@ pub async fn join_waves_handler(
 
     let result_id = state
         .store
-        .join_waves(&wave_a, &wave_b, payload.name)
+        .join_waves(&wave_a, &wave_b, payload.name, payload.nest)
         .await
         .map_err(map_store_error)?;
 

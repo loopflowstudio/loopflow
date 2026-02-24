@@ -168,8 +168,9 @@ impl Store {
         wave_a: &Wave,
         wave_b: &Wave,
         chord_name: Option<String>,
+        nest: bool,
     ) -> StoreResult<LfdId> {
-        WaveStateStore::join_waves(self, wave_a, wave_b, chord_name).await
+        WaveStateStore::join_waves(self, wave_a, wave_b, chord_name, nest).await
     }
 
     pub async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
@@ -541,6 +542,7 @@ pub trait WaveStateStore: Send + Sync {
         wave_a: &Wave,
         wave_b: &Wave,
         chord_name: Option<String>,
+        nest: bool,
     ) -> StoreResult<LfdId>;
     async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
@@ -696,17 +698,20 @@ impl WaveStateStore for Store {
         wave_a: &Wave,
         wave_b: &Wave,
         chord_name: Option<String>,
+        nest: bool,
     ) -> StoreResult<LfdId> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_a = wave_a.clone();
                 let wave_b = wave_b.clone();
                 run_sqlite(store, move |store| {
-                    store.join_waves(&wave_a, &wave_b, chord_name)
+                    store.join_waves(&wave_a, &wave_b, chord_name, nest)
                 })
                 .await
             }
-            StoreBackend::Postgres(store) => store.join_waves(wave_a, wave_b, chord_name).await,
+            StoreBackend::Postgres(store) => {
+                store.join_waves(wave_a, wave_b, chord_name, nest).await
+            }
         }
     }
 
@@ -2122,7 +2127,7 @@ mod tests {
         store.create_wave(&b).await.expect("create b");
 
         let chord_id = store
-            .join_waves(&a, &b, Some("ensemble".to_string()))
+            .join_waves(&a, &b, Some("ensemble".to_string()), false)
             .await
             .expect("join");
         let chord = store
@@ -2154,7 +2159,7 @@ mod tests {
         store.create_wave(&b).await.expect("create b");
 
         let chord_id = store
-            .join_waves(&a, &b, Some("ensemble".to_string()))
+            .join_waves(&a, &b, Some("ensemble".to_string()), false)
             .await
             .expect("join a+b");
 
@@ -2168,7 +2173,7 @@ mod tests {
             .expect("load")
             .expect("exists");
         let result_id = store
-            .join_waves(&chord, &c, None)
+            .join_waves(&chord, &c, None, false)
             .await
             .expect("join chord+c");
         assert_eq!(result_id, chord_id);
@@ -2198,18 +2203,21 @@ mod tests {
         store.create_wave(&d).await.unwrap();
 
         let chord_a_id = store
-            .join_waves(&a, &b, Some("chord-a".to_string()))
+            .join_waves(&a, &b, Some("chord-a".to_string()), false)
             .await
             .unwrap();
         let chord_b_id = store
-            .join_waves(&c, &d, Some("chord-b".to_string()))
+            .join_waves(&c, &d, Some("chord-b".to_string()), false)
             .await
             .unwrap();
 
         let chord_a = store.get_wave(&chord_a_id).await.unwrap().unwrap();
         let chord_b = store.get_wave(&chord_b_id).await.unwrap().unwrap();
 
-        let result_id = store.join_waves(&chord_a, &chord_b, None).await.unwrap();
+        let result_id = store
+            .join_waves(&chord_a, &chord_b, None, false)
+            .await
+            .unwrap();
         assert_eq!(result_id, chord_a_id);
 
         let merged = store.get_wave(&chord_a_id).await.unwrap().unwrap();
@@ -2231,7 +2239,7 @@ mod tests {
         store.create_wave(&b).await.unwrap();
 
         let chord_id = store
-            .join_waves(&a, &b, Some("ensemble".to_string()))
+            .join_waves(&a, &b, Some("ensemble".to_string()), false)
             .await
             .unwrap();
 
@@ -2261,5 +2269,54 @@ mod tests {
             .await
             .expect_err("should reject");
         assert!(matches!(err, super::StoreError::InvalidData(_)));
+    }
+
+    #[tokio::test]
+    async fn sqlite_join_chord_chord_nests() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let a = make_voice("/repo", "v1", None, 0);
+        let b = make_voice("/repo", "v2", None, 0);
+        let c = make_voice("/repo", "v3", None, 0);
+        let d = make_voice("/repo", "v4", None, 0);
+        store.create_wave(&a).await.unwrap();
+        store.create_wave(&b).await.unwrap();
+        store.create_wave(&c).await.unwrap();
+        store.create_wave(&d).await.unwrap();
+
+        let chord_a_id = store
+            .join_waves(&a, &b, Some("chord-a".to_string()), false)
+            .await
+            .unwrap();
+        let chord_b_id = store
+            .join_waves(&c, &d, Some("chord-b".to_string()), false)
+            .await
+            .unwrap();
+
+        let chord_a = store.get_wave(&chord_a_id).await.unwrap().unwrap();
+        let chord_b = store.get_wave(&chord_b_id).await.unwrap().unwrap();
+
+        // nest=true: B becomes a child of A (not flattened)
+        let result_id = store
+            .join_waves(&chord_a, &chord_b, None, true)
+            .await
+            .unwrap();
+        assert_eq!(result_id, chord_a_id);
+
+        let parent = store.get_wave(&chord_a_id).await.unwrap().unwrap();
+        // A should have 3 children: v1, v2, and nested chord-b
+        assert_eq!(parent.children().len(), 3);
+        assert_eq!(parent.children()[0].name(), "v1");
+        assert_eq!(parent.children()[1].name(), "v2");
+        assert_eq!(parent.children()[2].name(), "chord-b");
+        assert!(parent.children()[2].is_chord());
+        assert_eq!(parent.children()[2].children().len(), 2);
+        assert_eq!(parent.children()[2].children()[0].name(), "v3");
+        assert_eq!(parent.children()[2].children()[1].name(), "v4");
+
+        // chord-b should still exist (as nested child, not deleted)
+        assert!(store.get_wave(&chord_b_id).await.unwrap().is_some());
     }
 }

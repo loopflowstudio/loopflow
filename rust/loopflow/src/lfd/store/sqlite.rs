@@ -372,6 +372,7 @@ impl SqliteStore {
         wave_a: &Wave,
         wave_b: &Wave,
         chord_name: Option<String>,
+        nest: bool,
     ) -> StoreResult<LfdId> {
         match (wave_a.is_chord(), wave_b.is_chord()) {
             // Voice + Voice → create new chord, reparent both
@@ -407,6 +408,18 @@ impl SqliteStore {
                     next_pos,
                 ))?;
                 Ok(wave_b.id().clone())
+            }
+            // Chord + Chord
+            (true, true) if nest => {
+                // Nest: reparent B as a child of A (B keeps its children)
+                self.delete_stimuli_for_wave(wave_b.id())?;
+                let next_pos = wave_a.children().len() as u32;
+                self.upsert_wave(&super::reparented_wave(
+                    wave_b,
+                    Some(wave_a.id().clone()),
+                    next_pos,
+                ))?;
+                Ok(wave_a.id().clone())
             }
             // Chord + Chord → merge B's children into A, delete B
             (true, true) => {

@@ -113,13 +113,55 @@ POST /v0/waves/leave   { "wave": "vocalist" }
 - Leaving produces a solo voice with no stimulus.
 - A single-voice chord is valid (not auto-dissolved).
 
-## Remaining work
+## Changes remaining in this diff
 
-1. **Execution semantics completion (phase 02):** best-effort descendant execution.
-2. **Listen-step behavior (phase 03):** inter-voice communication.
+### 1. Add `nest` parameter to `join`
+
+`join(a, b, nest=false)` — when `nest=true`, B becomes a child of A instead of its children being merged flat.
+
+| nest | Input A | Input B | Result |
+|------|---------|---------|--------|
+| false | Voice | Voice | New chord, both reparented (current) |
+| false | Chord | Voice | Voice absorbed (current) |
+| false | Chord | Chord | B's children merged into A, B deleted (current) |
+| true | Voice | Voice | New chord, both reparented (same as false) |
+| true | Chord | Voice | Voice absorbed (same as false) |
+| true | Chord | Chord | B reparented as child of A (nesting) |
+
+`nest` only changes behavior for chord+chord. Voice+voice and chord+voice are always absorb — nesting a single voice is meaningless.
+
+**Store:** Add `nest: bool` parameter to `join_waves`. When true and both are chords, reparent B directly into A as a child (don't flatten). B keeps its children.
+
+**HTTP:** `POST /v0/waves/join { "wave_a": "...", "wave_b": "...", "nest": true }`
+
+**Python:** `join("ensemble-a", "ensemble-b", nest=True)`
+
+### 2. BeatGrid: metadata on Chord (phase 04 design decision)
+
+Beat grid is an `Option<Vec<Vec<bool>>>` on the Chord variant — a direct matrix:
+
+```rust
+Chord { data: WaveData, children: Vec<Wave>, beats: Option<Vec<Vec<bool>>> }
+// beats[beat_index][child_index] = active
+```
+
+No grid = all-on every tick (backwards compatible). With a grid, the chord plays through beats sequentially.
+
+BeatGrid invariants:
+- No silent beats — every beat must have at least one active child
+- Single-child beat grids are valid (repeat semantics)
+
+**What this means for this diff:** The `nest` parameter on `join` is the preparation — it makes nesting possible, which beat grids need. The `beats` field itself is phase 04 work.
+
+## Remaining work (later phases)
+
+1. **Execution semantics (phase 02):** best-effort descendant execution.
+2. **Listen step (phase 03):** inter-voice communication.
+3. **Beat grid (phase 04):** BeatGrid variant, sequential execution, drum machine UI.
 
 ## Out of scope for this branch
 
 - Voicing template schema/type work
 - Chord management CLI UX expansions
 - Backward compatibility for pre-010 storage layout
+- BeatGrid implementation (phase 04)

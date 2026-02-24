@@ -14,6 +14,10 @@ Fork lifted to the wave level, with three key differences:
 2. **Listening** — fork branches are deaf to each other. Chord voices listen (Phase 03).
 3. **Stimulus ownership** — the chord owns the trigger, not the children.
 
+## What Phase 01 established
+
+The trigger and executor infrastructure is already enum-aware — triggers call `wave.id()`, `wave.name()`, etc. through the accessor methods. The run entrypoint guard (409 for nested waves) is in place. The fork executor (`wave/fork.rs`) was updated to use the new Wave API and is a potential foundation for parallel child execution. The depth cap (`MAX_CHORD_DEPTH = 8`) applies to nesting here too.
+
 ## What to build
 
 ### Iteration cycle
@@ -58,8 +62,9 @@ Phase 03 adds the listen step between trigger and start.
 
 - Timeout: should there be a max wait for the slowest child?
 - Cleanup policy: what happens between iterations (branch cleanup, artifact management)?
-- Cancellation: how does stopping a chord propagate to children?
+- Cancellation: how does stopping a chord propagate to children? The existing `stop_wave` route kills a single process — needs to walk children.
 - Failure status detail beyond `has_failure`: do we add per-child status summary?
+- How much of the fork executor infrastructure can be reused vs. needs new parallel orchestration code?
 
 ## Done when
 

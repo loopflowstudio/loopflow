@@ -47,9 +47,15 @@ Key properties:
 
 | # | Phase | Focus | Status |
 |---|-------|-------|--------|
-| 01 | Data Model | Wave enum (Voice/Chord), SQLite storage, voicing | |
+| 01 | Data Model | Wave enum (Voice/Chord), SQLite storage, voicing | shipped |
 | 02 | Execution | Inherited trigger tick → start all → wait all → mark failure if any | |
 | 03 | Listen Step | Inter-voice communication via PR digestion and plan adaptation | |
+
+### Phase 01 retrospective
+
+Shipped as planned, but wider than expected. The accessor method migration (`wave.field` → `wave.field()`) touched executor, triggers, queue, and HTTP routes — most of the codebase had to adapt to the enum. This means Phase 02 inherits an infrastructure that's already enum-aware: triggers already call `wave.id()`, `wave.name()`, etc. The iteration cycle logic builds on top rather than requiring another migration pass.
+
+Pragmatic additions not in the original plan: depth cap (`MAX_CHORD_DEPTH = 8`), `#[non_exhaustive]` on the Wave enum (forward-looking for the Rhythm variant).
 
 ## Future Directions
 
@@ -72,7 +78,7 @@ Theoretically compelling but alternating execution semantics need more thought. 
 
 ## Open Questions
 
-- CLI/API surface: how do users create and manage chords?
+- CLI/API surface for chord management beyond creation: update children, reorder, remove. Creation exists (`create_chord()` API, `POST /v0/chords`), but management is unbuilt.
 - Cleanup policy between iterations
 - Failure status detail beyond `has_failure`: do we also store per-child failure summary?
 - First iteration: no listen step (nothing to listen to), or a "hello" step?

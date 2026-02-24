@@ -11,7 +11,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::lfd::http::dto::{format_datetime, ErrorResponse};
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
@@ -222,21 +222,26 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
         SessionManagerError::NotFound => api_error(StatusCode::NOT_FOUND, "session not found"),
         SessionManagerError::InvalidState { expected, actual } => api_error(
             StatusCode::CONFLICT,
-            format!("invalid session state: expected {expected}, got {actual:?}"),
+            ApiMessage::Safe(format!(
+                "invalid session state: expected {expected}, got {actual:?}"
+            )),
         ),
         SessionManagerError::UnsupportedProvider(provider) => api_error(
             StatusCode::BAD_REQUEST,
-            format!("unsupported provider: {provider}"),
+            ApiMessage::Safe(format!("unsupported provider: {provider}")),
         ),
         SessionManagerError::WaveRunSessionConflict(wave_run_id) => api_error(
             StatusCode::CONFLICT,
-            format!("wave run already has an active session: {wave_run_id}"),
+            ApiMessage::Safe(format!(
+                "wave run already has an active session: {wave_run_id}"
+            )),
         ),
         SessionManagerError::TurnAlreadyInProgress => {
             api_error(StatusCode::CONFLICT, "turn already in progress")
         }
-        SessionManagerError::Harness(message) => {
-            api_error(StatusCode::INTERNAL_SERVER_ERROR, message)
-        }
+        SessionManagerError::Harness(message) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(message),
+        ),
     }
 }

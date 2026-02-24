@@ -135,41 +135,78 @@ pub fn router(state: HttpState) -> Router {
         .with_state(state)
 }
 
+/// Distinguishes safe (known) messages from untrusted external content.
+///
+/// Static string literals auto-convert to `Safe` via `From<&'static str>`.
+/// Dynamic strings from external systems (DB errors, path operations) should
+/// use `Untrusted` to trigger sanitization.
+#[derive(Debug)]
+pub enum ApiMessage {
+    /// Known-safe content: static strings, domain identifiers. Passed through as-is.
+    Safe(String),
+    /// External content that may contain secrets or paths. Sanitized before exposure.
+    Untrusted(String),
+}
+
+impl From<&'static str> for ApiMessage {
+    fn from(s: &'static str) -> Self {
+        ApiMessage::Safe(s.to_string())
+    }
+}
+
 pub fn api_error(
     status: StatusCode,
-    message: impl Into<String>,
+    message: impl Into<ApiMessage>,
 ) -> (StatusCode, Json<ErrorResponse>) {
-    let raw = message.into();
-    let sanitized = sanitize_operator_message(&raw);
+    let message = message.into();
     if status.is_server_error() {
+        let raw = match &message {
+            ApiMessage::Safe(raw) | ApiMessage::Untrusted(raw) => raw,
+        };
         tracing::warn!(status = %status, error = %raw, "internal API error");
     }
+    let display = match message {
+        ApiMessage::Safe(s) => s,
+        ApiMessage::Untrusted(s) => sanitize_operator_message(&s),
+    };
     (
         status,
         Json(ErrorResponse {
             error: ErrorDetail {
                 error_type: "invalid_request_error".to_string(),
-                message: sanitized,
+                message: display,
                 param: None,
             },
         }),
     )
 }
 
-pub fn api_error_response(status: StatusCode, message: impl Into<String>) -> Response {
+pub fn api_error_response(status: StatusCode, message: impl Into<ApiMessage>) -> Response {
     api_error(status, message).into_response()
 }
 
 pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
     match err {
         StoreError::NotFound => api_error(StatusCode::NOT_FOUND, "not found"),
-        StoreError::InvalidData(message) => api_error(StatusCode::BAD_REQUEST, message),
-        StoreError::Serde(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
-        StoreError::Sqlite(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
-        StoreError::Postgres(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
-        StoreError::PostgresPool(err) => {
-            api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+        StoreError::InvalidData(message) => {
+            api_error(StatusCode::BAD_REQUEST, ApiMessage::Safe(message))
         }
+        StoreError::Serde(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
+        StoreError::Sqlite(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
+        StoreError::Postgres(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
+        StoreError::PostgresPool(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
     }
 }
 
@@ -407,5 +444,52 @@ mod tests {
         assert_eq!(decode_query_key("%"), None);
         assert_eq!(decode_query_key("%2"), None);
         assert_eq!(decode_query_key("%zz"), None);
+    }
+
+    #[test]
+    fn api_message_safe_passes_through_unchanged() {
+        let (_, json) = api_error(StatusCode::NOT_FOUND, ApiMessage::Safe("not found".into()));
+        assert_eq!(json.error.message, "not found");
+    }
+
+    #[test]
+    fn api_message_untrusted_sanitizes_paths() {
+        let raw = format!("error at /tmp/private/data.db");
+        let (_, json) = api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(raw),
+        );
+        assert!(!json.error.message.contains("/tmp/private/data.db"));
+        assert!(json.error.message.contains("[REDACTED_PATH]"));
+    }
+
+    #[test]
+    fn api_message_from_static_str_is_safe() {
+        let msg: ApiMessage = "not found".into();
+        let (_, json) = api_error(StatusCode::NOT_FOUND, msg);
+        assert_eq!(json.error.message, "not found");
+    }
+
+    #[test]
+    fn map_store_error_sanitizes_db_errors() {
+        let err = StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(1),
+            Some("no such table: /tmp/secret/db.sqlite".to_string()),
+        ));
+        let (status, json) = map_store_error(err);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!json.error.message.contains("/tmp/secret/db.sqlite"));
+    }
+
+    #[test]
+    fn map_store_error_passes_domain_errors_through() {
+        let (status, json) = map_store_error(StoreError::NotFound);
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(json.error.message, "not found");
+
+        let (status, json) =
+            map_store_error(StoreError::InvalidData("invalid wave name".to_string()));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json.error.message, "invalid wave name");
     }
 }

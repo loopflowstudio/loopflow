@@ -27,8 +27,8 @@ const THROTTLE_WINDOW: Duration = Duration::from_secs(60);
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum AuthProvider {
-    /// Local mode: loopback only, no remote access.
-    Local,
+    /// Local mode: loopback only, session token required.
+    Local { session_token: SecretString },
     /// Validate against a pre-shared static token.
     Static { token: SecretString },
     /// Validate via loopflow.studio registration.
@@ -120,8 +120,10 @@ pub async fn auth_middleware(
     }
 
     let auth_result = match &state.auth {
-        AuthProvider::Local => authorize_local(state.session_token.as_ref(), provided_token),
-        AuthProvider::Static { token } => authorize_static(token, provided_token),
+        AuthProvider::Local { session_token } => {
+            authorize_expected_token(session_token, provided_token)
+        }
+        AuthProvider::Static { token } => authorize_expected_token(token, provided_token),
         AuthProvider::Studio { validator } => match provided_token {
             Some(token) => {
                 if validator.validate(token).await {
@@ -152,24 +154,6 @@ pub async fn auth_middleware(
             }
         }
     }
-}
-
-fn authorize_local(
-    session_token: Option<&SecretString>,
-    provided_token: Option<&str>,
-) -> Result<(), (StatusCode, &'static str)> {
-    let Some(expected) = session_token else {
-        return Err((StatusCode::FORBIDDEN, "session token not configured"));
-    };
-
-    authorize_expected_token(expected, provided_token)
-}
-
-fn authorize_static(
-    static_token: &SecretString,
-    provided_token: Option<&str>,
-) -> Result<(), (StatusCode, &'static str)> {
-    authorize_expected_token(static_token, provided_token)
 }
 
 fn authorize_expected_token(
@@ -305,51 +289,22 @@ mod tests {
     #[test]
     fn valid_token_is_allowed() {
         let expected = token("session-token");
-        let result = authorize_local(Some(&expected), Some("session-token"));
+        let result = authorize_expected_token(&expected, Some("session-token"));
         assert_eq!(result, Ok(()));
     }
 
     #[test]
     fn invalid_token_is_rejected() {
         let expected = token("session-token");
-        let result = authorize_local(Some(&expected), Some("wrong"));
+        let result = authorize_expected_token(&expected, Some("wrong"));
         assert_eq!(result, Err((StatusCode::UNAUTHORIZED, "invalid token")));
     }
 
     #[test]
     fn missing_token_is_rejected() {
         let expected = token("session-token");
-        let result = authorize_local(Some(&expected), None);
+        let result = authorize_expected_token(&expected, None);
         assert_eq!(result, Err((StatusCode::UNAUTHORIZED, "missing token")));
-    }
-
-    #[test]
-    fn local_provider_rejects_static_provider_token() {
-        let session_token = token("session-token");
-        let result = authorize_local(Some(&session_token), Some("static-token"));
-        assert_eq!(result, Err((StatusCode::UNAUTHORIZED, "invalid token")));
-    }
-
-    #[test]
-    fn unconfigured_session_token_is_forbidden() {
-        let result = authorize_local(None, Some("any-token"));
-        assert_eq!(
-            result,
-            Err((StatusCode::FORBIDDEN, "session token not configured"))
-        );
-    }
-
-    #[test]
-    fn static_provider_accepts_static_token_only() {
-        let static_token = token("static-token");
-        assert_eq!(
-            authorize_static(&static_token, Some("static-token")),
-            Ok(())
-        );
-        assert_eq!(
-            authorize_static(&static_token, Some("session-token")),
-            Err((StatusCode::UNAUTHORIZED, "invalid token"))
-        );
     }
 
     #[test]

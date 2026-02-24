@@ -12,7 +12,6 @@ use crate::lfd::registration::RegistrationClient;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::SessionManager;
 use crate::lfd::store::SharedStore;
-use secrecy::SecretString;
 
 #[derive(Clone)]
 pub struct HttpState {
@@ -23,7 +22,6 @@ pub struct HttpState {
     #[allow(dead_code)] // Reserved for output streaming endpoints.
     pub output_hub: OutputHub,
     pub auth: AuthProvider,
-    pub session_token: Option<SecretString>,
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
     pub github: GitHubConfig,

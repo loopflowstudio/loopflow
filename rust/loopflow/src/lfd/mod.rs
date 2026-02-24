@@ -44,7 +44,7 @@ pub async fn setup_auth(
     Option<(String, String)>,
 ) {
     match config.auth.provider.as_str() {
-        "local" => (AuthProvider::Local, None, None),
+        "local" => (setup_local_auth(), None, None),
         "static" => {
             let token = config
                 .auth
@@ -66,6 +66,24 @@ pub async fn setup_auth(
             std::process::exit(1);
         }
     }
+}
+
+pub fn setup_local_auth() -> AuthProvider {
+    let session_token = match self::session_token::generate_and_write() {
+        Ok(token) => {
+            tracing::info!(
+                path = %self::session_token::token_path().display(),
+                "session token written"
+            );
+            secrecy::SecretString::from(token)
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "failed to write session token");
+            std::process::exit(1);
+        }
+    };
+
+    AuthProvider::Local { session_token }
 }
 
 async fn setup_studio_registration(

@@ -15,7 +15,7 @@ use crate::lfd::github::{
     GitHubCheckRunEvent, GitHubPullRequestEvent,
 };
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, ApiResult};
+use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
@@ -63,8 +63,12 @@ fn canonical_git_hook_repo(
         ));
     }
 
-    let canonical = canonicalize_existing_path(path)
-        .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+    let canonical = canonicalize_existing_path(path).map_err(|err| {
+        api_error(
+            StatusCode::BAD_REQUEST,
+            ApiMessage::Untrusted(err.to_string()),
+        )
+    })?;
     if !canonical.is_dir() {
         return Err(api_error(
             StatusCode::BAD_REQUEST,
@@ -106,8 +110,12 @@ pub async fn github_webhook_handler(
         .to_string();
 
     if event_kind.eq_ignore_ascii_case("check_run") {
-        let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body)
-            .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+        let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body).map_err(|err| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                ApiMessage::Untrusted(err.to_string()),
+            )
+        })?;
 
         if event.action != "completed"
             || !is_failed_check_run(
@@ -129,7 +137,12 @@ pub async fn github_webhook_handler(
                 Some(pr.number),
             )
             .await
-            .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+            .map_err(|err| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiMessage::Untrusted(err),
+                )
+            })?;
 
             for target in targets {
                 let emitted = emit_ci_failure(
@@ -158,8 +171,12 @@ pub async fn github_webhook_handler(
     }
 
     if event_kind.eq_ignore_ascii_case("pull_request") {
-        let event = serde_json::from_slice::<GitHubPullRequestEvent>(&body)
-            .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
+        let event = serde_json::from_slice::<GitHubPullRequestEvent>(&body).map_err(|err| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                ApiMessage::Untrusted(err.to_string()),
+            )
+        })?;
         if event.action != "closed" || !event.pull_request.merged {
             return Ok(Json(
                 serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
@@ -177,7 +194,12 @@ pub async fn github_webhook_handler(
             event.pull_request.number,
         )
         .await
-        .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+        .map_err(|err| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiMessage::Untrusted(err),
+            )
+        })?;
         let mut processed = 0_u32;
         for wave_id in wave_ids {
             let handled = crate::lfd::queue::handle_pr_merged(
@@ -188,7 +210,12 @@ pub async fn github_webhook_handler(
                 merged_at,
             )
             .await
-            .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+            .map_err(|err| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiMessage::Untrusted(err),
+                )
+            })?;
             if handled {
                 processed += 1;
             }
@@ -467,8 +494,9 @@ mod tests {
             executor,
             event_hub,
             output_hub,
-            auth: AuthProvider::Local,
-            session_token: None,
+            auth: AuthProvider::Local {
+                session_token: secrecy::SecretString::from("test-token".to_string()),
+            },
             registration: None,
             started_at: OffsetDateTime::now_utc(),
             github: GitHubConfig::default(),

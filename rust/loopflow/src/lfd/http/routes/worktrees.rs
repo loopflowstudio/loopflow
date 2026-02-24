@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::engine::worktrees::{list_worktrees, main_repo_root, worktree_short_name_for_main_repo};
 use crate::lfd::http::dto::{ListResponse, WorktreeDto};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 
 #[derive(Debug, Deserialize)]
 pub struct ListWorktreesQuery {
@@ -16,7 +16,10 @@ pub struct ListWorktreesQuery {
 fn internal_error(
     err: impl std::fmt::Display,
 ) -> (StatusCode, Json<crate::lfd::http::dto::ErrorResponse>) {
-    api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ApiMessage::Untrusted(err.to_string()),
+    )
 }
 
 pub async fn list_worktrees_handler(

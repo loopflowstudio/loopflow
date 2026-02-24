@@ -136,6 +136,12 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
+    /// Generate release notes
+    Release {
+        /// Bump type or explicit version (default: patch)
+        #[arg(default_value = "patch")]
+        version: String,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),

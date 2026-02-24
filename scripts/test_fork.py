@@ -4,17 +4,16 @@
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 import sys
-from pathlib import Path
 
 from lib.fork_scenarios import (
     build_lfd,
     create_and_run_wave,
     ensure_agent_image,
     ensure_postgres,
+    has_claude_credentials,
     start_lfd_container_mode,
+    stop_process,
     wait_for_completion,
 )
 
@@ -27,7 +26,7 @@ def main() -> int:
     parser.add_argument("--skip-build", action="store_true")
     args = parser.parse_args()
 
-    if not _has_claude_credentials():
+    if not has_claude_credentials():
         return _fail("no Claude credentials found (~/.claude/ or ANTHROPIC_API_KEY)")
 
     try:
@@ -49,11 +48,7 @@ def main() -> int:
         output = str(exc)
         success = False
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        stop_process(process)
 
     if success:
         print("\nPASS: fork execution completed successfully")
@@ -68,13 +63,6 @@ def main() -> int:
             print(f"  {line.strip()}")
 
     return _fail("fork execution failed (see above)")
-
-
-def _has_claude_credentials() -> bool:
-    claude_dir = Path.home() / ".claude"
-    has_oauth = claude_dir.exists() and any(claude_dir.iterdir())
-    has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    return has_oauth or has_api_key
 
 
 def _fail(message: str) -> int:

@@ -19,7 +19,10 @@ WAVE_NAME = "fork-test"
 
 
 def ensure_postgres() -> None:
-    result = _run_capture(["docker", "inspect", PG_CONTAINER, "--format", "{{.State.Running}}"])
+    result = _run(
+        ["docker", "inspect", PG_CONTAINER, "--format", "{{.State.Running}}"],
+        capture_output=True,
+    )
     if result.returncode == 0 and result.stdout.strip() == "true":
         return
 
@@ -54,8 +57,9 @@ def ensure_postgres() -> None:
     print("Waiting for postgres...")
     for _ in range(30):
         time.sleep(1)
-        check = _run_capture(
-            ["docker", "inspect", PG_CONTAINER, "--format", "{{.State.Health.Status}}"]
+        check = _run(
+            ["docker", "inspect", PG_CONTAINER, "--format", "{{.State.Health.Status}}"],
+            capture_output=True,
         )
         if check.stdout.strip() == "healthy":
             return
@@ -64,7 +68,7 @@ def ensure_postgres() -> None:
 
 
 def ensure_agent_image() -> None:
-    result = _run_capture(["docker", "image", "inspect", "loopflow/agent:latest"])
+    result = _run(["docker", "image", "inspect", "loopflow/agent:latest"], capture_output=True)
     if result.returncode == 0:
         return
 
@@ -82,7 +86,7 @@ def build_lfd() -> None:
 
 
 def kill_existing_lfd() -> None:
-    result = _run_capture(["lsof", "-ti", ":2486"])
+    result = _run(["lsof", "-ti", ":2486"], capture_output=True)
     if result.returncode != 0 or not result.stdout.strip():
         return
 
@@ -116,12 +120,12 @@ def start_lfd_container_mode() -> subprocess.Popen[str]:
 
     for _ in range(30):
         time.sleep(0.5)
-        check = _run_capture(["curl", "-sf", "http://127.0.0.1:2486/health"])
+        check = _run(["curl", "-sf", "http://127.0.0.1:2486/health"], capture_output=True)
         if check.returncode == 0:
             print("lfd ready")
             return process
 
-    process.terminate()
+    stop_process(process)
     stdout = process.stdout.read() if process.stdout else ""
     raise RuntimeError(f"lfd did not become ready.\nOutput:\n{stdout[:2000]}")
 
@@ -137,6 +141,24 @@ def create_and_run_wave(flow: str, direction: str, wave_name: str = WAVE_NAME) -
     loopflow_api.create_wave(wave_name, repo=repo, flow=flow, direction=[direction])
     loopflow_api.run_wave(wave_name)
     print(f"Wave '{wave_name}' started with flow '{flow}'")
+
+
+def has_claude_credentials() -> bool:
+    claude_dir = Path.home() / ".claude"
+    has_oauth = claude_dir.exists() and any(claude_dir.iterdir())
+    has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return has_oauth or has_api_key
+
+
+def stop_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
 
 
 def wait_for_completion(process: subprocess.Popen[str], timeout: int) -> tuple[bool, str]:
@@ -201,9 +223,5 @@ def wait_for_completion(process: subprocess.Popen[str], timeout: int) -> tuple[b
     return False, "".join(lines) + "\n[TIMEOUT]"
 
 
-def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, text=True, **kwargs)
-
-
-def _run_capture(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+def _run(cmd: list[str], capture_output: bool = False, **kwargs) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, capture_output=capture_output, text=True, **kwargs)

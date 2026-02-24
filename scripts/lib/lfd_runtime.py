@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Optional
+from typing import IO
 
 import httpx
 
@@ -32,9 +32,9 @@ class LfdRuntime:
     repo_dir: Path = field(init=False)
     log_path: Path = field(init=False)
 
-    _temp_dir: Optional[tempfile.TemporaryDirectory[str]] = field(init=False, default=None)
-    _log_handle: Optional[IO[str]] = field(init=False, default=None)
-    _process: Optional[subprocess.Popen[str]] = field(init=False, default=None)
+    _temp_dir: tempfile.TemporaryDirectory[str] | None = field(init=False, default=None)
+    _log_handle: IO[str] | None = field(init=False, default=None)
+    _process: subprocess.Popen[str] | None = field(init=False, default=None)
 
     def __enter__(self) -> "LfdRuntime":
         self.start()

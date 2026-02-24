@@ -40,3 +40,24 @@ Detailed design: `scratch/agentapi-claude-adapter.md`
 - Concurrent input while turn is active returns conflict/busy
 - `DELETE /sessions/{id}` stops any in-flight Claude process
 - `cargo test --all` and `cargo clippy -- -D warnings` pass
+
+## Shipped
+
+All planned pieces landed: Claude adapter (828 lines), NDJSON stream parser, tool name → item type inference, `--resume` continuity via persisted `provider_session_id`, config passthrough, and provider dispatch. Design review in `scratch/jack-heart.agentapi.20260223_1429-review.md`.
+
+**Process-per-turn is simpler than expected.** `start()` validates the binary; `send_input()` spawns a fresh process each turn. No persistent subprocess management, no custom IPC. `--resume` handles continuity. The model maps cleanly to the existing `SessionAdapter` trait — `stop()` just kills the current process if one is running.
+
+**Adapter abstraction held.** Adding Claude required one new match arm in `default_create_adapter()` and implementing the three-method trait. No changes to `SessionManager`, the bridge task, or the event persistence layer. The function pointer dispatch (`CreateAdapterFn`) worked exactly as Phase 01 designed it.
+
+**No `DiffUpdated` for Claude.** Claude doesn't emit a turn-level diff like Codex's `turn/diff/updated`. Concerto UI (Phase 03) must not rely on `DiffUpdated` for core functionality — it's provider-dependent.
+
+**Tool name inference is practical but manually maintained.** `Bash` → `Command`, `Edit`/`Write`/`NotebookEdit` → `File`, everything else → `Tool`. New Claude tools would need explicit mapping. Acceptable for now.
+
+**Open questions partially answered:**
+- `--resume` works for multi-turn continuity — `provider_session_id` persists to DB and is passed on subsequent turns. Long-session degradation (many turns) is untested.
+- Process-per-turn startup latency exists but hasn't been measured in interactive use. Pooling is possible future work if it's a problem.
+- `--append-system-prompt` is wired but not yet validated in real interactive sessions.
+
+**Known gaps for Phase 04:**
+- Reader-task-stop race: `stop()` kills the child and aborts the reader, but a normal exit between kill and abort can produce a stale `TurnCompleted(Completed)` event. The `AtomicBool` guard prevents state corruption but event ordering may be off.
+- Accumulated `input_json_delta` parsing drops malformed JSON silently (`.ok()`). A crash mid-tool produces no error event for that tool.

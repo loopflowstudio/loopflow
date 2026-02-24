@@ -17,20 +17,6 @@ fn write_claude_script(output: &str) -> String {
     format!("#!/bin/sh\ncat <<'EOF'\n{output}\nEOF\n")
 }
 
-fn run_git(repo: &TestRepo, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(repo.path())
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 fn git_output(repo: &TestRepo, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
@@ -59,7 +45,7 @@ fn release_generates_notes_and_opens_pr() {
     ]);
 
     let repo = TestRepo::new();
-    run_git(&repo, &["tag", "v0.8.0"]);
+    let _ = git_output(&repo, &["tag", "v0.8.0"]);
 
     let url = release(repo.path(), "v0.9.1", &NullProgress).expect("release should succeed");
 
@@ -89,7 +75,7 @@ fn release_keeps_existing_header() {
     ]);
 
     let repo = TestRepo::new();
-    run_git(&repo, &["tag", "v0.9.1"]);
+    let _ = git_output(&repo, &["tag", "v0.9.1"]);
 
     release(repo.path(), "0.9.2", &NullProgress).expect("release should succeed");
 

@@ -5,12 +5,13 @@ use serde::Deserialize;
 
 use crate::engine::agent::{launch_agent, LaunchConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
+use crate::engine::command::run_command;
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::get_default_branch;
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::util::{command_exists, stderr_from_output};
+use crate::ops::util::command_exists;
 
 /// A merged PR with enough context for release notes.
 #[derive(Debug, Deserialize)]
@@ -40,7 +41,7 @@ pub fn release(repo: &Path, version: &str, progress: &impl Progress) -> OpsResul
     write_release_notes(repo, &notes, &version)?;
 
     progress.status("Creating release PR...");
-    create_release_pr(repo, &version, progress)
+    create_release_pr(repo, &version)
 }
 
 fn normalize_version(version: &str) -> String {
@@ -48,8 +49,7 @@ fn normalize_version(version: &str) -> String {
 }
 
 fn latest_tag(repo: &Path) -> OpsResult<String> {
-    let output = run_checked(repo, "git", &["describe", "--tags", "--abbrev=0"])?;
-    let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let tag = run_stdout(repo, "git", &["describe", "--tags", "--abbrev=0"])?;
     if tag.is_empty() {
         return Err(OpsError::Message(
             "no previous tag found; create a tag before running release".to_string(),
@@ -59,10 +59,7 @@ fn latest_tag(repo: &Path) -> OpsResult<String> {
 }
 
 fn merged_prs_since(repo: &Path, tag: &str) -> OpsResult<Vec<MergedPr>> {
-    let tagged_at = run_checked(repo, "git", &["log", "-1", "--format=%aI", tag])?;
-    let tagged_at = String::from_utf8_lossy(&tagged_at.stdout)
-        .trim()
-        .to_string();
+    let tagged_at = run_stdout(repo, "git", &["log", "-1", "--format=%aI", tag])?;
     if tagged_at.is_empty() {
         return Err(OpsError::Message(format!(
             "could not determine merge date for tag {tag}"
@@ -79,7 +76,7 @@ fn merged_prs_since(repo: &Path, tag: &str) -> OpsResult<Vec<MergedPr>> {
     let base_branch = get_default_branch(&main_repo)?;
     let search = format!("merged:>={date}");
 
-    let output = run_checked(
+    let output = run_stdout(
         repo,
         "gh",
         &[
@@ -98,7 +95,7 @@ fn merged_prs_since(repo: &Path, tag: &str) -> OpsResult<Vec<MergedPr>> {
         ],
     )?;
 
-    let mut prs: Vec<MergedPr> = serde_json::from_slice(&output.stdout)
+    let mut prs: Vec<MergedPr> = serde_json::from_str(&output)
         .map_err(|err| OpsError::Parse(format!("failed to parse merged PR list: {err}")))?;
     prs.reverse();
     Ok(prs)
@@ -132,10 +129,8 @@ fn generate_release_notes(
         auto: true,
         stream: false,
         skip_permissions: true,
-        model_variant: None,
         chrome: config.chrome,
         cwd: Some(repo.to_path_buf()),
-        context_file: None,
         ..Default::default()
     };
 
@@ -183,7 +178,7 @@ fn write_release_notes(repo: &Path, notes: &str, version: &str) -> OpsResult<()>
     Ok(())
 }
 
-fn create_release_pr(repo: &Path, version: &str, progress: &impl Progress) -> OpsResult<String> {
+fn create_release_pr(repo: &Path, version: &str) -> OpsResult<String> {
     let branch = format!("release/v{version}");
 
     run_checked(repo, "git", &["checkout", "-B", &branch])?;
@@ -199,20 +194,13 @@ fn create_release_pr(repo: &Path, version: &str, progress: &impl Progress) -> Op
     run_checked(repo, "git", &["commit", "-m", &commit_message])?;
     run_checked(repo, "git", &["push", "-u", "origin", &branch])?;
 
-    let create_output = run_checked(
+    let url = run_stdout(
         repo,
         "gh",
         &["pr", "create", "--fill", "--label", "release"],
     )?;
-    let url = String::from_utf8_lossy(&create_output.stdout)
-        .trim()
-        .to_string();
 
     run_checked(repo, "gh", &["pr", "merge", "--auto", "--squash"])?;
-
-    if url.is_empty() {
-        progress.error("Release PR created but URL was empty");
-    }
 
     Ok(url)
 }
@@ -226,21 +214,15 @@ fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
 }
 
 fn run_checked(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
-    let output = Command::new(command)
-        .args(args)
-        .current_dir(repo)
-        .output()?;
-    if output.status.success() {
-        Ok(output)
-    } else {
-        let command_line = if args.is_empty() {
-            command.to_string()
-        } else {
-            format!("{} {}", command, args.join(" "))
-        };
-        Err(OpsError::CommandFailed {
-            command: command_line,
-            stderr: stderr_from_output(&output),
-        })
-    }
+    let mut cmd = Command::new(command);
+    cmd.args(args).current_dir(repo);
+    run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+        command: err.command_line(),
+        stderr: err.stderr,
+    })
+}
+
+fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
+    let output = run_checked(repo, command, args)?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

@@ -154,30 +154,17 @@ class TestClientResponses:
         assert "area" not in received
         client.close()
 
-    def test_join_waves_sends_correct_body(self):
+    def test_add_stimulus_with_listen_source_sends_correct_body(self):
         received = {}
 
         def handler(request):
             received.update(json.loads(request.content))
-            return httpx.Response(200, json=WAVE_MINIMAL)
+            return httpx.Response(200, json={"id": "stim-1", "kind": "listen"})
 
         client = _mock_client(handler)
-        client.join_waves("designer", "infra", name="ensemble")
-        assert received["wave_a"] == "designer"
-        assert received["wave_b"] == "infra"
-        assert received["name"] == "ensemble"
-        client.close()
-
-    def test_leave_wave_sends_correct_body(self):
-        received = {}
-
-        def handler(request):
-            received.update(json.loads(request.content))
-            return httpx.Response(200, json=WAVE_MINIMAL)
-
-        client = _mock_client(handler)
-        client.leave_wave("designer")
-        assert received["wave"] == "designer"
+        client.add_stimulus("designer", "listen", source_wave_id="infra")
+        assert received["kind"] == "listen"
+        assert received["source_wave_id"] == "infra"
         client.close()
 
     def test_next_wave(self):

@@ -14,6 +14,7 @@ pub enum StimulusKind {
     Loop = 2,
     Watch = 3,
     Cron = 4,
+    Listen = 5,
 }
 
 impl StimulusKind {
@@ -23,6 +24,7 @@ impl StimulusKind {
             2 => Self::Loop,
             3 => Self::Watch,
             4 => Self::Cron,
+            5 => Self::Listen,
             _ => Self::Unspecified,
         }
     }
@@ -36,8 +38,9 @@ impl StimulusKind {
 pub struct Stimulus {
     pub id: LfdId,
     pub wave_id: LfdId,
+    pub source_wave_id: Option<LfdId>,
     pub kind: StimulusKind,
-    pub cron: String,
+    pub cron: Option<String>,
     pub last_main_sha: Option<String>,
     pub last_triggered_at: Option<i64>,
     #[serde(with = "time::serde::rfc3339::option")]
@@ -56,8 +59,9 @@ impl Stimulus {
         Self {
             id,
             wave_id,
+            source_wave_id: None,
             kind,
-            cron: String::new(),
+            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -87,5 +91,16 @@ impl PendingActivation {
             to_sha: String::new(),
             queued_at: OffsetDateTime::now_utc().unix_timestamp(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StimulusKind;
+
+    #[test]
+    fn listen_stimulus_kind_storage_value_is_stable() {
+        assert_eq!(StimulusKind::Listen.as_i32(), 5);
+        assert_eq!(StimulusKind::from_i32(5), StimulusKind::Listen);
     }
 }

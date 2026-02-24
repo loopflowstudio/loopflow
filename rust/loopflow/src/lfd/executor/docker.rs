@@ -642,7 +642,7 @@ impl DockerExecutor {
 
         if let Some(wave_status) = next_wave_status {
             if let Some(mut wave) = self.store.get_wave(wave_id).await? {
-                wave.data_mut().status = wave_status;
+                wave.status = wave_status;
                 let _ = self.store.update_wave(&wave).await;
             }
         }
@@ -670,7 +670,7 @@ impl DockerExecutor {
 
                 if should_fail_wave {
                     if let Some(mut wave) = self.store.get_wave(&run.wave_id).await? {
-                        wave.data_mut().status = WaveStatus::Failed;
+                        wave.status = WaveStatus::Failed;
                         let _ = self.store.update_wave(&wave).await;
                     }
                 }
@@ -2167,7 +2167,7 @@ mod tests {
     use super::*;
     use crate::lfd::config::{ExecutorLimitsConfig, ExecutorType};
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{WaveData, WaveRunKind, WaveRunSnapshot};
+    use crate::lfd::types::{WaveRunKind, WaveRunSnapshot};
     use std::io::Cursor;
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
@@ -2463,7 +2463,7 @@ mod tests {
         repo: &Path,
         name: &str,
     ) -> (Wave, WaveRun) {
-        let wave = Wave::Voice(WaveData {
+        let wave = Wave {
             id: LfdId::new(),
             name: name.to_string(),
             repo: repo.to_string_lossy().to_string(),
@@ -2473,9 +2473,7 @@ mod tests {
             status: WaveStatus::Running,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        });
+        };
         store
             .create_wave(&wave)
             .await
@@ -2675,7 +2673,7 @@ mod tests {
                 .expect("db"),
         );
 
-        let wave = Wave::Voice(WaveData {
+        let wave = Wave {
             id: LfdId::new(),
             name: "completed-wave".to_string(),
             repo: tmp.path().to_string_lossy().to_string(),
@@ -2685,9 +2683,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        });
+        };
         store
             .create_wave(&wave)
             .await

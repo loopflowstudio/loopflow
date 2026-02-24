@@ -222,7 +222,7 @@ impl SidecarKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WaveData {
+pub struct Wave {
     pub id: LfdId,
     pub name: String,
     pub repo: String,
@@ -233,27 +233,12 @@ pub struct WaveData {
     pub iteration: u32,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
-    pub parent_id: Option<LfdId>,
-    pub position: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "wave_type", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum Wave {
-    Voice(WaveData),
-    Chord {
-        #[serde(flatten)]
-        data: WaveData,
-        #[serde(default)]
-        children: Vec<Wave>,
-    },
 }
 
 impl Wave {
     #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, name: String, repo: String) -> Self {
-        Self::Voice(WaveData {
+        Self {
             id,
             name,
             repo,
@@ -263,91 +248,43 @@ impl Wave {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        })
-    }
-
-    pub fn data(&self) -> &WaveData {
-        match self {
-            Self::Voice(data) | Self::Chord { data, .. } => data,
-        }
-    }
-
-    pub fn data_mut(&mut self) -> &mut WaveData {
-        match self {
-            Self::Voice(data) | Self::Chord { data, .. } => data,
         }
     }
 
     pub fn id(&self) -> &LfdId {
-        &self.data().id
+        &self.id
     }
 
     pub fn name(&self) -> &String {
-        &self.data().name
+        &self.name
     }
 
     pub fn repo(&self) -> &String {
-        &self.data().repo
+        &self.repo
     }
 
     pub fn flow(&self) -> &String {
-        &self.data().flow
+        &self.flow
     }
 
     pub fn direction(&self) -> &Vec<String> {
-        &self.data().direction
+        &self.direction
     }
 
     pub fn area(&self) -> &Vec<String> {
-        &self.data().area
+        &self.area
     }
 
     pub fn status(&self) -> WaveStatus {
-        self.data().status
+        self.status
     }
 
     pub fn iteration(&self) -> u32 {
-        self.data().iteration
+        self.iteration
     }
 
     pub fn created_at(&self) -> Option<OffsetDateTime> {
-        self.data().created_at
-    }
-
-    pub fn parent_id(&self) -> &Option<LfdId> {
-        &self.data().parent_id
-    }
-
-    pub fn position(&self) -> u32 {
-        self.data().position
-    }
-
-    pub fn is_chord(&self) -> bool {
-        matches!(self, Self::Chord { .. })
-    }
-
-    pub fn wave_type_i32(&self) -> i32 {
-        if self.is_chord() {
-            2
-        } else {
-            1
-        }
-    }
-
-    pub fn children(&self) -> &[Wave] {
-        match self {
-            Self::Voice(_) => &[],
-            Self::Chord { children, .. } => children,
-        }
-    }
-
-    pub fn children_mut(&mut self) -> Option<&mut Vec<Wave>> {
-        match self {
-            Self::Voice(_) => None,
-            Self::Chord { children, .. } => Some(children),
-        }
+        self.created_at
     }
 }
 

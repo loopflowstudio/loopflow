@@ -11,8 +11,7 @@ pub mod ws;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveChildDto,
-    WaveDto,
+    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -116,11 +115,6 @@ pub async fn build_wave_dto(
     Ok(WaveDto {
         id: wave.id().to_string(),
         object: "wave".to_string(),
-        wave_type: if wave.is_chord() {
-            "chord".to_string()
-        } else {
-            "voice".to_string()
-        },
         name: wave.name().clone(),
         repo: wave.repo().clone(),
         flow: wave.flow().clone(),
@@ -129,8 +123,6 @@ pub async fn build_wave_dto(
         created_at: format_datetime(wave.created_at()),
         status: wave.status().as_str().to_string(),
         iteration: wave.iteration(),
-        parent_id: wave.parent_id().as_ref().map(ToString::to_string),
-        position: wave.position(),
         local_worktree,
         remote_branch,
         commits,
@@ -141,24 +133,6 @@ pub async fn build_wave_dto(
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
         stimuli,
         active_run,
-        children: wave
-            .children()
-            .iter()
-            .map(|child| WaveChildDto {
-                id: child.id().to_string(),
-                wave_type: if child.is_chord() {
-                    "chord".to_string()
-                } else {
-                    "voice".to_string()
-                },
-                name: child.name().clone(),
-                flow: child.flow().clone(),
-                direction: child.direction().clone(),
-                area: child.area().clone(),
-                status: child.status().as_str().to_string(),
-                position: child.position(),
-            })
-            .collect(),
     })
 }
 
@@ -382,7 +356,7 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Wave, WaveData, WaveRun, WaveRunKind,
+        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunKind,
         WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
@@ -437,7 +411,7 @@ mod tests {
     }
 
     fn make_wave(repo: &str) -> Wave {
-        Wave::Voice(WaveData {
+        Wave {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
             repo: repo.to_string(),
@@ -447,9 +421,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        })
+        }
     }
 
     fn make_wave_run(wave: &Wave, pr_number: u32) -> WaveRun {

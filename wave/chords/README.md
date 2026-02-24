@@ -1,95 +1,96 @@
 # Chords
 
-Simultaneous multi-wave execution with inter-voice listening. The data model becomes explicitly musical — waves compose into chords, voices listen to each other, the hierarchy deepens.
+Named groups of waves with inter-wave listening. Chords organize related waves and let them react to each other via the `listen` stimulus.
 
-**Hierarchy:** Chord > Wave > Flow > Step
+**Model:** Waves are flat. Chords group them. Listening connects them.
 
 ## North Star
 
-A chord fires its stimulus, all child voices execute in parallel, each voice listens to what siblings did last iteration before starting its own work. Persistence across iterations and inter-voice awareness are the key differentiators from today's fork.
+A user creates waves, groups them into a chord, and wires `listen` stimuli so waves react to each other's work. No nested execution engine, no inherited triggers — just grouping and stimulus-based coordination.
 
 ## Design Decisions
 
-**Chords are waves.** A Chord can be used anywhere a Wave can be used. The recursive `Wave` enum (Voice | Chord) means a chord can contain chords — arbitrary nesting, opaque to the parent.
+**Waves are flat.** No enum, no tree. A `Wave` is a single struct. Chords are a separate concept stored in their own tables (`chords` + `chord_members`). A wave can belong to multiple chords or none.
 
-**Type safety and cleanliness over permissive behavior.** Impossible states are unrepresentable in types; data invariants are enforced in the database; invalid states fail loudly instead of silently coercing.
+**Chords are groups, not executors.** A chord doesn't own a trigger or manage child lifecycle. It's a named collection. Execution is still per-wave, driven by each wave's own stimuli.
 
-**Voicing over configuration.** Going from wave schema to instantiated wave is "voicing" — the choices of direction, area, model, parameters. Same schema, different voicings = different concrete waves. Already exists implicitly in fork drafts; this names the concept.
+**Listening is a stimulus.** `StimulusKind::Listen` with a `source_wave_id` fires a wave when its source completes. No special iteration-aware scheduling — it's just another stimulus type alongside loop/cron/watch/once.
 
-**Stimulus ownership and parenthood are mutually exclusive.** Top-level waves own triggers (loop/cron/watch/once). Nested waves never own triggers; they inherit effective trigger ticks from the nearest ancestor that does.
-
-**Nested waves are not runnable entrypoints.** Running a child wave directly is invalid; execution starts from a trigger-owning top-level wave/chord.
-
-**Best-effort iteration with failure signal.** If one descendant fails, siblings keep running. The tick completes after all children settle, and iteration state records `has_failure`.
-
-**Reset over compatibility for phase 01.** No existing customer data: migration can rebuild wave/stimulus tables and start from clean constraints.
-
-**Listening is a step, not a context source.** Runs at the start of each chord iteration (after the first). Produces modified plans as durable artifacts, not a summary riding along in every step's context.
-
-**Instantiated waves, not schemas.** For now, chords contain concrete instantiated waves, not abstract templates. An instantiated wave has at most one parent chord (or none if solo).
-
-**Bottoms-up composition via join/leave.** Voices exist independently with their own flows. `join(a, b)` absorbs both into a chord. `leave(v)` pulls a voice out as solo with no stimulus. No top-down `create_chord` — chords emerge from grouping existing waves.
+**Flat over nested.** The recursive model (chord-as-wave, nested chords, inherited triggers) moved to Symphonia/studio. OSS keeps the simpler model where composition happens through stimulus wiring, not tree structure.
 
 ## Data Model
 
 ```rust
-enum Wave {
-    Voice(WaveData),
-    Chord { data: WaveData, children: Vec<Wave> },
+struct Wave {
+    id: LfdId,
+    name: String,
+    repo: String,
+    // ... flat fields, no type/parent/position
+}
+
+struct Stimulus {
+    kind: StimulusKind,  // Once | Loop | Watch | Cron | Listen
+    source_wave_id: Option<LfdId>,  // for Listen stimuli
+    // ...
 }
 ```
 
-Key properties:
-- Recursive: a chord can contain chords (arbitrary nesting)
-- A nested chord is opaque to its parent — the parent sees it as one wave, not its internals
-- An instantiated wave has at most one parent chord (or none if solo)
-- A wave can be nested or trigger-owning, never both
+```sql
+CREATE TABLE chords (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL
+);
+
+CREATE TABLE chord_members (
+    chord_id TEXT NOT NULL REFERENCES chords(id) ON DELETE CASCADE,
+    wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
+    PRIMARY KEY (chord_id, wave_id)
+);
+```
 
 ## Phases
 
 | # | Phase | Focus | Status |
 |---|-------|-------|--------|
-| 01 | Data Model | Wave enum (Voice/Chord), SQLite storage, join/leave | shipped |
-| 02 | Execution | Inherited trigger tick → start all → wait all → mark failure if any | |
-| 03 | Listen Step | Inter-voice communication via PR digestion and plan adaptation | |
-| 04 | Concerto UI | Chord visualization, voice management, and execution status in the macOS app | |
-| 05 | Beat Grid | Sequenced execution — drum machine grid of on/off per child per beat | |
+| 01 | Flatten + Listen | Drop tree model, add listen stimulus, migration 012 | shipped |
+| 02 | Chord CRUD | Domain type, store ops, HTTP API, Python client | |
+| 03 | Listen Authoring | Listen stimulus in wave schema files, deeper inter-wave communication | |
+| 04 | Concerto UI | Chord groups and listen wiring in the macOS app | |
 
 ### Phase 01 retrospective
 
-Shipped as planned, but wider than expected. The accessor method migration (`wave.field` → `wave.field()`) touched executor, triggers, queue, and HTTP routes — most of the codebase had to adapt to the enum. This means Phase 02 inherits an infrastructure that's already enum-aware: triggers already call `wave.id()`, `wave.name()`, etc. The iteration cycle logic builds on top rather than requiring another migration pass.
+The original plan called for a recursive `Wave` enum (Voice | Chord) with join/leave composition, nested execution, and inherited triggers. Building it revealed that the recursive model was over-engineered for the OSS use case — users want named groups and inter-wave reactivity, not a tree-structured wave scheduler.
 
-Pragmatic additions not in the original plan: depth cap (`MAX_CHORD_DEPTH = 8`), `#[non_exhaustive]` on the Wave enum (forward-looking for the Rhythm variant), and `nest` parameter on `join` (shipped early because it was a small addition to the join logic and resolves the "explicit nesting operation (TBD)" that phase 04 beat grids need). The fork executor was also updated to use the new Wave API, giving phase 02 a concrete starting point for parallel child execution.
+The pivot: flatten `Wave` to a single struct, drop `wave_type`/`parent_id`/`position`/`join`/`leave`, add `chords`/`chord_members` tables for grouping, and add `StimulusKind::Listen` with `source_wave_id` for inter-wave coordination. Migration 012 handles the schema transition. Python client updated to match (removed `join()`/`leave()`, added `source_wave_id` to stimulus API).
+
+Key insight: stimulus-based listening (`source_wave_id`) is simpler and more composable than the nested iteration model. A wave can listen to any other wave regardless of chord membership. Chords provide organization; stimuli provide coordination. These are orthogonal.
 
 ## Future Directions
 
-### Rhythm (research)
+### Nested Chord Orchestration (Symphonia)
 
-A rhythm pairs exactly 2 waves with a temporal relationship — tempo ratios like 6:1 or 3:1 where one voice runs more frequently than the other.
+The recursive model — inherited triggers, child scheduling, beat-grid execution — lives in Symphonia/studio. If OSS needs it later, the `chords`/`chord_members` schema is a clean foundation to build on, but the execution engine stays simple here.
 
-- `Rhythm { waves: (Wave, Wave), ratio: (u32, u32) }` as a third Wave variant
-- Could unify chord and rhythm into a single recursive structure
-- Killer app: manager pattern where after every 6 engineer commits, a manager voice reviews
+### Listen Step (post-chord CRUD)
 
-Theoretically compelling but alternating execution semantics need more thought. Ship simultaneous chord first.
+Once chord CRUD is in place, a dedicated `listen` step could inject sibling PR content at iteration start — richer inter-wave communication than just "source completed, fire me." This builds on the stimulus wiring but adds content awareness.
 
 ### Multi-user (lfd-hub)
 
 - lfd stays simple: one user, one machine, local chords
 - lfd-hub (private codebase) orchestrates across lfd instances
-- The listen step protocol is the clean seam — lfd-hub can inject remote updates the same way lfd injects local ones
-- "Chords with other people" — baked into the theoretical foundation, not bolted on
+- The listen stimulus protocol is the clean seam — lfd-hub can inject remote activations the same way lfd handles local ones
 
 ## Open Questions
 
-- Cleanup policy between iterations
-- Failure status detail beyond `has_failure`: do we also store per-child failure summary?
-- First iteration: no listen step (nothing to listen to), or a "hello" step?
+- Should new waves auto-enroll in a default chord?
+- Should `listen` stimuli be accepted in wave schema files now, or remain API-only until chord CRUD lands?
 
 ## Done When (wave complete)
 
-- Wave enum supports Voice and Chord variants in storage and API
-- Chords execute child waves in parallel with inherited stimulus ownership
-- Tick-level failure is recorded if any descendant fails, without halting siblings
-- Listen step runs at iteration start, producing adapted plans from sibling output
-- Nesting works: a chord containing a chord behaves correctly
+- Chords exist as named groups with membership CRUD
+- HTTP API and Python client support chord operations
+- Listen stimulus wires waves to react to each other
+- Concerto shows chord grouping and listen relationships

@@ -38,7 +38,7 @@ async fn execute_run_inner(
                 tracing::error!(run_id = %run.id, error = %err, "failed to update wave run status");
             }
             if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id).await {
-                wave.data_mut().status = WaveStatus::Failed;
+                wave.status = WaveStatus::Failed;
                 if let Err(err) = store.update_wave(&wave).await {
                     tracing::error!(wave_id = %run.wave_id, error = %err, "failed to update wave status");
                 }

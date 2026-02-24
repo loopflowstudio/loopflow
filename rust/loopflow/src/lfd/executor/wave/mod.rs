@@ -476,7 +476,7 @@ impl WaveExecutor {
 
     async fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
         if let Ok(Some(mut wave)) = self.store.get_wave(wave_id).await {
-            wave.data_mut().status = status;
+            wave.status = status;
             if let Err(err) = self.store.update_wave(&wave).await {
                 error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
             }
@@ -557,7 +557,7 @@ mod tests {
     use super::*;
     use crate::engine::worktree::create_worktree;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{WaveData, WaveRunSnapshot};
+    use crate::lfd::types::WaveRunSnapshot;
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -659,7 +659,7 @@ mod tests {
         let wave_id = LfdId::new();
         let run_id = LfdId::new();
 
-        let wave = Wave::Voice(WaveData {
+        let wave = Wave {
             id: wave_id.clone(),
             name: "fork-wave".to_string(),
             repo: repo.to_string_lossy().to_string(),
@@ -669,9 +669,7 @@ mod tests {
             status: WaveStatus::Running,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        });
+        };
         store
             .create_wave(&wave)
             .await
@@ -1025,7 +1023,7 @@ mod tests {
             .await
             .expect("wave should load")
             .expect("wave should exist");
-        wave.data_mut().direction = vec!["base".to_string()];
+        wave.direction = vec!["base".to_string()];
         store.update_wave(&wave).await.expect("wave should update");
 
         let scheduler = Arc::new(Scheduler::new(4));

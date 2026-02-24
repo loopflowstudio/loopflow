@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class Stimulus(BaseModel):
     id: Optional[str] = None
     kind: str
+    source_wave_id: Optional[str] = None
     cron: Optional[str] = None
 
 
@@ -57,10 +58,6 @@ class Wave(BaseModel):
     flow_steps: list[str] = Field(default_factory=list)
     active_run: Optional[WaveRun] = None
     created_at: Optional[datetime] = None
-    wave_type: Optional[str] = None
-    parent_id: Optional[str] = None
-    position: Optional[int] = None
-    children: list["Wave"] = Field(default_factory=list)
 
     branch: Optional[str] = None
     pr_url: Optional[str] = None

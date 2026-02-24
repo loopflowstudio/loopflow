@@ -13,11 +13,11 @@ use crate::lfd::store::catalog::{
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
-    assemble_wave_tree, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
-    map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_stimulus_row,
-    map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr, WaveTreeRow,
+    map_agent_row, map_chat_memory_block_row, map_chat_message_row, map_fork_run_row,
+    map_live_pr_state_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
+    map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult, MAX_CHORD_DEPTH};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
@@ -101,47 +101,29 @@ impl PostgresStore {
 
     async fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.with_client(|client| async move {
-            if wave.parent_id().is_some() {
-                let has_stimulus = client
-                    .query_opt(
-                        "SELECT id FROM stimuli WHERE wave_id = $1 LIMIT 1",
-                        &[wave.id()],
-                    )
-                    .await?
-                    .is_some();
-                if has_stimulus {
-                    return Err(StoreError::StimulusOwnerCannotBeNested);
-                }
-            }
             let direction_json = serde_json::to_string(wave.direction())?;
             let area_json = serde_json::to_string(wave.area())?;
-            let created_at = wave
-                .created_at()
-                .map(|dt| dt.unix_timestamp())
-                .unwrap_or_else(now_unix);
             let paused: i32 = if wave.status() == WaveStatus::Paused {
                 1
             } else {
                 0
             };
+            let created_at = wave.created_at().map(|dt| dt.unix_timestamp()).unwrap_or(0);
 
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
                     &[
-                        wave.id(),
-                        wave.name(),
-                        wave.repo(),
-                        wave.flow(),
-                        &direction_json,
-                        &area_json,
+                        &wave.id().as_str(),
+                        &wave.name().as_str(),
+                        &wave.repo().as_str(),
+                        &wave.flow().as_str(),
+                        &direction_json.as_str(),
+                        &area_json.as_str(),
                         &paused,
-                        &wave.status().as_i32(),
+                        &(wave.status().as_i32()),
                         &(wave.iteration() as i32),
                         &created_at,
-                        &wave.wave_type_i32(),
-                        &wave.parent_id(),
-                        &(wave.position() as i32),
                     ],
                 )
                 .await?;
@@ -164,55 +146,6 @@ impl PostgresStore {
                 .get::<_, Option<i64>>(7)
                 .map(crate::lfd::store::rows::unix_to_datetime),
         })
-    }
-
-    async fn load_wave_tree(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        let rows = self.get_wave_subtree_rows(wave_id).await?;
-        if rows.is_empty() {
-            return Ok(None);
-        }
-        if rows.iter().any(|row| row.depth > MAX_CHORD_DEPTH) {
-            return Err(StoreError::DepthLimitExceeded);
-        }
-        Ok(Some(assemble_wave_tree(rows, wave_id)?))
-    }
-
-    async fn get_wave_subtree_rows(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveTreeRow>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(
-                    "WITH RECURSIVE tree AS (
-                        SELECT id, parent_wave_id, position, 0 AS depth
-                        FROM waves
-                        WHERE id = $1
-
-                        UNION ALL
-
-                        SELECT child.id, child.parent_wave_id, child.position, tree.depth + 1
-                        FROM waves AS child
-                        JOIN tree ON child.parent_wave_id = tree.id
-                        WHERE tree.depth < ($2 + 1)
-                    )
-                    SELECT
-                        w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status,
-                        w.iteration, w.created_at, w.wave_type,
-                        w.parent_wave_id, w.position, tree.depth
-                    FROM tree
-                    JOIN waves AS w ON w.id = tree.id
-                    ORDER BY tree.depth, w.parent_wave_id, w.position",
-                    &[&wave_id, &(MAX_CHORD_DEPTH as i32)],
-                )
-                .await?;
-            rows.into_iter()
-                .map(|row| {
-                    Ok(WaveTreeRow {
-                        wave: map_wave_row(&row)?,
-                        depth: row.get::<_, i32>(13) as u32,
-                    })
-                })
-                .collect()
-        })
-        .await
     }
 }
 
@@ -413,128 +346,28 @@ impl PostgresStore {
     }
 
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        self.load_wave_tree(wave_id).await
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(Self::sql(Query::GetWaveById), &[&wave_id])
+                .await?;
+            row.as_ref().map(map_wave_row).transpose()
+        })
+        .await
     }
 
     pub async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
         let name = name.to_string();
-        let wave_id = self
-            .with_client(|client| async move {
-                let row = client
-                    .query_opt(Self::sql(Query::GetWaveByName), &[&name])
-                    .await?;
-                row.as_ref()
-                    .map(map_wave_row)
-                    .transpose()
-                    .map(|wave| wave.map(|value| value.id().clone()))
-            })
-            .await?;
-        match wave_id {
-            Some(wave_id) => self.load_wave_tree(&wave_id).await,
-            None => Ok(None),
-        }
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(Self::sql(Query::GetWaveByName), &[&name])
+                .await?;
+            row.as_ref().map(map_wave_row).transpose()
+        })
+        .await
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        self.upsert_wave(wave).await?;
-        for child in wave.children() {
-            Box::pin(self.create_wave(child)).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn join_waves(
-        &self,
-        wave_a: &Wave,
-        wave_b: &Wave,
-        chord_name: Option<String>,
-        nest: bool,
-    ) -> StoreResult<LfdId> {
-        match (wave_a.is_chord(), wave_b.is_chord()) {
-            // Voice + Voice → create new chord, reparent both
-            (false, false) => {
-                let chord_id = LfdId::new();
-                let name = chord_name.unwrap_or_else(|| format!("chord-{}", chord_id));
-                let chord = super::new_chord_wave(wave_a, chord_id.clone(), name);
-                self.upsert_wave(&chord).await?;
-                self.delete_stimuli_for_wave(wave_a.id()).await?;
-                self.delete_stimuli_for_wave(wave_b.id()).await?;
-                self.upsert_wave(&super::reparented_wave(wave_a, Some(chord_id.clone()), 0))
-                    .await?;
-                self.upsert_wave(&super::reparented_wave(wave_b, Some(chord_id.clone()), 1))
-                    .await?;
-                Ok(chord_id)
-            }
-            // Chord + Voice → absorb voice into chord A
-            (true, false) => {
-                self.delete_stimuli_for_wave(wave_b.id()).await?;
-                let next_pos = wave_a.children().len() as u32;
-                self.upsert_wave(&super::reparented_wave(
-                    wave_b,
-                    Some(wave_a.id().clone()),
-                    next_pos,
-                ))
-                .await?;
-                Ok(wave_a.id().clone())
-            }
-            // Voice + Chord → create new chord, reparent both
-            // (A is always the target; since A isn't a chord, wrap both)
-            (false, true) => {
-                let chord_id = LfdId::new();
-                let name = chord_name.unwrap_or_else(|| format!("chord-{}", chord_id));
-                let chord = super::new_chord_wave(wave_a, chord_id.clone(), name);
-                self.upsert_wave(&chord).await?;
-                self.delete_stimuli_for_wave(wave_a.id()).await?;
-                self.delete_stimuli_for_wave(wave_b.id()).await?;
-                self.upsert_wave(&super::reparented_wave(wave_a, Some(chord_id.clone()), 0))
-                    .await?;
-                self.upsert_wave(&super::reparented_wave(wave_b, Some(chord_id.clone()), 1))
-                    .await?;
-                Ok(chord_id)
-            }
-            // Chord + Chord (nest)
-            (true, true) if nest => {
-                self.delete_stimuli_for_wave(wave_b.id()).await?;
-                let next_pos = wave_a.children().len() as u32;
-                self.upsert_wave(&super::reparented_wave(
-                    wave_b,
-                    Some(wave_a.id().clone()),
-                    next_pos,
-                ))
-                .await?;
-                Ok(wave_a.id().clone())
-            }
-            // Chord + Chord → merge B's children into A, delete B
-            (true, true) => {
-                let base_pos = wave_a.children().len() as u32;
-                for (i, child) in wave_b.children().iter().enumerate() {
-                    self.upsert_wave(&super::reparented_wave(
-                        child,
-                        Some(wave_a.id().clone()),
-                        base_pos + i as u32,
-                    ))
-                    .await?;
-                }
-                self.delete_wave(wave_b.id()).await?;
-                Ok(wave_a.id().clone())
-            }
-        }
-    }
-
-    pub async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        let wave = self
-            .load_wave_tree(wave_id)
-            .await?
-            .ok_or_else(|| StoreError::InvalidData("wave not found".to_string()))?;
-        if wave.parent_id().is_none() {
-            return Err(StoreError::InvalidData(
-                "wave is not in a chord".to_string(),
-            ));
-        }
-        self.upsert_wave(&super::reparented_wave(&wave, None, 0))
-            .await?;
-        self.delete_stimuli_for_wave(wave_id).await?;
-        Ok(())
+        self.upsert_wave(wave).await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -923,16 +756,6 @@ impl PostgresStore {
 
     pub async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
         self.with_client(|client| async move {
-            let parent_id = client
-                .query_opt(
-                    "SELECT parent_wave_id FROM waves WHERE id = $1",
-                    &[&stimulus.wave_id],
-                )
-                .await?
-                .and_then(|row| row.get::<_, Option<String>>(0));
-            if parent_id.is_some() {
-                return Err(StoreError::NestedWaveCannotOwnStimulus);
-            }
             let created_at = stimulus
                 .created_at
                 .map(|dt| dt.unix_timestamp())
@@ -951,6 +774,7 @@ impl PostgresStore {
                         &stimulus.last_triggered_at,
                         &created_at,
                         &enabled,
+                        &stimulus.source_wave_id,
                     ],
                 )
                 .await?;
@@ -971,6 +795,7 @@ impl PostgresStore {
                         &stimulus.last_main_sha,
                         &stimulus.last_triggered_at,
                         &enabled,
+                        &stimulus.source_wave_id,
                         &stimulus.id,
                     ],
                 )
@@ -989,16 +814,6 @@ impl PostgresStore {
                 .execute(Self::sql(Query::DeleteStimulusById), &[&stimulus_id])
                 .await?;
             Ok(())
-        })
-        .await
-    }
-
-    pub async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        self.with_client(|client| async move {
-            let deleted = client
-                .execute(Self::sql(Query::DeleteStimuliByWave), &[&wave_id])
-                .await?;
-            Ok(deleted as u32)
         })
         .await
     }

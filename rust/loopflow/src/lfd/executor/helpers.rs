@@ -90,8 +90,8 @@ pub async fn create_wave_run_with_id(
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
-        wave.data_mut().status = WaveStatus::Running;
-        wave.data_mut().iteration = iteration;
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
         if let Err(err) = store.update_wave(&wave).await {
             warn!(wave_id = %wave.id(), error = %err, "failed to set wave status to running");
         }

@@ -1345,7 +1345,6 @@ mod tests {
         }
     }
 
-
     fn make_run(wave: &Wave, status: WaveRunStatus, kind: WaveRunKind) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
@@ -1411,7 +1410,7 @@ mod tests {
             wave_id: wave.id().clone(),
             source_wave_id: Some(source_wave.id().clone()),
             kind: StimulusKind::Listen,
-            cron: "".to_string(),
+            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),

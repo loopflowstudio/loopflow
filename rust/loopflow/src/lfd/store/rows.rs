@@ -203,7 +203,7 @@ pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
         id: LfdId::from_raw(row.text(0)?),
         wave_id: LfdId::from_raw(row.text(1)?),
         kind: StimulusKind::from_i32(row.int(2)?),
-        cron: row.text(3)?,
+        cron: row.opt_text(3)?,
         last_main_sha: row.opt_text(4)?,
         last_triggered_at: row.opt_bigint(5)?,
         created_at: Some(created_at),

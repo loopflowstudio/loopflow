@@ -271,7 +271,7 @@ async fn ensure_local_wave_worktree(
 
 fn parse_stimulus(
     stimulus: &StimulusDef,
-) -> Result<(StimulusKind, String), (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(StimulusKind, Option<String>), (StatusCode, Json<ErrorResponse>)> {
     let kind = match stimulus.kind.as_str() {
         "cron" => StimulusKind::Cron,
         "watch" => StimulusKind::Watch,
@@ -286,19 +286,21 @@ fn parse_stimulus(
     };
 
     let cron = match kind {
-        StimulusKind::Cron => stimulus
-            .cron
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| {
-                api_error(
-                    StatusCode::BAD_REQUEST,
-                    "wave config stimulus kind 'cron' requires a cron expression",
-                )
-            })?,
-        _ => String::new(),
+        StimulusKind::Cron => Some(
+            stimulus
+                .cron
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| {
+                    api_error(
+                        StatusCode::BAD_REQUEST,
+                        "wave config stimulus kind 'cron' requires a cron expression",
+                    )
+                })?,
+        ),
+        _ => None,
     };
 
     Ok((kind, cron))
@@ -636,7 +638,7 @@ pub async fn add_stimulus_handler(
         wave_id,
         source_wave_id,
         kind: payload.kind,
-        cron: payload.cron.unwrap_or_default(),
+        cron: payload.cron,
         last_main_sha: None,
         last_triggered_at: None,
         created_at: Some(OffsetDateTime::now_utc()),
@@ -653,7 +655,7 @@ pub async fn add_stimulus_handler(
         "id": stimulus.id.to_string(),
         "kind": stimulus_kind_str(stimulus.kind),
         "source_wave_id": stimulus.source_wave_id.as_ref().map(ToString::to_string),
-        "cron": if stimulus.cron.is_empty() { None } else { Some(&stimulus.cron) },
+        "cron": stimulus.cron,
     })))
 }
 
@@ -1252,7 +1254,7 @@ mod tests {
 
         let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
         assert_eq!(parsed.0, StimulusKind::Cron);
-        assert_eq!(parsed.1, "0 8 * * *");
+        assert_eq!(parsed.1.as_deref(), Some("0 8 * * *"));
     }
 
     #[test]

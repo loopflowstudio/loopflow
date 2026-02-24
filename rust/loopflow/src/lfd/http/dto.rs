@@ -324,11 +324,7 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
         kind: stimulus_kind_str(s.kind).to_string(),
         enabled: s.enabled,
         source_wave_id: s.source_wave_id.map(|value| value.to_string()),
-        cron: if s.cron.is_empty() {
-            None
-        } else {
-            Some(s.cron)
-        },
+        cron: s.cron,
         last_main_sha: s.last_main_sha,
         last_triggered_at: s.last_triggered_at,
         created_at: format_datetime(s.created_at),

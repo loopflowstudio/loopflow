@@ -62,9 +62,10 @@ async fn check_cron_stimuli(
             continue;
         }
 
-        if stimulus.cron.is_empty() {
-            continue;
-        }
+        let cron_expr = match &stimulus.cron {
+            Some(c) if !c.is_empty() => c,
+            _ => continue,
+        };
 
         let wave = match store.get_wave(&stimulus.wave_id).await {
             Ok(Some(wave)) => wave,
@@ -127,7 +128,7 @@ async fn check_cron_stimuli(
             .last_triggered_at
             .and_then(|ts| DateTime::<Utc>::from_timestamp(ts, 0));
 
-        if should_activate_cron(&stimulus.cron, last_triggered) {
+        if should_activate_cron(cron_expr, last_triggered) {
             let mut stimulus = stimulus.clone();
             stimulus.last_triggered_at = Some(Utc::now().timestamp());
             let _ = store.update_stimulus(&stimulus).await;

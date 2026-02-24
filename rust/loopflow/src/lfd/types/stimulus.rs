@@ -40,7 +40,7 @@ pub struct Stimulus {
     pub wave_id: LfdId,
     pub source_wave_id: Option<LfdId>,
     pub kind: StimulusKind,
-    pub cron: String,
+    pub cron: Option<String>,
     pub last_main_sha: Option<String>,
     pub last_triggered_at: Option<i64>,
     #[serde(with = "time::serde::rfc3339::option")]
@@ -61,7 +61,7 @@ impl Stimulus {
             wave_id,
             source_wave_id: None,
             kind,
-            cron: String::new(),
+            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),

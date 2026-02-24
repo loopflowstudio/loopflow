@@ -85,10 +85,10 @@ Create a session:
 curl -s -X POST "http://127.0.0.1:2486/v0/sessions" \
   -H "Content-Type: application/json" \
   -d "{
-    \"provider\": \"codex\",
+    \"provider\": \"claude\",
     \"wave_run_id\": \"run_abc\",
     \"config\": {
-      \"model\": \"gpt-5.1-codex\",
+      \"model\": \"claude-sonnet-4-6\",
       \"cwd\": \"$(pwd)\"
     }
   }"
@@ -108,8 +108,8 @@ Stream events (replay + live tail):
 curl -N "http://127.0.0.1:2486/v0/sessions/<session_id>/events"
 ```
 
-Session item payloads use normalized item types: `command`, `file`, `message`, `thought`, and
-generic `tool`.
+Supported providers: `codex` and `claude`. Session item payloads use normalized item types:
+`command`, `file`, `message`, `thought`, and generic `tool`.
 
 Stop the session:
 

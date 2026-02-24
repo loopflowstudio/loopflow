@@ -547,6 +547,10 @@ impl SessionAdapter for ClaudeAdapter {
                     turn_id = %reader_turn_id,
                     "claude turn ended without result event"
                 );
+                let _ = events.send(SessionEvent::TurnCompleted {
+                    turn_id: reader_turn_id,
+                    status: TurnStatus::Failed,
+                });
             }
 
             turn_in_progress.store(false, Ordering::SeqCst);

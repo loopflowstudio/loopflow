@@ -1,4 +1,4 @@
-mod adapter;
+mod harness;
 pub mod types;
 
 use std::collections::HashMap;
@@ -8,13 +8,13 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::lfd::id::LfdId;
-use crate::lfd::sessions::adapter::{CreateAdapterFn, SessionAdapter};
+use crate::lfd::sessions::harness::{CreateHarnessFn, SessionHarness};
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionEvent, SessionStatus,
 };
 use crate::lfd::store::{SharedStore, StoreError};
 
-const ADAPTER_EVENT_BUFFER: usize = 256;
+const HARNESS_EVENT_BUFFER: usize = 256;
 const LIVE_EVENT_BUFFER: usize = 256;
 
 #[derive(Debug, thiserror::Error)]
@@ -34,12 +34,12 @@ pub enum SessionManagerError {
     WaveRunSessionConflict(String),
     #[error("turn already in progress")]
     TurnAlreadyInProgress,
-    #[error("adapter error: {0}")]
-    Adapter(String),
+    #[error("harness error: {0}")]
+    Harness(String),
 }
 
 struct SessionRuntime {
-    adapter: Mutex<Box<dyn SessionAdapter>>,
+    harness: Mutex<Box<dyn SessionHarness>>,
     events_tx: broadcast::Sender<PersistedSessionEvent>,
     next_seq: AtomicI64,
 }
@@ -52,7 +52,7 @@ impl std::fmt::Debug for SessionRuntime {
 
 struct SessionManagerInner {
     store: SharedStore,
-    create_adapter: CreateAdapterFn,
+    create_harness: CreateHarnessFn,
     runtimes: Mutex<HashMap<LfdId, Arc<SessionRuntime>>>,
 }
 
@@ -69,14 +69,14 @@ pub struct SessionManager {
 
 impl SessionManager {
     pub fn new(store: SharedStore) -> Self {
-        Self::with_create_adapter(store, adapter::default_create_adapter)
+        Self::with_create_harness(store, harness::default_create_harness)
     }
 
-    fn with_create_adapter(store: SharedStore, create_adapter: CreateAdapterFn) -> Self {
+    fn with_create_harness(store: SharedStore, create_harness: CreateHarnessFn) -> Self {
         Self {
             inner: Arc::new(SessionManagerInner {
                 store,
-                create_adapter,
+                create_harness,
                 runtimes: Mutex::new(HashMap::new()),
             }),
         }
@@ -87,7 +87,7 @@ impl SessionManager {
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
         let provider = params.provider.trim().to_lowercase();
-        if !adapter::supports_provider(&provider) {
+        if !harness::supports_provider(&provider) {
             return Err(SessionManagerError::UnsupportedProvider(provider));
         }
 
@@ -115,14 +115,14 @@ impl SessionManager {
             created_at: time::OffsetDateTime::now_utc(),
             ended_at: None,
         };
-        let (adapter_events_tx, mut adapter_events_rx) = broadcast::channel(ADAPTER_EVENT_BUFFER);
-        let adapter = (self.inner.create_adapter)(&provider, adapter_events_tx)
-            .map_err(|err| SessionManagerError::Adapter(err.to_string()))?;
+        let (harness_events_tx, mut harness_events_rx) = broadcast::channel(HARNESS_EVENT_BUFFER);
+        let harness = (self.inner.create_harness)(&provider, harness_events_tx)
+            .map_err(|err| SessionManagerError::Harness(err.to_string()))?;
         self.inner.store.create_session(&session).await?;
 
         let (events_tx, _) = broadcast::channel(LIVE_EVENT_BUFFER);
         let runtime = Arc::new(SessionRuntime {
-            adapter: Mutex::new(adapter),
+            harness: Mutex::new(harness),
             events_tx,
             next_seq: AtomicI64::new(0),
         });
@@ -146,7 +146,7 @@ impl SessionManager {
         let bridge_runtime = runtime.clone();
         tokio::spawn(async move {
             loop {
-                match adapter_events_rx.recv().await {
+                match harness_events_rx.recv().await {
                     Ok(event) => {
                         // Intercept ProviderSessionId: persist to DB, don't forward.
                         if let SessionEvent::ProviderSessionId {
@@ -154,8 +154,8 @@ impl SessionManager {
                         } = event
                         {
                             {
-                                let mut adapter = bridge_runtime.adapter.lock().await;
-                                adapter.set_provider_session_id(Some(provider_session_id.clone()));
+                                let mut harness = bridge_runtime.harness.lock().await;
+                                harness.set_provider_session_id(Some(provider_session_id.clone()));
                             }
                             if let Err(err) = manager
                                 .inner
@@ -176,11 +176,11 @@ impl SessionManager {
                             .append_runtime_event(&session_id, &bridge_runtime, event)
                             .await
                         {
-                            tracing::warn!(session_id = %session_id, error = %err, "failed to persist adapter event");
+                            tracing::warn!(session_id = %session_id, error = %err, "failed to persist harness event");
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::warn!(session_id = %session_id, skipped, "session adapter lagged")
+                        tracing::warn!(session_id = %session_id, skipped, "session harness lagged")
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -193,8 +193,8 @@ impl SessionManager {
         let startup_config = session.config.clone();
         tokio::spawn(async move {
             let result = {
-                let mut adapter = startup_runtime.adapter.lock().await;
-                adapter.start(&startup_config).await
+                let mut harness = startup_runtime.harness.lock().await;
+                harness.start(&startup_config).await
             };
 
             match result {
@@ -268,12 +268,12 @@ impl SessionManager {
             })?;
 
         let send_result = {
-            let mut adapter = runtime.adapter.lock().await;
-            adapter.send_input(content).await
+            let mut harness = runtime.harness.lock().await;
+            harness.send_input(content).await
         };
 
         if let Err(err) = send_result {
-            if adapter::is_turn_in_progress(&err) {
+            if harness::is_turn_in_progress(&err) {
                 return Err(SessionManagerError::TurnAlreadyInProgress);
             }
 
@@ -296,7 +296,7 @@ impl SessionManager {
                 )
                 .await;
             let _ = self.remove_runtime(session_id).await;
-            return Err(SessionManagerError::Adapter(err.to_string()));
+            return Err(SessionManagerError::Harness(err.to_string()));
         }
 
         Ok(())
@@ -316,8 +316,8 @@ impl SessionManager {
 
         let final_status = if let Some(ref runtime) = runtime {
             let stop_result = {
-                let mut adapter = runtime.adapter.lock().await;
-                adapter.stop().await
+                let mut harness = runtime.harness.lock().await;
+                harness.stop().await
             };
             if let Err(err) = stop_result {
                 self.append_runtime_event(
@@ -434,7 +434,7 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::sessions::adapter::{SessionAdapter, SessionAdapterError};
+    use crate::lfd::sessions::harness::{SessionHarness, SessionHarnessError};
     use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
     use crate::lfd::store::{open_store, StorageConfig};
     use anyhow::Result;
@@ -443,12 +443,12 @@ mod tests {
     use tempfile::tempdir;
 
     #[derive(Debug)]
-    struct FakeAdapter {
+    struct FakeHarness {
         tx: broadcast::Sender<SessionEvent>,
     }
 
     #[async_trait]
-    impl SessionAdapter for FakeAdapter {
+    impl SessionHarness for FakeHarness {
         async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
             Ok(())
         }
@@ -474,24 +474,24 @@ mod tests {
         }
     }
 
-    fn fake_create_adapter(
+    fn fake_create_harness(
         _provider: &str,
         event_tx: broadcast::Sender<SessionEvent>,
-    ) -> Result<Box<dyn SessionAdapter>> {
-        Ok(Box::new(FakeAdapter { tx: event_tx }))
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(FakeHarness { tx: event_tx }))
     }
 
     #[derive(Debug)]
-    struct BusyAdapter;
+    struct BusyHarness;
 
     #[async_trait]
-    impl SessionAdapter for BusyAdapter {
+    impl SessionHarness for BusyHarness {
         async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
             Ok(())
         }
 
         async fn send_input(&mut self, _content: &str) -> Result<()> {
-            Err(SessionAdapterError::TurnAlreadyInProgress.into())
+            Err(SessionHarnessError::TurnAlreadyInProgress.into())
         }
 
         async fn stop(&mut self) -> Result<()> {
@@ -499,22 +499,22 @@ mod tests {
         }
     }
 
-    fn busy_create_adapter(
+    fn busy_create_harness(
         _provider: &str,
         _event_tx: broadcast::Sender<SessionEvent>,
-    ) -> Result<Box<dyn SessionAdapter>> {
-        Ok(Box::new(BusyAdapter))
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(BusyHarness))
     }
 
     #[derive(Debug)]
-    struct ResumeAwareAdapter {
+    struct ResumeAwareHarness {
         tx: broadcast::Sender<SessionEvent>,
         send_count: usize,
         provider_session_id: Option<String>,
     }
 
     #[async_trait]
-    impl SessionAdapter for ResumeAwareAdapter {
+    impl SessionHarness for ResumeAwareHarness {
         async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
             Ok(())
         }
@@ -554,11 +554,11 @@ mod tests {
         }
     }
 
-    fn resume_aware_create_adapter(
+    fn resume_aware_create_harness(
         _provider: &str,
         event_tx: broadcast::Sender<SessionEvent>,
-    ) -> Result<Box<dyn SessionAdapter>> {
-        Ok(Box::new(ResumeAwareAdapter {
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(ResumeAwareHarness {
             tx: event_tx,
             send_count: 0,
             provider_session_id: None,
@@ -611,7 +611,7 @@ mod tests {
                 .expect("open sqlite store"),
         );
 
-        let manager = SessionManager::with_create_adapter(store, fake_create_adapter);
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
         let created = manager
             .create_session(CreateSessionParams {
                 provider: "codex".to_string(),
@@ -674,7 +674,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        // Use default_create_adapter (not fake) so unsupported providers are rejected.
+        // Use default_create_harness (not fake) so unsupported providers are rejected.
         let manager = SessionManager::new(store);
 
         let err = manager
@@ -701,7 +701,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_adapter(store, fake_create_adapter);
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
 
         let created = manager
             .create_session(CreateSessionParams {
@@ -737,7 +737,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_adapter(store, busy_create_adapter);
+        let manager = SessionManager::with_create_harness(store, busy_create_harness);
 
         let created = manager
             .create_session(CreateSessionParams {
@@ -752,7 +752,7 @@ mod tests {
         let err = manager
             .send_input(&created.id, "hello")
             .await
-            .expect_err("busy adapter should reject concurrent turn");
+            .expect_err("busy harness should reject concurrent turn");
         assert!(matches!(err, SessionManagerError::TurnAlreadyInProgress));
 
         let session = manager
@@ -763,7 +763,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_session_id_is_applied_to_adapter_for_resume() {
+    async fn provider_session_id_is_applied_to_harness_for_resume() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store = Arc::new(
@@ -771,7 +771,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_adapter(store, resume_aware_create_adapter);
+        let manager = SessionManager::with_create_harness(store, resume_aware_create_harness);
 
         let created = manager
             .create_session(CreateSessionParams {

@@ -235,7 +235,7 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
         SessionManagerError::TurnAlreadyInProgress => {
             api_error(StatusCode::CONFLICT, "turn already in progress")
         }
-        SessionManagerError::Adapter(message) => {
+        SessionManagerError::Harness(message) => {
             api_error(StatusCode::INTERNAL_SERVER_ERROR, message)
         }
     }

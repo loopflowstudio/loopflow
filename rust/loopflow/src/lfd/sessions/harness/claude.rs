@@ -10,12 +10,12 @@ use tokio::process::{Child, Command};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::lfd::sessions::adapter::{SessionAdapter, SessionAdapterError};
+use crate::lfd::sessions::harness::{SessionHarness, SessionHarnessError};
 use crate::lfd::sessions::types::{
     FileEdit, ItemStatus, SessionConfig, SessionEvent, SessionItem, TurnStatus,
 };
 
-pub struct ClaudeAdapter {
+pub struct ClaudeHarness {
     events: broadcast::Sender<SessionEvent>,
     config: Option<SessionConfig>,
     provider_session_id: Option<String>,
@@ -26,9 +26,9 @@ pub struct ClaudeAdapter {
     shutdown_requested: Arc<AtomicBool>,
 }
 
-impl std::fmt::Debug for ClaudeAdapter {
+impl std::fmt::Debug for ClaudeHarness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClaudeAdapter").finish()
+        f.debug_struct("ClaudeHarness").finish()
     }
 }
 
@@ -233,7 +233,7 @@ impl Drop for TurnInProgressGuard {
     }
 }
 
-impl ClaudeAdapter {
+impl ClaudeHarness {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
             events,
@@ -517,7 +517,7 @@ impl ClaudeAdapter {
 }
 
 #[async_trait]
-impl SessionAdapter for ClaudeAdapter {
+impl SessionHarness for ClaudeHarness {
     async fn start(&mut self, config: &SessionConfig) -> Result<()> {
         // Validate claude binary on PATH.
         let output = Command::new("claude").arg("--version").output().await;
@@ -550,14 +550,14 @@ impl SessionAdapter for ClaudeAdapter {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Err(SessionAdapterError::TurnAlreadyInProgress.into());
+            return Err(SessionHarnessError::TurnAlreadyInProgress.into());
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
         let config = self
             .config
             .as_ref()
-            .ok_or_else(|| anyhow!("claude adapter not started"))?;
+            .ok_or_else(|| anyhow!("claude harness not started"))?;
 
         let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
 
@@ -620,7 +620,7 @@ impl SessionAdapter for ClaudeAdapter {
                     continue;
                 }
 
-                if ClaudeAdapter::process_line(&line, &reader_turn_id, &events, &mut state) {
+                if ClaudeHarness::process_line(&line, &reader_turn_id, &events, &mut state) {
                     saw_turn_completed = true;
                     break;
                 }
@@ -646,7 +646,7 @@ impl SessionAdapter for ClaudeAdapter {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if !line.trim().is_empty() {
-                    tracing::debug!(target: "claude_adapter", "{line}");
+                    tracing::debug!(target: "claude_harness", "{line}");
                 }
             }
         }));
@@ -806,7 +806,7 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#;
 
-        let result = ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        let result = ClaudeHarness::process_line(line, "turn_1", &tx, &mut state);
         assert!(!result);
 
         let event = rx.try_recv().expect("should have event");
@@ -826,7 +826,7 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"stream_event":{"event":{"type":"system","session_id":"sess_wrapped"}}}"#;
 
-        let result = ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        let result = ClaudeHarness::process_line(line, "turn_1", &tx, &mut state);
         assert!(!result);
 
         let event = rx.try_recv().expect("should have event");
@@ -846,7 +846,7 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world"}}"#;
 
-        ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        ClaudeHarness::process_line(line, "turn_1", &tx, &mut state);
 
         let event = rx.try_recv().expect("should have event");
         match event {
@@ -864,7 +864,7 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}"#;
 
-        ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        ClaudeHarness::process_line(line, "turn_1", &tx, &mut state);
 
         let event = rx.try_recv().expect("should have event");
         match event {
@@ -882,7 +882,7 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false,"result":"done","session_id":"sess_abc"}"#;
 
-        let result = ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        let result = ClaudeHarness::process_line(line, "turn_1", &tx, &mut state);
         assert!(result);
 
         let event = rx.try_recv().expect("should have event");
@@ -901,7 +901,7 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"type":"result","is_error":true,"result":"failed"}"#;
 
-        let result = ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        let result = ClaudeHarness::process_line(line, "turn_1", &tx, &mut state);
         assert!(result);
 
         let event = rx.try_recv().expect("should have event");
@@ -920,7 +920,7 @@ mod tests {
         let mut state = ReaderState::default();
         let line = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_bash_1","name":"Bash"}}"#;
 
-        ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        ClaudeHarness::process_line(line, "turn_1", &tx, &mut state);
 
         assert!(state.tool_blocks.contains_key(&1));
         let tool = &state.tool_blocks[&1];
@@ -945,13 +945,13 @@ mod tests {
 
         // Start a tool block first.
         let start_line = r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash"}}"#;
-        ClaudeAdapter::process_line(start_line, "turn_1", &tx, &mut state);
+        ClaudeHarness::process_line(start_line, "turn_1", &tx, &mut state);
 
         // Send partial input.
         let delta1 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"com"}}"#;
         let delta2 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"mand\":\"ls\"}"}}"#;
-        ClaudeAdapter::process_line(delta1, "turn_1", &tx, &mut state);
-        ClaudeAdapter::process_line(delta2, "turn_1", &tx, &mut state);
+        ClaudeHarness::process_line(delta1, "turn_1", &tx, &mut state);
+        ClaudeHarness::process_line(delta2, "turn_1", &tx, &mut state);
 
         assert_eq!(
             state
@@ -965,32 +965,32 @@ mod tests {
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {
         let (tx, _rx) = broadcast::channel(16);
-        let mut adapter = ClaudeAdapter::new(tx);
-        adapter.config = Some(SessionConfig {
+        let mut harness = ClaudeHarness::new(tx);
+        harness.config = Some(SessionConfig {
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4())),
             ..Default::default()
         });
 
-        let first = adapter
+        let first = harness
             .send_input("first")
             .await
             .expect_err("spawn should fail for missing cwd");
         assert!(
             !matches!(
-                first.downcast_ref::<SessionAdapterError>(),
-                Some(SessionAdapterError::TurnAlreadyInProgress)
+                first.downcast_ref::<SessionHarnessError>(),
+                Some(SessionHarnessError::TurnAlreadyInProgress)
             ),
             "first failure should not be turn-in-progress"
         );
 
-        let second = adapter
+        let second = harness
             .send_input("second")
             .await
             .expect_err("turn guard should be released after setup failure");
         assert!(
             !matches!(
-                second.downcast_ref::<SessionAdapterError>(),
-                Some(SessionAdapterError::TurnAlreadyInProgress)
+                second.downcast_ref::<SessionHarnessError>(),
+                Some(SessionHarnessError::TurnAlreadyInProgress)
             ),
             "second failure should not be turn-in-progress"
         );

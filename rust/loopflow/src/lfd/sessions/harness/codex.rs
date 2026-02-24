@@ -10,7 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::lfd::sessions::adapter::SessionAdapter;
+use crate::lfd::sessions::harness::SessionHarness;
 use crate::lfd::sessions::types::{
     FileEdit, ItemDelta, ItemStatus, SessionConfig, SessionEvent, SessionItem, TurnStatus,
 };
@@ -34,7 +34,7 @@ enum ItemPhase {
     Completed,
 }
 
-pub struct CodexAdapter {
+pub struct CodexHarness {
     events: broadcast::Sender<SessionEvent>,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
@@ -47,13 +47,13 @@ pub struct CodexAdapter {
     shutdown_requested: Arc<AtomicBool>,
 }
 
-impl std::fmt::Debug for CodexAdapter {
+impl std::fmt::Debug for CodexHarness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodexAdapter").finish()
+        f.debug_struct("CodexHarness").finish()
     }
 }
 
-impl CodexAdapter {
+impl CodexHarness {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
             events,
@@ -71,7 +71,7 @@ impl CodexAdapter {
 
     async fn send_request(&mut self, method: &str, params: Value) -> Result<()> {
         let Some(tx) = &self.outbound_tx else {
-            return Err(anyhow!("codex adapter not started"));
+            return Err(anyhow!("codex harness not started"));
         };
         let id = self.next_request_id;
         self.next_request_id += 1;
@@ -329,7 +329,7 @@ fn parse_file_changes(item: &Value) -> Vec<FileEdit> {
 }
 
 #[async_trait]
-impl SessionAdapter for CodexAdapter {
+impl SessionHarness for CodexHarness {
     async fn start(&mut self, config: &SessionConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());
@@ -380,7 +380,7 @@ impl SessionAdapter for CodexAdapter {
     }
 }
 
-impl CodexAdapter {
+impl CodexHarness {
     async fn start_inner(&mut self, config: &SessionConfig) -> Result<()> {
         let mut child = Command::new("codex")
             .arg("--app-server")
@@ -474,7 +474,7 @@ impl CodexAdapter {
                 }
 
                 // Resolve turn_id from notification params or tracked state.
-                let turn_id_from_params = CodexAdapter::extract_turn_id(&params);
+                let turn_id_from_params = CodexHarness::extract_turn_id(&params);
 
                 match method {
                     "turn/started" => {
@@ -486,40 +486,40 @@ impl CodexAdapter {
                         let _ = event_tx.send(SessionEvent::TurnStarted { turn_id: tid });
                     }
                     "turn/completed" => {
-                        let tid = CodexAdapter::resolve_turn_id(
+                        let tid = CodexHarness::resolve_turn_id(
                             turn_id_from_params.as_deref(),
                             &current_turn_id,
                         )
                         .await;
                         turn_in_progress.store(false, Ordering::Relaxed);
                         *current_turn_id.lock().await = None;
-                        let status = CodexAdapter::map_turn_status(&params);
+                        let status = CodexHarness::map_turn_status(&params);
                         let _ = event_tx.send(SessionEvent::TurnCompleted {
                             turn_id: tid,
                             status,
                         });
                     }
                     "item/started" => {
-                        let tid = CodexAdapter::resolve_turn_id(
+                        let tid = CodexHarness::resolve_turn_id(
                             turn_id_from_params.as_deref(),
                             &current_turn_id,
                         )
                         .await;
-                        let item = CodexAdapter::build_item(&params, ItemPhase::Started);
+                        let item = CodexHarness::build_item(&params, ItemPhase::Started);
                         let _ = event_tx.send(SessionEvent::ItemStarted { turn_id: tid, item });
                     }
                     "item/completed" => {
-                        let tid = CodexAdapter::resolve_turn_id(
+                        let tid = CodexHarness::resolve_turn_id(
                             turn_id_from_params.as_deref(),
                             &current_turn_id,
                         )
                         .await;
-                        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+                        let item = CodexHarness::build_item(&params, ItemPhase::Completed);
                         let _ = event_tx.send(SessionEvent::ItemCompleted { turn_id: tid, item });
                     }
                     "item/agentMessage/delta" => {
-                        if let Some(content) = CodexAdapter::text_content(&params) {
-                            let tid = CodexAdapter::resolve_turn_id(
+                        if let Some(content) = CodexHarness::text_content(&params) {
+                            let tid = CodexHarness::resolve_turn_id(
                                 turn_id_from_params.as_deref(),
                                 &current_turn_id,
                             )
@@ -534,8 +534,8 @@ impl CodexAdapter {
                         // Final agent message text is captured in item/completed.
                     }
                     "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
-                        if let Some(content) = CodexAdapter::text_content(&params) {
-                            let tid = CodexAdapter::resolve_turn_id(
+                        if let Some(content) = CodexHarness::text_content(&params) {
+                            let tid = CodexHarness::resolve_turn_id(
                                 turn_id_from_params.as_deref(),
                                 &current_turn_id,
                             )
@@ -549,13 +549,13 @@ impl CodexAdapter {
                     "item/commandExecution/outputDelta"
                     | "item/fileChange/outputDelta"
                     | "item/plan/delta" => {
-                        if let Some(data) = CodexAdapter::map_item_delta(method, &params) {
-                            let tid = CodexAdapter::resolve_turn_id(
+                        if let Some(data) = CodexHarness::map_item_delta(method, &params) {
+                            let tid = CodexHarness::resolve_turn_id(
                                 turn_id_from_params.as_deref(),
                                 &current_turn_id,
                             )
                             .await;
-                            let item_id = CodexAdapter::map_item_id(&params);
+                            let item_id = CodexHarness::map_item_id(&params);
                             let _ = event_tx.send(SessionEvent::ItemUpdated {
                                 turn_id: tid,
                                 item_id,
@@ -569,7 +569,7 @@ impl CodexAdapter {
                             .and_then(Value::as_str)
                             .map(ToString::to_string)
                         {
-                            let tid = CodexAdapter::resolve_turn_id(
+                            let tid = CodexHarness::resolve_turn_id(
                                 turn_id_from_params.as_deref(),
                                 &current_turn_id,
                             )
@@ -656,7 +656,7 @@ mod tests {
             }
         });
 
-        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        let item = CodexHarness::build_item(&params, ItemPhase::Completed);
         match item {
             SessionItem::File {
                 id,
@@ -683,7 +683,7 @@ mod tests {
             }
         });
 
-        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        let item = CodexHarness::build_item(&params, ItemPhase::Completed);
         match item {
             SessionItem::Message { id, text, phase } => {
                 assert_eq!(id, "item_2");
@@ -704,7 +704,7 @@ mod tests {
             }
         });
 
-        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        let item = CodexHarness::build_item(&params, ItemPhase::Completed);
         match item {
             SessionItem::Thought { id, text } => {
                 assert_eq!(id, "item_3");
@@ -728,7 +728,7 @@ mod tests {
             }
         });
 
-        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+        let item = CodexHarness::build_item(&params, ItemPhase::Completed);
         match item {
             SessionItem::Tool {
                 id,

@@ -1,4 +1,4 @@
-# 04: Beat Grid
+# 05: Beat Grid
 
 Sequenced execution for chords. A beat grid defines which children fire on which beat, turning a chord into a drum machine.
 

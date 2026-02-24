@@ -52,7 +52,8 @@ Key properties:
 | 01 | Data Model | Wave enum (Voice/Chord), SQLite storage, join/leave | shipped |
 | 02 | Execution | Inherited trigger tick → start all → wait all → mark failure if any | |
 | 03 | Listen Step | Inter-voice communication via PR digestion and plan adaptation | |
-| 04 | Beat Grid | Sequenced execution — drum machine grid of on/off per child per beat | |
+| 04 | Concerto UI | Chord visualization, voice management, and execution status in the macOS app | |
+| 05 | Beat Grid | Sequenced execution — drum machine grid of on/off per child per beat | |
 
 ### Phase 01 retrospective
 

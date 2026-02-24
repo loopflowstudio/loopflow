@@ -1,2 +1,1 @@
-- Assumption: `scratch/chords-execution.md` is superseded by `scratch/chords-simple.md` for OSS loopflow. I implemented the next shared backend slice (`Listen` stimulus + schema migration plumbing) rather than resurrecting nested chord execution scheduling.
-- Open question: Should `Listen` stimuli be accepted in wave schema files (`parse_schema_stimulus`) now, or only via API for a later step?
+- Should `listen` stimuli be accepted in wave schema files (`parse_schema_stimulus`) now, or remain API-only until chord CRUD lands?

@@ -1,91 +1,69 @@
-# Chords: Simple Groups + Listening
+# Chords in OSS Loopflow: Current State + Next Work
 
-Complex chord orchestration (beat grids, inherited triggers, parallel execution) → Symphonia/studio repo.
-Open-source loopflow gets simple chord groups + listen stimulus.
+Complex nested chord orchestration (inherited triggers, child scheduling, beat-grid execution) moved out of OSS scope to Symphonia/studio.
 
-## Design
+OSS loopflow keeps a simpler model:
+- chords are named groups of waves
+- waves can listen to other waves via stimulus
+- no tree-structured wave scheduler in lfd
 
-**Chord** = named group of waves that listen to each other.
+## Product decision
 
-**Default chord**: All waves on an lfd instance are in one default chord. They all listen to each other automatically. Explicit chords can be created for subgroups.
+- **Primary interaction:** chord/listen behavior users can tinker with directly.
+- **Supporting sources:** GitHub and repo events remain available.
+- **No nested execution runtime in OSS:** child-chord scheduling and inherited-trigger iteration are not part of this branch's target model.
 
-**ListeningFlow** (replaces "sidecar"): A wave run triggered by listening to another wave. Has:
-- `source` — what it listens to (a wave, chord, or repo event)
-- `flow` — what it does when the source speaks
+## Implemented on this branch
 
-**Stimulus source hierarchy** (user's product framing):
-- **chord listening** — primary, encouraged for users to tinker with
-- **github** — automatic-on (webhook triggers)
-- **repo** — power-user flexibility (direct repo watching)
+- Flattened `Wave` from enum/tree model to a single struct.
+- Removed legacy chord-tree concepts from Rust types, store, SQL mapping, and HTTP DTOs:
+  - `wave_type`, `parent_id`, `position`, `children`
+  - `/v0/waves/join` and `/v0/waves/leave`
+  - tree-specific store errors and assembly logic
+- Added `listen` stimulus support in Rust:
+  - `StimulusKind::Listen = 5`
+  - optional `source_wave_id` on `Stimulus`
+  - `source_wave_id` persisted in sqlite/postgres and exposed in API DTOs
+- Added migration `012_remove_chord_tree.sql`:
+  - drops wave-tree columns/indexes
+  - adds `chords` + `chord_members`
+  - adds `stimuli.source_wave_id`
+- Updated Python client/docs to match backend:
+  - removed `join()` / `leave()` wrappers for removed routes
+  - added `source_wave_id` support for stimuli and examples
 
-## What's Done (Rust)
+## Remaining work
 
-Wave flattened from enum (Voice/Chord) to simple struct. All chord tree machinery removed:
+1. **Chord type + store operations**
+   - Add `Chord` domain type.
+   - Implement `create/delete chord`, membership mutation, chord listing/get operations.
+   - Auto-enroll newly created waves into the default chord.
 
-- [x] `Wave` is a flat struct (no more Voice/Chord enum, WaveData, parent_id, position)
-- [x] Removed `MAX_CHORD_DEPTH`, `reparented_wave()`, `new_chord_wave()`
-- [x] Removed `join_waves()`, `leave_wave()` from Store trait + impls (sqlite, postgres)
-- [x] Removed `StoreError::DepthLimitExceeded`, `NestedWaveCannotOwnStimulus`, `StimulusOwnerCannotBeNested`
-- [x] Removed `WaveTreeRow`, `assemble_wave_tree()`, recursive CTE queries
-- [x] Removed `/waves/join` and `/waves/leave` HTTP routes
-- [x] Removed `JoinWavesRequest`, `LeaveWaveRequest`, `ensure_wave_can_run_directly()`
-- [x] Removed `WaveChildDto`, `wave_type`, `parent_id`, `position`, `children` from DTOs
-- [x] Updated SQL catalog: wave queries use 12 columns (no wave_type, parent_wave_id, position)
-- [x] All `wave.data_mut().field` → `wave.field` across executor, triggers, HTTP handlers
-- [x] All tests pass (545 tests), clippy clean, fmt clean
+2. **Chord HTTP API**
+   - `POST /chords`
+   - `GET /chords`
+   - `GET /chords/:id`
+   - `DELETE /chords/:id`
+   - `POST /chords/:id/members`
+   - `DELETE /chords/:id/members/:wave_id`
 
-## What's Left
+3. **Listen authoring parity**
+   - Decide whether schema files should support `listen` + `source_wave_id` now or remain API-only until a later step.
 
-### SQL migration (Step 2)
-`012_remove_chord_tree.sql`:
-- Drop `wave_type`, `parent_wave_id`, `position` columns from waves
-- Drop chord-related indexes
-- Add `chords` table: `id TEXT PK, name TEXT NOT NULL UNIQUE, is_default INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL`
-- Add `chord_members` table: `chord_id TEXT FK → chords(id), wave_id TEXT FK → waves(id), PK (chord_id, wave_id)`
-- Add `source_wave_id TEXT` column to `stimuli` table (for listen kind)
-- Add `Listen = 5` stimulus kind
+4. **Terminology cleanup**
+   - Finish sidecar → listening naming cleanup wherever stale names remain.
 
-### Chord type + store ops (Step 6)
-New `chord.rs` type:
-```rust
-pub struct Chord {
-    pub id: LfdId,
-    pub name: String,
-    pub is_default: bool,
-    pub created_at: Option<OffsetDateTime>,
-}
-```
+5. **Python chord API**
+   - Add `Chord` model and chord CRUD/membership client methods.
 
-Store methods: `create_chord`, `delete_chord`, `add_chord_member`, `remove_chord_member`, `list_chords`, `get_chord`, `get_default_chord`, `list_chords_for_wave`.
+## Known risks / migration notes
 
-Default chord behavior: auto-add new waves to the default chord on creation.
+- Existing callers using Python `join/leave` must migrate.
+- Concerto UI test `ScreenshotPipelineTests/testCapture` is flaky/failing in this environment; Swift package tests pass.
+- Migration 012 is required for databases before running code that assumes flattened wave schema.
 
-### Listen stimulus (Step 5)
-- Add `Listen = 5` to `StimulusKind`
-- Add `source_wave_id: Option<LfdId>` to `Stimulus` (populated for Listen kind)
-- Rename sidecar concept → ListeningFlow
-- ListeningFlow has a `source` and a `flow`
+## Out of scope for OSS
 
-### Chord HTTP routes (Step 4b)
-- `POST /chords` — create chord
-- `GET /chords` — list chords
-- `GET /chords/:id` — get chord with members
-- `DELETE /chords/:id` — delete chord
-- `POST /chords/:id/members` — add wave
-- `DELETE /chords/:id/members/:wave_id` — remove wave
-
-### Rename sidecars → ListeningFlows (Step 5b)
-- `SidecarKind` → concept absorbed into Listen stimulus
-- `WaveRunKind::Sidecar` → `WaveRunKind::Listening`
-- `sidecar_kind` field → remove or repurpose
-- Update all references
-
-### Python API (Step 7)
-- Remove `join()`, `leave()` from API and client
-- Remove `wave_type`, `parent_id`, `position`, `children` from Wave model
-- Add `Chord` model and chord API methods
-
-### Documentation (Step 9)
-- Remove `wave/chords/` directory (moves to studio)
-- Remove `scratch/chords-execution.md`
-- This file (`scratch/chords-simple.md`) captures the new model
+- Inherited-trigger nested chord scheduler.
+- Parent/child chord runtime lifecycle management.
+- Chord beat-grid iteration orchestration.

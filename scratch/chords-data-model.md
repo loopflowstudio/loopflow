@@ -49,11 +49,11 @@ One verb. Two waves in, one chord out. Behavior depends on inputs:
 | Input A | Input B | Result |
 |---------|---------|--------|
 | Voice | Voice | New chord created, both reparented into it |
-| Chord | Voice | Voice absorbed into existing chord |
-| Voice | Chord | Voice absorbed into existing chord |
+| Chord | Voice | Voice absorbed into existing chord A |
+| Voice | Chord | New chord created, both reparented into it |
 | Chord | Chord | All children of B merged into A, B deleted |
 
-**Absorb, not nest.** `join` always produces a flat chord. Nesting (sub-chords) would be a separate explicit operation if ever needed.
+**A is always the target.** When A is a chord, B gets absorbed into it. When A is a voice, a new chord wraps both. The product layer guides users to put the chord first — the data model is dumb and consistent.
 
 **Store operation:** `UPDATE waves SET parent_id = ?, position = ? WHERE id = ?`. No tree recreation — just reparent.
 
@@ -121,14 +121,16 @@ POST /v0/waves/leave   { "wave": "vocalist" }
 
 | nest | Input A | Input B | Result |
 |------|---------|---------|--------|
-| false | Voice | Voice | New chord, both reparented (current) |
-| false | Chord | Voice | Voice absorbed (current) |
-| false | Chord | Chord | B's children merged into A, B deleted (current) |
+| false | Voice | Voice | New chord, both reparented |
+| false | Chord | Voice | Voice absorbed into A |
+| false | Voice | Chord | New chord, both reparented |
+| false | Chord | Chord | B's children merged into A, B deleted |
 | true | Voice | Voice | New chord, both reparented (same as false) |
-| true | Chord | Voice | Voice absorbed (same as false) |
+| true | Chord | Voice | Voice absorbed into A (same as false) |
+| true | Voice | Chord | New chord, both reparented (same as false) |
 | true | Chord | Chord | B reparented as child of A (nesting) |
 
-`nest` only changes behavior for chord+chord. Voice+voice and chord+voice are always absorb — nesting a single voice is meaningless.
+A is always the target. `nest` only changes behavior for chord+chord.
 
 **Store:** Add `nest: bool` parameter to `join_waves`. When true and both are chords, reparent B directly into A as a child (don't flatten). B keeps its children.
 

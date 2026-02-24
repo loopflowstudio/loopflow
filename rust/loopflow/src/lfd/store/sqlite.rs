@@ -398,16 +398,18 @@ impl SqliteStore {
                 ))?;
                 Ok(wave_a.id().clone())
             }
-            // Voice + Chord → absorb voice into chord B
+            // Voice + Chord → create new chord, reparent both
+            // (A is always the target; since A isn't a chord, wrap both)
             (false, true) => {
+                let chord_id = LfdId::new();
+                let name = chord_name.unwrap_or_else(|| format!("chord-{}", chord_id));
+                let chord = super::new_chord_wave(wave_a, chord_id.clone(), name);
+                self.upsert_wave(&chord)?;
                 self.delete_stimuli_for_wave(wave_a.id())?;
-                let next_pos = wave_b.children().len() as u32;
-                self.upsert_wave(&super::reparented_wave(
-                    wave_a,
-                    Some(wave_b.id().clone()),
-                    next_pos,
-                ))?;
-                Ok(wave_b.id().clone())
+                self.delete_stimuli_for_wave(wave_b.id())?;
+                self.upsert_wave(&super::reparented_wave(wave_a, Some(chord_id.clone()), 0))?;
+                self.upsert_wave(&super::reparented_wave(wave_b, Some(chord_id.clone()), 1))?;
+                Ok(chord_id)
             }
             // Chord + Chord
             (true, true) if nest => {

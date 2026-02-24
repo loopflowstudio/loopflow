@@ -45,12 +45,12 @@ The UI is a grid. Click to toggle. Add/remove beats. Reorder voices by dragging.
 
 ## Nesting and join
 
-With beat grids, nesting becomes meaningful — a nested chord on a beat acts as one unit that plays its own sequence before yielding. This means `join` should support both flat absorption and nesting:
+With beat grids, nesting becomes meaningful — a nested chord on a beat acts as one unit that plays its own sequence before yielding. Phase 01 shipped the `nest` parameter on `join`:
 
-- `join(a, b)` — absorb (current behavior, flat)
-- Explicit nesting operation (TBD) — add a chord as a child of another chord without flattening
+- `join(a, b)` — absorb (flat, merges B's children into A)
+- `join(a, b, nest=true)` — nest B as a child of A, keeping B's children intact
 
-The beat grid makes nesting useful because you can sequence when nested sub-groups fire.
+The beat grid makes nesting useful because you can sequence when nested sub-groups fire. The `nest` parameter is already in the store, HTTP, and Python API — no additional data model work needed for phase 04.
 
 ## Execution semantics
 
@@ -123,7 +123,7 @@ DELETE /v0/waves/{wave_id}/beats
 - Should the grid auto-resize when children are added/removed via join?
 - Looping: does the grid always loop, or can it play once and stop?
 - Tempo: is every beat one tick, or can beats have different durations?
-- How does `join` interact with BeatGrid? Does joining a voice into a beat grid auto-extend all beats with a new `false` slot?
+- How does `join` interact with BeatGrid? Does joining a voice into a beat grid auto-extend all beats with a new `false` slot? (The `nest` parameter is resolved — `join(a, b, nest=true)` handles chord-into-chord nesting. The grid resize question remains.)
 
 ## Done when
 

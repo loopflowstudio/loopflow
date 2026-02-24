@@ -16,7 +16,9 @@ Fork lifted to the wave level, with three key differences:
 
 ## What Phase 01 established
 
-The trigger and executor infrastructure is already enum-aware — triggers call `wave.id()`, `wave.name()`, etc. through the accessor methods. The run entrypoint guard (409 for nested waves) is in place. The fork executor (`wave/fork.rs`) was updated to use the new Wave API and is a potential foundation for parallel child execution. The depth cap (`MAX_CHORD_DEPTH = 8`) applies to nesting here too.
+The trigger and executor infrastructure is already enum-aware — triggers call `wave.id()`, `wave.name()`, etc. through the accessor methods. The run entrypoint guard (409 for nested waves) is in place. The fork executor (`wave/fork.rs`) was updated to use the new Wave API and is a likely foundation for parallel child execution — it already handles concurrent branch execution and result collection. The depth cap (`MAX_CHORD_DEPTH = 8`) applies to nesting here too.
+
+The `nest` parameter on `join` also shipped with phase 01. Nested chords (chord-as-child-of-chord) can be created via `join(a, b, nest=true)`, so the store and API infrastructure for nested execution is ready.
 
 ## What to build
 
@@ -64,7 +66,7 @@ Phase 03 adds the listen step between trigger and start.
 - Cleanup policy: what happens between iterations (branch cleanup, artifact management)?
 - Cancellation: how does stopping a chord propagate to children? The existing `stop_wave` route kills a single process — needs to walk children.
 - Failure status detail beyond `has_failure`: do we add per-child status summary?
-- How much of the fork executor infrastructure can be reused vs. needs new parallel orchestration code?
+- How much of the fork executor infrastructure can be reused vs. needs new parallel orchestration code? (Fork executor was updated to use Wave accessors — reuse looks feasible for the parallel execution pattern, but fork branches are ephemeral while chord voices persist across iterations. The lifecycle management differs.)
 
 ## Done when
 

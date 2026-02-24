@@ -58,7 +58,7 @@ Key properties:
 
 Shipped as planned, but wider than expected. The accessor method migration (`wave.field` → `wave.field()`) touched executor, triggers, queue, and HTTP routes — most of the codebase had to adapt to the enum. This means Phase 02 inherits an infrastructure that's already enum-aware: triggers already call `wave.id()`, `wave.name()`, etc. The iteration cycle logic builds on top rather than requiring another migration pass.
 
-Pragmatic additions not in the original plan: depth cap (`MAX_CHORD_DEPTH = 8`), `#[non_exhaustive]` on the Wave enum (forward-looking for the Rhythm variant).
+Pragmatic additions not in the original plan: depth cap (`MAX_CHORD_DEPTH = 8`), `#[non_exhaustive]` on the Wave enum (forward-looking for the Rhythm variant), and `nest` parameter on `join` (shipped early because it was a small addition to the join logic and resolves the "explicit nesting operation (TBD)" that phase 04 beat grids need). The fork executor was also updated to use the new Wave API, giving phase 02 a concrete starting point for parallel child execution.
 
 ## Future Directions
 

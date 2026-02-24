@@ -25,7 +25,7 @@ Propose a concrete test plan the human can execute. Three parts:
 
 **Validation.** How to inspect logs, database state, or output to confirm the change works correctly. Specify log locations, what patterns to grep for, and what "healthy" looks like versus failure modes.
 
-If the test workflow is more than a few commands, propose a dev script (`scripts/` — Python, not shell) that handles setup, exercise, validate, and teardown. The bar: an LLM agent should be able to run it, read the output, and know whether things are working without asking for help. `tests/e2e/` is a thin CI layer on top of scripts — the scripts do the real work.
+If the test workflow is more than a few commands, propose a Python script in `scripts/` that handles setup, exercise, validate, and teardown. The bar: an LLM agent should be able to run it, read the output, and know whether things are working without asking for help. E2e tests in `tests/e2e/` are trivial shell one-liners (`uv run python scripts/...`) that exist only as CI entry points — the scripts do the real work.
 
 ### 3. Core model
 

@@ -231,10 +231,21 @@ public enum AgentSessionEvent: Sendable, Hashable {
 
 public struct AgentSessionEventEnvelope: Sendable, Hashable {
     public let seq: Int?
-    public let event: AgentSessionEvent
+    public let eventType: String
+    public let event: AgentSessionEvent?
+    public let replayCompletedLastSeq: Int?
 
-    public init(seq: Int?, event: AgentSessionEvent) {
+    public init(seq: Int?, event: AgentSessionEvent, eventType: String = "session.event") {
         self.seq = seq
+        self.eventType = eventType
         self.event = event
+        self.replayCompletedLastSeq = nil
+    }
+
+    public init(replayCompletedLastSeq: Int) {
+        self.seq = nil
+        self.eventType = "session.replay_completed"
+        self.event = nil
+        self.replayCompletedLastSeq = replayCompletedLastSeq
     }
 }

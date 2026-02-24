@@ -139,6 +139,10 @@ pub async fn stream_session_events_handler(
             }
         }
 
+        if tx.send(Ok(replay_completed_sse(last_seq))).await.is_err() {
+            return;
+        }
+
         let Some(mut live_rx) = live_rx else {
             return;
         };
@@ -210,6 +214,17 @@ fn session_event_sse(event: &PersistedSessionEvent) -> SseEvent {
         .data(data)
 }
 
+fn replay_completed_sse(last_seq: i64) -> SseEvent {
+    let data = replay_completed_payload(last_seq);
+    SseEvent::default()
+        .event("session.replay_completed")
+        .data(data)
+}
+
+fn replay_completed_payload(last_seq: i64) -> String {
+    serde_json::json!({ "last_seq": last_seq }).to_string()
+}
+
 fn parse_session_id(value: &str) -> Result<LfdId, ApiError> {
     value
         .parse::<LfdId>()
@@ -243,5 +258,19 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiMessage::Untrusted(message),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_completed_sse_contains_event_type_and_last_seq() {
+        let event = replay_completed_sse(7);
+        let debug = format!("{event:?}");
+
+        assert!(debug.contains("session.replay_completed"));
+        assert_eq!(replay_completed_payload(7), "{\"last_seq\":7}");
     }
 }

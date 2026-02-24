@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -9,7 +9,9 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::lfd::sessions::harness::claude_mapping::ReaderState;
-use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
+use crate::lfd::sessions::harness::common::{
+    spawn_stderr_logger, InFlightItems, TurnInProgressGuard,
+};
 use crate::lfd::sessions::harness::{claude_mapping, SessionHarness, SessionHarnessError};
 use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
 
@@ -21,6 +23,7 @@ pub struct ClaudeHarness {
     child: Option<Child>,
     reader_task: Option<JoinHandle<()>>,
     stderr_task: Option<JoinHandle<()>>,
+    in_flight_items: Arc<Mutex<InFlightItems>>,
     shutdown_requested: Arc<AtomicBool>,
 }
 
@@ -77,6 +80,7 @@ impl ClaudeHarness {
             child: None,
             reader_task: None,
             stderr_task: None,
+            in_flight_items: Arc::new(Mutex::new(InFlightItems::default())),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -171,6 +175,7 @@ impl SessionHarness for ClaudeHarness {
         let events = self.events.clone();
         let turn_in_progress = self.turn_in_progress.clone();
         let shutdown = self.shutdown_requested.clone();
+        let in_flight_items = self.in_flight_items.clone();
         let reader_turn_id = turn_id.clone();
         self.reader_task = Some(tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -186,13 +191,31 @@ impl SessionHarness for ClaudeHarness {
                     continue;
                 }
 
-                if claude_mapping::process_line(&line, &reader_turn_id, &events, &mut state) {
+                if claude_mapping::process_line(
+                    &line,
+                    &reader_turn_id,
+                    &events,
+                    &mut state,
+                    &in_flight_items,
+                ) {
                     saw_turn_completed = true;
                     break;
                 }
             }
 
             if !saw_turn_completed && !shutdown.load(Ordering::Relaxed) {
+                let metadata = "claude process exited before emitting a result event";
+                let failed_items = in_flight_items
+                    .lock()
+                    .expect("in-flight tracker mutex poisoned")
+                    .drain_failed(metadata);
+                for (turn_id, item) in failed_items {
+                    let _ = events.send(SessionEvent::ItemCompleted { turn_id, item });
+                }
+                let _ = events.send(SessionEvent::Error {
+                    code: "claude_harness_crashed".to_string(),
+                    message: metadata.to_string(),
+                });
                 tracing::warn!(
                     turn_id = %reader_turn_id,
                     "claude turn ended without result event"
@@ -228,6 +251,10 @@ impl SessionHarness for ClaudeHarness {
         }
 
         self.turn_in_progress.store(false, Ordering::SeqCst);
+        self.in_flight_items
+            .lock()
+            .expect("in-flight tracker mutex poisoned")
+            .clear();
         Ok(())
     }
 

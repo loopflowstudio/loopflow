@@ -93,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let store: SharedStore = Arc::new(open_store(&storage_config).await?);
+    let session_manager = SessionManager::new(store.clone());
 
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
@@ -147,6 +148,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
+    }
+
+    match session_manager.recover_orphaned_sessions().await {
+        Ok(recovered) if recovered > 0 => {
+            tracing::warn!(
+                count = recovered,
+                "marked orphaned active sessions failed during startup recovery"
+            );
+        }
+        Ok(_) => {}
+        Err(err) => tracing::warn!(error = %err, "session startup recovery failed"),
     }
 
     let loop_handles = scheduler.clone().start_loops(
@@ -206,7 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_security: lfd_config.http_security,
         auth_failure_throttle: loopflow::lfd::auth::AuthFailureThrottle::new(),
         ci_failure_cache,
-        sessions: SessionManager::new(store),
+        sessions: session_manager,
     };
     let http_router = loopflow::lfd::http::router(http_state);
 

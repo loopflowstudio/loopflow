@@ -817,6 +817,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                     }
 
                     var pendingSeq: Int?
+                    var pendingEventType = "session.event"
                     for try await line in bytes.lines {
                         if line.hasPrefix("id:") {
                             let value = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
@@ -824,13 +825,35 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                             continue
                         }
 
+                        if line.hasPrefix("event:") {
+                            pendingEventType = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                            continue
+                        }
+
                         guard line.hasPrefix("data:") else { continue }
                         let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                         guard !payload.isEmpty else { continue }
 
-                        let event = try Self.parseSessionEvent(payload)
-                        continuation.yield(AgentSessionEventEnvelope(seq: pendingSeq, event: event))
+                        switch pendingEventType {
+                        case "session.event":
+                            let event = try Self.parseSessionEvent(payload)
+                            continuation.yield(
+                                AgentSessionEventEnvelope(
+                                    seq: pendingSeq,
+                                    event: event,
+                                    eventType: pendingEventType
+                                )
+                            )
+                        case "session.replay_completed":
+                            if let lastSeq = Self.parseReplayCompleted(payload) {
+                                continuation.yield(AgentSessionEventEnvelope(replayCompletedLastSeq: lastSeq))
+                            }
+                        default:
+                            break
+                        }
+
                         pendingSeq = nil
+                        pendingEventType = "session.event"
                     }
 
                     continuation.finish()
@@ -1231,6 +1254,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         default:
             return .other(type: type, payload: parseJSONValue(json))
         }
+    }
+
+    private static func parseReplayCompleted(_ raw: String) -> Int? {
+        guard let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return normalizeOptionalInt(json["last_seq"])
     }
 
     private static func parseSessionItem(_ json: [String: Any]) -> SessionItem {

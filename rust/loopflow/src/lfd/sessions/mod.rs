@@ -269,6 +269,23 @@ impl SessionManager {
             .map(|runtime| runtime.events_tx.subscribe()))
     }
 
+    pub async fn recover_orphaned_sessions(&self) -> Result<u32, SessionManagerError> {
+        let sessions = self
+            .inner
+            .store
+            .list_sessions_by_statuses(&[SessionStatus::Starting, SessionStatus::Active])
+            .await?;
+        if sessions.is_empty() {
+            return Ok(0);
+        }
+
+        for session in &sessions {
+            self.fail_orphaned_session(&session.id).await?;
+        }
+
+        Ok(sessions.len() as u32)
+    }
+
     fn spawn_harness_event_bridge(
         &self,
         session_id: LfdId,
@@ -285,6 +302,32 @@ impl SessionManager {
                         manager
                             .handle_provider_session_id(&session_id, &runtime, provider_session_id)
                             .await;
+                    }
+                    Ok(SessionEvent::Error { code, message }) => {
+                        let fatal = harness::is_terminal_harness_error(&code);
+                        if let Err(err) = manager
+                            .append_runtime_event(
+                                &session_id,
+                                &runtime,
+                                SessionEvent::Error {
+                                    code: code.clone(),
+                                    message: message.clone(),
+                                },
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                error = %err,
+                                "failed to persist harness error event"
+                            );
+                        }
+
+                        if fatal {
+                            manager
+                                .mark_session_failed_without_error(&session_id, &runtime)
+                                .await;
+                        }
                     }
                     Ok(event) => {
                         if let Err(err) = manager
@@ -322,6 +365,13 @@ impl SessionManager {
 
             match result {
                 Ok(()) => {
+                    let can_activate = manager
+                        .can_transition_to_active(&session_id)
+                        .await
+                        .unwrap_or(false);
+                    if !can_activate {
+                        return;
+                    }
                     if let Err(err) = manager
                         .set_status(
                             &session_id,
@@ -402,6 +452,73 @@ impl SessionManager {
             )
             .await;
         self.remove_runtime(session_id).await;
+    }
+
+    async fn mark_session_failed_without_error(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+    ) {
+        let _ = self
+            .set_status(
+                session_id,
+                SessionStatus::Failed,
+                Some(time::OffsetDateTime::now_utc().unix_timestamp()),
+                Some(runtime.clone()),
+            )
+            .await;
+        self.remove_runtime(session_id).await;
+    }
+
+    async fn can_transition_to_active(
+        &self,
+        session_id: &LfdId,
+    ) -> Result<bool, SessionManagerError> {
+        let session = self.get_session(session_id).await?;
+        Ok(session.status == SessionStatus::Starting)
+    }
+
+    async fn fail_orphaned_session(&self, session_id: &LfdId) -> Result<(), SessionManagerError> {
+        let now = time::OffsetDateTime::now_utc();
+        let existing_events = self
+            .inner
+            .store
+            .list_session_events(session_id, None)
+            .await?;
+        let mut next_seq = existing_events
+            .last()
+            .map(|event| event.seq + 1)
+            .unwrap_or(0);
+
+        let error_event = SessionEvent::Error {
+            code: "lfd_restarted_orphaned_session".to_string(),
+            message: "session was orphaned when lfd restarted".to_string(),
+        };
+        self.inner
+            .store
+            .append_session_event(session_id, next_seq, &error_event, now.unix_timestamp())
+            .await?;
+        next_seq += 1;
+
+        let status_event = SessionEvent::StatusChanged {
+            status: SessionStatus::Failed,
+        };
+        self.inner
+            .store
+            .append_session_event(session_id, next_seq, &status_event, now.unix_timestamp())
+            .await?;
+
+        self.inner
+            .store
+            .update_session_status(
+                session_id,
+                SessionStatus::Failed,
+                Some(now.unix_timestamp()),
+            )
+            .await?;
+
+        self.remove_runtime(session_id).await;
+        Ok(())
     }
 
     async fn set_status(
@@ -593,6 +710,100 @@ mod tests {
         }))
     }
 
+    #[derive(Debug)]
+    struct ItemLifecycleHarness {
+        tx: broadcast::Sender<SessionEvent>,
+    }
+
+    #[async_trait]
+    impl SessionHarness for ItemLifecycleHarness {
+        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            let turn_id = "turn_trace".to_string();
+            let item_id = "cmd_trace_1".to_string();
+
+            let _ = self.tx.send(SessionEvent::TurnStarted {
+                turn_id: turn_id.clone(),
+            });
+            let _ = self.tx.send(SessionEvent::ItemStarted {
+                turn_id: turn_id.clone(),
+                item: crate::lfd::sessions::types::SessionItem::Command {
+                    id: item_id.clone(),
+                    command: vec!["cargo".to_string(), "test".to_string()],
+                    cwd: "/tmp".to_string(),
+                    status: crate::lfd::sessions::types::ItemStatus::InProgress,
+                    output: None,
+                    exit_code: None,
+                    duration_ms: None,
+                },
+            });
+            let _ = self.tx.send(SessionEvent::ItemUpdated {
+                turn_id: turn_id.clone(),
+                item_id: item_id.clone(),
+                data: crate::lfd::sessions::types::ItemDelta::Output {
+                    content: "running".to_string(),
+                },
+            });
+            let _ = self.tx.send(SessionEvent::ItemCompleted {
+                turn_id: turn_id.clone(),
+                item: crate::lfd::sessions::types::SessionItem::Command {
+                    id: item_id,
+                    command: vec!["cargo".to_string(), "test".to_string()],
+                    cwd: "/tmp".to_string(),
+                    status: crate::lfd::sessions::types::ItemStatus::Completed,
+                    output: Some("ok".to_string()),
+                    exit_code: Some(0),
+                    duration_ms: Some(10),
+                },
+            });
+            let _ = self.tx.send(SessionEvent::TurnCompleted {
+                turn_id,
+                status: TurnStatus::Completed,
+            });
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn item_lifecycle_create_harness(
+        _provider: &str,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(ItemLifecycleHarness { tx: event_tx }))
+    }
+
+    #[derive(Debug)]
+    struct SlowStartHarness;
+
+    #[async_trait]
+    impl SessionHarness for SlowStartHarness {
+        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn slow_start_create_harness(
+        _provider: &str,
+        _event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(SlowStartHarness))
+    }
+
     async fn wait_for_status(
         manager: &SessionManager,
         session_id: &LfdId,
@@ -627,6 +838,24 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("session never captured expected provider session id");
+    }
+
+    async fn collect_until_turn_completed(
+        mut rx: broadcast::Receiver<PersistedSessionEvent>,
+    ) -> Vec<PersistedSessionEvent> {
+        let mut events = Vec::new();
+        for _ in 0..16 {
+            let result = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
+            let Ok(Ok(event)) = result else {
+                break;
+            };
+            let done = matches!(event.event, SessionEvent::TurnCompleted { .. });
+            events.push(event);
+            if done {
+                break;
+            }
+        }
+        events
     }
 
     #[tokio::test]
@@ -840,5 +1069,220 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert!(saw_resume);
+    }
+
+    #[tokio::test]
+    async fn multi_client_subscribers_receive_identical_item_ids_and_seq_order() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, item_lifecycle_create_harness);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "codex".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        let client_a = manager
+            .subscribe(&created.id)
+            .await
+            .expect("subscribe")
+            .expect("runtime receiver");
+        let client_b = manager
+            .subscribe(&created.id)
+            .await
+            .expect("subscribe")
+            .expect("runtime receiver");
+
+        manager
+            .send_input(&created.id, "run trace")
+            .await
+            .expect("send input");
+
+        let events_a = collect_until_turn_completed(client_a).await;
+        let events_b = collect_until_turn_completed(client_b).await;
+
+        assert!(!events_a.is_empty());
+        assert_eq!(events_a.len(), events_b.len());
+
+        let seqs_a: Vec<i64> = events_a.iter().map(|event| event.seq).collect();
+        let seqs_b: Vec<i64> = events_b.iter().map(|event| event.seq).collect();
+        assert_eq!(seqs_a, seqs_b);
+        assert!(seqs_a.windows(2).all(|window| window[0] < window[1]));
+
+        let ids_a: Vec<String> = events_a
+            .iter()
+            .filter_map(|event| match &event.event {
+                SessionEvent::ItemStarted { item, .. }
+                | SessionEvent::ItemCompleted { item, .. } => match item {
+                    crate::lfd::sessions::types::SessionItem::Command { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::File { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::Message { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::Thought { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::Tool { id, .. } => Some(id.clone()),
+                },
+                _ => None,
+            })
+            .collect();
+        let ids_b: Vec<String> = events_b
+            .iter()
+            .filter_map(|event| match &event.event {
+                SessionEvent::ItemStarted { item, .. }
+                | SessionEvent::ItemCompleted { item, .. } => match item {
+                    crate::lfd::sessions::types::SessionItem::Command { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::File { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::Message { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::Thought { id, .. }
+                    | crate::lfd::sessions::types::SessionItem::Tool { id, .. } => Some(id.clone()),
+                },
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            ids_a,
+            vec!["cmd_trace_1".to_string(), "cmd_trace_1".to_string()]
+        );
+        assert_eq!(ids_a, ids_b);
+    }
+
+    #[tokio::test]
+    async fn recover_orphaned_sessions_marks_starting_and_active_failed() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store.clone(), fake_create_harness);
+
+        let now = time::OffsetDateTime::now_utc();
+        let starting_session = Session {
+            id: LfdId::new(),
+            provider: "claude".to_string(),
+            status: SessionStatus::Starting,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig::default(),
+            created_at: now,
+            ended_at: None,
+        };
+        let active_session = Session {
+            id: LfdId::new(),
+            provider: "codex".to_string(),
+            status: SessionStatus::Active,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig::default(),
+            created_at: now,
+            ended_at: None,
+        };
+        let ended_session = Session {
+            id: LfdId::new(),
+            provider: "codex".to_string(),
+            status: SessionStatus::Ended,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig::default(),
+            created_at: now,
+            ended_at: Some(now),
+        };
+
+        store
+            .create_session(&starting_session)
+            .await
+            .expect("create starting session");
+        store
+            .create_session(&active_session)
+            .await
+            .expect("create active session");
+        store
+            .create_session(&ended_session)
+            .await
+            .expect("create ended session");
+
+        let recovered = manager
+            .recover_orphaned_sessions()
+            .await
+            .expect("recover orphaned sessions");
+        assert_eq!(recovered, 2);
+
+        let starting = manager
+            .get_session(&starting_session.id)
+            .await
+            .expect("starting session");
+        let active = manager
+            .get_session(&active_session.id)
+            .await
+            .expect("active session");
+        let ended = manager
+            .get_session(&ended_session.id)
+            .await
+            .expect("ended session");
+        assert_eq!(starting.status, SessionStatus::Failed);
+        assert_eq!(active.status, SessionStatus::Failed);
+        assert_eq!(ended.status, SessionStatus::Ended);
+
+        for session_id in [&starting_session.id, &active_session.id] {
+            let events = manager
+                .list_events(session_id, None)
+                .await
+                .expect("list session events");
+            assert!(events.iter().any(|event| {
+                matches!(
+                    &event.event,
+                    SessionEvent::Error { code, .. } if code == "lfd_restarted_orphaned_session"
+                )
+            }));
+            assert!(events.iter().any(|event| {
+                matches!(
+                    &event.event,
+                    SessionEvent::StatusChanged { status } if *status == SessionStatus::Failed
+                )
+            }));
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_session_is_idempotent_while_starting() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, slow_start_create_harness);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect("create session");
+
+        let first = manager
+            .stop_session(&created.id)
+            .await
+            .expect("first stop should succeed");
+        let second = manager
+            .stop_session(&created.id)
+            .await
+            .expect("second stop should be idempotent");
+
+        assert_eq!(first.status, SessionStatus::Ended);
+        assert_eq!(second.status, SessionStatus::Ended);
     }
 }

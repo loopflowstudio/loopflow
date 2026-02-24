@@ -188,8 +188,8 @@ struct ChatStateTests {
     }
 
     @MainActor
-    @Test("send is rejected while reconnecting")
-    func sendRejectedDuringReconnect() async {
+    @Test("send is rejected while replaying")
+    func sendRejectedDuringReplay() async {
         let defaults = makeUserDefaults("reconnect-race")
         defaults.set("session_1", forKey: "chatSession.wave-test")
 
@@ -205,6 +205,49 @@ struct ChatStateTests {
         #expect(service.sendInputCallCount == 0)
         #expect(messages(in: state, role: .system).contains { $0.content.contains("Please wait") })
 
+        state.onDisappear()
+    }
+
+    @MainActor
+    @Test("reconnect waits for replay sentinel before promoting live")
+    func reconnectWaitsForReplaySentinel() async {
+        let defaults = makeUserDefaults("replay-sentinel")
+        defaults.set("session_1", forKey: "chatSession.wave-test")
+
+        let service = MockChatService(
+            getSessionResults: [.success(activeSession(id: "session_1"))],
+            streamPlans: [
+                .init(
+                    events: [.success(AgentSessionEventEnvelope(replayCompletedLastSeq: 5))],
+                    holdOpen: true
+                )
+            ]
+        )
+
+        let state = ChatState(waveId: "wave-test", waveService: service, userDefaults: defaults)
+        await state.reconnectIfNeeded()
+        await waitUntil { state.streamPhase == .live }
+
+        #expect(state.streamPhase == .live)
+        state.onDisappear()
+    }
+
+    @MainActor
+    @Test("reconnect stays replaying without replay sentinel")
+    func reconnectWithoutSentinelStaysReplaying() async {
+        let defaults = makeUserDefaults("replay-no-sentinel")
+        defaults.set("session_1", forKey: "chatSession.wave-test")
+
+        let service = MockChatService(
+            getSessionResults: [.success(activeSession(id: "session_1"))],
+            streamPlans: [.init(events: [], holdOpen: true)]
+        )
+
+        let state = ChatState(waveId: "wave-test", waveService: service, userDefaults: defaults)
+        await state.reconnectIfNeeded()
+        try? await Task.sleep(for: .milliseconds(1200))
+
+        #expect(state.streamPhase == .replaying)
         state.onDisappear()
     }
 

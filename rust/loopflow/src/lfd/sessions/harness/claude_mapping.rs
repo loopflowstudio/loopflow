@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use tokio::sync::broadcast;
 
+use crate::lfd::sessions::harness::common::InFlightItems;
 use crate::lfd::sessions::types::{FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus};
 
 /// Reader-local state for tracking in-flight content blocks.
@@ -82,6 +84,7 @@ pub(super) fn process_line(
     turn_id: &str,
     events: &broadcast::Sender<SessionEvent>,
     state: &mut ReaderState,
+    in_flight_items: &Arc<Mutex<InFlightItems>>,
 ) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return false;
@@ -206,12 +209,12 @@ pub(super) fn process_line(
         // Claude emits "assistant" events with full message content.
         // These contain tool_use blocks and text blocks.
         "assistant" => {
-            process_assistant_message(event, turn_id, events, state);
+            process_assistant_message(event, turn_id, events, state, in_flight_items);
         }
 
         // Tool result events: type "user" with tool_result content.
         "user" => {
-            process_user_message(event, turn_id, events, state);
+            process_user_message(event, turn_id, events, state, in_flight_items);
         }
 
         _ => {}
@@ -294,6 +297,7 @@ fn process_assistant_message(
     turn_id: &str,
     events: &broadcast::Sender<SessionEvent>,
     state: &mut ReaderState,
+    in_flight_items: &Arc<Mutex<InFlightItems>>,
 ) {
     let Some(blocks) = message_content(value) else {
         return;
@@ -321,6 +325,10 @@ fn process_assistant_message(
                 // emit both started and track it.
                 if state.track_tool(idx, &tool_id, &tool_name, input.clone()) {
                     let item = infer_item(&tool_name, &tool_id, input);
+                    in_flight_items
+                        .lock()
+                        .expect("in-flight tracker mutex poisoned")
+                        .insert(turn_id, &item);
                     let _ = events.send(SessionEvent::ItemStarted {
                         turn_id: turn_id.to_string(),
                         item,
@@ -347,6 +355,7 @@ fn process_user_message(
     turn_id: &str,
     events: &broadcast::Sender<SessionEvent>,
     state: &mut ReaderState,
+    in_flight_items: &Arc<Mutex<InFlightItems>>,
 ) {
     let Some(blocks) = message_content(value) else {
         return;
@@ -373,6 +382,10 @@ fn process_user_message(
         let output = extract_tool_result_text(block);
         let input = tool.parsed_input();
         let completed_item = build_item(&tool.name, &tool.id, input, ItemStatus::Completed, output);
+        in_flight_items
+            .lock()
+            .expect("in-flight tracker mutex poisoned")
+            .remove(&completed_item);
         let _ = events.send(SessionEvent::ItemCompleted {
             turn_id: turn_id.to_string(),
             item: completed_item,
@@ -416,6 +429,10 @@ fn extract_tool_result_text(block: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn in_flight_tracker() -> Arc<Mutex<InFlightItems>> {
+        Arc::new(Mutex::new(InFlightItems::default()))
+    }
 
     #[test]
     fn infer_item_bash_to_command() {
@@ -490,9 +507,10 @@ mod tests {
     fn process_line_system_event() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
         let line = r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#;
 
-        let result = process_line(line, "turn_1", &tx, &mut state);
+        let result = process_line(line, "turn_1", &tx, &mut state, &in_flight);
         assert!(!result);
 
         let event = rx.try_recv().expect("should have event");
@@ -510,9 +528,10 @@ mod tests {
     fn process_line_wrapped_stream_event() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
         let line = r#"{"stream_event":{"event":{"type":"system","session_id":"sess_wrapped"}}}"#;
 
-        let result = process_line(line, "turn_1", &tx, &mut state);
+        let result = process_line(line, "turn_1", &tx, &mut state, &in_flight);
         assert!(!result);
 
         let event = rx.try_recv().expect("should have event");
@@ -530,9 +549,10 @@ mod tests {
     fn process_line_text_delta() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world"}}"#;
 
-        process_line(line, "turn_1", &tx, &mut state);
+        process_line(line, "turn_1", &tx, &mut state, &in_flight);
 
         let event = rx.try_recv().expect("should have event");
         match event {
@@ -548,9 +568,10 @@ mod tests {
     fn process_line_thinking_delta() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}"#;
 
-        process_line(line, "turn_1", &tx, &mut state);
+        process_line(line, "turn_1", &tx, &mut state, &in_flight);
 
         let event = rx.try_recv().expect("should have event");
         match event {
@@ -566,9 +587,10 @@ mod tests {
     fn process_line_result_completes_turn() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
         let line = r#"{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false,"result":"done","session_id":"sess_abc"}"#;
 
-        let result = process_line(line, "turn_1", &tx, &mut state);
+        let result = process_line(line, "turn_1", &tx, &mut state, &in_flight);
         assert!(result);
 
         let event = rx.try_recv().expect("should have event");
@@ -585,9 +607,10 @@ mod tests {
     fn process_line_result_error_marks_failed() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
         let line = r#"{"type":"result","is_error":true,"result":"failed"}"#;
 
-        let result = process_line(line, "turn_1", &tx, &mut state);
+        let result = process_line(line, "turn_1", &tx, &mut state, &in_flight);
         assert!(result);
 
         let event = rx.try_recv().expect("should have event");
@@ -604,9 +627,10 @@ mod tests {
     fn process_line_tool_use_start() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
         let line = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_bash_1","name":"Bash"}}"#;
 
-        process_line(line, "turn_1", &tx, &mut state);
+        process_line(line, "turn_1", &tx, &mut state, &in_flight);
 
         assert!(state.tool_blocks.contains_key(&1));
         let tool = &state.tool_blocks[&1];
@@ -628,16 +652,17 @@ mod tests {
     fn process_line_input_json_delta_accumulates() {
         let (tx, _rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
 
         // Start a tool block first.
         let start_line = r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash"}}"#;
-        process_line(start_line, "turn_1", &tx, &mut state);
+        process_line(start_line, "turn_1", &tx, &mut state, &in_flight);
 
         // Send partial input.
         let delta1 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"com"}}"#;
         let delta2 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"mand\":\"ls\"}"}}"#;
-        process_line(delta1, "turn_1", &tx, &mut state);
-        process_line(delta2, "turn_1", &tx, &mut state);
+        process_line(delta1, "turn_1", &tx, &mut state, &in_flight);
+        process_line(delta2, "turn_1", &tx, &mut state, &in_flight);
 
         assert_eq!(
             state
@@ -645,6 +670,42 @@ mod tests {
                 .get(&0)
                 .map(|tool| tool.input_json.as_str()),
             Some("{\"command\":\"ls\"}")
+        );
+    }
+
+    #[test]
+    fn claude_trace_replay_emits_stable_tool_item_ids() {
+        let (tx, mut rx) = broadcast::channel(32);
+        let mut state = ReaderState::default();
+        let in_flight = in_flight_tracker();
+        let lines = [
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_trace","name":"Bash","input":{"command":"pwd"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_trace","content":"ok"}]}}"#,
+            r#"{"type":"result","is_error":false}"#,
+        ];
+
+        for line in lines {
+            let _ = process_line(line, "turn_trace", &tx, &mut state, &in_flight);
+        }
+
+        let mut item_ids = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                SessionEvent::ItemStarted { item, .. }
+                | SessionEvent::ItemCompleted { item, .. } => match item {
+                    SessionItem::Command { id, .. }
+                    | SessionItem::File { id, .. }
+                    | SessionItem::Message { id, .. }
+                    | SessionItem::Thought { id, .. }
+                    | SessionItem::Tool { id, .. } => item_ids.push(id),
+                },
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            item_ids,
+            vec!["toolu_trace".to_string(), "toolu_trace".to_string()]
         );
     }
 }

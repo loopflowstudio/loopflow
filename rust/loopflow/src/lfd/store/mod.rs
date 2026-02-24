@@ -380,6 +380,22 @@ impl Store {
         }
     }
 
+    pub async fn list_sessions_by_statuses(
+        &self,
+        statuses: &[SessionStatus],
+    ) -> StoreResult<Vec<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let statuses = statuses.to_vec();
+                run_sqlite(store, move |store| {
+                    store.list_sessions_by_statuses(&statuses)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_sessions_by_statuses(statuses).await,
+        }
+    }
+
     pub async fn get_active_session_for_wave_run(
         &self,
         wave_run_id: &str,

@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -7,17 +7,17 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
-use crate::lfd::sessions::harness::common::spawn_stderr_logger;
+use crate::lfd::sessions::harness::common::{spawn_stderr_logger, InFlightItems};
 use crate::lfd::sessions::harness::{codex_mapping, SessionHarness};
 use crate::lfd::sessions::types::{SessionConfig, SessionEvent};
 
 async fn resolve_turn_id(
     turn_id_from_params: Option<&str>,
-    current_turn_id: &Arc<Mutex<Option<String>>>,
+    current_turn_id: &Arc<AsyncMutex<Option<String>>>,
 ) -> String {
     if let Some(turn_id) = turn_id_from_params {
         return turn_id.to_string();
@@ -51,7 +51,8 @@ pub struct CodexHarness {
     stderr_task: Option<JoinHandle<()>>,
     next_request_id: i64,
     turn_in_progress: Arc<AtomicBool>,
-    current_turn_id: Arc<Mutex<Option<String>>>,
+    current_turn_id: Arc<AsyncMutex<Option<String>>>,
+    in_flight_items: Arc<Mutex<InFlightItems>>,
     shutdown_requested: Arc<AtomicBool>,
 }
 
@@ -72,7 +73,8 @@ impl CodexHarness {
             stderr_task: None,
             next_request_id: 1,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
-            current_turn_id: Arc::new(Mutex::new(None)),
+            current_turn_id: Arc::new(AsyncMutex::new(None)),
+            in_flight_items: Arc::new(Mutex::new(InFlightItems::default())),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -154,6 +156,10 @@ impl SessionHarness for CodexHarness {
         self.child = None;
         self.turn_in_progress.store(false, Ordering::Relaxed);
         *self.current_turn_id.lock().await = None;
+        self.in_flight_items
+            .lock()
+            .expect("in-flight tracker mutex poisoned")
+            .clear();
 
         self.shutdown_tasks().await;
 
@@ -214,6 +220,7 @@ impl CodexHarness {
         let (initialized_tx, initialized_rx) = oneshot::channel::<()>();
         let turn_in_progress = self.turn_in_progress.clone();
         let current_turn_id = self.current_turn_id.clone();
+        let in_flight_items = self.in_flight_items.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let event_tx = self.events.clone();
         let approval_tx = outbound_tx.clone();
@@ -281,12 +288,20 @@ impl CodexHarness {
                         let tid =
                             resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         let item = codex_mapping::build_item(&params, ItemPhase::Started);
+                        in_flight_items
+                            .lock()
+                            .expect("in-flight tracker mutex poisoned")
+                            .insert(&tid, &item);
                         let _ = event_tx.send(SessionEvent::ItemStarted { turn_id: tid, item });
                     }
                     "item/completed" => {
                         let tid =
                             resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         let item = codex_mapping::build_item(&params, ItemPhase::Completed);
+                        in_flight_items
+                            .lock()
+                            .expect("in-flight tracker mutex poisoned")
+                            .remove(&item);
                         let _ = event_tx.send(SessionEvent::ItemCompleted { turn_id: tid, item });
                     }
                     "item/agentMessage/delta" => {
@@ -363,9 +378,17 @@ impl CodexHarness {
 
             turn_in_progress.store(false, Ordering::Relaxed);
             if !shutdown_requested.load(Ordering::Relaxed) {
+                let metadata = "codex app-server disconnected unexpectedly";
+                let failed_items = in_flight_items
+                    .lock()
+                    .expect("in-flight tracker mutex poisoned")
+                    .drain_failed(metadata);
+                for (turn_id, item) in failed_items {
+                    let _ = event_tx.send(SessionEvent::ItemCompleted { turn_id, item });
+                }
                 let _ = event_tx.send(SessionEvent::Error {
-                    code: "codex_disconnected".to_string(),
-                    message: "codex app-server disconnected".to_string(),
+                    code: "codex_harness_crashed".to_string(),
+                    message: metadata.to_string(),
                 });
             }
         });

@@ -224,6 +224,7 @@ fn parse_file_changes(item: &Value) -> Vec<FileEdit> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::sessions::types::SessionEvent;
 
     #[test]
     fn build_item_maps_file_change_to_file() {
@@ -327,5 +328,86 @@ mod tests {
             }
             other => panic!("expected tool item, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn codex_trace_replay_keeps_item_id_stable_across_lifecycle() {
+        let turn_started = SessionEvent::TurnStarted {
+            turn_id: "turn_trace".to_string(),
+        };
+        let started_params = json!({
+            "turn": { "id": "turn_trace" },
+            "item": {
+                "id": "item_trace_1",
+                "type": "commandExecution",
+                "status": "in_progress",
+                "command": ["cargo", "test"],
+                "cwd": "/repo"
+            }
+        });
+        let item_started = SessionEvent::ItemStarted {
+            turn_id: extract_turn_id(&started_params).expect("turn id"),
+            item: build_item(&started_params, ItemPhase::Started),
+        };
+        let item_updated = SessionEvent::ItemUpdated {
+            turn_id: "turn_trace".to_string(),
+            item_id: map_item_id(&started_params),
+            data: map_item_delta(
+                "item/commandExecution/outputDelta",
+                &json!({"content": "running tests..."}),
+            )
+            .expect("delta"),
+        };
+        let completed_params = json!({
+            "turn": { "id": "turn_trace" },
+            "item": {
+                "id": "item_trace_1",
+                "type": "commandExecution",
+                "status": "completed",
+                "command": ["cargo", "test"],
+                "cwd": "/repo",
+                "aggregatedOutput": "ok",
+                "exitCode": 0
+            }
+        });
+        let item_completed = SessionEvent::ItemCompleted {
+            turn_id: extract_turn_id(&completed_params).expect("turn id"),
+            item: build_item(&completed_params, ItemPhase::Completed),
+        };
+        let turn_completed = SessionEvent::TurnCompleted {
+            turn_id: "turn_trace".to_string(),
+            status: map_turn_status(&json!({"turn": {"status": "completed"}})),
+        };
+
+        let trace = vec![
+            turn_started,
+            item_started,
+            item_updated,
+            item_completed,
+            turn_completed,
+        ];
+
+        let mut item_ids = Vec::new();
+        for event in trace {
+            match event {
+                SessionEvent::ItemStarted { item, .. }
+                | SessionEvent::ItemCompleted { item, .. } => {
+                    if let SessionItem::Command { id, .. } = item {
+                        item_ids.push(id);
+                    }
+                }
+                SessionEvent::ItemUpdated { item_id, .. } => item_ids.push(item_id),
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            item_ids,
+            vec![
+                "item_trace_1".to_string(),
+                "item_trace_1".to_string(),
+                "item_trace_1".to_string(),
+            ]
+        );
     }
 }

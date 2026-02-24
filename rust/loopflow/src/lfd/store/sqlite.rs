@@ -167,6 +167,36 @@ impl SqliteStore {
         Ok(row)
     }
 
+    pub fn list_sessions_by_statuses(
+        &self,
+        statuses: &[SessionStatus],
+    ) -> StoreResult<Vec<Session>> {
+        if statuses.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let placeholders = vec!["?"; statuses.len()].join(", ");
+        let query = format!(
+            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+             FROM sessions
+             WHERE status IN ({placeholders})
+             ORDER BY created_at ASC"
+        );
+        let mut stmt = conn.prepare(&query)?;
+        let status_values: Vec<i64> = statuses
+            .iter()
+            .map(|status| status.as_i32() as i64)
+            .collect();
+        let mut rows = stmt.query(rusqlite::params_from_iter(status_values.iter()))?;
+
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(Self::map_session_row(row)?);
+        }
+        Ok(sessions)
+    }
+
     pub fn get_active_session_for_wave_run(
         &self,
         wave_run_id: &str,

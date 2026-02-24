@@ -10,13 +10,13 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 
 ## Design Decisions
 
-**Adapter-first, not protocol-first.** Build a working Codex adapter end-to-end before abstracting. The protocol emerges from real adapter behavior, not upfront design.
+**Harness-first, not protocol-first.** Build a working Codex harness end-to-end before abstracting. The protocol emerges from real provider behavior, not upfront design.
 
 **lfd owns the session lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
 
-**Turn+item event model.** Provider adapters translate native events (Codex JSON-RPC, Claude NDJSON, OpenCode SSE) into a canonical event model. Turns are first-class (every turn-scoped event carries `turn_id`). Items are typed (`Command`, `File`, `Message`, `Thought`, `Tool`) with lifecycles (`ItemStarted → ItemUpdated → ItemCompleted`). High-frequency deltas (`TextDelta`, `ReasoningDelta`) stay top-level for streaming efficiency.
+**Turn+item event model.** Provider harnesses translate native events (Codex JSON-RPC, Claude NDJSON, OpenCode SSE) into a canonical event model. Turns are first-class (every turn-scoped event carries `turn_id`). Items are typed (`Command`, `File`, `Message`, `Thought`, `Tool`) with lifecycles (`ItemStarted → ItemUpdated → ItemCompleted`). High-frequency deltas (`TextDelta`, `ReasoningDelta`) stay top-level for streaming efficiency.
 
-**Container-first safety.** All adapters run in yolo/bypass mode. Safety comes from the container, not tool-level permissions. No approval routing in v1.
+**Container-first safety.** All harnesses run in yolo/bypass mode. Safety comes from the container, not tool-level permissions. No approval routing in v1.
 
 **Provider-owned auth.** Codex and Claude handle their own OAuth/login. lfd never collects raw credentials.
 
@@ -32,22 +32,22 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 
 | # | Phase | What it unlocks | Status |
 |---|-------|----------------|--------|
-| 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first adapter. | shipped |
-| 02 | Claude Adapter | `-p --resume` with structured output. Probes agent personality. | shipped |
+| 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first harness. | shipped |
+| 02 | Claude Harness | `-p --resume` with structured output. Probes agent personality. | shipped |
 | 03 | Concerto UI | Minimal chat panel, input, End button against proven API | |
 | 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
 | 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
-| 06 | OpenCode Adapter | Third adapter validates the abstraction | |
+| 06 | OpenCode Harness | Third provider harness validates the abstraction | |
 
 ## Architecture
 
 ```
 Concerto ──HTTP/SSE──▶ lfd session API
                          ├── SessionManager (lifecycle, state machine)
-                         │     └── SessionRuntime (adapter + broadcast + seq counter)
+                         │     └── SessionRuntime (harness + broadcast + seq counter)
                          ├── session store (sessions + session_events tables)
-                         └── adapter (Codex | Claude | OpenCode)
-                               ├── event bridge task (adapter → store + broadcast)
+                         └── provider harness (Codex | Claude | OpenCode)
+                               ├── event bridge task (harness → store + broadcast)
                                └── provider process
                                      Codex: codex --app-server (JSON-RPC stdio)
                                      Claude: claude -p --resume (NDJSON stdio)

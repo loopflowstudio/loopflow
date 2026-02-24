@@ -14,7 +14,7 @@ Interactive sessions handle real-world failure modes gracefully. Reconnect is re
 - **Double-end**: idempotent end is already implemented (first-win terminal status). Verify edge case: end during `starting` state.
 - **Wave integration**: session end triggers existing continue/commit logic; wave run state guards
 - **lfd restart**: `SessionRuntime` lives in a `HashMap` in memory — active sessions become orphans on restart. Events and session metadata survive in the store. Need a startup recovery pass to mark orphaned `active`/`starting` sessions as `failed`.
-- **Process crash recovery**: detect dead adapter process (child process exit), transition to `failed` state, emit `Error` event. The Codex adapter's reader task will see EOF on stdout — use that as the crash signal.
+- **Process crash recovery**: detect dead adapter process (child process exit), transition to `failed` state, emit `Error` event. The Codex adapter's reader task already sees EOF on stdout and closes the event sender — the bridge task detects this and can transition state. Extend this pattern to Claude (process-per-turn exits are normal, only unexpected exits are crashes).
 - **Provider auth interruption**: keep session alive when possible, emit error events
 
 ## Done when

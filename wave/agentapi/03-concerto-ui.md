@@ -12,7 +12,7 @@ When a session is active, Concerto shows a chat panel with the event transcript,
 - Text input composer → `POST /sessions/{id}/input`
 - End button → `DELETE /sessions/{id}`
 - Reconnect: check for active sessions, reattach to event stream
-- Typed item rendering: the event model provides `Command`, `FileChange`, `McpToolCall`, `AgentMessage`, `Plan`, and generic `Tool` items. Render each inline with appropriate chrome (command name + output, file path + status, message text). No need for rich tool visualization — just enough to distinguish item types visually.
+- Typed item rendering: the event model provides `Command`, `File`, `Message`, `Thought`, and generic `Tool` items. Render each inline with appropriate chrome (command name + output, file path + status, message text). No need for rich tool visualization — just enough to distinguish item types visually.
 
 ## What not to build
 
@@ -23,7 +23,7 @@ When a session is active, Concerto shows a chat panel with the event transcript,
 
 ## What Phase 01 gives us
 
-The event model is richer than originally planned. Items are typed (`Command`, `FileChange`, `McpToolCall`, etc.) with lifecycles (`ItemStarted → ItemUpdated → ItemCompleted`) and carry `turn_id` for grouping. This means Concerto can distinguish between a command executing and a file being edited without parsing text — just match on the item type.
+The event model is richer than originally planned. Items are typed (`Command`, `File`, `Message`, `Thought`, `Tool`) with lifecycles (`ItemStarted → ItemUpdated → ItemCompleted`) and carry `turn_id` for grouping. This means Concerto can distinguish between a command executing and a file being edited without parsing text — just match on the item type.
 
 ## Done when
 

@@ -103,6 +103,8 @@ curl -s -X POST "http://127.0.0.1:2486/v0/sessions/<session_id>/input" \
   -d '{"content":"fix the failing tests"}'
 ```
 
+`repo_root` must point to a local repo containing `.lf/`, and `cwd` (when set) must resolve inside that repo root.
+
 Stream events (replay + live tail):
 
 ```bash

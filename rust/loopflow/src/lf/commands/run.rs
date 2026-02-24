@@ -1,3 +1,6 @@
+use crate::engine::annotation::{
+    self, build_lf_envelope, build_outcome, ensure_annotation_gitignored,
+};
 use crate::engine::{
     check_cli_available, default_gather_sources, drop_native_instruction_docs,
     format_context_prompt, format_prompt, format_task_prompt, gather_context, launch_agent,
@@ -245,6 +248,42 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     );
 
     let use_color = std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal();
+
+    // Write annotation sidecar before launching the agent.
+    let direction_names: Vec<String> = built
+        .components
+        .directions
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+    let run_mode = if built.is_interactive {
+        "interactive"
+    } else {
+        "auto"
+    };
+    let step_name = built.step_name.as_deref().unwrap_or("inline");
+    let envelope = build_lf_envelope(
+        step_name,
+        &built.model,
+        &direction_names,
+        built.area.as_deref(),
+        built.components.wave.as_deref(),
+        run_mode,
+    );
+    let annotation = match annotation::write_envelope(&built.repo_root, &envelope) {
+        Ok(path) => {
+            let _ = ensure_annotation_gitignored(&built.repo_root);
+            Some(crate::engine::agent::LaunchAnnotation {
+                envelope: envelope.clone(),
+                envelope_path: path,
+            })
+        }
+        Err(err) => {
+            debug!(?err, "annotation sidecar write failed, continuing without");
+            None
+        }
+    };
+
     let launch_config = LaunchConfig {
         auto: !built.is_interactive,
         stream: !built.is_interactive,
@@ -254,6 +293,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         cwd: Some(built.repo_root.clone()),
         context_file,
         stream_format: StreamFormat::Human(use_color),
+        annotation,
     };
     debug!(?launch_config, "launching agent");
 
@@ -266,6 +306,15 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "agent finished"
     );
     debug!(exit_code = result.exit_code, "agent completed");
+
+    // Append outcome to annotation sidecar.
+    let outcome = build_outcome(result.exit_code, launch_start, Some(&built.repo_root));
+    if let Err(err) =
+        annotation::append_outcome(&built.repo_root, &envelope.trace.trace_id, outcome)
+    {
+        debug!(?err, "annotation outcome append failed");
+    }
+
     if result.exit_code == 0 {
         Ok(())
     } else {

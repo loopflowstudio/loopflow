@@ -1572,20 +1572,28 @@ impl AgentExecutor for DockerExecutor {
             return Err(anyhow!("empty agent command"));
         }
 
+        let wave_id = context.wave_id.to_string();
+        let wave_run_id = context.wave_run_id.to_string();
+        let agent_id = context.agent_id.to_string();
+        let annotation_ctx = context.annotation.clone();
         let output_context: OutputContext = context.into();
-        let workspace = self
-            .resolve_workspace(context.wave_id, context.wave_run_id)
-            .await?;
+        let workspace = self.resolve_workspace(&wave_id, &wave_run_id).await?;
         let agent_image = self.ensure_repo_image(&workspace.repo_source).await?;
-        self.prepare_workspace(&workspace, context.wave_run_id, cwd)
+        self.prepare_workspace(&workspace, &wave_run_id, cwd)
             .await?;
 
-        let container_name = Self::build_container_name(context.agent_id);
+        let container_name = Self::build_container_name(&agent_id);
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
-        let env = self.collect_env();
+        let mut env = self.collect_env();
+        if let Some(ref ann) = annotation_ctx {
+            for (key, value) in
+                crate::engine::annotation::annotation_env_pairs(&ann.envelope, &ann.envelope_path)
+            {
+                env.push(format!("{key}={value}"));
+            }
+        }
         let mounts = self.build_mounts(&workspace.volume.volume_name);
-        let labels =
-            Self::build_agent_labels(context.agent_id, context.wave_id, context.wave_run_id);
+        let labels = Self::build_agent_labels(&agent_id, &wave_id, &wave_run_id);
 
         let host_config = container_host_config(mounts, &self.limits);
 
@@ -1612,7 +1620,7 @@ impl AgentExecutor for DockerExecutor {
             .await?;
 
         let container_id = container.id;
-        let agent_lfd_id = LfdId::from_raw(context.agent_id);
+        let agent_lfd_id = LfdId::from_raw(agent_id.clone());
         let _ = self
             .store
             .update_agent_status(
@@ -1625,14 +1633,14 @@ impl AgentExecutor for DockerExecutor {
         self.active
             .lock()
             .await
-            .insert(context.agent_id.to_string(), container_id.clone());
+            .insert(agent_id.clone(), container_id.clone());
 
         if let Err(err) = self
             .docker
             .start_container(&container_id, None::<StartContainerOptions>)
             .await
         {
-            self.active.lock().await.remove(context.agent_id);
+            self.active.lock().await.remove(&agent_id);
             self.remove_container(&container_id).await;
             return Err(err.into());
         }
@@ -1640,7 +1648,7 @@ impl AgentExecutor for DockerExecutor {
         let exit_code = self
             .wait_for_container_with_logs(&container_id, output_context)
             .await;
-        self.active.lock().await.remove(context.agent_id);
+        self.active.lock().await.remove(&agent_id);
         self.remove_container(&container_id).await;
 
         self.sync_to_host_worktree(&workspace, cwd).await?;

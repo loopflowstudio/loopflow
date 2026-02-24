@@ -2,9 +2,11 @@ use std::path::Path;
 
 use anyhow::Result;
 use time::OffsetDateTime;
+use tracing::debug;
 
 use crate::engine::flow::ConcreteStep;
 use crate::lfd::executor::helpers::build_agent_for_step;
+use crate::lfd::executor::AnnotationContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{AgentStatus, Event};
 
@@ -21,6 +23,7 @@ pub(super) struct AgentLaunchRequest {
     pub model: String,
     pub cmd: Vec<String>,
     pub output_prefix: Option<String>,
+    pub annotation: Option<AnnotationContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +64,7 @@ impl WaveExecutor {
                     wave_run_id: request.wave_run_id.as_str(),
                     output: &self.output,
                     output_prefix: request.output_prefix.as_deref(),
+                    annotation: request.annotation.clone(),
                 },
             )
             .await;
@@ -90,6 +94,24 @@ impl WaveExecutor {
             .await?;
         self.event_hub
             .send(Event::agent_ended(agent_id.clone(), status));
+
+        // Append outcome to annotation sidecar if present.
+        if let Some(ref ann) = request.annotation {
+            let repo_root = Path::new(&request.worktree);
+            let outcome = crate::engine::annotation::Outcome {
+                exit_code,
+                duration_ms: 0, // Duration tracked at higher level
+                verdict: None,
+                artifacts_produced: None,
+            };
+            if let Err(err) = crate::engine::annotation::append_outcome(
+                repo_root,
+                &ann.envelope.trace.trace_id,
+                outcome,
+            ) {
+                debug!(?err, "annotation outcome append failed for wave agent");
+            }
+        }
 
         Ok(AgentLaunchOutcome {
             agent_id,

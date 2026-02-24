@@ -17,13 +17,21 @@ use crate::lfd::types::Wave;
 pub use helpers::{create_wave_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct AgentRunContext<'a> {
     pub wave_id: &'a str,
     pub agent_id: &'a str,
     pub wave_run_id: &'a str,
     pub output: &'a OutputHub,
     pub output_prefix: Option<&'a str>,
+    pub annotation: Option<AnnotationContext>,
+}
+
+/// Annotation metadata to propagate to agent subprocesses.
+#[derive(Debug, Clone)]
+pub struct AnnotationContext {
+    pub envelope: crate::engine::annotation::AnnotationEnvelopeV1,
+    pub envelope_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone)]

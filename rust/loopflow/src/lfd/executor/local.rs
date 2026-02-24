@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
+use crate::engine::annotation;
 use crate::engine::platform::kill_process;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
@@ -46,6 +47,7 @@ impl AgentExecutor for LocalProcessExecutor {
         }
 
         let agent_id_string = context.agent_id.to_string();
+        let annotation_ctx = context.annotation.clone();
         let output_context: OutputContext = context.into();
         let mut command = Command::new(&cmd[0]);
         command.args(&cmd[1..]);
@@ -53,11 +55,15 @@ impl AgentExecutor for LocalProcessExecutor {
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
 
+        if let Some(ref ann) = annotation_ctx {
+            annotation::set_annotation_env_async(&mut command, &ann.envelope, &ann.envelope_path);
+        }
+
         let mut child = command.spawn()?;
 
         // Record the PID so the process can be killed on stop.
         if let Some(pid) = child.id() {
-            let agent_lfd_id = LfdId::from_raw(context.agent_id);
+            let agent_lfd_id = LfdId::from_raw(agent_id_string.clone());
             let _ = self
                 .store
                 .update_agent_status(
@@ -153,6 +159,7 @@ mod tests {
                     wave_run_id: "run-timeout",
                     output: &output,
                     output_prefix: None,
+                    annotation: None,
                 },
             )
             .await;

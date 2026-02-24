@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod annotation;
 pub mod builtins;
 pub mod clipboard;
 pub mod command;

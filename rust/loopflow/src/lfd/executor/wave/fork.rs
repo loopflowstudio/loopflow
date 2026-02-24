@@ -168,6 +168,38 @@ impl WaveExecutor {
                     "launching fork branch agent"
                 );
 
+                // Write annotation sidecar for fork branch.
+                let ann_context = {
+                    let wave_id_str = fork_wave_id.to_string();
+                    let envelope = crate::engine::annotation::build_wave_envelope(
+                        &crate::engine::annotation::WaveEnvelopeParams {
+                            step: &step.step.name,
+                            flow: "fork",
+                            model: &model,
+                            directions: &wave_directions,
+                            area: None,
+                            wave: &wave_id_str,
+                            step_index: fork_run.branch_index,
+                            total_steps: 0,
+                            parent_span_id: None,
+                        },
+                    );
+                    crate::engine::annotation::write_envelope(
+                        std::path::Path::new(&worktree),
+                        &envelope,
+                    )
+                    .ok()
+                    .map(|path| {
+                        let _ = crate::engine::annotation::ensure_annotation_gitignored(
+                            std::path::Path::new(&worktree),
+                        );
+                        crate::lfd::executor::AnnotationContext {
+                            envelope,
+                            envelope_path: path,
+                        }
+                    })
+                };
+
                 let result = executor
                     .launch_agent(AgentLaunchRequest {
                         wave_id: fork_wave_id.clone(),
@@ -178,6 +210,7 @@ impl WaveExecutor {
                         model,
                         cmd,
                         output_prefix: Some(format!("[{}] ", branch_label)),
+                        annotation: ann_context,
                     })
                     .await
                     .map(|outcome| outcome.exit_code);

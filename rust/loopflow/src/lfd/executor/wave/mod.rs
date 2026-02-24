@@ -500,6 +500,33 @@ impl WaveExecutor {
         .await?;
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 
+        // Write annotation sidecar for this step.
+        let annotation = crate::engine::annotation::build_wave_envelope(
+            &crate::engine::annotation::WaveEnvelopeParams {
+                step: &step.step.name,
+                flow: &run.snapshot.flow,
+                model: &model,
+                directions: &run.snapshot.direction,
+                area: run.snapshot.area.first().map(String::as_str),
+                wave: &wave.name,
+                step_index: run.step_index,
+                total_steps: 0,
+                parent_span_id: None,
+            },
+        );
+        let ann_context =
+            crate::engine::annotation::write_envelope(Path::new(&worktree), &annotation)
+                .ok()
+                .map(|path| {
+                    let _ = crate::engine::annotation::ensure_annotation_gitignored(Path::new(
+                        &worktree,
+                    ));
+                    super::AnnotationContext {
+                        envelope: annotation,
+                        envelope_path: path,
+                    }
+                });
+
         let outcome = self
             .launch_agent(AgentLaunchRequest {
                 wave_id: run.wave_id.clone(),
@@ -510,6 +537,7 @@ impl WaveExecutor {
                 model: model.clone(),
                 cmd: build_agent_command(&model, &prompt, &launch),
                 output_prefix: None,
+                annotation: ann_context,
             })
             .await?;
 

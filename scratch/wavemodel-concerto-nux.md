@@ -1,192 +1,68 @@
-# Concerto NUX: Design-First Onboarding
+# Concerto NUX: Design-First Onboarding (Current State)
 
-## Problem
+## Goal
 
-New users opening Concerto see "Start a wave" with a name field—a configuration form for a concept they don't yet understand. The sidebar shows orphan worktrees (implementation details) and schema-based wave templates (dead code since Phase 02). The detail panel is purely operational: status, output, commits. Nothing shows *what* a wave is about—its vision, goals, or progress.
+Make first-run Concerto UX design-first instead of configuration-first:
+- remove dead schema UI paths
+- replace "create wave by name" with a design prompt launcher
+- surface wave vision/goals/risks/roadmap directly in the detail panel
+- reduce sidebar clutter for new users
 
-The result: new users bounce. They don't know what to type, what a wave name means, or why they'd create one. The app orients around operations instead of intent.
+## What shipped on this branch
 
-Who benefits: every new user, plus existing users who want to see wave content without reading markdown files on disk.
+### 1) Wave schema cleanup (Swift)
+- Deleted `swift/LoopflowCore/Models/WaveSchema.swift`
+- Removed `listWaveSchemas` from `WaveServiceProtocol` and `LocalWaveService`
+- Removed schema state/actions from `RepoState`
+- Removed schema creation/instantiation UI from `WaveSidebar`
 
-Why now: Phase 01 standardized wave READMEs (Vision/Goals/Risks/Metrics). Phase 02 removed schema abstractions and validated filesystem-based wave config. The content exists and the reading patterns are proven. Concerto just doesn't surface any of it.
+### 2) Start wave flow changed to design entry
+- `StartWaveView` now takes a design prompt (`"Describe what you want to build..."`)
+- Submit action launches `lf design -c '<prompt>'` via `TerminalLauncher.launchDesign(...)`
+- No direct wave creation in UI; `lf design` owns wave creation
+- Launch is local-repo-only; non-local repo targets show an error
 
-## Approach
+### 3) Wave content model + parser
+- Added `WaveContent` and `RoadmapItem` models
+- Added `WaveContentParser` that reads:
+  - `wave/<name>/README.md` sections: `## Vision`, `## Goals`, `## Risks`, `## Metrics`
+  - `wave/<name>/NN-*.md` roadmap files
+- Roadmap completion is detected by `## Shipped`
 
-Three changes ship together, preceded by dead code cleanup:
+### 4) Wave detail panel now shows wave intent
+- Vision appears as subtitle in header
+- Goals shown while idle
+- Risks shown during review-like steps
+- Roadmap rendered with shipped/pending indicators
+- Content is loaded on selection and refreshed on status/activation changes
 
-### Phase 0: WaveSchema Cleanup
+### 5) Sidebar cleanup
+- Single create action: "Start designing"
+- Empty state updated to design-first copy
+- Orphan worktrees moved behind collapsed `DisclosureGroup` (persisted)
 
-Remove all `WaveSchema` references from Swift. Phase 02 deleted the Rust-side `GET /wave/schemas` endpoint. The Swift client still declares the protocol method, stores schemas in `RepoState`, renders them in `WaveSidebar`, and offers "Instantiate all" in the create menu. All dead code, all in files this phase modifies.
+## Behavior details to remember
 
-**Files:**
-- `WaveServiceProtocol.swift` — remove `listWaveSchemas` method
-- `WaveSchema.swift` — delete entire file
-- `RepoState.swift` — remove `waveSchemas` field, `instantiateSchema()`, schema loading in refresh
-- `WaveSidebar.swift` — remove `pendingSchemas`, schema menu items, instantiation logic
-- `LocalWaveService.swift` / `MockWaveService.swift` — remove `listWaveSchemas` implementations
+- "Risks during review" is currently gated by `wave.activeRun?.currentStep` containing `"review"` (case-insensitive substring check).
+- Wave content parsing is convention-based. Non-standard heading names are intentionally ignored.
+- Content loading is on-demand and cached in `WaveViewModel`; there is no filesystem watcher.
 
-### Phase 1: StartWaveView → Design Entry
+## Known limitations and follow-ups
 
-Replace the wave name form with a design prompt launcher.
+- Design still opens in external terminal (intentional interim).
+- Inline design chat/session depends on wave item `04-agent-harness`.
+- Content parsing is on main-actor paths today; very large docs could cause minor UI hitching.
+- Remote repo targets intentionally skip local filesystem wave-content reads.
 
-**Current flow:** Type wave name → create wave → configure later.
+## Validation status
 
-**New flow:** Describe what you want to build → launch `lf design -c "<description>"` in terminal → design session creates the wave.
+Validated in branch review with:
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test --all`
+- `uv run pytest python/tests/`
+- `swift test --package-path swift`
+- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'`
+- `tests/e2e/test_smoke.sh`
 
-The text field stays but changes meaning: from "wave name" to "design prompt." Placeholder text: "Describe what you want to build..." Submit button text: "Start designing."
-
-On submit, use `TerminalLauncher.launchTerminal(_:at:command:)` to run `lf design -c "<user input>"` at the repo root. The design step is interactive—it asks follow-up questions, walks through components, and either produces a `scratch/` design doc or a full `wave/` directory with README and roadmap.
-
-The terminal launch is intentional friction. The user typed their intent in Concerto; the design conversation happens in a terminal where `lf design` can use the full coding agent (Claude Code). When agentapi ships, this becomes an embedded interactive session using the existing `InteractiveSessionView` + `GhosttyTerminalView` infrastructure.
-
-**Shell-escape the user input.** The description goes into a shell command. Single quotes in the input must be escaped. Use the existing `escapeShellSingleQuotes` helper in TerminalLauncher.
-
-**No wave creation on submit.** The old flow called `repoState.createWave(name:)`. The new flow delegates wave creation to `lf design`. Concerto picks up the new wave on its next refresh cycle.
-
-### Phase 2: WaveDetailPanel → Surface Wave Content
-
-Add a content section to the detail panel that reads and displays wave README sections and roadmap progress.
-
-**New utility: `WaveContentParser`** — reads `{repo}/wave/{name}/README.md` and `{repo}/wave/{name}/##-*.md` files from disk.
-
-README parsing is a line-by-line state machine:
-1. Scan for `## Vision`, `## Goals`, `## Risks`, `## Metrics` headers
-2. Collect lines between matching headers into named sections
-3. Everything not under one of these four headers is supplementary (ignored for display)
-4. Subsections within a section (e.g., "### Not here" under Vision) stay with their parent
-
-Return a `WaveContent` struct:
-```swift
-public struct WaveContent: Sendable, Equatable {
-    public var vision: String?     // Text under ## Vision
-    public var goals: String?      // Text under ## Goals
-    public var risks: String?      // Text under ## Risks
-    public var metrics: String?    // Text under ## Metrics
-    public var roadmapItems: [RoadmapItem]
-}
-
-public struct RoadmapItem: Sendable, Identifiable, Equatable {
-    public var id: String          // Filename stem (e.g., "01-codex-e2e")
-    public var number: Int         // Parsed from prefix
-    public var title: String       // First heading or filename
-    public var isShipped: Bool     // Has "## Shipped" section
-}
-```
-
-Roadmap parsing:
-1. Glob `{repo}/wave/{name}/[0-9][0-9]-*.md`
-2. For each file, read the first `# ` heading as title
-3. Check for `## Shipped` section to determine completion status
-4. Sort by number prefix
-
-**Display in WaveDetailPanel:**
-- Vision appears as a subtitle below the wave name in the header area. One or two lines, muted secondary text. Truncate with ellipsis if longer.
-- Goals section visible when the wave is idle—this is what you're working toward. Rendered as a compact list.
-- Risks section visible when reviewing—what to watch for. Shown alongside the review output.
-- Roadmap progress as a compact list with checkmarks for shipped items and circles for pending. Shows item number and title.
-
-**Content loading:** Read from disk when the wave is selected (detail panel appears). Cache in `WaveViewModel` as `content: WaveContent?`. Refresh when the panel regains focus or when a step completes (wave status changes). Don't watch the filesystem continuously—read on demand.
-
-**Add content fields to WaveViewModel:**
-```swift
-public var content: WaveContent?
-```
-
-Content loading lives in `RepoState` alongside existing wave data fetching. New method `loadWaveContent(for:)` reads from `{currentRepo}/wave/{waveName}/` using `WaveContentParser`.
-
-### Phase 3: WaveSidebar → Clean Default View
-
-**Hide orphan worktrees by default.** Wrap the worktrees section in a `DisclosureGroup` that defaults to collapsed. Users who need worktree visibility can expand it. State persists via `@AppStorage`.
-
-**Update empty state.** Change from "No waves yet" + "Create Wave" button to "No waves yet" + "Start designing" button. The button navigates to StartWaveView (or triggers the same design flow inline).
-
-**Simplify create menu.** Remove schema-related menu items (Phase 0). The create button becomes a single action that opens StartWaveView, not a menu with options.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Embed design session inline using existing GhosttyTerminalView | More integrated experience, no context switch | Requires a wave ID for InteractiveSession, but design *creates* the wave. Would need a "pre-wave" session concept. Ship the terminal launch now; agentapi enables the inline version. |
-| Add API endpoint to serve README content | Cleaner separation, works for remote repos | Wave item explicitly says no API needed. Filesystem reads follow the `wave_config.rs` pattern. Remote repo support can use the existing remote file access when needed. |
-| Full markdown parser library for README | More robust parsing | Overkill. Wave READMEs follow a known four-section convention. A state machine matching `## Section` headers is sufficient and has zero dependencies. |
-| Remove worktrees section entirely | Cleaner sidebar | Too aggressive. Power users use worktrees for debugging. Disclosure group gives both audiences what they want. |
-| Keep wave name field alongside design prompt | Backward compatible | Two fields for one action is confusing. Wave names come from design conversations. Users who want manual naming can use `lfq create` from the terminal. |
-
-## Key decisions
-
-1. **External terminal for design, not embedded.** The existing `InteractiveSession` requires a `waveId`, but `lf design` creates the wave. Launching in a terminal is the right interim step. Wave principle: "Ship what we can now; full interactive sessions arrive with agentapi."
-
-2. **Filesystem reads, no API.** Phase 02 validated: "`wave_config.rs` reads `wave/<name>/<name>.yaml` cleanly. The pattern is a reference for how Concerto should read `wave/<name>/README.md`." Follow the same pattern—read from disk, return nil for missing.
-
-3. **State-machine parser, not regex or library.** The README convention is known: four section headers. A line-by-line scan matching `## Vision`, `## Goals`, `## Risks`, `## Metrics` is correct, simple, and matches the risk callout: "Parser should match `## Vision`, `## Goals`, `## Risks`, `## Metrics` as the four README sections and treat everything else as supplementary."
-
-4. **Roadmap status from `## Shipped` section.** Roadmap files use a "## Shipped" section to mark completion. This matches the existing convention (visible in `agentapi/01-codex-e2e.md`, `agentapi/02-claude-adapter.md`, etc.). No separate status field or naming convention needed.
-
-5. **Content cached on WaveViewModel, loaded on demand.** No filesystem watcher. Read when the detail panel appears and when wave status changes. This matches the existing pattern where `WaveViewModel` holds operational data refreshed by `RepoState`.
-
-6. **Worktrees behind disclosure, not removed.** Wave sidebar goal: "hide orphan worktrees by default." Disclosure group with `@AppStorage` persistence gives new users a clean view and power users their worktree list.
-
-## Scope
-
-**In scope:**
-- Remove dead `WaveSchema` code from Swift (prerequisite, same files)
-- StartWaveView redesign: design prompt → terminal launch
-- WaveContentParser: read README sections and roadmap from disk
-- WaveDetailPanel: show vision, goals, risks, roadmap
-- WaveSidebar: hide worktrees, update empty state, simplify create
-- WaveViewModel: add `content: WaveContent?` field
-
-**Out of scope:**
-- Embedded interactive design session (agentapi dependency)
-- Real-time README population during design conversation
-- Wave creation confirmation UI after design completes
-- Remote repo wave content reading (future, separate concern)
-- Filesystem watching for live content updates
-- Database schema changes for wave content (stays in markdown per wave README)
-- Enforced validation of section presence (convention first per wave README)
-
-## Follow-up: chat sessions must be wave-aware
-
-Current behavior allows chat sessions to start without an explicit wave/run context, which means the harness can lose the intended worktree/repo scope.
-
-Add a follow-up requirement:
-- Concerto must create agent sessions with the selected `wave_run_id`
-- Session config must include the active wave worktree as `cwd`
-- lfd should resolve/validate that `cwd` against the run/worktree mapping
-- Chat UI should display the resolved wave/run/worktree context for transparency
-
-## Files touched
-
-| File | Change |
-|------|--------|
-| `swift/LoopflowCore/Models/WaveSchema.swift` | Delete |
-| `swift/LoopflowCore/Services/WaveServiceProtocol.swift` | Remove `listWaveSchemas` |
-| `swift/LoopflowCore/Services/LocalWaveService.swift` | Remove schema implementation |
-| `swift/LoopflowCore/Services/MockWaveService.swift` | Remove schema implementation |
-| `swift/Concerto/State/RepoState.swift` | Remove schema fields, add `loadWaveContent` |
-| `swift/Concerto/Views/StartWaveView.swift` | Redesign as design prompt launcher |
-| `swift/Concerto/Views/WaveSidebar.swift` | Hide worktrees, update empty state, remove schemas |
-| `swift/Concerto/Views/WaveDetailPanel.swift` | Add wave content section |
-| `swift/LoopflowCore/Models/WaveViewModel.swift` | Add `content: WaveContent?` |
-| New: `swift/LoopflowCore/Models/WaveContent.swift` | `WaveContent`, `RoadmapItem` structs |
-| New: `swift/LoopflowCore/Services/WaveContentParser.swift` | README + roadmap file parser |
-
-## Done when
-
-```bash
-# Swift package builds clean
-swift build --package-path swift
-
-# Concerto builds and tests pass
-cd swift && xcodegen generate && xcodebuild test \
-  -project LoopflowSwift.xcodeproj -scheme Concerto \
-  -destination 'platform=macOS'
-
-# No WaveSchema references remain
-grep -r "WaveSchema" swift/ && echo "FAIL: dead code remains" || echo "PASS"
-
-# WaveContentParser correctly parses a wave README
-swift test --package-path swift --filter WaveContentParser
-```
-
-Observable: Open Concerto with a repo containing waves. The sidebar shows waves without a worktrees section. Select a wave—vision appears under the name, goals and roadmap are visible. Click "Start designing" from the empty state or the sidebar—a terminal opens with `lf design`.
+All passed in the recorded review run.

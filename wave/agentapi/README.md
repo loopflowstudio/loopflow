@@ -33,7 +33,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 | # | Phase | What it unlocks | Status |
 |---|-------|----------------|--------|
 | 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first adapter. | shipped |
-| 02 | Claude Adapter | `-p --resume` with structured output. Probes agent personality. | |
+| 02 | Claude Adapter | `-p --resume` with structured output. Probes agent personality. | shipped |
 | 03 | Concerto UI | Minimal chat panel, input, End button against proven API | |
 | 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
 | 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |

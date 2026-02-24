@@ -1,14 +1,19 @@
 use std::path::{Path, PathBuf};
 
+/// Generate a random 32-byte hex token.
+pub fn generate() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::fill(&mut bytes);
+    hex::encode(bytes)
+}
+
 /// Generate a new session token and write it to disk.
 pub fn generate_and_write() -> Result<String, std::io::Error> {
     generate_and_write_at(&token_path())
 }
 
 fn generate_and_write_at(path: &Path) -> Result<String, std::io::Error> {
-    let mut bytes = [0_u8; 32];
-    rand::fill(&mut bytes);
-    let token = hex::encode(bytes);
+    let token = generate();
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -32,6 +37,13 @@ pub fn token_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generate_returns_hex_token() {
+        let token = generate();
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
 
     #[test]
     fn generate_and_write_persists_hex_token() {

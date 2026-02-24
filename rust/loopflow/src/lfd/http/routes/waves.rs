@@ -22,7 +22,7 @@ use crate::lfd::http::dto::{
 use crate::lfd::http::routes::wave_config::{read_wave_config, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, map_store_error, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
@@ -190,10 +190,7 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
     if existing {
-        return Err(api_error(
-            StatusCode::CONFLICT,
-            format!("wave '{}' already exists in this repo", name),
-        ));
+        return Err(wave_name_exists_error(&name));
     }
 
     let wave = Wave {
@@ -280,7 +277,7 @@ fn parse_stimulus(
         value => {
             return Err(api_error(
                 StatusCode::BAD_REQUEST,
-                format!("invalid wave config stimulus kind '{value}'"),
+                ApiMessage::Safe(format!("invalid wave config stimulus kind '{value}'")),
             ));
         }
     };
@@ -357,10 +354,7 @@ pub async fn update_wave_handler(
                 .await
                 .map_err(map_store_error)?;
             if existing {
-                return Err(api_error(
-                    StatusCode::CONFLICT,
-                    format!("wave '{}' already exists in this repo", new_name),
-                ));
+                return Err(wave_name_exists_error(&new_name));
             }
 
             // Reject rename while wave is running or waiting.
@@ -467,7 +461,12 @@ pub async fn delete_wave_handler(
         }
     })
     .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    .map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        )
+    })?;
 
     state.event_hub.send(Event::wave_deleted(wave_id.clone()));
 
@@ -540,7 +539,7 @@ pub async fn run_wave_handler(
         Err(err) => {
             return Err(api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                err.to_string(),
+                ApiMessage::Untrusted(err.to_string()),
             ))
         }
     };
@@ -579,7 +578,12 @@ pub async fn check_wave_ci_handler(
         &token,
     )
     .await
-    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    .map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err),
+        )
+    })?;
 
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -1047,6 +1051,13 @@ pub async fn combine_wave_handler(
     }))
 }
 
+fn wave_name_exists_error(name: &str) -> ApiError {
+    api_error(
+        StatusCode::CONFLICT,
+        ApiMessage::Safe(format!("wave '{name}' already exists in this repo")),
+    )
+}
+
 async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, String), ApiError> {
     let wave = state
         .store
@@ -1084,7 +1095,10 @@ async fn resolve_wave_work_dir_for_api(
 }
 
 fn map_join_error(err: tokio::task::JoinError) -> ApiError {
-    api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ApiMessage::Untrusted(err.to_string()),
+    )
 }
 
 async fn run_blocking_result<T, E, F>(func: F, failure_status: StatusCode) -> Result<T, ApiError>
@@ -1096,7 +1110,7 @@ where
     tokio::task::spawn_blocking(func)
         .await
         .map_err(map_join_error)?
-        .map_err(|err| api_error(failure_status, err.to_string()))
+        .map_err(|err| api_error(failure_status, ApiMessage::Untrusted(err.to_string())))
 }
 
 fn resolve_wave_work_dir(

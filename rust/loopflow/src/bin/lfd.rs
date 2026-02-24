@@ -42,6 +42,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "start" => return loopflow::lfd::service::start(force),
             "stop" => return loopflow::lfd::service::stop(),
             "status" => return loopflow::lfd::service::status(),
+            "token" => {
+                if matches!(args.get(2).map(String::as_str), Some("rotate")) {
+                    let token = loopflow::lfd::session_token::generate();
+                    println!("{}", format_token_rotation_output(token.as_str()));
+                    return Ok(());
+                }
+                return Err("unknown token subcommand; expected `lfd token rotate`"
+                    .to_string()
+                    .into());
+            }
             _ => {} // fall through to serve
         }
     }
@@ -63,11 +73,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let is_loopback = http_addr.ip().is_loopback();
     let (auth_provider, registration_client, registration_creds) = if is_loopback {
         // Loopback bind — local provider, no registration needed.
-        (AuthProvider::Local, None, None)
+        (loopflow::lfd::setup_local_auth(), None, None)
     } else {
         let (provider, client, creds) =
             loopflow::lfd::setup_auth(&lfd_config, cancel.clone()).await;
-        if matches!(provider, AuthProvider::Local) {
+        if matches!(provider, AuthProvider::Local { .. }) {
             tracing::warn!(
                 addr = %http_addr,
                 "binding to non-loopback address with auth.provider=local; \
@@ -75,12 +85,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         (provider, client, creds)
-    };
-
-    let session_token = if matches!(&auth_provider, AuthProvider::Local) {
-        Some(generate_session_token_or_exit())
-    } else {
-        None
     };
 
     if matches!(&storage_config, StorageConfig::Postgres { .. }) {
@@ -196,7 +200,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         event_hub,
         output_hub: output,
         auth: auth_provider,
-        session_token,
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
         github: lfd_config.github,
@@ -279,25 +282,18 @@ fn storage_config_from_config(
     }
 }
 
-fn generate_session_token_or_exit() -> String {
-    match loopflow::lfd::session_token::generate_and_write() {
-        Ok(token) => {
-            tracing::info!(
-                path = %loopflow::lfd::session_token::token_path().display(),
-                "session token written"
-            );
-            token
-        }
-        Err(err) => {
-            tracing::error!(error = %err, "failed to write session token");
-            std::process::exit(1);
-        }
-    }
+fn format_token_rotation_output(token: &str) -> String {
+    format!(
+        "new static auth token (shown once):\n{token}\n\nnext steps:\n1. update LFD_AUTH_TOKEN in your secret source (.env, secret manager, systemd/launchd env)\n2. restart lfd\n3. verify old token is rejected and new token is accepted",
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{storage_config_from_config, LfdConfig, StorageConfig, StorageType};
+    use super::{
+        format_token_rotation_output, storage_config_from_config, LfdConfig, StorageConfig,
+        StorageType,
+    };
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
     use tempfile::{tempdir, TempDir};
@@ -415,5 +411,14 @@ mod tests {
             err.to_string(),
             "LFD_DATABASE_URL required for postgres storage"
         );
+    }
+
+    #[test]
+    fn format_token_rotation_output_prints_token_once_with_runbook_steps() {
+        let output = format_token_rotation_output("abc123");
+        assert_eq!(output.matches("abc123").count(), 1);
+        assert!(output.contains("update LFD_AUTH_TOKEN"));
+        assert!(output.contains("restart lfd"));
+        assert!(output.contains("verify old token is rejected and new token is accepted"));
     }
 }

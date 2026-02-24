@@ -6,6 +6,8 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::lfd::http_client::SafeHttpClient;
+use crate::lfd::redaction::sanitize_operator_message;
+use secrecy::SecretString;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -20,9 +22,33 @@ pub struct RegistrationState {
     pub machine_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct RegistrationPublicSummary {
+    pub enabled: bool,
+    pub registered: bool,
+}
+
+impl RegistrationState {
+    pub fn public_summary(&self) -> RegistrationPublicSummary {
+        RegistrationPublicSummary {
+            enabled: self.enabled,
+            registered: self.registered,
+        }
+    }
+
+    pub fn sanitized(self) -> Self {
+        Self {
+            last_error: self
+                .last_error
+                .map(|error| sanitize_operator_message(&error)),
+            ..self
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RegisterResponse {
-    connection_token: String,
+    connection_token: SecretString,
     expires_at: Option<f64>,
 }
 
@@ -31,7 +57,7 @@ pub struct RegistrationClient {
     base_url: String,
     http: SafeHttpClient,
     state: Arc<RwLock<RegistrationState>>,
-    connection_token: Arc<RwLock<Option<String>>>,
+    connection_token: Arc<RwLock<Option<SecretString>>>,
 }
 
 impl RegistrationClient {
@@ -48,12 +74,17 @@ impl RegistrationClient {
         self.state.read().await.clone()
     }
 
+    #[cfg(test)]
+    pub async fn set_state_for_test(&self, state: RegistrationState) {
+        *self.state.write().await = state;
+    }
+
     pub async fn register(
         &self,
         jwt: &str,
         machine_id: &str,
         machine_name: &str,
-    ) -> Result<String, RegistrationError> {
+    ) -> Result<SecretString, RegistrationError> {
         let payload = serde_json::json!({
             "machine_id": machine_id,
             "machine_name": machine_name,
@@ -293,4 +324,45 @@ pub enum RegistrationError {
     Http(u16),
     #[error("parse error: {0}")]
     Parse(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RegistrationPublicSummary, RegistrationState};
+
+    #[test]
+    fn public_summary_only_contains_enabled_and_registered() {
+        let state = RegistrationState {
+            enabled: true,
+            registered: true,
+            machine_id: Some("machine-id".to_string()),
+            machine_name: Some("machine-name".to_string()),
+            ..RegistrationState::default()
+        };
+
+        assert_eq!(
+            state.public_summary(),
+            RegistrationPublicSummary {
+                enabled: true,
+                registered: true,
+            }
+        );
+    }
+
+    #[test]
+    fn sanitized_redacts_last_error() {
+        let state = RegistrationState {
+            last_error: Some(
+                "request failed for Bearer abcdef0123456789abcdef0123456789 at /tmp/wave"
+                    .to_string(),
+            ),
+            ..RegistrationState::default()
+        };
+        let sanitized = state.sanitized();
+        let last_error = sanitized.last_error.expect("sanitized error");
+        assert!(!last_error.contains("abcdef0123456789abcdef0123456789"));
+        assert!(!last_error.contains("/tmp/wave"));
+        assert!(last_error.contains("[REDACTED_TOKEN]"));
+        assert!(last_error.contains("[REDACTED_PATH]"));
+    }
 }

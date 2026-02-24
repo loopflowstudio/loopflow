@@ -269,3 +269,82 @@ impl From<ComposePsRow> for ComposeServiceStatus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::render_compose_file;
+    use crate::lfd::config::{ExecutorType, LfdConfig, Mode, StorageType};
+    use secrecy::SecretString;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn snapshot(vars: &[&'static str]) -> Self {
+            Self {
+                vars: vars
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.vars {
+                if let Some(value) = value {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
+    }
+
+    fn container_config() -> LfdConfig {
+        let mut config = LfdConfig {
+            mode: Mode::Container,
+            storage: StorageType::Postgres,
+            ..LfdConfig::default()
+        };
+        config.executor.r#type = ExecutorType::Docker;
+        config
+    }
+
+    #[test]
+    fn compose_keeps_auth_token_placeholder_and_never_inlines_secret_values() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _guard = EnvGuard::snapshot(&["LFD_AUTH_TOKEN"]);
+        std::env::set_var("LFD_AUTH_TOKEN", "runtime-secret-value");
+
+        let mut config = container_config();
+        config.auth.token = Some(SecretString::new("config-secret-value".to_string()));
+        let content = render_compose_file(&config).expect("render compose file");
+
+        assert!(content.contains("LFD_AUTH_TOKEN: \"${LFD_AUTH_TOKEN:-}\""));
+        assert!(!content.contains("runtime-secret-value"));
+        assert!(!content.contains("config-secret-value"));
+    }
+
+    #[test]
+    fn compose_renders_credential_env_passthrough_placeholders() {
+        let mut config = container_config();
+        config.executor.credentials.env = vec![
+            "OPENAI_API_KEY".to_string(),
+            "ANTHROPIC_API_KEY".to_string(),
+        ];
+
+        let content = render_compose_file(&config).expect("render compose file");
+        assert!(content.contains("OPENAI_API_KEY: \"${OPENAI_API_KEY:-}\""));
+        assert!(content.contains("ANTHROPIC_API_KEY: \"${ANTHROPIC_API_KEY:-}\""));
+    }
+}

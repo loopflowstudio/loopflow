@@ -2,7 +2,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
-use crate::lfd::registration::RegistrationState;
+use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
 use crate::lfd::types::{
     ChatMemoryBlock, ChatMessage, LivePullRequestState, Stimulus, StimulusKind, WaveRun,
     WaveRunStatus,
@@ -16,7 +16,7 @@ pub struct HealthResponse {
     pub waves_running: u32,
     pub agents_active: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub registration: Option<RegistrationState>,
+    pub registration: Option<RegistrationPublicSummary>,
 }
 
 #[derive(Debug, Serialize)]

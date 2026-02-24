@@ -22,7 +22,6 @@ pub struct HttpState {
     #[allow(dead_code)] // Reserved for output streaming endpoints.
     pub output_hub: OutputHub,
     pub auth: AuthProvider,
-    pub session_token: Option<String>,
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
     pub github: GitHubConfig,

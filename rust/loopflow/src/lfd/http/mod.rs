@@ -2,10 +2,8 @@ pub mod dto;
 pub mod routes;
 pub mod state;
 
-use std::path::Path;
-
 use axum::extract::{DefaultBodyLimit, Request};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::middleware;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -18,11 +16,23 @@ use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
     flows, hooks, repos, sessions, system, wave_runs, waves, worktrees, ws,
 };
+use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfd::store::StoreError;
 
 pub use state::HttpState;
 
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
+const QUERY_TOKEN_ERROR: &str = "authentication credentials must not appear in query parameters";
+const AUTH_LIKE_QUERY_KEYS: [&str; 8] = [
+    "token",
+    "access_token",
+    "auth_token",
+    "api_key",
+    "bearer",
+    "secret",
+    "password",
+    "credential",
+];
 
 pub fn router(state: HttpState) -> Router {
     let max_json_body_bytes = state.http_security.max_json_body_bytes;
@@ -121,144 +131,83 @@ pub fn router(state: HttpState) -> Router {
         .merge(hook_routes)
         .layer(middleware::from_fn(normalize_payload_too_large))
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(reject_auth_query_params))
         .with_state(state)
+}
+
+/// Distinguishes safe (known) messages from untrusted external content.
+///
+/// Static string literals auto-convert to `Safe` via `From<&'static str>`.
+/// Dynamic strings from external systems (DB errors, path operations) should
+/// use `Untrusted` to trigger sanitization.
+#[derive(Debug)]
+pub enum ApiMessage {
+    /// Known-safe content: static strings, domain identifiers. Passed through as-is.
+    Safe(String),
+    /// External content that may contain secrets or paths. Sanitized before exposure.
+    Untrusted(String),
+}
+
+impl From<&'static str> for ApiMessage {
+    fn from(s: &'static str) -> Self {
+        ApiMessage::Safe(s.to_string())
+    }
 }
 
 pub fn api_error(
     status: StatusCode,
-    message: impl Into<String>,
+    message: impl Into<ApiMessage>,
 ) -> (StatusCode, Json<ErrorResponse>) {
-    let raw = message.into();
-    let sanitized = sanitize_error_message(&raw);
+    let message = message.into();
     if status.is_server_error() {
+        let raw = match &message {
+            ApiMessage::Safe(raw) | ApiMessage::Untrusted(raw) => raw,
+        };
         tracing::warn!(status = %status, error = %raw, "internal API error");
     }
+    let display = match message {
+        ApiMessage::Safe(s) => s,
+        ApiMessage::Untrusted(s) => sanitize_operator_message(&s),
+    };
     (
         status,
         Json(ErrorResponse {
             error: ErrorDetail {
                 error_type: "invalid_request_error".to_string(),
-                message: sanitized,
+                message: display,
                 param: None,
             },
         }),
     )
 }
 
-pub fn api_error_response(status: StatusCode, message: impl Into<String>) -> Response {
+pub fn api_error_response(status: StatusCode, message: impl Into<ApiMessage>) -> Response {
     api_error(status, message).into_response()
 }
 
 pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
     match err {
         StoreError::NotFound => api_error(StatusCode::NOT_FOUND, "not found"),
-        StoreError::InvalidData(message) => api_error(StatusCode::BAD_REQUEST, message),
-        StoreError::Serde(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
-        StoreError::Sqlite(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
-        StoreError::Postgres(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
-        StoreError::PostgresPool(err) => {
-            api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+        StoreError::InvalidData(message) => {
+            api_error(StatusCode::BAD_REQUEST, ApiMessage::Safe(message))
         }
+        StoreError::Serde(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
+        StoreError::Sqlite(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
+        StoreError::Postgres(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
+        StoreError::PostgresPool(err) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        ),
     }
-}
-
-fn sanitize_error_message(message: &str) -> String {
-    let mut sanitized = redact_known_paths(message);
-    sanitized = redact_bearer_token_segments(&sanitized);
-    sanitized = redact_long_secret_segments(&sanitized);
-    sanitized = redact_internal_identifiers(&sanitized);
-    sanitized
-}
-
-fn redact_known_paths(message: &str) -> String {
-    let mut sanitized = message.to_string();
-    if let Some(home) = dirs::home_dir() {
-        let home = home.to_string_lossy().to_string();
-        if !home.is_empty() {
-            sanitized = sanitized.replace(&home, "[REDACTED_PATH]");
-        }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd = cwd.to_string_lossy().to_string();
-        if !cwd.is_empty() {
-            sanitized = sanitized.replace(&cwd, "[REDACTED_PATH]");
-        }
-    }
-
-    for token in extract_absolute_path_tokens(message) {
-        sanitized = sanitized.replace(&token, "[REDACTED_PATH]");
-    }
-    sanitized
-}
-
-fn redact_bearer_token_segments(message: &str) -> String {
-    let mut result = String::new();
-    let mut remaining = message;
-    while let Some(idx) = remaining.find("Bearer ") {
-        result.push_str(&remaining[..idx]);
-        let after = &remaining[idx + "Bearer ".len()..];
-        let token = after.split_whitespace().next().unwrap_or_default();
-        if token.is_empty() {
-            result.push_str("Bearer");
-            remaining = after;
-        } else {
-            result.push_str("Bearer [REDACTED_TOKEN]");
-            remaining = &after[token.len()..];
-        }
-    }
-    result.push_str(remaining);
-    result
-}
-
-fn redact_long_secret_segments(message: &str) -> String {
-    message
-        .split_whitespace()
-        .map(redact_word_if_secret)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn redact_word_if_secret(word: &str) -> String {
-    let trimmed = word.trim_matches(|ch: char| ch == '"' || ch == '\'' || ch == ',');
-    let looks_secret = trimmed.len() >= 24
-        && trimmed.chars().any(|ch| ch.is_ascii_alphabetic())
-        && trimmed.chars().any(|ch| ch.is_ascii_digit())
-        && trimmed
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.');
-    if looks_secret {
-        word.replace(trimmed, "[REDACTED_TOKEN]")
-    } else {
-        word.to_string()
-    }
-}
-
-fn redact_internal_identifiers(message: &str) -> String {
-    let mut sanitized = message.to_string();
-    for marker in [
-        "docker://",
-        "/var/lib/docker/volumes/",
-        "volume ",
-        "container ",
-    ] {
-        if sanitized.contains(marker) {
-            sanitized = sanitized.replace(marker, "[REDACTED_INTERNAL] ");
-        }
-    }
-    sanitized
-}
-
-fn extract_absolute_path_tokens(message: &str) -> Vec<String> {
-    message
-        .split_whitespace()
-        .map(|word| word.trim_matches(|ch: char| ch == '"' || ch == '\'' || ch == ','))
-        .filter(|word| is_absolute_path_token(word))
-        .map(str::to_string)
-        .collect()
-}
-
-fn is_absolute_path_token(word: &str) -> bool {
-    !word.is_empty() && Path::new(word).is_absolute()
 }
 
 async fn normalize_payload_too_large(request: Request, next: Next) -> Response {
@@ -269,32 +218,91 @@ async fn normalize_payload_too_large(request: Request, next: Next) -> Response {
     response
 }
 
+async fn reject_auth_query_params(request: Request, next: Next) -> Response {
+    if has_auth_like_query_param(request.uri()) {
+        return api_error_response(StatusCode::BAD_REQUEST, QUERY_TOKEN_ERROR);
+    }
+    next.run(request).await
+}
+
+fn has_auth_like_query_param(uri: &Uri) -> bool {
+    let Some(query) = uri.query() else {
+        return false;
+    };
+    query.split('&').map(query_key).map(str::trim).any(|key| {
+        is_auth_like_query_key(key)
+            || decode_query_key(key).is_some_and(|decoded| is_auth_like_query_key(&decoded))
+    })
+}
+
+fn query_key(part: &str) -> &str {
+    part.split_once('=').map_or(part, |(key, _)| key)
+}
+
+fn is_auth_like_query_key(key: &str) -> bool {
+    AUTH_LIKE_QUERY_KEYS
+        .iter()
+        .any(|candidate| key.eq_ignore_ascii_case(candidate))
+}
+
+fn decode_query_key(raw_key: &str) -> Option<String> {
+    if !raw_key.contains('%') && !raw_key.contains('+') {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(raw_key.len());
+    let bytes = raw_key.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'+' => {
+                out.push(b' ');
+                idx += 1;
+            }
+            b'%' => {
+                if idx + 2 >= bytes.len() {
+                    return None;
+                }
+                let hi = from_hex_digit(bytes[idx + 1])?;
+                let lo = from_hex_digit(bytes[idx + 2])?;
+                out.push((hi << 4) | lo);
+                idx += 3;
+            }
+            byte => {
+                out.push(byte);
+                idx += 1;
+            }
+        }
+    }
+
+    String::from_utf8(out).ok()
+}
+
+fn from_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
+    use axum::routing::get;
     use axum::routing::post;
     use axum::Router;
     use tokio::net::TcpListener;
 
-    #[test]
-    fn sanitize_error_message_redacts_paths_and_tokens() {
-        let raw = "failed at /tmp/worktree with Bearer abcdef0123456789abcdef0123456789";
-        let sanitized = sanitize_error_message(raw);
-        assert!(!sanitized.contains("/tmp/worktree"));
-        assert!(!sanitized.contains("abcdef0123456789abcdef0123456789"));
-        assert!(sanitized.contains("[REDACTED_PATH]"));
-        assert!(sanitized.contains("[REDACTED_TOKEN]"));
-    }
-
-    #[test]
-    fn sanitize_error_message_redacts_home_path() {
-        let Some(home) = dirs::home_dir() else {
-            return;
-        };
-        let raw = format!("cannot open {}", home.display());
-        let sanitized = sanitize_error_message(&raw);
-        assert!(!sanitized.contains(&home.to_string_lossy().to_string()));
-        assert!(sanitized.contains("[REDACTED_PATH]"));
+    async fn add_trace_header(request: Request, next: Next) -> Response {
+        let mut response = next.run(request).await;
+        response
+            .headers_mut()
+            .insert("x-trace-hit", HeaderValue::from_static("1"));
+        response
     }
 
     #[tokio::test]
@@ -324,5 +332,164 @@ mod tests {
             payload["error"]["message"],
             serde_json::Value::String("request body too large".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn auth_like_query_keys_are_rejected_case_insensitively() {
+        let app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .layer(middleware::from_fn(reject_auth_query_params));
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve app");
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/health?ToKeN=abc"))
+            .send()
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload: serde_json::Value = response.json().await.expect("json response");
+        assert_eq!(
+            payload["error"]["message"],
+            serde_json::Value::String(QUERY_TOKEN_ERROR.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_like_query_keys_are_rejected_when_percent_encoded() {
+        let app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .layer(middleware::from_fn(reject_auth_query_params));
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve app");
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/health?%74oken=abc"))
+            .send()
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn auth_like_query_rejection_happens_before_trace_layer() {
+        let app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .layer(middleware::from_fn(add_trace_header))
+            .layer(middleware::from_fn(reject_auth_query_params));
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve app");
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/health?token=abc"))
+            .send()
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(response.headers().get("x-trace-hit").is_none());
+    }
+
+    #[test]
+    fn auth_like_query_key_list_is_case_insensitive() {
+        for key in [
+            "token",
+            "access_token",
+            "auth_token",
+            "api_key",
+            "bearer",
+            "secret",
+            "password",
+            "credential",
+            "ToKeN",
+            "API_KEY",
+        ] {
+            assert!(
+                is_auth_like_query_key(key),
+                "expected key {key} to be blocked"
+            );
+        }
+        assert!(!is_auth_like_query_key("page"));
+    }
+
+    #[test]
+    fn decode_query_key_decodes_percent_and_plus() {
+        assert_eq!(decode_query_key("%74oken"), Some("token".to_string()));
+        assert_eq!(
+            decode_query_key("access%5Ftoken"),
+            Some("access_token".to_string())
+        );
+        assert_eq!(decode_query_key("api+key"), Some("api key".to_string()));
+    }
+
+    #[test]
+    fn decode_query_key_rejects_invalid_escape_sequences() {
+        assert_eq!(decode_query_key("%"), None);
+        assert_eq!(decode_query_key("%2"), None);
+        assert_eq!(decode_query_key("%zz"), None);
+    }
+
+    #[test]
+    fn api_message_safe_passes_through_unchanged() {
+        let (_, json) = api_error(StatusCode::NOT_FOUND, ApiMessage::Safe("not found".into()));
+        assert_eq!(json.error.message, "not found");
+    }
+
+    #[test]
+    fn api_message_untrusted_sanitizes_paths() {
+        let raw = "error at /tmp/private/data.db".to_string();
+        let (_, json) = api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(raw),
+        );
+        assert!(!json.error.message.contains("/tmp/private/data.db"));
+        assert!(json.error.message.contains("[REDACTED_PATH]"));
+    }
+
+    #[test]
+    fn api_message_from_static_str_is_safe() {
+        let msg: ApiMessage = "not found".into();
+        let (_, json) = api_error(StatusCode::NOT_FOUND, msg);
+        assert_eq!(json.error.message, "not found");
+    }
+
+    #[test]
+    fn map_store_error_sanitizes_db_errors() {
+        let err = StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(1),
+            Some("no such table: /tmp/secret/db.sqlite".to_string()),
+        ));
+        let (status, json) = map_store_error(err);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!json.error.message.contains("/tmp/secret/db.sqlite"));
+    }
+
+    #[test]
+    fn map_store_error_passes_domain_errors_through() {
+        let (status, json) = map_store_error(StoreError::NotFound);
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(json.error.message, "not found");
+
+        let (status, json) =
+            map_store_error(StoreError::InvalidData("invalid wave name".to_string()));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json.error.message, "invalid wave name");
     }
 }

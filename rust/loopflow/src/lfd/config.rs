@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tracing::warn;
 
+use secrecy::SecretString;
+
 const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 const DEFAULT_EXECUTOR_IMAGE: &str = "loopflow/agent:latest";
 const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 45 * 60;
@@ -31,7 +33,7 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 pub struct AuthConfig {
     #[serde(default = "default_provider")]
     pub provider: String,
-    pub token: Option<String>,
+    pub token: Option<SecretString>,
     #[serde(default = "default_base_url")]
     pub base_url: String,
 }
@@ -124,7 +126,7 @@ impl RawLfdConfig {
         if let Ok(value) = std::env::var("LFD_AUTH_TOKEN") {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
-                self.auth.token = Some(trimmed.to_string());
+                self.auth.token = Some(SecretString::new(trimmed.to_string()));
             }
         }
 
@@ -768,6 +770,7 @@ fn config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::ExposeSecret;
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
@@ -942,7 +945,14 @@ executor:
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
         assert_eq!(resolved.auth.provider, "static");
-        assert_eq!(resolved.auth.token, Some("env-token-456".to_string()));
+        assert_eq!(
+            resolved
+                .auth
+                .token
+                .as_ref()
+                .map(|t| t.expose_secret().as_str()),
+            Some("env-token-456")
+        );
         assert_eq!(
             resolved.executor.credentials.env,
             vec!["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]

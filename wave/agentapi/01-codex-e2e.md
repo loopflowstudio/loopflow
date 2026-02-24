@@ -129,7 +129,7 @@ All planned pieces landed: session API (5 endpoints under `/v0/sessions`), turn+
 
 **Event model evolved from plan.** Started with flat events (`TextDelta, ToolStarted, ToolDone`). Shipped with a richer turn+item model — typed items with lifecycles, `turn_id` on all turn-scoped events, and a generic `Tool` fallback. This is better for both the Claude adapter (structured tool mapping) and Concerto (typed item rendering).
 
-**Adapter trait is simpler than expected.** Three methods: `start()`, `send_input()`, `stop()`. Factory pattern for provider dispatch. The abstraction is clean enough that Phase 02 should be straightforward to wire up.
+**Adapter trait is simpler than expected.** Three methods: `start()`, `send_input()`, `stop()`. Provider dispatch is a plain function pointer (`CreateAdapterFn`), no factory trait needed. The abstraction is clean enough that Phase 02 should be straightforward to wire up.
 
 **Event normalization is where complexity lives.** The Codex adapter (630 lines) spent most of its effort normalizing field name aliases (`turn.id` / `turnId` / `id`), status values (`cancelled` → `interrupted`), and item type detection from JSON-RPC payloads. Phase 02's Claude adapter will face similar normalization work against NDJSON.
 

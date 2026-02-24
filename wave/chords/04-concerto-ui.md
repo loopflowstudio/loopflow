@@ -1,26 +1,26 @@
 # 04: Concerto UI
 
-Surface chords in Concerto — creation, voice management, and execution visibility. The macOS app should make chord structure obvious and chord operations feel natural.
+Surface chords and listen relationships in Concerto. The macOS app should make wave grouping and inter-wave wiring visible and manageable.
 
 ## What exists after this
 
-Concerto shows chords as expandable groups in the wave list. You can see child voices, their status, and execution progress. Creating a chord (via join) and managing voices (join/leave) works from the app. Chord structure is visually distinct from solo waves.
+Concerto shows chords as named groups in the wave list. Waves within a chord are visually grouped. Listen stimulus relationships are visible — you can see which waves react to which. Creating chords and managing membership works from the app.
 
 ## What Phase 01–03 established
 
-The data model (Voice/Chord enum), execution engine (parallel child execution with inherited stimulus), and listen step (inter-voice communication) are all server-side. Concerto currently shows waves as a flat list — it has no awareness of parent/child relationships or chord structure.
+Waves are flat structs. Chords are named groups (from the `chords`/`chord_members` tables). Listen stimuli wire waves to react to each other via `source_wave_id`. Concerto currently shows waves as a flat list with no awareness of chord grouping or listen wiring.
 
 ## Key questions
 
-- How do chords appear in the wave list? Inline expandable, or a separate "chord view"?
-- What does chord execution look like in real-time? Per-voice progress, or aggregate?
-- How does join/leave map to UI gestures? Drag-to-group? Multi-select + action?
-- Should nested chords (chord containing chord) be visible, or collapsed?
+- How do chords appear in the wave list? Section headers? Collapsible groups? Tags?
+- How are listen relationships visualized? Arrows between waves? A separate "connections" view?
+- Should chord creation/membership be drag-and-drop, or menu-driven?
+- How do ungrouped waves (not in any chord) appear relative to grouped ones?
 
 ## Done when
 
-- Chords are visually distinct from solo waves in the wave list
-- Child voices are visible within their parent chord
-- Chord execution status shows per-voice progress
-- Join and leave operations are accessible from the UI
-- Nested chord structure is navigable
+- Chords are visually distinct groups in the wave list
+- Member waves are visible within their chord
+- Listen stimulus relationships are indicated (which wave listens to which)
+- Chord CRUD (create, delete, add/remove member) is accessible from the UI
+- Ungrouped waves display cleanly alongside chord groups

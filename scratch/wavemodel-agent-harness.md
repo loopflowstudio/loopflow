@@ -1,71 +1,124 @@
 # Unified Agent Harness
 
-Merge lf's agent running (prompt assembly, subprocess launch, I/O) with lfd's session infrastructure (lifecycle, event streaming, SSE) into one concept.
-
 ## Problem
 
-Two parallel implementations of "run a coding agent" exist:
+Loopflow currently has two agent runtimes that duplicate responsibility and diverge behavior:
 
-**lf** assembles prompts (repo docs, area docs, step prompt, direction, clipboard) and launches agents by shelling out to `claude`, `codex`, etc. It manages stdin/stdout directly. Rich context, no server infrastructure.
+- `lf` assembles rich step context (repo docs, area docs, direction, clipboard, wave context) and launches provider CLIs directly.
+- `lfd` sessions provide lifecycle/state persistence + SSE events, but only accept flat `system_prompt` strings.
 
-**lfd sessions** create provider sessions via harnesses (Claude, Codex), manage lifecycle (starting → active → ending → ended), stream structured events (turns, items, text deltas) over SSE, and persist to storage. Server infrastructure, but no prompt assembly — sessions get a raw `system_prompt` string and that's it.
+Who benefits from fixing this:
 
-The result: Concerto can't run `lf design` inline. It can show a chat session (WaveChatView + ChatState), and it can assemble prompts (lf engine), but there's no path from "run step X" to "create a session with step X's assembled prompt and stream events back." The NUX works around this by launching an external terminal.
+- **Concerto users**: can run `design` inline instead of bouncing to a terminal.
+- **CLI users**: interactive runs gain persisted history and resumable session semantics.
+- **Maintainers**: one execution path instead of two drifting implementations.
 
-## What unification means
+Why now:
 
-One agent harness interface that:
+- Phase 03 shipped design-first Concerto UX, but the critical path still detours through `TerminalLauncher.launchDesign(...)`.
+- Wave content now has first-class UI surfaces (Vision/Goals/Risks/Roadmap), so inline sessions need a way to trigger timely content refresh.
 
-1. Accepts a step (or assembled prompt) and provider config
-2. Uses the loopflow engine for prompt assembly (repo docs, area, direction, step prompt, clipboard)
-3. Launches the provider through lfd's session infrastructure (lifecycle, events, persistence)
-4. Streams structured events back to clients (Concerto, CLI, API consumers)
+## Approach
 
-The harness is provider-agnostic. Four providers implement it:
+Make **lfd session orchestration the single runtime primitive** and move prompt assembly into that path.
 
-| Provider | Status |
-|----------|--------|
-| Claude (claude -p) | Implemented in lfd today |
-| Codex (codex --json-rpc) | Implemented in lfd today |
-| Gemini CLI | Not implemented |
-| OpenCode | Not implemented |
+### 1) Add step-aware session input (not just flat system prompts)
 
-Gemini and OpenCode return "not implemented" initially but the trait accommodates them. No provider-specific assumptions in the interface.
+Extend session config with an explicit prompt source:
 
-## What this enables
+- `raw` (existing behavior): caller supplies `system_prompt`
+- `step` (new): caller supplies `step`, `repo_root/cwd`, `direction[]`, `area`, `wave`, and optional initial `message`
 
-- **Concerto inline sessions**: StartWaveView creates a session with step `design`, shows WaveChatView. No terminal launch.
-- **`lf -i` as a server operation**: Interactive steps run through lfd, get lifecycle management and event persistence for free.
-- **Wave runs through sessions**: A wave step becomes a session. The run coordinator creates sessions instead of spawning subprocesses directly.
-- **Unified provider abstraction**: One place to add a new agent provider, not two.
+The session runtime assembles context using existing engine prompt code (`gather_context`, `trim_context_with_breakdown`, `format_context_prompt`, `format_task_prompt`) before provider harness startup.
 
-## Current state
+### 2) Introduce a unified session runner above provider harnesses
 
-lfd session harnesses (Rust):
-- `HarnessFactory` trait with `create()` → `Box<dyn Harness>`
-- `Harness` trait: `start(session_id, config, input_rx)` → `EventStream`
-- `ClaudeHarness`: spawns `claude -p --resume`, parses NDJSON
-- `CodexHarness`: spawns `codex`, JSON-RPC over stdio
-- `SessionConfig`: `model`, `cwd`, `system_prompt`, `max_turns`, `yolo_mode`
+Add a thin runtime layer in `lfd::sessions` that:
 
-lf agent running (Rust):
-- Prompt assembly: `PromptAssembler` builds the full prompt from step, area, direction, repo docs, clipboard
-- Agent launch: spawns provider CLI directly, pipes assembled prompt as system prompt or first message
-- No lifecycle management, no event streaming, no persistence
+1. Resolves step config into a prepared prompt package (task text + system/context text + cwd)
+2. Normalizes provider launch config
+3. Delegates turn streaming to the existing Claude/Codex harnesses unchanged
 
-Concerto integration surface (from Phase 03 NUX):
-- `TerminalLauncher.launchDesign(prompt:repoPath:)` — current interim path, opens external terminal with `lf design -c '<prompt>'`
-- `StartWaveView` collects a design prompt and calls `launchDesign` — this becomes the inline session entry point
-- `WaveContentParser` reads wave README sections and roadmap from disk — the harness should trigger content refresh when a design session modifies wave files
-- `WaveViewModel.content: WaveContent?` — cached on-demand, no filesystem watcher. Real-time updates during inline sessions will need the harness to push refresh signals.
-- Content loading is on main-actor paths. If inline sessions produce rapid README updates, consider async parsing.
+Key implementation choice: extract `build_step_prompt` logic from `lfd::executor::helpers` into a shared helper used by both wave execution and sessions.
 
-The gap: `SessionConfig.system_prompt` is a flat string. The loopflow engine's prompt assembly produces a structured prompt. The harness needs to accept either a pre-assembled prompt or a step specification and do the assembly itself.
+### 3) Emit workspace-change events from session turns
 
-## Design questions
+Add a new session event for UI cache invalidation:
 
-- Should the harness accept a step name and assemble the prompt in-process, or should the caller assemble and pass the result? (Leaning: harness does assembly — keeps the interface simple and ensures prompt assembly is always correct.)
-- How does the unified harness relate to wave run coordination? Does the run coordinator become a session orchestrator?
-- What's the right Rust trait boundary? Current `Harness` trait is provider-specific (Claude, Codex). The unified harness adds a layer above that handles prompt assembly before delegating to the provider harness.
-- How do we handle providers that don't support structured events? (Gemini CLI and OpenCode may have different output formats.) The event normalization that Claude and Codex harnesses do today becomes the pattern.
-- How should the harness notify Concerto when a session modifies wave content files? Phase 03's content loading is pull-based (on selection/status change). Inline sessions need push-based refresh — either the harness emits file-change events, or Concerto watches the wave directory during active sessions.
+- `workspace_changed { paths: [] }`
+
+Emit it when file edits/diff updates include `wave/<name>/README.md` or `wave/<name>/NN-*.md`. Concerto listens and calls `loadWaveContent` for the active wave.
+
+This avoids adding a filesystem watcher and keeps updates tied to persisted session events.
+
+### 4) Wire Concerto start-design flow to inline sessions
+
+Replace terminal launch with session launch:
+
+- `StartWaveView` creates a `design` session (step-mode config)
+- initial user text is sent as first turn
+- `WaveChatView`/`ChatState` continues consuming session SSE stream
+
+### 5) Move wave step execution onto sessions
+
+Wave executor creates one session per step (`wave_run_id` attached), sends step task input, and waits for terminal turn status.
+
+Result: wave runs, CLI interactive runs, and Concerto interactive runs share the same lifecycle/event model.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep current split (lf runtime + lfd sessions) and only improve terminal launcher UX | Lowest short-term effort | Locks in duplicated behavior and keeps inline design blocked on ad hoc glue |
+| Caller assembles prompts and passes `system_prompt` into sessions | Minimal lfd changes | Prompt correctness becomes caller-dependent; drift between callers is guaranteed |
+| Rebuild sessions around `engine::agent` and drop harness abstraction | One unified subprocess model | Throws away working Claude/Codex event normalization and existing SSE persistence |
+
+## Key decisions
+
+1. **Sessions become the single orchestration boundary.**
+   - Prevents a third runtime path from emerging.
+   - Aligns with wave intent: *"Waves start with `lf design`, not configuration."*
+
+2. **Prompt assembly happens inside the harness runtime, not at callers.**
+   - Enforces one canonical context assembly path.
+   - Preserves wave intent consistency across Concerto, CLI, and wave runs.
+
+3. **Use event-driven content refresh (`workspace_changed`) instead of file watching.**
+   - Matches existing session event architecture and persistence.
+   - Supports wave goal: *"Wave content (Vision, Goals) is visible in the Concerto UI"* with timely updates.
+
+4. **Provider rollout is staged: Claude + Codex first; Gemini/OpenCode return explicit not-implemented errors.**
+   - Ships user value now without blocking on all providers.
+
+### Wild success signal
+
+New users type a design prompt in Concerto, stay in one window, and see wave Vision/Roadmap update while the design conversation runs.
+
+### Wild failure to avoid
+
+A partial bridge that only fixes StartWaveView while leaving wave executor and CLI on legacy runtime paths. That would reintroduce divergence within one release.
+
+## Scope
+
+- In scope:
+  - Step-aware session config + shared prompt assembly helper
+  - Unified session runtime layer above provider harnesses
+  - `workspace_changed` session events + Concerto refresh handling
+  - `StartWaveView` migration from terminal launch to inline session
+  - Wave executor step runs routed through sessions
+
+- Out of scope:
+  - New database schema for wave content
+  - Mandatory README section validation
+  - Full Gemini/OpenCode provider harness implementations
+  - General-purpose filesystem watching for wave docs
+
+## Done when
+
+1. `StartWaveView` no longer calls `TerminalLauncher.launchDesign`; it starts a `design` session and streams output inline.
+2. Session create API accepts step-mode config, and lfd assembles prompt context server-side.
+3. Wave executor steps run through session lifecycle/events rather than direct `engine::agent::launch_agent` calls.
+4. Editing `wave/<name>/README.md` during a live design session triggers `workspace_changed` and refreshes the visible Wave content panel.
+5. Validation passes:
+   - `cargo test --all`
+   - `swift test --package-path swift`

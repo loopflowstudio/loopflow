@@ -1,45 +1,29 @@
 // Landing view shown when no wave is selected.
-// Collects a wave name, creates a wave, and auto-launches a step (default: design).
+// Collects a design prompt and launches an interactive `lf design` session.
 
 import SwiftUI
 import LoopflowCore
 
 struct StartWaveView: View {
-    private enum InteractiveStep: String, CaseIterable {
-        case design
-        case explore
-        case review
-        case refine
-
-        var launchLabel: String {
-            switch self {
-            case .design: "Start designing"
-            case .explore: "Start exploring"
-            case .review: "Start reviewing"
-            case .refine: "Start refining"
-            }
-        }
-    }
-
     @Environment(RepoState.self) private var repoState
-    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
-    @State private var waveName = ""
-    @State private var selectedStep: InteractiveStep = .design
-    @State private var isCreating = false
+    @State private var designPrompt = ""
+    @State private var isLaunching = false
     @State private var errorMessage: String?
     @FocusState private var isTextFieldFocused: Bool
+
+    private let terminalLauncher = TerminalLauncher()
 
     var body: some View {
         VStack(spacing: Spacing.xxl) {
             Spacer()
 
             VStack(spacing: Spacing.lg) {
-                Text("Start a wave")
+                Text("Start designing")
                     .font(Typography.heroTitle())
                     .foregroundStyle(palette.accent)
 
-                TextField("Wave name", text: $waveName)
+                TextField("Describe what you want to build...", text: $designPrompt)
                     .textFieldStyle(.plain)
                     .font(Typography.body())
                     .padding(Spacing.md)
@@ -47,47 +31,14 @@ struct StartWaveView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                     .frame(maxWidth: 400)
                     .focused($isTextFieldFocused)
-                    .onSubmit { startWave() }
-                    .disabled(isCreating)
+                    .onSubmit { startDesigning() }
+                    .disabled(isLaunching)
 
-                HStack(spacing: Spacing.sm) {
-                    Button {
-                        startWave()
-                    } label: {
-                        HStack(spacing: Spacing.xs) {
-                            if isCreating {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                            }
-                            Text(buttonLabel)
-                        }
-                    }
-                    .buttonStyle(DarkButtonStyle())
-                    .disabled(isCreating || trimmedName.isEmpty)
-
-                    Menu {
-                        ForEach(InteractiveStep.allCases, id: \.rawValue) { step in
-                            Button {
-                                selectedStep = step
-                            } label: {
-                                HStack {
-                                    Text(step.rawValue)
-                                    if step == selectedStep {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(Typography.caption())
-                            .foregroundStyle(palette.textSecondary)
-                            .frame(width: HitTarget.comfortable, height: HitTarget.comfortable)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Choose which step to run")
+                Button("Start designing") {
+                    startDesigning()
                 }
+                .buttonStyle(DarkButtonStyle())
+                .disabled(isLaunching || trimmedPrompt.isEmpty)
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -102,38 +53,34 @@ struct StartWaveView: View {
         .onAppear { isTextFieldFocused = true }
     }
 
-    private var trimmedName: String {
-        waveName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var trimmedPrompt: String {
+        designPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var buttonLabel: String {
-        selectedStep.launchLabel
-    }
+    private func startDesigning() {
+        guard !isLaunching else { return }
+        guard !trimmedPrompt.isEmpty else { return }
 
-    private func startWave() {
-        guard !isCreating, !trimmedName.isEmpty else { return }
+        guard let repoRoot = repoState.currentRepo else {
+            errorMessage = "Open a repository first."
+            return
+        }
 
-        isCreating = true
+        guard FileManager.default.fileExists(atPath: repoRoot.path()) else {
+            errorMessage = "Design launch requires a local repository."
+            return
+        }
+
+        isLaunching = true
         errorMessage = nil
-        let name = trimmedName
-        let step = selectedStep.rawValue
 
         Task {
-            defer { isCreating = false }
+            defer { isLaunching = false }
+
             do {
-                let wave = try await repoState.createWave(name: name)
-                waveName = ""
-
-                guard let worktree = wave.localWorktree else {
-                    errorMessage = "Wave created but no worktree available."
-                    return
-                }
-
-                outputBuffer.launchInteractiveSession(
-                    waveId: wave.id,
-                    step: step,
-                    worktreePath: worktree
-                )
+                let escapedPrompt = terminalLauncher.escapeShellSingleQuotes(trimmedPrompt)
+                let command = "lf design -c '\(escapedPrompt)'"
+                try terminalLauncher.launchTerminal(.warp, at: repoRoot, command: command)
             } catch {
                 errorMessage = error.localizedDescription
             }

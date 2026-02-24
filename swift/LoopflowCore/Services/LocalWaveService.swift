@@ -468,18 +468,22 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    public func createWave(name: String, repo: RepoTarget) async throws -> Wave {
+    public func createWave(name: String, repo: RepoTarget, schema: String? = nil) async throws -> Wave {
         LoggingService.lfd("createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path)")
 
         // Create wave via lfd HTTP API with minimal config
         // User configures area, direction, flow in detail panel before running
         // Create with defaults - area left empty, user configures in detail panel
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "repo": repo.path,
             "name": name.isEmpty ? NSNull() : name,
-            "flow": "ship-roadmap",  // Default flow: ingest → kickoff → review-design → ship → review
-            "direction": [],
         ]
+        if let schema {
+            body["schema"] = schema
+        } else {
+            body["flow"] = "ship-roadmap"  // Default flow: ingest → kickoff → review-design → ship → review
+            body["direction"] = []
+        }
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves"),
             method: "POST",
@@ -694,8 +698,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         config: AgentSessionConfig
     ) async throws -> AgentSession {
         let url = sessionURL()
-        var payload = Self.sessionConfigJSON(config)
-        payload["provider"] = provider
+        var payload: [String: Any] = [
+            "provider": provider,
+            "config": Self.sessionConfigJSON(config),
+        ]
         if let waveRunId {
             payload["wave_run_id"] = waveRunId
         }
@@ -707,13 +713,27 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             contentType: "application/json"
         )
         let (data, response) = try await performRequest(request, useLongTimeouts: true)
-        return try parseSessionResponse(data: data, response: response)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
     }
 
     public func getSession(_ id: String) async throws -> AgentSession {
         let request = try makeRequest(sessionURL(id))
         let (data, response) = try await performRequest(request)
-        return try parseSessionResponse(data: data, response: response)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
     }
 
     public func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession {
@@ -724,7 +744,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             contentType: "application/json"
         )
         let (data, response) = try await performRequest(request, useLongTimeouts: true)
-        return try parseSessionResponse(data: data, response: response)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
     }
 
     public func streamSessionEvents(
@@ -790,7 +817,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     public func stopSession(_ id: String) async throws -> AgentSession {
         let request = try makeRequest(sessionURL(id), method: "DELETE")
         let (data, response) = try await performRequest(request)
-        return try parseSessionResponse(data: data, response: response)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
     }
 
     public func connect(_ id: String) async throws -> ConnectionInfo {
@@ -1031,20 +1065,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     // MARK: - Private helpers
 
-    private func parseSessionResponse(
-        data: Data,
-        response: HTTPURLResponse
-    ) throws -> AgentSession {
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseSessionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return session
-    }
-
     private static func parseWorktreeFromJSON(_ json: [String: Any]) -> WorktreeInfo? {
         guard let path = json["path"] as? String, !path.isEmpty else { return nil }
 
@@ -1066,14 +1086,9 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
         let configJSON = json["config"] as? [String: Any] ?? [:]
         let config = AgentSessionConfig(
-            step: configJSON["step"] as? String ?? "",
-            repoRoot: configJSON["repo_root"] as? String ?? "",
-            directions: configJSON["directions"] as? [String] ?? [],
-            area: configJSON["area"] as? String,
-            wave: configJSON["wave"] as? String,
-            message: configJSON["message"] as? String,
             model: configJSON["model"] as? String,
             cwd: configJSON["cwd"] as? String,
+            systemPrompt: configJSON["system_prompt"] as? String,
             maxTurns: normalizeOptionalInt(configJSON["max_turns"]),
             yoloMode: configJSON["yolo_mode"] as? Bool ?? false
         )
@@ -1091,17 +1106,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     private static func sessionConfigJSON(_ config: AgentSessionConfig) -> [String: Any] {
-        var json: [String: Any] = [
-            "step": config.step,
-            "repo_root": config.repoRoot,
-            "directions": config.directions,
-            "yolo_mode": config.yoloMode,
-        ]
-        if let area = config.area { json["area"] = area }
-        if let wave = config.wave { json["wave"] = wave }
-        if let message = config.message { json["message"] = message }
+        var json: [String: Any] = ["yolo_mode": config.yoloMode]
         if let model = config.model { json["model"] = model }
         if let cwd = config.cwd { json["cwd"] = cwd }
+        if let systemPrompt = config.systemPrompt { json["system_prompt"] = systemPrompt }
         if let maxTurns = config.maxTurns { json["max_turns"] = maxTurns }
         return json
     }

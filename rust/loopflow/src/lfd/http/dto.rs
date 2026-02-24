@@ -81,6 +81,7 @@ pub struct CommitEntryDto {
 pub struct WaveDto {
     pub id: String,
     pub object: String,
+    pub wave_type: String,
     pub name: String,
     pub repo: String,
     pub flow: String,
@@ -89,6 +90,9 @@ pub struct WaveDto {
     pub created_at: Option<String>,
     pub status: String,
     pub iteration: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    pub position: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_worktree: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

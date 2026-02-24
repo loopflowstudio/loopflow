@@ -311,7 +311,7 @@ impl WaveExecutor {
                     info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
                     let exit_code = self.run_step(&wave, &mut run, &step).await?;
                     if exit_code == 0 {
-                        self.advance_run_step(&mut run, &plan, &wave.id).await?;
+                        self.advance_run_step(&mut run, &plan, wave.id()).await?;
                     } else {
                         self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))
                             .await?;
@@ -337,9 +337,9 @@ impl WaveExecutor {
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run).await?;
-                    self.set_wave_status(&wave.id, WaveStatus::Waiting).await;
+                    self.set_wave_status(wave.id(), WaveStatus::Waiting).await;
                     self.event_hub.send(Event::wave_waiting(
-                        wave.id.clone(),
+                        wave.id().clone(),
                         run.id.clone(),
                         step.step.name.clone(),
                     ));
@@ -363,7 +363,7 @@ impl WaveExecutor {
 
                     let is_recurring = self
                         .store
-                        .list_stimuli(Some(&wave.id))
+                        .list_stimuli(Some(wave.id()))
                         .await
                         .map(|stimuli| {
                             stimuli.iter().any(|s| {
@@ -421,7 +421,7 @@ impl WaveExecutor {
                     // next iteration gets its own PR.
                     if run.snapshot.pr.is_some() && is_recurring {
                         let wt = run.worktree.clone();
-                        let name = wave.name.clone();
+                        let name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
                             advance_branch(Path::new(&wt), &name)
                         })
@@ -456,18 +456,18 @@ impl WaveExecutor {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
                             &self.store,
                             &self.github_config,
-                            &wave.id,
+                            wave.id(),
                             crate::lfd::queue::QueueTrigger::RunCompleted,
                         )
                         .await
                         {
-                            warn!(wave_id = %wave.id, error = %err, "queue reconcile failed after run completion");
+                            warn!(wave_id = %wave.id(), error = %err, "queue reconcile failed after run completion");
                         }
                     }
                     // Wave goes back to Idle after a run completes — the run
                     // is done, but the wave is ready for its next iteration.
-                    self.set_wave_status(&wave.id, WaveStatus::Idle).await;
-                    self.event_hub.send(Event::wave_updated(wave.id.clone()));
+                    self.set_wave_status(wave.id(), WaveStatus::Idle).await;
+                    self.event_hub.send(Event::wave_updated(wave.id().clone()));
                     return Ok(());
                 }
             }
@@ -476,7 +476,7 @@ impl WaveExecutor {
 
     async fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
         if let Ok(Some(mut wave)) = self.store.get_wave(wave_id).await {
-            wave.status = status;
+            wave.data_mut().status = status;
             if let Err(err) = self.store.update_wave(&wave).await {
                 error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
             }
@@ -488,8 +488,8 @@ impl WaveExecutor {
         run.ended_at = Some(OffsetDateTime::now_utc());
         run.error = Some(error);
         self.store.update_wave_run(run).await?;
-        self.set_wave_status(&wave.id, WaveStatus::Failed).await;
-        self.event_hub.send(Event::wave_updated(wave.id.clone()));
+        self.set_wave_status(wave.id(), WaveStatus::Failed).await;
+        self.event_hub.send(Event::wave_updated(wave.id().clone()));
         Ok(())
     }
 
@@ -514,8 +514,8 @@ impl WaveExecutor {
             &worktree,
             step,
             &run.snapshot.direction,
-            Some(&wave.name),
-            Some((&self.store, &wave.id)),
+            Some(wave.name()),
+            Some((&self.store, wave.id())),
             None,
         )
         .await?;
@@ -557,7 +557,7 @@ mod tests {
     use super::*;
     use crate::engine::worktree::create_worktree;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::WaveRunSnapshot;
+    use crate::lfd::types::{WaveData, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -659,7 +659,7 @@ mod tests {
         let wave_id = LfdId::new();
         let run_id = LfdId::new();
 
-        let wave = Wave {
+        let wave = Wave::Voice(WaveData {
             id: wave_id.clone(),
             name: "fork-wave".to_string(),
             repo: repo.to_string_lossy().to_string(),
@@ -671,7 +671,9 @@ mod tests {
             schema_ref: None,
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
-        };
+            parent_id: None,
+            position: 0,
+        });
         store
             .create_wave(&wave)
             .await
@@ -1025,7 +1027,7 @@ mod tests {
             .await
             .expect("wave should load")
             .expect("wave should exist");
-        wave.direction = vec!["base".to_string()];
+        wave.data_mut().direction = vec!["base".to_string()];
         store.update_wave(&wave).await.expect("wave should update");
 
         let scheduler = Arc::new(Scheduler::new(4));

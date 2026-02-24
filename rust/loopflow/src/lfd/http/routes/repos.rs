@@ -26,7 +26,7 @@ fn build_repo_dtos(waves: Vec<Wave>) -> Vec<RepoDto> {
     let mut by_repo: BTreeMap<String, u32> = BTreeMap::new();
 
     for wave in waves {
-        *by_repo.entry(wave.repo).or_insert(0) += 1;
+        *by_repo.entry(wave.repo().clone()).or_insert(0) += 1;
     }
 
     by_repo

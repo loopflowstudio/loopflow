@@ -104,6 +104,25 @@ class Client:
         payload = self._request_json("POST", "/v0/waves", json=body)
         return Wave.model_validate(payload)
 
+    def create_chord(
+        self,
+        name: str,
+        repo: str,
+        voices: list[dict[str, Any]],
+        flow: Optional[str] = None,
+        direction: Optional[list[str]] = None,
+        area: Optional[list[str]] = None,
+    ) -> Wave:
+        body: dict[str, Any] = {"repo": repo, "name": name, "voices": voices}
+        if flow is not None:
+            body["flow"] = flow
+        if direction is not None:
+            body["direction"] = direction
+        if area is not None:
+            body["area"] = area
+        payload = self._request_json("POST", "/v0/chords", json=body)
+        return Wave.model_validate(payload)
+
     def update_wave(
         self,
         name_or_id: str,

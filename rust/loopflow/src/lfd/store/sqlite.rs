@@ -12,11 +12,11 @@ use crate::lfd::store::catalog::{
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
-    map_agent_row, map_chat_memory_block_row, map_chat_message_row, map_fork_run_row,
-    map_live_pr_state_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
-    map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    assemble_wave_tree, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
+    map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_stimulus_row,
+    map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr, WaveTreeRow,
 };
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult, MAX_CHORD_DEPTH};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
@@ -75,32 +75,45 @@ impl SqliteStore {
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let direction_json = serde_json::to_string(&wave.direction)?;
-        let area_json = serde_json::to_string(&wave.area)?;
+        if wave.parent_id().is_some() {
+            let has_stimulus: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM stimuli WHERE wave_id = ?1)",
+                params![wave.id()],
+                |row| row.get(0),
+            )?;
+            if has_stimulus {
+                return Err(StoreError::StimulusOwnerCannotBeNested);
+            }
+        }
+        let direction_json = serde_json::to_string(wave.direction())?;
+        let area_json = serde_json::to_string(wave.area())?;
         let created_at = wave
-            .created_at
+            .created_at()
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
         conn.execute(
             Self::sql(Query::UpsertWave),
             params![
-                wave.id,
-                wave.name,
-                wave.repo,
-                wave.flow,
+                wave.id(),
+                wave.name(),
+                wave.repo(),
+                wave.flow(),
                 direction_json,
                 area_json,
-                if wave.status == WaveStatus::Paused {
+                if wave.status() == WaveStatus::Paused {
                     1i64
                 } else {
                     0i64
                 },
-                wave.status.as_i32() as i64,
-                wave.iteration as i64,
+                wave.status().as_i32() as i64,
+                wave.iteration() as i64,
                 created_at,
-                wave.schema_ref.clone(),
-                wave.schema_name.clone(),
+                wave.schema_ref().clone(),
+                wave.schema_name().clone(),
+                wave.wave_type_i32() as i64,
+                wave.parent_id().as_ref(),
+                wave.position() as i64,
             ],
         )?;
         Ok(())
@@ -123,6 +136,51 @@ impl SqliteStore {
                 .get::<_, Option<i64>>(7)?
                 .map(crate::lfd::store::rows::unix_to_datetime),
         })
+    }
+
+    fn load_wave_tree(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+        let rows = self.get_wave_subtree_rows(wave_id)?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        if rows.iter().any(|row| row.depth > MAX_CHORD_DEPTH) {
+            return Err(StoreError::DepthLimitExceeded);
+        }
+        Ok(Some(assemble_wave_tree(rows, wave_id)?))
+    }
+
+    fn get_wave_subtree_rows(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveTreeRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "WITH RECURSIVE tree AS (
+                SELECT id, parent_wave_id, position, 0 AS depth
+                FROM waves
+                WHERE id = ?1
+
+                UNION ALL
+
+                SELECT child.id, child.parent_wave_id, child.position, tree.depth + 1
+                FROM waves AS child
+                JOIN tree ON child.parent_wave_id = tree.id
+                WHERE tree.depth < (?2 + 1)
+            )
+            SELECT
+                w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status,
+                w.iteration, w.created_at, w.schema_ref, w.schema_name, w.wave_type,
+                w.parent_wave_id, w.position, tree.depth
+            FROM tree
+            JOIN waves AS w ON w.id = tree.id
+            ORDER BY tree.depth, w.parent_wave_id, w.position",
+        )?;
+        let mut rows = stmt.query(params![wave_id, MAX_CHORD_DEPTH as i64])?;
+        let mut tree_rows = Vec::new();
+        while let Some(row) = rows.next()? {
+            tree_rows.push(WaveTreeRow {
+                wave: map_wave_row(row)?,
+                depth: row.get::<_, i64>(15)? as u32,
+            });
+        }
+        Ok(tree_rows)
     }
 }
 
@@ -283,25 +341,39 @@ impl SqliteStore {
     }
 
     pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetWaveById))?;
-        let wave = stmt
-            .query_row(params![wave_id], |row| Ok(map_wave_row(row)))
-            .optional()?;
-        wave.transpose()
+        self.load_wave_tree(wave_id)
     }
 
     pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetWaveByName))?;
-        let wave = stmt
-            .query_row(params![name], |row| Ok(map_wave_row(row)))
-            .optional()?;
-        wave.transpose()
+        let wave_id = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let mut stmt = conn.prepare(Self::sql(Query::GetWaveByName))?;
+            let wave = stmt
+                .query_row(params![name], |row| Ok(map_wave_row(row)))
+                .optional()?;
+            wave.transpose()?.map(|wave| wave.id().clone())
+        };
+        match wave_id {
+            Some(wave_id) => self.load_wave_tree(&wave_id),
+            None => Ok(None),
+        }
     }
 
     pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.upsert_wave(wave)
+    }
+
+    pub fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()> {
+        if !chord.is_chord() {
+            return Err(StoreError::InvalidData(
+                "create_chord requires a chord wave".to_string(),
+            ));
+        }
+        self.create_wave(chord)?;
+        for voice in voices {
+            self.create_wave(voice)?;
+        }
+        Ok(())
     }
 
     pub fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -671,6 +743,16 @@ impl SqliteStore {
 
     pub fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let parent_id = conn
+            .query_row(
+                "SELECT parent_wave_id FROM waves WHERE id = ?1",
+                params![stimulus.wave_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        if parent_id.flatten().is_some() {
+            return Err(StoreError::NestedWaveCannotOwnStimulus);
+        }
         let created_at = stimulus
             .created_at
             .map(|dt| dt.unix_timestamp())

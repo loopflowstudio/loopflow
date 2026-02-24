@@ -12,9 +12,17 @@ A chord fires its stimulus, all child voices execute in parallel, each voice lis
 
 **Chords are waves.** A Chord can be used anywhere a Wave can be used. The recursive `Wave` enum (Voice | Chord) means a chord can contain chords — arbitrary nesting, opaque to the parent.
 
+**Type safety and cleanliness over permissive behavior.** Impossible states are unrepresentable in types; data invariants are enforced in the database; invalid states fail loudly instead of silently coercing.
+
 **Voicing over configuration.** Going from wave schema to instantiated wave is "voicing" — the choices of direction, area, model, parameters. Same schema, different voicings = different concrete waves. Already exists implicitly in fork drafts; this names the concept.
 
-**Stimulus ownership at the chord level.** The chord owns the trigger (loop/cron/watch/once). Child voices don't have independent triggers — they fire when the chord fires.
+**Stimulus ownership and parenthood are mutually exclusive.** Top-level waves own triggers (loop/cron/watch/once). Nested waves never own triggers; they inherit effective trigger ticks from the nearest ancestor that does.
+
+**Nested waves are not runnable entrypoints.** Running a child wave directly is invalid; execution starts from a trigger-owning top-level wave/chord.
+
+**Best-effort iteration with failure signal.** If one descendant fails, siblings keep running. The tick completes after all children settle, and iteration state records `has_failure`.
+
+**Reset over compatibility for phase 01.** No existing customer data: migration can rebuild wave/stimulus tables and start from clean constraints.
 
 **Listening is a step, not a context source.** Runs at the start of each chord iteration (after the first). Produces modified plans as durable artifacts, not a summary riding along in every step's context.
 
@@ -25,7 +33,7 @@ A chord fires its stimulus, all child voices execute in parallel, each voice lis
 ```rust
 enum Wave {
     Voice(WaveData),
-    Chord { data: WaveData, waves: Vec<Wave> },
+    Chord { data: WaveData, children: Vec<Wave> },
 }
 ```
 
@@ -33,13 +41,14 @@ Key properties:
 - Recursive: a chord can contain chords (arbitrary nesting)
 - A nested chord is opaque to its parent — the parent sees it as one wave, not its internals
 - An instantiated wave has at most one parent chord (or none if solo)
+- A wave can be nested or trigger-owning, never both
 
 ## Phases
 
 | # | Phase | Focus | Status |
 |---|-------|-------|--------|
 | 01 | Data Model | Wave enum (Voice/Chord), SQLite storage, voicing | |
-| 02 | Execution | Chord iteration cycle: trigger → start all → wait all | |
+| 02 | Execution | Inherited trigger tick → start all → wait all → mark failure if any | |
 | 03 | Listen Step | Inter-voice communication via PR digestion and plan adaptation | |
 
 ## Future Directions
@@ -64,13 +73,14 @@ Theoretically compelling but alternating execution semantics need more thought. 
 ## Open Questions
 
 - CLI/API surface: how do users create and manage chords?
-- Failure semantics: one voice fails, does the chord continue?
 - Cleanup policy between iterations
+- Failure status detail beyond `has_failure`: do we also store per-child failure summary?
 - First iteration: no listen step (nothing to listen to), or a "hello" step?
 
 ## Done When (wave complete)
 
 - Wave enum supports Voice and Chord variants in storage and API
-- Chords execute child waves in parallel with stimulus ownership
+- Chords execute child waves in parallel with inherited stimulus ownership
+- Tick-level failure is recorded if any descendant fails, without halting siblings
 - Listen step runs at iteration start, producing adapted plans from sibling output
 - Nesting works: a chord containing a chord behaves correctly

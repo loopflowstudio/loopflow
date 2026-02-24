@@ -13,11 +13,11 @@ use crate::lfd::store::catalog::{
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
-    map_agent_row, map_chat_memory_block_row, map_chat_message_row, map_fork_run_row,
-    map_live_pr_state_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
-    map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    assemble_wave_tree, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
+    map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_stimulus_row,
+    map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr, WaveTreeRow,
 };
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult, MAX_CHORD_DEPTH};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
@@ -101,13 +101,25 @@ impl PostgresStore {
 
     async fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.with_client(|client| async move {
-            let direction_json = serde_json::to_string(&wave.direction)?;
-            let area_json = serde_json::to_string(&wave.area)?;
+            if wave.parent_id().is_some() {
+                let has_stimulus = client
+                    .query_opt(
+                        "SELECT id FROM stimuli WHERE wave_id = $1 LIMIT 1",
+                        &[wave.id()],
+                    )
+                    .await?
+                    .is_some();
+                if has_stimulus {
+                    return Err(StoreError::StimulusOwnerCannotBeNested);
+                }
+            }
+            let direction_json = serde_json::to_string(wave.direction())?;
+            let area_json = serde_json::to_string(wave.area())?;
             let created_at = wave
-                .created_at
+                .created_at()
                 .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
-            let paused: i32 = if wave.status == WaveStatus::Paused {
+            let paused: i32 = if wave.status() == WaveStatus::Paused {
                 1
             } else {
                 0
@@ -117,18 +129,21 @@ impl PostgresStore {
                 .execute(
                     Self::sql(Query::UpsertWave),
                     &[
-                        &wave.id,
-                        &wave.name,
-                        &wave.repo,
-                        &wave.flow,
+                        wave.id(),
+                        wave.name(),
+                        wave.repo(),
+                        wave.flow(),
                         &direction_json,
                         &area_json,
                         &paused,
-                        &wave.status.as_i32(),
-                        &(wave.iteration as i32),
+                        &wave.status().as_i32(),
+                        &(wave.iteration() as i32),
                         &created_at,
-                        &wave.schema_ref,
-                        &wave.schema_name,
+                        wave.schema_ref(),
+                        wave.schema_name(),
+                        &wave.wave_type_i32(),
+                        &wave.parent_id(),
+                        &(wave.position() as i32),
                     ],
                 )
                 .await?;
@@ -151,6 +166,55 @@ impl PostgresStore {
                 .get::<_, Option<i64>>(7)
                 .map(crate::lfd::store::rows::unix_to_datetime),
         })
+    }
+
+    async fn load_wave_tree(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+        let rows = self.get_wave_subtree_rows(wave_id).await?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        if rows.iter().any(|row| row.depth > MAX_CHORD_DEPTH) {
+            return Err(StoreError::DepthLimitExceeded);
+        }
+        Ok(Some(assemble_wave_tree(rows, wave_id)?))
+    }
+
+    async fn get_wave_subtree_rows(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveTreeRow>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "WITH RECURSIVE tree AS (
+                        SELECT id, parent_wave_id, position, 0 AS depth
+                        FROM waves
+                        WHERE id = $1
+
+                        UNION ALL
+
+                        SELECT child.id, child.parent_wave_id, child.position, tree.depth + 1
+                        FROM waves AS child
+                        JOIN tree ON child.parent_wave_id = tree.id
+                        WHERE tree.depth < ($2 + 1)
+                    )
+                    SELECT
+                        w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status,
+                        w.iteration, w.created_at, w.schema_ref, w.schema_name, w.wave_type,
+                        w.parent_wave_id, w.position, tree.depth
+                    FROM tree
+                    JOIN waves AS w ON w.id = tree.id
+                    ORDER BY tree.depth, w.parent_wave_id, w.position",
+                    &[&wave_id, &(MAX_CHORD_DEPTH as i32)],
+                )
+                .await?;
+            rows.into_iter()
+                .map(|row| {
+                    Ok(WaveTreeRow {
+                        wave: map_wave_row(&row)?,
+                        depth: row.get::<_, i32>(15) as u32,
+                    })
+                })
+                .collect()
+        })
+        .await
     }
 }
 
@@ -330,28 +394,43 @@ impl PostgresStore {
     }
 
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt(Self::sql(Query::GetWaveById), &[&wave_id])
-                .await?;
-            row.as_ref().map(map_wave_row).transpose()
-        })
-        .await
+        self.load_wave_tree(wave_id).await
     }
 
     pub async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
         let name = name.to_string();
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt(Self::sql(Query::GetWaveByName), &[&name])
-                .await?;
-            row.as_ref().map(map_wave_row).transpose()
-        })
-        .await
+        let wave_id = self
+            .with_client(|client| async move {
+                let row = client
+                    .query_opt(Self::sql(Query::GetWaveByName), &[&name])
+                    .await?;
+                row.as_ref()
+                    .map(map_wave_row)
+                    .transpose()
+                    .map(|wave| wave.map(|value| value.id().clone()))
+            })
+            .await?;
+        match wave_id {
+            Some(wave_id) => self.load_wave_tree(&wave_id).await,
+            None => Ok(None),
+        }
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.upsert_wave(wave).await
+    }
+
+    pub async fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()> {
+        if !chord.is_chord() {
+            return Err(StoreError::InvalidData(
+                "create_chord requires a chord wave".to_string(),
+            ));
+        }
+        self.create_wave(chord).await?;
+        for voice in voices {
+            self.create_wave(voice).await?;
+        }
+        Ok(())
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -740,6 +819,16 @@ impl PostgresStore {
 
     pub async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
         self.with_client(|client| async move {
+            let parent_id = client
+                .query_opt(
+                    "SELECT parent_wave_id FROM waves WHERE id = $1",
+                    &[&stimulus.wave_id],
+                )
+                .await?
+                .and_then(|row| row.get::<_, Option<String>>(0));
+            if parent_id.is_some() {
+                return Err(StoreError::NestedWaveCannotOwnStimulus);
+            }
             let created_at = stimulus
                 .created_at
                 .map(|dt| dt.unix_timestamp())

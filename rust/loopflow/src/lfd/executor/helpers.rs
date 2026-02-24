@@ -40,7 +40,7 @@ pub async fn create_wave_run_with_id(
     wave: &Wave,
     run_id: &LfdId,
 ) -> anyhow::Result<WaveRun> {
-    let stack_runs = store.list_stack_runs(&wave.id).await?;
+    let stack_runs = store.list_stack_runs(wave.id()).await?;
     let last_run = stack_runs.last().cloned();
     let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
     let stack_position = last_run
@@ -55,19 +55,19 @@ pub async fn create_wave_run_with_id(
     let stack_group_id = last_run
         .as_ref()
         .map(|run| run.stack_group_id.clone())
-        .unwrap_or_else(|| wave.id.to_string());
+        .unwrap_or_else(|| wave.id().to_string());
 
-    let main_repo = Path::new(&wave.repo);
-    let (wt_path, branch) = ensure_wave_worktree(main_repo, &wave.name)?;
+    let main_repo = Path::new(wave.repo());
+    let (wt_path, branch) = ensure_wave_worktree(main_repo, wave.name())?;
 
     let run = WaveRun {
         id: run_id.clone(),
-        wave_id: wave.id.clone(),
+        wave_id: wave.id().clone(),
         snapshot: WaveRunSnapshot {
-            repo: wave.repo.clone(),
-            flow: wave.flow.clone(),
-            direction: wave.direction.clone(),
-            area: wave.area.clone(),
+            repo: wave.repo().clone(),
+            flow: wave.flow().clone(),
+            direction: wave.direction().clone(),
+            area: wave.area().clone(),
             pr: None,
         },
         iteration,
@@ -89,11 +89,11 @@ pub async fn create_wave_run_with_id(
         lineage_inferred: false,
     };
     store.create_wave_run(&run).await?;
-    if let Ok(Some(mut wave)) = store.get_wave(&wave.id).await {
-        wave.status = WaveStatus::Running;
-        wave.iteration = iteration;
+    if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
+        wave.data_mut().status = WaveStatus::Running;
+        wave.data_mut().iteration = iteration;
         if let Err(err) = store.update_wave(&wave).await {
-            warn!(wave_id = %wave.id, error = %err, "failed to set wave status to running");
+            warn!(wave_id = %wave.id(), error = %err, "failed to set wave status to running");
         }
     }
     Ok(run)

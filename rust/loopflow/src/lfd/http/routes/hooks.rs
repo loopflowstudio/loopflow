@@ -293,20 +293,20 @@ async fn find_waves_for_pr(
         .map_err(|err| err.to_string())?;
     let mut matches = Vec::new();
     for wave in waves {
-        let Some(repo_name) = github_repo_from_local(Path::new(&wave.repo)) else {
+        let Some(repo_name) = github_repo_from_local(Path::new(wave.repo())) else {
             continue;
         };
         if repo_name != repo_full_name {
             continue;
         }
         let has_pr = store
-            .list_stack_runs(&wave.id)
+            .list_stack_runs(wave.id())
             .await
             .map_err(|err| err.to_string())?
             .into_iter()
             .any(|run| run.snapshot.pr.and_then(|pr| pr.number) == Some(pr_number));
         if has_pr {
-            matches.push(wave.id);
+            matches.push(wave.id().clone());
         }
     }
     Ok(matches)
@@ -322,7 +322,7 @@ async fn collect_wave_ci_targets(
     let mut targets = Vec::new();
 
     for wave in waves {
-        let Some(repo_full_name) = github_repo_from_local(Path::new(&wave.repo)) else {
+        let Some(repo_full_name) = github_repo_from_local(Path::new(wave.repo())) else {
             continue;
         };
         if repo_filter.is_some_and(|repo| repo != repo_full_name) {
@@ -348,14 +348,14 @@ async fn find_wave_ci_target(
     pr_number: Option<u32>,
 ) -> Result<Option<WaveCiTarget>, String> {
     let runs = store
-        .list_wave_runs(Some(&wave.id), None)
+        .list_wave_runs(Some(wave.id()), None)
         .await
         .map_err(|err| err.to_string())?;
     let run = runs
         .into_iter()
         .find(|run| run_matches_ci_target(run, branch, pr_number));
 
-    Ok(run.and_then(|run| wave_ci_target(&wave.id, repo_full_name, &run)))
+    Ok(run.and_then(|run| wave_ci_target(wave.id(), repo_full_name, &run)))
 }
 
 fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<u32>) -> bool {

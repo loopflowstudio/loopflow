@@ -42,6 +42,24 @@ def create_wave(
     return _client().create_wave(name, repo, flow=flow, direction=direction, area=area)
 
 
+def create_chord(
+    name: str,
+    repo: str,
+    voices: list[dict[str, Any]],
+    flow: Optional[str] = None,
+    direction: Optional[list[str]] = None,
+    area: Optional[list[str]] = None,
+) -> Wave:
+    return _client().create_chord(
+        name,
+        repo,
+        voices,
+        flow=flow,
+        direction=direction,
+        area=area,
+    )
+
+
 def update_wave(
     name_or_id: str,
     flow: Optional[str] = None,
@@ -138,6 +156,7 @@ __all__ = [
     "waves",
     "wave",
     "create_wave",
+    "create_chord",
     "update_wave",
     "delete_wave",
     "run_wave",

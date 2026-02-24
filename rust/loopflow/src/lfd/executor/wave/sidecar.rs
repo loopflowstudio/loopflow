@@ -48,12 +48,13 @@ impl WaveExecutor {
             .await?
             .ok_or_else(|| anyhow!("wave run not found for CI fix"))?;
 
-        let worktree_path = ci_fix_worktree_path(Path::new(&wave.repo), &wave.name, sidecar_run_id);
+        let worktree_path =
+            ci_fix_worktree_path(Path::new(wave.repo()), wave.name(), sidecar_run_id);
         let worktree = worktree_path.to_string_lossy().to_string();
         let temp_branch = format!("ci-fix-{}", short_hash(sidecar_run_id.as_str(), 8));
 
         create_ci_fix_worktree(
-            Path::new(&wave.repo),
+            Path::new(wave.repo()),
             &worktree_path,
             &failure.branch,
             &temp_branch,
@@ -64,7 +65,7 @@ impl WaveExecutor {
         snapshot.pr = None;
         let mut run = WaveRun {
             id: sidecar_run_id.clone(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             snapshot,
             iteration: source_run.iteration,
             step_index: 0,
@@ -129,15 +130,15 @@ impl WaveExecutor {
             &run.worktree,
             &step,
             &run.snapshot.direction,
-            Some(&wave.name),
-            Some((&self.store, &wave.id)),
+            Some(wave.name()),
+            Some((&self.store, wave.id())),
             Some(message),
         )
         .await?;
 
         let outcome = self
             .launch_agent(AgentLaunchRequest {
-                wave_id: wave.id.clone(),
+                wave_id: wave.id().clone(),
                 wave_run_id: run.id.clone(),
                 repo: run.snapshot.repo.clone(),
                 worktree: run.worktree.clone(),

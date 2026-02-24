@@ -14,6 +14,8 @@ pub mod postgres;
 pub mod rows;
 pub mod sqlite;
 
+pub const MAX_CHORD_DEPTH: u32 = 8;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ForkRunStatus {
@@ -57,8 +59,14 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("not found")]
     NotFound,
+    #[error("chord nesting depth exceeded")]
+    DepthLimitExceeded,
     #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("nested wave cannot own stimulus")]
+    NestedWaveCannotOwnStimulus,
+    #[error("wave owning stimulus cannot be nested")]
+    StimulusOwnerCannotBeNested,
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -118,6 +126,10 @@ impl Store {
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         WaveStateStore::create_wave(self, wave).await
+    }
+
+    pub async fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()> {
+        WaveStateStore::create_chord(self, chord, voices).await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -480,6 +492,7 @@ pub trait WaveStateStore: Send + Sync {
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
+    async fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()>;
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
 
@@ -625,6 +638,17 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.create_wave(&wave)).await
             }
             StoreBackend::Postgres(store) => store.create_wave(wave).await,
+        }
+    }
+
+    async fn create_chord(&self, chord: &Wave, voices: &[Wave]) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let chord = chord.clone();
+                let voices = voices.to_vec();
+                run_sqlite(store, move |store| store.create_chord(&chord, &voices)).await
+            }
+            StoreBackend::Postgres(store) => store.create_chord(chord, voices).await,
         }
     }
 
@@ -1318,15 +1342,15 @@ mod tests {
     use crate::lfd::types::{
         Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
         QueueBlock, QueueBlockReason, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind,
-        Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-        WaveStatus,
+        Summary, Wave, WaveData, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
+        WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
         let id = LfdId::new();
-        Wave {
+        Wave::Voice(WaveData {
             id: id.clone(),
             name: format!("wave-{id}"),
             repo: repo.to_string(),
@@ -1338,18 +1362,59 @@ mod tests {
             schema_ref: None,
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
+            parent_id: None,
+            position: 0,
+        })
+    }
+
+    fn make_chord(repo: &str, name: &str, parent_id: Option<LfdId>, position: u32) -> Wave {
+        Wave::Chord {
+            data: WaveData {
+                id: LfdId::new(),
+                name: name.to_string(),
+                repo: repo.to_string(),
+                flow: "default".to_string(),
+                direction: vec!["focus".to_string()],
+                area: vec!["src".to_string()],
+                status: WaveStatus::Idle,
+                iteration: 0,
+                schema_ref: None,
+                schema_name: None,
+                created_at: Some(OffsetDateTime::now_utc()),
+                parent_id,
+                position,
+            },
+            children: Vec::new(),
         }
+    }
+
+    fn make_voice(repo: &str, name: &str, parent_id: Option<LfdId>, position: u32) -> Wave {
+        Wave::Voice(WaveData {
+            id: LfdId::new(),
+            name: name.to_string(),
+            repo: repo.to_string(),
+            flow: "default".to_string(),
+            direction: vec!["focus".to_string()],
+            area: vec!["src".to_string()],
+            status: WaveStatus::Idle,
+            iteration: 0,
+            schema_ref: None,
+            schema_name: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            parent_id,
+            position,
+        })
     }
 
     fn make_run(wave: &Wave, status: WaveRunStatus, kind: WaveRunKind) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
-                repo: wave.repo.clone(),
-                flow: wave.flow.clone(),
-                direction: wave.direction.clone(),
-                area: wave.area.clone(),
+                repo: wave.repo().clone(),
+                flow: wave.flow().clone(),
+                direction: wave.direction().clone(),
+                area: wave.area().clone(),
                 pr: None,
             },
             iteration: 0,
@@ -1370,7 +1435,7 @@ mod tests {
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
-            stack_group_id: wave.id.to_string(),
+            stack_group_id: wave.id().to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
         }
@@ -1384,20 +1449,20 @@ mod tests {
 
         let mut wave = make_wave("/repo");
         store.create_wave(&wave).await.expect("create wave");
-        assert!(store.get_wave(&wave.id).await.expect("get wave").is_some());
+        assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
 
-        wave.status = WaveStatus::Paused;
+        wave.data_mut().status = WaveStatus::Paused;
         store.update_wave(&wave).await.expect("update wave");
         let loaded = store
-            .get_wave(&wave.id)
+            .get_wave(wave.id())
             .await
             .expect("get wave")
             .expect("wave exists");
-        assert_eq!(loaded.status, WaveStatus::Paused);
+        assert_eq!(loaded.status(), WaveStatus::Paused);
 
         let stimulus = Stimulus {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             kind: StimulusKind::Watch,
             cron: "".to_string(),
             last_main_sha: None,
@@ -1411,7 +1476,7 @@ mod tests {
             .expect("create stimulus");
         assert_eq!(
             store
-                .list_stimuli(Some(&wave.id))
+                .list_stimuli(Some(wave.id()))
                 .await
                 .expect("list stimuli")
                 .len(),
@@ -1421,7 +1486,7 @@ mod tests {
         let run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
         store.create_wave_run(&run).await.expect("create wave run");
         assert!(store
-            .get_active_wave_run(&wave.id)
+            .get_active_wave_run(wave.id())
             .await
             .expect("get active")
             .is_some());
@@ -1483,14 +1548,14 @@ mod tests {
         };
         store.start_agent(&agent).await.expect("start agent");
         assert!(store
-            .get_waiting_agent_for_wave(&wave.id)
+            .get_waiting_agent_for_wave(wave.id())
             .await
             .expect("get waiting")
             .is_some());
 
         let summary = Summary {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             content: "summary".to_string(),
             source_hash: "abc".to_string(),
             token_budget: 100,
@@ -1502,7 +1567,7 @@ mod tests {
             .await
             .expect("upsert summary");
         assert!(store
-            .get_summary(&wave.id)
+            .get_summary(wave.id())
             .await
             .expect("get summary")
             .is_some());
@@ -1510,7 +1575,7 @@ mod tests {
         // Upsert replaces on same wave_id
         let updated_summary = Summary {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             content: "# Updated summary".to_string(),
             source_hash: "def456".to_string(),
             token_budget: 10000,
@@ -1522,7 +1587,7 @@ mod tests {
             .await
             .expect("upsert updated summary");
         let reloaded = store
-            .get_summary(&wave.id)
+            .get_summary(wave.id())
             .await
             .expect("get updated summary")
             .expect("summary should exist");
@@ -1531,14 +1596,14 @@ mod tests {
 
         // Chat memory block CRUD
         let block_a = ChatMemoryBlock {
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             name: "preferences".to_string(),
             content: "Keep responses concise.".to_string(),
             position: 1,
             updated_at: Some(OffsetDateTime::now_utc()),
         };
         let block_b = ChatMemoryBlock {
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             name: "project-context".to_string(),
             content: "Repo uses Rust + Swift.".to_string(),
             position: 0,
@@ -1553,7 +1618,7 @@ mod tests {
             .await
             .expect("upsert block b");
         let blocks = store
-            .list_chat_memory_blocks(&wave.id)
+            .list_chat_memory_blocks(wave.id())
             .await
             .expect("list blocks");
         assert_eq!(blocks.len(), 2);
@@ -1570,7 +1635,7 @@ mod tests {
             .await
             .expect("upsert updated block");
         let blocks = store
-            .list_chat_memory_blocks(&wave.id)
+            .list_chat_memory_blocks(wave.id())
             .await
             .expect("list blocks after update");
         let updated = blocks
@@ -1581,22 +1646,180 @@ mod tests {
         assert_eq!(updated.position, 2);
 
         store
-            .delete_chat_memory_block(&wave.id, "project-context")
+            .delete_chat_memory_block(wave.id(), "project-context")
             .await
             .expect("delete block");
         let blocks = store
-            .list_chat_memory_blocks(&wave.id)
+            .list_chat_memory_blocks(wave.id())
             .await
             .expect("list blocks after delete");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].name, "preferences");
 
-        store.delete_wave(&wave.id).await.expect("delete wave");
+        store.delete_wave(wave.id()).await.expect("delete wave");
         assert!(store
-            .get_wave(&wave.id)
+            .get_wave(wave.id())
             .await
             .expect("get deleted wave")
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn sqlite_chord_round_trip_loads_children() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let chord = make_chord("/repo", "ensemble", None, 0);
+        let child_a = make_voice("/repo", "designer", Some(chord.id().clone()), 0);
+        let child_b = make_voice("/repo", "infra", Some(chord.id().clone()), 1);
+        store.create_wave(&chord).await.expect("create chord");
+        store.create_wave(&child_a).await.expect("create child a");
+        store.create_wave(&child_b).await.expect("create child b");
+
+        let loaded = store
+            .get_wave(chord.id())
+            .await
+            .expect("load chord")
+            .expect("chord exists");
+        assert!(loaded.is_chord());
+        assert_eq!(loaded.children().len(), 2);
+        assert_eq!(loaded.children()[0].name(), "designer");
+        assert_eq!(loaded.children()[1].name(), "infra");
+
+        let listed = store.list_waves(None).await.expect("list waves");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name(), "ensemble");
+    }
+
+    #[tokio::test]
+    async fn sqlite_nested_chord_round_trip_loads_subtree() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let root = make_chord("/repo", "root", None, 0);
+        let nested = make_chord("/repo", "nested", Some(root.id().clone()), 0);
+        let nested_voice = make_voice("/repo", "voice", Some(nested.id().clone()), 0);
+        store.create_wave(&root).await.expect("create root");
+        store.create_wave(&nested).await.expect("create nested");
+        store
+            .create_wave(&nested_voice)
+            .await
+            .expect("create nested voice");
+
+        let loaded = store
+            .get_wave(root.id())
+            .await
+            .expect("load root")
+            .expect("root exists");
+        assert_eq!(loaded.children().len(), 1);
+        let loaded_nested = &loaded.children()[0];
+        assert!(loaded_nested.is_chord());
+        assert_eq!(loaded_nested.children().len(), 1);
+        assert_eq!(loaded_nested.children()[0].name(), "voice");
+    }
+
+    #[tokio::test]
+    async fn sqlite_rejects_chord_depth_beyond_limit() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let mut parent = make_chord("/repo", "level-0", None, 0);
+        let root_id = parent.id().clone();
+        store.create_wave(&parent).await.expect("create root");
+        for level in 1..=10 {
+            let child = make_chord(
+                "/repo",
+                &format!("level-{level}"),
+                Some(parent.id().clone()),
+                0,
+            );
+            store.create_wave(&child).await.expect("create depth child");
+            parent = child;
+        }
+
+        let err = store
+            .get_wave(&root_id)
+            .await
+            .expect_err("depth should fail");
+        assert!(matches!(err, super::StoreError::DepthLimitExceeded));
+    }
+
+    #[tokio::test]
+    async fn sqlite_nested_wave_cannot_own_stimulus() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        let parent = make_chord("/repo", "parent", None, 0);
+        let child = make_voice("/repo", "child", Some(parent.id().clone()), 0);
+        store.create_wave(&parent).await.expect("create parent");
+        store.create_wave(&child).await.expect("create child");
+
+        let parent_stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: parent.id().clone(),
+            kind: StimulusKind::Loop,
+            cron: "".to_string(),
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        store
+            .create_stimulus(&parent_stimulus)
+            .await
+            .expect("top-level wave can own stimulus");
+
+        let child_stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: child.id().clone(),
+            kind: StimulusKind::Loop,
+            cron: "".to_string(),
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        let err = store
+            .create_stimulus(&child_stimulus)
+            .await
+            .expect_err("nested wave cannot own stimulus");
+        assert!(matches!(
+            err,
+            super::StoreError::NestedWaveCannotOwnStimulus
+        ));
+
+        let mut top_voice = make_voice("/repo", "top-voice", None, 0);
+        store
+            .create_wave(&top_voice)
+            .await
+            .expect("create top voice");
+        let top_stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: top_voice.id().clone(),
+            kind: StimulusKind::Loop,
+            cron: "".to_string(),
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        store
+            .create_stimulus(&top_stimulus)
+            .await
+            .expect("create top-level stimulus");
+        top_voice.data_mut().parent_id = Some(parent.id().clone());
+        let err = store
+            .update_wave(&top_voice)
+            .await
+            .expect_err("stimulus owner cannot become nested");
+        assert!(matches!(
+            err,
+            super::StoreError::StimulusOwnerCannotBeNested
+        ));
     }
 
     #[tokio::test]
@@ -1614,7 +1837,7 @@ mod tests {
             .await
             .expect("create running run");
         assert!(store
-            .get_active_wave_run(&wave.id)
+            .get_active_wave_run(wave.id())
             .await
             .expect("active run")
             .is_some());
@@ -1624,13 +1847,13 @@ mod tests {
         run.ended_at = Some(OffsetDateTime::now_utc());
         store.update_wave_run(&run).await.expect("update run");
         assert!(store
-            .get_active_wave_run(&wave.id)
+            .get_active_wave_run(wave.id())
             .await
             .expect("active after fail")
             .is_none());
         assert_eq!(
             store
-                .get_latest_wave_run(&wave.id)
+                .get_latest_wave_run(wave.id())
                 .await
                 .expect("latest run")
                 .expect("run exists")
@@ -1644,12 +1867,12 @@ mod tests {
             .await
             .expect("create sidecar run");
         assert!(store
-            .get_active_wave_run(&wave.id)
+            .get_active_wave_run(wave.id())
             .await
             .expect("active with sidecar")
             .is_none());
 
-        store.delete_wave(&wave.id).await.expect("delete wave");
+        store.delete_wave(wave.id()).await.expect("delete wave");
     }
 
     #[tokio::test]
@@ -1666,12 +1889,12 @@ mod tests {
                 let pr_number = 100 + iteration;
                 WaveRun {
                     id: LfdId::new(),
-                    wave_id: wave.id.clone(),
+                    wave_id: wave.id().clone(),
                     snapshot: WaveRunSnapshot {
-                        repo: wave.repo.clone(),
-                        flow: wave.flow.clone(),
-                        direction: wave.direction.clone(),
-                        area: wave.area.clone(),
+                        repo: wave.repo().clone(),
+                        flow: wave.flow().clone(),
+                        direction: wave.direction().clone(),
+                        area: wave.area().clone(),
                         pr: Some(PullRequest {
                             url: format!("https://example.test/pr/{pr_number}"),
                             number: Some(pr_number),
@@ -1694,7 +1917,7 @@ mod tests {
                     parent_run_id,
                     parent_pr_number,
                     stack_position: iteration.saturating_sub(1),
-                    stack_group_id: wave.id.to_string(),
+                    stack_group_id: wave.id().to_string(),
                     stack_status: WaveRunStackStatus::Active,
                     lineage_inferred: false,
                 }
@@ -1702,7 +1925,7 @@ mod tests {
 
         let make_pr_state =
             |pr_number: u32, state: LivePrState, head_sha: &str| LivePullRequestState {
-                repo_id: wave.repo.clone(),
+                repo_id: wave.repo().clone(),
                 pr_number,
                 state,
                 is_draft: false,
@@ -1721,7 +1944,7 @@ mod tests {
         store.create_wave_run(&run2).await.expect("create run2");
 
         let first_pending = store
-            .find_next_unmerged_run(&wave.id)
+            .find_next_unmerged_run(wave.id())
             .await
             .expect("find first unmerged");
         assert_eq!(first_pending.map(|run| run.id), Some(run1.id.clone()));
@@ -1731,7 +1954,7 @@ mod tests {
             .await
             .expect("upsert pr 101 merged");
         let second_pending = store
-            .find_next_unmerged_run(&wave.id)
+            .find_next_unmerged_run(wave.id())
             .await
             .expect("find second unmerged");
         assert_eq!(second_pending.map(|run| run.id), Some(run2.id.clone()));
@@ -1746,13 +1969,13 @@ mod tests {
                 .await
                 .expect("upsert pr state");
             let pending = store
-                .find_next_unmerged_run(&wave.id)
+                .find_next_unmerged_run(wave.id())
                 .await
                 .expect("find unmerged");
             assert_eq!(pending.map(|run| run.id), expected);
         }
 
-        store.delete_wave(&wave.id).await.expect("delete wave");
+        store.delete_wave(wave.id()).await.expect("delete wave");
     }
 
     #[tokio::test]
@@ -1776,7 +1999,7 @@ mod tests {
         store.create_wave_run(&run).await.expect("create run");
 
         let block = QueueBlock {
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             run_id: run.id.clone(),
             reason: QueueBlockReason::RebaseConflict,
             attempted_at: OffsetDateTime::now_utc(),
@@ -1788,19 +2011,19 @@ mod tests {
             .await
             .expect("upsert block");
         let blocks = store
-            .list_queue_blocks(&wave.id)
+            .list_queue_blocks(wave.id())
             .await
             .expect("list blocks");
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].reason, QueueBlockReason::RebaseConflict);
         let deleted = store
-            .delete_queue_block(&wave.id, &run.id)
+            .delete_queue_block(wave.id(), &run.id)
             .await
             .expect("delete block");
         assert_eq!(deleted, 1);
 
         let merge_event = QueueMergeEvent {
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             pr_number: 42,
             merged_at: OffsetDateTime::now_utc(),
             processed_at: OffsetDateTime::now_utc(),
@@ -1816,6 +2039,6 @@ mod tests {
         assert!(first);
         assert!(!second);
 
-        store.delete_wave(&wave.id).await.expect("delete wave");
+        store.delete_wave(wave.id()).await.expect("delete wave");
     }
 }

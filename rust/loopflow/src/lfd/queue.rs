@@ -524,8 +524,8 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus,
-        WaveStatus,
+        PullRequest, QueueBlockReason, Wave, WaveData, WaveRun, WaveRunKind, WaveRunSnapshot,
+        WaveRunStatus, WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -585,7 +585,7 @@ mod tests {
     }
 
     fn make_wave(repo: &str) -> Wave {
-        Wave {
+        Wave::Voice(WaveData {
             id: LfdId::new(),
             name: "queue-wave".to_string(),
             repo: repo.to_string(),
@@ -597,18 +597,20 @@ mod tests {
             schema_ref: None,
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
-        }
+            parent_id: None,
+            position: 0,
+        })
     }
 
     fn make_run(wave: &Wave, stack_position: u32, pr_number: u32) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
-                repo: wave.repo.clone(),
-                flow: wave.flow.clone(),
-                direction: wave.direction.clone(),
-                area: wave.area.clone(),
+                repo: wave.repo().clone(),
+                flow: wave.flow().clone(),
+                direction: wave.direction().clone(),
+                area: wave.area().clone(),
                 pr: Some(PullRequest {
                     url: format!("https://example.test/pr/{pr_number}"),
                     number: Some(pr_number),
@@ -631,7 +633,7 @@ mod tests {
             parent_run_id: None,
             parent_pr_number: None,
             stack_position,
-            stack_group_id: wave.id.to_string(),
+            stack_group_id: wave.id().to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
         }
@@ -675,7 +677,7 @@ mod tests {
         reconcile_wave_queue_with_ops(
             &store,
             &GitHubConfig::default(),
-            &wave.id,
+            wave.id(),
             QueueTrigger::RunCompleted,
             &ops,
         )
@@ -683,13 +685,13 @@ mod tests {
         .expect("reconcile");
 
         let blocks = store
-            .list_queue_blocks(&wave.id)
+            .list_queue_blocks(wave.id())
             .await
             .expect("list queue blocks")
             .into_iter()
             .map(|block| (block.run_id.clone(), block))
             .collect::<HashMap<_, _>>();
-        let runs = store.list_stack_runs(&wave.id).await.expect("runs");
+        let runs = store.list_stack_runs(wave.id()).await.expect("runs");
         let live_snapshot = build_live_pr_snapshot(&store, &GitHubConfig::default(), &runs)
             .await
             .expect("live snapshot");
@@ -726,10 +728,10 @@ mod tests {
         set_live_open(&store, &run2, true).await;
 
         let merged_at = OffsetDateTime::now_utc();
-        let first = handle_pr_merged(&store, &GitHubConfig::default(), &wave.id, 21, merged_at)
+        let first = handle_pr_merged(&store, &GitHubConfig::default(), wave.id(), 21, merged_at)
             .await
             .expect("first merge");
-        let second = handle_pr_merged(&store, &GitHubConfig::default(), &wave.id, 21, merged_at)
+        let second = handle_pr_merged(&store, &GitHubConfig::default(), wave.id(), 21, merged_at)
             .await
             .expect("second merge");
         assert!(first);
@@ -752,7 +754,7 @@ mod tests {
         reconcile_wave_queue_with_ops(
             &store,
             &GitHubConfig::default(),
-            &wave.id,
+            wave.id(),
             QueueTrigger::RunCompleted,
             &ops,
         )
@@ -760,7 +762,7 @@ mod tests {
         .expect("reconcile");
 
         let block = store
-            .list_queue_blocks(&wave.id)
+            .list_queue_blocks(wave.id())
             .await
             .expect("blocks")
             .into_iter()

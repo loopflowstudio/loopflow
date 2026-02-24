@@ -707,27 +707,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             contentType: "application/json"
         )
         let (data, response) = try await performRequest(request, useLongTimeouts: true)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseSessionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return session
+        return try parseSessionResponse(data: data, response: response)
     }
 
     public func getSession(_ id: String) async throws -> AgentSession {
         let request = try makeRequest(sessionURL(id))
         let (data, response) = try await performRequest(request)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseSessionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return session
+        return try parseSessionResponse(data: data, response: response)
     }
 
     public func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession {
@@ -738,14 +724,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             contentType: "application/json"
         )
         let (data, response) = try await performRequest(request, useLongTimeouts: true)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseSessionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return session
+        return try parseSessionResponse(data: data, response: response)
     }
 
     public func streamSessionEvents(
@@ -811,14 +790,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     public func stopSession(_ id: String) async throws -> AgentSession {
         let request = try makeRequest(sessionURL(id), method: "DELETE")
         let (data, response) = try await performRequest(request)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = Self.parseSessionFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return session
+        return try parseSessionResponse(data: data, response: response)
     }
 
     public func connect(_ id: String) async throws -> ConnectionInfo {
@@ -1058,6 +1030,20 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     // MARK: - Private helpers
+
+    private func parseSessionResponse(
+        data: Data,
+        response: HTTPURLResponse
+    ) throws -> AgentSession {
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
+    }
 
     private static func parseWorktreeFromJSON(_ json: [String: Any]) -> WorktreeInfo? {
         guard let path = json["path"] as? String, !path.isEmpty else { return nil }

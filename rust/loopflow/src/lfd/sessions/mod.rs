@@ -94,18 +94,7 @@ impl SessionManager {
         &self,
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
-        let requested_provider = params.provider.trim().to_ascii_lowercase();
-        if matches!(requested_provider.as_str(), "gemini" | "opencode") {
-            return Err(SessionManagerError::ProviderNotImplemented(
-                requested_provider,
-            ));
-        }
-
-        let provider = harness::canonical_provider(&requested_provider)
-            .map(ToString::to_string)
-            .ok_or_else(|| {
-                SessionManagerError::UnsupportedProvider(requested_provider.to_string())
-            })?;
+        let provider = resolve_provider(&params.provider)?;
         let (session_config, prepared_prompt) = self.prepare_session_prompt(params.config).await?;
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
@@ -508,6 +497,19 @@ impl SessionManager {
     }
 }
 
+fn resolve_provider(provider: &str) -> Result<String, SessionManagerError> {
+    let requested_provider = provider.trim().to_ascii_lowercase();
+    if matches!(requested_provider.as_str(), "gemini" | "opencode") {
+        return Err(SessionManagerError::ProviderNotImplemented(
+            requested_provider,
+        ));
+    }
+
+    harness::canonical_provider(&requested_provider)
+        .map(ToString::to_string)
+        .ok_or(SessionManagerError::UnsupportedProvider(requested_provider))
+}
+
 fn validate_repo_root(repo_root: &str) -> Result<PathBuf, SessionManagerError> {
     let raw = repo_root.trim();
     if raw.is_empty() {
@@ -539,14 +541,9 @@ fn resolve_cwd(
     repo_root: &Path,
     cwd: Option<&str>,
 ) -> Result<Option<PathBuf>, SessionManagerError> {
-    let Some(raw) = cwd else {
+    let Some(trimmed) = cwd.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
-
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
 
     let path = PathBuf::from(trimmed);
     let resolved = if path.is_absolute() {

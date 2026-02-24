@@ -65,16 +65,7 @@ struct StartWaveView: View {
     private func startDesigning() {
         guard !isLaunching else { return }
         guard !trimmedPrompt.isEmpty else { return }
-
-        guard let repoRoot = repoState.currentRepo else {
-            errorMessage = "Open a repository first."
-            return
-        }
-
-        guard FileManager.default.fileExists(atPath: repoRoot.path()) else {
-            errorMessage = "Design launch requires a local repository."
-            return
-        }
+        guard canStartDesignSession() else { return }
 
         isLaunching = true
         errorMessage = nil
@@ -88,6 +79,21 @@ struct StartWaveView: View {
             defer { isLaunching = false }
             await state.send(prompt)
         }
+    }
+
+    private func canStartDesignSession() -> Bool {
+        guard let target = repoState.repoTarget else {
+            errorMessage = "Open a repository first."
+            return false
+        }
+
+        guard let localRepo = target.localURL,
+              FileManager.default.fileExists(atPath: localRepo.path()) else {
+            errorMessage = "Design launch requires a local repository."
+            return false
+        }
+
+        return true
     }
 }
 

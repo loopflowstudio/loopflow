@@ -1,6 +1,6 @@
 # 06: Auth Provider Isolation
 
-Ensure auth providers are mutually exclusive per-request, proxy topologies don't create loopback bypasses, and JWT validation fails closed. This phase hardens the auth system for remote deployments where the stakes are higher.
+Finalize remote auth-provider hardening: fail closed on JWKS issues, reject malformed bearer tokens before provider validation, and document revocation behavior. This phase hardens the `Studio` path where remote deployments carry higher exposure.
 
 Depends on remote/07 (Studio auth client wiring) since it hardens the `Studio` auth provider path.
 
@@ -10,17 +10,19 @@ Phase 01 shipped a clean auth middleware: all protected routes require a valid b
 
 Phase 04 shipped proxy-aware source IP handling: `trusted_proxy_cidrs` defaults to `[]` (fail-closed), `X-Forwarded-*` honored only when peer IP is in configured trusted CIDRs, malformed/ambiguous forwarded headers fall back to peer IP. Also shipped auth-failure rate throttling per source IP.
 
+Phase 05 shipped credential-boundary hardening: `SecretString` now carries auth/session/registration tokens, static/local token checks use constant-time comparison through provider-specific paths, auth-like query params are globally rejected before trace logging, and registration status exposure is split (`/health` summary, `/status` sanitized detail).
+
 Remaining gaps:
 
 **Studio validator caching**: `ConnectionValidator` caches validation results for 60 seconds. If a token is revoked server-side, it remains valid in lfd for up to 60 seconds. Acceptable for the threat model, but should be documented.
 
 **No JWKS validation yet**: The `Studio` provider currently validates connection tokens via the registration service (HTTP call to `auth.loopflow.studio`). Phase remote/07 plans to add local JWKS validation. The failure mode matters: if JWKS fetch fails on startup, does lfd reject all Studio auth (fail closed) or accept all (fail open)?
 
-**Token format not validated**: The `extract_token` function strips `Bearer ` prefix and trims whitespace, but doesn't validate token format (length, character set). A malformed token still reaches the provider's validation logic.
+**Token format not pre-validated**: The `extract_token` function strips `Bearer ` prefix and trims whitespace, but does not enforce provider-appropriate token bounds/shape. A malformed header token still reaches provider validation logic.
 
 ## What exists after this
 
-Auth providers enforce strict boundaries: no loopback bypass for `Static` or `Studio` providers, JWKS validation fails closed, and token format is pre-validated. (Proxy-aware source IP already shipped in Phase 04.)
+Auth providers enforce strict boundaries end-to-end: JWKS validation fails closed for `Studio`, token format is pre-validated before provider validation, and revocation latency is explicitly documented. (Loopback bypass, proxy trust, and credential transport hygiene are already shipped.)
 
 ## Security boundary for this phase
 
@@ -51,6 +53,8 @@ When remote/07 adds JWKS validation to the `Studio` provider:
 - Validate `iss`, `aud`, `exp`, `nbf` claims. Reject tokens with `exp` in the past (no grace period beyond clock skew tolerance of ~30 seconds).
 
 ### Token format pre-validation
+
+Query-based credentials are already rejected globally in Phase 05. This step only hardens header token parsing before provider validation.
 
 Before passing tokens to the provider, validate basic format:
 

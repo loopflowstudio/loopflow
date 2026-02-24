@@ -12,8 +12,8 @@ Every lfd deployment — local, containerized, remote — enforces auth, validat
 | 02 | Path Validation | Traversal in wave IDs, worktree paths, future file APIs | None | [02-path-validation.md](02-path-validation.md) | done |
 | 03 | Container Hardening | Resource limits, non-root agent user, cross-worktree isolation | None | [03-container-hardening.md](03-container-hardening.md) | done |
 | 04 | API Surface Gating | Rate limiting, body size limits, error sanitization, WebSocket caps, outbound token/header leakage prevention, proxy trust | 01 | — (shipped, see scratch/) | done |
-| 05 | Credential Hygiene | Token separation/rotation, config write secret preservation, log/status redaction, transport hygiene | None | — (in progress, see [scratch/security-credential-hygiene.md](../../scratch/security-credential-hygiene.md)) | in progress |
-| 06 | Auth Provider Isolation | Fallthrough bypass, JWKS fail-open, token format validation | remote/07 | [06-auth-provider-isolation.md](06-auth-provider-isolation.md) | |
+| 05 | Credential Hygiene | Token separation/rotation, config write secret preservation, log/status redaction, transport hygiene | None | — (shipped, see [scratch/security-credential-hygiene.md](../../scratch/security-credential-hygiene.md)) | done |
+| 06 | Auth Provider Isolation | JWKS fail-closed, token format pre-validation, revocation semantics | remote/07 | [06-auth-provider-isolation.md](06-auth-provider-isolation.md) | next (blocked on remote/07) |
 
 ## Goals
 
@@ -36,20 +36,20 @@ These are non-negotiable properties. Each phase should add tests that assert the
 
 ## Risks
 
-Near-term sequencing stays:
+Near-term sequencing now:
 
-1. **Phase 05** next (credential hygiene — narrower now that Phase 04 shipped error sanitization)
-2. **Phase 06** when remote/07 lands (JWKS and token format — proxy trust already done in Phase 04)
+1. **Phase 06** next when remote/07 lands (JWKS fail-closed and token format pre-validation)
+2. Keep the lightweight credential model restart-based unless operator pain proves otherwise
 
-## Post-ship adjustments (after phase 04)
+## Post-ship adjustments (after phase 05)
 
 What changed after implementation:
 
-- **Phase 04 was broader than planned.** Proxy trust with fail-closed CIDRs shipped here rather than in Phase 06 — the security envelope naturally spans inbound trust decisions. Error payload sanitization also shipped, partially covering Phase 05's redaction scope.
-- **`SafeHttpClient` is a new building block.** Outbound HTTP calls through `github.rs` and `registration.rs` now use a redirect-safe client that strips auth headers on authority change. Phase 05 can leverage this for any remaining transport hygiene.
-- **Phase 05 scope narrowed.** Error payload redaction and outbound header stripping are done. Remaining: token separation enforcement, rotation path, config write secret preservation, log/status endpoint redaction, query param rejection.
-- **Phase 06 scope narrowed.** Proxy-aware source IP is done (trusted CIDRs, fail-closed default, forwarded header handling). Remaining: JWKS fail-closed, token format pre-validation, revocation latency documentation. Still blocked on remote/07.
-- **Two unrelated flaky tests surfaced** during full-suite validation — `wave_rename_renames_branch` (Rust, intermittent) and `ScreenshotPipelineTests.testCapture` (Concerto UI, environment-sensitive). Neither is Phase 04 regression; tracked separately.
+- **Phase 05 was broader than planned at the type boundary.** `SecretString` now carries auth/registration/session secrets by default, with constant-time equality and redacted display/debug. This removed reliance on callsite logging discipline.
+- **Registration exposure split cleanly by audience.** `/health` now returns only `{ enabled, registered }`; `/status` keeps detailed registration state but sanitizes `last_error`.
+- **Transport hygiene moved earlier in the stack.** Query-based credentials are now rejected globally (including unauthenticated routes), and that rejection runs before trace logging middleware so sensitive query strings do not enter request traces.
+- **Static token rotation is explicitly restart-based.** `lfd token rotate` generates and prints a one-time token with a restart runbook. No dual-token grace window or hot-reload was added.
+- **Phase 06 scope is sharper.** Provider fallback and proxy trust concerns are already closed; remaining work is JWKS fail-closed behavior, token format pre-validation, and revocation latency documentation once remote/07 lands.
 
 ## Threat Model
 
@@ -67,6 +67,7 @@ lfd is an HTTP+WebSocket server that spawns Docker containers running AI coding 
 - Trusted vs untrusted execution tiers are currently deferred; priority could shift if threat posture changes.
 - Auth-provider isolation details depend on remote/07 sequencing and may force roadmap reshuffling.
 - Runtime hardening defaults may need adjustment if operator environments show unexpected constraints.
+- Redaction and query-key denylists are heuristic; we may need to extend pattern coverage as real-world error formats evolve.
 
 ## Metrics
 
@@ -101,14 +102,14 @@ From the recent OpenClaw postmortem review, prioritize two additions now and def
 
 1. **Phase 04: outbound integration hygiene** — done
    - ~~Never forward `Authorization`/session headers across host changes or redirects.~~ Shipped via `SafeHttpClient`.
-   - ~~Add regression tests proving secrets/tokens are not exposed in logs, status endpoints, or error payloads.~~ Error payload sanitization shipped; log/status redaction remains in Phase 05.
+   - ~~Add regression tests proving secrets/tokens are not exposed in logs, status endpoints, or error payloads.~~ Error payload sanitization shipped here; log/status redaction shipped in Phase 05.
    - ~~Keep forwarded-header handling fail-closed unless source IP is in explicit trusted-proxy CIDRs.~~ Shipped with `trusted_proxy_cidrs = []` default.
    - Scope note: Phase 04 shipped proxy/header handling mechanics and error sanitization. Phase 06 owns auth-policy decisions (JWKS, token format).
 
-2. **Phase 05: lightweight credential model (not full key-tiering)**
-   - Keep daemon auth token separate from user/session tokens.
-   - Add one explicit token rotation path for static auth.
-   - Keep credentials out of URLs/query params; headers only.
+2. **Phase 05: lightweight credential model (not full key-tiering)** — done
+   - ~~Keep daemon auth token separate from user/session tokens.~~ Enforced with provider-specific `SecretString` auth paths.
+   - ~~Add one explicit token rotation path for static auth.~~ Shipped via `lfd token rotate` + docs runbook.
+   - ~~Keep credentials out of URLs/query params; headers only.~~ Shipped via global auth-like query rejection middleware.
 
 Deferred for later:
 - Trusted vs untrusted execution tiers (for now: one hardened default execution profile)

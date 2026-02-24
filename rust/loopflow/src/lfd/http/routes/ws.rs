@@ -19,8 +19,8 @@ pub async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, (StatusCode, axum::Json<ErrorResponse>)> {
     let ws = ws
-        .max_frame_size(state.api_security.http.max_ws_frame_bytes)
-        .max_message_size(state.api_security.http.max_ws_message_bytes);
+        .max_frame_size(state.http_security.max_ws_frame_bytes)
+        .max_message_size(state.http_security.max_ws_message_bytes);
     Ok(ws.on_upgrade(move |socket| handle_ws(socket, state)))
 }
 
@@ -56,8 +56,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
         .await;
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let (outbound_tx, mut outbound_rx) =
-        mpsc::channel::<Message>(state.api_security.http.max_ws_queue);
+    let (outbound_tx, mut outbound_rx) = mpsc::channel::<Message>(state.http_security.max_ws_queue);
     let writer = tokio::spawn(async move {
         while let Some(message) = outbound_rx.recv().await {
             if ws_sender.send(message).await.is_err() {
@@ -70,7 +69,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
     let mut output = BroadcastStream::new(state.output_hub.subscribe());
     let mut ticker = interval(Duration::from_secs(30));
     let mut malformed_messages = 0_u32;
-    let malformed_limit = state.api_security.http.max_ws_malformed;
+    let malformed_limit = state.http_security.max_ws_malformed;
 
     loop {
         tokio::select! {

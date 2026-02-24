@@ -25,8 +25,8 @@ pub use state::HttpState;
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
 
 pub fn router(state: HttpState) -> Router {
-    let max_json_body_bytes = state.api_security.http.max_json_body_bytes;
-    let max_hook_body_bytes = state.api_security.http.max_hook_body_bytes;
+    let max_json_body_bytes = state.http_security.max_json_body_bytes;
+    let max_hook_body_bytes = state.http_security.max_hook_body_bytes;
 
     // API routes — protected by auth middleware.
     let api_routes = Router::new()

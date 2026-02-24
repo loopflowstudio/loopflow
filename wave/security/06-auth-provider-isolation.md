@@ -75,7 +75,7 @@ The 4096-byte cap prevents memory abuse from pathologically large Authorization 
 
 ### Proxy-aware source IP — done (Phase 04)
 
-Shipped in Phase 04 as part of the API security envelope. `trusted_proxy_cidrs` defaults to `[]` (fail-closed). `X-Forwarded-*` honored only when peer IP is in configured CIDRs. Malformed/ambiguous forwarded headers fall back to peer IP. Auth-failure throttle keys on resolved source IP. No further work needed.
+Shipped in Phase 04 as part of HTTP security hardening. `trusted_proxy_cidrs` defaults to `[]` (fail-closed). `X-Forwarded-*` honored only when peer IP is in configured CIDRs. Malformed/ambiguous forwarded headers fall back to peer IP. Auth-failure throttle keys on resolved source IP. No further work needed.
 
 ### Document token revocation latency
 

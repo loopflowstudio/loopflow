@@ -200,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
         github: lfd_config.github,
-        api_security: lfd_config.api_security,
+        http_security: lfd_config.http_security,
         auth_failure_throttle: loopflow::lfd::auth::AuthFailureThrottle::new(),
         ci_failure_cache,
         chat_turns: loopflow::lfd::http::state::ChatTurnRegistry::new(),

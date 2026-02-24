@@ -164,16 +164,15 @@ executor:
 github:
   webhook_secret: your-webhook-secret
   token: ghp_xxx # optional, used for startup /check-ci polling
-api_security:
-  http:
-    max_json_body_bytes: 1048576
-    max_hook_body_bytes: 262144
-    max_ws_frame_bytes: 65536
-    max_ws_message_bytes: 262144
-    max_ws_queue: 256
-    max_ws_malformed: 3
-    auth_failures_per_minute: 12
-    trusted_proxy_cidrs: [] # e.g. ["127.0.0.1/32", "10.0.0.0/8"]
+http_security:
+  max_json_body_bytes: 1048576
+  max_hook_body_bytes: 262144
+  max_ws_frame_bytes: 65536
+  max_ws_message_bytes: 262144
+  max_ws_queue: 256
+  max_ws_malformed: 3
+  auth_failures_per_minute: 12
+  trusted_proxy_cidrs: [] # e.g. ["127.0.0.1/32", "10.0.0.0/8"]
 ```
 
 `mode` (or `LFD_MODE`) selects a strict profile — `executor.type`, `storage`, `runtime_backend`, and

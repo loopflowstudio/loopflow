@@ -104,12 +104,8 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Response {
     let provided_token = extract_token(&headers);
-    let throttle_limit = state.api_security.http.auth_failures_per_minute;
-    let source = resolved_source(
-        &request,
-        &headers,
-        &state.api_security.http.trusted_proxy_cidrs,
-    );
+    let throttle_limit = state.http_security.auth_failures_per_minute;
+    let source = resolved_source(&request, &headers, &state.http_security.trusted_proxy_cidrs);
     let endpoint_group = endpoint_group(request.method(), request.uri().path());
     let throttle_key =
         AuthThrottleKey::new(source, auth_context_hash(provided_token), endpoint_group);

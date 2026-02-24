@@ -8,7 +8,7 @@ The `lfd` HTTP and WebSocket boundary now enforces strict default limits, fail-c
 
 ## What shipped
 
-### 1) Configurable security envelope (`api_security.http`)
+### 1) Configurable HTTP security policy (`http_security`)
 
 Default policy now lives in `lfd::config` with YAML + env overrides:
 
@@ -63,7 +63,7 @@ Detailed raw errors stay in structured logs.
 
 - Added regression tests for body/frame caps, auth throttling, proxy trust, WS malformed behavior, redirect header stripping, and sanitized error payloads.
 - Added client token-leak prevention checks in Python and Swift suites.
-- Updated `docs/lfd.md` with new `LFD_HTTP_*` settings and `api_security.http` examples.
+- Updated `docs/lfd.md` with new `LFD_HTTP_*` settings and `http_security` examples.
 
 ## Security invariants now enforced
 

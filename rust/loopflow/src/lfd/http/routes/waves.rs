@@ -483,6 +483,17 @@ async fn wave_name_exists(
     Ok(waves.into_iter().any(|wave| wave.name() == name))
 }
 
+fn ensure_wave_can_run_directly(wave: &Wave) -> Result<(), ApiError> {
+    if wave.parent_id().is_some() {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "nested waves cannot be run directly",
+        ));
+    }
+
+    Ok(())
+}
+
 pub async fn get_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -517,7 +528,7 @@ pub async fn update_wave_handler(
     if wave.parent_id().is_some() {
         return Err(api_error(
             StatusCode::CONFLICT,
-            "nested waves cannot be run directly",
+            "nested waves cannot be updated directly",
         ));
     }
 
@@ -665,6 +676,7 @@ pub async fn run_wave_handler(
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    ensure_wave_can_run_directly(&wave)?;
 
     let active_run = state
         .store
@@ -1377,6 +1389,9 @@ fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::types::{WaveData, WaveStatus};
+    use time::OffsetDateTime;
 
     #[test]
     fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
@@ -1399,5 +1414,41 @@ mod tests {
         let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
         assert_eq!(parsed.0, StimulusKind::Cron);
         assert_eq!(parsed.1, "0 8 * * *");
+    }
+
+    fn make_wave(parent_id: Option<LfdId>) -> Wave {
+        Wave::Voice(WaveData {
+            id: LfdId::new(),
+            name: "wave".to_string(),
+            repo: "/tmp/repo".to_string(),
+            flow: "ship".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Idle,
+            iteration: 0,
+            schema_ref: None,
+            schema_name: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            parent_id,
+            position: 0,
+        })
+    }
+
+    #[test]
+    fn ensure_wave_can_run_directly_allows_top_level_wave() {
+        let wave = make_wave(None);
+        let result = ensure_wave_can_run_directly(&wave);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn ensure_wave_can_run_directly_rejects_nested_wave() {
+        let parent_id = LfdId::new();
+        let wave = make_wave(Some(parent_id));
+
+        let err = ensure_wave_can_run_directly(&wave).expect_err("nested waves should be rejected");
+        let (status, body) = err;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body.0.error.message, "nested waves cannot be run directly");
     }
 }

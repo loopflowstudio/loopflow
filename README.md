@@ -185,7 +185,16 @@ import loopflow.api as loopflow
 
 loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
-loopflow.run_wave("engbot")
+loopflow.create_chord(
+    "eng-ensemble",
+    repo=".",
+    voices=[
+        {"name": "designer", "direction": ["designer"], "area": ["docs/"]},
+        {"name": "infra", "direction": ["infra-engineer"], "area": ["rust/"]},
+    ],
+    flow="ship",
+)
+loopflow.run_wave("eng-ensemble")
 ```
 
 [Documentation →](docs/index.md)

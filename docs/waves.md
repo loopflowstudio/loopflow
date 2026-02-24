@@ -18,6 +18,27 @@ PY
 
 This runs the `ship` flow on `src/api/` with the `product-engineer` direction—continuously, creating PRs until you stop it.
 
+## Chords
+
+```bash
+python - <<'PY'
+import loopflow.api as loopflow
+
+loopflow.create_chord(
+    "ensemble",
+    repo=".",
+    flow="ship",
+    voices=[
+        {"name": "designer", "direction": ["designer"], "area": ["docs/"]},
+        {"name": "infra", "direction": ["infra-engineer"], "area": ["rust/"]},
+    ],
+)
+loopflow.run_wave("ensemble")
+PY
+```
+
+A chord is a top-level wave with child voices. Run the chord name and loopflow schedules its voices together.
+
 ## Stimulus Types
 
 | Stimulus | Runs when | Command |

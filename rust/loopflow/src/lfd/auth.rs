@@ -160,19 +160,22 @@ fn authorize_local(
         return Err((StatusCode::FORBIDDEN, "session token not configured"));
     };
 
-    match provided_token {
-        Some(provided) if expected.constant_time_eq_str(provided) => Ok(()),
-        Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
-        None => Err((StatusCode::UNAUTHORIZED, "missing token")),
-    }
+    authorize_expected_token(expected, provided_token)
 }
 
 fn authorize_static(
     static_token: &SecretString,
     provided_token: Option<&str>,
 ) -> Result<(), (StatusCode, &'static str)> {
+    authorize_expected_token(static_token, provided_token)
+}
+
+fn authorize_expected_token(
+    expected_token: &SecretString,
+    provided_token: Option<&str>,
+) -> Result<(), (StatusCode, &'static str)> {
     match provided_token {
-        Some(provided) if static_token.constant_time_eq_str(provided) => Ok(()),
+        Some(provided) if expected_token.constant_time_eq_str(provided) => Ok(()),
         Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
         None => Err((StatusCode::UNAUTHORIZED, "missing token")),
     }

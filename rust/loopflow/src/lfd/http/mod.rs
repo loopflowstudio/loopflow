@@ -23,6 +23,16 @@ pub use state::HttpState;
 
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
 const QUERY_TOKEN_ERROR: &str = "authentication credentials must not appear in query parameters";
+const AUTH_LIKE_QUERY_KEYS: [&str; 8] = [
+    "token",
+    "access_token",
+    "auth_token",
+    "api_key",
+    "bearer",
+    "secret",
+    "password",
+    "credential",
+];
 
 pub fn router(state: HttpState) -> Router {
     let max_json_body_bytes = state.http_security.max_json_body_bytes;
@@ -184,23 +194,19 @@ fn has_auth_like_query_param(uri: &Uri) -> bool {
     };
     query
         .split('&')
-        .filter_map(|part| part.split_once('=').map(|(key, _)| key).or(Some(part)))
+        .map(query_key)
         .map(str::trim)
         .any(is_auth_like_query_key)
 }
 
+fn query_key(part: &str) -> &str {
+    part.split_once('=').map_or(part, |(key, _)| key)
+}
+
 fn is_auth_like_query_key(key: &str) -> bool {
-    matches!(
-        key.to_ascii_lowercase().as_str(),
-        "token"
-            | "access_token"
-            | "auth_token"
-            | "api_key"
-            | "bearer"
-            | "secret"
-            | "password"
-            | "credential"
-    )
+    AUTH_LIKE_QUERY_KEYS
+        .iter()
+        .any(|candidate| key.eq_ignore_ascii_case(candidate))
 }
 
 #[cfg(test)]

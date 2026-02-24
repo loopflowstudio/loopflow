@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "status" => return loopflow::lfd::service::status(),
             "token" => {
                 if matches!(args.get(2).map(String::as_str), Some("rotate")) {
-                    let token = rotate_static_auth_token();
+                    let token = loopflow::lfd::session_token::generate();
                     println!("{}", format_token_rotation_output(token.as_str()));
                     return Ok(());
                 }
@@ -306,10 +306,6 @@ fn generate_session_token_or_exit() -> SecretString {
     }
 }
 
-fn rotate_static_auth_token() -> String {
-    loopflow::lfd::session_token::generate()
-}
-
 fn format_token_rotation_output(token: &str) -> String {
     format!(
         "new static auth token (shown once):\n{token}\n\nnext steps:\n1. update LFD_AUTH_TOKEN in your secret source (.env, secret manager, systemd/launchd env)\n2. restart lfd\n3. verify old token is rejected and new token is accepted",
@@ -319,8 +315,8 @@ fn format_token_rotation_output(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_token_rotation_output, rotate_static_auth_token, storage_config_from_config,
-        LfdConfig, StorageConfig, StorageType,
+        format_token_rotation_output, storage_config_from_config, LfdConfig, StorageConfig,
+        StorageType,
     };
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
@@ -439,13 +435,6 @@ mod tests {
             err.to_string(),
             "LFD_DATABASE_URL required for postgres storage"
         );
-    }
-
-    #[test]
-    fn rotate_static_auth_token_returns_hex_32_byte_token() {
-        let token = rotate_static_auth_token();
-        assert_eq!(token.len(), 64);
-        assert!(token.chars().all(|ch| ch.is_ascii_hexdigit()));
     }
 
     #[test]

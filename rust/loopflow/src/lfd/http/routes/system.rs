@@ -4,12 +4,14 @@ use time::OffsetDateTime;
 
 use crate::lfd::http::dto::{HealthResponse, MetricsResponse, StatusResponse};
 use crate::lfd::http::state::HttpState;
-use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
+use crate::lfd::registration::RegistrationState;
 use crate::lfd::types::{AgentStatus, WaveRunStatus};
 
 pub async fn health_handler(State(state): State<HttpState>) -> Json<HealthResponse> {
     let counts = counts(&state).await;
-    let registration = health_registration(&state).await;
+    let registration = registration_state(&state)
+        .await
+        .map(|registration| registration.public_summary());
     Json(HealthResponse {
         status: if counts.database_ok { "ok" } else { "degraded" }.to_string(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
@@ -22,7 +24,9 @@ pub async fn health_handler(State(state): State<HttpState>) -> Json<HealthRespon
 
 pub async fn status_handler(State(state): State<HttpState>) -> Json<StatusResponse> {
     let counts = counts(&state).await;
-    let registration = status_registration(&state).await;
+    let registration = registration_state(&state)
+        .await
+        .map(RegistrationState::sanitized);
     Json(StatusResponse {
         pid: std::process::id(),
         waves_defined: counts.waves_defined,
@@ -88,15 +92,9 @@ async fn counts(state: &HttpState) -> Counts {
     }
 }
 
-async fn health_registration(state: &HttpState) -> Option<RegistrationPublicSummary> {
+async fn registration_state(state: &HttpState) -> Option<RegistrationState> {
     let client = state.registration.as_ref()?;
-    let registration = client.status().await;
-    Some(registration.public_summary())
-}
-
-async fn status_registration(state: &HttpState) -> Option<RegistrationState> {
-    let client = state.registration.as_ref()?;
-    Some(client.status().await.sanitized())
+    Some(client.status().await)
 }
 
 #[cfg(test)]

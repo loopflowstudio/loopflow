@@ -70,7 +70,6 @@ This is the natural session exit point. The user's answer determines what to run
    - `## Metrics` — observable signals discussed
    - Include `### Not here` under Vision when scope boundaries are important
 4. Write `wave/<name>/<name>.yaml`:
-   - `name`: wave name
    - `flow`: default `ship-wave` unless user asks for something else
    - `area`: inferred from the files/directories discussed (default `["."]`)
    - `direction`: inferred from conversation perspective (optional)

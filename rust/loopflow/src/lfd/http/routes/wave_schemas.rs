@@ -18,7 +18,8 @@ pub(crate) struct StimulusDef {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct WaveSchema {
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
     pub flow: String,
     pub area: Vec<String>,
     pub stimulus: Option<StimulusDef>,
@@ -27,25 +28,10 @@ pub(crate) struct WaveSchema {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WaveSchemaSource {
-    Builtin,
-    Local,
-}
-
-impl WaveSchemaSource {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            Self::Builtin => "builtin",
-            Self::Local => "local",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedWaveSchema {
     pub(crate) schema_ref: String,
-    pub(crate) source: WaveSchemaSource,
+    pub(crate) name: String,
     pub(crate) schema: WaveSchema,
 }
 
@@ -126,7 +112,7 @@ pub async fn list_wave_schemas_handler(
     let mut fallback_schema_by_name: HashMap<String, &ResolvedWaveSchema> = HashMap::new();
     for schema in &schemas {
         fallback_schema_by_name
-            .entry(schema.schema.name.clone())
+            .entry(schema.name.clone())
             .or_insert(schema);
     }
 
@@ -151,7 +137,7 @@ pub async fn list_wave_schemas_handler(
         .into_iter()
         .map(|resolved| {
             let WaveSchema {
-                name,
+                name: _,
                 flow,
                 area,
                 stimulus,
@@ -160,7 +146,7 @@ pub async fn list_wave_schemas_handler(
                 description,
             } = resolved.schema;
             WaveSchemaDto {
-                name,
+                name: resolved.name,
                 schema_ref: resolved.schema_ref.clone(),
                 flow,
                 area,
@@ -171,7 +157,6 @@ pub async fn list_wave_schemas_handler(
                 direction: direction.unwrap_or_default(),
                 owner,
                 description,
-                source: resolved.source.as_str().to_string(),
                 active_wave_id: active_by_ref.get(&resolved.schema_ref).cloned(),
             }
         })
@@ -183,18 +168,11 @@ pub async fn list_wave_schemas_handler(
 pub(crate) fn discover_wave_schemas(
     repo: &Path,
 ) -> Result<Vec<ResolvedWaveSchema>, SchemaDiscoveryError> {
-    let mut schemas = Vec::new();
-    schemas.extend(load_builtin_wave_schemas());
-    schemas.extend(load_local_wave_schemas(repo)?);
+    let mut schemas = load_local_wave_schemas(repo)?;
     schemas.sort_by(|a, b| {
-        a.schema
-            .name
-            .cmp(&b.schema.name)
-            .then_with(|| match (a.source, b.source) {
-                (WaveSchemaSource::Local, WaveSchemaSource::Builtin) => std::cmp::Ordering::Less,
-                (WaveSchemaSource::Builtin, WaveSchemaSource::Local) => std::cmp::Ordering::Greater,
-                _ => a.schema_ref.cmp(&b.schema_ref),
-            })
+        a.name
+            .cmp(&b.name)
+            .then_with(|| a.schema_ref.cmp(&b.schema_ref))
     });
     Ok(schemas)
 }
@@ -204,14 +182,7 @@ pub(crate) fn resolve_wave_schema(
     input: &str,
 ) -> Result<ResolvedWaveSchema, SchemaResolveError> {
     let schemas = discover_wave_schemas(repo).map_err(SchemaResolveError::Discovery)?;
-    let candidates: Vec<ResolvedWaveSchema> = if let Some(name) = input.strip_prefix("builtin://") {
-        schemas
-            .into_iter()
-            .filter(|schema| {
-                schema.source == WaveSchemaSource::Builtin && schema.schema.name == name
-            })
-            .collect()
-    } else if input.starts_with("file://") {
+    let candidates: Vec<ResolvedWaveSchema> = if input.starts_with("file://") {
         let canonical_input = canonical_schema_ref_from_input(input);
         schemas
             .into_iter()
@@ -223,23 +194,10 @@ pub(crate) fn resolve_wave_schema(
             })
             .collect()
     } else {
-        let local: Vec<_> = schemas
-            .iter()
-            .filter(|schema| {
-                schema.source == WaveSchemaSource::Local && schema.schema.name == input
-            })
-            .cloned()
-            .collect();
-        if !local.is_empty() {
-            local
-        } else {
-            schemas
-                .into_iter()
-                .filter(|schema| {
-                    schema.source == WaveSchemaSource::Builtin && schema.schema.name == input
-                })
-                .collect()
-        }
+        schemas
+            .into_iter()
+            .filter(|schema| schema.name == input)
+            .collect()
     };
 
     match candidates.as_slice() {
@@ -262,31 +220,6 @@ fn canonical_schema_ref_from_input(input: &str) -> Option<String> {
     let canonical = path.canonicalize().ok()?;
     let display = canonical.to_string_lossy().replace('\\', "/");
     Some(format!("file://{display}"))
-}
-
-fn load_builtin_wave_schemas() -> Vec<ResolvedWaveSchema> {
-    let mut schemas = Vec::new();
-    let mut names: Vec<_> = crate::engine::builtins::builtin_wave_names()
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-    names.sort();
-
-    for name in names {
-        let Some(raw) = crate::engine::builtins::get_builtin_wave(&name) else {
-            continue;
-        };
-        match serde_yaml_ng::from_str::<WaveSchema>(raw) {
-            Ok(schema) => schemas.push(ResolvedWaveSchema {
-                schema_ref: format!("builtin://{}", schema.name),
-                source: WaveSchemaSource::Builtin,
-                schema,
-            }),
-            Err(err) => warn!(schema = %name, error = %err, "invalid builtin wave schema"),
-        }
-    }
-
-    schemas
 }
 
 fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, SchemaDiscoveryError> {
@@ -327,7 +260,7 @@ fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, Schem
             }
         };
 
-        let schema = match serde_yaml_ng::from_str::<WaveSchema>(&raw) {
+        let mut schema = match serde_yaml_ng::from_str::<WaveSchema>(&raw) {
             Ok(schema) => schema,
             Err(err) => {
                 warn!(path = %canonical_schema_path.display(), error = %err, "invalid local wave schema");
@@ -335,15 +268,17 @@ fn load_local_wave_schemas(repo: &Path) -> Result<Vec<ResolvedWaveSchema>, Schem
             }
         };
 
+        let name = schema.name.take().unwrap_or_else(|| dir_name.to_string());
+
         let canonical_display = canonical_schema_path.to_string_lossy().replace('\\', "/");
         schema_files_by_name
-            .entry(schema.name.clone())
+            .entry(name.clone())
             .or_default()
             .push(canonical_display.clone());
 
         schemas.push(ResolvedWaveSchema {
             schema_ref: format!("file://{canonical_display}"),
-            source: WaveSchemaSource::Local,
+            name,
             schema,
         });
     }
@@ -381,56 +316,32 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn discover_wave_schemas_includes_builtin_and_local() {
+    fn discover_wave_schemas_finds_local() {
         let temp = tempdir().expect("temp dir");
         let local_dir = temp.path().join("wave").join("local-scan");
         fs::create_dir_all(&local_dir).expect("create local dir");
         fs::write(
             local_dir.join("local-scan.yaml"),
-            "name: local-scan\nflow: ship\narea: ['.']\n",
+            "flow: ship\narea: ['.']\n",
         )
         .expect("write schema");
 
         let schemas = discover_wave_schemas(temp.path()).expect("discover schemas");
-        assert!(schemas
-            .iter()
-            .any(|schema| schema.schema_ref == "builtin://scan"));
-        assert!(schemas
-            .iter()
-            .any(|schema| schema.schema_ref.starts_with("file://")));
+        assert_eq!(schemas.len(), 1);
+        assert_eq!(schemas[0].name, "local-scan");
+        assert!(schemas[0].schema_ref.starts_with("file://"));
     }
 
     #[test]
-    fn resolve_prefers_local_for_unqualified_names() {
+    fn resolve_by_name() {
         let temp = tempdir().expect("temp dir");
         let local_dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(
-            local_dir.join("scan.yaml"),
-            "name: scan\nflow: ship\narea: ['.']\n",
-        )
-        .expect("write schema");
+        fs::write(local_dir.join("scan.yaml"), "flow: ship\narea: ['.']\n").expect("write schema");
 
         let schema = resolve_wave_schema(temp.path(), "scan").expect("resolve schema");
-        assert_eq!(schema.source, WaveSchemaSource::Local);
+        assert_eq!(schema.name, "scan");
         assert!(schema.schema_ref.starts_with("file://"));
-    }
-
-    #[test]
-    fn resolve_supports_explicit_builtin_reference() {
-        let temp = tempdir().expect("temp dir");
-        let local_dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(
-            local_dir.join("scan.yaml"),
-            "name: scan\nflow: ship\narea: ['.']\n",
-        )
-        .expect("write schema");
-
-        let schema =
-            resolve_wave_schema(temp.path(), "builtin://scan").expect("resolve builtin schema");
-        assert_eq!(schema.source, WaveSchemaSource::Builtin);
-        assert_eq!(schema.schema_ref, "builtin://scan");
     }
 
     #[test]
@@ -438,17 +349,13 @@ mod tests {
         let temp = tempdir().expect("temp dir");
         let local_dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&local_dir).expect("create local dir");
-        fs::write(
-            local_dir.join("scan.yaml"),
-            "name: scan\nflow: ship\narea: ['.']\n",
-        )
-        .expect("write schema");
+        fs::write(local_dir.join("scan.yaml"), "flow: ship\narea: ['.']\n").expect("write schema");
 
         let non_canonical = local_dir.join("..").join("scan").join("scan.yaml");
         let input = format!("file://{}", non_canonical.to_string_lossy());
         let schema = resolve_wave_schema(temp.path(), &input).expect("resolve local schema");
 
-        assert_eq!(schema.source, WaveSchemaSource::Local);
+        assert_eq!(schema.name, "scan");
         assert!(schema.schema_ref.starts_with("file://"));
     }
 
@@ -482,5 +389,34 @@ mod tests {
             result,
             Err(SchemaDiscoveryError::DuplicateLocalNames { .. })
         ));
+    }
+
+    #[test]
+    fn name_defaults_to_directory_name() {
+        let temp = tempdir().expect("temp dir");
+        let local_dir = temp.path().join("wave").join("my-wave");
+        fs::create_dir_all(&local_dir).expect("create local dir");
+        fs::write(local_dir.join("my-wave.yaml"), "flow: ship\narea: ['.']\n")
+            .expect("write schema");
+
+        let schemas = discover_wave_schemas(temp.path()).expect("discover schemas");
+        assert_eq!(schemas.len(), 1);
+        assert_eq!(schemas[0].name, "my-wave");
+    }
+
+    #[test]
+    fn explicit_name_in_yaml_overrides_directory() {
+        let temp = tempdir().expect("temp dir");
+        let local_dir = temp.path().join("wave").join("dir-name");
+        fs::create_dir_all(&local_dir).expect("create local dir");
+        fs::write(
+            local_dir.join("dir-name.yaml"),
+            "name: custom-name\nflow: ship\narea: ['.']\n",
+        )
+        .expect("write schema");
+
+        let schemas = discover_wave_schemas(temp.path()).expect("discover schemas");
+        assert_eq!(schemas.len(), 1);
+        assert_eq!(schemas[0].name, "custom-name");
     }
 }

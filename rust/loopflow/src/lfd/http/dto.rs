@@ -292,7 +292,6 @@ pub struct WaveSchemaDto {
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_wave_id: Option<String>,
 }

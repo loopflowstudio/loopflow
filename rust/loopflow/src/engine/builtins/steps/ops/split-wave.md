@@ -33,7 +33,7 @@ Roadmap items move as-is — each one lands in exactly one child. But the README
 
 4. Create the new waves
    - `wave/<child>/README.md` — fresh Vision and Goals for each child; Risks and Metrics carried forward and adapted
-   - `wave/<child>/<child>.yaml` — name, flow, area, optional direction/stimulus
+   - `wave/<child>/<child>.yaml` — flow, area, optional direction/stimulus
    - Numbered roadmap files from the allocated items
    - Use `### Not here` under Vision to draw boundaries between siblings
 

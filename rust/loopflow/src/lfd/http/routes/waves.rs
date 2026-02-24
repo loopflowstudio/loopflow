@@ -197,7 +197,11 @@ pub async fn create_wave_handler(
 
     let id = LfdId::new();
     let name = name
-        .or_else(|| schema_defaults.map(|schema| schema.name.clone()))
+        .or_else(|| {
+            resolved_schema
+                .as_ref()
+                .map(|resolved| resolved.name.clone())
+        })
         .unwrap_or_else(|| format!("wave-{}", id));
     let flow = flow
         .or_else(|| schema_defaults.map(|schema| schema.flow.clone()))
@@ -213,7 +217,7 @@ pub async fn create_wave_handler(
         .map(|schema| schema.schema_ref.clone());
     let schema_name = resolved_schema
         .as_ref()
-        .map(|schema| schema.schema.name.clone());
+        .map(|resolved| resolved.name.clone());
 
     // Check for duplicate wave name in the same repo.
     let existing = wave_name_exists(&state, &repo, &name)

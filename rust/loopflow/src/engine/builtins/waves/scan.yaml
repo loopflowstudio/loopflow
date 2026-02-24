@@ -1,6 +1,0 @@
-name: scan
-flow: scan
-area: [.]
-stimulus:
-  kind: cron
-  cron: "0 8 * * *"

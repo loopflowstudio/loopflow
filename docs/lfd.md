@@ -83,7 +83,7 @@ Stream events (replay + live tail):
 curl -N "http://127.0.0.1:2486/v0/sessions/<session_id>/events"
 ```
 
-Supported providers: `codex`, `claude`, and `lfharness`. Session item payloads use normalized item types:
+Supported providers: `codex`, `claude`. Session item payloads use normalized item types:
 `command`, `file`, `message`, `thought`, and generic `tool`.
 
 Stop the session:

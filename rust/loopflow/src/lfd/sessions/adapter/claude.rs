@@ -209,6 +209,30 @@ impl ReaderState {
     }
 }
 
+#[derive(Debug)]
+struct TurnInProgressGuard {
+    flag: Arc<AtomicBool>,
+    armed: bool,
+}
+
+impl TurnInProgressGuard {
+    fn new(flag: Arc<AtomicBool>) -> Self {
+        Self { flag, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TurnInProgressGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.flag.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
 impl ClaudeAdapter {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
@@ -233,13 +257,22 @@ impl ClaudeAdapter {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             return false;
         };
-        let Some(event_type) = value.get("type").and_then(Value::as_str) else {
+        let event = value
+            .get("stream_event")
+            .and_then(|stream| stream.get("event"))
+            .unwrap_or(&value);
+
+        let Some(event_type) = event.get("type").and_then(Value::as_str) else {
             return false;
         };
 
         match event_type {
             "system" => {
-                if let Some(session_id) = value.get("session_id").and_then(Value::as_str) {
+                if let Some(session_id) = event
+                    .get("session_id")
+                    .or_else(|| value.get("session_id"))
+                    .and_then(Value::as_str)
+                {
                     let _ = events.send(SessionEvent::ProviderSessionId {
                         provider_session_id: session_id.to_string(),
                     });
@@ -247,10 +280,10 @@ impl ClaudeAdapter {
             }
 
             "content_block_start" => {
-                let Some(index) = value.get("index").and_then(Value::as_u64) else {
+                let Some(index) = event.get("index").and_then(Value::as_u64) else {
                     return false;
                 };
-                let Some(block) = value.get("content_block") else {
+                let Some(block) = event.get("content_block") else {
                     return false;
                 };
                 let Some(block_type) = block.get("type").and_then(Value::as_str) else {
@@ -276,11 +309,11 @@ impl ClaudeAdapter {
             }
 
             "content_block_delta" => {
-                let index = value
+                let index = event
                     .get("index")
                     .and_then(Value::as_u64)
                     .map(|v| v as usize);
-                let Some(delta) = value.get("delta") else {
+                let Some(delta) = event.get("delta") else {
                     return false;
                 };
                 let Some(delta_type) = delta.get("type").and_then(Value::as_str) else {
@@ -325,9 +358,18 @@ impl ClaudeAdapter {
             }
 
             "result" => {
+                let status = if event
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    TurnStatus::Failed
+                } else {
+                    TurnStatus::Completed
+                };
                 let _ = events.send(SessionEvent::TurnCompleted {
                     turn_id: turn_id.to_string(),
-                    status: TurnStatus::Completed,
+                    status,
                 });
                 return true;
             }
@@ -335,12 +377,12 @@ impl ClaudeAdapter {
             // Claude emits "assistant" events with full message content.
             // These contain tool_use blocks and text blocks.
             "assistant" => {
-                Self::process_assistant_message(&value, turn_id, events, state);
+                Self::process_assistant_message(event, turn_id, events, state);
             }
 
             // Tool result events: type "user" with tool_result content.
             "user" => {
-                Self::process_user_message(&value, turn_id, events, state);
+                Self::process_user_message(event, turn_id, events, state);
             }
 
             _ => {}
@@ -510,6 +552,7 @@ impl SessionAdapter for ClaudeAdapter {
         {
             return Err(SessionAdapterError::TurnAlreadyInProgress.into());
         }
+        let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
         let config = self
             .config
@@ -533,18 +576,28 @@ impl SessionAdapter for ClaudeAdapter {
             cmd.current_dir(cwd);
         }
 
+        self.shutdown_requested.store(false, Ordering::SeqCst);
+
         let mut child = cmd
             .spawn()
             .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("failed to capture claude stdout"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(anyhow!("failed to capture claude stdout"));
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(anyhow!("failed to capture claude stderr"));
+            }
+        };
 
         self.child = Some(child);
 
@@ -598,6 +651,7 @@ impl SessionAdapter for ClaudeAdapter {
             }
         }));
 
+        turn_guard.disarm();
         Ok(())
     }
 
@@ -767,6 +821,26 @@ mod tests {
     }
 
     #[test]
+    fn process_line_wrapped_stream_event() {
+        let (tx, mut rx) = broadcast::channel(16);
+        let mut state = ReaderState::default();
+        let line = r#"{"stream_event":{"event":{"type":"system","session_id":"sess_wrapped"}}}"#;
+
+        let result = ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        assert!(!result);
+
+        let event = rx.try_recv().expect("should have event");
+        match event {
+            SessionEvent::ProviderSessionId {
+                provider_session_id,
+            } => {
+                assert_eq!(provider_session_id, "sess_wrapped");
+            }
+            other => panic!("expected ProviderSessionId event, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn process_line_text_delta() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
@@ -822,6 +896,25 @@ mod tests {
     }
 
     #[test]
+    fn process_line_result_error_marks_failed() {
+        let (tx, mut rx) = broadcast::channel(16);
+        let mut state = ReaderState::default();
+        let line = r#"{"type":"result","is_error":true,"result":"failed"}"#;
+
+        let result = ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
+        assert!(result);
+
+        let event = rx.try_recv().expect("should have event");
+        match event {
+            SessionEvent::TurnCompleted { turn_id, status } => {
+                assert_eq!(turn_id, "turn_1");
+                assert_eq!(status, TurnStatus::Failed);
+            }
+            other => panic!("expected TurnCompleted, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn process_line_tool_use_start() {
         let (tx, mut rx) = broadcast::channel(16);
         let mut state = ReaderState::default();
@@ -866,6 +959,40 @@ mod tests {
                 .get(&0)
                 .map(|tool| tool.input_json.as_str()),
             Some("{\"command\":\"ls\"}")
+        );
+    }
+
+    #[tokio::test]
+    async fn send_input_spawn_failure_releases_turn_guard() {
+        let (tx, _rx) = broadcast::channel(16);
+        let mut adapter = ClaudeAdapter::new(tx);
+        adapter.config = Some(SessionConfig {
+            cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4())),
+            ..Default::default()
+        });
+
+        let first = adapter
+            .send_input("first")
+            .await
+            .expect_err("spawn should fail for missing cwd");
+        assert!(
+            !matches!(
+                first.downcast_ref::<SessionAdapterError>(),
+                Some(SessionAdapterError::TurnAlreadyInProgress)
+            ),
+            "first failure should not be turn-in-progress"
+        );
+
+        let second = adapter
+            .send_input("second")
+            .await
+            .expect_err("turn guard should be released after setup failure");
+        assert!(
+            !matches!(
+                second.downcast_ref::<SessionAdapterError>(),
+                Some(SessionAdapterError::TurnAlreadyInProgress)
+            ),
+            "second failure should not be turn-in-progress"
         );
     }
 }

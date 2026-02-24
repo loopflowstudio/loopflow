@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+use crate::engine::agent::LaunchConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::flow::load_step;
 use crate::engine::fork::merge_directions;
@@ -12,16 +13,6 @@ use crate::engine::prompt::{
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
-
-#[derive(Debug, Clone)]
-pub struct PreparedPrompt {
-    pub system_prompt: String,
-    pub task_prompt: String,
-    pub model: Option<String>,
-    pub cwd: PathBuf,
-    pub max_turns: Option<u32>,
-    pub yolo_mode: bool,
-}
 
 pub struct PrepareStepPromptConfig<'a> {
     pub repo_root: &'a Path,
@@ -38,7 +29,7 @@ pub struct PrepareStepPromptConfig<'a> {
     pub summary_source: Option<(&'a SharedStore, &'a LfdId)>,
 }
 
-pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<PreparedPrompt> {
+pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<LaunchConfig> {
     let repo_root = config.repo_root;
     let loaded_step = load_step(config.step, repo_root)?;
     let file_config = load_config_or_default(Some(repo_root));
@@ -90,12 +81,12 @@ pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<
         .or(Some(file_config.agent_model.clone()));
     let cwd = config.cwd.unwrap_or_else(|| repo_root.to_path_buf());
 
-    Ok(PreparedPrompt {
+    Ok(LaunchConfig {
         system_prompt,
         task_prompt,
         model,
-        cwd,
+        cwd: Some(cwd),
         max_turns: config.max_turns,
-        yolo_mode: config.yolo_mode,
+        skip_permissions: config.yolo_mode,
     })
 }

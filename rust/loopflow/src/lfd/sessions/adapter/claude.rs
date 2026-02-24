@@ -10,7 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::lfd::sessions::adapter::SessionAdapter;
+use crate::lfd::sessions::adapter::{SessionAdapter, SessionAdapterError};
 use crate::lfd::sessions::types::{
     FileEdit, ItemStatus, SessionConfig, SessionEvent, SessionItem, TurnStatus,
 };
@@ -477,7 +477,7 @@ impl SessionAdapter for ClaudeAdapter {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Err(anyhow!("turn already in progress"));
+            return Err(SessionAdapterError::TurnAlreadyInProgress.into());
         }
 
         let config = self
@@ -587,6 +587,10 @@ impl SessionAdapter for ClaudeAdapter {
 
         self.turn_in_progress.store(false, Ordering::SeqCst);
         Ok(())
+    }
+
+    fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
+        self.provider_session_id = provider_session_id;
     }
 }
 

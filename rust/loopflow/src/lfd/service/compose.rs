@@ -311,9 +311,11 @@ mod tests {
     }
 
     fn container_config() -> LfdConfig {
-        let mut config = LfdConfig::default();
-        config.mode = Mode::Container;
-        config.storage = StorageType::Postgres;
+        let mut config = LfdConfig {
+            mode: Mode::Container,
+            storage: StorageType::Postgres,
+            ..LfdConfig::default()
+        };
         config.executor.r#type = ExecutorType::Docker;
         config
     }

@@ -192,11 +192,10 @@ fn has_auth_like_query_param(uri: &Uri) -> bool {
     let Some(query) = uri.query() else {
         return false;
     };
-    query
-        .split('&')
-        .map(query_key)
-        .map(str::trim)
-        .any(is_auth_like_query_key)
+    query.split('&').map(query_key).map(str::trim).any(|key| {
+        is_auth_like_query_key(key)
+            || decode_query_key(key).is_some_and(|decoded| is_auth_like_query_key(&decoded))
+    })
 }
 
 fn query_key(part: &str) -> &str {
@@ -207,6 +206,49 @@ fn is_auth_like_query_key(key: &str) -> bool {
     AUTH_LIKE_QUERY_KEYS
         .iter()
         .any(|candidate| key.eq_ignore_ascii_case(candidate))
+}
+
+fn decode_query_key(raw_key: &str) -> Option<String> {
+    if !raw_key.contains('%') && !raw_key.contains('+') {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(raw_key.len());
+    let bytes = raw_key.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'+' => {
+                out.push(b' ');
+                idx += 1;
+            }
+            b'%' => {
+                if idx + 2 >= bytes.len() {
+                    return None;
+                }
+                let hi = from_hex_digit(bytes[idx + 1])?;
+                let lo = from_hex_digit(bytes[idx + 2])?;
+                out.push((hi << 4) | lo);
+                idx += 3;
+            }
+            byte => {
+                out.push(byte);
+                idx += 1;
+            }
+        }
+    }
+
+    String::from_utf8(out).ok()
+}
+
+fn from_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -283,6 +325,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_like_query_keys_are_rejected_when_percent_encoded() {
+        let app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .layer(middleware::from_fn(reject_auth_query_params));
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve app");
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/health?%74oken=abc"))
+            .send()
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn auth_like_query_rejection_happens_before_trace_layer() {
         let app = Router::new()
             .route("/health", get(|| async { "ok" }))
@@ -326,5 +390,22 @@ mod tests {
             );
         }
         assert!(!is_auth_like_query_key("page"));
+    }
+
+    #[test]
+    fn decode_query_key_decodes_percent_and_plus() {
+        assert_eq!(decode_query_key("%74oken"), Some("token".to_string()));
+        assert_eq!(
+            decode_query_key("access%5Ftoken"),
+            Some("access_token".to_string())
+        );
+        assert_eq!(decode_query_key("api+key"), Some("api key".to_string()));
+    }
+
+    #[test]
+    fn decode_query_key_rejects_invalid_escape_sequences() {
+        assert_eq!(decode_query_key("%"), None);
+        assert_eq!(decode_query_key("%2"), None);
+        assert_eq!(decode_query_key("%zz"), None);
     }
 }

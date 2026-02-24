@@ -38,6 +38,16 @@ Rotation runbook:
 3. Restart `lfd`.
 4. Verify the old token is rejected and the new token is accepted.
 
+## Authentication transport
+
+Send credentials in the `Authorization` header:
+
+```bash
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:2486/status
+```
+
+`lfd` rejects auth-like query parameters (`token`, `api_key`, `secret`, etc.) with `400 Bad Request`.
+
 ## Install
 
 ```bash

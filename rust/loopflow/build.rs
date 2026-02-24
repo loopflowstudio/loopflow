@@ -45,13 +45,6 @@ fn main() {
         &out_dir.join("builtin_ops_prompts.rs"),
     );
 
-    generate_map(
-        &builtins_dir.join("waves"),
-        "yaml",
-        "BUILTIN_WAVES",
-        &out_dir.join("builtin_waves.rs"),
-    );
-
     // Re-run if any file in the builtins tree changes
     println!("cargo:rerun-if-changed={}", builtins_dir.display());
     for entry in walkdir(&builtins_dir) {

@@ -59,6 +59,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "011_chords_data_model",
         sql: include_str!("migrations/011_chords_data_model.sql"),
     },
+    Migration {
+        version: "012_drop_wave_schema_columns",
+        sql: include_str!("migrations/012_drop_wave_schema_columns.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

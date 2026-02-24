@@ -1,4 +1,4 @@
-use crate::engine::{Flow, Step};
+use crate::engine::{Flow, LoadError, Step};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -15,17 +15,24 @@ pub enum Target {
 
 /// Discover a step or flow by name. Tries step lookup first, falls back to flow.
 pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
-    match discover_step(repo, name) {
-        Ok(step) => Ok(Target::Step(step)),
-        Err(_) => match crate::engine::load_flow(name, repo) {
-            Ok(flow) => Ok(Target::Flow(flow)),
-            Err(_) => {
-                // Return the original step-not-found error for better messaging
-                Err(anyhow::anyhow!(
-                    "step or flow not found: {name}. Run `lf --list` to see available steps."
-                ))
-            }
-        },
+    let step_error = match discover_step(repo, name) {
+        Ok(step) => return Ok(Target::Step(step)),
+        Err(err) => err,
+    };
+
+    if !matches!(
+        step_error.downcast_ref::<LoadError>(),
+        Some(LoadError::StepNotFound(_))
+    ) {
+        return Err(step_error);
+    }
+
+    match crate::engine::load_flow(name, repo) {
+        Ok(flow) => Ok(Target::Flow(flow)),
+        Err(LoadError::FlowNotFound(_)) => Err(anyhow::anyhow!(
+            "step or flow not found: {name}. Run `lf --list` to see available steps."
+        )),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -61,6 +68,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         &[
             "ingest",
             "add-to-wave",
+            "split-wave",
             "update-wave",
             "consolidate",
             "synthesize",
@@ -73,6 +81,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
     HashMap::from([
         ("init", "Set up loopflow in this repo"),
         ("design", "Plan what to build"),
+        ("split-wave", "Split a large wave into child waves"),
         ("explore", "Investigate current diff"),
         ("implement", "Build from design doc"),
         ("iterate", "Improve code on branch"),

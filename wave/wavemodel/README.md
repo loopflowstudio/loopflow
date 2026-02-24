@@ -27,6 +27,7 @@ The full experience: open Concerto, describe what you want to build, and the des
 
 - **README migration could lose nuance.** Mechanical restructuring might flatten content that was intentionally organized differently. Mitigate: preserve all content, only rename/regroup sections. *Phase 01 evidence: migrations preserved all content. Reorganization was clean — "North Star" → "Vision", design decisions and architecture moved into roadmap items. Risk is lower than expected for future migrations.*
 - **Concerto NUX depends on agentapi.** The full interactive design experience can't ship until interactive agent sessions work in Concerto. Mitigate: Phase 03 does what it can now (UI framing, content display), full experience completes later.
+- **Swift client has dead WaveSchema code.** Phase 02 removed the `GET /wave/schemas` endpoint but `LocalWaveService.swift`, `WaveSidebar.swift`, `RepoState.swift`, and `WaveServiceProtocol.swift` still reference `WaveSchema`. Returns `[]` so the app won't crash, but it's dead code in exactly the files Phase 03 modifies. Clean up before or at the start of Phase 03.
 - **Step prompts may over-reference sections.** If every step checks every section, prompts get bloated and agents waste tokens on irrelevant context. Mitigate: each step references only the sections relevant to its job. *Phase 01 evidence: gate checks Goals/Risks/Metrics, review checks Vision/Goals/Risks, ingest reads all four for selection. No step references all four sections unconditionally.*
 - **Section placement varies across waves.** Scope boundaries appear as "Not here" under Vision (agentapi, remote), "Security boundary (non-goals)" at the end (security), or inline in Vision (wavemodel). Phase 03's README parser should match `## Vision`, `## Goals`, `## Risks`, `## Metrics` as the four sections and treat everything else as supplementary.
 
@@ -35,6 +36,6 @@ The full experience: open Concerto, describe what you want to build, and the des
 - All wave READMEs have exactly four sections: Vision, Goals, Risks, Metrics *(Phase 01: done)*
 - Roadmap lives as `##-*.md` files, not in the README *(Phase 01: done)*
 - 6 built-in steps reference README sections and roadmap files by convention *(Phase 01: done)*
-- `lf design` conversation produces wave directories directly (no intermediate `add-to-wave` step)
+- `lf design` conversation produces wave directories directly (no intermediate `add-to-wave` step) *(Phase 02: done)*
 - New users in Concerto see "What do you want to build?" not "Configure a wave"
 

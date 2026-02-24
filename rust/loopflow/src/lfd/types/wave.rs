@@ -231,8 +231,6 @@ pub struct WaveData {
     pub area: Vec<String>,
     pub status: WaveStatus,
     pub iteration: u32,
-    pub schema_ref: Option<String>,
-    pub schema_name: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
     pub parent_id: Option<LfdId>,
@@ -264,8 +262,6 @@ impl Wave {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
-            schema_ref: None,
-            schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
             parent_id: None,
             position: 0,
@@ -314,14 +310,6 @@ impl Wave {
 
     pub fn iteration(&self) -> u32 {
         self.data().iteration
-    }
-
-    pub fn schema_ref(&self) -> &Option<String> {
-        &self.data().schema_ref
-    }
-
-    pub fn schema_name(&self) -> &Option<String> {
-        &self.data().schema_name
     }
 
     pub fn created_at(&self) -> Option<OffsetDateTime> {

@@ -2,6 +2,10 @@
 
 Reshape Concerto's new user experience to orient around design-first wave creation. Ship what we can now; full interactive sessions arrive with agentapi.
 
+## Prerequisite: Swift WaveSchema cleanup
+
+Phase 02 removed the `GET /wave/schemas` endpoint and all Rust-side schema code. The Swift client still references `WaveSchema` in `LocalWaveService.swift`, `WaveSidebar.swift`, `RepoState.swift`, and `WaveServiceProtocol.swift`. These calls return `[]` (error path) so the app doesn't crash, but the code is dead. Clean this up first — these are the same files this phase modifies.
+
 ## What changes now
 
 **`StartWaveView` → design-first framing.** Currently "Start a wave" with a name text field.
@@ -29,6 +33,12 @@ Reshape Concerto's new user experience to orient around design-first wave creati
 - Inline interactive `lf design` session in Concerto (needs agentapi phases 01-03)
 - Real-time README section population during design conversation
 - Wave creation confirmation UI after design completes
+
+## What Phase 02 validated
+
+- `wave_config.rs` reads `wave/<name>/<name>.yaml` cleanly. The pattern (read from disk, return `None` for missing) is a reference for how Concerto should read `wave/<name>/README.md`.
+- Wave YAML on disk works as the source of truth. No schema abstraction needed. Concerto can read wave content directly from the filesystem — no need for a new API endpoint to serve README content.
+- Directory name is canonical (`wave/<name>/`). Concerto can derive the wave name from the directory path without parsing YAML.
 
 ## Files touched
 

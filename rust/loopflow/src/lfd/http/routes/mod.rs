@@ -3,8 +3,8 @@ pub mod hooks;
 pub mod repos;
 pub mod sessions;
 pub mod system;
+pub mod wave_config;
 pub mod wave_runs;
-pub mod wave_schemas;
 pub mod waves;
 pub mod worktrees;
 pub mod ws;
@@ -446,8 +446,6 @@ mod tests {
             area: vec![],
             status: WaveStatus::Idle,
             iteration: 0,
-            schema_ref: None,
-            schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
             parent_id: None,
             position: 0,

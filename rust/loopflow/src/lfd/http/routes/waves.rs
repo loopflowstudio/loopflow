@@ -19,7 +19,7 @@ use crate::lfd::http::dto::{
     DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
     RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
-use crate::lfd::http::routes::wave_schemas::{resolve_wave_schema, StimulusDef};
+use crate::lfd::http::routes::wave_config::{read_wave_config, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
@@ -87,11 +87,11 @@ impl<'de> serde::Deserialize<'de> for ExpandParam {
 #[derive(Debug, Deserialize)]
 pub struct CreateWaveRequest {
     repo: String,
+    #[serde(alias = "schema")]
     name: Option<String>,
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
-    schema: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,47 +173,30 @@ pub async fn create_wave_handler(
 ) -> ApiResult<WaveDto> {
     let CreateWaveRequest {
         repo,
-        name,
+        name: requested_name,
         flow,
         direction,
         area,
-        schema,
     } = payload;
     let repo_path = PathBuf::from(&repo);
-    let resolved_schema = if let Some(schema_input) = schema.as_deref() {
-        Some(
-            resolve_wave_schema(&repo_path, schema_input)
-                .map_err(|err| api_error(err.status_code(), err.message()))?,
-        )
-    } else {
-        None
-    };
-    let schema_stimulus = resolved_schema
-        .as_ref()
-        .and_then(|schema| schema.schema.stimulus.as_ref())
-        .map(parse_schema_stimulus)
-        .transpose()?;
-    let schema_defaults = resolved_schema.as_ref().map(|resolved| &resolved.schema);
 
     let id = LfdId::new();
-    let name = name
-        .or_else(|| schema_defaults.map(|schema| schema.name.clone()))
-        .unwrap_or_else(|| format!("wave-{}", id));
+    let name = requested_name.unwrap_or_else(|| format!("wave-{}", id));
+    let wave_config = read_wave_config(&repo_path, &name);
+    let config_stimulus = wave_config
+        .as_ref()
+        .and_then(|config| config.stimulus.as_ref())
+        .map(parse_stimulus)
+        .transpose()?;
     let flow = flow
-        .or_else(|| schema_defaults.map(|schema| schema.flow.clone()))
+        .or_else(|| wave_config.as_ref().map(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship".to_string());
     let direction = direction
-        .or_else(|| schema_defaults.and_then(|schema| schema.direction.clone()))
+        .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();
     let area = area
-        .or_else(|| schema_defaults.map(|schema| schema.area.clone()))
+        .or_else(|| wave_config.as_ref().map(|c| c.area.clone()))
         .unwrap_or_default();
-    let schema_ref = resolved_schema
-        .as_ref()
-        .map(|schema| schema.schema_ref.clone());
-    let schema_name = resolved_schema
-        .as_ref()
-        .map(|schema| schema.schema.name.clone());
 
     // Check for duplicate wave name in the same repo.
     let existing = wave_name_exists(&state, &repo, &name)
@@ -235,8 +218,6 @@ pub async fn create_wave_handler(
         area,
         status: WaveStatus::Idle,
         iteration: 0,
-        schema_ref,
-        schema_name,
         created_at: Some(OffsetDateTime::now_utc()),
         parent_id: None,
         position: 0,
@@ -253,7 +234,7 @@ pub async fn create_wave_handler(
         return Err(err);
     }
 
-    if let Some((kind, cron)) = schema_stimulus {
+    if let Some((kind, cron)) = config_stimulus {
         let stimulus = Stimulus {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
@@ -448,7 +429,7 @@ pub async fn leave_wave_handler(
     Ok(Json(view))
 }
 
-fn parse_schema_stimulus(
+fn parse_stimulus(
     stimulus: &StimulusDef,
 ) -> Result<(StimulusKind, String), (StatusCode, Json<ErrorResponse>)> {
     let kind = match stimulus.kind.as_str() {
@@ -459,7 +440,7 @@ fn parse_schema_stimulus(
         value => {
             return Err(api_error(
                 StatusCode::BAD_REQUEST,
-                format!("invalid schema stimulus kind '{value}'"),
+                format!("invalid wave config stimulus kind '{value}'"),
             ));
         }
     };
@@ -474,7 +455,7 @@ fn parse_schema_stimulus(
             .ok_or_else(|| {
                 api_error(
                     StatusCode::BAD_REQUEST,
-                    "schema stimulus kind 'cron' requires a cron expression",
+                    "wave config stimulus kind 'cron' requires a cron expression",
                 )
             })?,
         _ => String::new(),
@@ -1403,24 +1384,24 @@ mod tests {
     use time::OffsetDateTime;
 
     #[test]
-    fn parse_schema_stimulus_requires_cron_expression_for_cron_kind() {
+    fn parse_stimulus_requires_cron_expression_for_cron_kind() {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
             cron: None,
         };
 
-        let result = parse_schema_stimulus(&stimulus);
+        let result = parse_stimulus(&stimulus);
         assert!(result.is_err());
     }
 
     #[test]
-    fn parse_schema_stimulus_accepts_valid_cron_expression() {
+    fn parse_stimulus_accepts_valid_cron_expression() {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
             cron: Some("0 8 * * *".to_string()),
         };
 
-        let parsed = parse_schema_stimulus(&stimulus).expect("parse stimulus");
+        let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
         assert_eq!(parsed.0, StimulusKind::Cron);
         assert_eq!(parsed.1, "0 8 * * *");
     }
@@ -1435,8 +1416,6 @@ mod tests {
             area: vec![],
             status: WaveStatus::Idle,
             iteration: 0,
-            schema_ref: None,
-            schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
             parent_id,
             position: 0,

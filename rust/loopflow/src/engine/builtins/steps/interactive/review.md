@@ -17,7 +17,15 @@ Summarize the shape of the change in 2-3 sentences. What's new, what moved, what
 
 ### 2. Demo plan
 
-Propose specific commands to run, workflows to walk through, UX to exercise. The human should know exactly how to poke at this change. If there are multiple user paths, list them.
+Propose a concrete test plan the human can execute. Three parts:
+
+**Setup.** Spell out every process that needs to be running and every prep step before the first test command. Don't assume the server is already up. Include build commands, daemon starts, seed data, environment variables — everything from cold start to ready.
+
+**Test commands.** Specific commands to run, workflows to walk through, UX to exercise. Each command should include what to expect — status codes, output shapes, state changes. If there are multiple user paths, list them.
+
+**Validation.** How to inspect logs, database state, or output to confirm the change works correctly. Specify log locations, what patterns to grep for, and what "healthy" looks like versus failure modes.
+
+If the test workflow is more than a few commands, propose a dev script (`scripts/` — Python, not shell) that handles setup, exercise, validate, and teardown. The bar: an LLM agent should be able to run it, read the output, and know whether things are working without asking for help. `tests/e2e/` is a thin CI layer on top of scripts — the scripts do the real work.
 
 ### 3. Core model
 

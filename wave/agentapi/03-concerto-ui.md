@@ -21,15 +21,9 @@ When a session is active, Concerto shows a chat panel with the event transcript,
 - Advanced layout or theming beyond existing Concerto patterns
 - Approval/permission UI (everything runs in bypass mode)
 
-## What Phases 01–02 give us
+## What Phase 01 gives us
 
 The event model is richer than originally planned. Items are typed (`Command`, `File`, `Message`, `Thought`, `Tool`) with lifecycles (`ItemStarted → ItemUpdated → ItemCompleted`) and carry `turn_id` for grouping. This means Concerto can distinguish between a command executing and a file being edited without parsing text — just match on the item type.
-
-Two working harnesses (Codex and Claude) are available for testing. This means the UI can be validated against both providers early, catching any accidental Codex-specific assumptions.
-
-**`DiffUpdated` is provider-dependent.** Codex emits `DiffUpdated` with a turn-level diff; Claude does not. The UI should render diffs when available but not rely on them for core functionality. The chat transcript and typed item rendering are the universal building blocks.
-
-**Busy turn rejection is clean.** Sending input while a turn is in progress returns 409 without disrupting the session. Concerto should handle this gracefully — disable the input composer while a turn is active, or show a transient indicator if a 409 arrives.
 
 ## Done when
 

@@ -1,1 +1,0 @@
-- Should `listen` stimuli be accepted in wave schema files (`parse_schema_stimulus`) now, or remain API-only until chord CRUD lands?

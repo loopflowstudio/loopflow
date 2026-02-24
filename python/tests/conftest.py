@@ -49,3 +49,26 @@ WAVE_RUN_MINIMAL = {
     "local_worktree": "/tmp/wt",
     "remote_branch": "wave/reduce",
 }
+
+SESSION_MINIMAL = {
+    "id": "session-1",
+    "object": "session",
+    "provider": "claude",
+    "status": "active",
+    "config": {},
+}
+
+SESSION_FULL = {
+    **SESSION_MINIMAL,
+    "wave_run_id": "run-1",
+    "provider_session_id": "provider-1",
+    "config": {
+        "model": "claude-sonnet-4-5-20250929",
+        "cwd": "/tmp/repo",
+        "system_prompt": "be concise",
+        "max_turns": 3,
+        "yolo_mode": True,
+    },
+    "created_at": "2026-02-24T12:00:00Z",
+    "ended_at": "2026-02-24T12:05:00Z",
+}

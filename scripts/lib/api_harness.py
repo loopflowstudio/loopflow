@@ -40,6 +40,17 @@ class ApiClient:
     ) -> None:
         self.close()
 
+    def __enter__(self) -> "ApiHarness":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
     def close(self) -> None:
         self._authed_client.close()
         self._anonymous_client.close()
@@ -50,6 +61,10 @@ class ApiClient:
 
 
 class ApiAssertions:
+    @staticmethod
+    def expect_json_object(response: httpx.Response) -> dict[str, Any]:
+        return _json_dict(response)
+
     @staticmethod
     def expect_json_object(response: httpx.Response) -> dict[str, Any]:
         return _json_dict(response)

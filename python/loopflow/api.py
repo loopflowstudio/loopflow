@@ -4,7 +4,16 @@ from collections.abc import Iterator
 from typing import Any, Optional
 
 from .client import Client
-from .models import CommitEntry, PullRequest, Stimulus, Wave, WaveRun
+from .models import (
+    CommitEntry,
+    PullRequest,
+    Session,
+    SessionConfig,
+    SessionEventEnvelope,
+    Stimulus,
+    Wave,
+    WaveRun,
+)
 
 _default_client: Optional[Client] = None
 
@@ -132,10 +141,45 @@ def wave_logs(name_or_id: str) -> Iterator[str]:
     return _client().wave_logs(name_or_id)
 
 
+def create_session(
+    provider: str,
+    wave_run_id: Optional[str] = None,
+    config: Optional[SessionConfig] = None,
+) -> Session:
+    return _client().create_session(provider, wave_run_id=wave_run_id, config=config)
+
+
+def session(session_id: str) -> Optional[Session]:
+    return _client().session(session_id)
+
+
+def send_session_input(session_id: str, content: str) -> Session:
+    return _client().send_session_input(session_id, content)
+
+
+def stop_session(session_id: str) -> Session:
+    return _client().stop_session(session_id)
+
+
+def stream_session_events(
+    session_id: str,
+    after_seq: Optional[int] = None,
+    timeout: float = 60.0,
+) -> Iterator[SessionEventEnvelope]:
+    return _client().stream_session_events(
+        session_id,
+        after_seq=after_seq,
+        timeout=timeout,
+    )
+
+
 __all__ = [
     "Client",
     "CommitEntry",
     "PullRequest",
+    "Session",
+    "SessionConfig",
+    "SessionEventEnvelope",
     "Stimulus",
     "Wave",
     "WaveRun",
@@ -154,4 +198,9 @@ __all__ = [
     "next_wave",
     "wave_runs",
     "wave_logs",
+    "create_session",
+    "session",
+    "send_session_input",
+    "stop_session",
+    "stream_session_events",
 ]

@@ -40,6 +40,16 @@ Phase 02 removed the `GET /wave/schemas` endpoint and all Rust-side schema code.
 - Wave YAML on disk works as the source of truth. No schema abstraction needed. Concerto can read wave content directly from the filesystem — no need for a new API endpoint to serve README content.
 - Directory name is canonical (`wave/<name>/`). Concerto can derive the wave name from the directory path without parsing YAML.
 
+## Follow-up: chat sessions must be wave-aware
+
+Current behavior allows chat sessions to start without an explicit wave/run context, which means the harness can lose the intended worktree/repo scope.
+
+Add a follow-up requirement:
+- Concerto must create agent sessions with the selected `wave_run_id`
+- Session config must include the active wave worktree as `cwd`
+- lfd should resolve/validate that `cwd` against the run/worktree mapping
+- Chat UI should display the resolved wave/run/worktree context for transparency
+
 ## Files touched
 
 | File | Change |

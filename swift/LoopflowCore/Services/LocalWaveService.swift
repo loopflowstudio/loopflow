@@ -1187,6 +1187,25 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                 turnId: json["turn_id"] as? String ?? "",
                 status: json["status"] as? String ?? "completed"
             )
+        case "item_started":
+            let turnId = json["turn_id"] as? String ?? ""
+            guard let itemJSON = json["item"] as? [String: Any] else {
+                return .other(type: type, payload: parseJSONValue(json))
+            }
+            return .itemStarted(turnId: turnId, item: parseSessionItem(itemJSON))
+        case "item_updated":
+            let turnId = json["turn_id"] as? String ?? ""
+            let itemId = json["item_id"] as? String ?? ""
+            guard let deltaJSON = json["data"] as? [String: Any] else {
+                return .other(type: type, payload: parseJSONValue(json))
+            }
+            return .itemUpdated(turnId: turnId, itemId: itemId, delta: parseItemDelta(deltaJSON))
+        case "item_completed":
+            let turnId = json["turn_id"] as? String ?? ""
+            guard let itemJSON = json["item"] as? [String: Any] else {
+                return .other(type: type, payload: parseJSONValue(json))
+            }
+            return .itemCompleted(turnId: turnId, item: parseSessionItem(itemJSON))
         case "text_delta":
             return .textDelta(
                 turnId: json["turn_id"] as? String ?? "",
@@ -1197,6 +1216,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                 turnId: json["turn_id"] as? String ?? "",
                 content: json["content"] as? String ?? ""
             )
+        case "diff_updated":
+            return .diffUpdated(
+                turnId: json["turn_id"] as? String ?? "",
+                diff: json["diff"] as? String ?? ""
+            )
         case "status_changed":
             return .statusChanged(status: json["status"] as? String ?? "")
         case "error":
@@ -1205,15 +1229,111 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                 message: json["message"] as? String ?? "Session error"
             )
         default:
-            let payload = json.reduce(into: [String: String]()) { result, entry in
-                if let stringValue = entry.value as? String {
-                    result[entry.key] = stringValue
-                } else if let numericValue = entry.value as? NSNumber {
-                    result[entry.key] = numericValue.stringValue
-                }
-            }
-            return .other(type: type, payload: payload)
+            return .other(type: type, payload: parseJSONValue(json))
         }
+    }
+
+    private static func parseSessionItem(_ json: [String: Any]) -> SessionItem {
+        let type = json["type"] as? String ?? "unknown"
+        switch type {
+        case "command":
+            let item = CommandItem(
+                id: json["id"] as? String ?? "",
+                command: normalizeStringList(json["command"]),
+                cwd: json["cwd"] as? String ?? "",
+                status: parseItemStatus(json["status"]) ?? .inProgress,
+                output: json["output"] as? String,
+                exitCode: normalizeOptionalInt(json["exit_code"]),
+                durationMs: normalizeOptionalUInt64(json["duration_ms"])
+            )
+            return .command(item)
+        case "file":
+            let changeList = (json["changes"] as? [[String: Any]] ?? []).map {
+                FileEdit(
+                    path: $0["path"] as? String ?? "",
+                    kind: $0["kind"] as? String,
+                    diff: $0["diff"] as? String
+                )
+            }
+            let item = FileItem(
+                id: json["id"] as? String ?? "",
+                changes: changeList,
+                status: parseItemStatus(json["status"]) ?? .inProgress
+            )
+            return .file(item)
+        case "message":
+            return .message(
+                MessageItem(
+                    id: json["id"] as? String ?? "",
+                    text: json["text"] as? String ?? "",
+                    phase: json["phase"] as? String
+                )
+            )
+        case "thought":
+            return .thought(
+                ThoughtItem(
+                    id: json["id"] as? String ?? "",
+                    text: json["text"] as? String ?? ""
+                )
+            )
+        case "tool":
+            return .tool(
+                ToolItem(
+                    id: json["id"] as? String ?? "",
+                    name: json["name"] as? String ?? "",
+                    status: parseItemStatus(json["status"]) ?? .inProgress,
+                    input: parseJSONValueOptional(json["input"]),
+                    output: json["output"] as? String
+                )
+            )
+        default:
+            return .unknown(type: type, payload: parseJSONValue(json))
+        }
+    }
+
+    private static func parseItemDelta(_ json: [String: Any]) -> ItemDelta {
+        let type = json["type"] as? String ?? "unknown"
+        switch type {
+        case "output":
+            return .output(content: json["content"] as? String ?? "")
+        case "plan_text":
+            return .planText(content: json["content"] as? String ?? "")
+        default:
+            return .unknown(type: type, payload: parseJSONValue(json))
+        }
+    }
+
+    private static func parseItemStatus(_ raw: Any?) -> ItemStatus? {
+        guard let rawString = raw as? String else { return nil }
+        return ItemStatus(rawValue: rawString)
+    }
+
+    private static func parseJSONValueOptional(_ value: Any?) -> JSONValue? {
+        guard let value else { return nil }
+        return parseJSONValue(value)
+    }
+
+    private static func parseJSONValue(_ value: Any) -> JSONValue {
+        if let dict = value as? [String: Any] {
+            let mapped = dict.mapValues { parseJSONValue($0) }
+            return .object(mapped)
+        }
+        if let array = value as? [Any] {
+            return .array(array.map(parseJSONValue))
+        }
+        if let string = value as? String {
+            return .string(string)
+        }
+        if let bool = value as? Bool {
+            return .bool(bool)
+        }
+        if let number = value as? NSNumber {
+            return .number(number.doubleValue)
+        }
+        if value is NSNull {
+            return .null
+        }
+        return .string(String(describing: value))
     }
 
     private static func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
@@ -1298,6 +1418,25 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     private static func normalizeOptionalInt(_ value: Any?) -> Int? {
         if let intValue = value as? Int { return intValue }
         if let doubleValue = value as? Double { return Int(doubleValue) }
+        return nil
+    }
+
+    private static func normalizeOptionalUInt64(_ value: Any?) -> UInt64? {
+        if let uintValue = value as? UInt64 {
+            return uintValue
+        }
+        if let intValue = value as? Int, intValue >= 0 {
+            return UInt64(intValue)
+        }
+        if let doubleValue = value as? Double, doubleValue >= 0 {
+            return UInt64(doubleValue)
+        }
+        if let number = value as? NSNumber {
+            let intValue = number.int64Value
+            if intValue >= 0 {
+                return UInt64(intValue)
+            }
+        }
         return nil
     }
 

@@ -7,7 +7,7 @@ use loopflow::engine::worktrees::{branch_exists, worktree_path};
 use loopflow::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use loopflow::lfd::id::LfdId;
 use loopflow::lfd::store::{open_store, SharedStore, StorageConfig};
-use loopflow::lfd::types::{Wave, WaveData, WaveStatus};
+use loopflow::lfd::types::{Wave, WaveStatus};
 use loopflow_test_support::TestRepo;
 
 async fn make_store() -> SharedStore {
@@ -23,7 +23,7 @@ async fn make_store() -> SharedStore {
 }
 
 fn make_wave(repo: &str, name: &str) -> Wave {
-    Wave::Voice(WaveData {
+    Wave {
         id: LfdId::new(),
         name: name.to_string(),
         repo: repo.to_string(),
@@ -33,9 +33,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         status: WaveStatus::Idle,
         iteration: 0,
         created_at: None,
-        parent_id: None,
-        position: 0,
-    })
+    }
 }
 
 #[tokio::test]

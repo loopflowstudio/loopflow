@@ -524,8 +524,8 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Wave, WaveData, WaveRun, WaveRunKind, WaveRunSnapshot,
-        WaveRunStatus, WaveStatus,
+        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus,
+        WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -585,7 +585,7 @@ mod tests {
     }
 
     fn make_wave(repo: &str) -> Wave {
-        Wave::Voice(WaveData {
+        Wave {
             id: LfdId::new(),
             name: "queue-wave".to_string(),
             repo: repo.to_string(),
@@ -595,9 +595,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        })
+        }
     }
 
     fn make_run(wave: &Wave, stack_position: u32, pr_number: u32) -> WaveRun {

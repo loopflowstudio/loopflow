@@ -12,11 +12,11 @@ use crate::lfd::store::catalog::{
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
-    assemble_wave_tree, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
-    map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_stimulus_row,
-    map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr, WaveTreeRow,
+    map_agent_row, map_chat_memory_block_row, map_chat_message_row, map_fork_run_row,
+    map_live_pr_state_row, map_pending_activation_row, map_stimulus_row, map_summary_row,
+    map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult, MAX_CHORD_DEPTH};
+use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
@@ -75,16 +75,6 @@ impl SqliteStore {
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if wave.parent_id().is_some() {
-            let has_stimulus: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM stimuli WHERE wave_id = ?1)",
-                params![wave.id()],
-                |row| row.get(0),
-            )?;
-            if has_stimulus {
-                return Err(StoreError::StimulusOwnerCannotBeNested);
-            }
-        }
         let direction_json = serde_json::to_string(wave.direction())?;
         let area_json = serde_json::to_string(wave.area())?;
         let created_at = wave
@@ -109,9 +99,6 @@ impl SqliteStore {
                 wave.status().as_i32() as i64,
                 wave.iteration() as i64,
                 created_at,
-                wave.wave_type_i32() as i64,
-                wave.parent_id().as_ref(),
-                wave.position() as i64,
             ],
         )?;
         Ok(())
@@ -134,51 +121,6 @@ impl SqliteStore {
                 .get::<_, Option<i64>>(7)?
                 .map(crate::lfd::store::rows::unix_to_datetime),
         })
-    }
-
-    fn load_wave_tree(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        let rows = self.get_wave_subtree_rows(wave_id)?;
-        if rows.is_empty() {
-            return Ok(None);
-        }
-        if rows.iter().any(|row| row.depth > MAX_CHORD_DEPTH) {
-            return Err(StoreError::DepthLimitExceeded);
-        }
-        Ok(Some(assemble_wave_tree(rows, wave_id)?))
-    }
-
-    fn get_wave_subtree_rows(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveTreeRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "WITH RECURSIVE tree AS (
-                SELECT id, parent_wave_id, position, 0 AS depth
-                FROM waves
-                WHERE id = ?1
-
-                UNION ALL
-
-                SELECT child.id, child.parent_wave_id, child.position, tree.depth + 1
-                FROM waves AS child
-                JOIN tree ON child.parent_wave_id = tree.id
-                WHERE tree.depth < (?2 + 1)
-            )
-            SELECT
-                w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status,
-                w.iteration, w.created_at, w.wave_type,
-                w.parent_wave_id, w.position, tree.depth
-            FROM tree
-            JOIN waves AS w ON w.id = tree.id
-            ORDER BY tree.depth, w.parent_wave_id, w.position",
-        )?;
-        let mut rows = stmt.query(params![wave_id, MAX_CHORD_DEPTH as i64])?;
-        let mut tree_rows = Vec::new();
-        while let Some(row) = rows.next()? {
-            tree_rows.push(WaveTreeRow {
-                wave: map_wave_row(row)?,
-                depth: row.get::<_, i64>(13)? as u32,
-            });
-        }
-        Ok(tree_rows)
     }
 }
 
@@ -355,117 +297,25 @@ impl SqliteStore {
     }
 
     pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        self.load_wave_tree(wave_id)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetWaveById))?;
+        let wave = stmt
+            .query_row(params![wave_id], |row| Ok(map_wave_row(row)))
+            .optional()?;
+        wave.transpose()
     }
 
     pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        let wave_id = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            let mut stmt = conn.prepare(Self::sql(Query::GetWaveByName))?;
-            let wave = stmt
-                .query_row(params![name], |row| Ok(map_wave_row(row)))
-                .optional()?;
-            wave.transpose()?.map(|wave| wave.id().clone())
-        };
-        match wave_id {
-            Some(wave_id) => self.load_wave_tree(&wave_id),
-            None => Ok(None),
-        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetWaveByName))?;
+        let wave = stmt
+            .query_row(params![name], |row| Ok(map_wave_row(row)))
+            .optional()?;
+        wave.transpose()
     }
 
     pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        self.upsert_wave(wave)?;
-        for child in wave.children() {
-            self.create_wave(child)?;
-        }
-        Ok(())
-    }
-
-    pub fn join_waves(
-        &self,
-        wave_a: &Wave,
-        wave_b: &Wave,
-        chord_name: Option<String>,
-        nest: bool,
-    ) -> StoreResult<LfdId> {
-        match (wave_a.is_chord(), wave_b.is_chord()) {
-            // Voice + Voice → create new chord, reparent both
-            (false, false) => {
-                let chord_id = LfdId::new();
-                let name = chord_name.unwrap_or_else(|| format!("chord-{}", chord_id));
-                let chord = super::new_chord_wave(wave_a, chord_id.clone(), name);
-                self.upsert_wave(&chord)?;
-                self.delete_stimuli_for_wave(wave_a.id())?;
-                self.delete_stimuli_for_wave(wave_b.id())?;
-                self.upsert_wave(&super::reparented_wave(wave_a, Some(chord_id.clone()), 0))?;
-                self.upsert_wave(&super::reparented_wave(wave_b, Some(chord_id.clone()), 1))?;
-                Ok(chord_id)
-            }
-            // Chord + Voice → absorb voice into chord A
-            (true, false) => {
-                self.delete_stimuli_for_wave(wave_b.id())?;
-                let next_pos = wave_a.children().len() as u32;
-                self.upsert_wave(&super::reparented_wave(
-                    wave_b,
-                    Some(wave_a.id().clone()),
-                    next_pos,
-                ))?;
-                Ok(wave_a.id().clone())
-            }
-            // Voice + Chord → create new chord, reparent both
-            // (A is always the target; since A isn't a chord, wrap both)
-            (false, true) => {
-                let chord_id = LfdId::new();
-                let name = chord_name.unwrap_or_else(|| format!("chord-{}", chord_id));
-                let chord = super::new_chord_wave(wave_a, chord_id.clone(), name);
-                self.upsert_wave(&chord)?;
-                self.delete_stimuli_for_wave(wave_a.id())?;
-                self.delete_stimuli_for_wave(wave_b.id())?;
-                self.upsert_wave(&super::reparented_wave(wave_a, Some(chord_id.clone()), 0))?;
-                self.upsert_wave(&super::reparented_wave(wave_b, Some(chord_id.clone()), 1))?;
-                Ok(chord_id)
-            }
-            // Chord + Chord
-            (true, true) if nest => {
-                // Nest: reparent B as a child of A (B keeps its children)
-                self.delete_stimuli_for_wave(wave_b.id())?;
-                let next_pos = wave_a.children().len() as u32;
-                self.upsert_wave(&super::reparented_wave(
-                    wave_b,
-                    Some(wave_a.id().clone()),
-                    next_pos,
-                ))?;
-                Ok(wave_a.id().clone())
-            }
-            // Chord + Chord → merge B's children into A, delete B
-            (true, true) => {
-                let base_pos = wave_a.children().len() as u32;
-                for (i, child) in wave_b.children().iter().enumerate() {
-                    self.upsert_wave(&super::reparented_wave(
-                        child,
-                        Some(wave_a.id().clone()),
-                        base_pos + i as u32,
-                    ))?;
-                }
-                // B's children are reparented; safe to delete the empty shell
-                self.delete_wave(wave_b.id())?;
-                Ok(wave_a.id().clone())
-            }
-        }
-    }
-
-    pub fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        let wave = self
-            .load_wave_tree(wave_id)?
-            .ok_or_else(|| StoreError::InvalidData("wave not found".to_string()))?;
-        if wave.parent_id().is_none() {
-            return Err(StoreError::InvalidData(
-                "wave is not in a chord".to_string(),
-            ));
-        }
-        self.upsert_wave(&super::reparented_wave(&wave, None, 0))?;
-        self.delete_stimuli_for_wave(wave_id)?;
-        Ok(())
+        self.upsert_wave(wave)
     }
 
     pub fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -835,16 +685,6 @@ impl SqliteStore {
 
     pub fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let parent_id = conn
-            .query_row(
-                "SELECT parent_wave_id FROM waves WHERE id = ?1",
-                params![stimulus.wave_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?;
-        if parent_id.flatten().is_some() {
-            return Err(StoreError::NestedWaveCannotOwnStimulus);
-        }
         let created_at = stimulus
             .created_at
             .map(|dt| dt.unix_timestamp())
@@ -861,6 +701,7 @@ impl SqliteStore {
                 stimulus.last_triggered_at,
                 created_at,
                 stimulus.enabled as i64,
+                stimulus.source_wave_id,
             ],
         )?;
         Ok(())
@@ -876,6 +717,7 @@ impl SqliteStore {
                 stimulus.last_main_sha,
                 stimulus.last_triggered_at,
                 stimulus.enabled as i64,
+                stimulus.source_wave_id,
                 stimulus.id,
             ],
         )?;
@@ -889,12 +731,6 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(Self::sql(Query::DeleteStimulusById), params![stimulus_id])?;
         Ok(())
-    }
-
-    pub fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let deleted = conn.execute(Self::sql(Query::DeleteStimuliByWave), params![wave_id])?;
-        Ok(deleted as u32)
     }
 
     pub fn list_pending_activations(&self, wave_id: &LfdId) -> StoreResult<Vec<PendingActivation>> {

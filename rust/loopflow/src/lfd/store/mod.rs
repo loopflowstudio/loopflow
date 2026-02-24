@@ -5,8 +5,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
     Agent, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PendingActivation,
-    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveData, WaveRun, WaveRunStackStatus,
-    WaveStatus,
+    QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -14,40 +13,6 @@ pub mod migrations;
 pub mod postgres;
 pub mod rows;
 pub mod sqlite;
-
-pub const MAX_CHORD_DEPTH: u32 = 8;
-
-pub(crate) fn reparented_wave(wave: &Wave, parent_id: Option<LfdId>, position: u32) -> Wave {
-    let mut data = wave.data().clone();
-    data.parent_id = parent_id;
-    data.position = position;
-    match wave {
-        Wave::Voice(_) => Wave::Voice(data),
-        Wave::Chord { .. } => Wave::Chord {
-            data,
-            children: Vec::new(),
-        },
-    }
-}
-
-pub(crate) fn new_chord_wave(template: &Wave, chord_id: LfdId, name: String) -> Wave {
-    Wave::Chord {
-        data: WaveData {
-            id: chord_id,
-            name,
-            repo: template.repo().clone(),
-            flow: template.flow().clone(),
-            direction: template.direction().clone(),
-            area: template.area().clone(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            created_at: Some(time::OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        },
-        children: Vec::new(),
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -92,14 +57,8 @@ pub enum StoreError {
     Serde(#[from] serde_json::Error),
     #[error("not found")]
     NotFound,
-    #[error("chord nesting depth exceeded")]
-    DepthLimitExceeded,
     #[error("invalid data: {0}")]
     InvalidData(String),
-    #[error("nested wave cannot own stimulus")]
-    NestedWaveCannotOwnStimulus,
-    #[error("wave owning stimulus cannot be nested")]
-    StimulusOwnerCannotBeNested,
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -159,20 +118,6 @@ impl Store {
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         WaveStateStore::create_wave(self, wave).await
-    }
-
-    pub async fn join_waves(
-        &self,
-        wave_a: &Wave,
-        wave_b: &Wave,
-        chord_name: Option<String>,
-        nest: bool,
-    ) -> StoreResult<LfdId> {
-        WaveStateStore::join_waves(self, wave_a, wave_b, chord_name, nest).await
-    }
-
-    pub async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        WaveStateStore::leave_wave(self, wave_id).await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -273,10 +218,6 @@ impl Store {
 
     pub async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
         WaveStateStore::delete_stimulus(self, stimulus_id).await
-    }
-
-    pub async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::delete_stimuli_for_wave(self, wave_id).await
     }
 
     pub async fn list_pending_activations(
@@ -557,14 +498,6 @@ pub trait WaveStateStore: Send + Sync {
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
-    async fn join_waves(
-        &self,
-        wave_a: &Wave,
-        wave_b: &Wave,
-        chord_name: Option<String>,
-        nest: bool,
-    ) -> StoreResult<LfdId>;
-    async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
 
@@ -598,8 +531,6 @@ pub trait WaveStateStore: Send + Sync {
     async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
     async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
     async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()>;
-    async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32>;
-
     async fn list_pending_activations(
         &self,
         wave_id: &LfdId,
@@ -710,38 +641,6 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.create_wave(&wave)).await
             }
             StoreBackend::Postgres(store) => store.create_wave(wave).await,
-        }
-    }
-
-    async fn join_waves(
-        &self,
-        wave_a: &Wave,
-        wave_b: &Wave,
-        chord_name: Option<String>,
-        nest: bool,
-    ) -> StoreResult<LfdId> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_a = wave_a.clone();
-                let wave_b = wave_b.clone();
-                run_sqlite(store, move |store| {
-                    store.join_waves(&wave_a, &wave_b, chord_name, nest)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store.join_waves(wave_a, wave_b, chord_name, nest).await
-            }
-        }
-    }
-
-    async fn leave_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.leave_wave(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.leave_wave(wave_id).await,
         }
     }
 
@@ -1012,16 +911,6 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.delete_stimulus(&stimulus_id)).await
             }
             StoreBackend::Postgres(store) => store.delete_stimulus(stimulus_id).await,
-        }
-    }
-
-    async fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.delete_stimuli_for_wave(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_stimuli_for_wave(wave_id).await,
         }
     }
 
@@ -1435,15 +1324,15 @@ mod tests {
     use crate::lfd::types::{
         Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
         QueueBlock, QueueBlockReason, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind,
-        Summary, Wave, WaveData, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
-        WaveRunStatus, WaveStatus,
+        Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
+        WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
         let id = LfdId::new();
-        Wave::Voice(WaveData {
+        Wave {
             id: id.clone(),
             name: format!("wave-{id}"),
             repo: repo.to_string(),
@@ -1453,45 +1342,9 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
-            parent_id: None,
-            position: 0,
-        })
-    }
-
-    fn make_chord(repo: &str, name: &str, parent_id: Option<LfdId>, position: u32) -> Wave {
-        Wave::Chord {
-            data: WaveData {
-                id: LfdId::new(),
-                name: name.to_string(),
-                repo: repo.to_string(),
-                flow: "default".to_string(),
-                direction: vec!["focus".to_string()],
-                area: vec!["src".to_string()],
-                status: WaveStatus::Idle,
-                iteration: 0,
-                created_at: Some(OffsetDateTime::now_utc()),
-                parent_id,
-                position,
-            },
-            children: Vec::new(),
         }
     }
 
-    fn make_voice(repo: &str, name: &str, parent_id: Option<LfdId>, position: u32) -> Wave {
-        Wave::Voice(WaveData {
-            id: LfdId::new(),
-            name: name.to_string(),
-            repo: repo.to_string(),
-            flow: "default".to_string(),
-            direction: vec!["focus".to_string()],
-            area: vec!["src".to_string()],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            created_at: Some(OffsetDateTime::now_utc()),
-            parent_id,
-            position,
-        })
-    }
 
     fn make_run(wave: &Wave, status: WaveRunStatus, kind: WaveRunKind) -> WaveRun {
         WaveRun {
@@ -1538,7 +1391,7 @@ mod tests {
         store.create_wave(&wave).await.expect("create wave");
         assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
 
-        wave.data_mut().status = WaveStatus::Paused;
+        wave.status = WaveStatus::Paused;
         store.update_wave(&wave).await.expect("update wave");
         let loaded = store
             .get_wave(wave.id())
@@ -1547,10 +1400,17 @@ mod tests {
             .expect("wave exists");
         assert_eq!(loaded.status(), WaveStatus::Paused);
 
+        let source_wave = make_wave("/repo");
+        store
+            .create_wave(&source_wave)
+            .await
+            .expect("create source wave");
+
         let stimulus = Stimulus {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            kind: StimulusKind::Watch,
+            source_wave_id: Some(source_wave.id().clone()),
+            kind: StimulusKind::Listen,
             cron: "".to_string(),
             last_main_sha: None,
             last_triggered_at: None,
@@ -1561,14 +1421,12 @@ mod tests {
             .create_stimulus(&stimulus)
             .await
             .expect("create stimulus");
-        assert_eq!(
-            store
-                .list_stimuli(Some(wave.id()))
-                .await
-                .expect("list stimuli")
-                .len(),
-            1
-        );
+        let stimuli = store
+            .list_stimuli(Some(wave.id()))
+            .await
+            .expect("list stimuli");
+        assert_eq!(stimuli.len(), 1);
+        assert_eq!(stimuli[0].source_wave_id.as_ref(), Some(source_wave.id()));
 
         let run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
         store.create_wave_run(&run).await.expect("create wave run");
@@ -1749,164 +1607,6 @@ mod tests {
             .await
             .expect("get deleted wave")
             .is_none());
-    }
-
-    #[tokio::test]
-    async fn sqlite_chord_round_trip_loads_children() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let chord = make_chord("/repo", "ensemble", None, 0);
-        let child_a = make_voice("/repo", "designer", Some(chord.id().clone()), 0);
-        let child_b = make_voice("/repo", "infra", Some(chord.id().clone()), 1);
-        store.create_wave(&chord).await.expect("create chord");
-        store.create_wave(&child_a).await.expect("create child a");
-        store.create_wave(&child_b).await.expect("create child b");
-
-        let loaded = store
-            .get_wave(chord.id())
-            .await
-            .expect("load chord")
-            .expect("chord exists");
-        assert!(loaded.is_chord());
-        assert_eq!(loaded.children().len(), 2);
-        assert_eq!(loaded.children()[0].name(), "designer");
-        assert_eq!(loaded.children()[1].name(), "infra");
-
-        let listed = store.list_waves(None).await.expect("list waves");
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].name(), "ensemble");
-    }
-
-    #[tokio::test]
-    async fn sqlite_nested_chord_round_trip_loads_subtree() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let root = make_chord("/repo", "root", None, 0);
-        let nested = make_chord("/repo", "nested", Some(root.id().clone()), 0);
-        let nested_voice = make_voice("/repo", "voice", Some(nested.id().clone()), 0);
-        store.create_wave(&root).await.expect("create root");
-        store.create_wave(&nested).await.expect("create nested");
-        store
-            .create_wave(&nested_voice)
-            .await
-            .expect("create nested voice");
-
-        let loaded = store
-            .get_wave(root.id())
-            .await
-            .expect("load root")
-            .expect("root exists");
-        assert_eq!(loaded.children().len(), 1);
-        let loaded_nested = &loaded.children()[0];
-        assert!(loaded_nested.is_chord());
-        assert_eq!(loaded_nested.children().len(), 1);
-        assert_eq!(loaded_nested.children()[0].name(), "voice");
-    }
-
-    #[tokio::test]
-    async fn sqlite_rejects_chord_depth_beyond_limit() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let mut parent = make_chord("/repo", "level-0", None, 0);
-        let root_id = parent.id().clone();
-        store.create_wave(&parent).await.expect("create root");
-        for level in 1..=10 {
-            let child = make_chord(
-                "/repo",
-                &format!("level-{level}"),
-                Some(parent.id().clone()),
-                0,
-            );
-            store.create_wave(&child).await.expect("create depth child");
-            parent = child;
-        }
-
-        let err = store
-            .get_wave(&root_id)
-            .await
-            .expect_err("depth should fail");
-        assert!(matches!(err, super::StoreError::DepthLimitExceeded));
-    }
-
-    #[tokio::test]
-    async fn sqlite_nested_wave_cannot_own_stimulus() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let parent = make_chord("/repo", "parent", None, 0);
-        let child = make_voice("/repo", "child", Some(parent.id().clone()), 0);
-        store.create_wave(&parent).await.expect("create parent");
-        store.create_wave(&child).await.expect("create child");
-
-        let parent_stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: parent.id().clone(),
-            kind: StimulusKind::Loop,
-            cron: "".to_string(),
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
-        store
-            .create_stimulus(&parent_stimulus)
-            .await
-            .expect("top-level wave can own stimulus");
-
-        let child_stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: child.id().clone(),
-            kind: StimulusKind::Loop,
-            cron: "".to_string(),
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
-        let err = store
-            .create_stimulus(&child_stimulus)
-            .await
-            .expect_err("nested wave cannot own stimulus");
-        assert!(matches!(
-            err,
-            super::StoreError::NestedWaveCannotOwnStimulus
-        ));
-
-        let mut top_voice = make_voice("/repo", "top-voice", None, 0);
-        store
-            .create_wave(&top_voice)
-            .await
-            .expect("create top voice");
-        let top_stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: top_voice.id().clone(),
-            kind: StimulusKind::Loop,
-            cron: "".to_string(),
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
-        store
-            .create_stimulus(&top_stimulus)
-            .await
-            .expect("create top-level stimulus");
-        top_voice.data_mut().parent_id = Some(parent.id().clone());
-        let err = store
-            .update_wave(&top_voice)
-            .await
-            .expect_err("stimulus owner cannot become nested");
-        assert!(matches!(
-            err,
-            super::StoreError::StimulusOwnerCannotBeNested
-        ));
     }
 
     #[tokio::test]
@@ -2127,210 +1827,5 @@ mod tests {
         assert!(!second);
 
         store.delete_wave(wave.id()).await.expect("delete wave");
-    }
-
-    #[tokio::test]
-    async fn sqlite_join_voice_voice_creates_chord() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let a = make_voice("/repo", "designer", None, 0);
-        let b = make_voice("/repo", "infra", None, 0);
-        store.create_wave(&a).await.expect("create a");
-        store.create_wave(&b).await.expect("create b");
-
-        let chord_id = store
-            .join_waves(&a, &b, Some("ensemble".to_string()), false)
-            .await
-            .expect("join");
-        let chord = store
-            .get_wave(&chord_id)
-            .await
-            .expect("load")
-            .expect("exists");
-        assert!(chord.is_chord());
-        assert_eq!(chord.name(), "ensemble");
-        assert_eq!(chord.children().len(), 2);
-        assert_eq!(chord.children()[0].name(), "designer");
-        assert_eq!(chord.children()[1].name(), "infra");
-
-        // Top-level list should show only the chord
-        let listed = store.list_waves(None).await.expect("list");
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].name(), "ensemble");
-    }
-
-    #[tokio::test]
-    async fn sqlite_join_chord_voice_absorbs() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let a = make_voice("/repo", "designer", None, 0);
-        let b = make_voice("/repo", "infra", None, 0);
-        store.create_wave(&a).await.expect("create a");
-        store.create_wave(&b).await.expect("create b");
-
-        let chord_id = store
-            .join_waves(&a, &b, Some("ensemble".to_string()), false)
-            .await
-            .expect("join a+b");
-
-        // Now add a third voice
-        let c = make_voice("/repo", "vocalist", None, 0);
-        store.create_wave(&c).await.expect("create c");
-
-        let chord = store
-            .get_wave(&chord_id)
-            .await
-            .expect("load")
-            .expect("exists");
-        let result_id = store
-            .join_waves(&chord, &c, None, false)
-            .await
-            .expect("join chord+c");
-        assert_eq!(result_id, chord_id);
-
-        let reloaded = store
-            .get_wave(&chord_id)
-            .await
-            .expect("load")
-            .expect("exists");
-        assert_eq!(reloaded.children().len(), 3);
-        assert_eq!(reloaded.children()[2].name(), "vocalist");
-    }
-
-    #[tokio::test]
-    async fn sqlite_join_chord_chord_merges() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let a = make_voice("/repo", "v1", None, 0);
-        let b = make_voice("/repo", "v2", None, 0);
-        let c = make_voice("/repo", "v3", None, 0);
-        let d = make_voice("/repo", "v4", None, 0);
-        store.create_wave(&a).await.unwrap();
-        store.create_wave(&b).await.unwrap();
-        store.create_wave(&c).await.unwrap();
-        store.create_wave(&d).await.unwrap();
-
-        let chord_a_id = store
-            .join_waves(&a, &b, Some("chord-a".to_string()), false)
-            .await
-            .unwrap();
-        let chord_b_id = store
-            .join_waves(&c, &d, Some("chord-b".to_string()), false)
-            .await
-            .unwrap();
-
-        let chord_a = store.get_wave(&chord_a_id).await.unwrap().unwrap();
-        let chord_b = store.get_wave(&chord_b_id).await.unwrap().unwrap();
-
-        let result_id = store
-            .join_waves(&chord_a, &chord_b, None, false)
-            .await
-            .unwrap();
-        assert_eq!(result_id, chord_a_id);
-
-        let merged = store.get_wave(&chord_a_id).await.unwrap().unwrap();
-        assert_eq!(merged.children().len(), 4);
-
-        // chord_b should be deleted
-        assert!(store.get_wave(&chord_b_id).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn sqlite_leave_wave_becomes_solo() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let a = make_voice("/repo", "designer", None, 0);
-        let b = make_voice("/repo", "infra", None, 0);
-        store.create_wave(&a).await.unwrap();
-        store.create_wave(&b).await.unwrap();
-
-        let chord_id = store
-            .join_waves(&a, &b, Some("ensemble".to_string()), false)
-            .await
-            .unwrap();
-
-        store.leave_wave(b.id()).await.expect("leave");
-
-        let solo = store.get_wave(b.id()).await.unwrap().unwrap();
-        assert!(solo.parent_id().is_none());
-        assert_eq!(solo.name(), "infra");
-
-        // Chord should still exist with one child
-        let chord = store.get_wave(&chord_id).await.unwrap().unwrap();
-        assert_eq!(chord.children().len(), 1);
-        assert_eq!(chord.children()[0].name(), "designer");
-    }
-
-    #[tokio::test]
-    async fn sqlite_leave_top_level_rejected() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let wave = make_voice("/repo", "solo", None, 0);
-        store.create_wave(&wave).await.unwrap();
-
-        let err = store
-            .leave_wave(wave.id())
-            .await
-            .expect_err("should reject");
-        assert!(matches!(err, super::StoreError::InvalidData(_)));
-    }
-
-    #[tokio::test]
-    async fn sqlite_join_chord_chord_nests() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let a = make_voice("/repo", "v1", None, 0);
-        let b = make_voice("/repo", "v2", None, 0);
-        let c = make_voice("/repo", "v3", None, 0);
-        let d = make_voice("/repo", "v4", None, 0);
-        store.create_wave(&a).await.unwrap();
-        store.create_wave(&b).await.unwrap();
-        store.create_wave(&c).await.unwrap();
-        store.create_wave(&d).await.unwrap();
-
-        let chord_a_id = store
-            .join_waves(&a, &b, Some("chord-a".to_string()), false)
-            .await
-            .unwrap();
-        let chord_b_id = store
-            .join_waves(&c, &d, Some("chord-b".to_string()), false)
-            .await
-            .unwrap();
-
-        let chord_a = store.get_wave(&chord_a_id).await.unwrap().unwrap();
-        let chord_b = store.get_wave(&chord_b_id).await.unwrap().unwrap();
-
-        // nest=true: B becomes a child of A (not flattened)
-        let result_id = store
-            .join_waves(&chord_a, &chord_b, None, true)
-            .await
-            .unwrap();
-        assert_eq!(result_id, chord_a_id);
-
-        let parent = store.get_wave(&chord_a_id).await.unwrap().unwrap();
-        // A should have 3 children: v1, v2, and nested chord-b
-        assert_eq!(parent.children().len(), 3);
-        assert_eq!(parent.children()[0].name(), "v1");
-        assert_eq!(parent.children()[1].name(), "v2");
-        assert_eq!(parent.children()[2].name(), "chord-b");
-        assert!(parent.children()[2].is_chord());
-        assert_eq!(parent.children()[2].children().len(), 2);
-        assert_eq!(parent.children()[2].children()[0].name(), "v3");
-        assert_eq!(parent.children()[2].children()[1].name(), "v4");
-
-        // chord-b should still exist (as nested child, not deleted)
-        assert!(store.get_wave(&chord_b_id).await.unwrap().is_some());
     }
 }

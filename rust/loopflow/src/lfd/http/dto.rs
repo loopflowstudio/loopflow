@@ -81,7 +81,6 @@ pub struct CommitEntryDto {
 pub struct WaveDto {
     pub id: String,
     pub object: String,
-    pub wave_type: String,
     pub name: String,
     pub repo: String,
     pub flow: String,
@@ -90,9 +89,6 @@ pub struct WaveDto {
     pub created_at: Option<String>,
     pub status: String,
     pub iteration: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
-    pub position: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_worktree: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,20 +103,6 @@ pub struct WaveDto {
     pub stimuli: Vec<StimulusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<WaveChildDto>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct WaveChildDto {
-    pub id: String,
-    pub wave_type: String,
-    pub name: String,
-    pub flow: String,
-    pub direction: Vec<String>,
-    pub area: Vec<String>,
-    pub status: String,
-    pub position: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -189,6 +171,8 @@ pub struct StimulusDto {
     pub id: String,
     pub kind: String,
     pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_wave_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -278,6 +262,7 @@ pub fn stimulus_kind_str(kind: StimulusKind) -> &'static str {
         StimulusKind::Watch => "watch",
         StimulusKind::Cron => "cron",
         StimulusKind::Once => "once",
+        StimulusKind::Listen => "listen",
         StimulusKind::Unspecified => "unspecified",
     }
 }
@@ -338,6 +323,7 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
         id: s.id.to_string(),
         kind: stimulus_kind_str(s.kind).to_string(),
         enabled: s.enabled,
+        source_wave_id: s.source_wave_id.map(|value| value.to_string()),
         cron: if s.cron.is_empty() {
             None
         } else {

@@ -26,7 +26,7 @@ use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
-    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveData, WaveRun, WaveRunStatus, WaveStatus,
+    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -94,20 +94,6 @@ pub struct CreateWaveRequest {
     area: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct JoinWavesRequest {
-    wave_a: String,
-    wave_b: String,
-    name: Option<String>,
-    #[serde(default)]
-    nest: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LeaveWaveRequest {
-    wave: String,
-}
-
 #[derive(Debug, Deserialize, Default)]
 pub struct UpdateWaveRequest {
     name: Option<String>,
@@ -128,6 +114,7 @@ pub struct RunWaveRequest {
 pub struct AddStimulusRequest {
     kind: StimulusKind,
     cron: Option<String>,
+    source_wave_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -209,7 +196,7 @@ pub async fn create_wave_handler(
         ));
     }
 
-    let wave = Wave::Voice(WaveData {
+    let wave = Wave {
         id: id.clone(),
         name,
         repo,
@@ -219,9 +206,7 @@ pub async fn create_wave_handler(
         status: WaveStatus::Idle,
         iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
-        parent_id: None,
-        position: 0,
-    });
+    };
     state
         .store
         .create_wave(&wave)
@@ -238,6 +223,7 @@ pub async fn create_wave_handler(
         let stimulus = Stimulus {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
+            source_wave_id: None,
             kind,
             cron,
             last_main_sha: None,
@@ -281,152 +267,6 @@ async fn ensure_local_wave_worktree(
         StatusCode::INTERNAL_SERVER_ERROR,
     )
     .await
-}
-
-pub async fn join_waves_handler(
-    State(state): State<HttpState>,
-    Json(payload): Json<JoinWavesRequest>,
-) -> ApiResult<WaveDto> {
-    let wave_a_id = resolve_wave_id(&state, &payload.wave_a).await?;
-    let wave_b_id = resolve_wave_id(&state, &payload.wave_b).await?;
-
-    if wave_a_id == wave_b_id {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "cannot join a wave with itself",
-        ));
-    }
-
-    let wave_a = state
-        .store
-        .get_wave(&wave_a_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave_a not found"))?;
-    let wave_b = state
-        .store
-        .get_wave(&wave_b_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave_b not found"))?;
-
-    if wave_a.parent_id().is_some() || wave_b.parent_id().is_some() {
-        return Err(api_error(StatusCode::CONFLICT, "cannot join nested waves"));
-    }
-
-    if wave_a.repo() != wave_b.repo() {
-        return Err(api_error(
-            StatusCode::BAD_REQUEST,
-            "waves must be in the same repo",
-        ));
-    }
-
-    if state
-        .store
-        .get_active_wave_run(&wave_a_id)
-        .await
-        .map_err(map_store_error)?
-        .is_some()
-    {
-        return Err(api_error(
-            StatusCode::PRECONDITION_FAILED,
-            "wave_a has an active run",
-        ));
-    }
-    if state
-        .store
-        .get_active_wave_run(&wave_b_id)
-        .await
-        .map_err(map_store_error)?
-        .is_some()
-    {
-        return Err(api_error(
-            StatusCode::PRECONDITION_FAILED,
-            "wave_b has an active run",
-        ));
-    }
-
-    if let Some(ref name) = payload.name {
-        let existing = wave_name_exists(&state, wave_a.repo(), name)
-            .await
-            .map_err(map_store_error)?;
-        if existing {
-            return Err(api_error(
-                StatusCode::CONFLICT,
-                format!("wave '{}' already exists in this repo", name),
-            ));
-        }
-    }
-
-    let result_id = state
-        .store
-        .join_waves(&wave_a, &wave_b, payload.name, payload.nest)
-        .await
-        .map_err(map_store_error)?;
-
-    state.event_hub.send(Event::wave_updated(result_id.clone()));
-
-    let wave = state
-        .store
-        .get_wave(&result_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "resulting chord not found"))?;
-    let view = build_wave_dto(&state.store, &state.github, wave, false)
-        .await
-        .map_err(map_store_error)?;
-    Ok(Json(view))
-}
-
-pub async fn leave_wave_handler(
-    State(state): State<HttpState>,
-    Json(payload): Json<LeaveWaveRequest>,
-) -> ApiResult<WaveDto> {
-    let wave_id = resolve_wave_id(&state, &payload.wave).await?;
-
-    let wave = state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    if wave.parent_id().is_none() {
-        return Err(api_error(StatusCode::CONFLICT, "wave is not in a chord"));
-    }
-
-    let parent_id = wave.parent_id().as_ref().expect("checked above");
-    if state
-        .store
-        .get_active_wave_run(parent_id)
-        .await
-        .map_err(map_store_error)?
-        .is_some()
-    {
-        return Err(api_error(
-            StatusCode::PRECONDITION_FAILED,
-            "parent chord has an active run",
-        ));
-    }
-
-    state
-        .store
-        .leave_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?;
-
-    state.event_hub.send(Event::wave_updated(wave_id.clone()));
-
-    let updated = state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found after leave"))?;
-    let view = build_wave_dto(&state.store, &state.github, updated, false)
-        .await
-        .map_err(map_store_error)?;
-    Ok(Json(view))
 }
 
 fn parse_stimulus(
@@ -473,17 +313,6 @@ async fn wave_name_exists(
     Ok(waves.into_iter().any(|wave| wave.name() == name))
 }
 
-fn ensure_wave_can_run_directly(wave: &Wave) -> Result<(), ApiError> {
-    if wave.parent_id().is_some() {
-        return Err(api_error(
-            StatusCode::CONFLICT,
-            "nested waves cannot be run directly",
-        ));
-    }
-
-    Ok(())
-}
-
 pub async fn get_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -515,12 +344,6 @@ pub async fn update_wave_handler(
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-    if wave.parent_id().is_some() {
-        return Err(api_error(
-            StatusCode::CONFLICT,
-            "nested waves cannot be updated directly",
-        ));
-    }
 
     // Handle rename: move worktree + rename branch before updating DB.
     if let Some(ref name) = payload.name {
@@ -565,21 +388,21 @@ pub async fn update_wave_handler(
             )
             .await?;
 
-            wave.data_mut().name = new_name;
+            wave.name = new_name;
         }
     }
 
     if let Some(flow) = payload.flow {
-        wave.data_mut().flow = flow;
+        wave.flow = flow;
     }
     if let Some(direction) = payload.direction {
-        wave.data_mut().direction = direction;
+        wave.direction = direction;
     }
     if let Some(area) = payload.area {
-        wave.data_mut().area = area;
+        wave.area = area;
     }
     if let Some(status) = payload.status {
-        wave.data_mut().status = WaveStatus::from_str(&status)
+        wave.status = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
     }
 
@@ -666,7 +489,6 @@ pub async fn run_wave_handler(
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-    ensure_wave_can_run_directly(&wave)?;
 
     let active_run = state
         .store
@@ -681,13 +503,13 @@ pub async fn run_wave_handler(
     }
 
     if let Some(flow) = payload.flow {
-        wave.data_mut().flow = flow;
+        wave.flow = flow;
     }
     if let Some(direction) = payload.direction {
-        wave.data_mut().direction = direction;
+        wave.direction = direction;
     }
     if let Some(area) = payload.area {
-        wave.data_mut().area = area;
+        wave.area = area;
     }
 
     state
@@ -781,9 +603,38 @@ pub async fn add_stimulus_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
+    let source_wave_id = match payload.kind {
+        StimulusKind::Listen => {
+            let source = payload.source_wave_id.as_deref().ok_or_else(|| {
+                api_error(
+                    StatusCode::BAD_REQUEST,
+                    "listen stimulus requires source_wave_id",
+                )
+            })?;
+            let resolved = resolve_wave_id(&state, source).await?;
+            if resolved == wave_id {
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "listen stimulus cannot target the same wave",
+                ));
+            }
+            Some(resolved)
+        }
+        _ => {
+            if payload.source_wave_id.is_some() {
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "source_wave_id is only valid for listen stimulus",
+                ));
+            }
+            None
+        }
+    };
+
     let stimulus = Stimulus {
         id: LfdId::new(),
         wave_id,
+        source_wave_id,
         kind: payload.kind,
         cron: payload.cron.unwrap_or_default(),
         last_main_sha: None,
@@ -801,6 +652,7 @@ pub async fn add_stimulus_handler(
     Ok(Json(serde_json::json!({
         "id": stimulus.id.to_string(),
         "kind": stimulus_kind_str(stimulus.kind),
+        "source_wave_id": stimulus.source_wave_id.as_ref().map(ToString::to_string),
         "cron": if stimulus.cron.is_empty() { None } else { Some(&stimulus.cron) },
     })))
 }
@@ -872,7 +724,7 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.data_mut().status = if has_auto_stimulus {
+            wave.status = if has_auto_stimulus {
                 WaveStatus::Paused
             } else {
                 WaveStatus::Failed
@@ -892,7 +744,7 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.data_mut().status = WaveStatus::Paused;
+            wave.status = WaveStatus::Paused;
             state
                 .store
                 .update_wave(&wave)
@@ -1049,7 +901,7 @@ pub async fn continue_wave_handler(
         .update_wave_run(&run)
         .await
         .map_err(map_store_error)?;
-    wave.data_mut().status = WaveStatus::Running;
+    wave.status = WaveStatus::Running;
     state
         .store
         .update_wave(&wave)
@@ -1270,7 +1122,7 @@ fn resolve_wave_work_dir(
 fn is_auto_stimulus(kind: StimulusKind) -> bool {
     matches!(
         kind,
-        StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
+        StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron | StimulusKind::Listen
     )
 }
 
@@ -1379,9 +1231,6 @@ fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::id::LfdId;
-    use crate::lfd::types::{WaveData, WaveStatus};
-    use time::OffsetDateTime;
 
     #[test]
     fn parse_stimulus_requires_cron_expression_for_cron_kind() {
@@ -1406,37 +1255,8 @@ mod tests {
         assert_eq!(parsed.1, "0 8 * * *");
     }
 
-    fn make_wave(parent_id: Option<LfdId>) -> Wave {
-        Wave::Voice(WaveData {
-            id: LfdId::new(),
-            name: "wave".to_string(),
-            repo: "/tmp/repo".to_string(),
-            flow: "ship".to_string(),
-            direction: vec![],
-            area: vec![],
-            status: WaveStatus::Idle,
-            iteration: 0,
-            created_at: Some(OffsetDateTime::now_utc()),
-            parent_id,
-            position: 0,
-        })
-    }
-
     #[test]
-    fn ensure_wave_can_run_directly_allows_top_level_wave() {
-        let wave = make_wave(None);
-        let result = ensure_wave_can_run_directly(&wave);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn ensure_wave_can_run_directly_rejects_nested_wave() {
-        let parent_id = LfdId::new();
-        let wave = make_wave(Some(parent_id));
-
-        let err = ensure_wave_can_run_directly(&wave).expect_err("nested waves should be rejected");
-        let (status, body) = err;
-        assert_eq!(status, StatusCode::CONFLICT);
-        assert_eq!(body.0.error.message, "nested waves cannot be run directly");
+    fn listen_stimulus_is_auto_stimulus() {
+        assert!(is_auto_stimulus(StimulusKind::Listen));
     }
 }

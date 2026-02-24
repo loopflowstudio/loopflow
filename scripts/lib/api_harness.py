@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared HTTP assertion harness for API contract suites."""
+"""Shared HTTP utilities for API contract suites."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ class ScenarioResult:
     detail: str = ""
 
 
-class ApiHarness:
-    """Small scenario runner with route-level JSON assertions."""
+class ApiClient:
+    """Thin authenticated HTTP client wrapper for lfd API tests."""
 
     def __init__(self, base_url: str, token: str, timeout_seconds: float = 10.0) -> None:
         self._authed_client = httpx.Client(
@@ -28,9 +28,8 @@ class ApiHarness:
             headers={"Authorization": f"Bearer {token}"},
         )
         self._anonymous_client = httpx.Client(base_url=base_url, timeout=timeout_seconds)
-        self._results: list[ScenarioResult] = []
 
-    def __enter__(self) -> "ApiHarness":
+    def __enter__(self) -> "ApiClient":
         return self
 
     def __exit__(
@@ -45,23 +44,12 @@ class ApiHarness:
         self._authed_client.close()
         self._anonymous_client.close()
 
-    def run_scenario(self, name: str, check: Callable[[], None]) -> None:
-        try:
-            check()
-        except AssertionError as exc:
-            detail = str(exc) or "assertion failed"
-            self._record(ScenarioResult(name=name, passed=False, detail=detail))
-        except Exception as exc:  # pragma: no cover - defensive in script harness
-            detail = f"{type(exc).__name__}: {exc}"
-            stack = traceback.format_exc(limit=3)
-            self._record(ScenarioResult(name=name, passed=False, detail=f"{detail}\n{stack}"))
-        else:
-            self._record(ScenarioResult(name=name, passed=True))
-
     def request(self, method: str, path: str, auth: bool = True, **kwargs: Any) -> httpx.Response:
         client = self._authed_client if auth else self._anonymous_client
         return client.request(method, path, **kwargs)
 
+
+class ApiAssertions:
     @staticmethod
     def expect_json_object(response: httpx.Response) -> dict[str, Any]:
         return _json_dict(response)
@@ -81,15 +69,15 @@ class ApiHarness:
         message_contains: str | None = None,
         error_type: str = "invalid_request_error",
     ) -> dict[str, Any]:
-        ApiHarness.expect_status(response, status_code)
+        ApiAssertions.expect_status(response, status_code)
         payload = _json_dict(response)
         error = payload.get("error")
         if not isinstance(error, dict):
             raise AssertionError(f"expected error envelope, got: {payload}")
 
-        error_value = error.get("type")
-        if error_value != error_type:
-            raise AssertionError(f"expected error.type={error_type}, got {error_value}")
+        actual_type = error.get("type")
+        if actual_type != error_type:
+            raise AssertionError(f"expected error.type={error_type}, got {actual_type}")
 
         message = error.get("message")
         if not isinstance(message, str):
@@ -107,6 +95,26 @@ class ApiHarness:
         missing = [field for field in required_fields if field not in payload]
         if missing:
             raise AssertionError(f"missing fields: {missing}; payload={payload}")
+
+
+class ScenarioRunner:
+    """Scenario execution and reporting for standalone scripts."""
+
+    def __init__(self) -> None:
+        self._results: list[ScenarioResult] = []
+
+    def run_scenario(self, name: str, check: Callable[[], None]) -> None:
+        try:
+            check()
+        except AssertionError as exc:
+            detail = str(exc) or "assertion failed"
+            self._record(ScenarioResult(name=name, passed=False, detail=detail))
+        except Exception as exc:  # pragma: no cover - defensive in script harness
+            detail = f"{type(exc).__name__}: {exc}"
+            stack = traceback.format_exc(limit=3)
+            self._record(ScenarioResult(name=name, passed=False, detail=f"{detail}\n{stack}"))
+        else:
+            self._record(ScenarioResult(name=name, passed=True))
 
     def has_failures(self) -> bool:
         return any(not result.passed for result in self._results)

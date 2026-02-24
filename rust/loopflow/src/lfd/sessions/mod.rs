@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, Mutex};
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::harness::{CreateHarnessFn, SessionHarness};
 use crate::lfd::sessions::types::{
-    CreateSessionParams, PersistedSessionEvent, Session, SessionEvent, SessionStatus,
+    CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
 };
 use crate::lfd::store::{SharedStore, StoreError};
 
@@ -86,10 +86,11 @@ impl SessionManager {
         &self,
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
-        let provider = params.provider.trim().to_lowercase();
-        if !harness::supports_provider(&provider) {
-            return Err(SessionManagerError::UnsupportedProvider(provider));
-        }
+        let provider = harness::canonical_provider(&params.provider)
+            .map(ToString::to_string)
+            .ok_or_else(|| {
+                SessionManagerError::UnsupportedProvider(params.provider.trim().to_lowercase())
+            })?;
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
             if self
@@ -115,7 +116,7 @@ impl SessionManager {
             created_at: time::OffsetDateTime::now_utc(),
             ended_at: None,
         };
-        let (harness_events_tx, mut harness_events_rx) = broadcast::channel(HARNESS_EVENT_BUFFER);
+        let (harness_events_tx, harness_events_rx) = broadcast::channel(HARNESS_EVENT_BUFFER);
         let harness = (self.inner.create_harness)(&provider, harness_events_tx)
             .map_err(|err| SessionManagerError::Harness(err.to_string()))?;
         self.inner.store.create_session(&session).await?;
@@ -141,99 +142,8 @@ impl SessionManager {
         )
         .await?;
 
-        let manager = self.clone();
-        let session_id = session.id.clone();
-        let bridge_runtime = runtime.clone();
-        tokio::spawn(async move {
-            loop {
-                match harness_events_rx.recv().await {
-                    Ok(event) => {
-                        // Intercept ProviderSessionId: persist to DB, don't forward.
-                        if let SessionEvent::ProviderSessionId {
-                            ref provider_session_id,
-                        } = event
-                        {
-                            {
-                                let mut harness = bridge_runtime.harness.lock().await;
-                                harness.set_provider_session_id(Some(provider_session_id.clone()));
-                            }
-                            if let Err(err) = manager
-                                .inner
-                                .store
-                                .update_provider_session_id(&session_id, provider_session_id)
-                                .await
-                            {
-                                tracing::warn!(
-                                    session_id = %session_id,
-                                    error = %err,
-                                    "failed to persist provider session id"
-                                );
-                            }
-                            continue;
-                        }
-
-                        if let Err(err) = manager
-                            .append_runtime_event(&session_id, &bridge_runtime, event)
-                            .await
-                        {
-                            tracing::warn!(session_id = %session_id, error = %err, "failed to persist harness event");
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::warn!(session_id = %session_id, skipped, "session harness lagged")
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-
-        let manager = self.clone();
-        let session_id = session.id.clone();
-        let startup_runtime = runtime.clone();
-        let startup_config = session.config.clone();
-        tokio::spawn(async move {
-            let result = {
-                let mut harness = startup_runtime.harness.lock().await;
-                harness.start(&startup_config).await
-            };
-
-            match result {
-                Ok(()) => {
-                    if let Err(err) = manager
-                        .set_status(
-                            &session_id,
-                            SessionStatus::Active,
-                            None,
-                            Some(startup_runtime.clone()),
-                        )
-                        .await
-                    {
-                        tracing::warn!(session_id = %session_id, error = %err, "failed to set active session status");
-                    }
-                }
-                Err(err) => {
-                    let _ = manager
-                        .append_runtime_event(
-                            &session_id,
-                            &startup_runtime,
-                            SessionEvent::Error {
-                                code: "session_start_failed".to_string(),
-                                message: err.to_string(),
-                            },
-                        )
-                        .await;
-                    let _ = manager
-                        .set_status(
-                            &session_id,
-                            SessionStatus::Failed,
-                            Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-                            Some(startup_runtime.clone()),
-                        )
-                        .await;
-                    let _ = manager.remove_runtime(&session_id).await;
-                }
-            }
-        });
+        self.spawn_harness_event_bridge(session.id.clone(), runtime.clone(), harness_events_rx);
+        self.spawn_harness_startup(session.id.clone(), runtime.clone(), session.config.clone());
 
         Ok(session)
     }
@@ -277,25 +187,8 @@ impl SessionManager {
                 return Err(SessionManagerError::TurnAlreadyInProgress);
             }
 
-            let _ = self
-                .append_runtime_event(
-                    session_id,
-                    &runtime,
-                    SessionEvent::Error {
-                        code: "send_input_failed".to_string(),
-                        message: err.to_string(),
-                    },
-                )
+            self.mark_session_failed(session_id, &runtime, "send_input_failed", err.to_string())
                 .await;
-            let _ = self
-                .set_status(
-                    session_id,
-                    SessionStatus::Failed,
-                    Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-                    Some(runtime.clone()),
-                )
-                .await;
-            let _ = self.remove_runtime(session_id).await;
             return Err(SessionManagerError::Harness(err.to_string()));
         }
 
@@ -374,6 +267,141 @@ impl SessionManager {
             .runtime(session_id)
             .await
             .map(|runtime| runtime.events_tx.subscribe()))
+    }
+
+    fn spawn_harness_event_bridge(
+        &self,
+        session_id: LfdId,
+        runtime: Arc<SessionRuntime>,
+        mut harness_events_rx: broadcast::Receiver<SessionEvent>,
+    ) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            loop {
+                match harness_events_rx.recv().await {
+                    Ok(SessionEvent::ProviderSessionId {
+                        provider_session_id,
+                    }) => {
+                        manager
+                            .handle_provider_session_id(&session_id, &runtime, provider_session_id)
+                            .await;
+                    }
+                    Ok(event) => {
+                        if let Err(err) = manager
+                            .append_runtime_event(&session_id, &runtime, event)
+                            .await
+                        {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                error = %err,
+                                "failed to persist harness event"
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(session_id = %session_id, skipped, "session harness lagged")
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    fn spawn_harness_startup(
+        &self,
+        session_id: LfdId,
+        runtime: Arc<SessionRuntime>,
+        config: SessionConfig,
+    ) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            let result = {
+                let mut harness = runtime.harness.lock().await;
+                harness.start(&config).await
+            };
+
+            match result {
+                Ok(()) => {
+                    if let Err(err) = manager
+                        .set_status(
+                            &session_id,
+                            SessionStatus::Active,
+                            None,
+                            Some(runtime.clone()),
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            error = %err,
+                            "failed to set active session status"
+                        );
+                    }
+                }
+                Err(err) => {
+                    manager
+                        .mark_session_failed(
+                            &session_id,
+                            &runtime,
+                            "session_start_failed",
+                            err.to_string(),
+                        )
+                        .await;
+                }
+            }
+        });
+    }
+
+    async fn handle_provider_session_id(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        provider_session_id: String,
+    ) {
+        {
+            let mut harness = runtime.harness.lock().await;
+            harness.set_provider_session_id(Some(provider_session_id.clone()));
+        }
+        if let Err(err) = self
+            .inner
+            .store
+            .update_provider_session_id(session_id, &provider_session_id)
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %err,
+                "failed to persist provider session id"
+            );
+        }
+    }
+
+    async fn mark_session_failed(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        code: &str,
+        message: String,
+    ) {
+        let _ = self
+            .append_runtime_event(
+                session_id,
+                runtime,
+                SessionEvent::Error {
+                    code: code.to_string(),
+                    message,
+                },
+            )
+            .await;
+        let _ = self
+            .set_status(
+                session_id,
+                SessionStatus::Failed,
+                Some(time::OffsetDateTime::now_utc().unix_timestamp()),
+                Some(runtime.clone()),
+            )
+            .await;
+        self.remove_runtime(session_id).await;
     }
 
     async fn set_status(

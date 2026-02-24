@@ -35,19 +35,51 @@ pub trait SessionHarness: Send + Sync {
 pub type CreateHarnessFn =
     fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn SessionHarness>>;
 
-pub fn supports_provider(provider: &str) -> bool {
-    matches!(provider, "codex" | "claude")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarnessProvider {
+    Codex,
+    Claude,
+}
+
+impl HarnessProvider {
+    fn parse(provider: &str) -> Option<Self> {
+        match provider.trim().to_ascii_lowercase().as_str() {
+            "codex" => Some(Self::Codex),
+            "claude" => Some(Self::Claude),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+        }
+    }
+
+    fn create(self, event_tx: broadcast::Sender<SessionEvent>) -> Box<dyn SessionHarness> {
+        match self {
+            Self::Codex => Box::new(codex::CodexHarness::new(event_tx)),
+            Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
+        }
+    }
+}
+
+pub fn canonical_provider(provider: &str) -> Option<&'static str> {
+    HarnessProvider::parse(provider).map(HarnessProvider::as_str)
 }
 
 pub fn default_create_harness(
     provider: &str,
     event_tx: broadcast::Sender<SessionEvent>,
 ) -> Result<Box<dyn SessionHarness>> {
-    match provider {
-        "codex" => Ok(Box::new(codex::CodexHarness::new(event_tx))),
-        "claude" => Ok(Box::new(claude::ClaudeHarness::new(event_tx))),
-        other => anyhow::bail!("unsupported session provider: {other}"),
+    if let Some(provider) = HarnessProvider::parse(provider) {
+        return Ok(provider.create(event_tx));
     }
+    anyhow::bail!(
+        "unsupported session provider: {}",
+        provider.trim().to_lowercase()
+    )
 }
 
 #[cfg(test)]
@@ -55,8 +87,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn supports_provider_rejects_unknown_provider() {
-        assert!(!supports_provider("lfharness"));
+    fn canonical_provider_is_case_insensitive_and_trimmed() {
+        assert_eq!(canonical_provider(" claUDe "), Some("claude"));
+        assert_eq!(canonical_provider(" CODEX"), Some("codex"));
+        assert_eq!(canonical_provider("lfharness"), None);
     }
 
     #[test]

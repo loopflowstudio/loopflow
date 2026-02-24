@@ -1,2 +1,0 @@
-- Assumption: "Risks when reviewing" is implemented by checking whether `wave.activeRun?.currentStep` contains `"review"`.
-- Assumption: StartWaveView launches `lf design` only for local repos (path exists on disk); remote repo targets show an error.

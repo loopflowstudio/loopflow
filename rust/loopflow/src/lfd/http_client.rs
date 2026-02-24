@@ -68,8 +68,7 @@ impl SafeHttpClient {
             validate_scheme(&next_url)?;
 
             let host_changed = authority(redirect_basis.url()) != authority(&next_url);
-            current =
-                redirected_request(redirect_basis, response.status(), next_url, host_changed)?;
+            current = redirected_request(redirect_basis, response.status(), next_url, host_changed);
         }
 
         Err(SafeHttpError::RedirectLimitExceeded(self.max_redirects))
@@ -122,7 +121,7 @@ fn redirected_request(
     status: StatusCode,
     next_url: Url,
     host_changed: bool,
-) -> Result<Request, SafeHttpError> {
+) -> Request {
     let original_method = request.method().clone();
     let redirect_method = redirected_method(&original_method, status);
 
@@ -140,7 +139,7 @@ fn redirected_request(
         strip_sensitive_headers(request.headers_mut());
     }
 
-    Ok(request)
+    request
 }
 
 fn redirected_method(original: &Method, status: StatusCode) -> Method {
@@ -159,12 +158,11 @@ fn redirected_method(original: &Method, status: StatusCode) -> Method {
 }
 
 fn strip_sensitive_headers(headers: &mut reqwest::header::HeaderMap) {
-    let mut to_remove = Vec::new();
-    for name in headers.keys() {
-        if is_sensitive_header(name) {
-            to_remove.push(name.clone());
-        }
-    }
+    let to_remove = headers
+        .keys()
+        .filter(|name| is_sensitive_header(name))
+        .cloned()
+        .collect::<Vec<_>>();
     for name in to_remove {
         headers.remove(name);
     }
@@ -175,11 +173,11 @@ fn is_sensitive_header(name: &HeaderName) -> bool {
         return true;
     }
 
-    let value = name.as_str();
+    let value = name.as_str().to_ascii_lowercase();
     matches!(
-        value.to_ascii_lowercase().as_str(),
+        value.as_str(),
         "x-loopflow-token" | "x-loopflow-session-token" | "x-lfd-token" | "x-session-token"
-    ) || (value.starts_with("x-") && value.to_ascii_lowercase().contains("token"))
+    ) || (value.starts_with("x-") && value.contains("token"))
 }
 
 fn authority(url: &Url) -> Option<(String, Option<u16>)> {

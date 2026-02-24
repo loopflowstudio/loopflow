@@ -199,25 +199,7 @@ pub async fn poll_check_runs(
 ) -> Result<Vec<CheckRun>, String> {
     let branch = branch.replace('/', "%2F");
     let url = format!("https://api.github.com/repos/{repo_full_name}/commits/{branch}/check-runs");
-    let client = SafeHttpClient::new().map_err(|err| err.to_string())?;
-    let response = client
-        .send(
-            client
-                .request(Method::GET, &url)
-                .map_err(|err| err.to_string())?
-                .header(ACCEPT, "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header(USER_AGENT, "loopflow-lfd")
-                .bearer_auth(token),
-        )
-        .await
-        .map_err(|err| err.to_string())?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("github API error {status}: {body}"));
-    }
+    let response = require_github_success(github_get(&url, token).await?).await?;
 
     response
         .json::<CheckRunsResponse>()
@@ -232,29 +214,13 @@ pub async fn fetch_pull_request(
     token: &str,
 ) -> Result<Option<GitHubPullRequestState>, String> {
     let url = format!("https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}");
-    let client = SafeHttpClient::new().map_err(|err| err.to_string())?;
-    let response = client
-        .send(
-            client
-                .request(Method::GET, &url)
-                .map_err(|err| err.to_string())?
-                .header(ACCEPT, "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header(USER_AGENT, "loopflow-lfd")
-                .bearer_auth(token),
-        )
-        .await
-        .map_err(|err| err.to_string())?;
+    let response = github_get(&url, token).await?;
 
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("github API error {status}: {body}"));
-    }
+    let response = require_github_success(response).await?;
 
     let payload = response
         .json::<PullRequestResponse>()
@@ -290,6 +256,31 @@ pub async fn fetch_pull_request(
         updated_at,
         merged_at,
     }))
+}
+
+async fn github_get(url: &str, token: &str) -> Result<reqwest::Response, String> {
+    let client = SafeHttpClient::new().map_err(|err| err.to_string())?;
+    client
+        .send(
+            client
+                .request(Method::GET, url)
+                .map_err(|err| err.to_string())?
+                .header(ACCEPT, "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header(USER_AGENT, "loopflow-lfd")
+                .bearer_auth(token),
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+async fn require_github_success(response: reqwest::Response) -> Result<reqwest::Response, String> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    Err(format!("github API error {status}: {body}"))
 }
 
 #[cfg(test)]

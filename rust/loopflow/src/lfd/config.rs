@@ -171,25 +171,29 @@ impl RawLfdConfig {
             }
         }
 
-        Self::apply_limit_env_override(
+        Self::apply_env_override(
             &mut self.executor.limits.memory,
             "LFD_EXECUTOR_LIMITS_MEMORY",
             "executor.limits.memory",
+            parse_executor_limit_i64,
         )?;
-        Self::apply_limit_env_override(
+        Self::apply_env_override(
             &mut self.executor.limits.memory_swap,
             "LFD_EXECUTOR_LIMITS_MEMORY_SWAP",
             "executor.limits.memory_swap",
+            parse_executor_limit_i64,
         )?;
-        Self::apply_limit_env_override(
+        Self::apply_env_override(
             &mut self.executor.limits.cpu_quota,
             "LFD_EXECUTOR_LIMITS_CPU_QUOTA",
             "executor.limits.cpu_quota",
+            parse_executor_limit_i64,
         )?;
-        Self::apply_limit_env_override(
+        Self::apply_env_override(
             &mut self.executor.limits.pids_limit,
             "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
             "executor.limits.pids_limit",
+            parse_executor_limit_i64,
         )?;
 
         if let Ok(value) = std::env::var("LFD_GITHUB_WEBHOOK_SECRET") {
@@ -205,40 +209,47 @@ impl RawLfdConfig {
             };
         }
 
-        Self::apply_usize_env_override(
+        Self::apply_env_override(
             &mut self.api_security.http.max_json_body_bytes,
             "LFD_HTTP_MAX_JSON_BODY_BYTES",
             "http.max_json_body_bytes",
+            parse_positive_usize,
         )?;
-        Self::apply_usize_env_override(
+        Self::apply_env_override(
             &mut self.api_security.http.max_hook_body_bytes,
             "LFD_HTTP_MAX_HOOK_BODY_BYTES",
             "http.max_hook_body_bytes",
+            parse_positive_usize,
         )?;
-        Self::apply_usize_env_override(
+        Self::apply_env_override(
             &mut self.api_security.http.max_ws_frame_bytes,
             "LFD_HTTP_MAX_WS_FRAME_BYTES",
             "http.max_ws_frame_bytes",
+            parse_positive_usize,
         )?;
-        Self::apply_usize_env_override(
+        Self::apply_env_override(
             &mut self.api_security.http.max_ws_message_bytes,
             "LFD_HTTP_MAX_WS_MESSAGE_BYTES",
             "http.max_ws_message_bytes",
+            parse_positive_usize,
         )?;
-        Self::apply_usize_env_override(
+        Self::apply_env_override(
             &mut self.api_security.http.max_ws_queue,
             "LFD_HTTP_MAX_WS_QUEUE",
             "http.max_ws_queue",
+            parse_positive_usize,
         )?;
-        Self::apply_u32_env_override(
+        Self::apply_env_override(
             &mut self.api_security.http.max_ws_malformed,
             "LFD_HTTP_MAX_WS_MALFORMED",
             "http.max_ws_malformed",
+            parse_positive_u32,
         )?;
-        Self::apply_u32_env_override(
+        Self::apply_env_override(
             &mut self.api_security.http.auth_failures_per_minute,
             "LFD_HTTP_AUTH_FAILURES_PER_MINUTE",
             "http.auth_failures_per_minute",
+            parse_positive_u32,
         )?;
 
         if let Ok(value) = std::env::var("LFD_HTTP_TRUSTED_PROXY_CIDRS") {
@@ -258,7 +269,12 @@ impl RawLfdConfig {
         Ok(())
     }
 
-    fn apply_limit_env_override(target: &mut i64, env_key: &str, field: &str) -> Result<()> {
+    fn apply_env_override<T>(
+        target: &mut T,
+        env_key: &str,
+        field: &str,
+        parse: fn(&str, &str, &str) -> Result<T>,
+    ) -> Result<()> {
         let Ok(value) = std::env::var(env_key) else {
             return Ok(());
         };
@@ -266,31 +282,7 @@ impl RawLfdConfig {
         if trimmed.is_empty() {
             return Ok(());
         }
-        *target = parse_executor_limit_i64(trimmed, env_key, field)?;
-        Ok(())
-    }
-
-    fn apply_usize_env_override(target: &mut usize, env_key: &str, field: &str) -> Result<()> {
-        let Ok(value) = std::env::var(env_key) else {
-            return Ok(());
-        };
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-        *target = parse_positive_usize(trimmed, env_key, field)?;
-        Ok(())
-    }
-
-    fn apply_u32_env_override(target: &mut u32, env_key: &str, field: &str) -> Result<()> {
-        let Ok(value) = std::env::var(env_key) else {
-            return Ok(());
-        };
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-        *target = parse_positive_u32(trimmed, env_key, field)?;
+        *target = parse(trimmed, env_key, field)?;
         Ok(())
     }
 

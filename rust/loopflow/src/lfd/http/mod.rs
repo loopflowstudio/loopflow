@@ -2,7 +2,7 @@ pub mod dto;
 pub mod routes;
 pub mod state;
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::StatusCode;
@@ -279,13 +279,7 @@ fn extract_absolute_path_tokens(message: &str) -> Vec<String> {
 }
 
 fn is_absolute_path_token(word: &str) -> bool {
-    if word.is_empty() {
-        return false;
-    }
-    if word.starts_with('/') {
-        return PathBuf::from(word).is_absolute();
-    }
-    false
+    !word.is_empty() && Path::new(word).is_absolute()
 }
 
 async fn normalize_payload_too_large(request: Request, next: Next) -> Response {

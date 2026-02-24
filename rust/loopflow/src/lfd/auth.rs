@@ -81,13 +81,13 @@ struct AuthThrottleBucket {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct AuthThrottleKey {
-    source: String,
+    source: IpAddr,
     auth_context_hash: String,
     endpoint_group: &'static str,
 }
 
 impl AuthThrottleKey {
-    pub fn new(source: String, auth_context_hash: String, endpoint_group: &'static str) -> Self {
+    pub fn new(source: IpAddr, auth_context_hash: String, endpoint_group: &'static str) -> Self {
         Self {
             source,
             auth_context_hash,
@@ -111,11 +111,8 @@ pub async fn auth_middleware(
         &state.api_security.http.trusted_proxy_cidrs,
     );
     let endpoint_group = endpoint_group(request.method(), request.uri().path());
-    let throttle_key = AuthThrottleKey::new(
-        source.clone(),
-        auth_context_hash(provided_token),
-        endpoint_group,
-    );
+    let throttle_key =
+        AuthThrottleKey::new(source, auth_context_hash(provided_token), endpoint_group);
 
     if state
         .auth_failure_throttle
@@ -134,7 +131,12 @@ pub async fn auth_middleware(
         AuthProvider::Studio { validator } => {
             let token = match provided_token {
                 Some(token) => token,
-                None => return auth_error(StatusCode::UNAUTHORIZED, "missing connection token"),
+                None => {
+                    return http::api_error_response(
+                        StatusCode::UNAUTHORIZED,
+                        "missing connection token",
+                    );
+                }
             };
             if validator.validate(token).await {
                 Ok(())
@@ -152,13 +154,13 @@ pub async fn auth_middleware(
                 .record_failure(throttle_key, throttle_limit)
             {
                 tracing::warn!(
-                    source = source,
+                    source = %source,
                     endpoint_group,
                     "auth failures exceeded limit; throttling"
                 );
                 throttled_response()
             } else {
-                auth_error(status, message)
+                http::api_error_response(status, message)
             }
         }
     }
@@ -217,14 +219,14 @@ fn resolved_source(
     request: &Request,
     headers: &HeaderMap,
     trusted_proxy_cidrs: &[IpNet],
-) -> String {
+) -> IpAddr {
     let peer_ip = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|connect_info| connect_info.0.ip())
         .unwrap_or(IpAddr::from([0, 0, 0, 0]));
 
-    resolve_client_source(peer_ip, headers, trusted_proxy_cidrs).to_string()
+    resolve_client_source(peer_ip, headers, trusted_proxy_cidrs)
 }
 
 fn resolve_client_source(
@@ -264,10 +266,6 @@ fn throttled_response() -> Response {
         StatusCode::TOO_MANY_REQUESTS,
         "too many authentication failures",
     )
-}
-
-fn auth_error(status: StatusCode, message: &str) -> Response {
-    http::api_error_response(status, message)
 }
 
 #[cfg(test)]
@@ -369,7 +367,7 @@ mod tests {
     #[test]
     fn auth_failure_throttle_limits_after_threshold() {
         let throttle = AuthFailureThrottle::new();
-        let key = AuthThrottleKey::new("127.0.0.1".to_string(), "hash".to_string(), "mutate");
+        let key = AuthThrottleKey::new(IpAddr::from([127, 0, 0, 1]), "hash".to_string(), "mutate");
 
         assert!(!throttle.record_failure(key.clone(), 2));
         assert!(!throttle.record_failure(key.clone(), 2));

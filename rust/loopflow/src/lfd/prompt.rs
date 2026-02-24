@@ -19,17 +19,22 @@ pub struct PreparedPrompt {
     pub task_prompt: String,
     pub model: Option<String>,
     pub cwd: PathBuf,
+    pub max_turns: Option<u32>,
+    pub yolo_mode: bool,
 }
 
 pub struct PrepareStepPromptConfig<'a> {
     pub repo_root: &'a Path,
     pub step: &'a str,
+    pub run_mode: &'a str,
     pub directions: &'a [String],
     pub area: Option<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
     pub model: Option<String>,
     pub cwd: Option<PathBuf>,
+    pub max_turns: Option<u32>,
+    pub yolo_mode: bool,
     pub summary_source: Option<(&'a SharedStore, &'a LfdId)>,
 }
 
@@ -43,7 +48,7 @@ pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<
         repo_root: repo_root.to_path_buf(),
         step: Some(config.step.to_string()),
         message: config.message,
-        run_mode: Some("auto".to_string()),
+        run_mode: Some(config.run_mode.to_string()),
         directions,
         files: Vec::new(),
         sources: default_gather_sources(
@@ -90,5 +95,7 @@ pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<
         task_prompt,
         model,
         cwd,
+        max_turns: config.max_turns,
+        yolo_mode: config.yolo_mode,
     })
 }

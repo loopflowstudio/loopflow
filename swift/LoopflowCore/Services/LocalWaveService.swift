@@ -468,22 +468,18 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    public func createWave(name: String, repo: RepoTarget, schema: String? = nil) async throws -> Wave {
+    public func createWave(name: String, repo: RepoTarget) async throws -> Wave {
         LoggingService.lfd("createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path)")
 
         // Create wave via lfd HTTP API with minimal config
         // User configures area, direction, flow in detail panel before running
         // Create with defaults - area left empty, user configures in detail panel
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "repo": repo.path,
             "name": name.isEmpty ? NSNull() : name,
+            "flow": "ship-roadmap",  // Default flow: ingest → kickoff → review-design → ship → review
+            "direction": [],
         ]
-        if let schema {
-            body["schema"] = schema
-        } else {
-            body["flow"] = "ship-roadmap"  // Default flow: ingest → kickoff → review-design → ship → review
-            body["direction"] = []
-        }
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves"),
             method: "POST",

@@ -104,6 +104,12 @@ struct TerminalLauncher {
         try launchTerminal(terminal, at: repo, command: "lf \(step)")
     }
 
+    /// Launch `lf design` with a prefilled clipboard prompt.
+    func launchDesign(prompt: String, terminal: TerminalApp = .warp, at repo: URL) throws {
+        let escapedPrompt = escapeShellSingleQuotes(prompt)
+        try launchTerminal(terminal, at: repo, command: "lf design -c '\(escapedPrompt)'")
+    }
+
     // MARK: - Terminal Launchers
 
     private func launchWarp(at path: URL, command: String?) throws {
@@ -382,7 +388,7 @@ struct TerminalLauncher {
     }
 
     /// Escape single quotes for shell: ' becomes '\''
-    func escapeShellSingleQuotes(_ string: String) -> String {
+    private func escapeShellSingleQuotes(_ string: String) -> String {
         string.replacingOccurrences(of: "'", with: "'\\''")
     }
 

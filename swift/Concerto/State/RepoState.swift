@@ -7,17 +7,6 @@ import LoopflowCore
 @MainActor
 @Observable
 final class RepoState {
-    enum WaveCreationReadinessError: LocalizedError {
-        case missingRepo
-
-        var errorDescription: String? {
-            switch self {
-            case .missingRepo:
-                "Select a repository in Connection Settings first."
-            }
-        }
-    }
-
     enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
@@ -496,19 +485,14 @@ final class RepoState {
     }
 
     @discardableResult
-    func createWave(name: String, schemaRef: String? = nil) async throws -> Wave {
+    func createWave(name: String) async throws -> Wave {
         guard let repo = repoTarget else {
             LoggingService.model("createWave: no repoTarget")
             throw WaveServiceError.commandFailed("No repository selected")
         }
 
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let waveName: String
-        if normalizedName.isEmpty && schemaRef == nil {
-            waveName = NameGenerator.generate()
-        } else {
-            waveName = normalizedName
-        }
+        let waveName = normalizedName.isEmpty ? NameGenerator.generate() : normalizedName
         LoggingService.model("createWave: name=\(waveName) repo=\(repo.path)")
 
         let pendingId = "pending-\(UUID().uuidString)"
@@ -519,7 +503,7 @@ final class RepoState {
         selectedWaveId = pendingId
 
         do {
-            let wave = try await waveService.createWave(name: waveName, repo: repo, schema: schemaRef)
+            let wave = try await waveService.createWave(name: waveName, repo: repo)
             waveStore.replacePending(pendingId, with: WaveViewModel(api: wave))
             selectedWaveId = wave.id
             await refreshFlowsAsync()
@@ -698,17 +682,6 @@ final class RepoState {
     func switchToLocal(outputBuffer: OutputBuffer) async throws {
         let connection = ServerConnection.local
         try await connect(to: connection, outputBuffer: outputBuffer)
-    }
-
-    func ensureReadyToCreateWave(outputBuffer: OutputBuffer) async throws {
-        if !lfdConnected {
-            try await connectLfd(outputBuffer: outputBuffer)
-            try await Task.sleep(for: .milliseconds(500))
-        }
-
-        guard repoTarget != nil else {
-            throw WaveCreationReadinessError.missingRepo
-        }
     }
 
     func selectRemoteRepo(path: String) {

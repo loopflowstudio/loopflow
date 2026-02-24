@@ -5,213 +5,130 @@ import Testing
 
 @Suite("ChatState")
 struct ChatStateTests {
-    @Test("memory blocks stay sorted by position and name")
-    func memoryBlocksAreSorted() {
-        var memory = MemoryStore()
-        memory.setBlocks([
-            ChatMemoryBlock(name: "prefs", content: "Use <short> answers & bullets", position: 1),
-            ChatMemoryBlock(name: "aaa", content: "same position", position: 1),
-            ChatMemoryBlock(name: "context", content: "Project \"Loopflow\"", position: 0),
-        ])
-
-        #expect(memory.blocks.map(\.name) == ["context", "aaa", "prefs"])
-    }
-
     @MainActor
-    @Test("send consumes harness events and persists memory edits")
-    func sendConsumesHarnessEvents() async {
+    @Test("send consumes session text deltas and marks completion")
+    func sendConsumesSessionEvents() async {
         let service = MockChatService(
             eventBatches: [[
-                .success(.message(content: "Working on it", phase: .progress)),
-                .success(.memoryEdit(op: "upsert", block: "prefs", detail: "Answer in bullets")),
-                .success(.message(content: "Done", phase: .final)),
-                .success(.done),
+                .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "Hello"))),
+                .success(AgentSessionEventEnvelope(seq: 2, event: .textDelta(turnId: "turn_1", content: " world"))),
+                .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
             ]]
         )
 
         let state = ChatState(waveId: "wave-test", waveService: service)
-        await state.send("Hello")
+        await state.send("Hi")
 
         #expect(state.turnState == .completed)
-        #expect(state.messages.count == 4)
+        #expect(state.messages.count == 2)
         #expect(state.messages[0].role == .user)
+        #expect(state.messages[0].content == "Hi")
         #expect(state.messages[1].role == .assistant)
-        #expect(state.messages[2].role == .memory)
-        #expect(state.messages[2].content.contains("Agent updated memory"))
-        #expect(state.messages[3].role == .assistant)
-        #expect(state.memory.blocks.contains(where: { $0.name == "prefs" && $0.content == "Answer in bullets" }))
+        #expect(state.messages[1].content == "Hello world")
     }
 
     @MainActor
-    @Test("send surfaces failed turn events from server")
-    func sendServerFailedTurn() async {
+    @Test("send surfaces session errors and failed turns")
+    func sendFailedTurn() async {
         let service = MockChatService(
             eventBatches: [[
-                .success(.failed(code: "missing_final_message", message: "Turn failed: expected exactly one final message.")),
+                .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                .success(AgentSessionEventEnvelope(seq: 1, event: .error(code: "oops", message: "bad thing"))),
+                .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "failed"))),
             ]]
         )
 
         let state = ChatState(waveId: "wave-test", waveService: service)
-        await state.send("Hello")
+        await state.send("Hi")
 
         #expect(state.turnState == .failed)
-        #expect(state.messages.last?.role == .error)
-        #expect(state.messages.last?.content.contains("expected exactly one final message") == true)
+        #expect(state.messages.count == 2)
+        #expect(state.messages[1].role == .error)
+        #expect(state.messages[1].content == "bad thing")
     }
 
     @MainActor
-    @Test("loadMessagesIfNeeded populates messages from DB")
-    func loadMessagesFromDB() async {
-        let records = [
-            ChatMessageRecord(id: "msg-1", role: "user", content: "Hello", createdAt: Date()),
-            ChatMessageRecord(id: "msg-2", role: "assistant", content: "Hi there", createdAt: Date()),
-        ]
-        let service = MockChatService(messageRecords: records)
-
-        let state = ChatState(waveId: "wave-test", waveService: service)
-        #expect(state.messages.isEmpty)
-
-        await state.loadMessagesIfNeeded()
-        #expect(state.messages.count == 2)
-        #expect(state.messages[0].role == .user)
-        #expect(state.messages[0].content == "Hello")
-        #expect(state.messages[1].role == .assistant)
-        #expect(state.messages[1].content == "Hi there")
-
-        // Second call is a no-op.
-        await state.loadMessagesIfNeeded()
-        #expect(state.messages.count == 2)
-    }
-
-    @MainActor
-    @Test("send refreshes from DB when SSE stream fails")
-    func sendRefreshesFromDBOnSSEFailure() async {
-        let records = [
-            ChatMessageRecord(id: "msg-1", role: "user", content: "Hello", createdAt: Date()),
-            ChatMessageRecord(id: "msg-2", role: "assistant", content: "Hi there!", createdAt: Date()),
-        ]
+    @Test("session is created once and reused across sends")
+    func sessionReusedAcrossTurns() async {
         let service = MockChatService(
-            eventBatches: [[
-                .failure(.commandFailed("chat turn already completed")),
-            ]],
-            messageRecords: records
-        )
-
-        let state = ChatState(waveId: "wave-test", waveService: service)
-        await state.send("Hello")
-
-        #expect(state.turnState == .completed)
-        #expect(state.messages.count == 2)
-        #expect(state.messages[0].role == .user)
-        #expect(state.messages[0].content == "Hello")
-        #expect(state.messages[1].role == .assistant)
-        #expect(state.messages[1].content == "Hi there!")
-    }
-
-    @MainActor
-    @Test("loadMemoryIfNeeded retries after a failed load")
-    func loadMemoryRetriesAfterFailure() async {
-        let service = MockChatService(
-            listResults: [
-                .failure(.commandFailed("temporary failure")),
-                .success([ChatMemoryBlock(name: "context", content: "Loaded", position: 0)]),
+            eventBatches: [
+                [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ],
+                [
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnStarted(turnId: "turn_2"))),
+                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_2", status: "completed"))),
+                ],
             ]
         )
 
         let state = ChatState(waveId: "wave-test", waveService: service)
+        await state.send("one")
+        await state.send("two")
 
-        await state.loadMemoryIfNeeded()
-        #expect(state.memory.blocks.isEmpty)
-        #expect(state.memoryError == "temporary failure")
-
-        await state.loadMemoryIfNeeded()
-        #expect(state.memory.blocks.count == 1)
-        #expect(state.memoryError == nil)
-
-        let calls = service.listCallCount()
-        #expect(calls == 2)
+        #expect(service.createSessionCallCount == 1)
+        #expect(service.sendInputCallCount == 2)
     }
 }
 
 private final class MockChatService: ChatService, @unchecked Sendable {
     private let queue = DispatchQueue(label: "MockChatService")
-    private var listResults: [Result<[ChatMemoryBlock], WaveServiceError>]
-    private var blocks: [ChatMemoryBlock] = []
-    private var listCalls = 0
-    private var eventBatches: [[Result<ChatTurnEvent, WaveServiceError>]]
-    private var messageRecords: [ChatMessageRecord]
+    private var eventBatches: [[Result<AgentSessionEventEnvelope, WaveServiceError>]]
 
-    init(
-        listResults: [Result<[ChatMemoryBlock], WaveServiceError>] = [.success([])],
-        eventBatches: [[Result<ChatTurnEvent, WaveServiceError>]] = [],
-        messageRecords: [ChatMessageRecord] = []
-    ) {
-        self.listResults = listResults
+    private(set) var createSessionCallCount = 0
+    private(set) var sendInputCallCount = 0
+
+    init(eventBatches: [[Result<AgentSessionEventEnvelope, WaveServiceError>]] = []) {
         self.eventBatches = eventBatches
-        self.messageRecords = messageRecords
     }
 
-    func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
-        try queue.sync {
-            listCalls += 1
-            if !listResults.isEmpty {
-                let next = listResults.removeFirst()
-                switch next {
-                case .success(let nextBlocks):
-                    blocks = nextBlocks
-                    return nextBlocks
-                case .failure(let error):
-                    throw error
-                }
-            }
-            return blocks
-        }
+    func createSession(
+        provider: String,
+        waveRunId: String?,
+        config: AgentSessionConfig
+    ) async throws -> AgentSession {
+        queue.sync { createSessionCallCount += 1 }
+        return AgentSession(
+            id: "session_1",
+            provider: provider,
+            status: "active",
+            waveRunId: waveRunId,
+            providerSessionId: nil,
+            config: config,
+            createdAt: nil,
+            endedAt: nil
+        )
     }
 
-    func upsertMemoryBlock(
-        waveId: String,
-        name: String,
-        content: String,
-        position: Int?
-    ) async throws -> ChatMemoryBlock {
-        queue.sync {
-            let block = ChatMemoryBlock(
-                name: name,
-                content: content,
-                position: position ?? blocks.count
-            )
-            blocks.removeAll { $0.name == name }
-            blocks.append(block)
-            return block
-        }
+    func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession {
+        queue.sync { sendInputCallCount += 1 }
+        return AgentSession(
+            id: sessionId,
+            provider: "claude",
+            status: "active",
+            waveRunId: nil,
+            providerSessionId: nil,
+            config: AgentSessionConfig(),
+            createdAt: nil,
+            endedAt: nil
+        )
     }
 
-    func deleteMemoryBlock(waveId: String, name: String) async throws {
-        queue.sync {
-            blocks.removeAll { $0.name == name }
-        }
-    }
-
-    func listChatMessages(waveId: String) async throws -> [ChatMessageRecord] {
-        queue.sync { messageRecords }
-    }
-
-    func startChat(
-        waveId: String,
-        message: String
-    ) async throws {}
-
-    func streamChatEvents(
-        waveId: String
-    ) -> AsyncThrowingStream<ChatTurnEvent, Error> {
+    func streamSessionEvents(
+        sessionId: String,
+        afterSeq: Int?
+    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error> {
         let batch = queue.sync {
             eventBatches.isEmpty ? [] : eventBatches.removeFirst()
         }
+
         return AsyncThrowingStream { continuation in
-            for event in batch {
-                switch event {
-                case .success(let item):
-                    continuation.yield(item)
+            for entry in batch {
+                switch entry {
+                case .success(let event):
+                    continuation.yield(event)
                 case .failure(let error):
                     continuation.finish(throwing: error)
                     return
@@ -219,9 +136,5 @@ private final class MockChatService: ChatService, @unchecked Sendable {
             }
             continuation.finish()
         }
-    }
-
-    func listCallCount() -> Int {
-        queue.sync { listCalls }
     }
 }

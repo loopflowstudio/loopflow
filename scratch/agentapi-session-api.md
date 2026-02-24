@@ -21,7 +21,7 @@ This document is the source of truth for session API work in `lfd`.
 
 ### Codex
 
-- `codex --app-server` adapter is wired through the shared adapter abstraction.
+- `codex --app-server` harness is wired through the shared harness abstraction.
 - Codex-specific JSON-RPC payloads are mapped into normalized session events.
 
 ### Claude
@@ -43,14 +43,14 @@ Tool/item mapping for Claude:
 
 ## Claude integration notes
 
-- Adapter events flow over `broadcast::Sender<SessionEvent>` and are bridged into persistence + SSE broadcast by `SessionManager`.
+- Harness events flow over `broadcast::Sender<SessionEvent>` and are bridged into persistence + SSE broadcast by `SessionManager`.
 - `ProviderSessionId` is treated as an internal event: persisted for resume, not emitted to SSE clients.
 - Setup failures release the in-flight turn guard to avoid stuck busy sessions.
 
 ## Remaining gaps
 
 1. **No restart rehydration**
-   - Active runtimes are process-local; daemon restart loses live adapter processes.
+   - Active runtimes are process-local; daemon restart loses live harness processes.
 2. **SSE lag handling is reconnect-based**
    - Lagged subscribers can miss broadcast events and must reconnect for replay.
 3. **No Claude turn diff synthesis**
@@ -67,4 +67,4 @@ Tool/item mapping for Claude:
    - restart recovery/rehydration
    - optional in-stream backfill for lagged SSE subscribers
    - stronger provider conformance tests (Codex + Claude)
-3. OpenCode adapter implementation on the normalized schema.
+3. OpenCode harness implementation on the normalized schema.

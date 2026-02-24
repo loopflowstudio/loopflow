@@ -6,6 +6,14 @@ Third adapter validates the session API is truly provider-agnostic.
 
 OpenCode sessions work through the same session API. Three adapters with three different transports (JSON-RPC stdio, NDJSON stdio, HTTP+SSE) all map cleanly to the canonical event model.
 
+## What Phase 04 set up
+
+**Crash handling is provider-generic.** Shared `InFlightItems` tracking in `harness/common.rs` handles abnormal exit for Codex and Claude. OpenCode gets this for free — implement the drain-on-crash pattern and in-flight items are completed as failed with crash metadata.
+
+**Replay and lifecycle are proven.** SSE replay with `session.replay_completed` sentinel, orphan session recovery, and idempotent end all work across Codex and Claude. OpenCode should require no changes to the session manager or event bridge.
+
+**Hermetic test infrastructure exists.** `scripts/lib/lfd_runtime.py` + `scripts/lib/api_harness.py` provide reusable live-HTTP assertions. OpenCode smoke tests can follow the same pattern as the existing API smoke suite.
+
 ## What to build
 
 ### OpenCode adapter

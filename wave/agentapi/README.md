@@ -10,7 +10,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 
 ## Design Decisions
 
-**Harness-first, not protocol-first.** Build a working harness end-to-end before abstracting. The protocol emerged from real provider behavior — Codex first, then Claude validated the abstraction. Harness mapping modules (`codex_mapping.rs`, `claude_mapping.rs`) now live alongside harness logic.
+**Harness-first, not protocol-first.** Build a working harness end-to-end before abstracting. The protocol emerged from real provider behavior — Codex first, then Claude validated the abstraction. Harness mapping modules (`codex_mapping.rs`, `claude_mapping.rs`) now live alongside harness logic. Shared crash handling (`harness/common.rs` `InFlightItems`) emerged from the hardening pass — provider-generic, not provider-specific.
 
 **lfd owns the session lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
 
@@ -23,9 +23,12 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 ## Invariants
 
 - At most one active session per wave run at a time
-- Session end is idempotent (multiple calls safe)
+- Session end is idempotent (multiple calls safe), including end during `starting` state
 - UI disconnect does not affect session state
-- Reconnect replays persisted events then follows live stream
+- Reconnect replays persisted events, emits `session.replay_completed` sentinel, then follows live stream
+- `session.replay_completed` is a protocol-level SSE event, not a persisted `SessionEvent`
+- Crash and orphan failure semantics are emitted by lfd, not inferred by clients
+- On lfd startup, orphaned `starting`/`active` sessions are recovered to `failed`
 - Session end triggers wave continue only when wave run still waits on that session
 
 ## Phases
@@ -35,7 +38,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 | 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first harness. | shipped |
 | 02 | Claude Harness | `-p --resume` with structured output. Probes agent personality. | shipped |
 | 03 | Concerto UI | Typed transcript, item cards, session lifecycle, reconnect/replay | shipped |
-| 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
+| 04 | Hardening | Replay sentinel, crash recovery, orphan session recovery, in-flight item tracking, hermetic API smoke tests | shipped |
 | 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
 | 06 | OpenCode Harness | Third provider harness validates the abstraction | |
 | 07 | Provider Layer Unification | Make provider harnesses the shared core used by both `lf` CLI runs and `/v0/sessions` HTTP sessions | planned |
@@ -52,10 +55,11 @@ After Phase 06, unify the provider layer so `lf` and Session HTTP are explicitly
 
 ```
 Concerto ──HTTP/SSE──▶ lfd session API
-                         ├── SessionManager (lifecycle, state machine)
+                         ├── SessionManager (lifecycle, state machine, orphan recovery)
                          │     └── SessionRuntime (harness + broadcast + seq counter)
                          ├── session store (sessions + session_events tables)
                          └── provider harness (Codex | Claude | OpenCode)
+                               ├── harness/common.rs (InFlightItems, crash completion)
                                ├── event bridge task (harness → store + broadcast)
                                └── provider process
                                      Codex: codex --app-server (JSON-RPC stdio)
@@ -80,6 +84,11 @@ DELETE /v0/sessions/{id}         # end session
 | Codex | subprocess stdio | JSON-RPC notifications | JSON-RPC requests | OAuth (provider-owned) |
 | Claude | subprocess stdio | NDJSON (stream-json) | New process per turn (`--resume`) | OAuth (provider-owned) |
 | OpenCode | HTTP client | SSE events | REST calls | Provider-owned |
+
+## Known gaps
+
+- **Slow-consumer lag backfill**: `tokio::broadcast` with 256-entry buffer drops events for slow SSE receivers. Need in-stream store fallback — detect `Lagged`, read missed events from store, resume broadcast. Affects basic reliability under load.
+- **Provider conformance tests**: trace-replay tests against real provider output (Codex JSON-RPC, Claude NDJSON) would catch mapping regressions. The mapping modules are cleanly separated now, making this straightforward.
 
 ## What's not here
 

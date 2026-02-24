@@ -63,6 +63,6 @@ All planned pieces landed: Claude harness (828 lines), NDJSON stream parser, too
 - Tool state tracking simplified — removed intermediate state machine, direct tracking instead.
 - Turn parsing hardened against NDJSON edge cases in `content_block_delta` handling.
 
-**Known gaps for Phase 04:**
-- Reader-task-stop race: `stop()` kills the child and aborts the reader, but a normal exit between kill and abort can produce a stale `TurnCompleted(Completed)` event. The `AtomicBool` guard prevents state corruption but event ordering may be off.
-- Accumulated `input_json_delta` parsing drops malformed JSON silently (`.ok()`). A crash mid-tool produces no error event for that tool.
+**Resolved in Phase 04:**
+- Crash mid-tool now handled: shared `InFlightItems` in `harness/common.rs` drains in-flight items on abnormal exit and completes them as failed with crash metadata. No more silent drops.
+- Reader-task-stop race: mitigated by the provider-generic crash completion path. Event ordering is consistent because in-flight items are drained before session status transitions.

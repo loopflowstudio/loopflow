@@ -304,6 +304,46 @@ struct ChatStateTests {
         #expect(service.streamCancellationCount >= 1)
         #expect(messages(in: state, role: .system).contains { $0.content == "Session ended" })
     }
+
+    @MainActor
+    @Test("session creation uses configured provider and config")
+    func sendUsesConfiguredSessionParameters() async {
+        let service = MockChatService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+        let config = AgentSessionConfig(
+            step: "review",
+            repoRoot: "/tmp/repo",
+            directions: ["designer"],
+            area: "swift/Concerto",
+            wave: "wavemodel",
+            message: "Focus on UX",
+            model: "claude-sonnet-4-6",
+            cwd: "/tmp/repo/swift",
+            maxTurns: 2,
+            yoloMode: true
+        )
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionProvider: "codex",
+            sessionWaveRunId: "run_123",
+            sessionConfig: config,
+            waveService: service,
+            userDefaults: makeUserDefaults("config-passthrough")
+        )
+
+        await state.send("Start")
+        await waitUntil { state.turnState == .completed }
+
+        #expect(service.lastCreateSessionProvider == "codex")
+        #expect(service.lastCreateSessionWaveRunId == "run_123")
+        #expect(service.lastCreateSessionConfig == config)
+    }
 }
 
 private struct StreamPlan {
@@ -327,6 +367,9 @@ private final class MockChatService: ChatService, @unchecked Sendable {
     private(set) var sendInputCallCount = 0
     private(set) var stopSessionCallCount = 0
     private(set) var streamCancellationCount = 0
+    private(set) var lastCreateSessionProvider: String?
+    private(set) var lastCreateSessionWaveRunId: String?
+    private(set) var lastCreateSessionConfig: AgentSessionConfig?
 
     init(
         createSessionResults: [Result<AgentSession, Error>] = [],
@@ -345,6 +388,9 @@ private final class MockChatService: ChatService, @unchecked Sendable {
     ) async throws -> AgentSession {
         let result = queue.sync { () -> Result<AgentSession, Error> in
             createSessionCallCount += 1
+            lastCreateSessionProvider = provider
+            lastCreateSessionWaveRunId = waveRunId
+            lastCreateSessionConfig = config
             if createSessionResults.isEmpty {
                 return .success(activeSession(id: "session_1"))
             }

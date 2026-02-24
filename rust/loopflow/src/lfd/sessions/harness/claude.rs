@@ -52,6 +52,15 @@ fn build_args(content: &str, prompt: &PreparedPrompt, resume_id: Option<&str>) -
         args.push(model.clone());
     }
 
+    if prompt.yolo_mode {
+        args.push("--dangerously-skip-permissions".to_string());
+    }
+
+    if let Some(max_turns) = prompt.max_turns {
+        args.push("--max-turns".to_string());
+        args.push(max_turns.to_string());
+    }
+
     if !prompt.system_prompt.trim().is_empty() {
         args.push("--append-system-prompt".to_string());
         args.push(prompt.system_prompt.clone());
@@ -247,6 +256,8 @@ mod tests {
             task_prompt: "task".to_string(),
             model: None,
             cwd: "/tmp".into(),
+            max_turns: None,
+            yolo_mode: false,
         };
         let args = build_args("hello", &prompt, None);
         assert_eq!(
@@ -262,12 +273,17 @@ mod tests {
             task_prompt: "task".to_string(),
             model: Some("claude-sonnet-4-5-20250514".to_string()),
             cwd: "/tmp".into(),
+            max_turns: Some(5),
+            yolo_mode: true,
         };
         let args = build_args("fix tests", &prompt, Some("sess_abc"));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_abc".to_string()));
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"claude-sonnet-4-5-20250514".to_string()));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(args.contains(&"--max-turns".to_string()));
+        assert!(args.contains(&"5".to_string()));
         assert!(args.contains(&"--append-system-prompt".to_string()));
         assert!(args.contains(&"Be concise".to_string()));
     }
@@ -279,11 +295,15 @@ mod tests {
             task_prompt: "task".to_string(),
             model: None,
             cwd: "/tmp".into(),
+            max_turns: None,
+            yolo_mode: false,
         };
         let args = build_args("next", &prompt, Some("sess_123"));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_123".to_string()));
         assert!(!args.contains(&"--model".to_string()));
+        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(!args.contains(&"--max-turns".to_string()));
     }
 
     #[tokio::test]
@@ -295,6 +315,8 @@ mod tests {
             task_prompt: "task".to_string(),
             model: None,
             cwd: format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into(),
+            max_turns: None,
+            yolo_mode: false,
         });
 
         let first = harness

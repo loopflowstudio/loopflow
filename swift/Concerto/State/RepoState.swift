@@ -317,6 +317,7 @@ final class RepoState {
 
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
+        chatStates.removeAll()
         currentRepo = url
         repoTarget = .local(url)
         errorMessage = nil
@@ -671,6 +672,7 @@ final class RepoState {
         } else {
             repoTarget = nil
         }
+        chatStates.removeAll()
 
         let probeService = Self.makeEventService(
             connection: connection,
@@ -691,6 +693,7 @@ final class RepoState {
     }
 
     func selectRemoteRepo(path: String) {
+        chatStates.removeAll()
         let host = connectionStore.activeConnection.host
         repoTarget = .remote(path: path, host: host)
         currentRepo = URL(fileURLWithPath: path)

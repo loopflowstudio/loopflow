@@ -172,12 +172,15 @@ impl SessionManager {
         let prepared = prepare_step_prompt(PrepareStepPromptConfig {
             repo_root: &repo_root,
             step: &step,
+            run_mode: "interactive",
             directions: &config.directions,
             area: config.area.clone(),
             wave: config.wave.clone(),
             message: config.message.clone(),
             model: config.model.clone(),
             cwd,
+            max_turns: config.max_turns,
+            yolo_mode: config.yolo_mode,
             summary_source: None,
         })
         .await

@@ -93,6 +93,12 @@ struct StartWaveView: View {
             return false
         }
 
+        let loopflowConfigDirectory = localRepo.appendingPathComponent(".lf", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: loopflowConfigDirectory.path()) else {
+            errorMessage = "Run `lf init` in this repository before starting a design session."
+            return false
+        }
+
         return true
     }
 }

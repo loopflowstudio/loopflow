@@ -261,12 +261,15 @@ pub(crate) async fn build_step_prompt(
     let prepared = prepare_step_prompt(PrepareStepPromptConfig {
         repo_root: Path::new(worktree),
         step: &step.step.name,
+        run_mode: "auto",
         directions,
         area: None,
         wave: wave.map(str::to_string),
         message,
         model: None,
         cwd: None,
+        max_turns: None,
+        yolo_mode: false,
         summary_source,
     })
     .await?;

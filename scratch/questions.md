@@ -1,2 +1,2 @@
-- Full `xcodebuild test -scheme Concerto` still fails in this environment because `ConcertoUITests/ScreenshotPipelineTests.testCapture` fails (screenshot assertion). `-only-testing:ConcertoTests` passes.
-- Reconnect stream phase currently promotes from `.reconnecting` to `.live` on first event, with a 1s fallback timer if no events arrive, to avoid indefinite send disable when replay stream is idle.
+- Can `ConcertoUITests/ScreenshotPipelineTests.testCapture` be stabilized in this environment so full `xcodebuild test -scheme Concerto` passes reliably?
+- Should reconnect promotion from `.reconnecting` to `.live` stay timer-based (1s fallback) or move to an explicit replay/live boundary signal?

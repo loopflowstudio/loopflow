@@ -569,7 +569,26 @@ fn resolve_cwd(
         )));
     }
 
-    Ok(Some(resolved))
+    let canonical_root = repo_root.canonicalize().map_err(|err| {
+        SessionManagerError::InvalidRepoRoot(format!(
+            "failed to resolve repo_root '{}': {err}",
+            repo_root.display()
+        ))
+    })?;
+    let canonical_cwd = resolved.canonicalize().map_err(|err| {
+        SessionManagerError::InvalidConfig(format!(
+            "failed to resolve cwd '{}': {err}",
+            resolved.display()
+        ))
+    })?;
+    if !canonical_cwd.starts_with(&canonical_root) {
+        return Err(SessionManagerError::InvalidConfig(format!(
+            "cwd must be inside repo_root: {}",
+            canonical_cwd.display()
+        )));
+    }
+
+    Ok(Some(canonical_cwd))
 }
 
 #[cfg(test)]
@@ -896,6 +915,38 @@ mod tests {
             .expect_err("invalid repo root should fail");
 
         assert!(matches!(err, SessionManagerError::InvalidRepoRoot(_)));
+    }
+
+    #[tokio::test]
+    async fn create_session_rejects_cwd_outside_repo_root() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let repo_root = tmp.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".lf")).expect("create .lf for tests");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).expect("create outside dir");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+
+        let err = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig {
+                    step: "design".to_string(),
+                    repo_root: repo_root.to_string_lossy().to_string(),
+                    cwd: Some(outside.to_string_lossy().to_string()),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect_err("cwd outside repo root should fail");
+
+        assert!(matches!(err, SessionManagerError::InvalidConfig(_)));
     }
 
     #[tokio::test]

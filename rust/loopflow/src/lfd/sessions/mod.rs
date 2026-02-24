@@ -85,7 +85,7 @@ impl SessionManager {
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
         let provider = params.provider.trim().to_lowercase();
-        if provider != "codex" {
+        if !adapter::supports_provider(&provider) {
             return Err(SessionManagerError::UnsupportedProvider(provider));
         }
 
@@ -146,6 +146,26 @@ impl SessionManager {
             loop {
                 match adapter_events_rx.recv().await {
                     Ok(event) => {
+                        // Intercept ProviderSessionId: persist to DB, don't forward.
+                        if let SessionEvent::ProviderSessionId {
+                            ref provider_session_id,
+                        } = event
+                        {
+                            if let Err(err) = manager
+                                .inner
+                                .store
+                                .update_provider_session_id(&session_id, provider_session_id)
+                                .await
+                            {
+                                tracing::warn!(
+                                    session_id = %session_id,
+                                    error = %err,
+                                    "failed to persist provider session id"
+                                );
+                            }
+                            continue;
+                        }
+
                         if let Err(err) = manager
                             .append_runtime_event(&session_id, &bridge_runtime, event)
                             .await
@@ -487,6 +507,7 @@ mod tests {
                 config: SessionConfig {
                     model: Some("gpt-5.1-codex".to_string()),
                     cwd: Some(tmp.path().to_string_lossy().to_string()),
+                    ..Default::default()
                 },
             })
             .await
@@ -541,11 +562,12 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_create_adapter(store, fake_create_adapter);
+        // Use default_create_adapter (not fake) so unsupported providers are rejected.
+        let manager = SessionManager::new(store);
 
         let err = manager
             .create_session(CreateSessionParams {
-                provider: "claude".to_string(),
+                provider: "openai".to_string(),
                 wave_run_id: None,
                 config: SessionConfig::default(),
             })
@@ -554,7 +576,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            SessionManagerError::UnsupportedProvider(ref provider) if provider == "claude"
+            SessionManagerError::UnsupportedProvider(ref provider) if provider == "openai"
         ));
     }
 

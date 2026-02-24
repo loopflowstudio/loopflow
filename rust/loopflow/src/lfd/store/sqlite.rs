@@ -253,6 +253,22 @@ impl SqliteStore {
         Ok(row)
     }
 
+    pub fn update_provider_session_id(
+        &self,
+        session_id: &LfdId,
+        provider_session_id: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE sessions SET provider_session_id = ?2 WHERE id = ?1",
+            params![session_id, provider_session_id],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     pub fn update_session_status(
         &self,
         session_id: &LfdId,

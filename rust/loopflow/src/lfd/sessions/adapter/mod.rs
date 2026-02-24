@@ -1,3 +1,4 @@
+pub mod claude;
 pub mod codex;
 
 use anyhow::Result;
@@ -17,12 +18,17 @@ pub trait SessionAdapter: Send + Sync {
 pub type CreateAdapterFn =
     fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn SessionAdapter>>;
 
+pub fn supports_provider(provider: &str) -> bool {
+    matches!(provider, "codex" | "claude")
+}
+
 pub fn default_create_adapter(
     provider: &str,
     event_tx: broadcast::Sender<SessionEvent>,
 ) -> Result<Box<dyn SessionAdapter>> {
     match provider {
         "codex" => Ok(Box::new(codex::CodexAdapter::new(event_tx))),
+        "claude" => Ok(Box::new(claude::ClaudeAdapter::new(event_tx))),
         other => anyhow::bail!("unsupported session provider: {other}"),
     }
 }

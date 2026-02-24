@@ -204,6 +204,11 @@ pub enum SessionEvent {
         code: String,
         message: String,
     },
+
+    // Internal (not persisted or forwarded to SSE clients)
+    ProviderSessionId {
+        provider_session_id: String,
+    },
 }
 
 impl SessionEvent {
@@ -219,6 +224,7 @@ impl SessionEvent {
             Self::DiffUpdated { .. } => "diff_updated",
             Self::StatusChanged { .. } => "status_changed",
             Self::Error { .. } => "error",
+            Self::ProviderSessionId { .. } => "provider_session_id",
         }
     }
 }
@@ -231,6 +237,12 @@ pub struct SessionConfig {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub yolo_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

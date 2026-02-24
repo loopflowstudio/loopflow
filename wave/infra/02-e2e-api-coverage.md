@@ -1,39 +1,43 @@
 # E2E test infrastructure
 
-No existing e2e test starts the `lfd` daemon or exercises the HTTP API. Current e2e tests (`test_smoke.sh`, `test_full_cycle.sh`, `test_rebase_conflict.sh`) exercise the `lf` CLI only. Python tests mock the HTTP client. This means the HTTP validation layer — status codes, error messages, cross-resource constraints — has no integration coverage.
+Live HTTP API coverage for `lfd`. Wave CRUD is covered; remaining routes need the same treatment.
 
-## Architecture
+## Architecture (established)
 
-Three layers:
+Three layers, refined from the original plan:
 
-1. **`scripts/test_*.py`** — Python scripts that do the real work. Start `lfd`, exercise APIs, validate responses, tear down. Self-contained: an LLM agent should be able to run one, read the output, and know if things work.
+1. **`scripts/test_*.py`** — Python scripts that start `lfd`, exercise APIs, validate responses, tear down. Self-contained.
 
-2. **`tests/e2e/test_*.sh`** — Trivial shell one-liners (`uv run python scripts/test_...`) that exist as CI entry points. No logic in shell.
+2. **`tests/e2e/test_*.sh`** — Trivial shell one-liners (`uv run python scripts/test_...`) as CI entry points. No logic in shell.
 
-3. **`scripts/dev.py`** — Already handles `lfd` lifecycle (build, start, kill). Test scripts should reuse this for daemon management rather than reimplementing it.
+3. **`scripts/lib/`** — Shared harness, split into two modules:
+   - `lfd_runtime.py` — hermetic `lfd` lifecycle (isolated `HOME`, temp git repo, ephemeral port, health wait, session token wait, clean teardown)
+   - `api_harness.py` — HTTP assertions (`expect_status`, `expect_error`, `expect_fields`), scenario runner with pass/fail output
 
-## Shared test harness
+The original plan suggested reusing `scripts/dev.py` for daemon management. Building revealed that full isolation (temp HOME, temp repo) per suite is more valuable — it eliminates flakiness from shared daemon state. `LfdRuntime` is purpose-built for this; `dev.py` remains for interactive use.
 
-Extract a `scripts/lib/test_harness.py` (or similar) that provides:
-- Start `lfd` from source, wait for ready, return base URL
-- HTTP helpers with response validation (assert status, assert shape)
-- Cleanup on exit (kill daemon, remove temp data)
-- Structured output: pass/fail per test case, summary at end
+## Progress
 
-Individual test scripts import the harness and focus on the domain logic.
-
-## Migration plan
-
-1. Build the harness against one new test (`test_api_smoke.py` — create wave, get wave, update wave, delete wave)
+1. ~~Build the harness against `test_api_smoke.py` (wave CRUD)~~ — **done**
 2. Add coverage for chords (join, leave, nest, error cases)
-3. Migrate existing shell e2e tests to Python scripts with shell wrappers
-4. Add to CI alongside existing tests, then remove the old shell versions
+3. Add coverage for stimuli (CRUD + owner constraints)
+4. Add coverage for run lifecycle (run, stop, continue, land, next)
+5. Add route coverage manifest so new `/v0` routes cannot land untested
+
+Phase 3 from the original plan (migrate existing shell e2e tests to Python) was dropped. The existing shell tests (`test_smoke.sh`, `test_full_cycle.sh`, `test_rebase_conflict.sh`) exercise CLI workflows, not HTTP APIs — they serve a different purpose and don't need migration.
 
 ## Coverage targets
 
 Every HTTP route should have at least one happy-path test and one error-path test. Priority order:
-- Wave CRUD (create, get, update, delete, list)
+
+- ~~Wave CRUD (create, get, update, delete, list)~~ — **done**, 10 scenarios
 - Wave lifecycle (run, stop, continue, land)
 - Chords (join, leave, nest)
 - Stimuli (create, update, delete)
 - Runs (list, get, active run)
+
+## Open questions
+
+- **Runtime latency**: each suite builds `lfd` from source. As suites multiply, should we cache the binary or build once and share across suites?
+- **Ephemeral port race**: reserve-then-bind gap could cause rare collisions. Not yet observed, but worth watching.
+- **Protocol-level tests**: WebSocket/SSE routes exist but have no contract tests. Unclear whether the current harness pattern extends or needs a different approach.

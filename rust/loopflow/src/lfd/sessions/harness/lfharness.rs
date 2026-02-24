@@ -15,7 +15,7 @@ use crate::lfd::sessions::types::{
     ItemStatus, SessionConfig, SessionEvent, SessionItem, TurnStatus,
 };
 
-pub struct ChatHarness {
+pub struct LfHarness {
     events: broadcast::Sender<SessionEvent>,
     config: Option<SessionConfig>,
     turn_in_progress: Arc<AtomicBool>,
@@ -24,13 +24,13 @@ pub struct ChatHarness {
     shutdown_requested: Arc<AtomicBool>,
 }
 
-impl std::fmt::Debug for ChatHarness {
+impl std::fmt::Debug for LfHarness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChatHarness").finish()
+        f.debug_struct("LfHarness").finish()
     }
 }
 
-impl ChatHarness {
+impl LfHarness {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
             events,
@@ -83,7 +83,7 @@ fn completion_error_code(error: &CompletionError) -> &'static str {
 }
 
 #[async_trait]
-impl SessionHarness for ChatHarness {
+impl SessionHarness for LfHarness {
     async fn start(&mut self, config: &SessionConfig) -> Result<()> {
         self.config = Some(config.clone());
         Ok(())
@@ -107,7 +107,7 @@ impl SessionHarness for ChatHarness {
         let config = self
             .config
             .as_ref()
-            .ok_or_else(|| anyhow!("chat harness not started"))?
+            .ok_or_else(|| anyhow!("lfharness not started"))?
             .clone();
 
         let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
@@ -284,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn stop_running_turn_emits_interrupted_completion() {
         let (tx, mut rx) = broadcast::channel(16);
-        let mut harness = ChatHarness::new(tx);
+        let mut harness = LfHarness::new(tx);
         harness.turn_in_progress.store(true, Ordering::SeqCst);
         *harness.active_turn_id.lock().await = Some("turn_123".to_string());
 

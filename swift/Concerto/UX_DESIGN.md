@@ -48,7 +48,7 @@ New agents start here. The detail panel shows configuration requirements (area n
 
 1. Click **Start designing**
 2. Describe what you want to build
-3. Concerto starts a `design` agent session inline with repo-aware context
+3. Concerto launches `lf design -c "<prompt>"` in a terminal at the repo root
 4. The design session creates and configures the wave; Concerto picks it up on refresh
 
 ### Goals

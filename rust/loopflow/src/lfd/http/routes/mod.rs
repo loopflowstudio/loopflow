@@ -12,7 +12,8 @@ pub mod ws;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
+    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveChildDto,
+    WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -39,7 +40,7 @@ pub async fn resolve_wave_id(
         .get_wave_by_name(&name)
         .await
         .map_err(crate::lfd::http::map_store_error)?;
-    wave.map(|wave| wave.id)
+    wave.map(|wave| wave.id().clone())
         .ok_or_else(|| crate::lfd::http::api_error(StatusCode::NOT_FOUND, "wave not found"))
 }
 
@@ -62,14 +63,14 @@ pub async fn build_wave_dto(
     wave: Wave,
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
-    let latest = store.get_latest_wave_run(&wave.id).await?;
-    let stack_runs = store.list_stack_runs(&wave.id).await?;
+    let latest = store.get_latest_wave_run(wave.id()).await?;
+    let stack_runs = store.list_stack_runs(wave.id()).await?;
     let live_snapshot = build_live_pr_snapshot(store, github_config, &stack_runs).await?;
-    let queue_views = build_wave_queue_views(store, &wave.id, &live_snapshot).await?;
-    let repo = wave.repo.clone();
-    let name = wave.name.clone();
-    let flow_name = wave.flow.clone();
-    let flow_repo = wave.repo.clone();
+    let queue_views = build_wave_queue_views(store, wave.id(), &live_snapshot).await?;
+    let repo = wave.repo().clone();
+    let name = wave.name().clone();
+    let flow_name = wave.flow().clone();
+    let flow_repo = wave.repo().clone();
     let (git_state, flow_steps) = tokio::join!(
         async {
             tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
@@ -87,7 +88,10 @@ pub async fn build_wave_dto(
         }
     );
 
-    let stimuli_list = store.list_stimuli(Some(&wave.id)).await.unwrap_or_default();
+    let stimuli_list = store
+        .list_stimuli(Some(wave.id()))
+        .await
+        .unwrap_or_default();
     let stimuli = stimuli_list.into_iter().map(stimulus_dto).collect();
 
     let active_run = if include_active_run {
@@ -111,16 +115,23 @@ pub async fn build_wave_dto(
     };
 
     Ok(WaveDto {
-        id: wave.id.to_string(),
+        id: wave.id().to_string(),
         object: "wave".to_string(),
-        name: wave.name,
-        repo: wave.repo,
-        flow: wave.flow,
-        direction: wave.direction,
-        area: wave.area,
-        created_at: format_datetime(wave.created_at),
-        status: wave.status.as_str().to_string(),
-        iteration: wave.iteration,
+        wave_type: if wave.is_chord() {
+            "chord".to_string()
+        } else {
+            "voice".to_string()
+        },
+        name: wave.name().clone(),
+        repo: wave.repo().clone(),
+        flow: wave.flow().clone(),
+        direction: wave.direction().clone(),
+        area: wave.area().clone(),
+        created_at: format_datetime(wave.created_at()),
+        status: wave.status().as_str().to_string(),
+        iteration: wave.iteration(),
+        parent_id: wave.parent_id().as_ref().map(ToString::to_string),
+        position: wave.position(),
         local_worktree,
         remote_branch,
         commits,
@@ -131,6 +142,24 @@ pub async fn build_wave_dto(
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
         stimuli,
         active_run,
+        children: wave
+            .children()
+            .iter()
+            .map(|child| WaveChildDto {
+                id: child.id().to_string(),
+                wave_type: if child.is_chord() {
+                    "chord".to_string()
+                } else {
+                    "voice".to_string()
+                },
+                name: child.name().clone(),
+                flow: child.flow().clone(),
+                direction: child.direction().clone(),
+                area: child.area().clone(),
+                status: child.status().as_str().to_string(),
+                position: child.position(),
+            })
+            .collect(),
     })
 }
 
@@ -354,7 +383,7 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunKind,
+        LivePrState, LivePullRequestState, PullRequest, Wave, WaveData, WaveRun, WaveRunKind,
         WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
@@ -409,7 +438,7 @@ mod tests {
     }
 
     fn make_wave(repo: &str) -> Wave {
-        Wave {
+        Wave::Voice(WaveData {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
             repo: repo.to_string(),
@@ -421,18 +450,20 @@ mod tests {
             schema_ref: None,
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
-        }
+            parent_id: None,
+            position: 0,
+        })
     }
 
     fn make_wave_run(wave: &Wave, pr_number: u32) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
-                repo: wave.repo.clone(),
-                flow: wave.flow.clone(),
-                direction: wave.direction.clone(),
-                area: wave.area.clone(),
+                repo: wave.repo().clone(),
+                flow: wave.flow().clone(),
+                direction: wave.direction().clone(),
+                area: wave.area().clone(),
                 pr: Some(PullRequest {
                     url: format!("https://example.test/pr/{pr_number}"),
                     number: Some(pr_number),
@@ -455,7 +486,7 @@ mod tests {
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: pr_number,
-            stack_group_id: wave.id.to_string(),
+            stack_group_id: wave.id().to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
         }
@@ -556,7 +587,7 @@ mod tests {
         let (store, _repo_dir, wave, _) = setup_wave_with_run(17).await;
 
         store
-            .upsert_live_pr_state(&live_state(&wave.repo, 17, LivePrState::Closed))
+            .upsert_live_pr_state(&live_state(wave.repo(), 17, LivePrState::Closed))
             .await
             .expect("live PR state should be upserted");
 
@@ -591,7 +622,7 @@ mod tests {
             (LivePrState::Unknown, 0_u32),
         ] {
             store
-                .upsert_live_pr_state(&live_state(&wave.repo, 21, state))
+                .upsert_live_pr_state(&live_state(wave.repo(), 21, state))
                 .await
                 .expect("live PR state should be upserted");
 

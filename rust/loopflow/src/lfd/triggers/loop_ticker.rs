@@ -65,11 +65,11 @@ async fn tick_loop_waves(
             }
         };
 
-        if wave.status == WaveStatus::Paused {
+        if wave.status() == WaveStatus::Paused {
             continue;
         }
 
-        if scheduler.has_active_session(wave.id.as_str()) {
+        if scheduler.has_active_session(wave.id().as_str()) {
             continue;
         }
 
@@ -81,7 +81,7 @@ async fn tick_loop_waves(
         let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
             Ok(guard) => guard,
             Err(reason) => {
-                tracing::warn!(wave_id = %wave.id, %reason, "scheduler at capacity; loop tick deferred");
+                tracing::warn!(wave_id = %wave.id(), %reason, "scheduler at capacity; loop tick deferred");
                 continue;
             }
         };
@@ -89,7 +89,7 @@ async fn tick_loop_waves(
         let run = match create_wave_run_with_id(store, &wave, &run_id).await {
             Ok(run) => run,
             Err(err) => {
-                tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
+                tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run");
                 continue;
             }
         };

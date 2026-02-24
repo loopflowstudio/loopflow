@@ -18,27 +18,27 @@ use super::WaveExecutor;
 impl WaveExecutor {
     /// Check if the wave's area summary is fresh; regenerate if stale or missing.
     pub(crate) async fn ensure_summary_fresh(&self, wave: &Wave, run: &WaveRun) -> Result<()> {
-        if wave.area.is_empty() {
+        if wave.area().is_empty() {
             return Ok(());
         }
 
         let worktree_path = Path::new(&run.worktree);
-        let current_hash = match hash_areas(worktree_path, &wave.area) {
+        let current_hash = match hash_areas(worktree_path, wave.area()) {
             Ok(h) => h,
             Err(err) => {
-                warn!(wave = %wave.name, error = %err, "failed to hash areas, skipping summary");
+                warn!(wave = %wave.name(), error = %err, "failed to hash areas, skipping summary");
                 return Ok(());
             }
         };
 
-        if let Ok(Some(existing)) = self.store.get_summary(&wave.id).await {
+        if let Ok(Some(existing)) = self.store.get_summary(wave.id()).await {
             if existing.source_hash == current_hash {
-                debug!(wave = %wave.name, "summary is fresh");
+                debug!(wave = %wave.name(), "summary is fresh");
                 return Ok(());
             }
-            info!(wave = %wave.name, "summary is stale, regenerating");
+            info!(wave = %wave.name(), "summary is stale, regenerating");
         } else {
-            info!(wave = %wave.name, "no summary found, generating");
+            info!(wave = %wave.name(), "no summary found, generating");
         }
 
         self.run_internal_summarize(wave, run, &current_hash).await
@@ -57,7 +57,7 @@ impl WaveExecutor {
         let config = load_config_or_default(Some(Path::new(&run.worktree)));
         let token_budget = config.summary_tokens;
 
-        let area_list = wave.area.join(", ");
+        let area_list = wave.area().join(", ");
         let prompt = template
             .replace("{token_budget}", &token_budget.to_string())
             .replace(
@@ -78,7 +78,7 @@ impl WaveExecutor {
         };
 
         let cmd = build_agent_command(&model, &prompt, &launch);
-        info!(wave = %wave.name, model = %model, "running internal summarize step");
+        info!(wave = %wave.name(), model = %model, "running internal summarize step");
 
         let step = ConcreteStep {
             step: Step {
@@ -93,7 +93,7 @@ impl WaveExecutor {
 
         let outcome = self
             .launch_agent(AgentLaunchRequest {
-                wave_id: wave.id.clone(),
+                wave_id: wave.id().clone(),
                 wave_run_id: run.id.clone(),
                 repo: run.snapshot.repo.clone(),
                 worktree: run.worktree.clone(),
@@ -105,7 +105,7 @@ impl WaveExecutor {
             .await?;
 
         if outcome.exit_code != 0 {
-            warn!(wave = %wave.name, exit_code = outcome.exit_code, "summarize step failed, continuing without summary");
+            warn!(wave = %wave.name(), exit_code = outcome.exit_code, "summarize step failed, continuing without summary");
             return Ok(());
         }
 
@@ -114,7 +114,7 @@ impl WaveExecutor {
             Ok(content) if !content.trim().is_empty() => {
                 let summary = Summary {
                     id: LfdId::new(),
-                    wave_id: wave.id.clone(),
+                    wave_id: wave.id().clone(),
                     content,
                     source_hash: source_hash.to_string(),
                     token_budget: token_budget as u32,
@@ -122,13 +122,13 @@ impl WaveExecutor {
                     created_at: Some(OffsetDateTime::now_utc()),
                 };
                 self.store.upsert_summary(&summary).await?;
-                info!(wave = %wave.name, "summary stored");
+                info!(wave = %wave.name(), "summary stored");
             }
             Ok(_) => {
-                warn!(wave = %wave.name, "summarize step produced empty output");
+                warn!(wave = %wave.name(), "summarize step produced empty output");
             }
             Err(err) => {
-                warn!(wave = %wave.name, error = %err, "failed to read summary file");
+                warn!(wave = %wave.name(), error = %err, "failed to read summary file");
             }
         }
 

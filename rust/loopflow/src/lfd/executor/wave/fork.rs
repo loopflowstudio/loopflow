@@ -90,7 +90,7 @@ impl WaveExecutor {
             let executor = self.clone();
             let scheduler = self.scheduler.clone();
             let tx = tx.clone();
-            let fork_wave_id = wave.id.clone();
+            let fork_wave_id = wave.id().clone();
             let wave_run_id = run.id.clone();
             let wave_repo = run.snapshot.repo.clone();
             let worktree = execution.run.worktree.clone();
@@ -309,7 +309,7 @@ impl WaveExecutor {
                 .await?;
             return Ok(());
         }
-        self.advance_run_step(run, plan, &wave.id).await?;
+        self.advance_run_step(run, plan, wave.id()).await?;
         Ok(())
     }
 

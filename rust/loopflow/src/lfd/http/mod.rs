@@ -53,6 +53,8 @@ pub fn router(state: HttpState) -> Router {
             "/waves",
             get(waves::list_waves_handler).post(waves::create_wave_handler),
         )
+        .route("/waves/join", post(waves::join_waves_handler))
+        .route("/waves/leave", post(waves::leave_wave_handler))
         .route(
             "/waves/{wave_id}",
             get(waves::get_wave_handler)
@@ -174,6 +176,16 @@ pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
     match err {
         StoreError::NotFound => api_error(StatusCode::NOT_FOUND, "not found"),
         StoreError::InvalidData(message) => api_error(StatusCode::BAD_REQUEST, message),
+        StoreError::DepthLimitExceeded => {
+            api_error(StatusCode::BAD_REQUEST, "chord depth limit exceeded")
+        }
+        StoreError::NestedWaveCannotOwnStimulus => {
+            api_error(StatusCode::CONFLICT, "nested wave cannot own stimulus")
+        }
+        StoreError::StimulusOwnerCannotBeNested => api_error(
+            StatusCode::CONFLICT,
+            "wave owning stimulus cannot be nested",
+        ),
         StoreError::Serde(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
         StoreError::Sqlite(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
         StoreError::Postgres(err) => api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),

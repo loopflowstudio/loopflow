@@ -29,8 +29,8 @@ pub fn spawn_queue_reconciler(
                         }
                     };
                     for wave in waves {
-                        if let Err(err) = reconcile_wave_queue(&store, &github, &wave.id, QueueTrigger::Poll).await {
-                            tracing::warn!(wave_id = %wave.id, error = %err, "queue reconcile poll failed");
+                        if let Err(err) = reconcile_wave_queue(&store, &github, wave.id(), QueueTrigger::Poll).await {
+                            tracing::warn!(wave_id = %wave.id(), error = %err, "queue reconcile poll failed");
                         }
                     }
                 }

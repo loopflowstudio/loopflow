@@ -75,11 +75,11 @@ async fn check_cron_stimuli(
             }
         };
 
-        if wave.status == WaveStatus::Paused {
+        if wave.status() == WaveStatus::Paused {
             continue;
         }
 
-        if started.contains(&wave.id) {
+        if started.contains(wave.id()) {
             continue;
         }
 
@@ -97,7 +97,7 @@ async fn check_cron_stimuli(
                         Ok(guard) => guard,
                         Err(reason) => {
                             tracing::warn!(
-                                wave_id = %wave.id,
+                                wave_id = %wave.id(),
                                 reason = %reason,
                                 "scheduler at capacity; cron activation deferred"
                             );
@@ -107,7 +107,7 @@ async fn check_cron_stimuli(
 
                     if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id).await {
                         let _ = store.delete_pending_activations(&stimulus.wave_id).await;
-                        started.insert(wave.id.clone());
+                        started.insert(wave.id().clone());
                         spawn_run_task_with_slot(
                             store.clone(),
                             executor.clone(),
@@ -142,7 +142,7 @@ async fn check_cron_stimuli(
                 Ok(guard) => guard,
                 Err(reason) => {
                     tracing::warn!(
-                        wave_id = %wave.id,
+                        wave_id = %wave.id(),
                         reason = %reason,
                         "scheduler at capacity; cron activation deferred"
                     );
@@ -153,7 +153,7 @@ async fn check_cron_stimuli(
             let run = match create_wave_run_with_id(store, &wave, &run_id).await {
                 Ok(run) => run,
                 Err(err) => {
-                    tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
+                    tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run");
                     continue;
                 }
             };

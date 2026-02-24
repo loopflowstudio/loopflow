@@ -2,9 +2,10 @@ use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState,
-    PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun,
-    WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+    PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveData,
+    WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
+use std::collections::HashMap;
 
 // -- Row adapter trait -------------------------------------------------------
 
@@ -98,7 +99,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-///        created_at, schema_ref, schema_name
+///        created_at, schema_ref, schema_name, wave_type, parent_wave_id, position
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(4)?)?;
     let area = parse_json_vec(&row.text(5)?)?;
@@ -111,7 +112,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         status = WaveStatus::Paused;
     }
 
-    Ok(Wave {
+    let data = WaveData {
         id: LfdId::from_raw(row.text(0)?),
         name: row.text(1)?,
         repo: row.text(2)?,
@@ -123,7 +124,102 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         schema_ref: row.opt_text(10)?,
         schema_name: row.opt_text(11)?,
         created_at: Some(created_at),
-    })
+        parent_id: row.opt_text(13)?.map(LfdId::from_raw),
+        position: row.int(14)? as u32,
+    };
+    match row.int(12)? {
+        1 => Ok(Wave::Voice(data)),
+        2 => Ok(Wave::Chord {
+            data,
+            children: Vec::new(),
+        }),
+        value => Err(StoreError::InvalidData(format!(
+            "invalid wave_type: {value}"
+        ))),
+    }
+}
+
+#[derive(Debug)]
+pub struct WaveTreeRow {
+    pub wave: Wave,
+    pub depth: u32,
+}
+
+/// Assemble a nested Wave tree from flat rows that include root + descendants.
+pub fn assemble_wave_tree(rows: Vec<WaveTreeRow>, root_id: &LfdId) -> StoreResult<Wave> {
+    #[derive(Debug)]
+    struct RawNode {
+        wave: Wave,
+        parent_id: Option<LfdId>,
+        position: u32,
+    }
+
+    fn build_wave(
+        id: &LfdId,
+        nodes: &mut HashMap<LfdId, RawNode>,
+        children_by_parent: &HashMap<LfdId, Vec<LfdId>>,
+    ) -> StoreResult<Wave> {
+        let mut node = nodes
+            .remove(id)
+            .ok_or_else(|| StoreError::InvalidData(format!("missing wave in tree: {id}")))?;
+        let child_ids = children_by_parent.get(id).cloned().unwrap_or_default();
+        if let Wave::Chord { children, .. } = &mut node.wave {
+            let mut built_children = Vec::with_capacity(child_ids.len());
+            for child_id in child_ids {
+                built_children.push(build_wave(&child_id, nodes, children_by_parent)?);
+            }
+            *children = built_children;
+        } else if !child_ids.is_empty() {
+            return Err(StoreError::InvalidData(format!(
+                "voice wave cannot have children: {id}"
+            )));
+        }
+        Ok(node.wave)
+    }
+
+    if rows.is_empty() {
+        return Err(StoreError::NotFound);
+    }
+
+    let mut nodes: HashMap<LfdId, RawNode> = HashMap::new();
+    for row in rows {
+        let wave_id = row.wave.id().clone();
+        nodes.insert(
+            wave_id,
+            RawNode {
+                parent_id: row.wave.parent_id().clone(),
+                position: row.wave.position(),
+                wave: row.wave,
+            },
+        );
+    }
+
+    if !nodes.contains_key(root_id) {
+        return Err(StoreError::NotFound);
+    }
+
+    let mut children_by_parent: HashMap<LfdId, Vec<(u32, LfdId)>> = HashMap::new();
+    for (id, node) in &nodes {
+        if let Some(parent_id) = &node.parent_id {
+            children_by_parent
+                .entry(parent_id.clone())
+                .or_default()
+                .push((node.position, id.clone()));
+        }
+    }
+
+    let children_by_parent: HashMap<LfdId, Vec<LfdId>> = children_by_parent
+        .into_iter()
+        .map(|(parent_id, mut children)| {
+            children.sort_by_key(|(position, _)| *position);
+            (
+                parent_id,
+                children.into_iter().map(|(_, child_id)| child_id).collect(),
+            )
+        })
+        .collect();
+
+    build_wave(root_id, &mut nodes, &children_by_parent)
 }
 
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,

@@ -642,7 +642,7 @@ impl DockerExecutor {
 
         if let Some(wave_status) = next_wave_status {
             if let Some(mut wave) = self.store.get_wave(wave_id).await? {
-                wave.status = wave_status;
+                wave.data_mut().status = wave_status;
                 let _ = self.store.update_wave(&wave).await;
             }
         }
@@ -670,7 +670,7 @@ impl DockerExecutor {
 
                 if should_fail_wave {
                     if let Some(mut wave) = self.store.get_wave(&run.wave_id).await? {
-                        wave.status = WaveStatus::Failed;
+                        wave.data_mut().status = WaveStatus::Failed;
                         let _ = self.store.update_wave(&wave).await;
                     }
                 }
@@ -1365,7 +1365,7 @@ impl DockerExecutor {
         if !run.branch.trim().is_empty() {
             return run.branch.clone();
         }
-        let fallback = sanitize_token(&wave.name);
+        let fallback = sanitize_token(wave.name());
         if fallback.is_empty() {
             "main".to_string()
         } else {
@@ -2155,8 +2155,8 @@ impl AgentExecutor for DockerExecutor {
     }
 
     async fn cleanup_wave(&self, wave: &Wave) -> Result<()> {
-        let repo = Self::resolve_host_repo(&wave.repo);
-        let host_worktree = crate::engine::worktrees::worktree_path(&repo, &wave.name);
+        let repo = Self::resolve_host_repo(wave.repo());
+        let host_worktree = crate::engine::worktrees::worktree_path(&repo, wave.name());
         let workspace = Self::docker_workspace_for_host_worktree(&repo, &host_worktree, "main");
         self.cleanup_container_worktree(&workspace).await
     }
@@ -2167,7 +2167,7 @@ mod tests {
     use super::*;
     use crate::lfd::config::{ExecutorLimitsConfig, ExecutorType};
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{WaveRunKind, WaveRunSnapshot};
+    use crate::lfd::types::{WaveData, WaveRunKind, WaveRunSnapshot};
     use std::io::Cursor;
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
@@ -2463,7 +2463,7 @@ mod tests {
         repo: &Path,
         name: &str,
     ) -> (Wave, WaveRun) {
-        let wave = Wave {
+        let wave = Wave::Voice(WaveData {
             id: LfdId::new(),
             name: name.to_string(),
             repo: repo.to_string_lossy().to_string(),
@@ -2475,7 +2475,9 @@ mod tests {
             schema_ref: None,
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
-        };
+            parent_id: None,
+            position: 0,
+        });
         store
             .create_wave(&wave)
             .await
@@ -2483,7 +2485,7 @@ mod tests {
 
         let run = WaveRun {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: repo.to_string_lossy().to_string(),
                 flow: "test-flow".to_string(),
@@ -2505,7 +2507,7 @@ mod tests {
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
-            stack_group_id: wave.id.to_string(),
+            stack_group_id: wave.id().to_string(),
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
         };
@@ -2641,11 +2643,11 @@ mod tests {
         );
 
         let lost_wave_after = store
-            .get_wave(&lost_wave.id)
+            .get_wave(lost_wave.id())
             .await
             .expect("get lost wave")
             .expect("lost wave exists");
-        assert_eq!(lost_wave_after.status, WaveStatus::Failed);
+        assert_eq!(lost_wave_after.status(), WaveStatus::Failed);
 
         let rehydrated_run_after = store
             .get_wave_run(&rehydrated_run.id)
@@ -2655,11 +2657,11 @@ mod tests {
         assert_eq!(rehydrated_run_after.status, WaveRunStatus::Running);
 
         let rehydrated_wave_after = store
-            .get_wave(&rehydrated_wave.id)
+            .get_wave(rehydrated_wave.id())
             .await
             .expect("get rehydrated wave")
             .expect("rehydrated wave exists");
-        assert_eq!(rehydrated_wave_after.status, WaveStatus::Running);
+        assert_eq!(rehydrated_wave_after.status(), WaveStatus::Running);
 
         assert_eq!(backend.stopped(), vec!["container-orphan".to_string()]);
         assert_eq!(backend.removed(), vec!["container-orphan".to_string()]);
@@ -2675,7 +2677,7 @@ mod tests {
                 .expect("db"),
         );
 
-        let wave = Wave {
+        let wave = Wave::Voice(WaveData {
             id: LfdId::new(),
             name: "completed-wave".to_string(),
             repo: tmp.path().to_string_lossy().to_string(),
@@ -2687,7 +2689,9 @@ mod tests {
             schema_ref: None,
             schema_name: None,
             created_at: Some(OffsetDateTime::now_utc()),
-        };
+            parent_id: None,
+            position: 0,
+        });
         store
             .create_wave(&wave)
             .await
@@ -2695,7 +2699,7 @@ mod tests {
 
         let run = WaveRun {
             id: LfdId::new(),
-            wave_id: wave.id.clone(),
+            wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: tmp.path().to_string_lossy().to_string(),
                 flow: "test-flow".to_string(),
@@ -2717,7 +2721,7 @@ mod tests {
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
-            stack_group_id: wave.id.to_string(),
+            stack_group_id: wave.id().to_string(),
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
         };
@@ -2771,10 +2775,10 @@ mod tests {
         assert_eq!(run_after.status, WaveRunStatus::Completed);
 
         let wave_after = store
-            .get_wave(&wave.id)
+            .get_wave(wave.id())
             .await
             .expect("get wave")
             .expect("wave exists");
-        assert_eq!(wave_after.status, WaveStatus::Idle);
+        assert_eq!(wave_after.status(), WaveStatus::Idle);
     }
 }

@@ -81,6 +81,7 @@ pub struct CommitEntryDto {
 pub struct WaveDto {
     pub id: String,
     pub object: String,
+    pub wave_type: String,
     pub name: String,
     pub repo: String,
     pub flow: String,
@@ -89,6 +90,9 @@ pub struct WaveDto {
     pub created_at: Option<String>,
     pub status: String,
     pub iteration: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    pub position: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_worktree: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -103,6 +107,20 @@ pub struct WaveDto {
     pub stimuli: Vec<StimulusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<WaveChildDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WaveChildDto {
+    pub id: String,
+    pub wave_type: String,
+    pub name: String,
+    pub flow: String,
+    pub direction: Vec<String>,
+    pub area: Vec<String>,
+    pub status: String,
+    pub position: u32,
 }
 
 #[derive(Debug, Serialize)]

@@ -59,17 +59,17 @@ async fn refresh_summaries_for_repo(
     };
 
     for wave in waves {
-        if wave.area.is_empty() {
+        if wave.area().is_empty() {
             continue;
         }
 
         // Skip waves that are actively running — the execute loop handles those.
-        if wave.status == WaveStatus::Running {
+        if wave.status() == WaveStatus::Running {
             continue;
         }
 
         // Debounce per wave.
-        let wave_key = wave.id.to_string();
+        let wave_key = wave.id().to_string();
         if let Some(last) = last_refresh.get(&wave_key) {
             if last.elapsed() < Duration::from_secs(DEBOUNCE_SECS) {
                 continue;
@@ -77,7 +77,7 @@ async fn refresh_summaries_for_repo(
         }
 
         // Need an active run to get the worktree path.
-        let run = match store.get_active_wave_run(&wave.id).await {
+        let run = match store.get_active_wave_run(wave.id()).await {
             Ok(Some(run)) => run,
             _ => continue,
         };
@@ -86,7 +86,7 @@ async fn refresh_summaries_for_repo(
 
         if let Err(err) = executor.ensure_summary_fresh(&wave, &run).await {
             tracing::warn!(
-                wave = %wave.name,
+                wave = %wave.name(),
                 error = %err,
                 "proactive summary refresh failed"
             );

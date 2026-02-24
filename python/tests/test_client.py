@@ -154,6 +154,32 @@ class TestClientResponses:
         assert "area" not in received
         client.close()
 
+    def test_join_waves_sends_correct_body(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=WAVE_MINIMAL)
+
+        client = _mock_client(handler)
+        client.join_waves("designer", "infra", name="ensemble")
+        assert received["wave_a"] == "designer"
+        assert received["wave_b"] == "infra"
+        assert received["name"] == "ensemble"
+        client.close()
+
+    def test_leave_wave_sends_correct_body(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=WAVE_MINIMAL)
+
+        client = _mock_client(handler)
+        client.leave_wave("designer")
+        assert received["wave"] == "designer"
+        client.close()
+
     def test_next_wave(self):
         def handler(request):
             assert request.url.path == "/v0/waves/reduce/next"

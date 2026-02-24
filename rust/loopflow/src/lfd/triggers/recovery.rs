@@ -65,7 +65,7 @@ async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
                     tracing::error!(run_id = %run.id, error = %err, "failed to update stuck run status");
                 }
                 if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id).await {
-                    wave.status = WaveStatus::Failed;
+                    wave.data_mut().status = WaveStatus::Failed;
                     if let Err(err) = store.update_wave(&wave).await {
                         tracing::error!(wave_id = %run.wave_id, error = %err, "failed to update wave status");
                     }

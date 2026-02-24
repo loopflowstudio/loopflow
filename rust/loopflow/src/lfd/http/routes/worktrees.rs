@@ -34,7 +34,7 @@ pub async fn list_worktrees_handler(
 
     let wave_name_to_id: std::collections::HashMap<String, String> = waves
         .into_iter()
-        .map(|w| (w.name.clone(), w.id.to_string()))
+        .map(|w| (w.name().clone(), w.id().to_string()))
         .collect();
 
     let worktrees = tokio::task::spawn_blocking({

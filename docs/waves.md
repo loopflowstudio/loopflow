@@ -18,6 +18,27 @@ PY
 
 This runs the `ship` flow on `src/api/` with the `product-engineer` direction—continuously, creating PRs until you stop it.
 
+## Chords
+
+```bash
+python - <<'PY'
+import loopflow.api as loopflow
+
+loopflow.create_wave("designer", repo=".", flow="ship", direction=["designer"], area=["docs/"])
+loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra-engineer"], area=["rust/"])
+loopflow.join("designer", "infra")  # creates a chord from two voices
+loopflow.run_wave("designer")       # run the chord
+PY
+```
+
+Voices are independent waves. `join` groups them into a chord. `leave` pulls a voice back out.
+
+```python
+loopflow.join("ensemble", "vocalist")  # add a voice to an existing chord
+loopflow.join("chord-a", "chord-b", nest=True)  # nest chord-b inside chord-a
+loopflow.leave("vocalist")             # vocalist becomes solo again (no stimulus)
+```
+
 ## Stimulus Types
 
 | Stimulus | Runs when | Command |

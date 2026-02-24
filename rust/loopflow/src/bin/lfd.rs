@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|wave| PathBuf::from(wave.repo))
+        .map(|wave| PathBuf::from(wave.repo()))
         .collect::<Vec<_>>();
     match executor.run_worktree_janitor(&repo_roots).await {
         Ok(report) => {

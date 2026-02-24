@@ -71,11 +71,11 @@ async fn check_watch_stimuli(
             }
         };
 
-        if wave.status == WaveStatus::Paused {
+        if wave.status() == WaveStatus::Paused {
             continue;
         }
 
-        if started.contains(&wave.id) {
+        if started.contains(wave.id()) {
             continue;
         }
 
@@ -93,7 +93,7 @@ async fn check_watch_stimuli(
                         Ok(guard) => guard,
                         Err(reason) => {
                             tracing::warn!(
-                                wave_id = %wave.id,
+                                wave_id = %wave.id(),
                                 reason = %reason,
                                 "scheduler at capacity; watch activation deferred"
                             );
@@ -103,7 +103,7 @@ async fn check_watch_stimuli(
 
                     if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id).await {
                         let _ = store.delete_pending_activations(&stimulus.wave_id).await;
-                        started.insert(wave.id.clone());
+                        started.insert(wave.id().clone());
                         spawn_run_task_with_slot(
                             store.clone(),
                             executor.clone(),
@@ -148,7 +148,7 @@ async fn check_watch_stimuli(
                     Ok(guard) => guard,
                     Err(reason) => {
                         tracing::warn!(
-                            wave_id = %wave.id,
+                            wave_id = %wave.id(),
                             reason = %reason,
                             "scheduler at capacity; watch activation deferred"
                         );
@@ -159,7 +159,7 @@ async fn check_watch_stimuli(
                 let run = match create_wave_run_with_id(store, &wave, &run_id).await {
                     Ok(run) => run,
                     Err(err) => {
-                        tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
+                        tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run");
                         continue;
                     }
                 };
@@ -172,7 +172,7 @@ async fn check_watch_stimuli(
                 );
             }
             Err(err) => {
-                tracing::warn!(wave_id = %wave.id, stimulus_id = %stimulus.id, error = %err, "watch check failed");
+                tracing::warn!(wave_id = %wave.id(), stimulus_id = %stimulus.id, error = %err, "watch check failed");
             }
         }
     }
@@ -186,7 +186,7 @@ struct WatchCheck {
 }
 
 fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, git2::Error> {
-    let repo = Repository::open(&wave.repo)?;
+    let repo = Repository::open(wave.repo())?;
 
     let mut remote = repo.find_remote("origin")?;
     remote.fetch(&["main"], None, None)?;
@@ -235,12 +235,12 @@ fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, 
         }
     };
 
-    let area_match = if wave.area.is_empty() {
+    let area_match = if wave.area().is_empty() {
         true
     } else {
         diff.deltas().any(|delta| {
             let path = delta.new_file().path().unwrap_or(Path::new(""));
-            wave.area.iter().any(|area| path.starts_with(area))
+            wave.area().iter().any(|area| path.starts_with(area))
         })
     };
 

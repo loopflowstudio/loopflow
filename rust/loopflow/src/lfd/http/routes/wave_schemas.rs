@@ -131,19 +131,19 @@ pub async fn list_wave_schemas_handler(
     }
 
     for wave in &waves {
-        if let Some(schema_ref) = &wave.schema_ref {
+        if let Some(schema_ref) = wave.schema_ref() {
             active_by_ref
                 .entry(schema_ref.clone())
-                .or_insert_with(|| wave.id.to_string());
+                .or_insert_with(|| wave.id().to_string());
         }
     }
 
-    for wave in waves.iter().filter(|wave| wave.schema_ref.is_none()) {
-        let fallback_name = wave.schema_name.as_deref().unwrap_or(&wave.name);
+    for wave in waves.iter().filter(|wave| wave.schema_ref().is_none()) {
+        let fallback_name = wave.schema_name().as_deref().unwrap_or(wave.name());
         if let Some(schema) = fallback_schema_by_name.get(fallback_name) {
             active_by_ref
                 .entry(schema.schema_ref.clone())
-                .or_insert_with(|| wave.id.to_string());
+                .or_insert_with(|| wave.id().to_string());
         }
     }
 

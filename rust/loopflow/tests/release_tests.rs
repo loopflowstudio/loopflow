@@ -83,3 +83,41 @@ fn release_keeps_existing_header() {
     assert_eq!(notes.lines().next().expect("first line"), "# v0.9.2");
     assert_eq!(notes.matches("# v0.9.2").count(), 1);
 }
+
+#[test]
+fn release_branch_starts_from_default_branch() {
+    let gh_script = write_gh_script("[]");
+    let claude_script = write_claude_script("## Highlights\n\n- Release notes.");
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("claude", claude_script.as_str()),
+    ]);
+
+    let repo = TestRepo::new();
+    let _ = git_output(&repo, &["tag", "v0.9.1"]);
+    repo.create_branch("feature-branch");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+
+    release(repo.path(), "0.9.2", &NullProgress).expect("release should succeed");
+
+    let commits = git_output(&repo, &["log", "--format=%s", "main..release/v0.9.2"]);
+    assert_eq!(commits.lines().collect::<Vec<_>>(), vec!["release: v0.9.2"]);
+}
+
+#[test]
+fn release_requires_clean_working_tree() {
+    let gh_script = write_gh_script("[]");
+    let claude_script = write_claude_script("## Highlights\n\n- Release notes.");
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("claude", claude_script.as_str()),
+    ]);
+
+    let repo = TestRepo::new();
+    repo.create_file("dirty.txt", "dirty");
+
+    let error = release(repo.path(), "0.9.2", &NullProgress).expect_err("release should fail");
+    assert!(error.to_string().contains("working tree dirty"));
+}

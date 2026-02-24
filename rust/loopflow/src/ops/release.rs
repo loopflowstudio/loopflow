@@ -7,7 +7,7 @@ use crate::engine::agent::{launch_agent, LaunchConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::command::run_command;
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::get_default_branch;
+use crate::engine::git::{get_default_branch, is_clean};
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -24,6 +24,11 @@ struct MergedPr {
 pub fn release(repo: &Path, version: &str, progress: &impl Progress) -> OpsResult<String> {
     if !command_exists("gh") {
         return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+    if !is_clean(repo)? {
+        return Err(OpsError::Message(
+            "working tree dirty; commit or stash changes before running release".to_string(),
+        ));
     }
 
     let version = normalize_version(version);
@@ -180,8 +185,12 @@ fn write_release_notes(repo: &Path, notes: &str, version: &str) -> OpsResult<()>
 
 fn create_release_pr(repo: &Path, version: &str) -> OpsResult<String> {
     let branch = format!("release/v{version}");
+    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let base_branch = get_default_branch(&main_repo)?;
+    let upstream_ref = format!("origin/{base_branch}");
 
-    run_checked(repo, "git", &["checkout", "-B", &branch])?;
+    run_checked(repo, "git", &["fetch", "origin", &base_branch])?;
+    run_checked(repo, "git", &["checkout", "-B", &branch, &upstream_ref])?;
     run_checked(repo, "git", &["add", "RELEASE_NOTES.md"])?;
 
     if !has_staged_changes(repo)? {

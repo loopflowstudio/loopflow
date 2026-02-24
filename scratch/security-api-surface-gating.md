@@ -1,102 +1,92 @@
 # 04: API Surface Gating
 
-## Problem
+## Current state
 
-lfd’s HTTP and WebSocket surface is still permissive in ways that can be abused: oversized payloads can burn resources, raw internal errors can leak paths/tokens, and outbound HTTP calls can accidentally carry auth headers across host boundaries.
+Phase 04 API surface hardening is implemented on branch `jack-heart.wavemodel.20260223_1611`.
 
-Who benefits:
-- Operators running lfd on non-loopback addresses (fewer crash/leak paths)
-- Local users relying on session-token auth (token stays local)
-- Remote users behind reverse proxies (spoofed forwarded headers no longer influence trust)
+The `lfd` HTTP and WebSocket boundary now enforces strict default limits, fail-closed proxy trust, sanitized client-facing errors, and safe outbound redirect handling for authenticated requests.
 
-Why now: phases 01–03 locked down auth and container runtime; the biggest remaining risk is API-envelope hardening and credential leakage at boundaries.
+## What shipped
 
-## Approach
+### 1) Configurable security envelope (`api_security.http`)
 
-Ship one “API guardrail” layer applied to all lfd HTTP/WS traffic, with strict defaults and explicit config knobs.
+Default policy now lives in `lfd::config` with YAML + env overrides:
 
-1. **Add `ApiSecurityConfig` to `lfd::config` (YAML + env overrides).**
-   - `http.max_json_body_bytes = 1_048_576` (1 MiB)
-   - `http.max_hook_body_bytes = 262_144` (256 KiB)
-   - `http.max_ws_frame_bytes = 65_536` (64 KiB)
-   - `http.max_ws_message_bytes = 262_144` (256 KiB)
-   - `http.max_ws_queue = 256`
-   - `http.max_ws_malformed = 3`
-   - `http.auth_failures_per_minute = 12`
-   - `http.trusted_proxy_cidrs = []` (fail-closed default)
+- `max_json_body_bytes = 1_048_576`
+- `max_hook_body_bytes = 262_144`
+- `max_ws_frame_bytes = 65_536`
+- `max_ws_message_bytes = 262_144`
+- `max_ws_queue = 256`
+- `max_ws_malformed = 3`
+- `auth_failures_per_minute = 12`
+- `trusted_proxy_cidrs = []` (fail-closed by default)
 
-2. **Inbound hardening in router/middleware.**
-   - Apply global body cap to `/v0/*`, `/status`, `/ws` handshake paths.
-   - Apply stricter body cap to `/hooks/git` and `/v0/hooks/github`.
-   - Add auth-failure throttle middleware keyed by **(resolved client source, auth context hash, endpoint group)**.
-   - Return deterministic 4xx errors (`413` for size, `429` for throttle) with sanitized payloads.
+### 2) Inbound HTTP hardening
 
-3. **WebSocket gating in `routes/ws.rs`.**
-   - Set handshake message/frame caps from config.
-   - Insert per-connection bounded outbound queue (`max_ws_queue`); overflow disconnects client.
-   - Count malformed inbound messages (non-text/non-pong or invalid envelope) and disconnect after `max_ws_malformed`.
+- Global body caps applied to `/v0/*`, `/status`, and `/ws` handshake paths.
+- Stricter hook cap applied to `/hooks/git` and `/v0/hooks/github`.
+- Auth-failure throttle added with key: `(resolved source IP, auth context hash, endpoint group)`.
+- Deterministic `413` and `429` responses returned with sanitized payloads.
 
-4. **Centralized error sanitization path.**
-   - Replace raw `err.to_string()` HTTP responses with a shared mapper that redacts:
-     - filesystem paths under repo/worktree/home
-     - bearer/static/session token-like substrings
-     - internal host/volume identifiers
-   - Keep detailed errors in structured logs only, and log sanitized request metadata.
+### 3) WebSocket gating
 
-5. **Safe outbound HTTP client for `github.rs` and `registration.rs`.**
-   - Introduce `lfd::http_client::SafeHttpClient`.
-   - Allow only `http`/`https` schemes.
-   - Disable automatic redirects; manually follow up to 5 hops.
-   - On host change, strip sensitive headers (`Authorization`, `Cookie`, and internal token headers) before follow-up request.
-   - Reuse this client for all authenticated outbound calls.
+- Frame/message limits sourced from config.
+- Per-connection bounded outbound queue; overflow disconnects the client.
+- Malformed inbound message counter; disconnect after configured threshold.
 
-6. **Proxy trust guardrails.**
-   - Resolve source IP from socket peer by default.
-   - Honor `X-Forwarded-*` only when peer IP matches configured trusted CIDR.
-   - If headers are malformed or trust is ambiguous, fall back to peer IP (never trust forwarded values).
+### 4) Centralized error sanitization
 
-7. **Regression coverage across Rust + clients.**
-   - Rust: oversized body/frame rejection, WS malformed disconnect, 429 throttle behavior, redirect host-change strip, sanitized error payloads, proxy CIDR trust behavior.
-   - Python + Swift: confirm session-token fallback is local-only and no bearer token leaks on remote URLs/redirects.
+HTTP error payloads redact:
 
-## Alternatives considered
+- repo/worktree/home filesystem paths
+- bearer/static/session token-like substrings
+- internal host/volume identifiers
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Per-route hand-written limits and checks | Fine-grained control | Repeats logic, drifts quickly, misses new endpoints |
-| Trust `X-Forwarded-*` by default | Easier reverse-proxy setup | Violates fail-closed security invariant; spoofable in direct-connect paths |
-| Rely on reqwest default redirect behavior | Less code | Security properties are implicit and hard to test/guarantee |
+Detailed raw errors stay in structured logs.
 
-## Key decisions
+### 5) Safe outbound HTTP redirect handling
 
-- We are enforcing defaults with explicit opt-out knobs, not optional middleware. This follows the wave invariant: **“Fail closed on auth/trust ambiguity.”**
-- Throttling keys are hybrid (source + auth context) to avoid punishing NAT-heavy environments while still slowing brute force.
-- Outbound HTTP goes through one safe client abstraction so we can prove the invariant: **“No cross-host auth header forwarding.”**
-- Limits and throttles are applied by shared API boundary, not route tags, following the post-ship direction: **“Method-tier auth beat route tagging.”**
+`SafeHttpClient` now fronts authenticated outbound calls (`github.rs`, `registration.rs`):
 
-## Scope
+- allows only `http`/`https`
+- disables automatic redirects and follows manually (max 5)
+- strips sensitive headers on redirect authority change
+- rejects non-replayable redirect follow-ups only when an actual follow is required
 
-- In scope:
-  - HTTP body caps (global + hooks)
-  - Auth-failure throttling for auth-sensitive entry points
-  - WebSocket frame/message/queue/malformed caps
-  - Central sanitized API error mapper
-  - Safe outbound HTTP redirect/scheme/header handling
-  - Trusted proxy CIDR gating for forwarded headers
-  - Regression tests in Rust, plus token-leak prevention checks in Python/Swift clients
-- Out of scope:
-  - Business authorization policy changes (phase 06)
-  - Full IAM/key-tier model (phase 05+remote)
-  - Host compromise protections
-  - SSRF policy for future URL-fetching endpoints
+### 6) Trusted proxy guardrails
 
-## Done when
+- Source identity defaults to socket peer IP.
+- `X-Forwarded-*` is honored only when peer IP is in configured trusted CIDRs.
+- Malformed/ambiguous forwarded headers fall back to peer IP.
+
+### 7) Coverage and docs
+
+- Added regression tests for body/frame caps, auth throttling, proxy trust, WS malformed behavior, redirect header stripping, and sanitized error payloads.
+- Added client token-leak prevention checks in Python and Swift suites.
+- Updated `docs/lfd.md` with new `LFD_HTTP_*` settings and `api_security.http` examples.
+
+## Security invariants now enforced
+
+- Fail closed on auth/trust ambiguity.
+- No cross-host forwarding of sensitive auth headers.
+- API size abuse gets deterministic rejection behavior.
+- Forwarded client identity is trusted only behind explicit proxy allowlists.
+
+## Validation summary
+
+Targeted Phase 04 test suites pass:
 
 - `cargo test -p loopflow -- lfd::http:: lfd::auth:: lfd::github:: lfd::registration::`
 - `uv run pytest python/tests/test_client.py -k token`
 - `swift test --package-path swift --filter FileTokenProviderTests`
-- Plus observable checks:
-  - Oversized JSON/WS payloads get predictable `413`/disconnect behavior.
-  - Cross-host redirect test fixture proves sensitive headers are stripped.
-  - Error responses never include repo/worktree paths or token strings.
-  - `X-Forwarded-*` affects source identity only when peer IP is in trusted CIDRs.
+
+Known unrelated instability during full-suite runs:
+
+- Intermittent `cargo test --all` failure at `wave_rename_renames_branch`.
+- Environment-sensitive Concerto UI failure in `ScreenshotPipelineTests.testCapture` (app foreground activation).
+
+## Remaining follow-ups
+
+1. Decide whether to fix or quarantine the unrelated flaky Rust test before merge.
+2. Stabilize Concerto screenshot pipeline activation behavior in CI/local headless runs.
+3. Keep expanding sanitizer regression cases as new token/path formats appear.

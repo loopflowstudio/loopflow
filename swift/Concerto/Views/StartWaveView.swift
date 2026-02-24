@@ -78,9 +78,7 @@ struct StartWaveView: View {
             defer { isLaunching = false }
 
             do {
-                let escapedPrompt = terminalLauncher.escapeShellSingleQuotes(trimmedPrompt)
-                let command = "lf design -c '\(escapedPrompt)'"
-                try terminalLauncher.launchTerminal(.warp, at: repoRoot, command: command)
+                try terminalLauncher.launchDesign(prompt: trimmedPrompt, at: repoRoot)
             } catch {
                 errorMessage = error.localizedDescription
             }

@@ -274,7 +274,7 @@ impl From<ComposePsRow> for ComposeServiceStatus {
 mod tests {
     use super::render_compose_file;
     use crate::lfd::config::{ExecutorType, LfdConfig, Mode, StorageType};
-    use crate::lfd::secret_string::SecretString;
+    use secrecy::SecretString;
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
 
@@ -327,7 +327,7 @@ mod tests {
         std::env::set_var("LFD_AUTH_TOKEN", "runtime-secret-value");
 
         let mut config = container_config();
-        config.auth.token = Some(SecretString::from("config-secret-value"));
+        config.auth.token = Some(SecretString::new("config-secret-value".to_string()));
         let content = render_compose_file(&config).expect("render compose file");
 
         assert!(content.contains("LFD_AUTH_TOKEN: \"${LFD_AUTH_TOKEN:-}\""));

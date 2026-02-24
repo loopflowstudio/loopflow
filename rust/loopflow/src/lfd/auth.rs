@@ -11,10 +11,12 @@ use axum::response::Response;
 use ipnet::IpNet;
 use sha2::{Digest, Sha256};
 
+use secrecy::{ExposeSecret, SecretString};
+use subtle::ConstantTimeEq;
+
 use crate::lfd::http;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::registration::ConnectionValidator;
-use crate::lfd::secret_string::SecretString;
 
 const THROTTLE_WINDOW: Duration = Duration::from_secs(60);
 
@@ -175,10 +177,18 @@ fn authorize_expected_token(
     provided_token: Option<&str>,
 ) -> Result<(), (StatusCode, &'static str)> {
     match provided_token {
-        Some(provided) if expected_token.constant_time_eq_str(provided) => Ok(()),
+        Some(provided) if token_matches(expected_token, provided) => Ok(()),
         Some(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
         None => Err((StatusCode::UNAUTHORIZED, "missing token")),
     }
+}
+
+fn token_matches(expected: &SecretString, provided: &str) -> bool {
+    expected
+        .expose_secret()
+        .as_bytes()
+        .ct_eq(provided.as_bytes())
+        .into()
 }
 
 fn extract_token(headers: &HeaderMap) -> Option<&str> {
@@ -267,10 +277,9 @@ fn throttled_response() -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::secret_string::SecretString;
 
     fn token(value: &str) -> SecretString {
-        SecretString::from(value)
+        SecretString::new(value.to_string())
     }
 
     #[test]

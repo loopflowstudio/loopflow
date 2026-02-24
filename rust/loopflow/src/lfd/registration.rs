@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::lfd::http_client::SafeHttpClient;
 use crate::lfd::redaction::sanitize_operator_message;
-use crate::lfd::secret_string::SecretString;
+use secrecy::SecretString;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 

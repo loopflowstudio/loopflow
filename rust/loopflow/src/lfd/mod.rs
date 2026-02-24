@@ -15,7 +15,6 @@ pub mod queue;
 pub mod redaction;
 pub mod registration;
 pub mod scheduler;
-pub mod secret_string;
 pub mod security;
 pub mod service;
 pub mod session_token;

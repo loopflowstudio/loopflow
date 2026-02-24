@@ -10,9 +10,9 @@ use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
 use crate::lfd::registration::RegistrationClient;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::secret_string::SecretString;
 use crate::lfd::sessions::SessionManager;
 use crate::lfd::store::SharedStore;
+use secrecy::SecretString;
 
 #[derive(Clone)]
 pub struct HttpState {

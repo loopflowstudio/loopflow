@@ -13,10 +13,10 @@ use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::scheduler::Scheduler;
-use loopflow::lfd::secret_string::SecretString;
 use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfd::sessions::SessionManager;
 use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
+use secrecy::SecretString;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -382,7 +382,7 @@ struct TerminalLauncher {
     }
 
     /// Escape single quotes for shell: ' becomes '\''
-    private func escapeShellSingleQuotes(_ string: String) -> String {
+    func escapeShellSingleQuotes(_ string: String) -> String {
         string.replacingOccurrences(of: "'", with: "'\\''")
     }
 

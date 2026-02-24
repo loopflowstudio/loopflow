@@ -3,6 +3,7 @@ import SwiftUI
 
 public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var api: Wave
+    public var content: WaveContent?
     public var worktreePath: String?
     public var branch: String?
     public var isDirty: Bool
@@ -26,6 +27,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public init(
         api: Wave,
+        content: WaveContent? = nil,
         worktreePath: String? = nil,
         branch: String? = nil,
         isDirty: Bool = false,
@@ -49,6 +51,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     ) {
         let activeRun = api.activeRun
         self.api = api
+        self.content = content
         self.worktreePath = worktreePath ?? activeRun?.worktree ?? api.localWorktree
         self.branch = branch ?? activeRun?.branch ?? api.remoteBranch
         self.isDirty = isDirty

@@ -372,33 +372,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return WaveFlowsResult(flows: flows + steps, directions: directions)
     }
 
-    public func listWaveSchemas(repo: RepoTarget) async throws -> [WaveSchema] {
-        var components = URLComponents(url: apiBaseURL.appendingPathComponent("wave/schemas"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
-
-        guard let url = components.url else {
-            LoggingService.lfd("listWaveSchemas: invalid URL")
-            return []
-        }
-
-        LoggingService.lfd("listWaveSchemas: GET \(url)")
-
-        do {
-            let (data, response) = try await performGet(url)
-            guard response.statusCode == 200 else {
-                return []
-            }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let schemaData = json["data"] as? [[String: Any]] else {
-                return []
-            }
-
-            return schemaData.compactMap(Self.parseWaveSchemaFromJSON)
-        } catch {
-            return []
-        }
-    }
-
     // MARK: - WaveRuns
 
     public func listWaveRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [WaveRun] {
@@ -1091,37 +1064,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     // MARK: - Private helpers
-
-    private static func parseWaveSchemaFromJSON(_ json: [String: Any]) -> WaveSchema? {
-        guard let schemaRef = json["schema_ref"] as? String,
-              let name = json["name"] as? String,
-              let flow = json["flow"] as? String,
-              let sourceRaw = json["source"] as? String,
-              let source = WaveSchema.Source(rawValue: sourceRaw) else {
-            return nil
-        }
-
-        let stimulus: StimulusSchema?
-        if let stimulusJson = json["stimulus"] as? [String: Any],
-           let kind = stimulusJson["kind"] as? String {
-            stimulus = StimulusSchema(kind: kind, cron: stimulusJson["cron"] as? String)
-        } else {
-            stimulus = nil
-        }
-
-        return WaveSchema(
-            schemaRef: schemaRef,
-            name: name,
-            flow: flow,
-            area: normalizeStringList(json["area"]),
-            direction: normalizeDirection(json["direction"]),
-            owner: json["owner"] as? String,
-            description: json["description"] as? String,
-            source: source,
-            activeWaveId: json["active_wave_id"] as? String,
-            stimulus: stimulus
-        )
-    }
 
     private static func parseWorktreeFromJSON(_ json: [String: Any]) -> WorktreeInfo? {
         guard let path = json["path"] as? String, !path.isEmpty else { return nil }

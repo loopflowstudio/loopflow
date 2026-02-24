@@ -1,28 +1,29 @@
 // Landing view shown when no wave is selected.
-// Single text field to start a new wave by name.
+// Collects a design prompt and launches an interactive `lf design` session.
 
 import SwiftUI
 import LoopflowCore
 
 struct StartWaveView: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
-    @State private var waveName = ""
-    @State private var isCreating = false
+    @State private var designPrompt = ""
+    @State private var isLaunching = false
     @State private var errorMessage: String?
     @FocusState private var isTextFieldFocused: Bool
+
+    private let terminalLauncher = TerminalLauncher()
 
     var body: some View {
         VStack(spacing: Spacing.xxl) {
             Spacer()
 
             VStack(spacing: Spacing.lg) {
-                Text("Start a wave")
+                Text("Start designing")
                     .font(Typography.heroTitle())
                     .foregroundStyle(palette.accent)
 
-                TextField("What do you want to build?", text: $waveName)
+                TextField("Describe what you want to build...", text: $designPrompt)
                     .textFieldStyle(.plain)
                     .font(Typography.body())
                     .padding(Spacing.md)
@@ -30,8 +31,14 @@ struct StartWaveView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                     .frame(maxWidth: 400)
                     .focused($isTextFieldFocused)
-                    .onSubmit { createWave() }
-                    .disabled(isCreating)
+                    .onSubmit { startDesigning() }
+                    .disabled(isLaunching)
+
+                Button("Start designing") {
+                    startDesigning()
+                }
+                .buttonStyle(DarkButtonStyle())
+                .disabled(isLaunching || trimmedPrompt.isEmpty)
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -46,23 +53,36 @@ struct StartWaveView: View {
         .onAppear { isTextFieldFocused = true }
     }
 
-    private func createWave() {
-        guard !isCreating else { return }
-        isCreating = true
+    private var trimmedPrompt: String {
+        designPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func startDesigning() {
+        guard !isLaunching else { return }
+        guard !trimmedPrompt.isEmpty else { return }
+
+        guard let repoRoot = repoState.currentRepo else {
+            errorMessage = "Open a repository first."
+            return
+        }
+
+        guard FileManager.default.fileExists(atPath: repoRoot.path()) else {
+            errorMessage = "Design launch requires a local repository."
+            return
+        }
+
+        isLaunching = true
         errorMessage = nil
 
         Task {
-            defer { isCreating = false }
+            defer { isLaunching = false }
 
             do {
-                try await repoState.ensureReadyToCreateWave(outputBuffer: outputBuffer)
-                let name = waveName.trimmingCharacters(in: .whitespacesAndNewlines)
-                try await repoState.createWave(name: name)
-                NotificationCenter.default.post(name: .editWaveName, object: nil)
+                let escapedPrompt = terminalLauncher.escapeShellSingleQuotes(trimmedPrompt)
+                let command = "lf design -c '\(escapedPrompt)'"
+                try terminalLauncher.launchTerminal(.warp, at: repoRoot, command: command)
             } catch {
-                errorMessage = repoState.isConnected
-                    ? error.localizedDescription
-                    : repoState.connectionSummary
+                errorMessage = error.localizedDescription
             }
         }
     }

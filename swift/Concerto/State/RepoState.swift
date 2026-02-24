@@ -67,7 +67,6 @@ final class RepoState {
     var repoTarget: RepoTarget?
     var flows: [Flow] = []
     var availableDirections: [String] = []
-    var waveSchemas: [WaveSchema] = []
 
     // Wave state — delegated to WaveStore
     let waveStore = WaveStore()
@@ -352,7 +351,7 @@ final class RepoState {
                         switch event {
                         case .connected(let connected):
                             self.updateConnectionState(.connected)
-                            self.waveStore.setAll(connected.waves.map { WaveViewModel(api: $0) })
+                            self.waveStore.setAll(connected.waves.map(self.makeWaveViewModel))
                             await self.refreshWorktrees()
                             await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
@@ -382,10 +381,11 @@ final class RepoState {
         switch event.type {
         case .created, .updated, .started, .stopped, .waiting:
             if let wave = event.wave {
-                waveStore.set(WaveViewModel(api: wave))
+                waveStore.set(makeWaveViewModel(api: wave))
             } else if let wave = try? await waveService.getWave(event.waveId) {
-                waveStore.set(WaveViewModel(api: wave))
+                waveStore.set(makeWaveViewModel(api: wave))
             }
+            loadWaveContent(for: event.waveId)
             // Update runs cache on run lifecycle events
             if event.type == .started || event.type == .stopped || event.type == .updated {
                 loadRuns(for: event.waveId)
@@ -416,7 +416,6 @@ final class RepoState {
             flows = result.flows
         }
         availableDirections = result.directions
-        waveSchemas = (try? await waveService.listWaveSchemas(repo: repo)) ?? []
     }
 
     // MARK: - Waves
@@ -430,7 +429,10 @@ final class RepoState {
         do {
             let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
-            waveStore.setAll(newWaves.map { WaveViewModel(api: $0) })
+            waveStore.setAll(newWaves.map(makeWaveViewModel))
+            if let selectedWaveId {
+                loadWaveContent(for: selectedWaveId)
+            }
         } catch {
             LoggingService.model("refreshWaves: error=\(error.localizedDescription)")
             waveStore.removeAll()
@@ -456,6 +458,8 @@ final class RepoState {
     }
 
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
+        loadWaveContent(for: wave.id)
+
         switch newStatus {
         case .waiting:
             let step = wave.recentSteps.first?.step ?? "step"
@@ -523,16 +527,6 @@ final class RepoState {
             waveStore.removePending(pendingId)
             if selectedWaveId == pendingId { selectedWaveId = nil }
             throw error
-        }
-    }
-
-    func instantiateSchema(_ schema: WaveSchema, startImmediately: Bool = true) async throws {
-        let wave = try await createWave(name: schema.name, schemaRef: schema.schemaRef)
-        if startImmediately {
-            try await waveService.run(wave.id, overrides: nil)
-            _ = waveStore.applyOptimistic(wave.id) { $0.status = .running }
-            waveStore.commitMutation(wave.id)
-            scheduleRefresh(for: wave.id)
         }
     }
 
@@ -900,9 +894,28 @@ final class RepoState {
             try? await Task.sleep(for: .seconds(delay))
             guard waveStore.wave(for: waveId) != nil else { return }
             if let wave = try? await waveService.getWave(waveId) {
-                waveStore.set(WaveViewModel(api: wave))
+                waveStore.set(makeWaveViewModel(api: wave))
             }
         }
+    }
+
+    func loadWaveContent(for waveId: String) {
+        guard let repoRoot = currentRepo,
+              let wave = waveStore.wave(for: waveId),
+              repoTarget?.isRemote != true else {
+            return
+        }
+
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name)
+        _ = waveStore.applyOptimistic(waveId) { $0.content = content }
+        waveStore.commitMutation(waveId)
+    }
+
+    private func makeWaveViewModel(api wave: Wave) -> WaveViewModel {
+        WaveViewModel(
+            api: wave,
+            content: waveStore.wave(for: wave.id)?.content
+        )
     }
 }
 

@@ -119,9 +119,12 @@ case "$arch" in
     ;;
 esac
 
-curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${oc_arch}.tar.gz" \
-  | tar -xz -C /usr/local/bin opencode
-chmod +x /usr/local/bin/opencode
+if curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${oc_arch}.tar.gz" \
+  | tar -xz -C /usr/local/bin opencode 2>/dev/null; then
+  chmod +x /usr/local/bin/opencode
+else
+  echo "warning: opencode install failed (optional)" >&2
+fi
 
 git config --system init.defaultBranch main
 git config --system safe.directory /workspace

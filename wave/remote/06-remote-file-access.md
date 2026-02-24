@@ -21,11 +21,12 @@ Phase 05 adds only correctness-critical capability gating for remote mode. The f
 - Replacing hidden local-only actions with remote alternatives (`Copy Path`, `Copy SSH Command`)
 - Wider capability matrix polish across secondary UI surfaces
 
-## Adjustments from Phase 01D hardening
+## Adjustments from Phase 01 hardening
 
-Phase 01D confirmed remote execution is strictly headless and timeout-driven. This phase should assume:
+Remote execution is headless and timeout-driven. Fork flows now work in Docker (01E shipped). This phase should assume:
 
 - No interactive fallback: remote-only actions must honor capability gating from Phase 05.
+- All flows (including forks) are available remotely — no fork capability gating needed.
 - Error copy should distinguish unsupported remote action vs execution timeout vs SSH/editor launch failure.
 
 ## Implementation

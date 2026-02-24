@@ -82,7 +82,7 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
 
     let launch_config = LaunchConfig {
         auto: true,
-        stream: false,
+        stream: true,
         skip_permissions: true,
         model_variant: None,
         chrome: config.chrome,

@@ -136,6 +136,12 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
+    /// Generate release notes
+    Release {
+        /// Bump type or explicit version (default: patch)
+        #[arg(default_value = "patch")]
+        version: String,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -230,11 +236,6 @@ pub enum OpsCommand {
     Lint,
     /// Run configured test checks
     Test,
-    /// Generate release notes and open release PR
-    Release {
-        /// Release version (for example: 0.9.1 or v0.9.1)
-        version: String,
-    },
 }
 
 #[derive(Subcommand, Debug)]

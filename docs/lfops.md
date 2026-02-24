@@ -77,16 +77,6 @@ Options:
 |------|-------------|
 | `-p, --push` | Push after committing |
 
-## lf ops release
-
-Generate `RELEASE_NOTES.md`, open a release PR, and enable auto-merge.
-
-```bash
-lf ops release v0.9.1
-```
-
-Finds merged PRs since the latest tag, generates user-focused notes, writes `RELEASE_NOTES.md`, creates `release/v0.9.1`, opens a PR with the `release` label, and turns on auto-merge.
-
 ## lf ops lint
 
 Run the configured lint command.

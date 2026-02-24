@@ -7,8 +7,7 @@ use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
-    release, AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, Progress,
-    RebaseOptions,
+    AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, Write};
@@ -59,7 +58,6 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         OpsCommand::Shell { cmd } => run_shell(cmd),
         OpsCommand::Lint => run_check("lint"),
         OpsCommand::Test => run_check("test"),
-        OpsCommand::Release { version } => run_release(version, &progress),
     }
 }
 
@@ -222,15 +220,6 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
         },
         progress,
     )?;
-    Ok(())
-}
-
-fn run_release(version: &str, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let url = release(&repo_root, version, progress)?;
-    if !url.is_empty() {
-        println!("{}", url);
-    }
     Ok(())
 }
 

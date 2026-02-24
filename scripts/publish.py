@@ -56,6 +56,17 @@ def _bump_version(version: str, bump_type: str) -> str:
         return f"{major}.{minor}.{patch + 1}"
 
 
+def _get_version_from_release_notes() -> str | None:
+    """Parse version from RELEASE_NOTES.md header (e.g. '# v0.9.2')."""
+    path = ROOT / "RELEASE_NOTES.md"
+    if not path.exists():
+        return None
+    first_line = path.read_text().split("\n", 1)[0].strip()
+    if first_line.startswith("# v"):
+        return first_line[3:]
+    return None
+
+
 # --- Preconditions ---
 
 
@@ -491,7 +502,15 @@ def _ensure_released(version: str) -> None:
 def _release(bump_type: str, dry_run: bool, skip_dmg: bool) -> None:
     _check_on_main()
     version = _get_version()
-    new_version = _bump_version(version, bump_type)
+
+    # Prefer version from RELEASE_NOTES.md (written by `lf release`)
+    # if it's newer than the current tag.
+    notes_version = _get_version_from_release_notes()
+    if notes_version and notes_version != version:
+        new_version = notes_version
+        typer.echo(f"Using version from RELEASE_NOTES.md: v{new_version}")
+    else:
+        new_version = _bump_version(version, bump_type)
 
     if dry_run:
         if not skip_dmg:

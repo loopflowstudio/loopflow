@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Command;
 
 use serde::Deserialize;
 
@@ -7,7 +7,7 @@ use crate::engine::agent::{launch_agent, LaunchConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::command::run_command;
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::{get_default_branch, is_clean};
+use crate::engine::git::get_default_branch;
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -21,20 +21,25 @@ struct MergedPr {
     body: Option<String>,
 }
 
-pub fn release(repo: &Path, version: &str, progress: &impl Progress) -> OpsResult<String> {
+/// Generate release notes and write RELEASE_NOTES.md.
+///
+/// `version_input` is either a bump keyword (`patch`, `minor`, `major`)
+/// or an explicit version like `0.9.1` / `v0.9.1`.
+///
+/// Returns the resolved version string (without `v` prefix).
+pub fn generate_release(
+    repo: &Path,
+    version_input: &str,
+    progress: &impl Progress,
+) -> OpsResult<String> {
     if !command_exists("gh") {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
-    if !is_clean(repo)? {
-        return Err(OpsError::Message(
-            "working tree dirty; commit or stash changes before running release".to_string(),
-        ));
-    }
-
-    let version = normalize_version(version);
 
     progress.status("Finding latest tag...");
     let prev_tag = latest_tag(repo)?;
+
+    let version = resolve_version(&prev_tag, version_input)?;
 
     progress.status("Collecting merged PRs...");
     let prs = merged_prs_since(repo, &prev_tag)?;
@@ -45,8 +50,43 @@ pub fn release(repo: &Path, version: &str, progress: &impl Progress) -> OpsResul
     progress.status("Writing RELEASE_NOTES.md...");
     write_release_notes(repo, &notes, &version)?;
 
-    progress.status("Creating release PR...");
-    create_release_pr(repo, &version)
+    Ok(version)
+}
+
+/// Parse `X.Y.Z` and bump the specified component.
+pub fn bump_version(current: &str, bump: &str) -> OpsResult<String> {
+    let clean = current.trim().trim_start_matches('v');
+    let parts: Vec<&str> = clean.split('.').collect();
+    if parts.len() != 3 {
+        return Err(OpsError::Parse(format!(
+            "invalid version format: {current}"
+        )));
+    }
+    let major: u32 = parts[0]
+        .parse()
+        .map_err(|_| OpsError::Parse(format!("invalid major version: {}", parts[0])))?;
+    let minor: u32 = parts[1]
+        .parse()
+        .map_err(|_| OpsError::Parse(format!("invalid minor version: {}", parts[1])))?;
+    let patch: u32 = parts[2]
+        .parse()
+        .map_err(|_| OpsError::Parse(format!("invalid patch version: {}", parts[2])))?;
+
+    match bump {
+        "major" => Ok(format!("{}.0.0", major + 1)),
+        "minor" => Ok(format!("{}.{}.0", major, minor + 1)),
+        "patch" => Ok(format!("{}.{}.{}", major, minor, patch + 1)),
+        _ => Err(OpsError::Parse(format!("unknown bump type: {bump}"))),
+    }
+}
+
+/// Resolve version input: bump keywords go through `bump_version`,
+/// anything else is treated as an explicit version.
+fn resolve_version(prev_tag: &str, input: &str) -> OpsResult<String> {
+    match input.trim() {
+        "patch" | "minor" | "major" => bump_version(prev_tag, input.trim()),
+        other => Ok(normalize_version(other)),
+    }
 }
 
 fn normalize_version(version: &str) -> String {
@@ -183,55 +223,12 @@ fn write_release_notes(repo: &Path, notes: &str, version: &str) -> OpsResult<()>
     Ok(())
 }
 
-fn create_release_pr(repo: &Path, version: &str) -> OpsResult<String> {
-    let branch = format!("release/v{version}");
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let base_branch = get_default_branch(&main_repo)?;
-    let upstream_ref = format!("origin/{base_branch}");
-
-    run_checked(repo, "git", &["fetch", "origin", &base_branch])?;
-    run_checked(repo, "git", &["checkout", "-B", &branch, &upstream_ref])?;
-    run_checked(repo, "git", &["add", "RELEASE_NOTES.md"])?;
-
-    if !has_staged_changes(repo)? {
-        return Err(OpsError::Message(
-            "RELEASE_NOTES.md has no changes to commit".to_string(),
-        ));
-    }
-
-    let commit_message = format!("release: v{version}");
-    run_checked(repo, "git", &["commit", "-m", &commit_message])?;
-    run_checked(repo, "git", &["push", "-u", "origin", &branch])?;
-
-    let url = run_stdout(
-        repo,
-        "gh",
-        &["pr", "create", "--fill", "--label", "release"],
-    )?;
-
-    run_checked(repo, "gh", &["pr", "merge", "--auto", "--squash"])?;
-
-    Ok(url)
-}
-
-fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
-    let status = Command::new("git")
-        .args(["diff", "--cached", "--quiet"])
-        .current_dir(repo)
-        .status()?;
-    Ok(!status.success())
-}
-
-fn run_checked(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
+fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
     let mut cmd = Command::new(command);
     cmd.args(args).current_dir(repo);
-    run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+    let output = run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
         command: err.command_line(),
         stderr: err.stderr,
-    })
-}
-
-fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
-    let output = run_checked(repo, command, args)?;
+    })?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

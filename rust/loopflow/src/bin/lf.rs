@@ -43,7 +43,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 
 /// Known subcommands that should not be treated as step names.
-const KNOWN_COMMANDS: &[&str] = &[":", "ops", "help"];
+const KNOWN_COMMANDS: &[&str] = &[":", "ops", "release", "help"];
 
 fn is_value_flag(arg: &str) -> bool {
     VALUE_FLAGS.contains(&arg)
@@ -144,6 +144,26 @@ fn run_target(name: &str, message: Option<&str>, cli: &Cli) -> anyhow::Result<()
     }
 }
 
+fn run_release(version: &str) -> anyhow::Result<()> {
+    struct PrintProgress;
+    impl loopflow::ops::Progress for PrintProgress {
+        fn status(&self, msg: &str) {
+            println!("{msg}");
+        }
+        fn error(&self, msg: &str) {
+            eprintln!("{msg}");
+        }
+        fn confirm(&self, _msg: &str) -> bool {
+            false
+        }
+    }
+
+    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    let resolved = loopflow::ops::generate_release(&repo_root, version, &PrintProgress)?;
+    println!("v{resolved}");
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
@@ -182,6 +202,7 @@ fn main() -> anyhow::Result<()> {
             loopflow::lf::commands::run::run(None, Some(&text), &cli)
         }
         Some(Commands::Ops { op }) => loopflow::lf::commands::ops::run(op),
+        Some(Commands::Release { version }) => run_release(version),
         Some(Commands::External(args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(args)?;
             let message = join_args(&step_args);

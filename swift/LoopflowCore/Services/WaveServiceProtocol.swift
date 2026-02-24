@@ -15,7 +15,7 @@ public struct WaveFlowsResult: Sendable {
 public protocol WaveServiceProtocol: Sendable {
     func listWaves(repo: RepoTarget) async throws -> [Wave]
     func getWave(_ id: String) async throws -> Wave
-    func createWave(name: String, repo: RepoTarget, schema: String?) async throws -> Wave
+    func createWave(name: String, repo: RepoTarget) async throws -> Wave
     func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave
     func deleteWave(_ id: String) async throws
     func cloneWave(_ id: String, name: String?) async throws -> Wave
@@ -42,10 +42,4 @@ public protocol WaveServiceProtocol: Sendable {
     func listWorktrees(repo: RepoTarget) async throws -> [WorktreeInfo]
     func listRepos() async throws -> [RemoteRepo]
     func checkConnection() async throws
-}
-
-public extension WaveServiceProtocol {
-    func createWave(name: String, repo: RepoTarget) async throws -> Wave {
-        try await createWave(name: name, repo: repo, schema: nil)
-    }
 }

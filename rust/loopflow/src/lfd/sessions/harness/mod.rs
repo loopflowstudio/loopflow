@@ -1,9 +1,9 @@
-pub mod chat;
 pub mod claude;
 mod claude_mapping;
 pub mod codex;
 mod codex_mapping;
 mod common;
+pub mod lfharness;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -37,7 +37,7 @@ pub type CreateHarnessFn =
     fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn SessionHarness>>;
 
 pub fn supports_provider(provider: &str) -> bool {
-    matches!(provider, "codex" | "claude" | "chat")
+    matches!(provider, "codex" | "claude" | "lfharness")
 }
 
 pub fn default_create_harness(
@@ -47,7 +47,7 @@ pub fn default_create_harness(
     match provider {
         "codex" => Ok(Box::new(codex::CodexHarness::new(event_tx))),
         "claude" => Ok(Box::new(claude::ClaudeHarness::new(event_tx))),
-        "chat" => Ok(Box::new(chat::ChatHarness::new(event_tx))),
+        "lfharness" => Ok(Box::new(lfharness::LfHarness::new(event_tx))),
         other => anyhow::bail!("unsupported session provider: {other}"),
     }
 }
@@ -57,14 +57,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn supports_provider_includes_chat() {
-        assert!(supports_provider("chat"));
+    fn supports_provider_includes_lfharness() {
+        assert!(supports_provider("lfharness"));
     }
 
     #[test]
-    fn default_create_harness_supports_chat() {
+    fn default_create_harness_supports_lfharness() {
         let (tx, _rx) = broadcast::channel(16);
-        let harness = default_create_harness("chat", tx).expect("chat harness should construct");
+        let harness = default_create_harness("lfharness", tx).expect("lfharness should construct");
         drop(harness);
     }
 }

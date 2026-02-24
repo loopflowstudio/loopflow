@@ -41,9 +41,9 @@ Tool/item mapping for Claude:
 - `Edit` / `Write` / `NotebookEdit` → `File`
 - everything else → `Tool`
 
-### Chat
+### LFHarness
 
-`chat` is supported as an internal third harness using the existing loopflow turn runtime:
+`lfharness` is supported as an internal third harness using the existing loopflow turn runtime:
 
 - Invocation: in-process `turn::run_with_event_handler(...)` (no provider subprocess)
 - Tools: default boundary tools (`send_message`, `memory_edit`, plus built-ins)

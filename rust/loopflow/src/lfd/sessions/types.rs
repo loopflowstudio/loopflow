@@ -26,7 +26,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn as_i32(self) -> i32 {
+    pub(crate) fn as_i32(self) -> i32 {
         match self {
             Self::Starting => 0,
             Self::Active => 1,
@@ -36,7 +36,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn from_i32(value: i32) -> Self {
+    pub(crate) fn from_i32(value: i32) -> Self {
         match value {
             0 => Self::Starting,
             1 => Self::Active,
@@ -128,18 +128,6 @@ pub enum SessionItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<String>,
     },
-}
-
-impl SessionItem {
-    pub fn id(&self) -> &str {
-        match self {
-            Self::Command { id, .. }
-            | Self::File { id, .. }
-            | Self::Message { id, .. }
-            | Self::Thought { id, .. }
-            | Self::Tool { id, .. } => id,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

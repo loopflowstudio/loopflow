@@ -15,6 +15,20 @@ use crate::lfd::sessions::harness::common::spawn_stderr_logger;
 use crate::lfd::sessions::harness::{codex_mapping, SessionHarness};
 use crate::lfd::sessions::types::{SessionConfig, SessionEvent};
 
+async fn resolve_turn_id(
+    turn_id_from_params: Option<&str>,
+    current_turn_id: &Arc<Mutex<Option<String>>>,
+) -> String {
+    if let Some(turn_id) = turn_id_from_params {
+        return turn_id.to_string();
+    }
+    current_turn_id
+        .lock()
+        .await
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 #[derive(Debug)]
 enum OutboundRpc {
     Request {
@@ -76,20 +90,6 @@ impl CodexHarness {
         })
         .await
         .map_err(|_| anyhow!("codex writer task unavailable"))
-    }
-
-    async fn resolve_turn_id(
-        turn_id_from_params: Option<&str>,
-        current_turn_id: &Arc<Mutex<Option<String>>>,
-    ) -> String {
-        if let Some(turn_id) = turn_id_from_params {
-            return turn_id.to_string();
-        }
-        current_turn_id
-            .lock()
-            .await
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string())
     }
 
     async fn shutdown_tasks(&mut self) {
@@ -267,11 +267,8 @@ impl CodexHarness {
                         let _ = event_tx.send(SessionEvent::TurnStarted { turn_id: tid });
                     }
                     "turn/completed" => {
-                        let tid = CodexHarness::resolve_turn_id(
-                            turn_id_from_params.as_deref(),
-                            &current_turn_id,
-                        )
-                        .await;
+                        let tid =
+                            resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         turn_in_progress.store(false, Ordering::Relaxed);
                         *current_turn_id.lock().await = None;
                         let status = codex_mapping::map_turn_status(&params);
@@ -281,30 +278,22 @@ impl CodexHarness {
                         });
                     }
                     "item/started" => {
-                        let tid = CodexHarness::resolve_turn_id(
-                            turn_id_from_params.as_deref(),
-                            &current_turn_id,
-                        )
-                        .await;
+                        let tid =
+                            resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         let item = codex_mapping::build_item(&params, ItemPhase::Started);
                         let _ = event_tx.send(SessionEvent::ItemStarted { turn_id: tid, item });
                     }
                     "item/completed" => {
-                        let tid = CodexHarness::resolve_turn_id(
-                            turn_id_from_params.as_deref(),
-                            &current_turn_id,
-                        )
-                        .await;
+                        let tid =
+                            resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         let item = codex_mapping::build_item(&params, ItemPhase::Completed);
                         let _ = event_tx.send(SessionEvent::ItemCompleted { turn_id: tid, item });
                     }
                     "item/agentMessage/delta" => {
                         if let Some(content) = codex_mapping::text_content(&params) {
-                            let tid = CodexHarness::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
                             let _ = event_tx.send(SessionEvent::TextDelta {
                                 turn_id: tid,
                                 content,
@@ -316,11 +305,9 @@ impl CodexHarness {
                     }
                     "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
                         if let Some(content) = codex_mapping::text_content(&params) {
-                            let tid = CodexHarness::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
                             let _ = event_tx.send(SessionEvent::ReasoningDelta {
                                 turn_id: tid,
                                 content,
@@ -331,11 +318,9 @@ impl CodexHarness {
                     | "item/fileChange/outputDelta"
                     | "item/plan/delta" => {
                         if let Some(data) = codex_mapping::map_item_delta(method, &params) {
-                            let tid = CodexHarness::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
                             let item_id = codex_mapping::map_item_id(&params);
                             let _ = event_tx.send(SessionEvent::ItemUpdated {
                                 turn_id: tid,
@@ -350,11 +335,9 @@ impl CodexHarness {
                             .and_then(Value::as_str)
                             .map(ToString::to_string)
                         {
-                            let tid = CodexHarness::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
                             let _ = event_tx.send(SessionEvent::DiffUpdated { turn_id: tid, diff });
                         }
                     }

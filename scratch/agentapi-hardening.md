@@ -1,47 +1,78 @@
 # 04: Hardening
 
-Edge cases, reconnect durability, wave integration, and production readiness.
+## Problem
 
-## What exists after this
+Session reliability is still "demo strong," not production strong. Slow SSE consumers can miss events, reconnect relies on a UI timer heuristic, active sessions become orphans across `lfd` restart, and harness crash behavior is inconsistent across providers.  
+Who benefits: Concerto users, API clients, and wave automation that depends on trustworthy session state.  
+Why now: this is the last reliability gate before adding more providers and reusing this layer for both CLI and HTTP surfaces.
 
-Interactive sessions handle real-world failure modes gracefully. Reconnect is reliable. Concurrent clients don't corrupt state. Session end triggers wave advancement.
+## Approach
 
-## What Phase 02+03 already addressed
+Ship a reliability-first hardening pass centered on one rule: **no silent event loss**.
 
-- **Busy turn rejection**: concurrent `send_input` during an active turn returns 409 without failing the session. `SessionManager` distinguishes `TurnAlreadyInProgress` from real harness errors. No further work needed.
-- **Claude NDJSON parsing robustness**: turn parsing hardened against edge cases in `content_block_delta` handling. Tool state tracking simplified.
-- **Bounded UI detail buffers**: `ChatState` caps command output and tool detail growth to prevent unbounded memory use in long sessions. Server-side bounded buffering is not yet implemented but the UI is resilient.
-- **Seq-based event dedup**: `ChatState` filters stale/duplicate events by sequence ID. Replay and live events flow through the same reducer path — no separate codepaths to harden.
-- **Single stream ownership**: `ChatState` maintains exactly one owned stream task, cancelling the previous on reconnect. Ghost streams (multiple concurrent SSE consumers from the same client) are prevented at the client level.
-- **Old chat routes removed**: the session API is now the sole client path (`/v0/sessions/*`). No legacy endpoints to maintain or harden.
+1. **Make replay/live boundary explicit**
+   - Add a server event `ReplayCompleted { last_seq }` on `/v0/sessions/{id}/events`.
+   - Stream order becomes: replay from store → `ReplayCompleted` → live follow.
+   - Concerto can promote reconnect state on sentinel, not timer fallback.
 
-## What Phase 03 taught us
+2. **Backfill on broadcast lag instead of skipping**
+   - Keep `tokio::broadcast` for fan-out.
+   - On `Lagged`, fetch missing `[expected_seq, newest_seq)` from store and emit them in-order before resuming live stream.
+   - Preserve strictly increasing seq per client stream.
 
-**Reconnect promotion needs thought.** The current approach — promote from `.reconnecting` to `.live` on first new event or a 1-second fallback timer — works for demo-length sessions but is fragile. A long replay with no new events after completion looks identical to "waiting for live events." Phase 04 should decide: add an explicit replay/live boundary signal from lfd, or accept the timer heuristic and document it.
+3. **Harden runtime lifecycle across restart/crash**
+   - On `lfd` startup, mark persisted `starting`/`active` sessions as `failed` with a recovery error event (`lfd_restarted_orphaned_session`).
+   - In bridge tasks, treat unexpected harness death as terminal session failure (provider-specific rules for Codex vs Claude normal exits).
+   - Keep end-session idempotent, including end during `starting`.
 
-**`DiffUpdated` is provider-dependent.** Codex emits turn-level diffs; Claude doesn't. The event is plumbed through the model but Concerto doesn't visualize it beyond basic display. Any hardening of diff rendering should handle missing diffs gracefully.
+4. **Make Claude abnormal exits explicit in transcript**
+   - Track in-flight tool items.
+   - On abnormal process exit, emit `ItemCompleted(Failed)` for each in-flight tool with crash metadata instead of dropping partial tool state.
 
-**Item identity is server-authoritative.** Concerto keys transcript items by server `item.id`, not local UUIDs. This means the server must guarantee unique, stable item IDs across replay and live — something to verify under concurrent client scenarios.
+5. **Prove invariants with contract-style tests**
+   - Add provider trace replay tests (Codex JSON-RPC + Claude NDJSON fixtures).
+   - Add multi-client SSE tests validating identical item IDs and ordered seqs across clients.
+   - Add restart recovery and lag-backfill integration tests.
 
-## What to address
+## Alternatives considered
 
-- **SSE lagged receiver backfill**: `tokio::broadcast` with 256-entry buffer drops messages for slow receivers. Current behavior: skip and continue. Needs in-stream store fallback — detect `Lagged`, read missed events from store, resume broadcast. This is the highest-priority item since it affects basic reliability.
-- **Reconnect durability**: `after_seq` cursor-based replay works for clean reconnects. Handle: stale SSE connections (keep-alive timeout detection), client reconnect after broadcast lag (seamless store backfill). Consider adding an explicit replay-complete sentinel event so clients don't need a timer-based heuristic for replay/live promotion.
-- **Concurrent clients**: multiple Concerto instances can subscribe to the same broadcast channel. Input routing is already single-harness — no conflict. Need to verify broadcast fan-out works under load and that item IDs are stable across all clients.
-- **Double-end**: idempotent end is already implemented (first-win terminal status). Verify edge case: end during `starting` state.
-- **Wave integration**: session end triggers existing continue/commit logic; wave run state guards
-- **lfd restart**: `SessionRuntime` lives in a `HashMap` in memory — active sessions become orphans on restart. Events and session metadata survive in the store. Need a startup recovery pass to mark orphaned `active`/`starting` sessions as `failed`.
-- **Process crash recovery**: detect dead harness process (child process exit), transition to `failed` state, emit `Error` event. The Codex harness's reader task already sees EOF on stdout and closes the event sender — the bridge task detects this and can transition state. Claude's process-per-turn model is different: normal exits happen after every turn, only non-zero exits during an active turn are crashes. The harness already emits `TurnCompleted(Failed)` on abnormal exit, but the bridge task should also transition session status to `failed` if the error is unrecoverable.
-- **Reader-task-stop race (Claude)**: `stop()` kills the child process and aborts the reader task. If the process exits normally between the kill and abort, a stale `TurnCompleted(Completed)` event may be emitted alongside the stop flow. The `AtomicBool` guard prevents state corruption but event ordering can be surprising. Consider draining the reader before emitting stop events.
-- **Malformed tool input on crash**: Claude's `input_json_delta` chunks are concatenated and parsed at tool completion. If the process crashes mid-tool, accumulated partial JSON is silently dropped (`.ok()`). Should emit an `ItemCompleted` with `Failed` status for any in-flight tool when the process exits abnormally.
-- **Provider conformance tests**: Phase 02 hardening revealed NDJSON edge cases that unit tests didn't catch initially. Add integration-style tests that replay real provider traces (both Codex JSON-RPC and Claude NDJSON) through the harnesses. The mapping modules (`codex_mapping.rs`, `claude_mapping.rs`) are now cleanly separated from harness lifecycle code, making trace-replay tests easier to write.
-- **Provider-layer unification prep**: leave clear seams so a later phase can reuse this same provider layer for both `lf` CLI runs and Session HTTP without rewriting event mapping twice.
-- **Provider auth interruption**: keep session alive when possible, emit error events
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep timer-based reconnect promotion and current lag skip behavior | Minimal code churn | Leaves silent data-loss edge cases and reconnect ambiguity in core path |
+| Replace broadcast with per-client durable queues | Strong reliability semantics | Too heavy for this phase; large memory/complexity jump and slower ship |
+| **Chosen: broadcast + store backfill + replay sentinel** | Moderate implementation complexity | Best reliability gain per line of code; keeps current architecture intact |
+
+## Key decisions
+
+1. **Adopt an explicit replay boundary event now.** We are removing timer heuristics from correctness paths.
+2. **Treat lag as recoverable, not fatal.** Missing events are backfilled from persisted store in-stream.
+3. **Crash state is server-owned.** `lfd` always emits terminal failure semantics for orphaned or crashed sessions.
+4. **Follow wave principles directly:**
+   - "**Harness-first, not protocol-first.**" Reliability work stays in harness/runtime correctness, not client workarounds.
+   - "**lfd owns the session lifecycle.**" Restart/crash recovery is solved in `lfd`, not delegated to Concerto.
+   - "**Reconnect replays persisted events then follows live stream.**" Sentinel + lag backfill make this invariant mechanically true.
+
+## Scope
+
+- In scope:
+  - `ReplayCompleted` sentinel event in session SSE protocol
+  - Lagged receiver store backfill path
+  - Startup orphan recovery for `starting`/`active` sessions
+  - Provider crash-to-failed-session transitions
+  - Claude in-flight tool failure completion on abnormal exit
+  - Concurrent-client and provider-trace conformance tests
+  - Verify end-session behavior during `starting`
+- Out of scope:
+  - New diff visualization UX in Concerto
+  - Multi-session picker/history UI
+  - Re-architecting away from `tokio::broadcast`
+  - Full provider-layer unification (phase 07)
 
 ## Done when
 
-- Reconnect replays events correctly from any cursor position
-- Two Concerto clients can view the same session without corruption
-- lfd restart preserves event history for ended sessions
-- Dead harness processes detected and marked failed within reasonable time
-- Session end advances wave run when appropriate
+- A slow SSE client that overruns broadcast capacity reconnects/continues with no seq gaps (validated by integration test).
+- Concerto reconnect promotion depends on `ReplayCompleted`, not timer fallback.
+- Restarting `lfd` marks previously `starting`/`active` sessions as `failed` with explicit error events.
+- Unexpected provider process death transitions session to `failed` and closes in-flight Claude tools as `Failed`.
+- Two concurrent SSE clients observe stable `item.id` values and monotonic seq ordering for the same session.
+- `cargo test --all`, `uv run pytest python/tests/`, and `uv run pytest tests/e2e/test_api_smoke.py -v` remain green after hardening changes.

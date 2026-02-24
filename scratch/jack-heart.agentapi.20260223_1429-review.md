@@ -5,11 +5,15 @@
 Added Claude as a second session provider in `lfd`, running through the same `/v0/sessions` API and normalized event schema as Codex. Claude sessions use process-per-turn invocation (`claude -p ... --output-format stream-json`) with `--resume` for turn continuity.
 
 Key additions:
-- `ClaudeAdapter` in `adapter/claude.rs` (828 lines including tests)
+- `ClaudeAdapter` in `adapter/claude.rs` (implementation + unit tests)
 - NDJSON stream parser mapping Claude events → normalized `SessionEvent`
 - Store methods for persisting `provider_session_id` (sqlite + postgres)
 - `supports_provider` and `default_create_adapter` dispatch for both providers
 - Style guide updates banning factory patterns and reshaping production code for tests
+- Hardening fixes from gate pass:
+  - parser accepts both top-level NDJSON events and wrapped `stream_event.event`
+  - `result.is_error` now maps to `TurnCompleted(Failed)`
+  - setup failures now release the in-flight turn guard, preventing stuck `409 busy` sessions
 
 ## Key choices
 

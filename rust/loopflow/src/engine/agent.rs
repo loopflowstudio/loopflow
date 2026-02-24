@@ -141,10 +141,7 @@ pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
     }
 
     if config.skip_permissions {
-        cmd.push("--sandbox".to_string());
-        cmd.push("danger-full-access".to_string());
-        cmd.push("-c".to_string());
-        cmd.push("approval_policy=\"never\"".to_string());
+        cmd.push("--yolo".to_string());
     } else {
         cmd.push("--sandbox".to_string());
         cmd.push("workspace-write".to_string());
@@ -659,6 +656,17 @@ mod tests {
         };
         let cmd = build_codex_command(&config);
         assert!(cmd.contains(&"model=\"o3\"".to_string()));
+    }
+
+    #[test]
+    fn build_codex_command_yolo() {
+        let config = LaunchConfig {
+            skip_permissions: true,
+            ..Default::default()
+        };
+        let cmd = build_codex_command(&config);
+        assert!(cmd.contains(&"--yolo".to_string()));
+        assert!(!cmd.contains(&"--sandbox".to_string()));
     }
 
     #[test]

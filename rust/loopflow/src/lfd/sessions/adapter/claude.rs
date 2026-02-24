@@ -140,11 +140,73 @@ fn build_args(content: &str, config: &SessionConfig, resume_id: Option<&str>) ->
 
 /// Reader-local state for tracking in-flight content blocks.
 #[derive(Debug, Default)]
+struct ToolUseState {
+    id: String,
+    name: String,
+    input_json: String,
+    input: Option<Value>,
+}
+
+impl ToolUseState {
+    fn parsed_input(&self) -> Option<Value> {
+        if self.input_json.is_empty() {
+            return self.input.clone();
+        }
+
+        serde_json::from_str(&self.input_json)
+            .ok()
+            .or_else(|| self.input.clone())
+    }
+}
+
+#[derive(Debug, Default)]
 struct ReaderState {
-    /// Accumulated input_json_delta fragments per tool_use block index.
-    tool_inputs: HashMap<usize, String>,
-    /// Map block index → (tool_use_id, tool_name).
-    tool_blocks: HashMap<usize, (String, String)>,
+    /// Map block index -> tool use state for streaming deltas.
+    tool_blocks: HashMap<usize, ToolUseState>,
+    /// Map tool_use_id -> block index for direct completion lookup.
+    tool_indexes: HashMap<String, usize>,
+}
+
+impl ReaderState {
+    fn track_tool(
+        &mut self,
+        index: usize,
+        tool_id: &str,
+        tool_name: &str,
+        input: Option<Value>,
+    ) -> bool {
+        if let Some(existing_index) = self.tool_indexes.get(tool_id).copied() {
+            if let Some(existing) = self.tool_blocks.get_mut(&existing_index) {
+                if existing.input.is_none() {
+                    existing.input = input;
+                }
+            }
+            return false;
+        }
+
+        self.tool_indexes.insert(tool_id.to_string(), index);
+        self.tool_blocks.insert(
+            index,
+            ToolUseState {
+                id: tool_id.to_string(),
+                name: tool_name.to_string(),
+                input_json: String::new(),
+                input,
+            },
+        );
+        true
+    }
+
+    fn append_input_json(&mut self, index: usize, partial_json: &str) {
+        if let Some(tool) = self.tool_blocks.get_mut(&index) {
+            tool.input_json.push_str(partial_json);
+        }
+    }
+
+    fn tool_by_id(&self, tool_use_id: &str) -> Option<&ToolUseState> {
+        let index = self.tool_indexes.get(tool_use_id)?;
+        self.tool_blocks.get(index)
+    }
 }
 
 impl ClaudeAdapter {
@@ -203,18 +265,13 @@ impl ClaudeAdapter {
                     let Some(tool_name) = block.get("name").and_then(Value::as_str) else {
                         return false;
                     };
-                    let tool_id = tool_id.to_string();
-                    let tool_name = tool_name.to_string();
-                    state
-                        .tool_blocks
-                        .insert(index, (tool_id.clone(), tool_name.clone()));
-                    state.tool_inputs.insert(index, String::new());
-
-                    let item = infer_item(&tool_name, &tool_id, None);
-                    let _ = events.send(SessionEvent::ItemStarted {
-                        turn_id: turn_id.to_string(),
-                        item,
-                    });
+                    if state.track_tool(index, tool_id, tool_name, None) {
+                        let item = infer_item(tool_name, tool_id, None);
+                        let _ = events.send(SessionEvent::ItemStarted {
+                            turn_id: turn_id.to_string(),
+                            item,
+                        });
+                    }
                 }
             }
 
@@ -255,9 +312,7 @@ impl ClaudeAdapter {
                         if let (Some(idx), Some(json_chunk)) =
                             (index, delta.get("partial_json").and_then(Value::as_str))
                         {
-                            if let Some(buf) = state.tool_inputs.get_mut(&idx) {
-                                buf.push_str(json_chunk);
-                            }
+                            state.append_input_json(idx, json_chunk);
                         }
                     }
                     _ => {}
@@ -300,11 +355,9 @@ impl ClaudeAdapter {
         events: &broadcast::Sender<SessionEvent>,
         state: &mut ReaderState,
     ) {
-        let content = value
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(Value::as_array);
-        let Some(blocks) = content else { return };
+        let Some(blocks) = Self::message_content(value) else {
+            return;
+        };
 
         for (idx, block) in blocks.iter().enumerate() {
             let Some(block_type) = block.get("type").and_then(Value::as_str) else {
@@ -326,10 +379,7 @@ impl ClaudeAdapter {
 
                     // If we haven't already emitted ItemStarted via streaming,
                     // emit both started and track it.
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        state.tool_blocks.entry(idx)
-                    {
-                        e.insert((tool_id.clone(), tool_name.clone()));
+                    if state.track_tool(idx, &tool_id, &tool_name, input.clone()) {
                         let item = infer_item(&tool_name, &tool_id, input);
                         let _ = events.send(SessionEvent::ItemStarted {
                             turn_id: turn_id.to_string(),
@@ -358,11 +408,9 @@ impl ClaudeAdapter {
         events: &broadcast::Sender<SessionEvent>,
         state: &mut ReaderState,
     ) {
-        let content = value
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(Value::as_array);
-        let Some(blocks) = content else { return };
+        let Some(blocks) = Self::message_content(value) else {
+            return;
+        };
 
         for block in blocks {
             let Some(block_type) = block.get("type").and_then(Value::as_str) else {
@@ -377,36 +425,28 @@ impl ClaudeAdapter {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
 
-            let Some((tool_index, tool_name)) =
-                state.tool_blocks.iter().find_map(|(index, (id, name))| {
-                    if id == tool_use_id {
-                        Some((*index, name.clone()))
-                    } else {
-                        None
-                    }
-                })
-            else {
+            let Some(tool) = state.tool_by_id(tool_use_id) else {
                 continue;
             };
 
             // Extract output from content array or text.
             let output = Self::extract_tool_result_text(block);
-
-            // Get accumulated input for this tool.
-            let input: Option<Value> = state.tool_inputs.get(&tool_index).and_then(|s| {
-                if s.is_empty() {
-                    None
-                } else {
-                    serde_json::from_str(s).ok()
-                }
-            });
-
-            let completed_item = complete_item(&tool_name, tool_use_id, input, output);
+            let input = tool.parsed_input();
+            let completed_item =
+                build_item(&tool.name, &tool.id, input, ItemStatus::Completed, output);
             let _ = events.send(SessionEvent::ItemCompleted {
                 turn_id: turn_id.to_string(),
                 item: completed_item,
             });
         }
+    }
+
+    fn message_content(value: &Value) -> Option<&[Value]> {
+        value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
     }
 
     fn extract_tool_result_text(block: &Value) -> Option<String> {
@@ -432,15 +472,6 @@ impl ClaudeAdapter {
             .and_then(Value::as_str)
             .map(String::from)
     }
-}
-
-fn complete_item(
-    tool_name: &str,
-    tool_use_id: &str,
-    input: Option<Value>,
-    output: Option<String>,
-) -> SessionItem {
-    build_item(tool_name, tool_use_id, input, ItemStatus::Completed, output)
 }
 
 #[async_trait]
@@ -799,9 +830,10 @@ mod tests {
         ClaudeAdapter::process_line(line, "turn_1", &tx, &mut state);
 
         assert!(state.tool_blocks.contains_key(&1));
-        let (id, name) = &state.tool_blocks[&1];
-        assert_eq!(id, "tu_bash_1");
-        assert_eq!(name, "Bash");
+        let tool = &state.tool_blocks[&1];
+        assert_eq!(tool.id, "tu_bash_1");
+        assert_eq!(tool.name, "Bash");
+        assert_eq!(state.tool_indexes.get("tu_bash_1"), Some(&1));
 
         let event = rx.try_recv().expect("should have event");
         match event {
@@ -829,7 +861,10 @@ mod tests {
         ClaudeAdapter::process_line(delta2, "turn_1", &tx, &mut state);
 
         assert_eq!(
-            state.tool_inputs.get(&0).map(String::as_str),
+            state
+                .tool_blocks
+                .get(&0)
+                .map(|tool| tool.input_json.as_str()),
             Some("{\"command\":\"ls\"}")
         );
     }

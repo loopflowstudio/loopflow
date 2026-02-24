@@ -130,18 +130,6 @@ pub enum SessionItem {
     },
 }
 
-impl SessionItem {
-    pub fn id(&self) -> &str {
-        match self {
-            Self::Command { id, .. }
-            | Self::File { id, .. }
-            | Self::Message { id, .. }
-            | Self::Thought { id, .. }
-            | Self::Tool { id, .. } => id,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]

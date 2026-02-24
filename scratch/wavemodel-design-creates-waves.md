@@ -32,7 +32,6 @@ Implemented:
 ## Remaining risks
 
 - Prompt-driven file creation quality depends on agent adherence to wave conventions
-- `discover_target` falls back from step to flow lookup on any error, can mask diagnostics
 
 ## Out of scope
 

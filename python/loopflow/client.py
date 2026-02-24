@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from urllib.parse import urlparse
 from collections.abc import Iterator
@@ -9,7 +10,7 @@ from typing import Any, Optional
 import httpx
 
 from .errors import LoopflowError, WaveAlreadyRunning
-from .models import Wave, WaveRun
+from .models import Session, SessionConfig, SessionEventEnvelope, Wave, WaveRun
 
 
 def _resolve_base_url() -> str:
@@ -224,6 +225,94 @@ class Client:
         except httpx.RequestError as exc:
             raise ConnectionError(str(exc)) from exc
 
+    def create_session(
+        self,
+        provider: str,
+        wave_run_id: Optional[str] = None,
+        config: Optional[SessionConfig] = None,
+    ) -> Session:
+        body: dict[str, Any] = {"provider": provider, "config": {}}
+        if wave_run_id is not None:
+            body["wave_run_id"] = wave_run_id
+        if config is not None:
+            body["config"] = config.model_dump(exclude_none=True)
+        payload = self._request_json("POST", "/v0/sessions", json=body)
+        return Session.model_validate(payload)
+
+    def session(self, session_id: str) -> Optional[Session]:
+        payload = self._request_json(
+            "GET",
+            f"/v0/sessions/{session_id}",
+            allow_not_found=True,
+        )
+        if payload is None:
+            return None
+        return Session.model_validate(payload)
+
+    def send_session_input(self, session_id: str, content: str) -> Session:
+        payload = self._request_json(
+            "POST",
+            f"/v0/sessions/{session_id}/input",
+            json={"content": content},
+        )
+        return Session.model_validate(payload)
+
+    def stop_session(self, session_id: str) -> Session:
+        payload = self._request_json("DELETE", f"/v0/sessions/{session_id}")
+        return Session.model_validate(payload)
+
+    def stream_session_events(
+        self,
+        session_id: str,
+        after_seq: Optional[int] = None,
+        timeout: float = 60.0,
+    ) -> Iterator[SessionEventEnvelope]:
+        params: dict[str, str] = {}
+        if after_seq is not None:
+            params["after_seq"] = str(after_seq)
+
+        try:
+            with self._client.stream(
+                "GET",
+                f"/v0/sessions/{session_id}/events",
+                params=params or None,
+                timeout=timeout,
+            ) as response:
+                if response.status_code >= 400:
+                    self._raise_for_error(response)
+
+                pending_seq: Optional[int] = None
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("id:"):
+                        value = line[3:].strip()
+                        try:
+                            pending_seq = int(value)
+                        except ValueError:
+                            pending_seq = None
+                        continue
+
+                    if not line.startswith("data:"):
+                        continue
+
+                    payload = line[5:].strip()
+                    if not payload:
+                        continue
+
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if not isinstance(event, dict):
+                        continue
+
+                    yield SessionEventEnvelope(seq=pending_seq, event=event)
+                    pending_seq = None
+        except httpx.RequestError as exc:
+            raise ConnectionError(str(exc)) from exc
+
     def _request_json(
         self,
         method: str,
@@ -241,12 +330,16 @@ class Client:
             return None
 
         if response.status_code >= 400:
-            message = _extract_error_message(response)
-            if response.status_code == 412:
-                raise WaveAlreadyRunning(message)
-            raise LoopflowError(message)
+            self._raise_for_error(response)
 
         return response.json()
+
+    @staticmethod
+    def _raise_for_error(response: httpx.Response) -> None:
+        message = _extract_error_message(response)
+        if response.status_code == 412:
+            raise WaveAlreadyRunning(message)
+        raise LoopflowError(message)
 
 
 def _extract_error_message(response: httpx.Response) -> str:

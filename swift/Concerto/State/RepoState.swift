@@ -325,8 +325,6 @@ final class RepoState {
         // Background operations (skip in screenshot mode to avoid overwriting mock data)
         if !skipBackgroundRefresh {
             Task {
-                let setupService = SetupService()
-                try? await setupService.ensureDaemonRunning()
                 startEventSubscription(outputBuffer: outputBuffer)
                 await refreshFlowsAsync()
             }
@@ -662,10 +660,6 @@ final class RepoState {
         self.outputBuffer = outputBuffer
         connectionStore.setConnection(connection)
         rebuildServices(for: connection)
-
-        if connection.isLocal {
-            try? await waveService.connectLfd()
-        }
 
         for phase in [ConnectionPhase.tlsTrustCheck, .authCheck] {
             try await runConnectionPhase(phase, connection: connection) {

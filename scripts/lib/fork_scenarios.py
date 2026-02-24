@@ -8,6 +8,7 @@ import re
 import select
 import signal
 import subprocess
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -165,6 +166,29 @@ def create_and_run_wave(flow: str, direction: str, wave_name: str | None = None)
         client.close()
 
     return selected_wave_name
+
+
+def create_test_wave_name(prefix: str = WAVE_NAME) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+def cleanup_wave_artifacts(wave_name: str) -> None:
+    """Best-effort cleanup for fork test waves and worktrees."""
+    client = Client(timeout=10.0, token=_current_token())
+    try:
+        try:
+            client.stop_wave(wave_name)
+        except Exception:
+            pass
+
+        try:
+            client.delete_wave(wave_name)
+        except Exception:
+            pass
+    finally:
+        client.close()
+
+    _cleanup_local_worktrees(wave_name)
 
 
 def has_claude_credentials() -> bool:
@@ -367,3 +391,20 @@ def _main_repo_root(repo: Path) -> Path:
         if common_dir.name == ".git":
             return common_dir.parent
     return repo
+
+
+def _cleanup_local_worktrees(wave_name: str) -> None:
+    repo_root = REPO_ROOT.resolve()
+    parent = repo_root.parent
+    base = parent / f"{repo_root.name}.{wave_name}"
+    candidates = [base] + sorted(parent.glob(f"{base.name}-fork-*"))
+
+    for worktree in candidates:
+        if not worktree.exists():
+            continue
+        _run(
+            ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree)],
+            capture_output=True,
+        )
+        if worktree.exists():
+            shutil.rmtree(worktree, ignore_errors=True)

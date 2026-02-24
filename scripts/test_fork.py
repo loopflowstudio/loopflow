@@ -8,6 +8,8 @@ import sys
 
 from lib.fork_scenarios import (
     build_lfd,
+    cleanup_wave_artifacts,
+    create_test_wave_name,
     create_and_run_wave,
     ensure_agent_image,
     ensure_postgres,
@@ -41,13 +43,15 @@ def main() -> int:
         process = start_lfd_container_mode()
     except RuntimeError as exc:
         return _fail(str(exc))
+    wave_name = create_test_wave_name()
     try:
-        wave_name = create_and_run_wave(args.flow, args.direction)
+        create_and_run_wave(args.flow, args.direction, wave_name=wave_name)
         success, output = wait_for_completion(process, args.timeout, wave_name=wave_name)
     except RuntimeError as exc:
         output = str(exc)
         success = False
     finally:
+        cleanup_wave_artifacts(wave_name)
         stop_process(process)
 
     if success:

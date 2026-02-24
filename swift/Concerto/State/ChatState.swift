@@ -276,7 +276,50 @@ final class ChatState {
         sessionId = session.id
         persistSessionId(session.id)
         appendMessage(role: .system, content: "Session started")
+
+        if !isSessionActiveStatus(session.status) {
+            try await waitForActiveSession(sessionId: session.id)
+        }
         return session.id
+    }
+
+    private func waitForActiveSession(sessionId: String) async throws {
+        var lastStatus: String = "starting"
+        for attempt in 0..<20 {
+            let session = try await waveService.getSession(sessionId)
+            lastStatus = session.status
+
+            if isSessionActiveStatus(session.status) {
+                return
+            }
+
+            if isSessionTerminalStatus(session.status) {
+                throw NSError(
+                    domain: "ChatState",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Session ended before becoming active (\(session.status))"]
+                )
+            }
+
+            if attempt < 19 {
+                try await Task.sleep(for: .milliseconds(150))
+            }
+        }
+
+        throw NSError(
+            domain: "ChatState",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "Session is still \(lastStatus). Please retry in a moment."]
+        )
+    }
+
+    private func isSessionActiveStatus(_ status: String) -> Bool {
+        status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "active"
+    }
+
+    private func isSessionTerminalStatus(_ status: String) -> Bool {
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "ended" || normalized == "failed"
     }
 
     private func startStream(sessionId: String, afterSeq: Int?, phase: StreamPhase) {

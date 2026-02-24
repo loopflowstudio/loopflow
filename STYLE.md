@@ -17,7 +17,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - Derive `Debug` on all public types
 
 **Both:**
-- Mock side effects, but don't test mock wiring
+- Mock side effects, but don't test mock wiring or reshape production code for tests
 - Design docs go under `scratch/`; `lf ops pr land` removes `scratch/*` contents
 - Auto runs are headless: make best-effort assumptions and append open questions to `scratch/questions.md`
 
@@ -74,7 +74,7 @@ When editing Rust tests:
 - `unwrap()` is fine in tests
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory
-- Mock via traits and dependency injection, not test doubles
+- Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 
 # Goals
 
@@ -273,6 +273,10 @@ If a test requires elaborate mock setup, it's usually a sign that either:
 1. The code under test does too much (refactor it)
 2. You're testing implementation rather than behavior (test something else)
 3. This should be an integration test, not a unit test (move it)
+
+**Never reshape production code for tests.** If you're adding a factory trait, an interface, a constructor overload, or an extra parameter solely because tests need it, stop. The production code's shape should be dictated by production needs. Use closures, conditional compilation (`#[cfg(test)]`), or test-only modules — not abstractions that exist to satisfy test doubles.
+
+**No factory patterns.** Factory traits, abstract factories, and provider registries are almost always over-engineering. A function or a closure does the same job without the ceremony. If you need runtime dispatch, use an enum or a function pointer — not a trait with one method and one real implementation.
 
 # Pre-Commit Checklist
 

@@ -5,7 +5,6 @@ enum ChatRole {
     case user
     case assistant
     case error
-    case memory
 }
 
 struct ChatMessage: Identifiable, Equatable {
@@ -22,54 +21,17 @@ struct ChatMessage: Identifiable, Equatable {
     }
 }
 
-struct MemoryStore {
-    var blocks: [ChatMemoryBlock] = []
-
-    mutating func setBlocks(_ value: [ChatMemoryBlock]) {
-        blocks = value
-        sortBlocks()
-    }
-
-    mutating func upsert(_ block: ChatMemoryBlock) {
-        if let index = blocks.firstIndex(where: { $0.name == block.name }) {
-            blocks[index] = block
-        } else {
-            blocks.append(block)
-        }
-        sortBlocks()
-    }
-
-    mutating func remove(named name: String) {
-        blocks.removeAll { $0.name == name }
-    }
-
-    private mutating func sortBlocks() {
-        blocks.sort {
-            if $0.position == $1.position {
-                return $0.name < $1.name
-            }
-            return $0.position < $1.position
-        }
-    }
-}
-
 protocol ChatService: Sendable {
-    func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock]
-    func upsertMemoryBlock(
-        waveId: String,
-        name: String,
-        content: String,
-        position: Int?
-    ) async throws -> ChatMemoryBlock
-    func deleteMemoryBlock(waveId: String, name: String) async throws
-    func startChat(
-        waveId: String,
-        message: String
-    ) async throws
-    func streamChatEvents(
-        waveId: String
-    ) -> AsyncThrowingStream<ChatTurnEvent, Error>
-    func listChatMessages(waveId: String) async throws -> [ChatMessageRecord]
+    func createSession(
+        provider: String,
+        waveRunId: String?,
+        config: AgentSessionConfig
+    ) async throws -> AgentSession
+    func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession
+    func streamSessionEvents(
+        sessionId: String,
+        afterSeq: Int?
+    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error>
 }
 
 extension LocalWaveService: ChatService {}
@@ -84,18 +46,15 @@ enum ChatTurnState {
 @MainActor
 @Observable
 final class ChatState {
-    private static let missingBlockNameMessage = "Memory block name is required."
-
     let waveId: String
 
     var messages: [ChatMessage] = []
     var turnState: ChatTurnState = .idle
-    var memory = MemoryStore()
-    var memoryError: String?
 
-    private var hasLoadedMemory = false
-    private var hasLoadedMessages = false
     private let waveService: any ChatService
+    private var sessionId: String?
+    private var lastEventSeq: Int?
+    private var currentTurnId: String?
 
     init(
         waveId: String,
@@ -113,38 +72,6 @@ final class ChatState {
         turnState != .running
     }
 
-    func loadMemoryIfNeeded() async {
-        guard !hasLoadedMemory else { return }
-        hasLoadedMemory = await loadMemory()
-    }
-
-    func loadMessagesIfNeeded() async {
-        guard !hasLoadedMessages else { return }
-        do {
-            let records = try await waveService.listChatMessages(waveId: waveId)
-            if !records.isEmpty {
-                messages = records.compactMap(Self.chatMessageFromRecord)
-            }
-            hasLoadedMessages = true
-        } catch {
-            // Non-fatal — messages will accumulate from live events.
-            hasLoadedMessages = true
-        }
-    }
-
-    @discardableResult
-    func loadMemory() async -> Bool {
-        do {
-            let blocks = try await waveService.listMemoryBlocks(waveId: waveId)
-            memory.setBlocks(blocks)
-            memoryError = nil
-            return true
-        } catch {
-            memoryError = error.localizedDescription
-            return false
-        }
-    }
-
     func send(_ rawText: String) async {
         guard turnState != .running else { return }
 
@@ -155,172 +82,85 @@ final class ChatState {
         turnState = .running
 
         do {
-            try await waveService.startChat(
-                waveId: waveId,
-                message: text
-            )
+            let sessionId = try await ensureSession()
+            _ = try await waveService.sendSessionInput(sessionId: sessionId, content: text)
 
-            var hasLocalFailure = false
-            var terminalState: ChatTurnState?
+            var assistantMessageIndex: Int?
+            var terminalStatus: String?
 
-            for try await event in waveService.streamChatEvents(waveId: waveId) {
-                switch event {
-                case .message(let content, _):
-                    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        messages.append(ChatMessage(role: .assistant, content: trimmed))
+            eventLoop: for try await envelope in waveService.streamSessionEvents(
+                sessionId: sessionId,
+                afterSeq: lastEventSeq
+            ) {
+                if let seq = envelope.seq {
+                    lastEventSeq = max(lastEventSeq ?? seq, seq)
+                }
+
+                switch envelope.event {
+                case .turnStarted(let turnId):
+                    currentTurnId = turnId
+                    assistantMessageIndex = nil
+
+                case .textDelta(let turnId, let delta):
+                    guard currentTurnId == nil || turnId == currentTurnId else { continue }
+                    guard !delta.isEmpty else { continue }
+                    if let index = assistantMessageIndex,
+                       messages.indices.contains(index),
+                       messages[index].role == .assistant {
+                        let existing = messages[index]
+                        messages[index] = ChatMessage(
+                            id: existing.id,
+                            role: .assistant,
+                            content: existing.content + delta,
+                            timestamp: existing.timestamp
+                        )
+                    } else {
+                        messages.append(ChatMessage(role: .assistant, content: delta))
+                        assistantMessageIndex = messages.indices.last
                     }
-                case .memoryEdit(let op, let block, let detail):
-                    do {
-                        let badge = try await applyMemoryEdit(op: op, block: block, detail: detail)
-                        messages.append(ChatMessage(role: .memory, content: badge))
-                    } catch {
-                        memoryError = error.localizedDescription
-                        messages.append(ChatMessage(role: .error, content: error.localizedDescription))
-                        hasLocalFailure = true
-                    }
-                case .done:
-                    if terminalState == nil {
-                        terminalState = .completed
-                    }
-                case .failed(_, let message):
-                    terminalState = .failed
+
+                case .turnCompleted(let turnId, let status):
+                    guard currentTurnId == nil || turnId == currentTurnId else { continue }
+                    terminalStatus = status
+                    currentTurnId = nil
+                    break eventLoop
+
+                case .error(_, let message):
                     let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let display = trimmed.isEmpty ? "Turn failed." : trimmed
-                    messages.append(ChatMessage(role: .error, content: display))
+                    if !trimmed.isEmpty {
+                        messages.append(ChatMessage(role: .error, content: trimmed))
+                    }
+
+                case .reasoningDelta, .statusChanged, .other:
+                    continue
                 }
             }
 
-            // Always refresh from persisted messages after a turn — the DB
-            // is the source of truth, SSE is just a live optimization.
-            await refreshMessagesFromStore()
-
-            if hasLocalFailure {
+            switch terminalStatus {
+            case "completed":
+                turnState = .completed
+            case "failed", "interrupted":
                 turnState = .failed
-                return
-            }
-
-            guard let terminalState else {
+            default:
                 turnState = .failed
-                return
-            }
-            turnState = terminalState
-        } catch {
-            // SSE stream failed or completed before we subscribed — refresh
-            // from persisted messages so we don't lose the turn result.
-            await refreshMessagesFromStore()
-            turnState = .completed
-        }
-    }
-
-    private func refreshMessagesFromStore() async {
-        do {
-            let records = try await waveService.listChatMessages(waveId: waveId)
-            let persisted = records.compactMap(Self.chatMessageFromRecord)
-            if !persisted.isEmpty {
-                messages = persisted
             }
         } catch {
-            // Best-effort — the local messages from the user input are still visible.
+            messages.append(ChatMessage(role: .error, content: error.localizedDescription))
+            turnState = .failed
         }
     }
 
-    func upsertMemoryBlock(name: String, content: String, position: Int?) async {
-        guard let trimmedName = validatedMemoryBlockName(name) else { return }
-
-        do {
-            let block = try await waveService.upsertMemoryBlock(
-                waveId: waveId,
-                name: trimmedName,
-                content: content,
-                position: position
-            )
-            memory.upsert(block)
-            memoryError = nil
-        } catch {
-            memoryError = error.localizedDescription
-        }
-    }
-
-    func renameMemoryBlock(
-        oldName: String,
-        newName: String,
-        content: String,
-        position: Int
-    ) async {
-        let trimmedOld = oldName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmedNew = validatedMemoryBlockName(newName) else { return }
-
-        if !trimmedOld.isEmpty && trimmedOld != trimmedNew {
-            do {
-                try await waveService.deleteMemoryBlock(waveId: waveId, name: trimmedOld)
-                memory.remove(named: trimmedOld)
-            } catch {
-                memoryError = error.localizedDescription
-                return
-            }
+    private func ensureSession() async throws -> String {
+        if let existing = sessionId {
+            return existing
         }
 
-        await upsertMemoryBlock(name: trimmedNew, content: content, position: position)
-    }
-
-    func deleteMemoryBlock(name: String) async {
-        do {
-            try await waveService.deleteMemoryBlock(waveId: waveId, name: name)
-            memory.remove(named: name)
-            memoryError = nil
-        } catch {
-            memoryError = error.localizedDescription
-        }
-    }
-
-    private func applyMemoryEdit(op: String, block: String, detail: String) async throws -> String {
-        let normalizedBlock = block.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedBlock.isEmpty else {
-            throw WaveServiceError.commandFailed("Agent memory edit missing block name.")
-        }
-
-        if op.lowercased() == "delete" {
-            try await waveService.deleteMemoryBlock(waveId: waveId, name: normalizedBlock)
-            memory.remove(named: normalizedBlock)
-            memoryError = nil
-            return "Agent updated memory: deleted \(normalizedBlock)"
-        }
-
-        let existingPosition = memory.blocks.first(where: { $0.name == normalizedBlock })?.position
-        let updated = try await waveService.upsertMemoryBlock(
-            waveId: waveId,
-            name: normalizedBlock,
-            content: detail,
-            position: existingPosition
+        let session = try await waveService.createSession(
+            provider: "claude",
+            waveRunId: nil,
+            config: AgentSessionConfig()
         )
-        memory.upsert(updated)
-        memoryError = nil
-        return "Agent updated memory: \(normalizedBlock)"
-    }
-
-    private func validatedMemoryBlockName(_ raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            memoryError = Self.missingBlockNameMessage
-            return nil
-        }
-        return trimmed
-    }
-
-    private static func chatMessageFromRecord(_ record: ChatMessageRecord) -> ChatMessage? {
-        let role: ChatRole
-        switch record.role {
-        case "user": role = .user
-        case "assistant": role = .assistant
-        case "memory": role = .memory
-        case "error": role = .error
-        default: return nil
-        }
-        return ChatMessage(
-            role: role,
-            content: record.content,
-            timestamp: record.createdAt ?? Date()
-        )
+        sessionId = session.id
+        return session.id
     }
 }

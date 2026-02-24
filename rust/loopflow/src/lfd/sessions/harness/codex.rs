@@ -10,10 +10,24 @@ use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::lfd::sessions::adapter::SessionAdapter;
-use crate::lfd::sessions::types::{
-    FileEdit, ItemDelta, ItemStatus, SessionConfig, SessionEvent, SessionItem, TurnStatus,
-};
+use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
+use crate::lfd::sessions::harness::common::spawn_stderr_logger;
+use crate::lfd::sessions::harness::{codex_mapping, SessionHarness};
+use crate::lfd::sessions::types::{SessionConfig, SessionEvent};
+
+async fn resolve_turn_id(
+    turn_id_from_params: Option<&str>,
+    current_turn_id: &Arc<Mutex<Option<String>>>,
+) -> String {
+    if let Some(turn_id) = turn_id_from_params {
+        return turn_id.to_string();
+    }
+    current_turn_id
+        .lock()
+        .await
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 #[derive(Debug)]
 enum OutboundRpc {
@@ -28,13 +42,7 @@ enum OutboundRpc {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ItemPhase {
-    Started,
-    Completed,
-}
-
-pub struct CodexAdapter {
+pub struct CodexHarness {
     events: broadcast::Sender<SessionEvent>,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
@@ -47,13 +55,13 @@ pub struct CodexAdapter {
     shutdown_requested: Arc<AtomicBool>,
 }
 
-impl std::fmt::Debug for CodexAdapter {
+impl std::fmt::Debug for CodexHarness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodexAdapter").finish()
+        f.debug_struct("CodexHarness").finish()
     }
 }
 
-impl CodexAdapter {
+impl CodexHarness {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
             events,
@@ -71,7 +79,7 @@ impl CodexAdapter {
 
     async fn send_request(&mut self, method: &str, params: Value) -> Result<()> {
         let Some(tx) = &self.outbound_tx else {
-            return Err(anyhow!("codex adapter not started"));
+            return Err(anyhow!("codex harness not started"));
         };
         let id = self.next_request_id;
         self.next_request_id += 1;
@@ -82,198 +90,6 @@ impl CodexAdapter {
         })
         .await
         .map_err(|_| anyhow!("codex writer task unavailable"))
-    }
-
-    fn extract_turn_id(params: &Value) -> Option<String> {
-        params
-            .get("turn")
-            .and_then(|t| t.get("id"))
-            .and_then(Value::as_str)
-            .or_else(|| params.get("turnId").and_then(Value::as_str))
-            .map(ToString::to_string)
-    }
-
-    fn item_payload(params: &Value) -> &Value {
-        params.get("item").unwrap_or(params)
-    }
-
-    fn text_field(value: &Value, key: &str) -> Option<String> {
-        value
-            .get(key)
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-    }
-
-    fn required_text_field(value: &Value, key: &str) -> String {
-        Self::text_field(value, key).unwrap_or_default()
-    }
-
-    fn map_item_id(params: &Value) -> String {
-        Self::item_payload(params)
-            .get("id")
-            .and_then(Value::as_str)
-            .or_else(|| params.get("itemId").and_then(Value::as_str))
-            .or_else(|| params.get("id").and_then(Value::as_str))
-            .unwrap_or("unknown")
-            .to_string()
-    }
-
-    fn map_item_type(params: &Value) -> &str {
-        Self::item_payload(params)
-            .get("type")
-            .and_then(Value::as_str)
-            .or_else(|| params.get("kind").and_then(Value::as_str))
-            .unwrap_or("tool")
-    }
-
-    fn map_turn_status(params: &Value) -> TurnStatus {
-        let turn_status = params
-            .get("turn")
-            .and_then(|t| t.get("status"))
-            .and_then(Value::as_str)
-            .or_else(|| params.get("status").and_then(Value::as_str))
-            .unwrap_or_default();
-        match turn_status {
-            "interrupted" | "cancelled" => TurnStatus::Interrupted,
-            "failed" | "error" => TurnStatus::Failed,
-            _ => TurnStatus::Completed,
-        }
-    }
-
-    fn map_item_status(params: &Value) -> ItemStatus {
-        let status = Self::item_payload(params)
-            .get("status")
-            .and_then(Value::as_str)
-            .or_else(|| params.get("status").and_then(Value::as_str))
-            .unwrap_or("in_progress");
-        match status {
-            "completed" => ItemStatus::Completed,
-            "failed" | "error" => ItemStatus::Failed,
-            "declined" => ItemStatus::Declined,
-            _ => ItemStatus::InProgress,
-        }
-    }
-
-    fn parse_command(item: &Value) -> Vec<String> {
-        item.get("command")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(ToString::to_string)
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    fn build_item(params: &Value, phase: ItemPhase) -> SessionItem {
-        let id = Self::map_item_id(params);
-        let item_type = Self::map_item_type(params);
-        let item = Self::item_payload(params);
-        let status = Self::map_item_status(params);
-        let completed = phase == ItemPhase::Completed;
-
-        match item_type {
-            "commandExecution" => SessionItem::Command {
-                id,
-                command: Self::parse_command(item),
-                cwd: Self::required_text_field(item, "cwd"),
-                status,
-                output: if completed {
-                    Self::text_field(item, "aggregatedOutput")
-                } else {
-                    None
-                },
-                exit_code: if completed {
-                    item.get("exitCode")
-                        .and_then(Value::as_i64)
-                        .map(|v| v as i32)
-                } else {
-                    None
-                },
-                duration_ms: if completed {
-                    item.get("durationMs").and_then(Value::as_u64)
-                } else {
-                    None
-                },
-            },
-            "fileChange" => SessionItem::FileChange {
-                id,
-                changes: parse_file_changes(item),
-                status,
-            },
-            "mcpToolCall" => SessionItem::McpToolCall {
-                id,
-                server: Self::required_text_field(item, "server"),
-                tool: Self::required_text_field(item, "tool"),
-                status,
-                arguments: item.get("arguments").cloned().unwrap_or(json!({})),
-                result: if completed {
-                    Self::text_field(item, "result")
-                } else {
-                    None
-                },
-                error: if completed {
-                    Self::text_field(item, "error")
-                } else {
-                    None
-                },
-            },
-            "agentMessage" => SessionItem::AgentMessage {
-                id,
-                text: Self::required_text_field(item, "text"),
-                phase: Self::text_field(item, "phase"),
-            },
-            "plan" => SessionItem::Plan {
-                id,
-                text: Self::required_text_field(item, "text"),
-            },
-            _ => SessionItem::Tool {
-                id,
-                name: item_type.to_string(),
-                status,
-                input: item.get("input").cloned(),
-                output: if completed {
-                    Self::text_field(item, "output")
-                } else {
-                    None
-                },
-            },
-        }
-    }
-
-    fn map_item_delta(method: &str, params: &Value) -> Option<ItemDelta> {
-        let content = Self::text_content(params)?;
-        match method {
-            "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
-                Some(ItemDelta::Output { content })
-            }
-            "item/plan/delta" => Some(ItemDelta::PlanText { content }),
-            _ => None,
-        }
-    }
-
-    fn text_content(params: &Value) -> Option<String> {
-        params
-            .get("content")
-            .and_then(Value::as_str)
-            .or_else(|| params.get("delta").and_then(Value::as_str))
-            .or_else(|| params.get("output").and_then(Value::as_str))
-            .map(ToString::to_string)
-    }
-
-    async fn resolve_turn_id(
-        turn_id_from_params: Option<&str>,
-        current_turn_id: &Arc<Mutex<Option<String>>>,
-    ) -> String {
-        if let Some(turn_id) = turn_id_from_params {
-            return turn_id.to_string();
-        }
-        current_turn_id
-            .lock()
-            .await
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string())
     }
 
     async fn shutdown_tasks(&mut self) {
@@ -293,33 +109,8 @@ impl CodexAdapter {
     }
 }
 
-fn parse_file_changes(item: &Value) -> Vec<FileEdit> {
-    item.get("changes")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .map(|c| FileEdit {
-                    path: c
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    kind: c
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string),
-                    diff: c
-                        .get("diff")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 #[async_trait]
-impl SessionAdapter for CodexAdapter {
+impl SessionHarness for CodexHarness {
     async fn start(&mut self, config: &SessionConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());
@@ -370,7 +161,7 @@ impl SessionAdapter for CodexAdapter {
     }
 }
 
-impl CodexAdapter {
+impl CodexHarness {
     async fn start_inner(&mut self, config: &SessionConfig) -> Result<()> {
         let mut child = Command::new("codex")
             .arg("--app-server")
@@ -464,7 +255,7 @@ impl CodexAdapter {
                 }
 
                 // Resolve turn_id from notification params or tracked state.
-                let turn_id_from_params = CodexAdapter::extract_turn_id(&params);
+                let turn_id_from_params = codex_mapping::extract_turn_id(&params);
 
                 match method {
                     "turn/started" => {
@@ -476,44 +267,33 @@ impl CodexAdapter {
                         let _ = event_tx.send(SessionEvent::TurnStarted { turn_id: tid });
                     }
                     "turn/completed" => {
-                        let tid = CodexAdapter::resolve_turn_id(
-                            turn_id_from_params.as_deref(),
-                            &current_turn_id,
-                        )
-                        .await;
+                        let tid =
+                            resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
                         turn_in_progress.store(false, Ordering::Relaxed);
                         *current_turn_id.lock().await = None;
-                        let status = CodexAdapter::map_turn_status(&params);
+                        let status = codex_mapping::map_turn_status(&params);
                         let _ = event_tx.send(SessionEvent::TurnCompleted {
                             turn_id: tid,
                             status,
                         });
                     }
                     "item/started" => {
-                        let tid = CodexAdapter::resolve_turn_id(
-                            turn_id_from_params.as_deref(),
-                            &current_turn_id,
-                        )
-                        .await;
-                        let item = CodexAdapter::build_item(&params, ItemPhase::Started);
+                        let tid =
+                            resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
+                        let item = codex_mapping::build_item(&params, ItemPhase::Started);
                         let _ = event_tx.send(SessionEvent::ItemStarted { turn_id: tid, item });
                     }
                     "item/completed" => {
-                        let tid = CodexAdapter::resolve_turn_id(
-                            turn_id_from_params.as_deref(),
-                            &current_turn_id,
-                        )
-                        .await;
-                        let item = CodexAdapter::build_item(&params, ItemPhase::Completed);
+                        let tid =
+                            resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
+                        let item = codex_mapping::build_item(&params, ItemPhase::Completed);
                         let _ = event_tx.send(SessionEvent::ItemCompleted { turn_id: tid, item });
                     }
                     "item/agentMessage/delta" => {
-                        if let Some(content) = CodexAdapter::text_content(&params) {
-                            let tid = CodexAdapter::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
+                        if let Some(content) = codex_mapping::text_content(&params) {
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
                             let _ = event_tx.send(SessionEvent::TextDelta {
                                 turn_id: tid,
                                 content,
@@ -524,12 +304,10 @@ impl CodexAdapter {
                         // Final agent message text is captured in item/completed.
                     }
                     "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
-                        if let Some(content) = CodexAdapter::text_content(&params) {
-                            let tid = CodexAdapter::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
+                        if let Some(content) = codex_mapping::text_content(&params) {
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
                             let _ = event_tx.send(SessionEvent::ReasoningDelta {
                                 turn_id: tid,
                                 content,
@@ -539,13 +317,11 @@ impl CodexAdapter {
                     "item/commandExecution/outputDelta"
                     | "item/fileChange/outputDelta"
                     | "item/plan/delta" => {
-                        if let Some(data) = CodexAdapter::map_item_delta(method, &params) {
-                            let tid = CodexAdapter::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
-                            let item_id = CodexAdapter::map_item_id(&params);
+                        if let Some(data) = codex_mapping::map_item_delta(method, &params) {
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
+                            let item_id = codex_mapping::map_item_id(&params);
                             let _ = event_tx.send(SessionEvent::ItemUpdated {
                                 turn_id: tid,
                                 item_id,
@@ -559,11 +335,9 @@ impl CodexAdapter {
                             .and_then(Value::as_str)
                             .map(ToString::to_string)
                         {
-                            let tid = CodexAdapter::resolve_turn_id(
-                                turn_id_from_params.as_deref(),
-                                &current_turn_id,
-                            )
-                            .await;
+                            let tid =
+                                resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
+                                    .await;
                             let _ = event_tx.send(SessionEvent::DiffUpdated { turn_id: tid, diff });
                         }
                     }
@@ -596,12 +370,7 @@ impl CodexAdapter {
             }
         });
 
-        let stderr_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                tracing::debug!(target: "lfd::sessions::codex", stderr = %line, "codex stderr");
-            }
-        });
+        let stderr_task = spawn_stderr_logger(stderr, "lfd::sessions::codex");
 
         self.child = Some(child);
         self.outbound_tx = Some(outbound_tx);

@@ -2,34 +2,6 @@
 
 Build the session API, event model, storage, and SSE replay. Codex as first adapter to prove the design.
 
-## Design principles (wave-wide)
-
-**Adapter-first, not protocol-first.** Build a working Codex adapter end-to-end before abstracting. The protocol emerges from real adapter behavior, not upfront design.
-
-**lfd owns the agent lifecycle.** Concerto is a thin client. Agent processes survive Concerto close/reopen. Session state lives in lfd's store.
-
-**Structured events over terminal bytes.** Provider adapters translate native events (Codex JSON-RPC, Claude PTY output) into a canonical event model. Raw fallback for anything the adapter can't parse.
-
-**Honest capability flags.** Each adapter advertises what it can do (structured input requests, tool events, interrupts). UI renders from capabilities, not provider name. Partial support is explicit.
-
-**Provider-owned auth.** Codex and Claude handle their own OAuth/login. lfd never collects raw credentials.
-
-## Architecture
-
-```
-wave_runs (orchestration parent)
-  └── agents (execution child, agents.wave_run_id)
-        └── agent_events (event history, agent_events.agent_id)
-```
-
-```
-Concerto ──HTTP/SSE──▶ lfd agent API
-                         ├── AgentManager (lifecycle, state machine)
-                         ├── agent store (agents + agent_events tables)
-                         └── adapter (Codex | Claude | OpenCode | Fake)
-                               └── provider process (Codex app-server | Claude PTY | ...)
-```
-
 ## What exists after this
 
 lfd exposes a session API. Clients create a Codex session, send input, receive structured events via SSE, and end the session. Events persist and replay on reconnect. The API, storage, and event model are provider-agnostic — Codex is just the first adapter.
@@ -79,11 +51,10 @@ enum SessionEvent {
 
 enum SessionItem {
     Command { id, command, cwd, status, output, exit_code },
-    FileChange { id, changes, status },
-    McpToolCall { id, server, tool, status, arguments, result },
-    AgentMessage { id, text, phase },
-    Plan { id, text },
-    Tool { id, name, status, input, output }, // generic fallback
+    File { id, path, status, diff },
+    Message { id, text },
+    Thought { id, text },
+    Tool { id, name, status, input, output },
 }
 ```
 
@@ -129,9 +100,9 @@ CREATE TABLE session_events (
   - `turn/started` → `TurnStarted { turn_id }`
   - `turn/completed` → `TurnCompleted { turn_id, status }`
   - `item/started` (commandExecution) → `ItemStarted { turn_id, Command { .. } }`
-  - `item/started` (fileChange) → `ItemStarted { turn_id, FileChange { .. } }`
-  - `item/started` (mcpToolCall) → `ItemStarted { turn_id, McpToolCall { .. } }`
-  - `item/started` (plan) → `ItemStarted { turn_id, Plan { .. } }`
+  - `item/started` (fileChange) → `ItemStarted { turn_id, File { .. } }`
+  - `item/started` (mcpToolCall) → `ItemStarted { turn_id, Tool { .. } }`
+  - `item/started` (plan) → `ItemStarted { turn_id, Thought { .. } }`
   - `item/completed` → `ItemCompleted { turn_id, item }`
   - `item/agentMessage/delta` → `TextDelta { turn_id, content }`
   - `item/reasoning/summaryTextDelta` → `ReasoningDelta { turn_id, content }`
@@ -158,8 +129,8 @@ All planned pieces landed: session API (5 endpoints under `/v0/sessions`), turn+
 
 **Event model evolved from plan.** Started with flat events (`TextDelta, ToolStarted, ToolDone`). Shipped with a richer turn+item model — typed items with lifecycles, `turn_id` on all turn-scoped events, and a generic `Tool` fallback. This is better for both the Claude adapter (structured tool mapping) and Concerto (typed item rendering).
 
-**Adapter trait is simpler than expected.** Three methods: `start()`, `send_input()`, `stop()`. Factory pattern for provider dispatch. The abstraction is clean enough that Phase 02 should be straightforward to wire up.
+**Harness trait is simpler than expected.** Three methods: `start()`, `send_input()`, `stop()`. Provider dispatch via `HarnessProvider` enum, no factory trait needed. The abstraction is clean enough that Phase 02 was straightforward to wire up.
 
-**Event normalization is where complexity lives.** The Codex adapter (630 lines) spent most of its effort normalizing field name aliases (`turn.id` / `turnId` / `id`), status values (`cancelled` → `interrupted`), and item type detection from JSON-RPC payloads. Phase 02's Claude adapter will face similar normalization work against NDJSON.
+**Event normalization is where complexity lives.** The Codex harness spent most of its effort normalizing field name aliases (`turn.id` / `turnId` / `id`), status values (`cancelled` → `interrupted`), and item type detection from JSON-RPC payloads. Phase 02's Claude harness faced similar normalization work against NDJSON.
 
-**What to validate before phase 02:** Codex event mappings were built from docs, not real traces. Run a real Codex session to confirm payloads match before using this as the reference for Claude adapter event mapping.
+**What to validate before phase 02:** Codex event mappings were built from docs, not real traces. Run a real Codex session to confirm payloads match before using this as the reference for Claude harness event mapping.

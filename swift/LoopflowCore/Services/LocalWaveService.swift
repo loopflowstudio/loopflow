@@ -251,6 +251,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    private func sessionURL(_ sessionId: String? = nil, components: String...) -> URL {
+        var url = apiBaseURL.appendingPathComponent("sessions")
+        if let sessionId {
+            url = url.appendingPathComponent(sessionId)
+        }
+        return components.reduce(url) { current, component in
+            current.appendingPathComponent(component)
+        }
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.
@@ -705,120 +715,88 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    public func listMemoryBlocks(waveId: String) async throws -> [ChatMemoryBlock] {
-        let url = waveURL(waveId, components: "memory-blocks")
-        let request = try makeRequest(url)
-
-        let (data, response) = try await performRequest(request)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rows = json["data"] as? [[String: Any]] else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-
-        return rows.compactMap(Self.parseMemoryBlockFromJSON)
-    }
-
-    public func upsertMemoryBlock(
-        waveId: String,
-        name: String,
-        content: String,
-        position: Int?
-    ) async throws -> ChatMemoryBlock {
-        let url = waveURL(waveId, components: "memory-blocks", name)
-
-        var body: [String: Any] = ["content": content]
-        if let position { body["position"] = position }
-        let request = try makeRequest(
-            url,
-            method: "PUT",
-            body: body,
-            contentType: "application/json"
-        )
-
-        let (data, response) = try await performRequest(request)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let block = Self.parseMemoryBlockFromJSON(json) else {
-            throw WaveServiceError.commandFailed("Invalid response")
-        }
-        return block
-    }
-
-    public func deleteMemoryBlock(waveId: String, name: String) async throws {
-        let url = waveURL(waveId, components: "memory-blocks", name)
-
-        let request = try makeRequest(url, method: "DELETE")
-        let (data, response) = try await performRequest(request)
-        guard response.statusCode == 200 else {
-            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
-        }
-    }
-
-    public func startChat(
-        waveId: String,
-        message: String
-    ) async throws {
-        let url = waveURL(waveId, components: "chat")
-
-        let body: [String: Any] = [
-            "message": message,
+    public func createSession(
+        provider: String,
+        waveRunId: String?,
+        config: AgentSessionConfig
+    ) async throws -> AgentSession {
+        let url = sessionURL()
+        var payload: [String: Any] = [
+            "provider": provider,
+            "config": Self.sessionConfigJSON(config),
         ]
+        if let waveRunId {
+            payload["wave_run_id"] = waveRunId
+        }
 
         let request = try makeRequest(
             url,
             method: "POST",
-            body: body,
+            body: payload,
             contentType: "application/json"
         )
-
         let (data, response) = try await performRequest(request, useLongTimeouts: true)
         guard response.statusCode == 200 else {
             throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
     }
 
-    public func listChatMessages(waveId: String) async throws -> [ChatMessageRecord] {
-        let url = waveURL(waveId, components: "chat", "messages")
-        let request = try makeRequest(url)
-
+    public func getSession(_ id: String) async throws -> AgentSession {
+        let request = try makeRequest(sessionURL(id))
         let (data, response) = try await performRequest(request)
         guard response.statusCode == 200 else {
             throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
-
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rows = json["data"] as? [[String: Any]] else {
+              let session = Self.parseSessionFromJSON(json) else {
             throw WaveServiceError.commandFailed("Invalid response")
         }
-
-        return rows.compactMap { dict in
-            guard let id = dict["id"] as? String,
-                  let role = dict["role"] as? String,
-                  let content = dict["content"] as? String else { return nil }
-            return ChatMessageRecord(
-                id: id,
-                role: role,
-                content: content,
-                createdAt: Self.parseDate(dict["created_at"])
-            )
-        }
+        return session
     }
 
-    public func streamChatEvents(
-        waveId: String
-    ) -> AsyncThrowingStream<ChatTurnEvent, Error> {
+    public func sendSessionInput(sessionId: String, content: String) async throws -> AgentSession {
+        let request = try makeRequest(
+            sessionURL(sessionId, components: "input"),
+            method: "POST",
+            body: ["content": content],
+            contentType: "application/json"
+        )
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
+    }
+
+    public func streamSessionEvents(
+        sessionId: String,
+        afterSeq: Int?
+    ) -> AsyncThrowingStream<AgentSessionEventEnvelope, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 let activeSession = longSession()
                 do {
-                    let url = waveURL(waveId, components: "chat", "events")
+                    var components = URLComponents(
+                        url: sessionURL(sessionId, components: "events"),
+                        resolvingAgainstBaseURL: false
+                    )!
+                    if let afterSeq {
+                        components.queryItems = [URLQueryItem(name: "after_seq", value: String(afterSeq))]
+                    }
+
+                    guard let url = components.url else {
+                        throw WaveServiceError.commandFailed("Invalid events URL")
+                    }
+
                     let request = try makeRequest(url)
                     let (bytes, response) = try await activeSession.session.bytes(for: request)
 
@@ -834,22 +812,42 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                         throw parseStatusCodeError(statusCode: httpResponse.statusCode, data: data)
                     }
 
+                    var pendingSeq: Int?
                     for try await line in bytes.lines {
+                        if line.hasPrefix("id:") {
+                            let value = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                            pendingSeq = Int(value)
+                            continue
+                        }
+
                         guard line.hasPrefix("data:") else { continue }
                         let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                         guard !payload.isEmpty else { continue }
-                        let event = try Self.parseChatTurnEvent(payload)
-                        continuation.yield(event)
-                        if event.isTerminal {
-                            break
-                        }
+
+                        let event = try Self.parseSessionEvent(payload)
+                        continuation.yield(AgentSessionEventEnvelope(seq: pendingSeq, event: event))
+                        pendingSeq = nil
                     }
+
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: mapError(error, trustDelegate: activeSession.delegate))
                 }
             }
         }
+    }
+
+    public func stopSession(_ id: String) async throws -> AgentSession {
+        let request = try makeRequest(sessionURL(id), method: "DELETE")
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = Self.parseSessionFromJSON(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return session
     }
 
     public func connect(_ id: String) async throws -> ConnectionInfo {
@@ -1133,48 +1131,84 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    private static func parseMemoryBlockFromJSON(_ json: [String: Any]) -> ChatMemoryBlock? {
-        guard let name = json["name"] as? String,
-              let content = json["content"] as? String else {
+    private static func parseSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
+        guard let id = json["id"] as? String,
+              let provider = json["provider"] as? String,
+              let status = json["status"] as? String else {
             return nil
         }
 
-        return ChatMemoryBlock(
-            name: name,
-            content: content,
-            position: normalizeInt(json["position"]),
-            updatedAt: parseDate(json["updated_at"])
+        let configJSON = json["config"] as? [String: Any] ?? [:]
+        let config = AgentSessionConfig(
+            model: configJSON["model"] as? String,
+            cwd: configJSON["cwd"] as? String,
+            systemPrompt: configJSON["system_prompt"] as? String,
+            maxTurns: normalizeOptionalInt(configJSON["max_turns"]),
+            yoloMode: configJSON["yolo_mode"] as? Bool ?? false
+        )
+
+        return AgentSession(
+            id: id,
+            provider: provider,
+            status: status,
+            waveRunId: json["wave_run_id"] as? String,
+            providerSessionId: json["provider_session_id"] as? String,
+            config: config,
+            createdAt: parseDate(json["created_at"]),
+            endedAt: parseDate(json["ended_at"])
         )
     }
 
-    private static func parseChatTurnEvent(_ raw: String) throws -> ChatTurnEvent {
+    private static func sessionConfigJSON(_ config: AgentSessionConfig) -> [String: Any] {
+        var json: [String: Any] = ["yolo_mode": config.yoloMode]
+        if let model = config.model { json["model"] = model }
+        if let cwd = config.cwd { json["cwd"] = cwd }
+        if let systemPrompt = config.systemPrompt { json["system_prompt"] = systemPrompt }
+        if let maxTurns = config.maxTurns { json["max_turns"] = maxTurns }
+        return json
+    }
+
+    private static func parseSessionEvent(_ raw: String) throws -> AgentSessionEvent {
         guard let data = raw.data(using: .utf8),
               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else {
-            throw WaveServiceError.commandFailed("Invalid chat event payload")
+            throw WaveServiceError.commandFailed("Invalid session event payload")
         }
 
         switch type {
-        case "message":
-            let content = json["content"] as? String ?? ""
-            let phaseRaw = json["phase"] as? String
-            let phase = ChatTurnPhase(rawValue: phaseRaw ?? "") ?? .progress
-            return .message(content: content, phase: phase)
-        case "memory_edit":
-            return .memoryEdit(
-                op: json["op"] as? String ?? "upsert",
-                block: json["block"] as? String ?? "",
-                detail: json["detail"] as? String ?? ""
+        case "turn_started":
+            return .turnStarted(turnId: json["turn_id"] as? String ?? "")
+        case "turn_completed":
+            return .turnCompleted(
+                turnId: json["turn_id"] as? String ?? "",
+                status: json["status"] as? String ?? "completed"
             )
-        case "done":
-            return .done
-        case "failed":
-            return .failed(
-                code: json["code"] as? String ?? "failed",
-                message: json["message"] as? String ?? "Turn failed"
+        case "text_delta":
+            return .textDelta(
+                turnId: json["turn_id"] as? String ?? "",
+                content: json["content"] as? String ?? ""
+            )
+        case "reasoning_delta":
+            return .reasoningDelta(
+                turnId: json["turn_id"] as? String ?? "",
+                content: json["content"] as? String ?? ""
+            )
+        case "status_changed":
+            return .statusChanged(status: json["status"] as? String ?? "")
+        case "error":
+            return .error(
+                code: json["code"] as? String ?? "error",
+                message: json["message"] as? String ?? "Session error"
             )
         default:
-            throw WaveServiceError.commandFailed("Unknown chat event type: \(type)")
+            let payload = json.reduce(into: [String: String]()) { result, entry in
+                if let stringValue = entry.value as? String {
+                    result[entry.key] = stringValue
+                } else if let numericValue = entry.value as? NSNumber {
+                    result[entry.key] = numericValue.stringValue
+                }
+            }
+            return .other(type: type, payload: payload)
         }
     }
 
@@ -1255,6 +1289,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let intValue = value as? Int { return intValue }
         if let doubleValue = value as? Double { return Int(doubleValue) }
         return 0
+    }
+
+    private static func normalizeOptionalInt(_ value: Any?) -> Int? {
+        if let intValue = value as? Int { return intValue }
+        if let doubleValue = value as? Double { return Int(doubleValue) }
+        return nil
     }
 
     private static func parseDate(_ value: Any?) -> Date? {

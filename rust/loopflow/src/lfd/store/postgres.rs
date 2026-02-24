@@ -297,6 +297,27 @@ impl PostgresStore {
         .await
     }
 
+    pub async fn update_provider_session_id(
+        &self,
+        session_id: &LfdId,
+        provider_session_id: &str,
+    ) -> StoreResult<()> {
+        let provider_session_id = provider_session_id.to_string();
+        self.with_client(|client| async move {
+            let updated = client
+                .execute(
+                    "UPDATE sessions SET provider_session_id = $2 WHERE id = $1",
+                    &[&session_id, &provider_session_id],
+                )
+                .await?;
+            if updated == 0 {
+                return Err(StoreError::NotFound);
+            }
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn update_session_status(
         &self,
         session_id: &LfdId,

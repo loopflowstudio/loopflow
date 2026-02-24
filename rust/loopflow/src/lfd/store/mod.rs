@@ -459,6 +459,28 @@ impl Store {
         }
     }
 
+    pub async fn update_provider_session_id(
+        &self,
+        session_id: &LfdId,
+        provider_session_id: &str,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                let provider_session_id = provider_session_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.update_provider_session_id(&session_id, &provider_session_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_provider_session_id(session_id, provider_session_id)
+                    .await
+            }
+        }
+    }
+
     pub async fn update_session_status(
         &self,
         session_id: &LfdId,

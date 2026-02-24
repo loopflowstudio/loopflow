@@ -203,7 +203,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_security: lfd_config.http_security,
         auth_failure_throttle: loopflow::lfd::auth::AuthFailureThrottle::new(),
         ci_failure_cache,
-        chat_turns: loopflow::lfd::http::state::ChatTurnRegistry::new(),
         sessions: SessionManager::new(store),
     };
     let http_router = loopflow::lfd::http::router(http_state);

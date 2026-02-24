@@ -1,4 +1,4 @@
-mod adapter;
+mod harness;
 pub mod types;
 
 use std::collections::HashMap;
@@ -8,15 +8,13 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::lfd::id::LfdId;
-use crate::lfd::sessions::adapter::{
-    DefaultSessionAdapterFactory, SessionAdapter, SharedSessionAdapterFactory,
-};
+use crate::lfd::sessions::harness::{CreateHarnessFn, SessionHarness};
 use crate::lfd::sessions::types::{
-    CreateSessionParams, PersistedSessionEvent, Session, SessionEvent, SessionStatus,
+    CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
 };
 use crate::lfd::store::{SharedStore, StoreError};
 
-const ADAPTER_EVENT_BUFFER: usize = 256;
+const HARNESS_EVENT_BUFFER: usize = 256;
 const LIVE_EVENT_BUFFER: usize = 256;
 
 #[derive(Debug, thiserror::Error)]
@@ -34,12 +32,14 @@ pub enum SessionManagerError {
     UnsupportedProvider(String),
     #[error("wave run already has an active session: {0}")]
     WaveRunSessionConflict(String),
-    #[error("adapter error: {0}")]
-    Adapter(String),
+    #[error("turn already in progress")]
+    TurnAlreadyInProgress,
+    #[error("harness error: {0}")]
+    Harness(String),
 }
 
 struct SessionRuntime {
-    adapter: Mutex<Box<dyn SessionAdapter>>,
+    harness: Mutex<Box<dyn SessionHarness>>,
     events_tx: broadcast::Sender<PersistedSessionEvent>,
     next_seq: AtomicI64,
 }
@@ -52,7 +52,7 @@ impl std::fmt::Debug for SessionRuntime {
 
 struct SessionManagerInner {
     store: SharedStore,
-    adapter_factory: SharedSessionAdapterFactory,
+    create_harness: CreateHarnessFn,
     runtimes: Mutex<HashMap<LfdId, Arc<SessionRuntime>>>,
 }
 
@@ -69,14 +69,14 @@ pub struct SessionManager {
 
 impl SessionManager {
     pub fn new(store: SharedStore) -> Self {
-        Self::with_factory(store, Arc::new(DefaultSessionAdapterFactory))
+        Self::with_create_harness(store, harness::default_create_harness)
     }
 
-    pub fn with_factory(store: SharedStore, adapter_factory: SharedSessionAdapterFactory) -> Self {
+    fn with_create_harness(store: SharedStore, create_harness: CreateHarnessFn) -> Self {
         Self {
             inner: Arc::new(SessionManagerInner {
                 store,
-                adapter_factory,
+                create_harness,
                 runtimes: Mutex::new(HashMap::new()),
             }),
         }
@@ -86,10 +86,11 @@ impl SessionManager {
         &self,
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
-        let provider = params.provider.trim().to_lowercase();
-        if provider != "codex" {
-            return Err(SessionManagerError::UnsupportedProvider(provider));
-        }
+        let provider = harness::canonical_provider(&params.provider)
+            .map(ToString::to_string)
+            .ok_or_else(|| {
+                SessionManagerError::UnsupportedProvider(params.provider.trim().to_lowercase())
+            })?;
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
             if self
@@ -115,17 +116,14 @@ impl SessionManager {
             created_at: time::OffsetDateTime::now_utc(),
             ended_at: None,
         };
-        let (adapter_events_tx, mut adapter_events_rx) = broadcast::channel(ADAPTER_EVENT_BUFFER);
-        let adapter = self
-            .inner
-            .adapter_factory
-            .create(&provider, adapter_events_tx)
-            .map_err(|err| SessionManagerError::Adapter(err.to_string()))?;
+        let (harness_events_tx, harness_events_rx) = broadcast::channel(HARNESS_EVENT_BUFFER);
+        let harness = (self.inner.create_harness)(&provider, harness_events_tx)
+            .map_err(|err| SessionManagerError::Harness(err.to_string()))?;
         self.inner.store.create_session(&session).await?;
 
         let (events_tx, _) = broadcast::channel(LIVE_EVENT_BUFFER);
         let runtime = Arc::new(SessionRuntime {
-            adapter: Mutex::new(adapter),
+            harness: Mutex::new(harness),
             events_tx,
             next_seq: AtomicI64::new(0),
         });
@@ -144,75 +142,8 @@ impl SessionManager {
         )
         .await?;
 
-        let manager = self.clone();
-        let session_id = session.id.clone();
-        let bridge_runtime = runtime.clone();
-        tokio::spawn(async move {
-            loop {
-                match adapter_events_rx.recv().await {
-                    Ok(event) => {
-                        if let Err(err) = manager
-                            .append_runtime_event(&session_id, &bridge_runtime, event)
-                            .await
-                        {
-                            tracing::warn!(session_id = %session_id, error = %err, "failed to persist adapter event");
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::warn!(session_id = %session_id, skipped, "session adapter lagged")
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-
-        let manager = self.clone();
-        let session_id = session.id.clone();
-        let startup_runtime = runtime.clone();
-        let startup_config = session.config.clone();
-        tokio::spawn(async move {
-            let result = {
-                let mut adapter = startup_runtime.adapter.lock().await;
-                adapter.start(&startup_config).await
-            };
-
-            match result {
-                Ok(()) => {
-                    if let Err(err) = manager
-                        .set_status(
-                            &session_id,
-                            SessionStatus::Active,
-                            None,
-                            Some(startup_runtime.clone()),
-                        )
-                        .await
-                    {
-                        tracing::warn!(session_id = %session_id, error = %err, "failed to set active session status");
-                    }
-                }
-                Err(err) => {
-                    let _ = manager
-                        .append_runtime_event(
-                            &session_id,
-                            &startup_runtime,
-                            SessionEvent::Error {
-                                code: "session_start_failed".to_string(),
-                                message: err.to_string(),
-                            },
-                        )
-                        .await;
-                    let _ = manager
-                        .set_status(
-                            &session_id,
-                            SessionStatus::Failed,
-                            Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-                            Some(startup_runtime.clone()),
-                        )
-                        .await;
-                    let _ = manager.remove_runtime(&session_id).await;
-                }
-            }
-        });
+        self.spawn_harness_event_bridge(session.id.clone(), runtime.clone(), harness_events_rx);
+        self.spawn_harness_startup(session.id.clone(), runtime.clone(), session.config.clone());
 
         Ok(session)
     }
@@ -247,31 +178,18 @@ impl SessionManager {
             })?;
 
         let send_result = {
-            let mut adapter = runtime.adapter.lock().await;
-            adapter.send_input(content).await
+            let mut harness = runtime.harness.lock().await;
+            harness.send_input(content).await
         };
 
         if let Err(err) = send_result {
-            let _ = self
-                .append_runtime_event(
-                    session_id,
-                    &runtime,
-                    SessionEvent::Error {
-                        code: "send_input_failed".to_string(),
-                        message: err.to_string(),
-                    },
-                )
+            if harness::is_turn_in_progress(&err) {
+                return Err(SessionManagerError::TurnAlreadyInProgress);
+            }
+
+            self.mark_session_failed(session_id, &runtime, "send_input_failed", err.to_string())
                 .await;
-            let _ = self
-                .set_status(
-                    session_id,
-                    SessionStatus::Failed,
-                    Some(time::OffsetDateTime::now_utc().unix_timestamp()),
-                    Some(runtime.clone()),
-                )
-                .await;
-            let _ = self.remove_runtime(session_id).await;
-            return Err(SessionManagerError::Adapter(err.to_string()));
+            return Err(SessionManagerError::Harness(err.to_string()));
         }
 
         Ok(())
@@ -291,8 +209,8 @@ impl SessionManager {
 
         let final_status = if let Some(ref runtime) = runtime {
             let stop_result = {
-                let mut adapter = runtime.adapter.lock().await;
-                adapter.stop().await
+                let mut harness = runtime.harness.lock().await;
+                harness.stop().await
             };
             if let Err(err) = stop_result {
                 self.append_runtime_event(
@@ -349,6 +267,141 @@ impl SessionManager {
             .runtime(session_id)
             .await
             .map(|runtime| runtime.events_tx.subscribe()))
+    }
+
+    fn spawn_harness_event_bridge(
+        &self,
+        session_id: LfdId,
+        runtime: Arc<SessionRuntime>,
+        mut harness_events_rx: broadcast::Receiver<SessionEvent>,
+    ) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            loop {
+                match harness_events_rx.recv().await {
+                    Ok(SessionEvent::ProviderSessionId {
+                        provider_session_id,
+                    }) => {
+                        manager
+                            .handle_provider_session_id(&session_id, &runtime, provider_session_id)
+                            .await;
+                    }
+                    Ok(event) => {
+                        if let Err(err) = manager
+                            .append_runtime_event(&session_id, &runtime, event)
+                            .await
+                        {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                error = %err,
+                                "failed to persist harness event"
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(session_id = %session_id, skipped, "session harness lagged")
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    fn spawn_harness_startup(
+        &self,
+        session_id: LfdId,
+        runtime: Arc<SessionRuntime>,
+        config: SessionConfig,
+    ) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            let result = {
+                let mut harness = runtime.harness.lock().await;
+                harness.start(&config).await
+            };
+
+            match result {
+                Ok(()) => {
+                    if let Err(err) = manager
+                        .set_status(
+                            &session_id,
+                            SessionStatus::Active,
+                            None,
+                            Some(runtime.clone()),
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            error = %err,
+                            "failed to set active session status"
+                        );
+                    }
+                }
+                Err(err) => {
+                    manager
+                        .mark_session_failed(
+                            &session_id,
+                            &runtime,
+                            "session_start_failed",
+                            err.to_string(),
+                        )
+                        .await;
+                }
+            }
+        });
+    }
+
+    async fn handle_provider_session_id(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        provider_session_id: String,
+    ) {
+        {
+            let mut harness = runtime.harness.lock().await;
+            harness.set_provider_session_id(Some(provider_session_id.clone()));
+        }
+        if let Err(err) = self
+            .inner
+            .store
+            .update_provider_session_id(session_id, &provider_session_id)
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %err,
+                "failed to persist provider session id"
+            );
+        }
+    }
+
+    async fn mark_session_failed(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        code: &str,
+        message: String,
+    ) {
+        let _ = self
+            .append_runtime_event(
+                session_id,
+                runtime,
+                SessionEvent::Error {
+                    code: code.to_string(),
+                    message,
+                },
+            )
+            .await;
+        let _ = self
+            .set_status(
+                session_id,
+                SessionStatus::Failed,
+                Some(time::OffsetDateTime::now_utc().unix_timestamp()),
+                Some(runtime.clone()),
+            )
+            .await;
+        self.remove_runtime(session_id).await;
     }
 
     async fn set_status(
@@ -409,22 +462,21 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::sessions::adapter::{SessionAdapter, SessionAdapterFactory};
+    use crate::lfd::sessions::harness::{SessionHarness, SessionHarnessError};
     use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
     use crate::lfd::store::{open_store, StorageConfig};
-    use anyhow::anyhow;
     use anyhow::Result;
     use async_trait::async_trait;
     use std::sync::Arc;
     use tempfile::tempdir;
 
     #[derive(Debug)]
-    struct FakeAdapter {
+    struct FakeHarness {
         tx: broadcast::Sender<SessionEvent>,
     }
 
     #[async_trait]
-    impl SessionAdapter for FakeAdapter {
+    impl SessionHarness for FakeHarness {
         async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
             Ok(())
         }
@@ -450,20 +502,95 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default)]
-    struct FakeFactory;
+    fn fake_create_harness(
+        _provider: &str,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(FakeHarness { tx: event_tx }))
+    }
 
-    impl SessionAdapterFactory for FakeFactory {
-        fn create(
-            &self,
-            provider: &str,
-            event_tx: broadcast::Sender<SessionEvent>,
-        ) -> Result<Box<dyn SessionAdapter>> {
-            if provider != "codex" {
-                return Err(anyhow!("unsupported session provider: {provider}"));
-            }
-            Ok(Box::new(FakeAdapter { tx: event_tx }))
+    #[derive(Debug)]
+    struct BusyHarness;
+
+    #[async_trait]
+    impl SessionHarness for BusyHarness {
+        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+            Ok(())
         }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            Err(SessionHarnessError::TurnAlreadyInProgress.into())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn busy_create_harness(
+        _provider: &str,
+        _event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(BusyHarness))
+    }
+
+    #[derive(Debug)]
+    struct ResumeAwareHarness {
+        tx: broadcast::Sender<SessionEvent>,
+        send_count: usize,
+        provider_session_id: Option<String>,
+    }
+
+    #[async_trait]
+    impl SessionHarness for ResumeAwareHarness {
+        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            self.send_count += 1;
+            let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+            let _ = self.tx.send(SessionEvent::TurnStarted {
+                turn_id: turn_id.clone(),
+            });
+            if self.send_count == 1 {
+                let _ = self.tx.send(SessionEvent::ProviderSessionId {
+                    provider_session_id: "sess_resume_1".to_string(),
+                });
+            }
+            let resume = self
+                .provider_session_id
+                .clone()
+                .unwrap_or_else(|| "none".to_string());
+            let _ = self.tx.send(SessionEvent::TextDelta {
+                turn_id: turn_id.clone(),
+                content: format!("resume:{resume}"),
+            });
+            let _ = self.tx.send(SessionEvent::TurnCompleted {
+                turn_id,
+                status: TurnStatus::Completed,
+            });
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
+            self.provider_session_id = provider_session_id;
+        }
+    }
+
+    fn resume_aware_create_harness(
+        _provider: &str,
+        event_tx: broadcast::Sender<SessionEvent>,
+    ) -> Result<Box<dyn SessionHarness>> {
+        Ok(Box::new(ResumeAwareHarness {
+            tx: event_tx,
+            send_count: 0,
+            provider_session_id: None,
+        }))
     }
 
     async fn wait_for_status(
@@ -484,6 +611,24 @@ mod tests {
         panic!("session never reached expected status");
     }
 
+    async fn wait_for_provider_session_id(
+        manager: &SessionManager,
+        session_id: &LfdId,
+        expected: &str,
+    ) {
+        for _ in 0..50 {
+            let session = manager
+                .get_session(session_id)
+                .await
+                .expect("session should exist");
+            if session.provider_session_id.as_deref() == Some(expected) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("session never captured expected provider session id");
+    }
+
     #[tokio::test]
     async fn session_lifecycle_create_input_events_end() {
         let tmp = tempdir().expect("tempdir");
@@ -494,7 +639,7 @@ mod tests {
                 .expect("open sqlite store"),
         );
 
-        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
         let created = manager
             .create_session(CreateSessionParams {
                 provider: "codex".to_string(),
@@ -502,6 +647,7 @@ mod tests {
                 config: SessionConfig {
                     model: Some("gpt-5.1-codex".to_string()),
                     cwd: Some(tmp.path().to_string_lossy().to_string()),
+                    ..Default::default()
                 },
             })
             .await
@@ -556,11 +702,12 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+        // Use default_create_harness (not fake) so unsupported providers are rejected.
+        let manager = SessionManager::new(store);
 
         let err = manager
             .create_session(CreateSessionParams {
-                provider: "claude".to_string(),
+                provider: "openai".to_string(),
                 wave_run_id: None,
                 config: SessionConfig::default(),
             })
@@ -569,7 +716,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            SessionManagerError::UnsupportedProvider(ref provider) if provider == "claude"
+            SessionManagerError::UnsupportedProvider(ref provider) if provider == "openai"
         ));
     }
 
@@ -582,7 +729,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let manager = SessionManager::with_factory(store, Arc::new(FakeFactory));
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
 
         let created = manager
             .create_session(CreateSessionParams {
@@ -607,5 +754,91 @@ mod tests {
             err,
             SessionManagerError::WaveRunSessionConflict(ref wave_run_id) if wave_run_id == "run_1"
         ));
+    }
+
+    #[tokio::test]
+    async fn send_input_busy_error_does_not_fail_session() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, busy_create_harness);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        let err = manager
+            .send_input(&created.id, "hello")
+            .await
+            .expect_err("busy harness should reject concurrent turn");
+        assert!(matches!(err, SessionManagerError::TurnAlreadyInProgress));
+
+        let session = manager
+            .get_session(&created.id)
+            .await
+            .expect("session should still exist");
+        assert_eq!(session.status, SessionStatus::Active);
+    }
+
+    #[tokio::test]
+    async fn provider_session_id_is_applied_to_harness_for_resume() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, resume_aware_create_harness);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        manager
+            .send_input(&created.id, "first turn")
+            .await
+            .expect("first input should succeed");
+        wait_for_provider_session_id(&manager, &created.id, "sess_resume_1").await;
+
+        manager
+            .send_input(&created.id, "second turn")
+            .await
+            .expect("second input should succeed");
+
+        let mut saw_resume = false;
+        for _ in 0..50 {
+            let events = manager
+                .list_events(&created.id, None)
+                .await
+                .expect("list events");
+            saw_resume = events.iter().any(|event| {
+                matches!(
+                    &event.event,
+                    SessionEvent::TextDelta { content, .. } if content == "resume:sess_resume_1"
+                )
+            });
+            if saw_resume {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(saw_resume);
     }
 }

@@ -26,7 +26,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn as_i32(self) -> i32 {
+    pub(crate) fn as_i32(self) -> i32 {
         match self {
             Self::Starting => 0,
             Self::Active => 1,
@@ -36,7 +36,7 @@ impl SessionStatus {
         }
     }
 
-    pub fn from_i32(value: i32) -> Self {
+    pub(crate) fn from_i32(value: i32) -> Self {
         match value {
             0 => Self::Starting,
             1 => Self::Active,
@@ -100,32 +100,20 @@ pub enum SessionItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,
     },
-    FileChange {
+    File {
         id: String,
         #[serde(default)]
         changes: Vec<FileEdit>,
         status: ItemStatus,
     },
-    McpToolCall {
-        id: String,
-        server: String,
-        tool: String,
-        status: ItemStatus,
-        #[serde(default)]
-        arguments: Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        result: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    AgentMessage {
+    Message {
         id: String,
         #[serde(default)]
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         phase: Option<String>,
     },
-    Plan {
+    Thought {
         id: String,
         #[serde(default)]
         text: String,
@@ -140,19 +128,6 @@ pub enum SessionItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<String>,
     },
-}
-
-impl SessionItem {
-    pub fn id(&self) -> &str {
-        match self {
-            Self::Command { id, .. }
-            | Self::FileChange { id, .. }
-            | Self::McpToolCall { id, .. }
-            | Self::AgentMessage { id, .. }
-            | Self::Plan { id, .. }
-            | Self::Tool { id, .. } => id,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +192,11 @@ pub enum SessionEvent {
         code: String,
         message: String,
     },
+
+    // Internal (not persisted or forwarded to SSE clients)
+    ProviderSessionId {
+        provider_session_id: String,
+    },
 }
 
 impl SessionEvent {
@@ -232,6 +212,7 @@ impl SessionEvent {
             Self::DiffUpdated { .. } => "diff_updated",
             Self::StatusChanged { .. } => "status_changed",
             Self::Error { .. } => "error",
+            Self::ProviderSessionId { .. } => "provider_session_id",
         }
     }
 }
@@ -244,6 +225,12 @@ pub struct SessionConfig {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub yolo_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

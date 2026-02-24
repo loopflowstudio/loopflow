@@ -9,14 +9,14 @@ use axum::http::StatusCode;
 use axum::middleware;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use tower_http::trace::TraceLayer;
 
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    chat, flows, hooks, repos, sessions, system, wave_runs, wave_schemas, waves, worktrees, ws,
+    flows, hooks, repos, sessions, system, wave_runs, wave_schemas, waves, worktrees, ws,
 };
 use crate::lfd::store::StoreError;
 
@@ -71,23 +71,6 @@ pub fn router(state: HttpState) -> Router {
             delete(waves::remove_stimulus_handler),
         )
         .route("/waves/{wave_id}/stimuli", get(waves::list_stimuli_handler))
-        .route(
-            "/waves/{wave_id}/memory-blocks",
-            get(chat::list_memory_blocks_handler),
-        )
-        .route(
-            "/waves/{wave_id}/memory-blocks/{name}",
-            put(chat::upsert_memory_block_handler).delete(chat::delete_memory_block_handler),
-        )
-        .route("/waves/{wave_id}/chat", post(chat::start_chat_handler))
-        .route(
-            "/waves/{wave_id}/chat/events",
-            get(chat::stream_chat_events_handler),
-        )
-        .route(
-            "/waves/{wave_id}/chat/messages",
-            get(chat::list_chat_messages_handler),
-        )
         .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
         .route(
             "/waves/{wave_id}/restart-step",

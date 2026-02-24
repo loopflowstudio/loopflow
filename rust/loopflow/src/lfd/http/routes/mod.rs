@@ -1,4 +1,3 @@
-pub mod chat;
 pub mod flows;
 pub mod hooks;
 pub mod repos;

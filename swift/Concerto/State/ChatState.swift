@@ -133,7 +133,6 @@ final class ChatState {
     private var sessionId: String?
     private var lastAppliedSeq: Int?
     private var currentTurnId: String?
-    private var turnDiffs: [String: String] = [:]
 
     private var itemEntryIdByItemId: [String: UUID] = [:]
     private var assistantEntryIdByTurnId: [String: UUID] = [:]
@@ -232,7 +231,6 @@ final class ChatState {
         guard let storedSessionId = userDefaults.string(forKey: sessionIdKey) else { return }
 
         streamPhase = .reconnecting
-        appendMessage(role: .system, content: "Reconnecting…")
 
         do {
             let session = try await waveService.getSession(storedSessionId)
@@ -370,7 +368,6 @@ final class ChatState {
         itemsById.removeAll()
         itemEntryIdByItemId.removeAll()
         assistantEntryIdByTurnId.removeAll()
-        turnDiffs.removeAll()
     }
 
     private func appendMessage(role: ChatRole, content: String) {
@@ -408,16 +405,16 @@ final class ChatState {
             appendAssistantDelta(turnId: turnId, delta: content)
 
         case .itemStarted(let turnId, let item):
-            upsertItemStart(turnId: turnId, item: item)
+            upsertItem(turnId: turnId, item: item)
 
         case .itemUpdated(let turnId, let itemId, let delta):
             applyItemUpdate(turnId: turnId, itemId: itemId, delta: delta)
 
         case .itemCompleted(let turnId, let item):
-            upsertItemCompletion(turnId: turnId, item: item)
+            upsertItem(turnId: turnId, item: item)
 
-        case .diffUpdated(let turnId, let diff):
-            turnDiffs[turnId] = trimDetail(diff)
+        case .diffUpdated(_, _):
+            return
 
         case .statusChanged(let status):
             if status == "ended" || status == "failed" {
@@ -456,7 +453,7 @@ final class ChatState {
         assistantEntryIdByTurnId[turnId] = message.id
     }
 
-    private func upsertItemStart(turnId: String, item: SessionItem) {
+    private func upsertItem(turnId: String, item: SessionItem) {
         guard let itemId = itemIdentifier(item) else { return }
         let boundedItem = boundedSessionItem(item)
         itemsById[itemId] = boundedItem
@@ -481,25 +478,6 @@ final class ChatState {
         let updated = boundedSessionItem(apply(delta: delta, to: existing))
         itemsById[itemId] = updated
         updateTranscriptItem(itemId: itemId, turnId: turnId, item: updated)
-    }
-
-    private func upsertItemCompletion(turnId: String, item: SessionItem) {
-        guard let itemId = itemIdentifier(item) else { return }
-        let boundedItem = boundedSessionItem(item)
-        itemsById[itemId] = boundedItem
-
-        if itemEntryIdByItemId[itemId] == nil {
-            let entry = TranscriptItem(
-                turnId: turnId,
-                itemId: itemId,
-                card: projectCard(from: boundedItem)
-            )
-            itemEntryIdByItemId[itemId] = entry.id
-            transcript.append(.item(entry))
-            return
-        }
-
-        updateTranscriptItem(itemId: itemId, turnId: turnId, item: boundedItem)
     }
 
     private func updateTranscriptItem(itemId: String, turnId: String, item: SessionItem) {

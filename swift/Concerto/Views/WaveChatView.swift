@@ -90,10 +90,8 @@ struct WaveChatView: View {
                 item: item,
                 isExpanded: expandedItemIds.contains(item.id),
                 onToggleExpanded: {
-                    if expandedItemIds.contains(item.id) {
+                    if !expandedItemIds.insert(item.id).inserted {
                         expandedItemIds.remove(item.id)
-                    } else {
-                        expandedItemIds.insert(item.id)
                     }
                 }
             )

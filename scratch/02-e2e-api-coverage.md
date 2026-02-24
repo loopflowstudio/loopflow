@@ -2,22 +2,21 @@
 
 ## Problem
 
-`lfd` exposes a large HTTP surface, but our current e2e tests only exercise CLI workflows. We are missing live coverage for:
+`lfd` exposes a growing HTTP surface, but our current e2e tests only exercise CLI workflows. We are missing live coverage for:
 
 - HTTP status codes and error payload shape
 - auth + request validation at the API boundary
-- cross-resource constraints (join/leave/nest invariants, run lifecycle preconditions)
 
-Who benefits: anyone changing API handlers, store logic, or client behavior. Today they can break `/v0` without CI noticing. We need this now because route count is growing and drift between handler intent and real behavior is already expensive to debug.
+Who benefits: anyone changing API handlers, store logic, or client behavior. Today they can break `/v0` without CI noticing.
 
 ## Approach
 
-Build a **hermetic API contract test system** in `scripts/` and make shell e2e files thin CI wrappers.
+Build a **hermetic API contract test system** in `scripts/` and make shell e2e files thin CI wrappers. Start with wave CRUD — the most-used endpoints and the cleanest test of the harness.
 
 1. **Extract reusable daemon lifecycle into `scripts/lib/lfd_runtime.py`.**
-   - Move process lifecycle helpers out of ad-hoc scripts into one module used by both `scripts/dev.py` and API tests.
-   - Provide `LfdRuntime` context manager: build `lfd`, start on an ephemeral port, wait for `/health`, expose base URL + token, and always tear down.
-   - Run each suite with isolated `HOME` and temp repo so tests do not touch `~/.lf` or depend on local state.
+   - Provide `LfdRuntime` context manager: build `lfd` (cargo handles dirty check), start on an ephemeral port, wait for `/health`, expose base URL + token, tear down on exit.
+   - Isolated `HOME` and temp repo per suite so tests don't touch `~/.lf` or depend on local state.
+   - Reusable by `scripts/dev.py` and future test suites.
 
 2. **Add `scripts/lib/api_harness.py` for route-level assertions.**
    - `httpx` client with auth header wiring from runtime token.
@@ -27,21 +26,12 @@ Build a **hermetic API contract test system** in `scripts/` and make shell e2e f
      - required JSON fields per route
    - Structured output: one line per scenario + summary + non-zero exit on any failure.
 
-3. **Implement scenario suites by domain (priority-first).**
-   - `scripts/test_api_smoke.py`: wave CRUD + list
-   - `scripts/test_api_chords.py`: join/leave/nest happy and invariant failures
-   - `scripts/test_api_stimuli.py`: create/list/delete stimulus + owner constraint failures
-   - `scripts/test_api_runs.py`: list/get active run semantics
-   - `scripts/test_api_lifecycle.py`: run/stop/continue/land/next using temp git repos and local-only settings
+3. **Implement wave CRUD smoke suite.**
+   - `scripts/test_api_smoke.py`: create, list, get, update, delete — happy paths and error cases (missing wave, bad input, auth failures).
 
-4. **Add a coverage guard so route additions cannot skip tests.**
-   - `scripts/lib/api_coverage_manifest.py` maps each required route to: owning suite, happy case id, error case id.
-   - `scripts/test_api_coverage_guard.py` verifies every priority route is present in the manifest and has both case types.
-   - CI fails if a new/changed route lacks coverage metadata.
-
-5. **Wire CI through shell wrappers only.**
-   - `tests/e2e/test_api_smoke.sh` and `tests/e2e/test_api_contract.sh` become one-line `uv run python ...` entry points.
-   - Keep shell scripts logic-free to match wave direction: scripts contain behavior; `tests/e2e` is CI glue.
+4. **Wire CI through a shell wrapper.**
+   - `tests/e2e/test_api_smoke.sh` — one-line `uv run python ...` entry point.
+   - Shell script is logic-free: scripts contain behavior, `tests/e2e` is CI glue.
 
 ## Alternatives considered
 
@@ -56,39 +46,30 @@ Build a **hermetic API contract test system** in `scripts/` and make shell e2e f
 1. **Hermetic runtime per suite (isolated HOME + temp repo) is non-negotiable.**
    - Wild failure to avoid: six months of flaky tests caused by shared `~/.lf` state and zombie daemons.
 
-2. **Route coverage is enforced with a manifest + guard, not convention.**
-   - Wild success target: adding a new route immediately fails CI with a precise “missing happy/error case” message.
+2. **Wave CRUD first, extend later.**
+   - Proves the harness works on the simplest endpoints. Chords, stimuli, run lifecycle, and coverage guard come in follow-up passes once the foundation is solid.
 
-3. **Priority routes first, then full-route expansion.**
-   - Start with wave CRUD/lifecycle/chords/stimuli/runs, then extend the same harness to sessions/chat/hooks.
-
-4. **`scripts/` owns behavior; `tests/e2e/` owns CI entrypoints only.**
-   - This follows Infra wave intent: “Dev scripts in `scripts/` are the primary test infrastructure; `tests/e2e/` is a thin CI wrapper.”
+3. **`scripts/` owns behavior; `tests/e2e/` owns CI entrypoints only.**
 
 ## Scope
 
 - In scope:
   - `scripts/lib/lfd_runtime.py` and `scripts/lib/api_harness.py`
-  - Domain API suites for priority routes
-  - Coverage manifest + guard script
-  - CI shell wrappers that only invoke Python scripts
+  - `scripts/test_api_smoke.py` — wave CRUD happy + error paths
+  - `tests/e2e/test_api_smoke.sh` — CI wrapper
 
-- Out of scope:
-  - WebSocket streaming deep coverage (`/ws`, SSE chat events)
-  - GitHub webhook end-to-end with real external callbacks
-  - Rewriting existing unit tests in `python/tests/`
+- Out of scope (future passes):
+  - Chords (join/leave/nest)
+  - Stimuli (create/list/delete, owner constraints)
+  - Run lifecycle (run/stop/continue/land/next)
+  - Coverage manifest + guard
+  - WebSocket / SSE / webhook coverage
 
 ## Done when
 
 ```bash
 uv run python scripts/test_api_smoke.py
-uv run python scripts/test_api_chords.py
-uv run python scripts/test_api_stimuli.py
-uv run python scripts/test_api_runs.py
-uv run python scripts/test_api_lifecycle.py
-uv run python scripts/test_api_coverage_guard.py
 tests/e2e/test_api_smoke.sh
-tests/e2e/test_api_contract.sh
 ```
 
-And the observable outcome is: every priority HTTP route has at least one happy-path and one error-path scenario, enforced by the coverage guard in CI.
+Wave create, list, get, update, delete each have at least one happy-path and one error-path scenario passing against a live `lfd` instance.

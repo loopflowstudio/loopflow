@@ -25,30 +25,27 @@ def _expect_wave_shape(payload: dict[str, Any]) -> None:
 
 def main() -> int:
     with LfdRuntime() as runtime:
-        harness = ApiHarness(base_url=runtime.base_url, token=runtime.token)
-        state: dict[str, str] = {}
-        scenarios = [
-            ("create_wave_happy", partial(_create_wave_happy, harness, runtime, state)),
-            (
-                "create_wave_duplicate_name_error",
-                partial(_create_wave_duplicate_error, harness, runtime),
-            ),
-            ("list_waves_happy", partial(_list_waves_happy, harness, state)),
-            ("list_waves_auth_error", partial(_list_waves_auth_error, harness)),
-            ("get_wave_happy", partial(_get_wave_happy, harness, state)),
-            ("get_wave_missing_error", partial(_get_wave_missing_error, harness)),
-            ("update_wave_happy", partial(_update_wave_happy, harness, state)),
-            ("update_wave_invalid_status_error", partial(_update_wave_error, harness, state)),
-            ("delete_wave_happy", partial(_delete_wave_happy, harness, runtime, state)),
-            ("delete_wave_missing_error", partial(_delete_wave_missing_error, harness, state)),
-        ]
+        with ApiHarness(base_url=runtime.base_url, token=runtime.token) as harness:
+            state: dict[str, str] = {}
+            scenarios = [
+                ("create_wave_happy", partial(_create_wave_happy, harness, runtime, state)),
+                (
+                    "create_wave_duplicate_name_error",
+                    partial(_create_wave_duplicate_error, harness, runtime),
+                ),
+                ("list_waves_happy", partial(_list_waves_happy, harness, state)),
+                ("list_waves_auth_error", partial(_list_waves_auth_error, harness)),
+                ("get_wave_happy", partial(_get_wave_happy, harness, state)),
+                ("get_wave_missing_error", partial(_get_wave_missing_error, harness)),
+                ("update_wave_happy", partial(_update_wave_happy, harness, state)),
+                ("update_wave_invalid_status_error", partial(_update_wave_error, harness, state)),
+                ("delete_wave_happy", partial(_delete_wave_happy, harness, runtime, state)),
+                ("delete_wave_missing_error", partial(_delete_wave_missing_error, harness, state)),
+            ]
 
-        try:
             for name, check in scenarios:
                 harness.run_scenario(name, check)
-        finally:
             harness.print_summary()
-            harness.close()
 
         if harness.has_failures():
             print("lfd logs:\n" + runtime.logs())

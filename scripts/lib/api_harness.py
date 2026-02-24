@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import traceback
 from dataclasses import dataclass
+from types import TracebackType
 from typing import Any, Callable, Iterable
 
 import httpx
@@ -28,6 +29,17 @@ class ApiHarness:
         )
         self._anonymous_client = httpx.Client(base_url=base_url, timeout=timeout_seconds)
         self._results: list[ScenarioResult] = []
+
+    def __enter__(self) -> "ApiHarness":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def close(self) -> None:
         self._authed_client.close()

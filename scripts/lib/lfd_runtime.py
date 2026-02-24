@@ -10,7 +10,8 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from types import TracebackType
+from typing import IO, Optional
 
 import httpx
 
@@ -32,14 +33,19 @@ class LfdRuntime:
     log_path: Path = field(init=False)
 
     _temp_dir: Optional[tempfile.TemporaryDirectory[str]] = field(init=False, default=None)
-    _log_handle: Optional[object] = field(init=False, default=None)
+    _log_handle: Optional[IO[str]] = field(init=False, default=None)
     _process: Optional[subprocess.Popen[str]] = field(init=False, default=None)
 
     def __enter__(self) -> "LfdRuntime":
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.stop()
 
     def start(self) -> None:
@@ -109,6 +115,8 @@ class LfdRuntime:
     def logs(self) -> str:
         if not hasattr(self, "log_path") or not self.log_path.exists():
             return ""
+        if self._log_handle is not None:
+            self._log_handle.flush()
         return self.log_path.read_text(encoding="utf-8")
 
     def _wait_for_health(self) -> None:
@@ -139,6 +147,12 @@ class LfdRuntime:
         deadline = time.time() + self.startup_timeout_seconds
 
         while time.time() < deadline:
+            if self._process is not None and self._process.poll() is not None:
+                logs = self.logs()
+                raise RuntimeError(
+                    f"lfd exited before writing session token (exit={self._process.returncode})\n{logs}"
+                )
+
             if token_path.exists():
                 token = token_path.read_text(encoding="utf-8").strip()
                 if token:

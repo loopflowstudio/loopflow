@@ -9,7 +9,23 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MAIN_REF = "main"
+
+
+def _resolve_main_ref() -> str:
+    for ref in ("main", "origin/main"):
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", ref],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return ref
+    return "main"
+
+
+MAIN_REF = _resolve_main_ref()
 
 MAC_ONLY_IMPORTS = {
     "AppKit",

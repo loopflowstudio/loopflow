@@ -98,12 +98,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
     let event_hub = EventHub::new(1024);
+    let session_manager = SessionManager::new(store.clone());
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let executor = WaveExecutor::new(
         store.clone(),
         scheduler.clone(),
         output.clone(),
         event_hub.clone(),
+        session_manager.clone(),
         lfd_config.executor.clone(),
         lfd_config.github.clone(),
     )?;
@@ -150,7 +152,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
     }
 
-    let session_manager = SessionManager::new(store.clone());
     match session_manager.recover_orphaned_sessions().await {
         Ok(count) if count > 0 => {
             tracing::info!(count, "recovered orphaned sessions from previous lfd");

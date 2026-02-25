@@ -128,6 +128,7 @@ public final class ChatState {
     public var transcript: [TranscriptEntry] = []
     public var turnState: ChatTurnState = .idle
     public var streamPhase: StreamPhase = .idle
+    public var awaitingSessionJoin: Bool = false
 
     public private(set) var itemsById: [String: SessionItem] = [:]
 
@@ -145,6 +146,7 @@ public final class ChatState {
 
     private var itemEntryIdByItemId: [String: UUID] = [:]
     private var assistantEntryIdByTurnId: [String: UUID] = [:]
+    private var messageEntryIdByItemId: [String: UUID] = [:]
 
     private var streamTask: Task<Void, Never>?
     private var streamGeneration = 0
@@ -166,7 +168,7 @@ public final class ChatState {
     }
 
     public var isLoading: Bool {
-        turnState == .running || streamPhase == .replaying || streamPhase == .ending
+        awaitingSessionJoin || turnState == .running || streamPhase == .replaying || streamPhase == .ending
     }
 
     public var canSend: Bool {
@@ -179,13 +181,46 @@ public final class ChatState {
 
     public func onAppear() async {
         if let sessionId {
+            awaitingSessionJoin = false
             if streamTask == nil {
-                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
+                let phase: StreamPhase = lastAppliedSeq == nil ? .replaying : .live
+                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: phase)
             }
             return
         }
 
         await reconnectIfNeeded()
+    }
+
+    public func joinSession(_ id: String) {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard sessionId != trimmed else { return }
+
+        cancelStreamTask()
+        resetForReplay()
+        sessionId = trimmed
+        persistSessionId(trimmed)
+        streamPhase = .idle
+        turnState = .idle
+        awaitingSessionJoin = false
+    }
+
+    public func setAwaitingSession(_ awaiting: Bool) {
+        guard sessionId == nil else {
+            awaitingSessionJoin = false
+            return
+        }
+        awaitingSessionJoin = awaiting
+    }
+
+    public func seedInitialUserMessage(_ rawText: String) {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        _ = upsertMessageBubble(
+            item: .message(MessageItem(id: "msg_seed_user_prompt", text: text, phase: "user")),
+            isCompletion: true
+        )
     }
 
     public func onDisappear() {
@@ -208,6 +243,7 @@ public final class ChatState {
 
         appendMessage(role: .user, content: text)
         turnState = .running
+        awaitingSessionJoin = false
 
         do {
             let sessionId = try await ensureSession()
@@ -249,9 +285,10 @@ public final class ChatState {
 
         do {
             let session = try await waveService.getSession(storedSessionId)
-            guard session.status == "active" else {
+            if isSessionTerminalStatus(session.status) {
                 persistSessionId(nil)
                 streamPhase = .idle
+                awaitingSessionJoin = false
                 return
             }
 
@@ -262,6 +299,7 @@ public final class ChatState {
         } catch {
             persistSessionId(nil)
             streamPhase = .idle
+            awaitingSessionJoin = false
         }
     }
 
@@ -291,6 +329,7 @@ public final class ChatState {
         sessionId = session.id
         persistSessionId(session.id)
         appendMessage(role: .system, content: "Session started")
+        awaitingSessionJoin = false
 
         if !isSessionActiveStatus(session.status) {
             try await waitForActiveSession(sessionId: session.id)
@@ -342,6 +381,7 @@ public final class ChatState {
         streamGeneration += 1
         let generation = streamGeneration
         streamPhase = phase
+        awaitingSessionJoin = false
 
         streamTask = Task { [weak self] in
             guard let self else { return }
@@ -416,10 +456,57 @@ public final class ChatState {
         itemsById.removeAll()
         itemEntryIdByItemId.removeAll()
         assistantEntryIdByTurnId.removeAll()
+        messageEntryIdByItemId.removeAll()
     }
 
     private func appendMessage(role: ChatRole, content: String) {
         transcript.append(.message(ChatMessage(role: role, content: content)))
+    }
+
+    private func upsertMessageBubble(item: SessionItem, isCompletion: Bool) -> Bool {
+        guard case .message(let message) = item else { return false }
+        guard let role = roleForMessagePhase(message.phase) else { return false }
+
+        let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return true }
+
+        if let itemId = normalizedItemId(message.id) {
+            if let entryId = messageEntryIdByItemId[itemId],
+               let index = transcript.firstIndex(where: { $0.id == entryId }),
+               case .message(let existing) = transcript[index] {
+                let updated = ChatMessage(
+                    id: existing.id,
+                    role: role,
+                    content: text,
+                    timestamp: existing.timestamp
+                )
+                transcript[index] = .message(updated)
+                return true
+            }
+
+            let messageEntry = ChatMessage(role: role, content: text)
+            transcript.append(.message(messageEntry))
+            messageEntryIdByItemId[itemId] = messageEntry.id
+            return true
+        }
+
+        guard isCompletion else { return true }
+        transcript.append(.message(ChatMessage(role: role, content: text)))
+        return true
+    }
+
+    private func roleForMessagePhase(_ phase: String?) -> ChatRole? {
+        guard let phase else { return nil }
+        let normalized = phase.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "user" || normalized == "input" || normalized == "prompt" {
+            return .user
+        }
+        return nil
+    }
+
+    private func normalizedItemId(_ rawId: String) -> String? {
+        let trimmed = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func applyEnvelope(_ envelope: AgentSessionEventEnvelope) {
@@ -455,12 +542,18 @@ public final class ChatState {
             appendAssistantDelta(turnId: turnId, delta: content)
 
         case .itemStarted(let turnId, let item):
+            if upsertMessageBubble(item: item, isCompletion: false) {
+                return
+            }
             upsertItem(turnId: turnId, item: item)
 
         case .itemUpdated(let turnId, let itemId, let delta):
             applyItemUpdate(turnId: turnId, itemId: itemId, delta: delta)
 
         case .itemCompleted(let turnId, let item):
+            if upsertMessageBubble(item: item, isCompletion: true) {
+                return
+            }
             upsertItem(turnId: turnId, item: item)
 
         case .diffUpdated(_, _):

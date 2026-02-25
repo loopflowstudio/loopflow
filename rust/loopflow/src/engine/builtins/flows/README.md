@@ -9,6 +9,7 @@ Flows that produce code changes.
 | Flow | Steps | Use case |
 |------|-------|----------|
 | `ship` | implement → compress → gate | Build from design, ship clean |
+| `design-ship-review` | design → ship → review | Interactive design, headless ship, interactive review |
 | `pair` | design → ship | Interactive design then build |
 | `grind` | research → iterate → ship → gate | Research-driven iteration |
 | `incident` | debug → 5whys → ship | Fix bug, analyze root cause, ship fixes |

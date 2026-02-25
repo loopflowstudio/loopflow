@@ -6,6 +6,90 @@ import Testing
 @Suite("ChatState")
 struct ChatStateTests {
     @MainActor
+    @Test("joining existing session streams without creating a new session")
+    func joinExistingSessionSkipsCreate() async {
+        let service = MockChatService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "hello from existing"))),
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: service,
+            userDefaults: makeUserDefaults("join-existing")
+        )
+
+        state.joinSession("session_existing")
+        await state.onAppear()
+        await waitUntil { state.turnState == .completed }
+
+        #expect(service.createSessionCallCount == 0)
+        #expect(messages(in: state, role: .assistant).last?.content == "hello from existing")
+    }
+
+    @MainActor
+    @Test("user message session items render as user chat bubbles")
+    func userMessageItemsRenderAsChatBubbles() async {
+        let service = MockChatService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .itemCompleted(
+                        turnId: "turn_1",
+                        item: .message(MessageItem(
+                            id: "msg_user_1",
+                            text: "Design the architecture before coding.",
+                            phase: "user"
+                        ))
+                    ))),
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .textDelta(turnId: "turn_1", content: "What are you trying to build?"))),
+                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: service,
+            userDefaults: makeUserDefaults("user-message-item")
+        )
+
+        state.joinSession("session_existing")
+        await state.onAppear()
+        await waitUntil { state.turnState == .completed }
+
+        let allMessages = messages(in: state)
+        #expect(allMessages.first?.role == .user)
+        #expect(allMessages.first?.content == "Design the architecture before coding.")
+        #expect(allMessages.last?.role == .assistant)
+    }
+
+    @MainActor
+    @Test("seeded initial user message upserts without duplicates")
+    func seededInitialUserMessageUpserts() {
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: MockChatService(),
+            userDefaults: makeUserDefaults("seeded-initial-message")
+        )
+
+        state.seedInitialUserMessage("First seeded prompt")
+        state.seedInitialUserMessage("Updated seeded prompt")
+
+        let userMessages = messages(in: state, role: .user)
+        #expect(userMessages.count == 1)
+        #expect(userMessages[0].content == "Updated seeded prompt")
+    }
+
+    @MainActor
     @Test("send consumes text deltas once when replay includes duplicate seq")
     func sendDedupesDuplicateSeq() async {
         let service = MockChatService(

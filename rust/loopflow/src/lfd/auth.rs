@@ -531,6 +531,7 @@ mod tests {
                 scheduler.clone(),
                 output_hub.clone(),
                 event_hub.clone(),
+                SessionManager::new(store.clone()),
                 ExecutorConfig::default(),
                 GitHubConfig::default(),
             )

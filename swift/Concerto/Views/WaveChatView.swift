@@ -14,13 +14,6 @@ struct WaveChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                        if state.transcript.isEmpty {
-                            Text("Start an interactive session.")
-                                .font(Typography.body())
-                                .foregroundStyle(palette.textSecondary)
-                                .padding(.vertical, Spacing.xl)
-                        }
-
                         ForEach(state.transcript) { entry in
                             transcriptRow(entry)
                                 .id(entry.id)

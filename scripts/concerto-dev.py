@@ -9,9 +9,9 @@ Commands:
     build           Build the app
     test            Build and run tests
     run             Build and launch the app
-    run-debug       Build and run with stdout visible (default: one-shot local lfd + UI)
-    run-debug --no-lfd
-                    Run UI only (skip automatic lfd lifecycle)
+    run-debug       Build and run with stdout visible (default: bundled lfd only)
+    run-debug --with-lfd
+                    Also run one-shot local lfd from this branch (for daemon debugging)
     run-ios         Build and launch in iOS Simulator
     run-ios --device "iPad Pro 13-inch (M4)"
                     Target a specific simulator device
@@ -290,7 +290,7 @@ def _seed_waves_from_worktrees() -> None:
         print(f"Seeded {seeded} wave(s) from worktrees")
 
 
-def cmd_run_debug(with_lfd: bool = True, docker_lfd: bool = False) -> int:
+def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
     """Build and run with stdout visible."""
     lfd_process: subprocess.Popen[str] | None = None
     lfd_log: TextIO | None = None
@@ -989,7 +989,7 @@ COMMANDS = {
     "build": (cmd_build, "Build the app"),
     "test": (cmd_test, "Build and run tests"),
     "run": (cmd_run, "Build and launch the app"),
-    "run-debug": (cmd_run_debug, "Build and run with stdout visible (default includes one-shot local lfd stack)"),
+    "run-debug": (cmd_run_debug, "Build and run with stdout visible (default uses bundled lfd in Concerto)"),
     "run-ios": (cmd_run_ios, "Build and launch in iOS Simulator"),
     "release": (cmd_release, "Build release .app and .dmg"),
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
@@ -1025,12 +1025,12 @@ def main() -> int:
             mode_group.add_argument(
                 "--with-lfd",
                 action="store_true",
-                help="Explicitly enable one-shot lfd lifecycle (default)",
+                help="Also run one-shot lfd lifecycle from this branch",
             )
             mode_group.add_argument(
                 "--no-lfd",
                 action="store_true",
-                help="Run UI only (skip automatic lfd lifecycle)",
+                help="Run UI only (default; bundled lfd managed by Concerto)",
             )
             sub.add_argument(
                 "--docker-lfd",
@@ -1066,7 +1066,7 @@ def main() -> int:
     if args.command == "lfd":
         return func(docker=args.docker, kill=args.kill)
     if args.command == "run-debug":
-        with_lfd = True if args.with_lfd else not args.no_lfd
+        with_lfd = args.with_lfd
         return func(with_lfd=with_lfd, docker_lfd=args.docker_lfd)
     if args.command == "run-ios":
         return func(device=args.device)

@@ -12,12 +12,17 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 import httpx
 
 from lib.api_harness import ApiAssertions, ApiClient, ScenarioRunner
+
+try:
+    import websockets
+except ImportError:  # pragma: no cover - runtime guard for script users
+    websockets = None
 
 
 class WebSocketClient:
@@ -37,29 +42,26 @@ class WebSocketClient:
         return asyncio.run(self._receive_connected_message())
 
     async def _receive_connected_message(self) -> dict[str, Any]:
-        try:
-            import websockets
-        except ImportError as exc:  # pragma: no cover - runtime guard for script users
-            raise RuntimeError(
-                "Missing dependency: websockets. Run `uv sync --dev` and retry."
-            ) from exc
+        if websockets is None:
+            raise RuntimeError("Missing dependency: websockets. Run `uv sync --dev` and retry.")
 
-        headers = {"Authorization": f"Bearer {self._token}"}
+        connect = websockets.connect
+        header_field = (
+            "additional_headers"
+            if "additional_headers" in inspect.signature(connect).parameters
+            else "extra_headers"
+        )
+
         connect_kwargs: dict[str, Any] = {
             "open_timeout": self._timeout_seconds,
             "close_timeout": self._timeout_seconds,
+            header_field: {"Authorization": f"Bearer {self._token}"},
         }
         if self._ssl_context is not None:
             connect_kwargs["ssl"] = self._ssl_context
 
-        signature = inspect.signature(websockets.connect)
-        if "additional_headers" in signature.parameters:
-            connect_kwargs["additional_headers"] = headers
-        else:
-            connect_kwargs["extra_headers"] = headers
-
         ws_url = _ws_url(self._base_url, "/ws")
-        async with websockets.connect(ws_url, **connect_kwargs) as socket:
+        async with connect(ws_url, **connect_kwargs) as socket:
             raw = await asyncio.wait_for(socket.recv(), timeout=self._timeout_seconds)
 
         if not isinstance(raw, str):
@@ -85,44 +87,59 @@ def main() -> int:
         token=args.token,
         timeout_seconds=args.timeout,
         verify=verify,
-    ) as api:
-        authed_stream = httpx.Client(
-            base_url=args.url,
-            headers={"Authorization": f"Bearer {args.token}"},
-            timeout=args.timeout,
-            verify=verify,
-        )
+    ) as api, httpx.Client(
+        base_url=args.url,
+        headers={"Authorization": f"Bearer {args.token}"},
+        timeout=args.timeout,
+        verify=verify,
+    ) as authed_stream:
         ws = WebSocketClient(
             base_url=args.url,
             token=args.token,
             timeout_seconds=args.timeout,
             ssl_context=ssl_context,
         )
-
-        state: dict[str, Any] = {"cleanup_waves": []}
+        repo_path = _resolve_repo_path(api, args.repo)
+        cleanup_waves: list[str] = []
         runner = ScenarioRunner()
 
-        try:
-            runner.run_scenario("health", lambda: _scenario_health(api))
-            runner.run_scenario("wave_crud", lambda: _scenario_wave_crud(api, args, state))
-            runner.run_scenario("auth_rejection", lambda: _scenario_auth_rejection(api))
-            runner.run_scenario(
+        scenarios: list[tuple[str, Callable[[], None]]] = [
+            ("health", lambda: _scenario_health(api)),
+            ("wave_crud", lambda: _scenario_wave_crud(api, repo_path)),
+            ("auth_rejection", lambda: _scenario_auth_rejection(api)),
+            (
                 "sse_streaming",
-                lambda: _scenario_sse_streaming(api, authed_stream, args),
-            )
-            runner.run_scenario("websocket_connected", lambda: _scenario_websocket(ws, state))
-            runner.run_scenario(
+                lambda: _scenario_sse_streaming(
+                    api,
+                    authed_stream,
+                    repo_path,
+                    args.session_harness,
+                    args.events_timeout,
+                ),
+            ),
+            ("websocket_connected", lambda: _scenario_websocket(ws)),
+            (
                 "wave_run_and_logs",
-                lambda: _scenario_wave_run_logs(api, authed_stream, args, state),
-            )
-            runner.run_scenario(
+                lambda: _scenario_wave_run_logs(
+                    api,
+                    authed_stream,
+                    repo_path,
+                    args.logs_timeout,
+                    cleanup_waves,
+                ),
+            ),
+            (
                 "websocket_reconnect",
-                lambda: _scenario_websocket_reconnect(api, ws, args, state),
-            )
+                lambda: _scenario_websocket_reconnect(api, ws, repo_path, cleanup_waves),
+            ),
+        ]
+
+        try:
+            for name, check in scenarios:
+                runner.run_scenario(name, check)
             runner.print_summary()
         finally:
-            authed_stream.close()
-            _cleanup_waves(api, state)
+            _cleanup_waves(api, cleanup_waves)
 
     return 1 if runner.has_failures() else 0
 
@@ -136,16 +153,8 @@ def _scenario_health(api: ApiClient) -> None:
         raise AssertionError(f"expected status='ok', got: {status!r}")
 
 
-def _scenario_wave_crud(api: ApiClient, args: argparse.Namespace, state: dict[str, Any]) -> None:
-    repo_path = _resolve_repo_path(api, args.repo)
-    created = api.request(
-        "POST",
-        "/v0/waves",
-        json={"repo": repo_path, "name": _wave_name("remote-smoke-crud")},
-    )
-    ApiAssertions.expect_status(created, 200)
-    created_payload = ApiAssertions.expect_json_object(created)
-    wave_id = _require_field(created_payload, "id")
+def _scenario_wave_crud(api: ApiClient, repo_path: str) -> None:
+    wave_id = _create_wave(api, repo_path, "remote-smoke-crud")
 
     listed = api.request("GET", "/v0/waves")
     ApiAssertions.expect_status(listed, 200)
@@ -187,14 +196,15 @@ def _scenario_auth_rejection(api: ApiClient) -> None:
 def _scenario_sse_streaming(
     api: ApiClient,
     authed_stream: httpx.Client,
-    args: argparse.Namespace,
+    repo_path: str,
+    session_harness: str,
+    events_timeout: float,
 ) -> None:
-    repo_path = _resolve_repo_path(api, args.repo)
     create_response = api.request(
         "POST",
         "/v0/sessions",
         json={
-            "harness": args.session_harness,
+            "harness": session_harness,
             "step": "design",
             "repo_root": repo_path,
         },
@@ -210,7 +220,7 @@ def _scenario_sse_streaming(
     )
     ApiAssertions.expect_status(input_response, 200)
 
-    deadline = time.monotonic() + args.events_timeout
+    deadline = time.monotonic() + events_timeout
     seen_session_event = False
     current_event_name = ""
 
@@ -224,10 +234,7 @@ def _scenario_sse_streaming(
             if line.startswith("event:"):
                 current_event_name = line[6:].strip()
                 continue
-            if not line.startswith("data:"):
-                continue
-
-            if current_event_name != "session.event":
+            if not line.startswith("data:") or current_event_name != "session.event":
                 continue
 
             payload = line[5:].strip()
@@ -235,45 +242,28 @@ def _scenario_sse_streaming(
                 continue
 
             event = json.loads(payload)
-            if not isinstance(event, dict):
-                continue
-            seen_session_event = True
-            break
+            if isinstance(event, dict):
+                seen_session_event = True
+                break
 
     if not seen_session_event:
-        raise AssertionError(
-            f"no session.event received from SSE stream within {args.events_timeout}s"
-        )
+        raise AssertionError(f"no session.event received from SSE stream within {events_timeout}s")
 
 
-def _scenario_websocket(ws: WebSocketClient, state: dict[str, Any]) -> None:
+def _scenario_websocket(ws: WebSocketClient) -> None:
     payload = ws.receive_connected_message()
-    if payload.get("type") != "connected":
-        raise AssertionError(f"expected websocket type='connected', got: {payload!r}")
-
-    waves = payload.get("waves")
-    if not isinstance(waves, list):
-        raise AssertionError(f"expected connected.waves list, got: {payload!r}")
-
-    state["last_ws_wave_count"] = len(waves)
+    _expect_connected_message(payload)
 
 
 def _scenario_wave_run_logs(
     api: ApiClient,
     authed_stream: httpx.Client,
-    args: argparse.Namespace,
-    state: dict[str, Any],
+    repo_path: str,
+    logs_timeout: float,
+    cleanup_waves: list[str],
 ) -> None:
-    repo_path = _resolve_repo_path(api, args.repo)
-    create_response = api.request(
-        "POST",
-        "/v0/waves",
-        json={"repo": repo_path, "name": _wave_name("remote-smoke-run")},
-    )
-    ApiAssertions.expect_status(create_response, 200)
-    created_payload = ApiAssertions.expect_json_object(create_response)
-    wave_id = _require_field(created_payload, "id")
-    _register_wave_for_cleanup(state, wave_id)
+    wave_id = _create_wave(api, repo_path, "remote-smoke-run")
+    cleanup_waves.append(wave_id)
 
     run_response = api.request("POST", f"/v0/waves/{wave_id}/run", json={})
     ApiAssertions.expect_status(run_response, 200)
@@ -281,7 +271,7 @@ def _scenario_wave_run_logs(
     if "started" not in run_payload:
         raise AssertionError(f"run response missing 'started': {run_payload!r}")
 
-    deadline = time.monotonic() + args.logs_timeout
+    deadline = time.monotonic() + logs_timeout
     saw_output_line = False
 
     with authed_stream.stream("GET", f"/v0/waves/{wave_id}/logs") as response:
@@ -298,40 +288,48 @@ def _scenario_wave_run_logs(
                 break
 
     if not saw_output_line:
-        raise AssertionError(f"no log output observed within {args.logs_timeout}s")
+        raise AssertionError(f"no log output observed within {logs_timeout}s")
 
 
 def _scenario_websocket_reconnect(
     api: ApiClient,
     ws: WebSocketClient,
-    args: argparse.Namespace,
-    state: dict[str, Any],
+    repo_path: str,
+    cleanup_waves: list[str],
 ) -> None:
     first = ws.receive_connected_message()
-    if first.get("type") != "connected":
-        raise AssertionError(f"first websocket connect failed: {first!r}")
+    _expect_connected_message(first)
 
-    repo_path = _resolve_repo_path(api, args.repo)
-    create_response = api.request(
-        "POST",
-        "/v0/waves",
-        json={"repo": repo_path, "name": _wave_name("remote-smoke-reconnect")},
-    )
-    ApiAssertions.expect_status(create_response, 200)
-    payload = ApiAssertions.expect_json_object(create_response)
-    new_wave_id = _require_field(payload, "id")
-    _register_wave_for_cleanup(state, new_wave_id)
+    new_wave_id = _create_wave(api, repo_path, "remote-smoke-reconnect")
+    cleanup_waves.append(new_wave_id)
 
     second = ws.receive_connected_message()
-    if second.get("type") != "connected":
-        raise AssertionError(f"second websocket connect failed: {second!r}")
-
-    waves = second.get("waves")
-    if not isinstance(waves, list):
-        raise AssertionError(f"expected connected.waves list, got: {second!r}")
+    waves = _expect_connected_message(second)
 
     if not any(isinstance(wave, dict) and wave.get("id") == new_wave_id for wave in waves):
         raise AssertionError(f"reconnected websocket snapshot missing wave {new_wave_id}")
+
+
+def _create_wave(api: ApiClient, repo_path: str, prefix: str) -> str:
+    response = api.request(
+        "POST",
+        "/v0/waves",
+        json={"repo": repo_path, "name": _wave_name(prefix)},
+    )
+    ApiAssertions.expect_status(response, 200)
+    payload = ApiAssertions.expect_json_object(response)
+    return _require_field(payload, "id")
+
+
+def _expect_connected_message(payload: dict[str, Any]) -> list[Any]:
+    if payload.get("type") != "connected":
+        raise AssertionError(f"expected websocket type='connected', got: {payload!r}")
+
+    waves = payload.get("waves")
+    if not isinstance(waves, list):
+        raise AssertionError(f"expected connected.waves list, got: {payload!r}")
+
+    return waves
 
 
 def _resolve_repo_path(api: ApiClient, repo_override: str | None) -> str:
@@ -356,22 +354,12 @@ def _resolve_repo_path(api: ApiClient, repo_override: str | None) -> str:
     return path
 
 
-def _cleanup_waves(api: ApiClient, state: dict[str, Any]) -> None:
-    wave_ids = state.get("cleanup_waves")
-    if not isinstance(wave_ids, list):
-        return
-
+def _cleanup_waves(api: ApiClient, wave_ids: list[str]) -> None:
     for wave_id in wave_ids:
         try:
             api.request("DELETE", f"/v0/waves/{wave_id}")
         except Exception:
             continue
-
-
-def _register_wave_for_cleanup(state: dict[str, Any], wave_id: str) -> None:
-    cleanup = state.setdefault("cleanup_waves", [])
-    if isinstance(cleanup, list):
-        cleanup.append(wave_id)
 
 
 def _require_field(payload: dict[str, Any], name: str) -> str:
@@ -420,13 +408,21 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run remote lfd smoke checks over TLS proxy")
     parser.add_argument("--url", required=True, help="Remote lfd base URL (https://lfd.example.com)")
     parser.add_argument("--token", required=True, help="Bearer token for remote auth")
-    parser.add_argument("--repo", default="", help="Repo path for wave creation (defaults to first /v0/repos entry)")
+    parser.add_argument(
+        "--repo",
+        default=None,
+        help="Repo path for wave creation (defaults to first /v0/repos entry)",
+    )
     parser.add_argument("--timeout", type=float, default=20.0, help="HTTP and websocket timeout in seconds")
     parser.add_argument("--events-timeout", type=float, default=30.0, help="Seconds to wait for a session SSE event")
     parser.add_argument("--logs-timeout", type=float, default=30.0, help="Seconds to wait for wave log output")
     parser.add_argument("--session-harness", default="claude", help="Harness for SSE session scenario")
     parser.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification")
-    parser.add_argument("--ca-cert", default="", help="Path to custom CA certificate for TLS verification")
+    parser.add_argument(
+        "--ca-cert",
+        default=None,
+        help="Path to custom CA certificate for TLS verification",
+    )
     return parser.parse_args()
 
 

@@ -28,17 +28,16 @@ class ApiClient:
         timeout_seconds: float = 10.0,
         verify: bool | str = True,
     ) -> None:
+        client_kwargs = {
+            "base_url": base_url,
+            "timeout": timeout_seconds,
+            "verify": verify,
+        }
         self._authed_client = httpx.Client(
-            base_url=base_url,
-            timeout=timeout_seconds,
-            verify=verify,
+            **client_kwargs,
             headers={"Authorization": f"Bearer {token}"},
         )
-        self._anonymous_client = httpx.Client(
-            base_url=base_url,
-            timeout=timeout_seconds,
-            verify=verify,
-        )
+        self._anonymous_client = httpx.Client(**client_kwargs)
 
     def __enter__(self) -> "ApiClient":
         return self

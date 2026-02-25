@@ -6,7 +6,6 @@ import LoopflowCore
 struct MobileRootView: View {
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
-    @State private var profileStore = MobileConnectionProfilesStore()
     @State private var selectedWaveId: String?
     @State private var selectedTab = 0
     @State private var showingSettings = false
@@ -30,7 +29,7 @@ struct MobileRootView: View {
     var body: some View {
         Group {
             if needsConnectionSetup {
-                ConnectionSetupView(profileStore: profileStore)
+                ConnectionSetupView()
             } else if isPadLayout {
                 iPadLayout
             } else {
@@ -56,7 +55,7 @@ struct MobileRootView: View {
             }
             .tag(0)
 
-            ConnectionSetupView(profileStore: profileStore)
+            ConnectionSetupView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
@@ -88,7 +87,7 @@ struct MobileRootView: View {
             }
         }
         .sheet(isPresented: $showingSettings) {
-            ConnectionSetupView(profileStore: profileStore)
+            ConnectionSetupView()
         }
     }
 }

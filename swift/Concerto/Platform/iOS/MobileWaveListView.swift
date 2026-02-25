@@ -25,7 +25,7 @@ struct MobileWaveListView: View {
                                 Spacer()
                                 Text(wave.statusText)
                                     .font(Typography.caption(11))
-                                    .foregroundStyle(wave.status.mobileStatusColor)
+                                    .foregroundStyle(wave.status.color)
                             }
                             Text(wave.areaDisplay)
                                 .font(Typography.caption(11))

@@ -32,7 +32,7 @@ struct MobileWaveDetailView: View {
                             Spacer()
                             Text(wave.statusText)
                                 .font(Typography.caption())
-                                .foregroundStyle(wave.status.mobileStatusColor)
+                                .foregroundStyle(wave.status.color)
                         }
                         Text(wave.areaDisplay)
                             .font(Typography.caption())

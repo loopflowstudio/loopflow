@@ -250,17 +250,11 @@ pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
     let mut expanded = Vec::new();
     let mut seen = HashSet::new();
     for name in names {
-        if let Some(members) = resolve_direction_group(name, repo) {
-            for member in members {
-                if seen.insert(member.clone()) {
-                    expanded.push(member);
-                }
+        let members = resolve_direction_group(name, repo).unwrap_or_else(|| vec![name.clone()]);
+        for member in members {
+            if seen.insert(member.clone()) {
+                expanded.push(member);
             }
-            continue;
-        }
-
-        if seen.insert(name.clone()) {
-            expanded.push(name.clone());
         }
     }
     expanded

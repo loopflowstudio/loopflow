@@ -131,7 +131,7 @@ struct WaveSidebar: View {
                     .fontWeight(.medium)
                     .foregroundStyle(.white.opacity(0.7))
 
-                Text(repoState.connectionStore.activeConnection.displayName)
+                Text(connectionSubtitle)
                     .font(Typography.caption(10))
                     .foregroundStyle(.white.opacity(0.45))
             }
@@ -172,6 +172,15 @@ struct WaveSidebar: View {
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.md)
+    }
+
+    private var connectionSubtitle: String {
+        switch repoState.connectionStore.mode {
+        case .bundled:
+            return "Bundled daemon"
+        case .remote:
+            return repoState.connectionStore.activeConnection.displayName
+        }
     }
 
     private var createButtonDisabled: Bool {

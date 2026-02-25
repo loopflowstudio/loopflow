@@ -22,6 +22,8 @@ Visual interface for loopflow. SwiftUI, requires macOS 15+.
 
 The `./dev` script is the primary build tool. It uses Swift Package Manager (`Package.swift`) for building and installs to `~/Applications/Concerto Dev.app` to preserve macOS permissions across rebuilds.
 
+Concerto bundles `lfd` and `lf` into the app bundle. By default, each opened repo starts a bundled `lfd` process with an ephemeral localhost port and token.
+
 ### Commands
 
 | Command | Description |
@@ -129,6 +131,13 @@ Two patterns, intentionally different:
    - Uses configured auth mode (none or static token)
    - Subscribes to wave + agent + output events
    - Used for live UI updates
+
+Connection settings support two modes:
+
+- **Bundled** (default): Concerto starts one bundled `lfd` process automatically.
+- **Remote**: Concerto connects to an externally managed `lfd`.
+
+In bundled mode, Settings also supports optional CLI symlink install for `lf` + `lfd` (for `~/.local/bin` or `/usr/local/bin`).
 
 ## UI Tests
 

@@ -10,51 +10,29 @@ struct RepoWindow: View {
 
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
-
-    @State private var setupComplete = false
-    @State private var hasCheckedSetup = false
-    @State private var hasOpenedRepo = false
+    @State private var openedRepoPath: String?
     @State private var pendingWaveSelection: String?
 
-    private let setupService = SetupService()
-
     var body: some View {
-        Group {
-            if !hasCheckedSetup {
-                ProgressView("Loading...")
-            } else if !setupComplete {
-                SetupView(isComplete: $setupComplete)
-            } else {
-                ContentView()
-                    .environment(repoState)
-                    .environment(outputBuffer)
-            }
-        }
+        ContentView()
+            .environment(repoState)
+            .environment(outputBuffer)
         .background(WindowAccessor { window in
             window?.representedURL = repoURL
         })
         .task {
             if let mode = RepoState.uiTestMode() {
-                setupComplete = true
-                hasCheckedSetup = true
-                hasOpenedRepo = true
                 let url = repoURL ?? URL(fileURLWithPath: "/tmp/loopflow-ui-tests")
+                openedRepoPath = canonicalPath(url)
                 repoState.configureForUITest(mode, repoURL: url)
                 return
             }
 
-            // Check setup first
-            let status = setupService.checkDependencies()
-            setupComplete = status.lfInstalled
-            hasCheckedSetup = true
-
             await openRepoIfNeeded()
         }
-        .onChange(of: setupComplete) { _, complete in
-            if complete {
-                Task {
-                    await openRepoIfNeeded()
-                }
+        .onChange(of: repoURL) { _, _ in
+            Task {
+                await openRepoIfNeeded()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .selectPortfolioWave)) { notification in
@@ -68,23 +46,33 @@ struct RepoWindow: View {
             pendingWaveSelection = waveId
             applyPendingWaveSelectionIfNeeded()
         }
+        .onDisappear {
+            repoState.closeRepo()
+            openedRepoPath = nil
+        }
     }
 
     private func openRepoIfNeeded() async {
-        guard setupComplete, let url = repoURL, !hasOpenedRepo else { return }
-        hasOpenedRepo = true
+        guard let url = repoURL else { return }
+        let canonical = canonicalPath(url)
+        guard openedRepoPath != canonical else { return }
+        openedRepoPath = canonical
         await repoState.openRepo(url, outputBuffer: outputBuffer)
         portfolioService.addRepo(url)
         applyPendingWaveSelectionIfNeeded()
     }
 
     private func applyPendingWaveSelectionIfNeeded() {
-        guard hasOpenedRepo, let waveId = pendingWaveSelection else { return }
+        guard openedRepoPath != nil, let waveId = pendingWaveSelection else { return }
         NotificationCenter.default.post(
             name: .selectWave,
             object: nil,
             userInfo: ["waveId": waveId]
         )
         pendingWaveSelection = nil
+    }
+
+    private func canonicalPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 }

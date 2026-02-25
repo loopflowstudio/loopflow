@@ -337,6 +337,13 @@ pub fn launch_agent(
     // invoking shell state via the top-level directive file.
     cmd.env_remove("LOOPFLOW_DIRECTIVE_FILE");
 
+    // Never forward API keys to agent subprocesses. Claude Code, Codex, etc.
+    // should use their own auth (subscription/OAuth). A stray ANTHROPIC_API_KEY
+    // in the shell causes Claude Code to silently bill the API instead.
+    cmd.env_remove("ANTHROPIC_API_KEY");
+    cmd.env_remove("OPENAI_API_KEY");
+    cmd.env_remove("GEMINI_API_KEY");
+
     // For Gemini, set GEMINI_SYSTEM_MD env var to load context
     if backend == "gemini" {
         if let Some(ref context_file) = process.context_file {

@@ -7,6 +7,17 @@ import LoopflowCore
 @MainActor
 @Observable
 final class RepoState {
+    enum WaveCreationReadinessError: LocalizedError {
+        case missingRepo
+
+        var errorDescription: String? {
+            switch self {
+            case .missingRepo:
+                "Select a repository in Connection Settings first."
+            }
+        }
+    }
+
     enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
@@ -113,11 +124,13 @@ final class RepoState {
     var availableRemoteRepos: [RemoteRepo] = []
 
     // Services
+    private let bundledDaemon: BundledDaemonManager
     private var waveService: WaveService
     private var eventService: EventService?
     private weak var outputBuffer: OutputBuffer?
 
-    init() {
+    init(bundledDaemon: BundledDaemonManager = BundledDaemonManager()) {
+        self.bundledDaemon = bundledDaemon
         let connection = connectionStore.activeConnection
         waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
 
@@ -317,19 +330,34 @@ final class RepoState {
 
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
+        let canonicalURL = canonicalRepoURL(url)
+
         chatStates.removeAll()
-        currentRepo = url
-        repoTarget = .local(url)
+        currentRepo = canonicalURL
+        repoTarget = .local(canonicalURL)
         errorMessage = nil
         LoggingService.append("openRepo.total elapsed=\(Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))ms")
 
         // Background operations (skip in screenshot mode to avoid overwriting mock data)
         if !skipBackgroundRefresh {
             Task {
-                startEventSubscription(outputBuffer: outputBuffer)
-                await refreshFlowsAsync()
+                if connectionStore.mode == .remote, connectionStore.configuredRemoteConnection == nil {
+                    return
+                }
+                do {
+                    try await connectLfd(outputBuffer: outputBuffer)
+                } catch {
+                    errorMessage = "Failed to connect: \(error.localizedDescription)"
+                }
             }
         }
+    }
+
+    func closeRepo() {
+        Task {
+            await eventService?.disconnect()
+        }
+        eventService = nil
     }
 
     // MARK: - Event Subscription
@@ -644,12 +672,43 @@ final class RepoState {
     }
 
     func connectLfd(outputBuffer: OutputBuffer) async throws {
-        try await connect(to: connectionStore.activeConnection, outputBuffer: outputBuffer)
+        let connection = try await resolveConnection()
+        try await performConnectionHandshake(connection: connection, outputBuffer: outputBuffer)
     }
 
     func connect(to connection: ServerConnection, outputBuffer: OutputBuffer) async throws {
+        connectionStore.setRemoteConnection(connection)
+        try await connectLfd(outputBuffer: outputBuffer)
+    }
+
+    func connectBundled(outputBuffer: OutputBuffer) async throws {
+        connectionStore.setMode(.bundled)
+        try await connectLfd(outputBuffer: outputBuffer)
+    }
+
+    private func resolveConnection() async throws -> ServerConnection {
+        switch connectionStore.mode {
+        case .bundled:
+            guard currentRepo != nil else {
+                throw WaveCreationReadinessError.missingRepo
+            }
+            let bundledConnection = try await bundledDaemon.start()
+            connectionStore.setBundledRuntimeConnection(bundledConnection)
+            return connectionStore.activeConnection
+        case .remote:
+            guard let connection = connectionStore.configuredRemoteConnection else {
+                throw WaveServiceError.commandFailed("Configure a remote server in Connection Settings.")
+            }
+            connectionStore.setMode(.remote)
+            return connection
+        }
+    }
+
+    private func performConnectionHandshake(
+        connection: ServerConnection,
+        outputBuffer: OutputBuffer
+    ) async throws {
         self.outputBuffer = outputBuffer
-        connectionStore.setConnection(connection)
         rebuildServices(for: connection)
 
         for phase in [ConnectionPhase.tlsTrustCheck, .authCheck] {
@@ -662,14 +721,16 @@ final class RepoState {
             try await waveService.listRepos()
         }
 
-        availableRemoteRepos = repos
-        if connection.isLocal {
+        if connectionStore.mode == .bundled {
+            availableRemoteRepos = []
             if let currentRepo {
                 repoTarget = .local(currentRepo)
             }
         } else if let remote = repos.first {
+            availableRemoteRepos = repos
             selectRemoteRepo(path: remote.path)
         } else {
+            availableRemoteRepos = repos
             repoTarget = nil
         }
         chatStates.removeAll()
@@ -687,14 +748,21 @@ final class RepoState {
         await refreshWaves()
     }
 
-    func switchToLocal(outputBuffer: OutputBuffer) async throws {
-        let connection = ServerConnection.local
-        try await connect(to: connection, outputBuffer: outputBuffer)
+    func ensureReadyToCreateWave(outputBuffer: OutputBuffer) async throws {
+        if !lfdConnected {
+            try await connectLfd(outputBuffer: outputBuffer)
+            try await Task.sleep(for: .milliseconds(500))
+        }
+
+        guard repoTarget != nil else {
+            throw WaveCreationReadinessError.missingRepo
+        }
     }
 
     func selectRemoteRepo(path: String) {
         chatStates.removeAll()
         let host = connectionStore.activeConnection.host
+        connectionStore.setMode(.remote)
         repoTarget = .remote(path: path, host: host)
         currentRepo = URL(fileURLWithPath: path)
     }
@@ -760,13 +828,18 @@ final class RepoState {
     }
 
     private func rebuildServices(for connection: ServerConnection) {
-        waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
-        outputBuffer?.configureConnection(connection)
+        let token = connectionStore.token(for: connection)
+        waveService = Self.makeWaveService(connection: connection, token: token)
+        outputBuffer?.configureConnection(connection, tokenProvider: { token })
 
         Task {
             await eventService?.disconnect()
         }
         eventService = nil
+    }
+
+    private func canonicalRepoURL(_ url: URL) -> URL {
+        url.resolvingSymlinksInPath().standardizedFileURL
     }
 
     private func mapConnectionError(_ error: Error, connection: ServerConnection) -> ConnectionState {

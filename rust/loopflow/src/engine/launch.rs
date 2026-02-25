@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::AgentConfig;
 use crate::engine::config::Config;
 use crate::engine::error::CoreError;
 use crate::engine::fork::merge_directions;
@@ -42,7 +42,7 @@ pub struct LaunchPromptInput {
 /// Canonical launch-prep output.
 #[derive(Debug, Clone)]
 pub struct PreparedLaunchPrompt {
-    pub launch: LaunchConfig,
+    pub config: AgentConfig,
     pub components: PromptComponents,
     pub breakdown: ContextBreakdown,
     pub prompt: String,
@@ -120,7 +120,7 @@ pub fn prepare_launch_prompt(
     let model = model
         .or_else(|| components.step.as_ref().and_then(|step| step.model.clone()))
         .unwrap_or_else(|| config.agent_model.clone());
-    let launch = LaunchConfig {
+    let launch = AgentConfig {
         system_prompt: format_context_prompt(&components),
         task_prompt: format_task_prompt(&components),
         model: Some(model),
@@ -130,7 +130,7 @@ pub fn prepare_launch_prompt(
     };
 
     Ok(PreparedLaunchPrompt {
-        launch,
+        config: launch,
         components,
         breakdown,
         prompt,
@@ -196,7 +196,7 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.launch.model.as_deref(), Some("codex:o3"));
+        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
     }
 
     #[test]
@@ -215,7 +215,7 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.launch.model.as_deref(), Some("claude:sonnet"));
+        assert_eq!(prepared.config.model.as_deref(), Some("claude:sonnet"));
     }
 
     #[test]

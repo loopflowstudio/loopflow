@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::AgentConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::write_prompt_log;
@@ -24,7 +24,7 @@ pub struct PrepareStepPromptConfig<'a> {
     pub summary_source: Option<(&'a SharedStore, &'a LfdId)>,
 }
 
-pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<LaunchConfig> {
+pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<AgentConfig> {
     let repo_root = config.repo_root;
     let file_config = load_config_or_default(Some(repo_root));
     let summary = if let Some((store, wave_id)) = config.summary_source {
@@ -60,7 +60,7 @@ pub async fn prepare_step_prompt(config: PrepareStepPromptConfig<'_>) -> Result<
     )?;
 
     let _ = write_prompt_log(repo_root, &prepared.prompt, config.step, None);
-    Ok(prepared.launch)
+    Ok(prepared.config)
 }
 
 #[cfg(test)]
@@ -122,11 +122,11 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(launch.system_prompt, prepared.launch.system_prompt);
-        assert_eq!(launch.task_prompt, prepared.launch.task_prompt);
-        assert_eq!(launch.model, prepared.launch.model);
-        assert_eq!(launch.max_turns, prepared.launch.max_turns);
-        assert_eq!(launch.cwd, prepared.launch.cwd);
-        assert_eq!(launch.skip_permissions, prepared.launch.skip_permissions);
+        assert_eq!(launch.system_prompt, prepared.config.system_prompt);
+        assert_eq!(launch.task_prompt, prepared.config.task_prompt);
+        assert_eq!(launch.model, prepared.config.model);
+        assert_eq!(launch.max_turns, prepared.config.max_turns);
+        assert_eq!(launch.cwd, prepared.config.cwd);
+        assert_eq!(launch.skip_permissions, prepared.config.skip_permissions);
     }
 }

@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::engine::agent::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
+use loopflow::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use loopflow::engine::error::CoreError;
 use tempfile::TempDir;
 
@@ -72,8 +72,8 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-fn base_launch() -> LaunchConfig {
-    LaunchConfig {
+fn base_launch() -> AgentConfig {
+    AgentConfig {
         task_prompt: "prompt".to_string(),
         model: Some("claude".to_string()),
         skip_permissions: true,

@@ -1,8 +1,8 @@
 use crate::engine::{
     check_cli_available, launch_agent, load_config_or_default, parse_model, prepare_launch_prompt,
-    seed_rlm_env, write_prompt_log, AgentCapabilities, Config, ContextBreakdown,
-    ContextSourceOverrides, LaunchConfig, LaunchPromptInput, ProcessConfig, PromptComponents,
-    StreamFormat, DEFAULT_CONTEXT_BUDGET,
+    seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextBreakdown,
+    ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents, StreamFormat,
+    DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -31,7 +31,7 @@ pub fn run(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
 struct PromptBuild {
     repo_root: PathBuf,
     config: Config,
-    launch: LaunchConfig,
+    agent_config: AgentConfig,
     process: ProcessConfig,
     capabilities: AgentCapabilities,
     components: PromptComponents,
@@ -122,7 +122,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         "prepared launch prompt"
     );
     let model = prepared
-        .launch
+        .config
         .model
         .clone()
         .expect("prepare_launch_prompt always sets launch model");
@@ -145,7 +145,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     Ok(PromptBuild {
         repo_root,
         config,
-        launch: prepared.launch,
+        agent_config: prepared.config,
         process,
         capabilities,
         components: prepared.components,
@@ -167,7 +167,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         .map(|d| d.name.clone())
         .collect();
     let cli_model = if cli.model.is_some() {
-        built.launch.model.as_deref()
+        built.agent_config.model.as_deref()
     } else {
         None
     };
@@ -219,7 +219,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let context_file_start = Instant::now();
     let context_file = Some(write_prompt_log(
         &built.repo_root,
-        &built.launch.system_prompt,
+        &built.agent_config.system_prompt,
         &format!("{}.context", built.log_name),
         None,
     )?);
@@ -232,12 +232,12 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let mut process = built.process.clone();
     process.context_file = context_file;
     process.stream_format = StreamFormat::Human(use_color);
-    debug!(launch = ?built.launch, ?process, ?built.capabilities, "launching agent");
+    debug!(launch = ?built.agent_config, ?process, ?built.capabilities, "launching agent");
 
     seed_rlm_env(&built.config);
     info!(backend = built.backend, "launching agent");
     let launch_start = Instant::now();
-    let result = launch_agent(&built.launch, &process, &built.capabilities)?;
+    let result = launch_agent(&built.agent_config, &process, &built.capabilities)?;
     debug!(
         elapsed_ms = launch_start.elapsed().as_millis(),
         "agent finished"

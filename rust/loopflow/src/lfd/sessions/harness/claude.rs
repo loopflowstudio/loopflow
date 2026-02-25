@@ -8,7 +8,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_model;
 use crate::lfd::sessions::harness::claude_mapping::ReaderState;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
@@ -17,7 +17,7 @@ use crate::lfd::sessions::types::{SessionEvent, TurnStatus};
 
 pub struct ClaudeHarness {
     events: broadcast::Sender<SessionEvent>,
-    launch: Option<LaunchConfig>,
+    launch: Option<AgentConfig>,
     should_seed_task_prompt: bool,
     provider_session_id: Option<String>,
     turn_in_progress: Arc<AtomicBool>,
@@ -34,7 +34,7 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 /// Build CLI args for a Claude invocation.
-fn build_args(content: &str, launch: &LaunchConfig, resume_id: Option<&str>) -> Vec<String> {
+fn build_args(content: &str, launch: &AgentConfig, resume_id: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         content.to_string(),
@@ -94,7 +94,7 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl SessionHarness for ClaudeHarness {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()> {
+    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         // Validate claude binary on PATH.
         let output = Command::new("claude").arg("--version").output().await;
         match output {
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn build_args_minimal() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             model: None,
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn build_args_full() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
             model: Some("claude-sonnet-4-5-20250514".to_string()),
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn build_args_resume_without_extras() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             model: None,
@@ -319,7 +319,7 @@ mod tests {
     async fn send_input_spawn_failure_releases_turn_guard() {
         let (tx, _rx) = broadcast::channel(16);
         let mut harness = ClaudeHarness::new(tx);
-        harness.launch = Some(LaunchConfig {
+        harness.launch = Some(AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             model: None,

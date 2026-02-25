@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
+use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::prompt::count_tokens;
 
@@ -158,7 +158,7 @@ fn generate_pr_message_with_diff(repo: &Path, diff: Option<&str>) -> OpsResult<M
 
 fn generate_message(repo: &Path, prompt: &str, kind: MessageKind) -> OpsResult<Message> {
     let config = load_config_or_default(Some(repo));
-    let launch = LaunchConfig {
+    let launch = AgentConfig {
         task_prompt: format!(
             "{}\n\nReturn JSON with keys: title, body. No extra text.",
             prompt

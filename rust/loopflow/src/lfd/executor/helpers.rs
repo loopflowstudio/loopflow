@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::agent::{AgentCapabilities, LaunchConfig, ProcessConfig};
+use crate::engine::agent::{AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{ConcreteItem, ConcreteStep};
 use crate::engine::git::{
@@ -258,7 +258,7 @@ pub(crate) async fn build_step_prompt(
     wave: Option<&str>,
     summary_source: Option<(&SharedStore, &LfdId)>,
     message: Option<String>,
-) -> Result<(LaunchConfig, ProcessConfig)> {
+) -> Result<(AgentConfig, ProcessConfig)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
     let run_mode = if step.step.interactive.unwrap_or(false) {
         "interactive"

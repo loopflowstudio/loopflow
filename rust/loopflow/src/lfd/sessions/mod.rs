@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, Mutex};
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::AgentConfig;
 use crate::lfd::id::LfdId;
 use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, SessionHarness};
@@ -157,7 +157,7 @@ impl SessionManager {
     async fn prepare_session_prompt(
         &self,
         mut config: SessionConfig,
-    ) -> Result<(SessionConfig, LaunchConfig), SessionManagerError> {
+    ) -> Result<(SessionConfig, AgentConfig), SessionManagerError> {
         let repo_root = validate_repo_root(&config.repo_root)?;
         let step = config.step.trim().to_string();
         if step.is_empty() {
@@ -434,7 +434,7 @@ impl SessionManager {
         &self,
         session_id: LfdId,
         runtime: Arc<SessionRuntime>,
-        launch: LaunchConfig,
+        launch: AgentConfig,
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
@@ -687,7 +687,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for FakeHarness {
-        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
             Ok(())
         }
 
@@ -724,7 +724,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for BusyHarness {
-        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
             Ok(())
         }
 
@@ -753,7 +753,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for ResumeAwareHarness {
-        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
             Ok(())
         }
 

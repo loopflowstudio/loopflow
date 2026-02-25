@@ -54,7 +54,7 @@ pub struct LaunchResult {
 
 /// Configuration for launching an agent.
 #[derive(Debug, Clone, Default)]
-pub struct LaunchConfig {
+pub struct AgentConfig {
     /// System/context prompt content.
     pub system_prompt: String,
     /// Task prompt content sent as the turn input.
@@ -92,7 +92,7 @@ pub struct AgentCapabilities {
 
 /// Build Claude CLI command.
 pub fn build_claude_command(
-    launch: &LaunchConfig,
+    launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
     model_variant: Option<&str>,
@@ -139,7 +139,7 @@ pub fn build_claude_command(
 
 /// Build Codex CLI command.
 pub fn build_codex_command(
-    launch: &LaunchConfig,
+    launch: &AgentConfig,
     process: &ProcessConfig,
     model_variant: Option<&str>,
 ) -> Vec<String> {
@@ -191,7 +191,7 @@ pub fn build_codex_command(
 
 /// Build Gemini CLI command.
 pub fn build_gemini_command(
-    launch: &LaunchConfig,
+    launch: &AgentConfig,
     process: &ProcessConfig,
     model_variant: Option<&str>,
 ) -> Vec<String> {
@@ -262,7 +262,7 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
 
 /// Build command for any model.
 pub fn build_model_command(
-    launch: &LaunchConfig,
+    launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
@@ -281,7 +281,7 @@ pub fn build_model_command(
 
 /// Build a full CLI command (including prompt) for a model.
 pub fn build_agent_command(
-    launch: &LaunchConfig,
+    launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
@@ -302,7 +302,7 @@ pub fn build_agent_command(
 /// # Returns
 /// LaunchResult with exit code and captured output (if any)
 pub fn launch_agent(
-    launch: &LaunchConfig,
+    launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
@@ -597,7 +597,7 @@ pub fn check_cli_available(cli: &str) -> bool {
 pub trait Runner: Send + Sync {
     fn launch(
         &self,
-        launch: &LaunchConfig,
+        launch: &AgentConfig,
         process: &ProcessConfig,
         capabilities: &AgentCapabilities,
     ) -> Result<LaunchResult, CoreError>;
@@ -610,7 +610,7 @@ pub struct DefaultRunner;
 impl Runner for DefaultRunner {
     fn launch(
         &self,
-        launch: &LaunchConfig,
+        launch: &AgentConfig,
         process: &ProcessConfig,
         capabilities: &AgentCapabilities,
     ) -> Result<LaunchResult, CoreError> {
@@ -622,8 +622,8 @@ impl Runner for DefaultRunner {
 mod tests {
     use super::*;
 
-    fn default_launch() -> LaunchConfig {
-        LaunchConfig {
+    fn default_launch() -> AgentConfig {
+        AgentConfig {
             task_prompt: "task".to_string(),
             ..Default::default()
         }
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn build_claude_command_auto() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             skip_permissions: false,
             ..default_launch()
         };
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn build_codex_command_auto() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             skip_permissions: false,
             ..default_launch()
         };
@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn build_codex_command_interactive() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             skip_permissions: false,
             ..default_launch()
         };
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn build_codex_command_yolo() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             skip_permissions: true,
             ..default_launch()
         };
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn build_gemini_command_yolo() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             skip_permissions: true,
             ..default_launch()
         };
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn build_agent_command_opencode_default() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             model: Some("opencode".to_string()),
             task_prompt: "fix the bug".to_string(),
             ..Default::default()
@@ -897,7 +897,7 @@ mod tests {
 
     #[test]
     fn build_agent_command_opencode_with_variant() {
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             model: Some("opencode:anthropic/claude-sonnet".to_string()),
             task_prompt: "fix the bug".to_string(),
             ..Default::default()

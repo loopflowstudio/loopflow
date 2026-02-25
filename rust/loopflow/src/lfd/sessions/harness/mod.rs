@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::AgentConfig;
 use crate::lfd::sessions::types::SessionEvent;
 
 #[derive(Debug, thiserror::Error)]
@@ -30,7 +30,7 @@ pub fn is_terminal_harness_error(code: &str) -> bool {
 
 #[async_trait]
 pub trait SessionHarness: Send + Sync {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()>;
+    async fn start(&mut self, config: &AgentConfig) -> Result<()>;
     async fn send_input(&mut self, content: &str) -> Result<()>;
     async fn stop(&mut self) -> Result<()>;
     fn set_provider_session_id(&mut self, _provider_session_id: Option<String>) {}

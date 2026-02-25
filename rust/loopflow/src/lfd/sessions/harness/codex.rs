@@ -10,7 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_model;
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
@@ -55,7 +55,7 @@ pub struct CodexHarness {
     turn_in_progress: Arc<AtomicBool>,
     current_turn_id: Arc<Mutex<Option<String>>>,
     shutdown_requested: Arc<AtomicBool>,
-    launch: Option<LaunchConfig>,
+    launch: Option<AgentConfig>,
     should_seed_prompt: bool,
 }
 
@@ -117,7 +117,7 @@ impl CodexHarness {
 
 #[async_trait]
 impl SessionHarness for CodexHarness {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()> {
+    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());
         }
@@ -189,7 +189,7 @@ impl SessionHarness for CodexHarness {
 }
 
 impl CodexHarness {
-    async fn start_inner(&mut self, launch: &LaunchConfig) -> Result<()> {
+    async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
         let mut child = Command::new("codex")
             .arg("--app-server")
             .stdin(std::process::Stdio::piped())

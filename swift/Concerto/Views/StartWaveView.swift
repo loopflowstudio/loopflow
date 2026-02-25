@@ -1,105 +1,143 @@
 // Landing view shown when no wave is selected.
-// Collects a design prompt and launches an interactive `lf design` session.
+// Collects a wave name, creates a wave, and auto-launches a step (default: design).
 
 import SwiftUI
 import LoopflowCore
 
 struct StartWaveView: View {
+    private enum InteractiveStep: String, CaseIterable {
+        case design
+        case explore
+        case review
+        case refine
+
+        var launchLabel: String {
+            switch self {
+            case .design: "Start designing"
+            case .explore: "Start exploring"
+            case .review: "Start reviewing"
+            case .refine: "Start refining"
+            }
+        }
+    }
+
     @Environment(RepoState.self) private var repoState
+    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
-    @State private var designPrompt = ""
-    @State private var isLaunching = false
+    @State private var waveName = ""
+    @State private var selectedStep: InteractiveStep = .design
+    @State private var isCreating = false
     @State private var errorMessage: String?
-    @State private var chatState: ChatState?
     @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
-        Group {
-            if let state = chatState {
-                WaveChatView(state: state)
-            } else {
-                VStack(spacing: Spacing.xxl) {
-                    Spacer()
+        VStack(spacing: Spacing.xxl) {
+            Spacer()
 
-                    VStack(spacing: Spacing.lg) {
-                        Text("Start designing")
-                            .font(Typography.heroTitle())
-                            .foregroundStyle(palette.accent)
+            VStack(spacing: Spacing.lg) {
+                Text("Start a wave")
+                    .font(Typography.heroTitle())
+                    .foregroundStyle(palette.accent)
 
-                        TextField("Describe what you want to build...", text: $designPrompt)
-                            .textFieldStyle(.plain)
-                            .font(Typography.body())
-                            .padding(Spacing.md)
-                            .background(palette.surfaceMuted)
-                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                            .frame(maxWidth: 400)
-                            .focused($isTextFieldFocused)
-                            .onSubmit { startDesigning() }
-                            .disabled(isLaunching)
+                TextField("Wave name", text: $waveName)
+                    .textFieldStyle(.plain)
+                    .font(Typography.body())
+                    .padding(Spacing.md)
+                    .background(palette.surfaceMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .frame(maxWidth: 400)
+                    .focused($isTextFieldFocused)
+                    .onSubmit { startWave() }
+                    .disabled(isCreating)
 
-                        Button("Start designing") {
-                            startDesigning()
-                        }
-                        .buttonStyle(DarkButtonStyle())
-                        .disabled(isLaunching || trimmedPrompt.isEmpty)
-
-                        if let errorMessage {
-                            Text(errorMessage)
-                                .font(Typography.caption())
-                                .foregroundStyle(Color.statusError)
+                HStack(spacing: Spacing.sm) {
+                    Button {
+                        startWave()
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            if isCreating {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                            }
+                            Text(buttonLabel)
                         }
                     }
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(isCreating || trimmedName.isEmpty)
 
-                    Spacer()
+                    Menu {
+                        ForEach(InteractiveStep.allCases, id: \.rawValue) { step in
+                            Button {
+                                selectedStep = step
+                            } label: {
+                                HStack {
+                                    Text(step.rawValue)
+                                    if step == selectedStep {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .frame(width: HitTarget.comfortable, height: HitTarget.comfortable)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Choose which step to run")
+                }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(Typography.caption())
+                        .foregroundStyle(Color.statusError)
                 }
             }
+
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { isTextFieldFocused = true }
     }
 
-    private var trimmedPrompt: String {
-        designPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var trimmedName: String {
+        waveName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func startDesigning() {
-        guard !isLaunching else { return }
-        guard !trimmedPrompt.isEmpty else { return }
-        guard canStartDesignSession() else { return }
+    private var buttonLabel: String {
+        selectedStep.launchLabel
+    }
 
-        isLaunching = true
+    private func startWave() {
+        guard !isCreating, !trimmedName.isEmpty else { return }
+
+        isCreating = true
         errorMessage = nil
-
-        let prompt = trimmedPrompt
-        let state = chatState ?? repoState.chatState(for: "__start_design__")
-        chatState = state
-        designPrompt = ""
+        let name = trimmedName
+        let step = selectedStep.rawValue
 
         Task {
-            defer { isLaunching = false }
-            await state.send(prompt)
-        }
-    }
+            defer { isCreating = false }
+            do {
+                let wave = try await repoState.createWave(name: name)
+                waveName = ""
 
-    private func canStartDesignSession() -> Bool {
-        guard let target = repoState.repoTarget else {
-            errorMessage = "Open a repository first."
-            return false
-        }
+                guard let worktree = wave.localWorktree else {
+                    errorMessage = "Wave created but no worktree available."
+                    return
+                }
 
-        guard let localRepo = target.localURL,
-              FileManager.default.fileExists(atPath: localRepo.path()) else {
-            errorMessage = "Design launch requires a local repository."
-            return false
+                outputBuffer.launchInteractiveSession(
+                    waveId: wave.id,
+                    step: step,
+                    worktreePath: worktree
+                )
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
-
-        let loopflowConfigDirectory = localRepo.appendingPathComponent(".lf", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: loopflowConfigDirectory.path()) else {
-            errorMessage = "Run `lf init` in this repository before starting a design session."
-            return false
-        }
-
-        return true
     }
 }
 

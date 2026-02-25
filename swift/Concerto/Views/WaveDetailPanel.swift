@@ -9,7 +9,6 @@ struct WaveDetailPanel: View {
     private enum DetailTab: String, CaseIterable {
         case current = "Current"
         case runs = "Runs"
-        case chat = "Chat"
     }
 
     let wave: WaveViewModel
@@ -25,13 +24,11 @@ struct WaveDetailPanel: View {
     @State private var showingStopConfirmation = false
     @State private var editingName: String = ""
     @State private var isEditingName = false
-    @State private var currentTime = Date()
     @State private var selectedTab: DetailTab = .current
     @State private var hasAppliedScreenshotTab = false
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
-    private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var waveRuns: [WaveRun] { repoState.runStore.runs(for: wave.id) }
     private var isSelectedWave: Bool { repoState.selectedWave?.id == wave.id }
@@ -88,12 +85,6 @@ struct WaveDetailPanel: View {
                 commitNameChange()
             }
         }
-        .onReceive(elapsedTimeTimer) { time in
-            // Update current time for elapsed time display (only when running)
-            if wave.status == .running {
-                currentTime = time
-            }
-        }
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
             repoState.loadRuns(for: wave.id)
@@ -131,63 +122,59 @@ struct WaveDetailPanel: View {
 
             Divider()
 
-            if selectedTab == .chat {
-                WaveChatView(state: repoState.chatState(for: wave.id))
-            } else {
-                ScrollView {
-                    VStack(spacing: Spacing.lg) {
-                        if selectedTab == .current {
-                            if wave.status == .idle || wave.status == .failed {
-                                if wave.status == .idle {
-                                    goalsSection
-                                }
-
-                                if wave.status == .failed {
-                                    failedRunDetail
-                                }
-
-                                StepRunner(wave: wave)
-
-                                if !wave.commits.isEmpty {
-                                    commitLogSection
-                                }
-
-                                if let stat = wave.diffStat {
-                                    diffStatSection(stat)
-                                }
-
-                                if !wave.commits.isEmpty || wave.prURL != nil {
-                                    opsActionsBar
-                                } else if wave.status == .idle && !wave.recentSteps.isEmpty {
-                                    Divider()
-                                    NextActionsBar(wave: wave)
-                                }
-
-                                if wave.status == .failed && !outputBuffer.output(for: wave.id).isEmpty {
-                                    liveOutputSection
-                                }
-                            } else {
-                                waveConfigSummary
-                                if isReviewStep {
-                                    risksSection
-                                }
-                                runProgressSection
+            ScrollView {
+                VStack(spacing: Spacing.lg) {
+                    if selectedTab == .current {
+                        if wave.status == .idle || wave.status == .failed {
+                            if wave.status == .idle {
+                                goalsSection
                             }
 
-                            roadmapSection
+                            if wave.status == .failed {
+                                failedRunDetail
+                            }
 
-                            if wave.worktreePath != nil {
-                                quickActionsBar
+                            StepRunner(wave: wave)
+
+                            if !wave.commits.isEmpty {
+                                commitLogSection
+                            }
+
+                            if let stat = wave.diffStat {
+                                diffStatSection(stat)
+                            }
+
+                            if !wave.commits.isEmpty || wave.prURL != nil {
+                                opsActionsBar
+                            } else if wave.status == .idle && !wave.recentSteps.isEmpty {
+                                Divider()
+                                NextActionsBar(wave: wave)
+                            }
+
+                            if wave.status == .failed && !outputBuffer.output(for: wave.id).isEmpty {
+                                liveOutputSection
                             }
                         } else {
-                            WaveRunsTab(
-                                runs: waveRuns,
-                                onCombine: combinePRs
-                            )
+                            waveConfigSummary
+                            if isReviewStep {
+                                risksSection
+                            }
+                            runProgressSection
                         }
+
+                        roadmapSection
+
+                        if wave.worktreePath != nil {
+                            quickActionsBar
+                        }
+                    } else {
+                        WaveRunsTab(
+                            runs: waveRuns,
+                            onCombine: combinePRs
+                        )
                     }
-                    .padding(Spacing.xl)
                 }
+                .padding(Spacing.xl)
             }
         }
     }
@@ -278,7 +265,6 @@ struct WaveDetailPanel: View {
             Picker("", selection: $selectedTab) {
                 Text("Current").tag(DetailTab.current)
                 Text("Runs (\(waveRuns.count))").tag(DetailTab.runs)
-                Text("Chat").tag(DetailTab.chat)
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 320)

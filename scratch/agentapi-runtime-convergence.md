@@ -1,4 +1,4 @@
-# 05: Runtime Convergence
+# Runtime Convergence
 
 Unify the two agent execution paths (`lf` engine and `lfd` sessions) into one runtime. Interactive `lf` commands use the session API and Concerto's chat UI instead of spawning a terminal.
 

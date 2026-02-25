@@ -2,7 +2,7 @@
 
 Unified session API for interactive coding agents. lfd spawns and manages provider processes (Codex, Claude, OpenCode), translates events into a canonical model, persists everything for replay. Concerto and future clients connect via HTTP/SSE.
 
-`lf` headless runs are unchanged. Interactive `lf` commands (`design`, `explore`, `review`, `refine`) will move to the session API + Concerto UI (see `01-runtime-convergence.md`).
+`lf` headless runs are unchanged. Interactive `lf` commands (`design`, `explore`, `review`, `refine`) will move to the session API + Concerto UI (runtime convergence — active in scratch/).
 
 ## Vision
 

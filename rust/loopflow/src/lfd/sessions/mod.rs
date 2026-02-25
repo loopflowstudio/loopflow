@@ -15,7 +15,8 @@ use crate::engine::prompt::write_prompt_log;
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
 use crate::lfd::sessions::types::{
-    CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
+    CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionItem,
+    SessionStatus,
 };
 use crate::lfd::store::{SharedStore, StoreError};
 
@@ -53,6 +54,7 @@ struct SessionRuntime {
     harness: Mutex<Box<dyn Harness>>,
     events_tx: broadcast::Sender<PersistedSessionEvent>,
     next_seq: AtomicI64,
+    seeded_user_prompt: Option<String>,
 }
 
 impl std::fmt::Debug for SessionRuntime {
@@ -130,10 +132,12 @@ impl SessionManager {
         self.inner.store.create_session(&session).await?;
 
         let (events_tx, _) = broadcast::channel(LIVE_EVENT_BUFFER);
+        let seeded_user_prompt = normalized_seeded_user_prompt(&prepared_prompt.task_prompt);
         let runtime = Arc::new(SessionRuntime {
             harness: Mutex::new(harness),
             events_tx,
             next_seq: AtomicI64::new(0),
+            seeded_user_prompt,
         });
 
         {
@@ -327,6 +331,17 @@ impl SessionManager {
             .map(|runtime| runtime.events_tx.subscribe()))
     }
 
+    pub async fn seeded_user_prompt(
+        &self,
+        session_id: &LfdId,
+    ) -> Result<Option<String>, SessionManagerError> {
+        let _ = self.get_session(session_id).await?;
+        Ok(self
+            .runtime(session_id)
+            .await
+            .and_then(|runtime| runtime.seeded_user_prompt.clone()))
+    }
+
     pub async fn recover_orphaned_sessions(&self) -> Result<u32, SessionManagerError> {
         let sessions = self
             .inner
@@ -469,6 +484,20 @@ impl SessionManager {
                     // Auto-start: send empty input so the harness delivers
                     // the task_prompt (step content) as the agent's first turn.
                     if auto_start {
+                        if let Err(err) = manager
+                            .append_seeded_user_prompt_event(
+                                &session_id,
+                                &runtime,
+                                launch.task_prompt.trim(),
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                error = %err,
+                                "failed to append seeded user prompt event"
+                            );
+                        }
                         let send_result = {
                             let mut harness = runtime.harness.lock().await;
                             harness.send_input("").await
@@ -494,6 +523,32 @@ impl SessionManager {
                 }
             }
         });
+    }
+
+    async fn append_seeded_user_prompt_event(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        prompt: &str,
+    ) -> Result<(), SessionManagerError> {
+        if prompt.is_empty() {
+            return Ok(());
+        }
+
+        self.append_runtime_event(
+            session_id,
+            runtime,
+            SessionEvent::ItemCompleted {
+                turn_id: "turn_seed_user_prompt".to_string(),
+                item: SessionItem::Message {
+                    id: "msg_seed_user_prompt".to_string(),
+                    text: prompt.to_string(),
+                    phase: Some("user".to_string()),
+                },
+            },
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn handle_provider_session_id(
@@ -705,11 +760,19 @@ fn resolve_cwd(
     Ok(Some(canonical_cwd))
 }
 
+fn normalized_seeded_user_prompt(prompt: &str) -> Option<String> {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lfd::sessions::harness::{Harness, HarnessError};
-    use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
+    use crate::lfd::sessions::types::{SessionConfig, SessionEvent, SessionItem, TurnStatus};
     use crate::lfd::store::{open_store, StorageConfig};
     use anyhow::Result;
     use async_trait::async_trait;
@@ -949,6 +1012,71 @@ mod tests {
             .await
             .expect("replay events");
         assert!(!replay.is_empty());
+    }
+
+    #[tokio::test]
+    async fn auto_start_seeds_user_prompt_event() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+
+        let steps_dir = tmp.path().join(".lf").join("steps");
+        std::fs::create_dir_all(&steps_dir).expect("create steps dir");
+        std::fs::write(
+            steps_dir.join("seed-step.md"),
+            "Seeded prompt text for interactive wave start.",
+        )
+        .expect("write test step");
+
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let created = manager
+            .create_session(CreateSessionParams {
+                harness: "codex".to_string(),
+                wave_run_id: Some("run_seed".to_string()),
+                config: SessionConfig {
+                    step: "seed-step".to_string(),
+                    repo_root: tmp.path().to_string_lossy().to_string(),
+                    model: Some("gpt-5.1-codex".to_string()),
+                    cwd: Some(tmp.path().to_string_lossy().to_string()),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect("create session");
+
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        let mut saw_seeded_prompt = false;
+        for _ in 0..50 {
+            let events = manager
+                .list_events(&created.id, None)
+                .await
+                .expect("list events");
+            saw_seeded_prompt = events.iter().any(|event| {
+                matches!(
+                    &event.event,
+                    SessionEvent::ItemCompleted {
+                        item:
+                            SessionItem::Message {
+                                text,
+                                phase: Some(phase),
+                                ..
+                            },
+                        ..
+                    } if phase == "user" && text.contains("Seeded prompt text for interactive wave start.")
+                )
+            });
+            if saw_seeded_prompt {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        assert!(saw_seeded_prompt);
     }
 
     #[tokio::test]

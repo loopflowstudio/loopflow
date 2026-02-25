@@ -38,6 +38,7 @@ struct PortfolioRepoStateTests {
                 waveRunId: nil,
                 step: nil,
                 sessionId: nil,
+                initialUserMessage: nil,
                 name: nil,
                 wave: createdWave,
                 timestamp: Date()
@@ -53,6 +54,7 @@ struct PortfolioRepoStateTests {
                 waveRunId: nil,
                 step: nil,
                 sessionId: nil,
+                initialUserMessage: nil,
                 name: nil,
                 wave: nil,
                 timestamp: Date()
@@ -81,6 +83,7 @@ struct PortfolioRepoStateTests {
                 waveRunId: nil,
                 step: nil,
                 sessionId: nil,
+                initialUserMessage: nil,
                 name: nil,
                 wave: remoteWave,
                 timestamp: Date()

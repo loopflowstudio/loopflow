@@ -352,31 +352,49 @@ fn process_user_message(
         return;
     };
 
-    for block in blocks {
+    for (idx, block) in blocks.iter().enumerate() {
         let Some(block_type) = block.get("type").and_then(Value::as_str) else {
             continue;
         };
-        if block_type != "tool_result" {
-            continue;
+        match block_type {
+            "tool_result" => {
+                let tool_use_id = block
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+
+                let Some(tool) = state.tool_by_id(tool_use_id) else {
+                    continue;
+                };
+
+                // Extract output from content array or text.
+                let output = extract_tool_result_text(block);
+                let input = tool.parsed_input();
+                let completed_item =
+                    build_item(&tool.name, &tool.id, input, ItemStatus::Completed, output);
+                let _ = events.send(SessionEvent::ItemCompleted {
+                    turn_id: turn_id.to_string(),
+                    item: completed_item,
+                });
+            }
+            "text" => {
+                let Some(text) = block.get("text").and_then(Value::as_str) else {
+                    continue;
+                };
+                if text.is_empty() {
+                    continue;
+                }
+                let _ = events.send(SessionEvent::ItemCompleted {
+                    turn_id: turn_id.to_string(),
+                    item: SessionItem::Message {
+                        id: format!("msg_user_{turn_id}_{idx}"),
+                        text: text.to_string(),
+                        phase: Some("user".to_string()),
+                    },
+                });
+            }
+            _ => {}
         }
-
-        let tool_use_id = block
-            .get("tool_use_id")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-
-        let Some(tool) = state.tool_by_id(tool_use_id) else {
-            continue;
-        };
-
-        // Extract output from content array or text.
-        let output = extract_tool_result_text(block);
-        let input = tool.parsed_input();
-        let completed_item = build_item(&tool.name, &tool.id, input, ItemStatus::Completed, output);
-        let _ = events.send(SessionEvent::ItemCompleted {
-            turn_id: turn_id.to_string(),
-            item: completed_item,
-        });
     }
 }
 
@@ -646,5 +664,29 @@ mod tests {
                 .map(|tool| tool.input_json.as_str()),
             Some("{\"command\":\"ls\"}")
         );
+    }
+
+    #[test]
+    fn process_line_user_text_emits_user_message_item() {
+        let (tx, mut rx) = broadcast::channel(16);
+        let mut state = ReaderState::default();
+        let line = r#"{"type":"user","message":{"content":[{"type":"text","text":"Design the architecture before coding."}]}}"#;
+
+        process_line(line, "turn_1", &tx, &mut state);
+
+        let event = rx.try_recv().expect("should have event");
+        match event {
+            SessionEvent::ItemCompleted { turn_id, item } => {
+                assert_eq!(turn_id, "turn_1");
+                match item {
+                    SessionItem::Message { text, phase, .. } => {
+                        assert_eq!(text, "Design the architecture before coding.");
+                        assert_eq!(phase.as_deref(), Some("user"));
+                    }
+                    other => panic!("expected Message item, got {other:?}"),
+                }
+            }
+            other => panic!("expected ItemCompleted event, got {other:?}"),
+        }
     }
 }

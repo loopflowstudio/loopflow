@@ -334,7 +334,7 @@ impl WaveExecutor {
                     }
                 }
                 FlowAction::WaitInteractive { step } => {
-                    let session = self
+                    let (session, initial_user_message) = self
                         .create_interactive_session(&wave, &run, &step)
                         .await
                         .map_err(|err| anyhow!("failed to create interactive session: {err}"))?;
@@ -353,6 +353,7 @@ impl WaveExecutor {
                         run.id.clone(),
                         step.step.name.clone(),
                         Some(session_id),
+                        initial_user_message,
                     ));
                     return Ok(());
                 }
@@ -523,7 +524,7 @@ impl WaveExecutor {
         wave: &Wave,
         run: &WaveRun,
         step: &ConcreteStep,
-    ) -> std::result::Result<Session, SessionManagerError> {
+    ) -> std::result::Result<(Session, Option<String>), SessionManagerError> {
         let repo_config = load_config_or_default(Some(Path::new(&run.worktree)));
         let model = step
             .step
@@ -541,13 +542,16 @@ impl WaveExecutor {
             ..Default::default()
         };
 
-        self.sessions
+        let session = self
+            .sessions
             .create_session(CreateSessionParams {
                 provider,
                 wave_run_id: Some(run.id.to_string()),
                 config: session_config,
             })
-            .await
+            .await?;
+        let initial_user_message = self.sessions.seeded_user_prompt(&session.id).await?;
+        Ok((session, initial_user_message))
     }
 
     fn spawn_interactive_session_watcher(&self, wave_id: LfdId, run_id: LfdId, session_id: LfdId) {

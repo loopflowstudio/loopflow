@@ -2,7 +2,7 @@
 
 Standard content model for waves and a design-first onboarding experience.
 
-**Status: complete.** All four phases shipped (01: content model, 02: design step, 03: Concerto UX, 04: interactive sessions). Remaining follow-up items (daemon restart rehydration, filesystem watcher, per-tab routing) are tracked in "Not here" and can seed future waves.
+**Status: in progress.** Phases 01–04 shipped (content model, design step, Concerto UX, interactive sessions). Phase 05 (flow lifecycle: rename, update-wave, loop signal) is next. Remaining follow-up items (daemon restart rehydration, filesystem watcher, per-tab routing) are tracked in "Not here" and can seed future waves.
 
 ## Vision
 

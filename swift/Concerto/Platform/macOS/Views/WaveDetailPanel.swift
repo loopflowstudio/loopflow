@@ -37,10 +37,10 @@ struct WaveDetailPanel: View {
     private var isSelectedWave: Bool { repoState.selectedWave?.id == wave.id }
     private var waveContent: WaveContent? { wave.content }
     private var activeChatState: ChatState? {
-        if let sessionId = repoState.interactiveSessionId(for: wave.id) {
-            return repoState.chatState(for: wave.id, joinSessionId: sessionId)
-        }
-        if wave.status == .waiting {
+        if repoState.shouldShowInteractiveChat(for: wave) {
+            if let sessionId = repoState.interactiveSessionId(for: wave.id) {
+                return repoState.chatState(for: wave.id, joinSessionId: sessionId)
+            }
             return repoState.chatState(for: wave.id)
         }
         return nil
@@ -56,7 +56,7 @@ struct WaveDetailPanel: View {
     var body: some View {
         Group {
             if let chatState = activeChatState {
-                WaveChatView(state: chatState)
+                interactiveChatView(state: chatState)
             } else if outputBuffer.hasActiveSession(for: wave.id),
                let session = outputBuffer.interactiveSession {
                 InteractiveSessionView(session: session)
@@ -135,6 +135,14 @@ struct WaveDetailPanel: View {
     }
 
     // MARK: - Blended View (header + context + actions)
+
+    private func interactiveChatView(state: ChatState) -> some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            WaveChatView(state: state)
+        }
+    }
 
     private var blendedView: some View {
         VStack(spacing: 0) {

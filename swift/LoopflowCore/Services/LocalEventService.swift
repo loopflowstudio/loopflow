@@ -26,6 +26,7 @@ public struct WaveEvent: Sendable {
     public let waveRunId: String?
     public let step: String?
     public let sessionId: String?
+    public let initialUserMessage: String?
     public let name: String?
     public let wave: Wave?
     public let timestamp: Date
@@ -445,6 +446,7 @@ public actor EventService {
                 waveRunId: json["wave_run_id"] as? String,
                 step: json["step"] as? String,
                 sessionId: json["session_id"] as? String,
+                initialUserMessage: json["initial_user_message"] as? String,
                 name: json["name"] as? String,
                 wave: wave,
                 timestamp: parseTimestamp(json["timestamp"])

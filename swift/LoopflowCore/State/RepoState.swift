@@ -91,6 +91,7 @@ public final class RepoState {
     public let worktreeStore = WorktreeStore()
     private var chatStates: [String: ChatState] = [:]
     private var waitingSessionIds: [String: String] = [:]
+    private var optimisticInteractiveWaveIds: Set<String> = []
 
     public var waves: [WaveViewModel] { waveStore.ordered }
     public var waveGroups: WaveGroups { waveStore.groups }
@@ -134,7 +135,7 @@ public final class RepoState {
         return state
     }
 
-    func interactiveSessionId(for waveId: String) -> String? {
+    public func interactiveSessionId(for waveId: String) -> String? {
         if let sessionId = waitingSessionIds[waveId] {
             return sessionId
         }
@@ -142,6 +143,30 @@ public final class RepoState {
             return nil
         }
         return UserDefaults.standard.string(forKey: "chatSession.\(waveId)")
+    }
+
+    public func isOptimisticallyStartingInteractiveSession(for waveId: String) -> Bool {
+        optimisticInteractiveWaveIds.contains(waveId)
+    }
+
+    public func shouldShowInteractiveChat(for wave: WaveViewModel) -> Bool {
+        if isOptimisticallyStartingInteractiveSession(for: wave.id) {
+            return true
+        }
+        if interactiveSessionId(for: wave.id) != nil {
+            return true
+        }
+        return wave.status == .waiting
+    }
+
+    func setOptimisticInteractiveSessionStart(for waveId: String, isStarting: Bool) {
+        if isStarting {
+            optimisticInteractiveWaveIds.insert(waveId)
+            chatState(for: waveId).setAwaitingSession(true)
+            return
+        }
+        optimisticInteractiveWaveIds.remove(waveId)
+        chatStates[waveId]?.setAwaitingSession(false)
     }
 
     // In-flight actions (land) — buttons disable while pending
@@ -203,6 +228,9 @@ public final class RepoState {
         flows = []
         waveStore.removeAll()
         worktreeStore.removeAll()
+        chatStates.removeAll()
+        waitingSessionIds.removeAll()
+        optimisticInteractiveWaveIds.removeAll()
         selectedWaveId = nil
         isLoading = false
         errorMessage = nil
@@ -381,6 +409,7 @@ public final class RepoState {
 
         chatStates.removeAll()
         waitingSessionIds.removeAll()
+        optimisticInteractiveWaveIds.removeAll()
         currentRepo = canonicalURL
         repoTarget = .local(canonicalURL)
         errorMessage = nil
@@ -407,6 +436,7 @@ public final class RepoState {
         }
         eventService = nil
         waitingSessionIds.removeAll()
+        optimisticInteractiveWaveIds.removeAll()
     }
 
     // MARK: - Event Subscription
@@ -471,10 +501,21 @@ public final class RepoState {
             if event.type == .waiting {
                 if let sessionId = event.sessionId {
                     waitingSessionIds[event.waveId] = sessionId
-                    _ = chatState(for: event.waveId, joinSessionId: sessionId)
+                    setOptimisticInteractiveSessionStart(for: event.waveId, isStarting: false)
+                    let state = chatState(for: event.waveId, joinSessionId: sessionId)
+                    if let initialUserMessage = event.initialUserMessage {
+                        state.seedInitialUserMessage(initialUserMessage)
+                    }
+                    state.setAwaitingSession(false)
+                } else if let initialUserMessage = event.initialUserMessage {
+                    let state = chatState(for: event.waveId)
+                    state.seedInitialUserMessage(initialUserMessage)
                 }
             } else if refreshedWave?.status != .waiting {
                 waitingSessionIds.removeValue(forKey: event.waveId)
+                if refreshedWave?.status == .failed || refreshedWave?.status == .idle {
+                    setOptimisticInteractiveSessionStart(for: event.waveId, isStarting: false)
+                }
             }
 
             loadWaveContent(for: event.waveId)
@@ -491,6 +532,7 @@ public final class RepoState {
             waveStore.remove(event.waveId)
             runStore.clear(for: event.waveId)
             waitingSessionIds.removeValue(forKey: event.waveId)
+            setOptimisticInteractiveSessionStart(for: event.waveId, isStarting: false)
             if selectedWaveId == event.waveId {
                 selectedWaveId = nil
             }
@@ -612,7 +654,11 @@ public final class RepoState {
             api: Wave(id: pendingId, name: waveName.isEmpty ? "New wave" : waveName, repo: repo.path)
         )
         waveStore.insertPending(pending)
-        selectedWaveId = pendingId
+        if run {
+            setOptimisticInteractiveSessionStart(for: pendingId, isStarting: true)
+        } else {
+            selectedWaveId = pendingId
+        }
 
         do {
             let wave = try await waveService.createWave(
@@ -621,13 +667,22 @@ public final class RepoState {
                 flow: flow,
                 run: run
             )
-            waveStore.replacePending(pendingId, with: WaveViewModel(api: wave))
+            var createdWave = WaveViewModel(api: wave)
+            if run {
+                createdWave.status = .waiting
+            }
+            waveStore.replacePending(pendingId, with: createdWave)
+            if run {
+                setOptimisticInteractiveSessionStart(for: pendingId, isStarting: false)
+                setOptimisticInteractiveSessionStart(for: wave.id, isStarting: true)
+            }
             selectedWaveId = wave.id
             await refreshFlowsAsync()
             LoggingService.model("createWave: selectedWave=\(wave.id)")
             return wave
         } catch {
             waveStore.removePending(pendingId)
+            setOptimisticInteractiveSessionStart(for: pendingId, isStarting: false)
             if selectedWaveId == pendingId { selectedWaveId = nil }
             throw error
         }
@@ -815,6 +870,8 @@ public final class RepoState {
             repoTarget = nil
         }
         chatStates.removeAll()
+        waitingSessionIds.removeAll()
+        optimisticInteractiveWaveIds.removeAll()
 
         let probeService = Self.makeEventService(
             connection: connection,
@@ -842,6 +899,8 @@ public final class RepoState {
 
     public func selectRemoteRepo(path: String) {
         chatStates.removeAll()
+        waitingSessionIds.removeAll()
+        optimisticInteractiveWaveIds.removeAll()
         let host = connectionStore.activeConnection.host
         connectionStore.setMode(.remote)
         repoTarget = .remote(path: path, host: host)

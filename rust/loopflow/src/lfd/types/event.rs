@@ -51,6 +51,8 @@ pub enum Event {
         step: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         session_id: Option<LfdId>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        initial_user_message: Option<String>,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
@@ -156,12 +158,14 @@ impl Event {
         wave_run_id: LfdId,
         step: String,
         session_id: Option<LfdId>,
+        initial_user_message: Option<String>,
     ) -> Self {
         Self::WaveWaiting {
             wave_id,
             wave_run_id,
             step,
             session_id,
+            initial_user_message,
             timestamp: Self::now(),
         }
     }
@@ -220,6 +224,7 @@ mod tests {
             test_id("run-1"),
             "implement".to_string(),
             Some(test_id("session-1")),
+            Some("Start with user prompt".to_string()),
         );
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "wave_waiting");
@@ -227,6 +232,7 @@ mod tests {
         assert_eq!(json["wave_run_id"], "run-1");
         assert_eq!(json["step"], "implement");
         assert_eq!(json["session_id"], "session-1");
+        assert_eq!(json["initial_user_message"], "Start with user prompt");
         assert!(json["timestamp"].is_string());
     }
 
@@ -237,9 +243,11 @@ mod tests {
             test_id("run-1"),
             "implement".to_string(),
             None,
+            None,
         );
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("session_id").is_none());
+        assert!(json.get("initial_user_message").is_none());
     }
 
     #[test]
@@ -269,7 +277,7 @@ mod tests {
     fn event_roundtrips_through_json() {
         let id = || LfdId::new();
         let events = vec![
-            Event::wave_waiting(id(), id(), "step".to_string(), None),
+            Event::wave_waiting(id(), id(), "step".to_string(), None, None),
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
             Event::agent_ended(id(), AgentStatus::Failed),
         ];

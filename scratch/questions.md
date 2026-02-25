@@ -1,1 +1,1 @@
-- `parse_branch_name()` currently treats only a trailing `{words}` segment as optional when matching schema variants. This covers the stacked-branch case in the design (`{user}.{name}.{timestamp}`), but does not also drop trailing `{timestamp}`/`{date}` segments. Confirm if broader optional trailing parsing is desired.
+- Decision: keep only trailing `{words}` optional in `parse_branch_name()`. `{timestamp}`/`{date}` remain required when present in schema to avoid misparsing arbitrary dotted names as metadata.

@@ -104,6 +104,8 @@ fn strip_trailing_optional_segment(tokens: &[BranchSchemaToken]) -> Option<Vec<B
         _ => return None,
     };
 
+    // Stacked branches commonly omit only `{words}`. Keep timestamp/date
+    // required so we don't misparse arbitrary dotted names as branch metadata.
     if trailing != "words" {
         return None;
     }
@@ -342,6 +344,11 @@ mod tests {
     #[test]
     fn parse_branch_name_returns_none_for_non_matching_branch() {
         assert_eq!(parse_branch_name("mobile", None), None);
+    }
+
+    #[test]
+    fn parse_branch_name_requires_timestamp_when_schema_requires_it() {
+        assert_eq!(parse_branch_name("jack-heart.mobile", None), None);
     }
 
     #[test]

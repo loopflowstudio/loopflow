@@ -46,7 +46,9 @@ struct WaveDetailPanel: View {
 
     var body: some View {
         Group {
-            if outputBuffer.hasActiveSession(for: wave.id),
+            if let sessionId = repoState.interactiveSessionId(for: wave.id) {
+                WaveChatView(state: repoState.chatState(for: wave.id, joinSessionId: sessionId))
+            } else if outputBuffer.hasActiveSession(for: wave.id),
                let session = outputBuffer.interactiveSession {
                 InteractiveSessionView(session: session)
             } else {

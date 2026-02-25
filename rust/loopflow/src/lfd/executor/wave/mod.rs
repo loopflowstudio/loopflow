@@ -8,11 +8,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use time::OffsetDateTime;
 
 use crate::engine::agent::build_agent_command;
+use crate::engine::config::{load_config_or_default, parse_model};
 use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
 };
@@ -22,17 +24,20 @@ use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
+use crate::lfd::sessions::types::{CreateSessionParams, SessionConfig, SessionStatus};
+use crate::lfd::sessions::SessionManager;
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
+use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
-    AgentStatus, Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun,
-    WaveRunKind, WaveRunStatus, WaveStatus,
+    Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun, WaveRunKind,
+    WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
 use super::helpers::{
-    advance_branch, auto_create_pr, build_agent_capabilities, build_agent_for_step,
+    advance_branch, auto_commit_if_dirty, auto_create_pr, build_agent_capabilities,
     build_step_prompt, flow_parents_for_index, is_active_wave_run_status,
-    is_ephemeral_worktree_path,
+    is_ephemeral_worktree_path, resolve_current_step_name,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, EphemeralOwnerKind, EphemeralWorktree, JanitorReport, StartupRecovery};
@@ -45,6 +50,7 @@ pub struct WaveExecutor {
     output: OutputHub,
     runner: Arc<dyn AgentExecutor>,
     event_hub: EventHub,
+    sessions: SessionManager,
     executor_type: ExecutorType,
     github_config: GitHubConfig,
 }
@@ -63,6 +69,7 @@ impl WaveExecutor {
         scheduler: Arc<Scheduler>,
         output: OutputHub,
         event_hub: EventHub,
+        sessions: SessionManager,
         config: ExecutorConfig,
         github_config: GitHubConfig,
     ) -> Result<Self> {
@@ -80,6 +87,7 @@ impl WaveExecutor {
             output,
             runner,
             event_hub,
+            sessions,
             executor_type,
             github_config,
         })
@@ -93,12 +101,14 @@ impl WaveExecutor {
         event_hub: EventHub,
         runner: Arc<dyn AgentExecutor>,
     ) -> Self {
+        let sessions = SessionManager::new(store.clone());
         Self {
             store,
             scheduler,
             output,
             runner,
             event_hub,
+            sessions,
             executor_type: ExecutorType::Local,
             github_config: GitHubConfig::default(),
         }
@@ -324,21 +334,15 @@ impl WaveExecutor {
                     }
                 }
                 FlowAction::WaitInteractive { step } => {
-                    let model = step
-                        .step
-                        .model
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let worktree = run.worktree.clone();
-                    let agent = build_agent_for_step(
-                        &run.id,
-                        &run.snapshot.repo,
-                        &worktree,
-                        &step,
-                        AgentStatus::Waiting,
-                        &model,
+                    let session = self
+                        .create_interactive_session(&wave, &run, &step)
+                        .await
+                        .map_err(|err| anyhow!("failed to create interactive session: {err}"))?;
+                    self.spawn_interactive_session_watcher(
+                        wave.id().clone(),
+                        run.id.clone(),
+                        session.id.clone(),
                     );
-                    self.store.start_agent(&agent).await?;
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run).await?;
@@ -347,6 +351,7 @@ impl WaveExecutor {
                         wave.id().clone(),
                         run.id.clone(),
                         step.step.name.clone(),
+                        Some(session.id),
                     ));
                     return Ok(());
                 }
@@ -512,6 +517,157 @@ impl WaveExecutor {
         Ok(())
     }
 
+    async fn create_interactive_session(
+        &self,
+        wave: &Wave,
+        run: &WaveRun,
+        step: &ConcreteStep,
+    ) -> std::result::Result<
+        crate::lfd::sessions::types::Session,
+        crate::lfd::sessions::SessionManagerError,
+    > {
+        let repo_config = load_config_or_default(Some(Path::new(&run.worktree)));
+        let model = step
+            .step
+            .model
+            .clone()
+            .unwrap_or_else(|| repo_config.agent_model.clone());
+        let (provider, _) = parse_model(&model);
+        let session_config = SessionConfig {
+            step: step.step.name.clone(),
+            repo_root: run.worktree.clone(),
+            directions: run.snapshot.direction.clone(),
+            area: run.snapshot.area.first().cloned(),
+            wave: Some(wave.name().clone()),
+            model: Some(model),
+            ..Default::default()
+        };
+
+        self.sessions
+            .create_session(CreateSessionParams {
+                provider,
+                wave_run_id: Some(run.id.to_string()),
+                config: session_config,
+            })
+            .await
+    }
+
+    fn spawn_interactive_session_watcher(&self, wave_id: LfdId, run_id: LfdId, session_id: LfdId) {
+        let executor = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = executor
+                .wait_for_interactive_session_and_resume(wave_id, run_id, session_id.clone())
+                .await
+            {
+                warn!(session_id = %session_id, error = %err, "interactive session watcher failed");
+            }
+        });
+    }
+
+    async fn wait_for_interactive_session_and_resume(
+        &self,
+        wave_id: LfdId,
+        run_id: LfdId,
+        session_id: LfdId,
+    ) -> Result<()> {
+        let session_status = self.wait_for_terminal_session_status(&session_id).await?;
+        info!(
+            wave_run_id = %run_id,
+            session_id = %session_id,
+            status = %session_status.as_str(),
+            "interactive session ended; resuming wave flow"
+        );
+
+        let Some(mut run) = self.store.get_wave_run(&run_id).await? else {
+            return Ok(());
+        };
+        if run.status != WaveRunStatus::Waiting {
+            return Ok(());
+        }
+
+        let Some(wave) = self.store.get_wave(&wave_id).await? else {
+            return Ok(());
+        };
+
+        let step_name = resolve_current_step_name(&run, run.step_index);
+        let worktree = run.worktree.clone();
+        match tokio::task::spawn_blocking(move || {
+            auto_commit_if_dirty(Path::new(&worktree), &step_name)
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                self.fail_run(
+                    &mut run,
+                    &wave,
+                    format!("interactive auto-commit failed: {err}"),
+                )
+                .await?;
+                return Ok(());
+            }
+            Err(err) => {
+                self.fail_run(
+                    &mut run,
+                    &wave,
+                    format!("interactive auto-commit task failed: {err}"),
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+
+        let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
+        let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
+        self.advance_run_step(&mut run, &plan, wave.id()).await?;
+        self.set_wave_status(wave.id(), WaveStatus::Running).await;
+        self.resume_run_execution(run).await?;
+        Ok(())
+    }
+
+    async fn wait_for_terminal_session_status(&self, session_id: &LfdId) -> Result<SessionStatus> {
+        loop {
+            let session = self
+                .sessions
+                .get_session(session_id)
+                .await
+                .map_err(|err| anyhow!("failed to load session {session_id}: {err}"))?;
+            if session.status.is_terminal() {
+                return Ok(session.status);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    async fn resume_run_execution(&self, run: WaveRun) -> Result<()> {
+        for _ in 0..120 {
+            if let Some(current) = self.store.get_wave_run(&run.id).await? {
+                if current.status != WaveRunStatus::Running {
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+
+            if let Ok(slot_guard) = self.scheduler.acquire_guard(run.id.as_str()).await {
+                spawn_run_task_with_slot(
+                    self.store.clone(),
+                    self.clone(),
+                    self.event_hub.clone(),
+                    run,
+                    slot_guard,
+                );
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        Err(anyhow!(
+            "unable to resume run {}: no scheduler slots available",
+            run.id
+        ))
+    }
+
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
         let worktree = run.worktree.clone();
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
@@ -564,6 +720,7 @@ struct OrphanedForkCleanup {
 mod tests {
     use super::*;
     use crate::engine::worktree::create_worktree;
+    use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::WaveRunSnapshot;
     use async_trait::async_trait;
@@ -815,6 +972,7 @@ mod tests {
             output,
             runner: Arc::new(MockRunner),
             event_hub,
+            sessions: SessionManager::new(store.clone()),
             executor_type: ExecutorType::Docker,
             github_config: GitHubConfig::default(),
         };

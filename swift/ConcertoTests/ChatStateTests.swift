@@ -6,6 +6,34 @@ import Testing
 @Suite("ChatState")
 struct ChatStateTests {
     @MainActor
+    @Test("joining existing session streams without creating a new session")
+    func joinExistingSessionSkipsCreate() async {
+        let service = MockChatService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "hello from existing"))),
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: service,
+            userDefaults: makeUserDefaults("join-existing")
+        )
+
+        state.joinSession("session_existing")
+        await state.onAppear()
+        await waitUntil { state.turnState == .completed }
+
+        #expect(service.createSessionCallCount == 0)
+        #expect(messages(in: state, role: .assistant).last?.content == "hello from existing")
+    }
+
+    @MainActor
     @Test("send consumes text deltas once when replay includes duplicate seq")
     func sendDedupesDuplicateSeq() async {
         let service = MockChatService(

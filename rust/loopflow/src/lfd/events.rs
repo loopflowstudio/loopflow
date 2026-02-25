@@ -51,6 +51,7 @@ mod tests {
             wave_id.clone(),
             run_id,
             "review".to_string(),
+            None,
         ));
         hub.send(Event::wave_updated(wave_id));
 

@@ -188,6 +188,19 @@ public final class ChatState {
         await reconnectIfNeeded()
     }
 
+    public func joinSession(_ id: String) {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard sessionId != trimmed else { return }
+
+        cancelStreamTask()
+        resetForReplay()
+        sessionId = trimmed
+        persistSessionId(trimmed)
+        streamPhase = .idle
+        turnState = .idle
+    }
+
     public func onDisappear() {
         cancelStreamTask()
         if streamPhase != .ending {
@@ -249,7 +262,7 @@ public final class ChatState {
 
         do {
             let session = try await waveService.getSession(storedSessionId)
-            guard session.status == "active" else {
+            if isSessionTerminalStatus(session.status) {
                 persistSessionId(nil)
                 streamPhase = .idle
                 return

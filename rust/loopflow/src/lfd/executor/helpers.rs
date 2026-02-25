@@ -8,7 +8,9 @@ use time::OffsetDateTime;
 
 use crate::engine::agent::{AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::{load_config, load_config_or_default};
-use crate::engine::flow::{ConcreteItem, ConcreteStep};
+use crate::engine::flow::{
+    expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
+};
 use crate::engine::git::{
     commit, create_branch, current_branch, is_clean, push_with_upstream, stage_all,
 };
@@ -249,6 +251,29 @@ pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) ->
         Some(ConcreteItem::Fork(fork)) => fork.flow_parents.clone(),
         None => Vec::new(),
     }
+}
+
+pub(crate) fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> String {
+    let repo = Path::new(&run.snapshot.repo);
+    let name = load_flow(&run.snapshot.flow, repo)
+        .ok()
+        .and_then(|flow| expand_flow(&flow, repo).ok())
+        .and_then(|plan| match next_action(&plan, step_index as usize) {
+            FlowAction::WaitInteractive { step } => Some(step.step.name),
+            FlowAction::RunStep { step } => Some(step.step.name),
+            _ => None,
+        });
+    name.unwrap_or_else(|| format!("step-{step_index}"))
+}
+
+pub(crate) fn auto_commit_if_dirty(worktree: &Path, step_name: &str) -> Result<()> {
+    if is_clean(worktree)? {
+        return Ok(());
+    }
+    stage_all(worktree)?;
+    let message = format!("lfd: auto-commit after interactive step '{step_name}'");
+    commit(worktree, &message)?;
+    Ok(())
 }
 
 pub(crate) async fn build_step_prompt(

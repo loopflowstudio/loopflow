@@ -12,6 +12,8 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
+use crate::lfd::config::ExecutorType;
+use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
     stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
@@ -91,6 +93,8 @@ pub struct CreateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
+    #[serde(default)]
+    run: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -163,6 +167,7 @@ pub async fn create_wave_handler(
         flow,
         direction,
         area,
+        run,
     } = payload;
     let repo_path = PathBuf::from(&repo);
 
@@ -192,7 +197,7 @@ pub async fn create_wave_handler(
         return Err(wave_name_exists_error(&name));
     }
 
-    let wave = Wave {
+    let mut wave = Wave {
         id: id.clone(),
         name,
         repo,
@@ -238,7 +243,22 @@ pub async fn create_wave_handler(
         .event_hub
         .send(Event::wave_created(wave.id().clone(), wave.name().clone()));
 
-    let view = build_wave_dto(&state.store, &state.github, wave, false)
+    if run {
+        let _ = start_wave_run(&state, &mut wave, None).await?;
+    }
+
+    let response_wave = if run {
+        state
+            .store
+            .get_wave(wave.id())
+            .await
+            .map_err(map_store_error)?
+            .unwrap_or(wave)
+    } else {
+        wave
+    };
+
+    let view = build_wave_dto(&state.store, &state.github, response_wave, run)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
@@ -475,17 +495,30 @@ pub async fn run_wave_handler(
     payload: Option<Json<RunWaveRequest>>,
 ) -> ApiResult<RunWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let payload = payload.map(|Json(value)| value).unwrap_or_default();
     let mut wave = state
         .store
         .get_wave(&wave_id)
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let payload = payload.map(|Json(value)| value);
+    let run = start_wave_run(&state, &mut wave, payload).await?;
 
+    Ok(Json(RunWaveResponse {
+        started: run.is_some(),
+        wave_id: wave.id().to_string(),
+        wave_run_id: run.as_ref().map(|value| value.id.to_string()),
+    }))
+}
+
+async fn start_wave_run(
+    state: &HttpState,
+    wave: &mut Wave,
+    overrides: Option<RunWaveRequest>,
+) -> Result<Option<WaveRun>, ApiError> {
     let active_run = state
         .store
-        .get_active_wave_run(&wave_id)
+        .get_active_wave_run(wave.id())
         .await
         .map_err(map_store_error)?;
     if active_run.is_some() {
@@ -495,46 +528,41 @@ pub async fn run_wave_handler(
         ));
     }
 
-    if let Some(flow) = payload.flow {
-        wave.flow = flow;
-    }
-    if let Some(direction) = payload.direction {
-        wave.direction = direction;
-    }
-    if let Some(area) = payload.area {
-        wave.area = area;
+    if let Some(overrides) = overrides {
+        if let Some(flow) = overrides.flow {
+            wave.flow = flow;
+        }
+        if let Some(direction) = overrides.direction {
+            wave.direction = direction;
+        }
+        if let Some(area) = overrides.area {
+            wave.area = area;
+        }
     }
 
     state
         .store
-        .update_wave(&wave)
+        .update_wave(wave)
         .await
         .map_err(map_store_error)?;
 
     // Re-enable all stimuli (they may have been disabled by a previous stop).
-    let _ = set_wave_stimuli_enabled(&state, wave.id(), true, false).await;
+    let _ = set_wave_stimuli_enabled(state, wave.id(), true, false).await;
 
     let run_id = LfdId::new();
     let slot_guard = match state.scheduler.acquire_guard(run_id.as_str()).await {
         Ok(guard) => guard,
-        Err(_) => {
-            return Ok(Json(RunWaveResponse {
-                started: false,
-                wave_id: wave.id().to_string(),
-                wave_run_id: None,
-            }))
-        }
+        Err(_) => return Ok(None),
     };
 
-    let run = match create_wave_run_with_id(&state.store, &wave, &run_id).await {
-        Ok(run) => run,
-        Err(err) => {
-            return Err(api_error(
+    let run = create_wave_run_with_id(&state.store, wave, &run_id)
+        .await
+        .map_err(|err| {
+            api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 ApiMessage::Untrusted(err.to_string()),
-            ))
-        }
-    };
+            )
+        })?;
 
     spawn_run_task_with_slot(
         state.store.clone(),
@@ -544,11 +572,7 @@ pub async fn run_wave_handler(
         slot_guard,
     );
 
-    Ok(Json(RunWaveResponse {
-        started: true,
-        wave_id: wave.id().to_string(),
-        wave_run_id: Some(run.id.to_string()),
-    }))
+    Ok(Some(run))
 }
 
 pub async fn check_wave_ci_handler(
@@ -1160,20 +1184,6 @@ async fn set_wave_stimuli_enabled(
     matched
 }
 
-fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> String {
-    use crate::engine::flow::{expand_flow, load_flow, next_action, FlowAction};
-    let repo = std::path::Path::new(&run.snapshot.repo);
-    let name = load_flow(&run.snapshot.flow, repo)
-        .ok()
-        .and_then(|flow| expand_flow(&flow, repo).ok())
-        .and_then(|plan| match next_action(&plan, step_index as usize) {
-            FlowAction::WaitInteractive { step } => Some(step.step.name),
-            FlowAction::RunStep { step } => Some(step.step.name),
-            _ => None,
-        });
-    name.unwrap_or_else(|| format!("step-{step_index}"))
-}
-
 /// Move a wave's worktree and rename its branch to match the new name.
 /// Returns Ok(()) if no worktree exists (legacy wave). Returns Err with a
 /// user-facing message if the rename is not possible.
@@ -1222,17 +1232,6 @@ fn rename_wave_worktree(
         let _ = delete_remote_branch(repo, "origin", &old_branch);
     }
 
-    Ok(())
-}
-
-fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(), String> {
-    use crate::engine::git::{commit, is_clean, stage_all};
-    if is_clean(worktree).map_err(|e| e.to_string())? {
-        return Ok(());
-    }
-    stage_all(worktree).map_err(|e| e.to_string())?;
-    let message = format!("lfd: auto-commit after interactive step '{step_name}'");
-    commit(worktree, &message).map_err(|e| e.to_string())?;
     Ok(())
 }
 

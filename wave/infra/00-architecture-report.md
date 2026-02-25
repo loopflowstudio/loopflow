@@ -805,7 +805,7 @@ So there is a mismatch: prompt/doc guidance is strong on shipping quality and re
 ### How prompts should evolve for software quality
 
 1. **Add first-class quality directions** ✓ Shipped
-   Replaced role-style directions with composable quality-focused groups (`infra/`, `ux/`, `values/`). Built-in directions now include `security`, `reliability`, `performance`, `observability`, `visibility`, `feedback`, `clarity`, `simplicity`, `craft`, and more. Group expansion (`-d infra`, `-d ux`) works in prompt context and fork execution.
+   Replaced role-style directions with composable quality-focused groups (`infra/`, `ux/`, `craft/`, `creativity/`, `ceo/`). Built-in directions now include `security`, `reliability`, `performance`, `observability`, `visibility`, `feedback`, `clarity`, `simplicity`, `care`, `alive`, `musical`, `minimal`, and more. Group expansion (`-d infra`, `-d ux`, `-d craft`) works in prompt context and fork execution.
 2. **Quality-tagged step frontmatter**
    Steps should declare which quality axes they optimize (`quality: [correctness, security, reliability, ...]`), and outputs should reflect those checks.
 3. **Gate template upgrade** — partially addressed

@@ -188,6 +188,18 @@ Test step content with builtin direction group.
 Directions for this work.
 
 <lf:directions>
+<lf:direction:care>
+Quality and attention to detail. Take time to get it right. No shortcuts.
+
+What would this look like if we had infinite time? Now do 80% of that.
+
+- Edge cases handled, not ignored
+- Error messages a user will actually read
+- Naming that teaches — someone unfamiliar learns the domain by reading the code
+- Consistency that compounds — small decisions aligned across the codebase
+- Refactor when needed, not when convenient
+
+</lf:direction:care>
 <lf:direction:clarity>
 Design around data structures and public APIs. 1:1 mapping between real-world concepts and code.
 
@@ -199,28 +211,15 @@ Code demonstrates its own correctness. If a feature exists, a test proves it wor
 - One source of truth per concept
 
 </lf:direction:clarity>
-<lf:direction:craft>
-Quality and attention to detail. Code should be clear, tested, documented.
-
-Take time to get it right. Refactor when needed. No shortcuts.
-
-- Edge cases handled, not ignored
-- Error messages a user will actually read
-- Naming that teaches — someone unfamiliar learns the domain by reading the code
-- Consistency that compounds — small decisions aligned across the codebase
-- Consider: what would this look like if we had infinite time? Now do 80% of that.
-
-</lf:direction:craft>
-<lf:direction:flow>
-Maintain momentum. Ship small, iterate fast, unblock quickly.
-Prefer simple solutions that work now over perfect solutions later.
-Consider: what's the smallest useful change? What's blocking progress?
-
-</lf:direction:flow>
 <lf:direction:scale>
 Build for growth. Prefer horizontal scaling, stateless design, async patterns.
+
 Avoid premature optimization but design for 10x current load.
-Consider: caching, sharding, queues, idempotency.
+
+- Caching, sharding, queues, idempotency — reach for these before inventing
+- Stateless where possible; explicit state where necessary
+- Design for 10x, not 100x — you'll rewrite before you get there
+- Measure first, scale second
 
 </lf:direction:scale>
 <lf:direction:simplicity>

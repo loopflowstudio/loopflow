@@ -3,7 +3,7 @@ repo: tests/parity/fixtures/with_direction_group
 step: test
 run_mode: auto
 directions:
-  - values
+  - craft
 lfdocs: false
 diff_files: false
 diff: false

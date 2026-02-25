@@ -2,9 +2,7 @@
 
 ## Status
 
-Completed.
-
-This is the canonical summary for this work item. It replaces earlier planning and review notes.
+Implementation pass needed. Review complete — taxonomy finalized, code changes in progress on branch.
 
 ## Goal
 
@@ -28,59 +26,69 @@ rust/loopflow/src/engine/builtins/directions/
     accessibility.md
     dynamics.md
     aesthetics.md
-  values/
+  craft/
+    care.md
     clarity.md
-    simplicity.md
-    craft.md
-    flow.md
     scale.md
-  ceo.md
+    simplicity.md
+  creativity/
+    alive.md
+    musical.md
+  ceo/
+    focus.md
+    immediacy.md
+    truth.md
 ```
 
-Removed: `roles/infra-engineer.md`, `roles/designer.md`, `roles/product-engineer.md`, and `roles/` itself.  
-Moved: `roles/ceo.md` to top-level `ceo.md`.
+## What changed from the original branch
 
-## Implemented
+The original branch shipped `values/` as a flat group and `ceo.md` as a standalone file. Review restructured both:
 
-- Added build-time builtin direction group generation (`BUILTIN_DIRECTION_GROUPS`) and public lookup APIs in `engine::builtins`.
-- Added direction group expansion before direction loading, with:
-  - user-defined group directories in `.lf/directions/<group>/` taking precedence over builtin groups,
-  - stable dedupe behavior preserving order.
-- Applied group expansion in:
-  - prompt context assembly (`gather_context`),
-  - CLI fork planning path,
-  - daemon wave fork planning path.
-- Updated user direction resolution to find nested `.lf/directions/*/*.md` files.
-- Updated plan fork flows (`wave-reduce`, `wave-polish`, `wave-expand`) to fork across `infra`, `ux`, and `ceo`.
-- Updated quality-language in builtin steps:
-  - `interactive/review.md`
-  - `interactive/review-design.md`
-  - `code/gate.md`
-- Added/updated tests for:
-  - group expansion behavior (builtin, user, mixed, dedupe),
-  - nested direction lookup,
-  - fork flow direction parsing,
-  - golden prompt parity with grouped directions.
-- Updated docs/examples/scripts to the new taxonomy.
+1. **`ceo.md` → `ceo/` group** — decomposed into three orthogonal voices:
+   - `immediacy.md` — speed, bias to action, decide don't deliberate
+   - `focus.md` — kill things, stop what isn't working, errors of omission
+   - `truth.md` — contrarian truth, 10x thinking, raise the ceiling
+
+2. **`values/` → `craft/` + `creativity/`** — the old values group mixed two concerns:
+   - `craft/` — building things right: care (renamed from craft.md), clarity, simplicity, scale
+   - `creativity/` — momentum and feel: alive (fleshed out from thin flow.md), musical (new)
+
+## What needs to happen
+
+The code changes are already applied on the branch. The implementation pass should:
+
+1. Verify all tests pass: `cargo fmt`, `cargo clippy`, `cargo test -p loopflow --test flow_tests --test context_tests --test discovery_tests --test golden_prompt`, `cargo test -p loopflow -- engine::flow::tests`, `uv run pytest python/tests/ -q`
+2. Regenerate golden prompt if needed (the `with_direction_group` golden now uses `craft` instead of `values`)
+3. Commit the taxonomy changes as a single atomic commit on top of the existing branch
 
 ## Key decisions
 
-- Expand groups before loading concrete direction files, keeping downstream logic unchanged.
-- Resolve user groups before builtin groups when names collide.
-- Do not maintain compatibility aliases for removed role names.
+- All groups expand before loading concrete direction files — downstream logic unchanged.
+- User groups (`.lf/directions/<group>/`) take precedence over builtin groups.
+- No compatibility aliases for removed names (`infra-engineer`, `designer`, `product-engineer`, `values`).
+- Short names for CLI users; Concerto can use full paths for disambiguation.
+- Fork flows (`wave-reduce` etc.) are demos — the `infra`/`ux`/`ceo` fork split has no deep justification.
 
-## Risks and migration notes
+## Files changed (relative to original branch)
 
-- Any automation still passing removed names (`infra-engineer`, `designer`, `product-engineer`) must migrate.
-- Leaf-name collisions across groups can still cause ambiguity if duplicate filenames are introduced.
-- `cargo test --all` still includes Docker-socket-dependent failures in environments without `/var/run/docker.sock`.
+### Created
+- `directions/ceo/immediacy.md`
+- `directions/ceo/focus.md`
+- `directions/ceo/truth.md`
+- `directions/craft/care.md`
+- `directions/craft/clarity.md`
+- `directions/craft/simplicity.md`
+- `directions/craft/scale.md`
+- `directions/creativity/alive.md`
+- `directions/creativity/musical.md`
 
-## Validation
+### Deleted
+- `directions/ceo.md` (decomposed into group)
+- `directions/values/` (entire directory — replaced by craft/ and creativity/)
 
-- `cargo fmt --all -- --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test -p loopflow --test flow_tests --test context_tests --test discovery_tests --test golden_prompt`
-- `cargo test -p loopflow engine::flow::tests::`
-- `cargo test --all` *(fails only on Docker socket-dependent tests in this environment)*
-- `uv run pytest python/tests/ -q`
-- `swift test --package-path swift`
+### Modified
+- `rust/loopflow/src/engine/flow.rs` — updated tests for new groups
+- `tests/goldens/with_direction_group.yaml` — `values` → `craft`
+- `tests/goldens/with_direction_group.md` — regenerated
+- `wave/infra/00-architecture-report.md` — updated group names
+- `wave/infra/README.md` — updated group names

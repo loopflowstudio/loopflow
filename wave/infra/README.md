@@ -42,6 +42,6 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 ### Findings rolled into roadmap
 
 - Session harness trait work is already shipped (`lfd/sessions/harness/mod.rs`); remove it from future infra debt lists.
-- Quality directions are now shipped via direction taxonomy restructuring. Role-style directions (`infra-engineer`, `designer`, `product-engineer`) replaced with composable quality-focused groups (`infra/`, `ux/`, `values/`). Gate and review steps updated with quality-language. Architecture report recommendations #2 (quality-tagged frontmatter) and #4 (API-boundary prompts) remain open.
+- Quality directions are now shipped via direction taxonomy restructuring. Role-style directions (`infra-engineer`, `designer`, `product-engineer`) replaced with composable quality-focused groups (`infra/`, `ux/`, `craft/`, `creativity/`, `ceo/`). Gate and review steps updated with quality-language. Architecture report recommendations #2 (quality-tagged frontmatter) and #4 (API-boundary prompts) remain open.
 - Core risk moved from “too many features” to “too much responsibility in a few files.”
 - Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all three passes.

@@ -964,8 +964,17 @@ Be careful.
     #[test]
     fn expand_direction_names_passes_through_non_groups() {
         let tmp = TempDir::new().unwrap();
+        let result = expand_direction_names(&["security".to_string()], tmp.path());
+        assert_eq!(result, vec!["security"]);
+    }
+
+    #[test]
+    fn expand_direction_names_expands_ceo_group() {
+        let tmp = TempDir::new().unwrap();
         let result = expand_direction_names(&["ceo".to_string()], tmp.path());
-        assert_eq!(result, vec!["ceo"]);
+        assert!(result.contains(&"focus".to_string()));
+        assert!(result.contains(&"immediacy".to_string()));
+        assert!(result.contains(&"truth".to_string()));
     }
 
     #[test]
@@ -983,11 +992,11 @@ Be careful.
     #[test]
     fn expand_direction_names_user_group_overrides_builtin_group() {
         let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/values");
+        let group_dir = tmp.path().join(".lf/directions/craft");
         fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("custom.md"), "Custom values").unwrap();
+        fs::write(group_dir.join("custom.md"), "Custom craft").unwrap();
 
-        let result = expand_direction_names(&["values".to_string()], tmp.path());
+        let result = expand_direction_names(&["craft".to_string()], tmp.path());
         assert_eq!(result, vec!["custom"]);
     }
 
@@ -1004,10 +1013,21 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_expands_builtin_group() {
+    fn expand_direction_names_expands_builtin_craft_group() {
         let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["values".to_string()], tmp.path());
-        assert_eq!(result, vec!["craft", "flow", "scale"]);
+        let result = expand_direction_names(&["craft".to_string()], tmp.path());
+        assert!(result.contains(&"care".to_string()));
+        assert!(result.contains(&"clarity".to_string()));
+        assert!(result.contains(&"scale".to_string()));
+        assert!(result.contains(&"simplicity".to_string()));
+    }
+
+    #[test]
+    fn expand_direction_names_expands_builtin_creativity_group() {
+        let tmp = TempDir::new().unwrap();
+        let result = expand_direction_names(&["creativity".to_string()], tmp.path());
+        assert!(result.contains(&"alive".to_string()));
+        assert!(result.contains(&"musical".to_string()));
     }
 
     #[test]

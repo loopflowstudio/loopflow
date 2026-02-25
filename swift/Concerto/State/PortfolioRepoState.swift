@@ -7,7 +7,6 @@ import LoopflowCore
 @Observable
 final class PortfolioRepoState {
     let repo: PortfolioRepo
-    let connection: ServerConnection
 
     private let repoPath: String
     private let waveService: WaveService
@@ -18,13 +17,8 @@ final class PortfolioRepoState {
 
     init(repo: PortfolioRepo, connection: ServerConnection, token: String?) {
         self.repo = repo
-        self.connection = connection
         self.repoPath = repo.path.normalizedFilePath
         self.waveService = WaveService(connection: connection, tokenProvider: { token })
-    }
-
-    func connect() async {
-        await refresh()
     }
 
     func refresh() async {
@@ -71,10 +65,6 @@ final class PortfolioRepoState {
         }
     }
 
-    var activeCount: Int {
-        waves.filter { $0.status == .running || $0.status == .waiting }.count
-    }
-
     var blockedCount: Int {
         waves.filter { $0.status == .waiting }.count
     }
@@ -85,19 +75,6 @@ final class PortfolioRepoState {
             partial.insertions += stat.insertions
             partial.deletions += stat.deletions
         }
-    }
-
-    var totalInsertions: Int {
-        totalDiff.insertions
-    }
-
-    var totalDeletions: Int {
-        totalDiff.deletions
-    }
-
-    var totalDiffLines: Int {
-        let diff = totalDiff
-        return diff.insertions + diff.deletions
     }
 
     var needsAttention: Bool {

@@ -6,18 +6,15 @@ import Foundation
 final class PortfolioService {
     private let defaults: UserDefaults
     private let key: String
-    private let legacyKey: String
 
     private(set) var repos: [PortfolioRepo] = []
 
     init(
         defaults: UserDefaults = .standard,
-        key: String = "portfolioRepos",
-        legacyKey: String = "recentRepos"
+        key: String = "portfolioRepos"
     ) {
         self.defaults = defaults
         self.key = key
-        self.legacyKey = legacyKey
         loadRepos()
     }
 
@@ -33,29 +30,14 @@ final class PortfolioService {
         saveRepos()
     }
 
-    func clearAll() {
-        repos = []
-        saveRepos()
-    }
-
     private func loadRepos() {
-        if let storedRepos = decodedRepos(forKey: key) {
-            repos = normalizedRepos(storedRepos)
-            return
-        }
-
-        guard let legacyRepos = decodedRepos(forKey: legacyKey) else {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([PortfolioRepo].self, from: data)
+        else {
             repos = []
             return
         }
-
-        repos = normalizedRepos(legacyRepos)
-        saveRepos()
-    }
-
-    private func decodedRepos(forKey key: String) -> [PortfolioRepo]? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode([PortfolioRepo].self, from: data)
+        repos = normalizedRepos(decoded)
     }
 
     private func saveRepos() {

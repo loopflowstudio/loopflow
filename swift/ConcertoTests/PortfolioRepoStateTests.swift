@@ -18,11 +18,9 @@ struct PortfolioRepoStateTests {
             makeWave(id: "failed", repoPath: repo.path, status: .failed, diffStat: " 1 files changed, 4 insertions(+), 0 deletions(-)"),
         ])
 
-        #expect(state.activeCount == 2)
         #expect(state.blockedCount == 1)
-        #expect(state.totalInsertions == 15)
-        #expect(state.totalDeletions == 9)
-        #expect(state.totalDiffLines == 24)
+        #expect(state.totalDiff.insertions == 15)
+        #expect(state.totalDiff.deletions == 9)
         #expect(state.needsAttention)
     }
 

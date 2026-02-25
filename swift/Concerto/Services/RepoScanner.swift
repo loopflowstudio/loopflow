@@ -17,7 +17,7 @@ struct RepoScanner {
         return children
             .filter { isDirectory($0) }
             .filter(isMainGitWorktree)
-            .map(standardizedURL)
+            .map(\.standardizedFileURL)
             .sorted { lhs, rhs in
                 lhs.lastPathComponent.localizedCaseInsensitiveCompare(rhs.lastPathComponent) == .orderedAscending
             }
@@ -47,9 +47,5 @@ struct RepoScanner {
         }
 
         return !content.contains("/.git/worktrees/")
-    }
-
-    private func standardizedURL(_ url: URL) -> URL {
-        url.standardizedFileURL
     }
 }

@@ -29,7 +29,7 @@ struct PortfolioWindow: View {
                                 repoState: state,
                                 onSelectWave: selectWave,
                                 onOpenRepo: openRepo,
-                                onRemoveRepo: removeRepo
+                                onRemoveRepo: portfolioService.removeRepo
                             )
                         }
                     }
@@ -61,7 +61,7 @@ struct PortfolioWindow: View {
                 .padding(Spacing.xxl)
             }
         }
-        .background(Color.loopflowBurgundy.ignoresSafeArea())
+        .background(Color.loopflowCream.ignoresSafeArea())
         .task {
             await syncRepoStates()
             await startEventSubscription()
@@ -95,7 +95,7 @@ struct PortfolioWindow: View {
         for repo in desiredRepos where repoStates[repo.path] == nil {
             let state = PortfolioRepoState(repo: repo, connection: connection, token: token)
             repoStates[repo.path] = state
-            await state.connect()
+            await state.refresh()
         }
     }
 
@@ -155,10 +155,6 @@ struct PortfolioWindow: View {
         isShowingTypeahead = false
     }
 
-    private func removeRepo(_ repoURL: URL) {
-        portfolioService.removeRepo(repoURL)
-    }
-
     private func openRepo(_ repoURL: URL) {
         portfolioService.addRepo(repoURL)
         openWindow(id: "repo", value: repoURL)
@@ -192,10 +188,10 @@ struct PortfolioRepoCard: View {
     var onRemoveRepo: ((URL) -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            Button {
-                onOpenRepo(repoState.repo.url)
-            } label: {
+        Button {
+            onOpenRepo(repoState.repo.url)
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.md) {
                 HStack(spacing: Spacing.sm) {
                     Text(repoState.repo.displayName)
                         .font(Typography.sectionTitle(18))
@@ -208,40 +204,41 @@ struct PortfolioRepoCard: View {
                         .fill(repoState.isConnected ? Color.statusSuccess : Color.white.opacity(0.35))
                         .frame(width: 8, height: 8)
                 }
-            }
-            .buttonStyle(.plain)
 
-            Text(summaryText)
-                .font(Typography.caption())
-                .foregroundStyle(.white.opacity(0.72))
-
-            if repoState.isLoading {
-                ProgressView()
-                    .tint(.white)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, Spacing.md)
-            } else if repoState.waves.isEmpty {
-                Text("No waves")
+                Text(summaryText)
                     .font(Typography.caption())
-                    .foregroundStyle(.white.opacity(0.55))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, Spacing.sm)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                        ForEach(repoState.waves) { wave in
-                            waveRow(wave)
+                    .foregroundStyle(.white.opacity(0.72))
+
+                if repoState.isLoading {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, Spacing.md)
+                } else if repoState.waves.isEmpty {
+                    Text("No waves")
+                        .font(Typography.caption())
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, Spacing.sm)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+                            ForEach(repoState.waves) { wave in
+                                waveRow(wave)
+                            }
                         }
                     }
+                    .frame(maxHeight: 180)
                 }
-                .frame(maxHeight: 180)
             }
+            .padding(Spacing.lg)
+            .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+            .contentShape(Rectangle())
         }
-        .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+        .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: CornerRadius.lg)
-                .fill(Color.black.opacity(repoState.needsAttention ? 0.3 : 0.2))
+                .fill(Color.loopflowBurgundy.opacity(repoState.needsAttention ? 1.0 : 0.85))
                 .overlay(
                     RoundedRectangle(cornerRadius: CornerRadius.lg)
                         .stroke(Color.white.opacity(0.12), lineWidth: 1)

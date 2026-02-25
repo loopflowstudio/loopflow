@@ -1,3 +1,4 @@
+#if os(macOS)
 // Main content view with wave sidebar and detail panel.
 
 import SwiftUI
@@ -365,3 +366,5 @@ struct ContentView: View {
         .environment(OutputBuffer())
         .environment(KeyboardRouter())
 }
+
+#endif

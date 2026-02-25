@@ -1,3 +1,4 @@
+#if os(macOS)
 // Row view for an orphan worktree in the "Worktrees" sidebar section.
 
 import SwiftUI
@@ -84,3 +85,5 @@ struct WorktreeRow: View {
         .accessibilityLabel("Worktree: \(displayName)")
     }
 }
+
+#endif

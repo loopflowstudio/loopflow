@@ -1,3 +1,4 @@
+#if os(macOS)
 // Service for persisting portfolio repositories.
 
 import Foundation
@@ -61,3 +62,5 @@ final class PortfolioService {
         return normalized
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 // Provides app icons by looking up installed applications.
 
 import AppKit
@@ -93,3 +94,5 @@ enum AppIdentifier {
         }
     }
 }
+
+#endif

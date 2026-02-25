@@ -1,3 +1,4 @@
+#if os(macOS)
 // AppleScript command handlers for Concerto automation.
 
 import Cocoa
@@ -26,3 +27,5 @@ class CaptureScreenshotCommand: NSScriptCommand {
         return result
     }
 }
+
+#endif

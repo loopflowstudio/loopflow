@@ -1,7 +1,9 @@
+#if os(macOS)
 // Simple test window for the embedded Ghostty terminal.
 // Access via Window menu > Terminal Test
 
 import SwiftUI
+import LoopflowCore
 
 struct TerminalTestWindow: View {
     @Environment(\.palette) private var palette
@@ -99,3 +101,5 @@ struct TerminalTestWindow: View {
     TerminalTestWindow()
         .frame(width: 800, height: 600)
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 // Landing view shown when no wave is selected.
 // Collects a design prompt and launches an interactive `lf design` session.
 
@@ -109,3 +110,5 @@ struct StartWaveView: View {
         .environment(OutputBuffer())
         .frame(width: 600, height: 500)
 }
+
+#endif

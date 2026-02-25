@@ -1,20 +1,19 @@
 import Foundation
-import LoopflowCore
 
-enum ChatRole {
+public enum ChatRole {
     case user
     case assistant
     case error
     case system
 }
 
-struct ChatMessage: Identifiable, Equatable {
-    let id: UUID
-    let role: ChatRole
-    let content: String
-    let timestamp: Date
+public struct ChatMessage: Identifiable, Equatable {
+    public let id: UUID
+    public let role: ChatRole
+    public let content: String
+    public let timestamp: Date
 
-    init(id: UUID = UUID(), role: ChatRole, content: String, timestamp: Date = Date()) {
+    public init(id: UUID = UUID(), role: ChatRole, content: String, timestamp: Date = Date()) {
         self.id = id
         self.role = role
         self.content = content
@@ -22,7 +21,7 @@ struct ChatMessage: Identifiable, Equatable {
     }
 }
 
-enum SessionItemType: Equatable {
+public enum SessionItemType: Equatable {
     case command
     case file
     case message
@@ -31,21 +30,28 @@ enum SessionItemType: Equatable {
     case unknown
 }
 
-struct TranscriptItemCard: Equatable {
-    let type: SessionItemType
-    let label: String
-    let status: ItemStatus?
-    let detail: String?
+public struct TranscriptItemCard: Equatable {
+    public let type: SessionItemType
+    public let label: String
+    public let status: ItemStatus?
+    public let detail: String?
+
+    public init(type: SessionItemType, label: String, status: ItemStatus?, detail: String?) {
+        self.type = type
+        self.label = label
+        self.status = status
+        self.detail = detail
+    }
 }
 
-struct TranscriptItem: Identifiable, Equatable {
-    let id: UUID
-    let turnId: String
-    let itemId: String
-    let card: TranscriptItemCard
-    let timestamp: Date
+public struct TranscriptItem: Identifiable, Equatable {
+    public let id: UUID
+    public let turnId: String
+    public let itemId: String
+    public let card: TranscriptItemCard
+    public let timestamp: Date
 
-    init(
+    public init(
         id: UUID = UUID(),
         turnId: String,
         itemId: String,
@@ -60,11 +66,11 @@ struct TranscriptItem: Identifiable, Equatable {
     }
 }
 
-enum TranscriptEntry: Identifiable, Equatable {
+public enum TranscriptEntry: Identifiable, Equatable {
     case message(ChatMessage)
     case item(TranscriptItem)
 
-    var id: UUID {
+    public var id: UUID {
         switch self {
         case .message(let message):
             return message.id
@@ -73,7 +79,7 @@ enum TranscriptEntry: Identifiable, Equatable {
         }
     }
 
-    var timestamp: Date {
+    public var timestamp: Date {
         switch self {
         case .message(let message):
             return message.timestamp
@@ -83,7 +89,7 @@ enum TranscriptEntry: Identifiable, Equatable {
     }
 }
 
-protocol ChatService: Sendable {
+public protocol ChatService: Sendable {
     func createSession(
         provider: String,
         waveRunId: String?,
@@ -100,14 +106,14 @@ protocol ChatService: Sendable {
 
 extension LocalWaveService: ChatService {}
 
-enum ChatTurnState {
+public enum ChatTurnState {
     case idle
     case running
     case completed
     case failed
 }
 
-enum StreamPhase {
+public enum StreamPhase {
     case idle
     case replaying
     case live
@@ -116,14 +122,14 @@ enum StreamPhase {
 
 @MainActor
 @Observable
-final class ChatState {
-    let waveId: String
+public final class ChatState {
+    public let waveId: String
 
-    var transcript: [TranscriptEntry] = []
-    var turnState: ChatTurnState = .idle
-    var streamPhase: StreamPhase = .idle
+    public var transcript: [TranscriptEntry] = []
+    public var turnState: ChatTurnState = .idle
+    public var streamPhase: StreamPhase = .idle
 
-    private(set) var itemsById: [String: SessionItem] = [:]
+    public private(set) var itemsById: [String: SessionItem] = [:]
 
     private let sessionProvider: String
     private let sessionWaveRunId: String?
@@ -143,7 +149,7 @@ final class ChatState {
     private var streamTask: Task<Void, Never>?
     private var streamGeneration = 0
 
-    init(
+    public init(
         waveId: String,
         sessionProvider: String = "claude",
         sessionWaveRunId: String? = nil,
@@ -159,19 +165,19 @@ final class ChatState {
         self.userDefaults = userDefaults
     }
 
-    var isLoading: Bool {
+    public var isLoading: Bool {
         turnState == .running || streamPhase == .replaying || streamPhase == .ending
     }
 
-    var canSend: Bool {
+    public var canSend: Bool {
         turnState != .running && streamPhase != .replaying && streamPhase != .ending
     }
 
-    var canEndSession: Bool {
+    public var canEndSession: Bool {
         sessionId != nil && streamPhase != .ending
     }
 
-    func onAppear() async {
+    public func onAppear() async {
         if let sessionId {
             if streamTask == nil {
                 startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
@@ -182,14 +188,14 @@ final class ChatState {
         await reconnectIfNeeded()
     }
 
-    func onDisappear() {
+    public func onDisappear() {
         cancelStreamTask()
         if streamPhase != .ending {
             streamPhase = .idle
         }
     }
 
-    func send(_ rawText: String) async {
+    public func send(_ rawText: String) async {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
@@ -215,7 +221,7 @@ final class ChatState {
         }
     }
 
-    func endSession() async {
+    public func endSession() async {
         guard let sessionId else { return }
 
         streamPhase = .ending
@@ -235,7 +241,7 @@ final class ChatState {
         appendMessage(role: .system, content: "Session ended")
     }
 
-    func reconnectIfNeeded() async {
+    public func reconnectIfNeeded() async {
         guard sessionId == nil else { return }
         guard let storedSessionId = userDefaults.string(forKey: sessionIdKey) else { return }
 

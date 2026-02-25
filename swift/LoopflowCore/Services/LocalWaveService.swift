@@ -71,11 +71,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         _ resourceTimeout: TimeInterval,
         _ delegate: URLSessionDelegate?
     ) -> URLSession
+    public typealias ShellCommandRunner = @Sendable (_ args: [String]) async throws -> Void
 
     private let connection: ServerConnection
     private let tokenProvider: @Sendable () -> String?
     private let sessionFactory: SessionFactory
     private let pinStore: CertificatePinStore
+    private let shellCommandRunner: ShellCommandRunner?
 
     private var pinningDelegate: CertificatePinningDelegate? {
         guard connection.useTLS else { return nil }
@@ -86,7 +88,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         connection: ServerConnection = .local,
         tokenProvider: (@Sendable () -> String?)? = nil,
         sessionFactory: SessionFactory? = nil,
-        pinStore: CertificatePinStore = .shared
+        pinStore: CertificatePinStore = .shared,
+        shellCommandRunner: ShellCommandRunner? = nil
     ) {
         self.connection = connection
         self.tokenProvider = {
@@ -102,6 +105,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         }
         self.pinStore = pinStore
+        self.shellCommandRunner = shellCommandRunner
     }
 
     private var baseURL: URL { connection.httpBaseURL }
@@ -453,8 +457,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             try await checkConnection()
             return
         }
+        guard let shellCommandRunner else {
+            throw WaveServiceError.commandFailed(
+                "Local lfd bootstrap is unavailable on this platform."
+            )
+        }
         LoggingService.lfd("connectLfd: running 'lfd install'")
-        try await runShellCommand(["lfd", "install"])
+        try await shellCommandRunner(["lfd", "install"])
         LoggingService.lfd("connectLfd: 'lfd install' completed")
     }
 
@@ -1447,39 +1456,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    private func runShellCommand(_ args: [String]) async throws {
-        let cmd = args.joined(separator: " ")
-        LoggingService.lfd("runShellCommand: \(cmd)")
-
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-l", "-c", cmd]
-
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-                LoggingService.lfd("runShellCommand: exit=\(process.terminationStatus) output=\(output.prefix(200))")
-
-                if process.terminationStatus == 0 {
-                    continuation.resume()
-                } else {
-                    continuation.resume(throwing: WaveServiceError.commandFailed(output.isEmpty ? "Exit code \(process.terminationStatus)" : output))
-                }
-            } catch {
-                LoggingService.lfd("runShellCommand: exception=\(error.localizedDescription)")
-                continuation.resume(throwing: error)
-            }
-        }
-    }
 }
 
 public enum WaveServiceError: LocalizedError {

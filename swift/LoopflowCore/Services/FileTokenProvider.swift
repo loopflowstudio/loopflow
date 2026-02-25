@@ -40,7 +40,7 @@ public struct FileTokenProvider: TokenProvider {
     }
 
     public static var defaultTokenURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent(".lf", isDirectory: true)
             .appendingPathComponent("session-token", isDirectory: false)
     }

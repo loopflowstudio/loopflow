@@ -52,8 +52,13 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
       - name: Run Swift tests
         run: swift test --package-path swift
+      - name: Check Swift multiplatform boundaries
+        run: uv run python scripts/check_swift_multiplatform_boundaries.py
 
   concerto-ui-test:
     runs-on: macos-15
@@ -65,5 +70,5 @@ jobs:
         run: xcodegen generate
         working-directory: swift
       - name: Run Concerto UI tests
-        run: xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'
+        run: xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
         working-directory: swift

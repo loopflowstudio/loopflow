@@ -1,3 +1,4 @@
+#if os(macOS)
 // Manager for the embedded Ghostty terminal.
 // Wraps the libghostty C API for terminal embedding in Concerto.
 
@@ -252,5 +253,7 @@ final class GhosttyManager: ObservableObject {
         // Stub - no-op
     }
 }
+
+#endif
 
 #endif

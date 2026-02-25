@@ -1,26 +1,42 @@
-// Brand colors from loopflow.studio
-
 import SwiftUI
 
-extension Color {
+public extension Color {
     static let loopflowBurgundy = Color(hex: 0x722F37)
     static let loopflowBurgundyHover = Color(hex: 0x8B3D47)
     static let loopflowCream = Color(hex: 0xFAF8F5)
 }
 
-// Status colors are defined in LoopflowCore/Models/StatusColors.swift
+public struct LoopflowPalette: @unchecked Sendable {
+    public let background: Color
+    public let surface: Color
+    public let surfaceMuted: Color
+    public let border: Color
+    public let text: Color
+    public let textSecondary: Color
+    public let accent: Color
+    public let accentHover: Color
 
-struct LoopflowPalette {
-    let background: Color
-    let surface: Color
-    let surfaceMuted: Color
-    let border: Color
-    let text: Color
-    let textSecondary: Color
-    let accent: Color
-    let accentHover: Color
+    public init(
+        background: Color,
+        surface: Color,
+        surfaceMuted: Color,
+        border: Color,
+        text: Color,
+        textSecondary: Color,
+        accent: Color,
+        accentHover: Color
+    ) {
+        self.background = background
+        self.surface = surface
+        self.surfaceMuted = surfaceMuted
+        self.border = border
+        self.text = text
+        self.textSecondary = textSecondary
+        self.accent = accent
+        self.accentHover = accentHover
+    }
 
-    static let light = LoopflowPalette(
+    public static let light = LoopflowPalette(
         background: Color(hex: 0xFAF8F5),
         surface: Color(hex: 0xFFFDFB),
         surfaceMuted: Color(hex: 0xF3EEE7),
@@ -31,7 +47,7 @@ struct LoopflowPalette {
         accentHover: .loopflowBurgundyHover
     )
 
-    static let dark = LoopflowPalette(
+    public static let dark = LoopflowPalette(
         background: Color(hex: 0x2B3036),
         surface: Color(hex: 0x343B44),
         surfaceMuted: Color(hex: 0x3C4550),
@@ -42,7 +58,7 @@ struct LoopflowPalette {
         accentHover: .loopflowBurgundyHover
     )
 
-    static let deepWine = LoopflowPalette(
+    public static let deepWine = LoopflowPalette(
         background: Color(hex: 0x1E1215),
         surface: Color(hex: 0x2A1A20),
         surfaceMuted: Color(hex: 0x35222A),
@@ -54,13 +70,11 @@ struct LoopflowPalette {
     )
 }
 
-// MARK: - Palette Environment Key
-
-struct PaletteKey: EnvironmentKey {
-    static let defaultValue = LoopflowPalette.light
+public struct PaletteKey: EnvironmentKey {
+    public static let defaultValue = LoopflowPalette.light
 }
 
-extension EnvironmentValues {
+public extension EnvironmentValues {
     var palette: LoopflowPalette {
         get { self[PaletteKey.self] }
         set { self[PaletteKey.self] = newValue }

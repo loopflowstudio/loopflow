@@ -1,3 +1,4 @@
+#if os(macOS)
 // StepRunner - wave execution UI with flow selection and run/auto controls.
 
 import SwiftUI
@@ -338,3 +339,5 @@ struct StepRunner: View {
         .environment(repoState)
         .frame(width: 500, height: 600)
 }
+
+#endif

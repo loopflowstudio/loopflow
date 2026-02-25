@@ -1,3 +1,4 @@
+#if os(macOS)
 // Portfolio dashboard window showing repositories and waves.
 
 import SwiftUI
@@ -453,3 +454,5 @@ struct RepoTypeahead: View {
         return "No matching repositories"
     }
 }
+
+#endif

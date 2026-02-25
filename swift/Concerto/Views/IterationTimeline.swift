@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import LoopflowCore
 
@@ -48,3 +49,5 @@ struct IterationTimeline: View {
         return .statusNeutral
     }
 }
+
+#endif

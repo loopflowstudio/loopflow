@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import AppKit
 import Carbon.HIToolbox
@@ -298,3 +299,5 @@ extension Notification.Name {
     static let switchToCurrentTab = Notification.Name("switchToCurrentTab")
     static let switchToRunsTab = Notification.Name("switchToRunsTab")
 }
+
+#endif

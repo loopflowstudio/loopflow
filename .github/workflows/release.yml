@@ -75,7 +75,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build DMG
-        run: python3 scripts/dev.py release
+        run: python3 scripts/concerto-dev.py release
         working-directory: ${{ github.workspace }}
       - name: Upload DMG to R2
         run: |

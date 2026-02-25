@@ -64,8 +64,9 @@ public enum LoggingService {
     }
 
     public static func logDirectory() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library")
+        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return base
             .appendingPathComponent("Logs")
             .appendingPathComponent("Concerto")
     }

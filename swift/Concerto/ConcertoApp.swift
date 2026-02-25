@@ -1,10 +1,64 @@
-// Loopflow Concerto app entry point.
-// macOS 15+ native app for managing waves and launching LLM coding sessions.
-
 import SwiftUI
 import CoreText
 import LoopflowCore
 
+extension AppearanceMode {
+    static func resolvedTheme(
+        rawValue: String,
+        systemScheme: ColorScheme
+    ) -> (preferredScheme: ColorScheme?, palette: LoopflowPalette) {
+        let mode = AppearanceMode(rawValue: rawValue) ?? .system
+        let palette: LoopflowPalette
+
+        switch mode {
+        case .light:
+            palette = .light
+        case .dark:
+            palette = .dark
+        case .system:
+            palette = systemScheme == .dark ? .dark : .light
+        }
+
+        return (mode.colorScheme, palette)
+    }
+}
+
+private enum AppFontRegistration {
+    private static var fontBundle: Bundle {
+        #if SWIFT_PACKAGE
+        Bundle.module
+        #else
+        Bundle.main
+        #endif
+    }
+
+    static func registerBundledFonts() {
+        let fontFiles = [
+            "CormorantGaramond-Regular.otf",
+            "CormorantGaramond-Medium.otf",
+            "CormorantGaramond-SemiBold.otf",
+            "Lato-Regular.ttf",
+            "Lato-Bold.ttf",
+            "JetBrainsMono-Regular.ttf",
+        ]
+
+        for file in fontFiles {
+            guard let url = fontBundle.url(forResource: file, withExtension: nil, subdirectory: "Fonts") else {
+                continue
+            }
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+    }
+}
+
+private func bootstrapConcertoApp() {
+    AppFontRegistration.registerBundledFonts()
+    Task {
+        try? await NotificationService.shared.requestAuthorization()
+    }
+}
+
+#if os(macOS)
 @main
 struct ConcertoApp: App {
     @State private var portfolioService = PortfolioService()
@@ -16,53 +70,14 @@ struct ConcertoApp: App {
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
-        Self.registerBundledFonts()
-        Task {
-            try? await NotificationService.shared.requestAuthorization()
-        }
-    }
-
-    private static var fontBundle: Bundle {
-        // SPM executable targets use Bundle.module for copied resources.
-        // Xcode app targets use Bundle.main (Fonts copied into app bundle).
-        #if SWIFT_PACKAGE
-        return Bundle.module
-        #else
-        return Bundle.main
-        #endif
-    }
-
-    private static func registerBundledFonts() {
-        let fontFiles = [
-            "CormorantGaramond-Regular.otf",
-            "CormorantGaramond-Medium.otf",
-            "CormorantGaramond-SemiBold.otf",
-            "Lato-Regular.ttf",
-            "Lato-Bold.ttf",
-            "JetBrainsMono-Regular.ttf",
-        ]
-        for file in fontFiles {
-            guard let url = fontBundle.url(forResource: file, withExtension: nil, subdirectory: "Fonts") else {
-                continue
-            }
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        }
-    }
-
-    private var resolvedPalette: LoopflowPalette {
-        switch AppearanceMode(rawValue: appearanceMode) {
-        case .light: return .light
-        case .dark: return .dark
-        case .system, .none: return systemScheme == .dark ? .dark : .light
-        }
+        bootstrapConcertoApp()
     }
 
     var body: some Scene {
-        let preferredScheme = AppearanceMode(rawValue: appearanceMode)?.colorScheme
+        let theme = AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
         let uiTestMode = RepoState.uiTestMode()
         let screenshotMode = RepoState.ScreenshotMode.fromArgs()
 
-        // Portfolio window - shown on launch
         WindowGroup {
             Group {
                 if let screenshot = screenshotMode {
@@ -77,34 +92,31 @@ struct ConcertoApp: App {
                 }
             }
             .tint(.loopflowBurgundy)
-            .preferredColorScheme(preferredScheme)
-            .environment(\.palette, resolvedPalette)
+            .preferredColorScheme(theme.preferredScheme)
+            .environment(\.palette, theme.palette)
             .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
 
-        // Repo windows - opened explicitly for each repository
         WindowGroup(id: "repo", for: URL.self) { $repoURL in
             RepoWindow(repoURL: repoURL, portfolioService: portfolioService)
                 .tint(.loopflowBurgundy)
-                .preferredColorScheme(preferredScheme)
-                .environment(\.palette, resolvedPalette)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
                 .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
 
-        // Terminal test window - for testing embedded Ghostty
         Window("Terminal Test", id: "terminal-test") {
             TerminalTestWindow()
-                .preferredColorScheme(preferredScheme)
-                .environment(\.palette, resolvedPalette)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
         }
         .defaultSize(width: 800, height: 600)
 
         .commands {
-            // Beta features menu
             CommandGroup(after: .appSettings) {
                 Toggle("Beta Features", isOn: Binding(
                     get: { Flags.beta },
@@ -129,7 +141,6 @@ struct ConcertoApp: App {
                 .keyboardShortcut("4", modifiers: [.command])
             }
 
-            // View menu - command palette and navigation
             CommandGroup(after: .sidebar) {
                 Button("Command Palette") {
                     NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
@@ -160,3 +171,17 @@ struct ConcertoApp: App {
         }
     }
 }
+#else
+@main
+struct ConcertoApp: App {
+    init() {
+        bootstrapConcertoApp()
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            MobileRootView()
+        }
+    }
+}
+#endif

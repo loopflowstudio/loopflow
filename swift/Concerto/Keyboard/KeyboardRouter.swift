@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Observation
 
@@ -337,3 +338,5 @@ enum KeyboardMode: Equatable {
     case helpOverlay
     case global
 }
+
+#endif

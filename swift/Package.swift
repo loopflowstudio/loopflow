@@ -5,7 +5,8 @@ import PackageDescription
 let package = Package(
     name: "LoopflowSwift",
     platforms: [
-        .macOS(.v15)
+        .macOS(.v15),
+        .iOS(.v18),
     ],
     products: [
         .library(name: "LoopflowCore", targets: ["LoopflowCore"]),
@@ -30,7 +31,10 @@ let package = Package(
             name: "Concerto",
             dependencies: [
                 "LoopflowCore",
-                "GhosttyKit"
+                .target(
+                    name: "GhosttyKit",
+                    condition: .when(platforms: [.macOS])
+                ),
             ],
             path: "Concerto",
             exclude: ["Info.plist", "Concerto.sdef", "UX_DESIGN.md", "AppIcon.icns", "Services/Ghostty/README.md"],
@@ -38,14 +42,14 @@ let package = Package(
                 .copy("Fonts")
             ],
             swiftSettings: [
-                .define("GHOSTTY_ENABLED")
+                .define("GHOSTTY_ENABLED", .when(platforms: [.macOS])),
             ],
             linkerSettings: [
-                .linkedFramework("Carbon"),
-                .linkedFramework("QuartzCore"),
-                .linkedFramework("Metal"),
-                .linkedFramework("IOKit"),
-                .linkedLibrary("c++")
+                .linkedFramework("Carbon", .when(platforms: [.macOS])),
+                .linkedFramework("QuartzCore", .when(platforms: [.macOS])),
+                .linkedFramework("Metal", .when(platforms: [.macOS])),
+                .linkedFramework("IOKit", .when(platforms: [.macOS])),
+                .linkedLibrary("c++", .when(platforms: [.macOS])),
             ]
         ),
         .executableTarget(

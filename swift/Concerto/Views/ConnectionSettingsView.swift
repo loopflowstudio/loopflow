@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import LoopflowCore
 
@@ -365,3 +366,5 @@ struct ConnectionSettingsView: View {
         )
     }
 }
+
+#endif

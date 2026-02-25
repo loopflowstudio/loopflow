@@ -1,3 +1,4 @@
+#if os(macOS)
 // Interactive session view wrapping GhosttyTerminalView with session controls.
 // Displays embedded terminal running `lf <step>` in the wave's worktree.
 
@@ -179,3 +180,5 @@ struct InteractiveSessionView: View {
         .environment(outputBuffer)
         .frame(width: 600, height: 500)
 }
+
+#endif

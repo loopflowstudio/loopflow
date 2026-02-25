@@ -2,11 +2,10 @@
 
 import Foundation
 import SwiftUI
-import LoopflowCore
 
 @MainActor
 @Observable
-final class RepoState {
+public final class RepoState {
     enum WaveCreationReadinessError: LocalizedError {
         case missingRepo
 
@@ -18,22 +17,40 @@ final class RepoState {
         }
     }
 
-    enum UITestMode: String {
+    public enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
         case mockWaves = "mock-waves"
     }
 
-    struct ScreenshotMode {
-        let outputPath: String
-        let repoPath: String?
-        let windowSize: (Int, Int)?
-        let selectBranch: String?
-        let mockLoops: Bool
-        let mockConfig: String?
-        let selectTab: String?
+    public struct ScreenshotMode {
+        public let outputPath: String
+        public let repoPath: String?
+        public let windowSize: (Int, Int)?
+        public let selectBranch: String?
+        public let mockLoops: Bool
+        public let mockConfig: String?
+        public let selectTab: String?
 
-        static func fromArgs() -> ScreenshotMode? {
+        public init(
+            outputPath: String,
+            repoPath: String?,
+            windowSize: (Int, Int)?,
+            selectBranch: String?,
+            mockLoops: Bool,
+            mockConfig: String?,
+            selectTab: String?
+        ) {
+            self.outputPath = outputPath
+            self.repoPath = repoPath
+            self.windowSize = windowSize
+            self.selectBranch = selectBranch
+            self.mockLoops = mockLoops
+            self.mockConfig = mockConfig
+            self.selectTab = selectTab
+        }
+
+        public static func fromArgs() -> ScreenshotMode? {
             let args = ProcessInfo.processInfo.arguments
 
             func arg(_ flag: String) -> String? {
@@ -63,29 +80,29 @@ final class RepoState {
         }
     }
 
-    var currentRepo: URL?
-    var repoTarget: RepoTarget?
-    var flows: [Flow] = []
-    var availableDirections: [String] = []
+    public var currentRepo: URL?
+    public var repoTarget: RepoTarget?
+    public var flows: [Flow] = []
+    public var availableDirections: [String] = []
 
     // Wave state — delegated to WaveStore
-    let waveStore = WaveStore()
-    let runStore = RunStore()
-    let worktreeStore = WorktreeStore()
+    public let waveStore = WaveStore()
+    public let runStore = RunStore()
+    public let worktreeStore = WorktreeStore()
     private var chatStates: [String: ChatState] = [:]
 
-    var waves: [WaveViewModel] { waveStore.ordered }
-    var waveGroups: WaveGroups { waveStore.groups }
+    public var waves: [WaveViewModel] { waveStore.ordered }
+    public var waveGroups: WaveGroups { waveStore.groups }
 
     // Selection — ID-based, derived from store
-    var selectedWaveId: String?
+    public var selectedWaveId: String?
 
-    var selectedWave: WaveViewModel? {
+    public var selectedWave: WaveViewModel? {
         get { selectedWaveId.flatMap { waveStore.wave(for: $0) } }
         set { selectedWaveId = newValue?.id }
     }
 
-    func chatState(for waveId: String) -> ChatState {
+    public func chatState(for waveId: String) -> ChatState {
         if let state = chatStates[waveId] {
             return state
         }
@@ -109,37 +126,46 @@ final class RepoState {
     // In-flight actions (land) — buttons disable while pending
     private(set) var inFlightActions: Set<String> = []
 
-    func isActionInFlight(_ waveId: String) -> Bool {
+    public func isActionInFlight(_ waveId: String) -> Bool {
         inFlightActions.contains(waveId)
     }
 
     // Loading
-    var isLoading: Bool = false
-    var errorMessage: String?
+    public var isLoading: Bool = false
+    public var errorMessage: String?
 
     // Connection
-    let connectionStore = ConnectionStore()
-    var connectionState: ConnectionState = .disconnected(nil)
-    var lfdConnected: Bool = false
-    var availableRemoteRepos: [RemoteRepo] = []
+    public let connectionStore = ConnectionStore()
+    public var connectionState: ConnectionState = .disconnected(nil)
+    public var lfdConnected: Bool = false
+    public var availableRemoteRepos: [RemoteRepo] = []
 
     // Services
-    private let bundledDaemon: BundledDaemonManager
+    private let startBundledDaemon: (@MainActor () async throws -> ServerConnection)?
+    private let shellCommandRunner: WaveService.ShellCommandRunner?
     private var waveService: WaveService
     private var eventService: EventService?
     private weak var outputBuffer: OutputBuffer?
 
-    init(bundledDaemon: BundledDaemonManager = BundledDaemonManager()) {
-        self.bundledDaemon = bundledDaemon
+    public init(
+        startBundledDaemon: (@MainActor () async throws -> ServerConnection)? = nil,
+        shellCommandRunner: WaveService.ShellCommandRunner? = nil
+    ) {
+        self.startBundledDaemon = startBundledDaemon
+        self.shellCommandRunner = shellCommandRunner
         let connection = connectionStore.activeConnection
-        waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
+        waveService = Self.makeWaveService(
+            connection: connection,
+            token: connectionStore.token(for: connection),
+            shellCommandRunner: shellCommandRunner
+        )
 
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
             self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
         }
     }
 
-    static func uiTestMode() -> UITestMode? {
+    public static func uiTestMode() -> UITestMode? {
         let args = ProcessInfo.processInfo.arguments
         if let index = args.firstIndex(of: "-ui-test-mode"), args.count > index + 1 {
             return UITestMode(rawValue: args[index + 1])
@@ -150,7 +176,7 @@ final class RepoState {
         return nil
     }
 
-    func configureForUITest(_ mode: UITestMode, repoURL: URL) {
+    public func configureForUITest(_ mode: UITestMode, repoURL: URL) {
         currentRepo = repoURL
         repoTarget = .local(repoURL)
         flows = []
@@ -172,7 +198,7 @@ final class RepoState {
         }
     }
 
-    func configureMockWaves() {
+    public func configureMockWaves() {
         lfdConnected = true
         connectionState = .connected
         let repo = currentRepo?.path ?? "/tmp/demo"
@@ -322,13 +348,13 @@ final class RepoState {
         runStore.setRuns(for: "mock-wave-1", mockRuns)
     }
 
-    func configureMockWavesEmpty() {
+    public func configureMockWavesEmpty() {
         lfdConnected = true
         connectionState = .connected
         waveStore.removeAll()
     }
 
-    func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
+    public func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         let canonicalURL = canonicalRepoURL(url)
 
@@ -353,7 +379,7 @@ final class RepoState {
         }
     }
 
-    func closeRepo() {
+    public func closeRepo() {
         Task {
             await eventService?.disconnect()
         }
@@ -362,7 +388,7 @@ final class RepoState {
 
     // MARK: - Event Subscription
 
-    func startEventSubscription(outputBuffer: OutputBuffer) {
+    public func startEventSubscription(outputBuffer: OutputBuffer) {
         LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
         self.outputBuffer = outputBuffer
         if eventService != nil { return }
@@ -439,7 +465,7 @@ final class RepoState {
 
     // MARK: - Flows
 
-    func refreshFlowsAsync() async {
+    public func refreshFlowsAsync() async {
         guard let repo = repoTarget else { return }
         guard let result = try? await waveService.listFlowsAndDirections(repo: repo) else { return }
         if !result.flows.isEmpty {
@@ -450,7 +476,7 @@ final class RepoState {
 
     // MARK: - Waves
 
-    func refreshWaves() async {
+    public func refreshWaves() async {
         guard let repo = repoTarget else {
             LoggingService.model("refreshWaves: no repoTarget")
             return
@@ -469,19 +495,19 @@ final class RepoState {
         }
     }
 
-    func loadRuns(for waveId: String) {
+    public func loadRuns(for waveId: String) {
         Task {
             guard let runs = try? await waveService.listWaveRuns(waveId: waveId) else { return }
             runStore.setRuns(for: waveId, runs)
         }
     }
 
-    func refreshWorktrees() async {
+    public func refreshWorktrees() async {
         guard let repo = repoTarget else { return }
         worktreeStore.setAll((try? await waveService.listWorktrees(repo: repo)) ?? [])
     }
 
-    func combinePRs(_ waveId: String) async throws -> CombinePRsResult {
+    public func combinePRs(_ waveId: String) async throws -> CombinePRsResult {
         let result = try await waveService.combinePRs(waveId)
         loadRuns(for: waveId)
         return result
@@ -524,7 +550,7 @@ final class RepoState {
     }
 
     @discardableResult
-    func createWave(name: String) async throws -> Wave {
+    public func createWave(name: String) async throws -> Wave {
         guard let repo = repoTarget else {
             LoggingService.model("createWave: no repoTarget")
             throw WaveServiceError.commandFailed("No repository selected")
@@ -555,7 +581,7 @@ final class RepoState {
         }
     }
 
-    func runWave(
+    public func runWave(
         wave: WaveViewModel,
         area: [String]? = nil,
         direction: [String]? = nil,
@@ -567,31 +593,31 @@ final class RepoState {
         }
     }
 
-    func addStimulus(wave: WaveViewModel, kind: Stimulus.Kind, cron: String? = nil) async throws {
+    public func addStimulus(wave: WaveViewModel, kind: Stimulus.Kind, cron: String? = nil) async throws {
         let stimulus = try await waveService.addStimulus(wave.id, kind: kind, cron: cron)
         _ = waveStore.applyOptimistic(wave.id) { $0.stimuli.append(stimulus) }
         waveStore.commitMutation(wave.id)
     }
 
-    func removeStimulus(wave: WaveViewModel, stimulusId: String) async throws {
+    public func removeStimulus(wave: WaveViewModel, stimulusId: String) async throws {
         try await waveService.removeStimulus(wave.id, stimulusId: stimulusId)
         _ = waveStore.applyOptimistic(wave.id) { $0.stimuli.removeAll { $0.id == stimulusId } }
         waveStore.commitMutation(wave.id)
     }
 
-    func stopWave(_ wave: WaveViewModel) async throws {
+    public func stopWave(_ wave: WaveViewModel) async throws {
         try await optimisticAction(wave.id, mutation: { $0.status = .idle }) {
             try await self.waveService.stop(wave.id)
         }
     }
 
-    func restartStep(_ wave: WaveViewModel) async throws {
+    public func restartStep(_ wave: WaveViewModel) async throws {
         try await optimisticAction(wave.id, mutation: { _ in }) {
             try await self.waveService.restartStep(wave.id)
         }
     }
 
-    func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
+    public func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
         let pendingId = "pending-\(UUID().uuidString)"
         let pendingWave = Wave(
             id: pendingId,
@@ -619,7 +645,7 @@ final class RepoState {
         }
     }
 
-    func deleteWave(_ wave: WaveViewModel) async throws {
+    public func deleteWave(_ wave: WaveViewModel) async throws {
         waveStore.applyDelete(wave.id)
         if selectedWaveId == wave.id { selectedWaveId = nil }
 
@@ -635,13 +661,13 @@ final class RepoState {
         }
     }
 
-    func renameWave(_ wave: WaveViewModel, to newName: String) async throws {
+    public func renameWave(_ wave: WaveViewModel, to newName: String) async throws {
         try await optimistic(wave.id, mutation: { $0.name = newName }) {
             _ = try await self.waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
         }
     }
 
-    func updateWave(
+    public func updateWave(
         _ wave: WaveViewModel,
         area: [String]? = nil,
         direction: [String]? = nil,
@@ -659,29 +685,29 @@ final class RepoState {
         }
     }
 
-    func landWave(_ wave: WaveViewModel) async throws {
+    public func landWave(_ wave: WaveViewModel) async throws {
         inFlightActions.insert(wave.id)
         defer { inFlightActions.remove(wave.id) }
         try await waveService.landWave(wave.id)
     }
 
-    func nextWave(_ wave: WaveViewModel) async throws {
+    public func nextWave(_ wave: WaveViewModel) async throws {
         try await optimisticAction(wave.id, mutation: { $0.status = .idle }) {
             _ = try await self.waveService.nextWave(wave.id)
         }
     }
 
-    func connectLfd(outputBuffer: OutputBuffer) async throws {
+    public func connectLfd(outputBuffer: OutputBuffer) async throws {
         let connection = try await resolveConnection()
         try await performConnectionHandshake(connection: connection, outputBuffer: outputBuffer)
     }
 
-    func connect(to connection: ServerConnection, outputBuffer: OutputBuffer) async throws {
+    public func connect(to connection: ServerConnection, outputBuffer: OutputBuffer) async throws {
         connectionStore.setRemoteConnection(connection)
         try await connectLfd(outputBuffer: outputBuffer)
     }
 
-    func connectBundled(outputBuffer: OutputBuffer) async throws {
+    public func connectBundled(outputBuffer: OutputBuffer) async throws {
         connectionStore.setMode(.bundled)
         try await connectLfd(outputBuffer: outputBuffer)
     }
@@ -689,10 +715,13 @@ final class RepoState {
     private func resolveConnection() async throws -> ServerConnection {
         switch connectionStore.mode {
         case .bundled:
+            guard let startBundledDaemon else {
+                throw WaveServiceError.commandFailed("Bundled daemon is not available on this platform.")
+            }
             guard currentRepo != nil else {
                 throw WaveCreationReadinessError.missingRepo
             }
-            let bundledConnection = try await bundledDaemon.start()
+            let bundledConnection = try await startBundledDaemon()
             connectionStore.setBundledRuntimeConnection(bundledConnection)
             return connectionStore.activeConnection
         case .remote:
@@ -748,7 +777,7 @@ final class RepoState {
         await refreshWaves()
     }
 
-    func ensureReadyToCreateWave(outputBuffer: OutputBuffer) async throws {
+    public func ensureReadyToCreateWave(outputBuffer: OutputBuffer) async throws {
         if !lfdConnected {
             try await connectLfd(outputBuffer: outputBuffer)
             try await Task.sleep(for: .milliseconds(500))
@@ -759,7 +788,7 @@ final class RepoState {
         }
     }
 
-    func selectRemoteRepo(path: String) {
+    public func selectRemoteRepo(path: String) {
         chatStates.removeAll()
         let host = connectionStore.activeConnection.host
         connectionStore.setMode(.remote)
@@ -767,24 +796,24 @@ final class RepoState {
         currentRepo = URL(fileURLWithPath: path)
     }
 
-    func clearPinnedCertificate() {
+    public func clearPinnedCertificate() {
         connectionStore.clearPinnedCertificate()
     }
 
-    func trustNewCertificate() {
+    public func trustNewCertificate() {
         guard case .trustRequired(let requirement) = connectionState else { return }
         connectionStore.trustNewCertificate(requirement)
     }
 
-    var isRemoteTarget: Bool {
+    public var isRemoteTarget: Bool {
         repoTarget?.isRemote ?? false
     }
 
-    var isConnected: Bool {
+    public var isConnected: Bool {
         connectionState.isConnected
     }
 
-    var connectionSummary: String {
+    public var connectionSummary: String {
         switch connectionState {
         case .connected:
             return "Connected"
@@ -829,7 +858,11 @@ final class RepoState {
 
     private func rebuildServices(for connection: ServerConnection) {
         let token = connectionStore.token(for: connection)
-        waveService = Self.makeWaveService(connection: connection, token: token)
+        waveService = Self.makeWaveService(
+            connection: connection,
+            token: token,
+            shellCommandRunner: shellCommandRunner
+        )
         outputBuffer?.configureConnection(connection, tokenProvider: { token })
 
         Task {
@@ -907,10 +940,15 @@ final class RepoState {
         }
     }
 
-    private static func makeWaveService(connection: ServerConnection, token: String?) -> WaveService {
+    private static func makeWaveService(
+        connection: ServerConnection,
+        token: String?,
+        shellCommandRunner: WaveService.ShellCommandRunner?
+    ) -> WaveService {
         WaveService(
             connection: connection,
-            tokenProvider: { token }
+            tokenProvider: { token },
+            shellCommandRunner: shellCommandRunner
         )
     }
 
@@ -960,7 +998,7 @@ final class RepoState {
         }
     }
 
-    func loadWaveContent(for waveId: String) {
+    public func loadWaveContent(for waveId: String) {
         guard let repoRoot = currentRepo,
               let wave = waveStore.wave(for: waveId),
               repoTarget?.isRemote != true else {

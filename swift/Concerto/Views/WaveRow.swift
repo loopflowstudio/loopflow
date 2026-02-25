@@ -1,3 +1,4 @@
+#if os(macOS)
 // Row view for displaying a wave in the sidebar.
 
 import SwiftUI
@@ -215,3 +216,5 @@ struct WaveRow: View {
         return "\(step.step), \(time)"
     }
 }
+
+#endif

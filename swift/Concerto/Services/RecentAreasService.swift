@@ -1,3 +1,4 @@
+#if os(macOS)
 // RecentAreasService - persists recent area selections per repo in UserDefaults.
 
 import Foundation
@@ -38,3 +39,5 @@ struct RecentAreasService {
         UserDefaults.standard.removeObject(forKey: key)
     }
 }
+
+#endif

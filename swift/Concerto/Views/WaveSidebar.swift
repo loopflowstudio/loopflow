@@ -1,3 +1,4 @@
+#if os(macOS)
 // Unified sidebar showing all waves.
 
 import SwiftUI
@@ -416,3 +417,5 @@ struct WaveSidebar: View {
         .environment(OutputBuffer())
         .frame(width: 280, height: 400)
 }
+
+#endif

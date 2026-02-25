@@ -38,7 +38,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
     }
 }
 
-fn run_git(repo: &Path, args: &[&str]) {
+fn run_git(repo: &Path, args: &[&str]) -> std::process::Output {
     let output = Command::new("git")
         .args(args)
         .current_dir(repo)
@@ -50,20 +50,15 @@ fn run_git(repo: &Path, args: &[&str]) {
         args,
         String::from_utf8_lossy(&output.stderr)
     );
+    output
+}
+
+fn run_git_ok(repo: &Path, args: &[&str]) {
+    run_git(repo, args);
 }
 
 fn run_git_output(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let output = run_git(repo, args);
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
@@ -292,7 +287,7 @@ fn create_with_schema_uses_existing_remote_branch_and_wave_worktree_name() {
     repo.commit("mobile update");
     repo.push_new_branch(branch);
     repo.checkout("main");
-    run_git(repo.path(), &["branch", "-D", branch]);
+    run_git_ok(repo.path(), &["branch", "-D", branch]);
 
     let branch_config = BranchNameConfig::default();
     let result = create_with_schema(repo.path(), branch, None, Some(&branch_config)).unwrap();

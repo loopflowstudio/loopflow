@@ -339,27 +339,20 @@ pub fn create_with_schema(
         });
     }
 
-    let existing_branches = list_worktrees(repo)?
+    if list_worktrees(repo)?
         .into_iter()
         .filter_map(|wt| wt.branch)
-        .collect::<Vec<_>>();
-    if existing_branches.iter().any(|b| b == &branch_name) {
+        .any(|branch| branch == branch_name)
+    {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
             stderr: format!("branch already exists: {branch_name}"),
         });
     }
     if has_remote_branch {
-        if branch_exists(repo, &branch_name)? {
-            worktree_add_existing_branch(repo, &worktree_path, &branch_name)?;
-        } else {
-            worktree_add_tracking_remote_branch(
-                repo,
-                &worktree_path,
-                &branch_name,
-                &remote_branch,
-            )?;
-        }
+        let remote_to_track =
+            (!branch_exists(repo, &branch_name)?).then_some(remote_branch.as_str());
+        worktree_add_branch(repo, &worktree_path, &branch_name, remote_to_track)?;
         return Ok(CreateWorktreeResult {
             path: worktree_path,
             branch: branch_name,
@@ -401,54 +394,32 @@ pub fn create_with_schema(
     })
 }
 
-fn worktree_add_existing_branch(repo: &Path, path: &Path, branch: &str) -> Result<(), GitError> {
-    let path_str = path.to_string_lossy();
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["worktree", "add", path_str.as_ref(), branch])
-        .output()?;
-    if !output.status.success() {
-        if path.join(".git").exists() {
-            return Ok(());
-        }
-        return Err(GitError::CommandFailed {
-            command: format!("git worktree add {} {}", path_str, branch),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(())
-}
-
-fn worktree_add_tracking_remote_branch(
+fn worktree_add_branch(
     repo: &Path,
     path: &Path,
     branch: &str,
-    remote_branch: &str,
+    remote_branch: Option<&str>,
 ) -> Result<(), GitError> {
     let path_str = path.to_string_lossy();
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args([
-            "worktree",
-            "add",
-            "--track",
-            "-b",
-            branch,
-            path_str.as_ref(),
-            remote_branch,
-        ])
-        .output()?;
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo).args(["worktree", "add"]);
+    let command_str = if let Some(remote_branch) = remote_branch {
+        command.args(["--track", "-b", branch, path_str.as_ref(), remote_branch]);
+        format!(
+            "git worktree add --track -b {} {} {}",
+            branch, path_str, remote_branch
+        )
+    } else {
+        command.args([path_str.as_ref(), branch]);
+        format!("git worktree add {} {}", path_str, branch)
+    };
+    let output = command.output()?;
     if !output.status.success() {
         if path.join(".git").exists() {
             return Ok(());
         }
         return Err(GitError::CommandFailed {
-            command: format!(
-                "git worktree add --track -b {} {} {}",
-                branch, path_str, remote_branch
-            ),
+            command: command_str,
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }

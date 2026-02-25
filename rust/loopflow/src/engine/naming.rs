@@ -169,17 +169,11 @@ pub fn parse_branch_name(
     let config = config.unwrap_or(&default);
     let tokens = parse_schema_tokens(config.schema_.as_str())?;
 
-    for variant in schema_variants(&tokens) {
+    schema_variants(&tokens).into_iter().find_map(|variant| {
         let (regex, placeholders) = build_schema_regex(&variant)?;
-        let captures = match regex.captures(branch) {
-            Some(captures) => captures,
-            None => continue,
-        };
-        let parts = captures_to_branch_parts(&captures, &placeholders)?;
-        return Some(parts);
-    }
-
-    None
+        let captures = regex.captures(branch)?;
+        captures_to_branch_parts(&captures, &placeholders)
+    })
 }
 
 /// Extract the wave name ({name} component) from a branch name.

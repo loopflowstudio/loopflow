@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
+use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::command::run_command;
 use crate::engine::config::load_config_or_default;
@@ -172,7 +172,7 @@ fn generate_release_notes(
     );
 
     let config = load_config_or_default(Some(repo));
-    let launch = LaunchConfig {
+    let launch = AgentConfig {
         task_prompt: prompt,
         model: Some(config.agent_model.clone()),
         skip_permissions: true,

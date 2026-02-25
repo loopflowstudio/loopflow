@@ -5,7 +5,7 @@ use crate::engine::config::load_config_or_default;
 use crate::engine::prompt::{
     default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
 };
-use crate::engine::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
+use crate::engine::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -65,7 +65,7 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let components = gather_context(&opts)?;
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
-    let launch = LaunchConfig {
+    let launch = AgentConfig {
         task_prompt: prompt,
         model: Some(config.agent_model.clone()),
         cwd: Some(repo.to_path_buf()),

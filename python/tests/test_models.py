@@ -70,7 +70,7 @@ class TestWaveRunModel:
 class TestSessionModel:
     def test_minimal_payload(self):
         session = Session.model_validate(SESSION_MINIMAL)
-        assert session.provider == "claude"
+        assert session.harness == "claude"
         assert session.config.yolo_mode is False
         assert session.created_at is None
 

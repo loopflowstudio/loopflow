@@ -20,7 +20,7 @@ use crate::lfd::sessions::SessionManagerError;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
-    pub provider: String,
+    pub harness: String,
     #[serde(default)]
     pub wave_run_id: Option<String>,
     #[serde(flatten)]
@@ -41,7 +41,7 @@ pub struct SessionEventsQuery {
 pub struct SessionDto {
     pub id: String,
     pub object: String,
-    pub provider: String,
+    pub harness: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wave_run_id: Option<String>,
@@ -60,7 +60,7 @@ pub async fn create_session_handler(
     let session = state
         .sessions
         .create_session(CreateSessionParams {
-            provider: payload.provider,
+            harness: payload.harness,
             wave_run_id: payload.wave_run_id,
             config: payload.config,
         })
@@ -191,7 +191,7 @@ fn session_dto(session: Session) -> SessionDto {
     SessionDto {
         id: session.id.to_string(),
         object: "session".to_string(),
-        provider: session.provider,
+        harness: session.harness,
         status: session.status.as_str().to_string(),
         wave_run_id: session.wave_run_id,
         provider_session_id: session.provider_session_id,
@@ -233,13 +233,13 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
                 "invalid session state: expected {expected}, got {actual:?}"
             )),
         ),
-        SessionManagerError::UnsupportedProvider(provider) => api_error(
+        SessionManagerError::UnsupportedHarness(name) => api_error(
             StatusCode::BAD_REQUEST,
-            ApiMessage::Safe(format!("unsupported provider: {provider}")),
+            ApiMessage::Safe(format!("unsupported harness: {name}")),
         ),
-        SessionManagerError::ProviderNotImplemented(provider) => api_error(
+        SessionManagerError::HarnessNotImplemented(name) => api_error(
             StatusCode::NOT_IMPLEMENTED,
-            ApiMessage::Safe(format!("provider not implemented yet: {provider}")),
+            ApiMessage::Safe(format!("harness not implemented yet: {name}")),
         ),
         SessionManagerError::WaveRunSessionConflict(wave_run_id) => api_error(
             StatusCode::CONFLICT,

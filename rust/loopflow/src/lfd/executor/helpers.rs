@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::agent::{AgentCapabilities, LaunchConfig, ProcessConfig};
+use crate::engine::agent::{AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{ConcreteItem, ConcreteStep};
 use crate::engine::git::{
@@ -18,12 +18,12 @@ use crate::engine::worktrees::{
     branch_exists, create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
 };
 
+use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::lfd::id::LfdId;
-use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
 use crate::lfd::security::{sanitize_fs_component, validate_safe_id};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    Agent, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
+    AgentRun, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
     WaveRunStatus, WaveStatus,
 };
 
@@ -258,36 +258,64 @@ pub(crate) async fn build_step_prompt(
     wave: Option<&str>,
     summary_source: Option<(&SharedStore, &LfdId)>,
     message: Option<String>,
-) -> Result<(LaunchConfig, ProcessConfig)> {
-    let config = load_config_or_default(Some(Path::new(worktree)));
-    let mut launch = prepare_step_prompt(PrepareStepPromptConfig {
-        repo_root: Path::new(worktree),
-        step: &step.step.name,
-        run_mode: "auto",
-        directions,
-        area: None,
-        wave: wave.map(str::to_string),
-        message,
-        model: None,
-        cwd: None,
-        max_turns: None,
-        yolo_mode: false,
-        summary_source,
-    })
-    .await?;
-    let cwd = launch
+) -> Result<(AgentConfig, ProcessConfig)> {
+    let repo_root = Path::new(worktree);
+    let config = load_config_or_default(Some(repo_root));
+
+    let run_mode = if step.step.interactive.unwrap_or(false) {
+        "interactive"
+    } else {
+        "auto"
+    };
+
+    let summary = if let Some((store, wave_id)) = summary_source {
+        store
+            .get_summary(wave_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|record| record.content)
+    } else {
+        None
+    };
+
+    let prepared = prepare_launch_prompt(
+        &config,
+        LaunchPromptInput {
+            repo_root: repo_root.to_path_buf(),
+            step: Some(step.step.name.clone()),
+            run_mode: Some(run_mode.to_string()),
+            directions: directions.to_vec(),
+            area: None,
+            wave: wave.map(str::to_string),
+            message,
+            model: None,
+            cwd: None,
+            max_turns: None,
+            yolo_mode: false,
+            include_config_directions: false,
+            include_config_area: true,
+            source_overrides: Default::default(),
+            summary,
+        },
+    )?;
+
+    let _ = write_prompt_log(repo_root, &prepared.prompt, &step.step.name, None);
+    let mut agent_config = prepared.config;
+
+    let cwd = agent_config
         .cwd
         .clone()
-        .unwrap_or_else(|| Path::new(worktree).to_path_buf());
+        .unwrap_or_else(|| repo_root.to_path_buf());
     let context_file = write_prompt_log(
         &cwd,
-        &launch.system_prompt,
+        &agent_config.system_prompt,
         &format!("{}.context", step.step.name),
         None,
     )
     .ok();
-    launch.cwd = Some(cwd);
-    launch.skip_permissions = config.yolo;
+    agent_config.cwd = Some(cwd);
+    agent_config.skip_permissions = config.yolo;
 
     let process = ProcessConfig {
         auto: true,
@@ -296,7 +324,7 @@ pub(crate) async fn build_step_prompt(
         ..Default::default()
     };
 
-    Ok((launch, process))
+    Ok((agent_config, process))
 }
 
 pub(crate) fn build_agent_capabilities(worktree: &str) -> AgentCapabilities {
@@ -313,8 +341,8 @@ pub(crate) fn build_agent_for_step(
     step: &ConcreteStep,
     status: AgentStatus,
     model: &str,
-) -> Agent {
-    Agent {
+) -> AgentRun {
+    AgentRun {
         id: LfdId::new(),
         step: step.step.name.clone(),
         repo: repo.to_string(),

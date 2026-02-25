@@ -1,7 +1,7 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState,
+    AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState,
     PendingActivation, PullRequest, SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun,
     WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
@@ -241,14 +241,14 @@ pub fn map_fork_run_row(row: &impl StoreRow) -> StoreResult<ForkRun> {
 
 /// SELECT id, step, repo, worktree, wave_run_id, status,
 ///        started_at, ended_at, pid, container_id, model, run_mode
-pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<Agent> {
+pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<AgentRun> {
     let started_at = unix_to_datetime(row.bigint(6)?);
     let ended_at = row.opt_bigint(7)?;
     let pid = row.opt_int(8)?;
     let container_id = row.opt_text(9)?;
     let wave_run_id = row.opt_text(4)?;
 
-    Ok(Agent {
+    Ok(AgentRun {
         id: LfdId::from_raw(row.text(0)?),
         step: row.text(1)?,
         repo: row.text(2)?,

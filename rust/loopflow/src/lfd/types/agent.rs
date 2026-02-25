@@ -1,4 +1,4 @@
-//! Agent types.
+//! Agent run types.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -7,6 +7,7 @@ use crate::lfd::id::LfdId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AgentStatus {
     #[default]
     Unspecified = 0,
@@ -43,7 +44,7 @@ impl AgentStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Agent {
+pub struct AgentRun {
     pub id: LfdId,
     pub step: String,
     pub repo: String,
@@ -58,24 +59,4 @@ pub struct Agent {
     pub container_id: Option<String>,
     pub model: String,
     pub run_mode: String,
-}
-
-impl Agent {
-    #[allow(dead_code)] // Convenience constructor for tests and future use.
-    pub fn new(id: LfdId, step: String, repo: String, worktree: String) -> Self {
-        Self {
-            id,
-            step,
-            repo,
-            worktree,
-            wave_run_id: None,
-            status: AgentStatus::Running,
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            pid: None,
-            container_id: None,
-            model: String::new(),
-            run_mode: String::new(),
-        }
-    }
 }

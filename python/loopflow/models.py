@@ -75,7 +75,7 @@ class SessionConfig(BaseModel):
 class Session(BaseModel):
     id: str
     object: str = "session"
-    provider: str
+    harness: str
     status: str
     wave_run_id: Optional[str] = None
     provider_session_id: Optional[str] = None

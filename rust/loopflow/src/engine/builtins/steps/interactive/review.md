@@ -19,17 +19,17 @@ Summarize the shape of the change in 2-3 sentences. What's new, what moved, what
 
 Produce a runnable script, not a list of commands. The human should be able to run one command and immediately start the manual walkthrough.
 
-**Default: write or extend a script in `scripts/`.** Check `scripts/` first — reuse or extend an existing script if one covers similar ground. The script handles automated checks (build, lint, test) and ends by launching whatever the human needs for manual verification (e.g., `concerto-dev.py run-debug` for UI work). The bar: run one command, get a working environment, start clicking.
+**Default: write or extend a Python script in `scripts/` (no bash).** Check `scripts/` first — reuse or extend an existing script if one covers similar ground. The script should launch whatever the human needs for manual verification (e.g., `concerto-dev.py run-debug` for UI work). The bar: run one command, get a working environment, start clicking.
 
 The script should:
-- Run automated checks (fmt, clippy, cargo test, swift test, python tests — whichever apply)
-- Print a clear pass/fail summary
-- If all pass, launch the manual environment (lfd + Concerto, or whatever the change needs)
+- Focus on manual/live review flows, not CI reproduction
+- Avoid full automated test/lint suites unless the human explicitly asks
+- Launch the manual environment (lfd + Concerto, or whatever the change needs)
 - Print a short walkthrough checklist inline before launching
 
 **Manual walkthrough checklist.** After the script launches the environment, tell the human what to exercise. Be specific about what to look for — UI states, expected behavior, edge cases. Keep it short enough to scan in 30 seconds.
 
-**When a script isn't needed.** If the change is purely backend with no manual verification beyond tests passing, skip the script — just confirm the automated suite covers it.
+**When a script isn't needed.** If the change is purely backend with no manual verification, skip the script and explain why.
 
 ### 3. Core model
 

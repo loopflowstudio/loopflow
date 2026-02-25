@@ -18,7 +18,7 @@ use crate::lfd::store::rows::{
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
+    AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
     WaveStatus,
 };
@@ -111,7 +111,7 @@ impl SqliteStore {
         })?;
         Ok(Session {
             id: row.get(0)?,
-            provider: row.get(1)?,
+            harness: row.get(1)?,
             status: SessionStatus::from_i32(row.get::<_, i64>(2)? as i32),
             wave_run_id: row.get(3)?,
             provider_session_id: row.get(4)?,
@@ -139,11 +139,11 @@ impl SqliteStore {
     pub fn create_session(&self, session: &Session) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO sessions (id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at)
+            "INSERT INTO sessions (id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 session.id,
-                session.provider,
+                session.harness,
                 session.status.as_i32() as i64,
                 session.wave_run_id,
                 session.provider_session_id,
@@ -158,7 +158,7 @@ impl SqliteStore {
     pub fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+            "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
              FROM sessions WHERE id = ?1",
         )?;
         let row = stmt
@@ -173,7 +173,7 @@ impl SqliteStore {
     ) -> StoreResult<Option<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+            "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
              FROM sessions
              WHERE wave_run_id = ?1 AND status IN (?2, ?3, ?4)
              ORDER BY created_at DESC
@@ -303,7 +303,7 @@ impl SqliteStore {
             .map(|(i, _)| format!("?{}", i + 1))
             .collect();
         let sql = format!(
-            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+            "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
              FROM sessions WHERE status IN ({})
              ORDER BY created_at ASC",
             placeholders.join(", ")
@@ -899,7 +899,7 @@ impl SqliteStore {
         Ok(deleted as u32)
     }
 
-    pub fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+    pub fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
         self.list_agent_history(None, None, None)
     }
 
@@ -908,7 +908,7 @@ impl SqliteStore {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<Agent>> {
+    ) -> StoreResult<Vec<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = Self::sql(list_agent_history_query(
             worktree.is_some(),
@@ -940,7 +940,7 @@ impl SqliteStore {
         Ok(runs)
     }
 
-    pub fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetAgentById))?;
         let run = stmt
@@ -949,7 +949,7 @@ impl SqliteStore {
         run.transpose()
     }
 
-    pub fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetWaitingAgentForWave))?;
         let run = stmt
@@ -961,7 +961,7 @@ impl SqliteStore {
         run.transpose()
     }
 
-    pub fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+    pub fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let started_at = agent
             .started_at
@@ -1017,7 +1017,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+    pub fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetActiveAgentsForWave))?;
         let rows = stmt.query_map(params![wave_id], |row| Ok(map_agent_row(row)))?;
@@ -1045,7 +1045,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+    pub fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let cutoff = now_unix() - older_than_secs as i64;
         let mut stmt = conn.prepare(Self::sql(Query::GetStuckAgents))?;

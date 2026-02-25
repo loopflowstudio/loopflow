@@ -698,13 +698,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     }
 
     public func createSession(
-        provider: String,
+        harness: String,
         waveRunId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession {
         let url = sessionURL()
         var payload = Self.sessionConfigJSON(config)
-        payload["provider"] = provider
+        payload["harness"] = harness
         if let waveRunId {
             payload["wave_run_id"] = waveRunId
         }
@@ -1083,7 +1083,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     private static func parseSessionFromJSON(_ json: [String: Any]) -> AgentSession? {
         guard let id = json["id"] as? String,
-              let provider = json["provider"] as? String,
+              let harness = json["harness"] as? String,
               let status = json["status"] as? String else {
             return nil
         }
@@ -1104,7 +1104,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
         return AgentSession(
             id: id,
-            provider: provider,
+            harness: harness,
             status: status,
             waveRunId: json["wave_run_id"] as? String,
             providerSessionId: json["provider_session_id"] as? String,

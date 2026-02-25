@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use time::OffsetDateTime;
 use tracing::{debug, info, warn};
 
-use crate::engine::agent::{build_agent_command, AgentCapabilities, LaunchConfig, ProcessConfig};
+use crate::engine::agent::{build_agent_command, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::load_config_or_default;
 use crate::engine::flow::{ConcreteStep, Step};
@@ -66,7 +66,7 @@ impl WaveExecutor {
             );
 
         let model = config.agent_model.clone();
-        let launch = LaunchConfig {
+        let launch = AgentConfig {
             task_prompt: prompt,
             model: Some(model.clone()),
             cwd: Some(PathBuf::from(&run.worktree)),

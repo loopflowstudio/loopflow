@@ -142,11 +142,11 @@ def wave_logs(name_or_id: str) -> Iterator[str]:
 
 
 def create_session(
-    provider: str,
+    harness: str,
     wave_run_id: Optional[str] = None,
     config: Optional[SessionConfig] = None,
 ) -> Session:
-    return _client().create_session(provider, wave_run_id=wave_run_id, config=config)
+    return _client().create_session(harness, wave_run_id=wave_run_id, config=config)
 
 
 def session(session_id: str) -> Optional[Session]:

@@ -8,16 +8,15 @@ use tokio::process::{Child, Command};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::LaunchConfig;
-use crate::engine::config::parse_model;
+use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::lfd::sessions::harness::claude_mapping::ReaderState;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::sessions::harness::{claude_mapping, SessionHarness, SessionHarnessError};
+use crate::lfd::sessions::harness::{claude_mapping, Harness, HarnessError};
 use crate::lfd::sessions::types::{SessionEvent, TurnStatus};
 
 pub struct ClaudeHarness {
     events: broadcast::Sender<SessionEvent>,
-    launch: Option<LaunchConfig>,
+    config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
     provider_session_id: Option<String>,
     turn_in_progress: Arc<AtomicBool>,
@@ -33,54 +32,11 @@ impl std::fmt::Debug for ClaudeHarness {
     }
 }
 
-/// Build CLI args for a Claude invocation.
-fn build_args(content: &str, launch: &LaunchConfig, resume_id: Option<&str>) -> Vec<String> {
-    let mut args = vec![
-        "-p".to_string(),
-        content.to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-    ];
-
-    if let Some(id) = resume_id {
-        args.push("--resume".to_string());
-        args.push(id.to_string());
-    }
-
-    if let Some(model) = &launch.model {
-        let (backend, variant) = parse_model(model);
-        let model = if backend == "claude" {
-            variant.unwrap_or_else(|| model.to_string())
-        } else {
-            model.to_string()
-        };
-        args.push("--model".to_string());
-        args.push(model);
-    }
-
-    if launch.skip_permissions {
-        args.push("--dangerously-skip-permissions".to_string());
-    }
-
-    if let Some(max_turns) = launch.max_turns {
-        args.push("--max-turns".to_string());
-        args.push(max_turns.to_string());
-    }
-
-    if !launch.system_prompt.trim().is_empty() {
-        args.push("--append-system-prompt".to_string());
-        args.push(launch.system_prompt.clone());
-    }
-
-    args
-}
-
 impl ClaudeHarness {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
             events,
-            launch: None,
+            config: None,
             should_seed_task_prompt: true,
             provider_session_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
@@ -93,8 +49,8 @@ impl ClaudeHarness {
 }
 
 #[async_trait]
-impl SessionHarness for ClaudeHarness {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()> {
+impl Harness for ClaudeHarness {
+    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         // Validate claude binary on PATH.
         let output = Command::new("claude").arg("--version").output().await;
         match output {
@@ -116,7 +72,7 @@ impl SessionHarness for ClaudeHarness {
             }
         }
 
-        self.launch = Some(config.clone());
+        self.config = Some(config.clone());
         self.should_seed_task_prompt = true;
         Ok(())
     }
@@ -127,19 +83,19 @@ impl SessionHarness for ClaudeHarness {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Err(SessionHarnessError::TurnAlreadyInProgress.into());
+            return Err(HarnessError::TurnAlreadyInProgress.into());
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
-        let launch = self
-            .launch
+        let config = self
+            .config
             .as_ref()
             .ok_or_else(|| anyhow!("claude harness not started"))?;
         let mut turn_content = content.to_string();
         if self.should_seed_task_prompt {
             self.should_seed_task_prompt = false;
-            if !launch.task_prompt.trim().is_empty() {
-                turn_content = format!("{}\n\n{}", launch.task_prompt.trim(), content);
+            if !config.task_prompt.trim().is_empty() {
+                turn_content = format!("{}\n\n{}", config.task_prompt.trim(), content);
             }
         }
 
@@ -149,14 +105,18 @@ impl SessionHarness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        let args = build_args(&turn_content, launch, self.provider_session_id.as_deref());
+        let args = build_claude_session_turn_args(
+            &turn_content,
+            config,
+            self.provider_session_id.as_deref(),
+        );
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         cmd.stdin(std::process::Stdio::null());
 
-        if let Some(cwd) = &launch.cwd {
+        if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
 
@@ -258,68 +218,13 @@ impl SessionHarness for ClaudeHarness {
 mod tests {
     use super::*;
 
-    #[test]
-    fn build_args_minimal() {
-        let launch = LaunchConfig {
-            system_prompt: String::new(),
-            task_prompt: "task".to_string(),
-            model: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            skip_permissions: false,
-        };
-        let args = build_args("hello", &launch, None);
-        assert_eq!(
-            args,
-            vec!["-p", "hello", "--output-format", "stream-json", "--verbose"]
-        );
-    }
-
-    #[test]
-    fn build_args_full() {
-        let launch = LaunchConfig {
-            system_prompt: "Be concise".to_string(),
-            task_prompt: "task".to_string(),
-            model: Some("claude-sonnet-4-5-20250514".to_string()),
-            cwd: Some("/tmp".into()),
-            max_turns: Some(5),
-            skip_permissions: true,
-        };
-        let args = build_args("fix tests", &launch, Some("sess_abc"));
-        assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"sess_abc".to_string()));
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"claude-sonnet-4-5-20250514".to_string()));
-        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(args.contains(&"--max-turns".to_string()));
-        assert!(args.contains(&"5".to_string()));
-        assert!(args.contains(&"--append-system-prompt".to_string()));
-        assert!(args.contains(&"Be concise".to_string()));
-    }
-
-    #[test]
-    fn build_args_resume_without_extras() {
-        let launch = LaunchConfig {
-            system_prompt: String::new(),
-            task_prompt: "task".to_string(),
-            model: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            skip_permissions: false,
-        };
-        let args = build_args("next", &launch, Some("sess_123"));
-        assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"sess_123".to_string()));
-        assert!(!args.contains(&"--model".to_string()));
-        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(!args.contains(&"--max-turns".to_string()));
-    }
+    // build_claude_session_turn_args coverage lives in engine::agent::tests.
 
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {
         let (tx, _rx) = broadcast::channel(16);
         let mut harness = ClaudeHarness::new(tx);
-        harness.launch = Some(LaunchConfig {
+        harness.config = Some(AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             model: None,
@@ -334,8 +239,8 @@ mod tests {
             .expect_err("spawn should fail for missing cwd");
         assert!(
             !matches!(
-                first.downcast_ref::<SessionHarnessError>(),
-                Some(SessionHarnessError::TurnAlreadyInProgress)
+                first.downcast_ref::<HarnessError>(),
+                Some(HarnessError::TurnAlreadyInProgress)
             ),
             "first failure should not be turn-in-progress"
         );
@@ -346,8 +251,8 @@ mod tests {
             .expect_err("turn guard should be released after setup failure");
         assert!(
             !matches!(
-                second.downcast_ref::<SessionHarnessError>(),
-                Some(SessionHarnessError::TurnAlreadyInProgress)
+                second.downcast_ref::<HarnessError>(),
+                Some(HarnessError::TurnAlreadyInProgress)
             ),
             "second failure should not be turn-in-progress"
         );

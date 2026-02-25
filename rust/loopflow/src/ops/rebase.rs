@@ -6,7 +6,7 @@ use crate::engine::prompt::{
     default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
 };
 use crate::engine::{
-    launch_agent, load_config_or_default, AgentCapabilities, LaunchConfig, ProcessConfig,
+    launch_agent, load_config_or_default, AgentCapabilities, AgentConfig, ProcessConfig,
 };
 
 use crate::ops::error::{OpsError, OpsResult};
@@ -82,7 +82,7 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
         base_prompt, step_content, onto
     );
 
-    let launch = LaunchConfig {
+    let launch = AgentConfig {
         task_prompt: prompt,
         model: Some(config.agent_model.clone()),
         cwd: Some(repo.to_path_buf()),

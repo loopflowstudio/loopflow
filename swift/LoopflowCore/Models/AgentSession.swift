@@ -201,7 +201,7 @@ public struct AgentSessionConfig: Sendable, Hashable {
 
 public struct AgentSession: Sendable, Hashable {
     public let id: String
-    public let provider: String
+    public let harness: String
     public let status: String
     public let waveRunId: String?
     public let providerSessionId: String?
@@ -211,7 +211,7 @@ public struct AgentSession: Sendable, Hashable {
 
     public init(
         id: String,
-        provider: String,
+        harness: String,
         status: String,
         waveRunId: String?,
         providerSessionId: String?,
@@ -220,7 +220,7 @@ public struct AgentSession: Sendable, Hashable {
         endedAt: Date?
     ) {
         self.id = id
-        self.provider = provider
+        self.harness = harness
         self.status = status
         self.waveRunId = waveRunId
         self.providerSessionId = providerSessionId

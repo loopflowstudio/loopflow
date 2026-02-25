@@ -53,7 +53,7 @@ WAVE_RUN_MINIMAL = {
 SESSION_MINIMAL = {
     "id": "session-1",
     "object": "session",
-    "provider": "claude",
+    "harness": "claude",
     "status": "active",
     "config": {},
 }

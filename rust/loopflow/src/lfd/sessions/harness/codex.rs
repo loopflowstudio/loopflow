@@ -10,11 +10,10 @@ use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::LaunchConfig;
-use crate::engine::config::parse_model;
+use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
-use crate::lfd::sessions::harness::{codex_mapping, SessionHarness};
+use crate::lfd::sessions::harness::{codex_mapping, Harness};
 use crate::lfd::sessions::types::SessionEvent;
 
 async fn resolve_turn_id(
@@ -55,7 +54,7 @@ pub struct CodexHarness {
     turn_in_progress: Arc<AtomicBool>,
     current_turn_id: Arc<Mutex<Option<String>>>,
     shutdown_requested: Arc<AtomicBool>,
-    launch: Option<LaunchConfig>,
+    launch: Option<AgentConfig>,
     should_seed_prompt: bool,
 }
 
@@ -116,8 +115,8 @@ impl CodexHarness {
 }
 
 #[async_trait]
-impl SessionHarness for CodexHarness {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()> {
+impl Harness for CodexHarness {
+    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());
         }
@@ -189,7 +188,7 @@ impl SessionHarness for CodexHarness {
 }
 
 impl CodexHarness {
-    async fn start_inner(&mut self, launch: &LaunchConfig) -> Result<()> {
+    async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
         let mut child = Command::new("codex")
             .arg("--app-server")
             .stdin(std::process::Stdio::piped())
@@ -411,22 +410,7 @@ impl CodexHarness {
             .map_err(|_| anyhow!("timed out waiting for codex initialize"))?
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
 
-        let mut thread_params = serde_json::Map::new();
-        if let Some(model) = launch.model.as_deref() {
-            let (backend, variant) = parse_model(model);
-            let model = if backend == "codex" {
-                variant.unwrap_or_else(|| model.to_string())
-            } else {
-                model.to_string()
-            };
-            thread_params.insert("model".to_string(), Value::String(model));
-        }
-        if let Some(cwd) = launch.cwd.as_ref() {
-            thread_params.insert(
-                "cwd".to_string(),
-                Value::String(cwd.to_string_lossy().to_string()),
-            );
-        }
+        let thread_params = build_codex_thread_start_params(launch);
         self.send_request("thread/start", Value::Object(thread_params))
             .await?;
 

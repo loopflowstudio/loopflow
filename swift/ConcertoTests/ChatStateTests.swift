@@ -358,7 +358,7 @@ struct ChatStateTests {
     }
 
     @MainActor
-    @Test("session creation uses configured provider and config")
+    @Test("session creation uses configured harness and config")
     func sendUsesConfiguredSessionParameters() async {
         let service = MockChatService(
             streamPlans: [
@@ -382,7 +382,7 @@ struct ChatStateTests {
         )
         let state = ChatState(
             waveId: "wave-test",
-            sessionProvider: "codex",
+            sessionHarness: "codex",
             sessionWaveRunId: "run_123",
             sessionConfig: config,
             waveService: service,
@@ -392,7 +392,7 @@ struct ChatStateTests {
         await state.send("Start")
         await waitUntil { state.turnState == .completed }
 
-        #expect(service.lastCreateSessionProvider == "codex")
+        #expect(service.lastCreateSessionHarness == "codex")
         #expect(service.lastCreateSessionWaveRunId == "run_123")
         #expect(service.lastCreateSessionConfig == config)
     }
@@ -419,7 +419,7 @@ private final class MockChatService: ChatService, @unchecked Sendable {
     private(set) var sendInputCallCount = 0
     private(set) var stopSessionCallCount = 0
     private(set) var streamCancellationCount = 0
-    private(set) var lastCreateSessionProvider: String?
+    private(set) var lastCreateSessionHarness: String?
     private(set) var lastCreateSessionWaveRunId: String?
     private(set) var lastCreateSessionConfig: AgentSessionConfig?
 
@@ -434,13 +434,13 @@ private final class MockChatService: ChatService, @unchecked Sendable {
     }
 
     func createSession(
-        provider: String,
+        harness: String,
         waveRunId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession {
         let result = queue.sync { () -> Result<AgentSession, Error> in
             createSessionCallCount += 1
-            lastCreateSessionProvider = provider
+            lastCreateSessionHarness = harness
             lastCreateSessionWaveRunId = waveRunId
             lastCreateSessionConfig = config
             if createSessionResults.isEmpty {
@@ -533,7 +533,7 @@ private func endedSession(id: String) -> AgentSession {
 private func session(id: String, status: String, endedAt: Date? = nil) -> AgentSession {
     AgentSession(
         id: id,
-        provider: "claude",
+        harness: "claude",
         status: status,
         waveRunId: nil,
         providerSessionId: nil,

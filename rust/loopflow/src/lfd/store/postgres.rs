@@ -19,7 +19,7 @@ use crate::lfd::store::rows::{
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
+    AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
     WaveStatus,
 };
@@ -136,7 +136,7 @@ impl PostgresStore {
         let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
         Ok(Session {
             id: row.get(0),
-            provider: row.get(1),
+            harness: row.get(1),
             status: SessionStatus::from_i32(row.get::<_, i32>(2)),
             wave_run_id: row.get(3),
             provider_session_id: row.get(4),
@@ -166,11 +166,11 @@ impl PostgresStore {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO sessions (id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at)
+                    "INSERT INTO sessions (id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     &[
                         &session.id,
-                        &session.provider,
+                        &session.harness,
                         &session.status.as_i32(),
                         &session.wave_run_id,
                         &session.provider_session_id,
@@ -189,7 +189,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
                      FROM sessions
                      WHERE id = $1",
                     &[&session_id],
@@ -208,7 +208,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
                      FROM sessions
                      WHERE wave_run_id = $1 AND status = ANY($2)
                      ORDER BY created_at DESC
@@ -349,7 +349,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
                      FROM sessions WHERE status = ANY($1)
                      ORDER BY created_at ASC",
                     &[&status_ints],
@@ -1000,7 +1000,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+    pub async fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
         self.list_agent_history(None, None, None).await
     }
 
@@ -1009,7 +1009,7 @@ impl PostgresStore {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<Agent>> {
+    ) -> StoreResult<Vec<AgentRun>> {
         self.with_client(|client| async move {
             let query = Self::sql(list_agent_history_query(
                 worktree.is_some(),
@@ -1038,7 +1038,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(Self::sql(Query::GetAgentById), &[&agent_id])
@@ -1048,7 +1048,10 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub async fn get_waiting_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Option<AgentRun>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
@@ -1061,7 +1064,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+    pub async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
         self.with_client(|client| async move {
             let started_at = agent
                 .started_at
@@ -1131,7 +1134,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+    pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(Self::sql(Query::GetActiveAgentsForWave), &[&wave_id])
@@ -1162,7 +1165,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+    pub async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
         self.with_client(|client| async move {
             let cutoff = now_unix() - older_than_secs as i64;
             let rows = client

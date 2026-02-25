@@ -190,7 +190,7 @@ class TestClientResponses:
         config = SessionConfig(model="claude-sonnet", yolo_mode=True)
         session = client.create_session("claude", wave_run_id="run-1", config=config)
 
-        assert received["provider"] == "claude"
+        assert received["harness"] == "claude"
         assert received["wave_run_id"] == "run-1"
         assert received["config"]["model"] == "claude-sonnet"
         assert received["config"]["yolo_mode"] is True

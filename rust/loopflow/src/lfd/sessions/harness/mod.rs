@@ -8,19 +8,19 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 
-use crate::engine::agent::LaunchConfig;
+use crate::engine::agent::AgentConfig;
 use crate::lfd::sessions::types::SessionEvent;
 
 #[derive(Debug, thiserror::Error)]
-pub enum SessionHarnessError {
+pub enum HarnessError {
     #[error("turn already in progress")]
     TurnAlreadyInProgress,
 }
 
 pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
     matches!(
-        err.downcast_ref::<SessionHarnessError>(),
-        Some(SessionHarnessError::TurnAlreadyInProgress)
+        err.downcast_ref::<HarnessError>(),
+        Some(HarnessError::TurnAlreadyInProgress)
     )
 }
 
@@ -29,26 +29,25 @@ pub fn is_terminal_harness_error(code: &str) -> bool {
 }
 
 #[async_trait]
-pub trait SessionHarness: Send + Sync {
-    async fn start(&mut self, config: &LaunchConfig) -> Result<()>;
+pub trait Harness: Send + Sync {
+    async fn start(&mut self, config: &AgentConfig) -> Result<()>;
     async fn send_input(&mut self, content: &str) -> Result<()>;
     async fn stop(&mut self) -> Result<()>;
     fn set_provider_session_id(&mut self, _provider_session_id: Option<String>) {}
 }
 
-/// Constructor fn: `(provider, event_tx) -> harness`.
-pub type CreateHarnessFn =
-    fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn SessionHarness>>;
+/// Constructor fn: `(harness_kind, event_tx) -> harness`.
+pub type CreateHarnessFn = fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn Harness>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HarnessProvider {
+pub enum HarnessKind {
     Codex,
     Claude,
 }
 
-impl HarnessProvider {
-    fn parse(provider: &str) -> Option<Self> {
-        match provider.trim().to_ascii_lowercase().as_str() {
+impl HarnessKind {
+    fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
             "codex" => Some(Self::Codex),
             "claude" => Some(Self::Claude),
             _ => None,
@@ -62,7 +61,7 @@ impl HarnessProvider {
         }
     }
 
-    fn create(self, event_tx: broadcast::Sender<SessionEvent>) -> Box<dyn SessionHarness> {
+    fn create(self, event_tx: broadcast::Sender<SessionEvent>) -> Box<dyn Harness> {
         match self {
             Self::Codex => Box::new(codex::CodexHarness::new(event_tx)),
             Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
@@ -70,20 +69,20 @@ impl HarnessProvider {
     }
 }
 
-pub fn canonical_provider(provider: &str) -> Option<&'static str> {
-    HarnessProvider::parse(provider).map(HarnessProvider::as_str)
+pub fn canonical_harness(name: &str) -> Option<&'static str> {
+    HarnessKind::parse(name).map(HarnessKind::as_str)
 }
 
 pub fn default_create_harness(
-    provider: &str,
+    name: &str,
     event_tx: broadcast::Sender<SessionEvent>,
-) -> Result<Box<dyn SessionHarness>> {
-    if let Some(provider) = HarnessProvider::parse(provider) {
-        return Ok(provider.create(event_tx));
+) -> Result<Box<dyn Harness>> {
+    if let Some(kind) = HarnessKind::parse(name) {
+        return Ok(kind.create(event_tx));
     }
     anyhow::bail!(
-        "unsupported session provider: {}",
-        provider.trim().to_lowercase()
+        "unsupported session harness: {}",
+        name.trim().to_lowercase()
     )
 }
 
@@ -92,18 +91,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_provider_is_case_insensitive_and_trimmed() {
-        assert_eq!(canonical_provider(" claUDe "), Some("claude"));
-        assert_eq!(canonical_provider(" CODEX"), Some("codex"));
-        assert_eq!(canonical_provider("lfharness"), None);
+    fn canonical_harness_is_case_insensitive_and_trimmed() {
+        assert_eq!(canonical_harness(" claUDe "), Some("claude"));
+        assert_eq!(canonical_harness(" CODEX"), Some("codex"));
+        assert_eq!(canonical_harness("lfharness"), None);
     }
 
     #[test]
-    fn default_create_harness_rejects_unknown_provider() {
+    fn default_create_harness_rejects_unknown() {
         let (tx, _rx) = broadcast::channel(16);
         match default_create_harness("lfharness", tx) {
-            Ok(_) => panic!("should reject provider"),
-            Err(err) => assert!(err.to_string().contains("unsupported session provider")),
+            Ok(_) => panic!("should reject unknown harness"),
+            Err(err) => assert!(err.to_string().contains("unsupported session harness")),
         }
     }
 }

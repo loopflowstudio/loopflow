@@ -768,13 +768,7 @@ impl SessionManager {
     }
 
     async fn register_wave_session(&self, wave_run_id: Option<&str>) {
-        let Some(scheduler) = self.inner.scheduler.as_ref() else {
-            return;
-        };
-        let Some(wave_run_id) = wave_run_id else {
-            return;
-        };
-        let Some(wave_id) = self.wave_id_for_wave_run(wave_run_id).await else {
+        let Some((scheduler, wave_id)) = self.scheduler_wave_id_for_run(wave_run_id).await else {
             return;
         };
         if !scheduler.register_session(&wave_id) {
@@ -783,9 +777,6 @@ impl SessionManager {
     }
 
     async fn on_session_terminal(&self, session_id: &LfdId) {
-        let Some(scheduler) = self.inner.scheduler.as_ref() else {
-            return;
-        };
         let session = match self.inner.store.get_session(session_id).await {
             Ok(Some(session)) => session,
             Ok(None) => return,
@@ -794,13 +785,24 @@ impl SessionManager {
                 return;
             }
         };
-        let Some(wave_run_id) = session.wave_run_id.as_deref() else {
-            return;
-        };
-        let Some(wave_id) = self.wave_id_for_wave_run(wave_run_id).await else {
+
+        let Some((scheduler, wave_id)) = self
+            .scheduler_wave_id_for_run(session.wave_run_id.as_deref())
+            .await
+        else {
             return;
         };
         scheduler.unregister_session(&wave_id);
+    }
+
+    async fn scheduler_wave_id_for_run(
+        &self,
+        wave_run_id: Option<&str>,
+    ) -> Option<(Arc<Scheduler>, String)> {
+        let scheduler = self.inner.scheduler.clone()?;
+        let wave_run_id = wave_run_id?;
+        let wave_id = self.wave_id_for_wave_run(wave_run_id).await?;
+        Some((scheduler, wave_id))
     }
 
     async fn wave_id_for_wave_run(&self, wave_run_id: &str) -> Option<String> {

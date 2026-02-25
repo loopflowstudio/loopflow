@@ -252,23 +252,18 @@ pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
     for name in names {
         if let Some(members) = resolve_direction_group(name, repo) {
             for member in members {
-                push_unique_direction(&mut expanded, &mut seen, member);
+                if seen.insert(member.clone()) {
+                    expanded.push(member);
+                }
             }
-        } else {
-            push_unique_direction(&mut expanded, &mut seen, name.clone());
+            continue;
+        }
+
+        if seen.insert(name.clone()) {
+            expanded.push(name.clone());
         }
     }
     expanded
-}
-
-fn push_unique_direction(
-    expanded: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-    direction: String,
-) {
-    if seen.insert(direction.clone()) {
-        expanded.push(direction);
-    }
 }
 
 /// Check whether `name` is a direction group (user-defined directory or builtin group).
@@ -1011,9 +1006,7 @@ Be careful.
     fn expand_direction_names_expands_builtin_group() {
         let tmp = TempDir::new().unwrap();
         let result = expand_direction_names(&["values".to_string()], tmp.path());
-        assert!(result.contains(&"craft".to_string()));
-        assert!(result.contains(&"flow".to_string()));
-        assert!(result.contains(&"scale".to_string()));
+        assert_eq!(result, vec!["craft", "flow", "scale"]);
     }
 
     #[test]

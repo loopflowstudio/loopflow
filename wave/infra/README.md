@@ -32,7 +32,7 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 
 | Pass | Phase doc | Scope | What it unlocks | Status |
 |---|---|---|---|---|
-| 1 | `01-core-boundary-cleanup.md` | Core boundary cleanup (`store` + `docker` + provider registry) | Lower blast radius in hotspot files; add providers without central switch edits | Next |
+| 1 | `01-core-boundary-cleanup.md` | Core boundary cleanup (`store` + `docker` + provider registry) | Lower blast radius in hotspot files; add providers without central switch edits | In progress |
 | 2 | `02-contract-hardening.md` | Contract hardening (prompt pipeline split + SQL catalog validation + recovery invariants tests) | Safer iteration on prompt/token policy and fewer runtime contract regressions | After Pass 1 |
 | 3 | `03-orchestration-expansion.md` | Orchestration expansion (push triggers + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | Later |
 | 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |

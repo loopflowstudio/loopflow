@@ -17,9 +17,10 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 
 ## What's left
 
+- **Harness reconnect**: All three harnesses treat stream/process death as terminal. OpenCode is most exposed — SSE streams drop for transient reasons (TCP reset, sleep/wake, load balancer timeout) that don't mean the session is gone. Claude and Codex could also benefit from crash recovery via fresh spawn + resume instead of terminal failure. Design needed: reconnect with replay from last known event, partial state recovery, and backoff.
 - **lfd restart / orphan cleanup**: `SessionRuntime` still lives in memory only. Active sessions become orphans on restart. Events survive in the store. Startup recovery pass needed: mark orphaned `active`/`starting` sessions as `failed`. OpenCode adds orphaned `opencode serve` processes.
 - **Immediate wave advancement**: open question whether successful session completion should trigger immediate waiting-step advancement or remain tick-driven. Current choice (tick-driven) is simpler but adds latency.
-- **OpenCode conformance replay tests**: the adapter shipped with unit tests for event mapping but no recorded-trace replay tests. Especially important given the inferred event schema (see `scratch/questions.md`).
+- **Conformance traces and schema pinning**: The OpenCode adapter shipped with unit tests for event mapping but no recorded-trace replay tests. The defensive multi-key fallbacks (`sessionID`/`sessionId`/`session_id`, etc.) are a temporary hedge against an inferred schema — they mask bugs by silently matching the wrong field. Record real traces from a live OpenCode server, add replay tests (matching the Claude/Codex pattern), then strip fallbacks to canonical field names. Consider bundling fixed OpenCode binaries (or recorded trace fixtures) so CI can validate without a live server. See `scratch/questions.md` for the two unresolved schema questions.
 
 ## What we learned
 
@@ -29,6 +30,7 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 
 ## What the adapter taught us
 
+- The harness abstraction held: a third transport model (HTTP+SSE) mapped to the same session API with no endpoint or event model changes. The canonical turn+item model is validated across stdio JSON-RPC, stdio NDJSON, and HTTP+SSE.
 - The session codebase was significantly simplified alongside the adapter (sessions/mod.rs -300 lines, flow.rs -130 lines, conformance tests removed). Hardening builds on this cleaner base.
 - OpenCode's HTTP+SSE transport is the odd one out — the other two harnesses use stdio. Process management and failure detection work differently: OpenCode crash = HTTP error or SSE disconnect, not process EOF.
 - OpenCode event schema is inferred from observation, not from a spec. Two open questions remain about `POST /session` response shape and `ToolPart` payload fields. Conformance tests that record real OpenCode traces would close both.
@@ -39,3 +41,5 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 - lfd restart doesn't leave orphaned active sessions or orphaned `opencode serve` processes
 - ~~Session end advances wave run~~ ✓ (tick-driven)
 - Conformance replay tests pass for all three harnesses with recorded traces
+- SSE/stream disconnect triggers reconnect with backoff, not terminal failure
+- OpenCode defensive field-name fallbacks replaced with canonical names backed by recorded traces

@@ -59,23 +59,3 @@ pub struct AgentRun {
     pub model: String,
     pub run_mode: String,
 }
-
-impl AgentRun {
-    #[allow(dead_code)] // Convenience constructor for tests and future use.
-    pub fn new(id: LfdId, step: String, repo: String, worktree: String) -> Self {
-        Self {
-            id,
-            step,
-            repo,
-            worktree,
-            wave_run_id: None,
-            status: AgentStatus::Running,
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            pid: None,
-            container_id: None,
-            model: String::new(),
-            run_mode: String::new(),
-        }
-    }
-}

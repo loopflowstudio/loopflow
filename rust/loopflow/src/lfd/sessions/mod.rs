@@ -396,23 +396,17 @@ impl SessionManager {
                         ref message,
                     }) => {
                         let fatal = is_terminal_harness_error(code);
-                        if let Err(err) = manager
-                            .append_runtime_event(
+                        manager
+                            .append_runtime_event_or_warn(
                                 &session_id,
                                 &runtime,
                                 SessionEvent::Error {
                                     code: code.clone(),
                                     message: message.clone(),
                                 },
+                                "error",
                             )
-                            .await
-                        {
-                            tracing::warn!(
-                                session_id = %session_id,
-                                error = %err,
-                                "failed to persist harness error event"
-                            );
-                        }
+                            .await;
                         if fatal {
                             manager
                                 .mark_session_failed(&session_id, &runtime, code, message.clone())
@@ -420,16 +414,9 @@ impl SessionManager {
                         }
                     }
                     Ok(event) => {
-                        if let Err(err) = manager
-                            .append_runtime_event(&session_id, &runtime, event)
-                            .await
-                        {
-                            tracing::warn!(
-                                session_id = %session_id,
-                                error = %err,
-                                "failed to persist harness event"
-                            );
-                        }
+                        manager
+                            .append_runtime_event_or_warn(&session_id, &runtime, event, "event")
+                            .await;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                         tracing::warn!(session_id = %session_id, skipped, "session harness lagged")
@@ -557,12 +544,29 @@ impl SessionManager {
         Ok(())
     }
 
+    async fn append_runtime_event_or_warn(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        event: SessionEvent,
+        context: &'static str,
+    ) {
+        if let Err(err) = self.append_runtime_event(session_id, runtime, event).await {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %err,
+                context,
+                "failed to persist harness event"
+            );
+        }
+    }
+
     async fn append_runtime_event(
         &self,
         session_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
         event: SessionEvent,
-    ) -> Result<PersistedSessionEvent, SessionManagerError> {
+    ) -> Result<(), SessionManagerError> {
         let now = time::OffsetDateTime::now_utc();
         let seq = runtime.next_seq.fetch_add(1, Ordering::Relaxed);
 
@@ -577,8 +581,8 @@ impl SessionManager {
             event,
             created_at: now,
         };
-        let _ = runtime.events_tx.send(persisted.clone());
-        Ok(persisted)
+        let _ = runtime.events_tx.send(persisted);
+        Ok(())
     }
 
     async fn runtime(&self, session_id: &LfdId) -> Option<Arc<SessionRuntime>> {

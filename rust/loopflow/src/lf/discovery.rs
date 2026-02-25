@@ -75,6 +75,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "consolidate",
             "synthesize",
             "validate",
+            "release",
         ],
     ),
 ];
@@ -109,6 +110,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("consolidate", "Reorganize scratch/ for wave"),
         ("synthesize", "Combine multiple perspectives"),
         ("validate", "Validate flows, steps, and directions"),
+        ("release", "Generate release notes from merged PRs"),
         ("scan/scan-report", "Scan deps and APIs for issues"),
         ("scan/scan-plan", "Turn scan report into action plan"),
     ])

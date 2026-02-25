@@ -76,6 +76,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `split-wave` | Split a wave into smaller independent waves |
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
+| `release` | Generate release notes in `RELEASE_NOTES.md` |
 
 ## Flows
 

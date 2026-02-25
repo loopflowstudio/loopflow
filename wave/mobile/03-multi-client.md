@@ -8,9 +8,7 @@ Multiple Concerto clients connect to the same lfd and see consistent state. No c
 
 Stage 03 assumes manual/direct connection is already working from Stage 01. Discovery UX is out of scope here (Stage 04).
 
-**Pre-req from Stage 02:** ActionButtonsView exists in LoopflowCore but is not yet embedded in MobileWaveDetailView (iOS). Wire it up before or early in Stage 03 — it's a small change but needed for the "both devices see the same thing" story to hold.
-
-**Naming note from Stage 02:** ChatState → SessionState, WaveChatView → WaveSessionView across Swift. References below use the new names.
+**From Stage 02:** ChatState → SessionState, WaveChatView → WaveSessionView across Swift. Suggested actions flow through `SessionEvent::SuggestedActions` (server-side stream) → `SessionState.suggestedActions` (client-side). References below use the new names.
 
 ## What's already free
 
@@ -25,6 +23,14 @@ lfd owns all state. Concerto is a thin client. Most multi-client already works:
 No session awareness or handoff needed. Multiple clients just connect and see the same thing.
 
 ## What needs work
+
+### iOS action button wiring (pre-req)
+
+`ActionButtonsView` exists in LoopflowCore but isn't embedded in `MobileWaveDetailView` yet. Small change — wire it up early in Stage 03 before multi-client testing. Both devices should show the same features.
+
+### Suggested action consistency across clients
+
+Suggested actions are client-side ephemeral state in `SessionState`. When one client taps an action (sending a message), the other client needs to clear its stale suggestions. This should happen naturally: the session event stream carries the new user message, the other client's `SessionState` sees the turn change and clears. Verify this works — if session events don't propagate user messages to other clients in real time, stale action buttons will linger.
 
 ### Connection UX on iOS
 
@@ -77,4 +83,5 @@ If lfd has single-client assumptions (e.g. one WebSocket per repo), fix those.
 - Both see the same wave list and status updates in real time
 - Starting a wave on Mac shows output on iPhone
 - Chat transcript visible on both devices, messages from either device appear on both
+- Action buttons appear on both devices; tapping on one clears stale suggestions on the other
 - iPhone reconnects gracefully after backgrounding

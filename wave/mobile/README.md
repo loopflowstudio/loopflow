@@ -48,13 +48,13 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 - ~~Moving views into LoopflowCore requires careful dependency management (views can't depend on app-level state)~~ *Resolved differently: iOS got purpose-built views instead. Shared components (ActionButtonsView, DesignSystem) live in LoopflowCore; platform views stay in Concerto.*
 - iOS and macOS views diverging means feature work (like action buttons) touches both platforms — more surface area per feature. *Confirmed by Stage 01: this is real but manageable. Purpose-built views are simpler than forced sharing.*
 - ~~ConnectionProfile abstraction needed early for iOS connection management~~ *Dropped: tried in Stage 01, removed. Simple ConnectionMode (bundled/remote) + ConnectionStore suffices. Profiles may return in Stage 03 if saved connections become important.*
-- Action button quality depends on agent prompt engineering — bad suggestions = bad UX. *Confirmed by Stage 02: prompt-compliance-dependent, no strict tool contract. Manageable but real — quality is only as good as the model's adherence to guidance.*
+- Action button quality depends on agent prompt engineering — bad suggestions = bad UX. *Confirmed by Stage 02: prompt-compliance-dependent, no strict tool contract. Manageable but real — quality is only as good as the model's adherence to guidance. Pipeline is proven across both Claude and Codex harnesses, so provider portability is not a concern.*
 - Harness layer has subtle assumptions about message authorship — Stage 02 found an auto-send bug where claude_mapping.rs echoed user text as new messages. Fixed, but multi-client work (Stage 03) should audit message attribution paths carefully.
+- Suggested actions are client-side ephemeral state. Multi-client (Stage 03) needs to verify that session events propagate turns across clients so stale suggestions clear on all devices.
 - Multi-client session handoff may need lfd changes if sessions assume single-client
 - SwiftUI multiplatform has rough edges (NavigationSplitView behaves differently on iOS)
 - Tailscale as prerequisite narrows the audience — users must install it on both devices
 - Studio discovery service is simple but is still new infrastructure to operate
-- iOS action button wiring is pending — small but must land before Stage 03 multi-client testing makes sense (both devices should show the same features)
 
 ## Metrics
 

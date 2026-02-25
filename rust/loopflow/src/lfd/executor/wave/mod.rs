@@ -37,7 +37,7 @@ use super::docker::DockerExecutor;
 use super::helpers::{
     advance_branch, auto_commit_if_dirty, auto_create_pr, build_agent_capabilities,
     build_step_prompt, flow_parents_for_index, is_active_wave_run_status,
-    is_ephemeral_worktree_path, resolve_current_step_name,
+    is_ephemeral_worktree_path,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, EphemeralOwnerKind, EphemeralWorktree, JanitorReport, StartupRecovery};
@@ -597,13 +597,27 @@ impl WaveExecutor {
             return Ok(());
         }
 
-        if let Err(err) = self.auto_commit_interactive_step(&run).await {
+        let repo = Path::new(&run.snapshot.repo);
+        let flow = load_flow(&run.snapshot.flow, repo)?;
+        let plan = expand_flow(&flow, repo)?;
+
+        // Auto-commit any changes left by the interactive step.
+        let step_name = match next_action(&plan, run.step_index as usize) {
+            FlowAction::WaitInteractive { step } | FlowAction::RunStep { step } => step.step.name,
+            _ => format!("step-{}", run.step_index),
+        };
+        let worktree = run.worktree.clone();
+        if let Err(err) = tokio::task::spawn_blocking(move || {
+            auto_commit_if_dirty(Path::new(&worktree), &step_name)
+        })
+        .await
+        .map_err(|err| anyhow!("interactive auto-commit task failed: {err}"))
+        .and_then(|r| r.map_err(|err| anyhow!("interactive auto-commit failed: {err}")))
+        {
             self.fail_run(&mut run, &wave, err.to_string()).await?;
             return Ok(());
         }
 
-        let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
-        let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
         self.advance_run_step(&mut run, &plan, wave.id()).await?;
         self.set_wave_status(wave.id(), WaveStatus::Running).await;
         self.resume_run_execution(run).await?;
@@ -622,15 +636,6 @@ impl WaveExecutor {
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-    }
-
-    async fn auto_commit_interactive_step(&self, run: &WaveRun) -> Result<()> {
-        let step_name = resolve_current_step_name(run, run.step_index);
-        let worktree = run.worktree.clone();
-        tokio::task::spawn_blocking(move || auto_commit_if_dirty(Path::new(&worktree), &step_name))
-            .await
-            .map_err(|err| anyhow!("interactive auto-commit task failed: {err}"))?
-            .map_err(|err| anyhow!("interactive auto-commit failed: {err}"))
     }
 
     async fn resume_run_execution(&self, run: WaveRun) -> Result<()> {

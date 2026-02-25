@@ -1,3 +1,4 @@
+#if os(macOS)
 // ThemePreview - renders content in light, dark, and deep wine side-by-side.
 // Use in #Preview blocks to compare all three themes simultaneously.
 
@@ -20,3 +21,5 @@ struct ThemePreview<Content: View>: View {
         }
     }
 }
+
+#endif

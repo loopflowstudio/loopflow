@@ -1,3 +1,4 @@
+#if os(macOS)
 // NextActionsBar - sticky footer for next actions after running steps.
 
 import SwiftUI
@@ -105,3 +106,5 @@ struct NextActionsBar: View {
     .environment(repoState)
     .frame(width: 600, height: 200)
 }
+
+#endif

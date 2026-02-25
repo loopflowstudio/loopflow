@@ -1,3 +1,4 @@
+#if os(macOS)
 // AreaTypeahead - terminal-style path input with fish-style tab completion and chips.
 
 import SwiftUI
@@ -205,3 +206,5 @@ struct AreaTypeahead: View {
     .frame(width: 400)
     .padding()
 }
+
+#endif

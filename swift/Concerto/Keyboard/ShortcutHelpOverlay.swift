@@ -1,4 +1,6 @@
+#if os(macOS)
 import SwiftUI
+import LoopflowCore
 
 struct ShortcutHelpOverlay: View {
     @Binding var isPresented: Bool
@@ -115,3 +117,5 @@ private struct ShortcutEntry: Identifiable {
         "\(key)|\(label)"
     }
 }
+
+#endif

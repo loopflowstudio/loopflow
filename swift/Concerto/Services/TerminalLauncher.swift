@@ -1,3 +1,4 @@
+#if os(macOS)
 // Service for launching terminal sessions.
 
 import AppKit
@@ -397,3 +398,5 @@ struct TerminalLauncher {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
+
+#endif

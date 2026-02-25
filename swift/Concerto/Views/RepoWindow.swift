@@ -1,3 +1,4 @@
+#if os(macOS)
 // Window wrapper for a single repository.
 // Each repo window has its own state instances.
 
@@ -76,3 +77,5 @@ struct RepoWindow: View {
         url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 }
+
+#endif

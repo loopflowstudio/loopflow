@@ -1,8 +1,10 @@
+#if os(macOS)
 // SwiftUI view for embedding Ghostty terminal.
 // Uses NSViewRepresentable to bridge the Metal-rendered terminal surface.
 
 import SwiftUI
 import AppKit
+import LoopflowCore
 
 #if GHOSTTY_ENABLED
 import GhosttyKit
@@ -600,5 +602,7 @@ struct GhosttyTerminalView: View {
         .background(Color.black.opacity(0.9))
     }
 }
+
+#endif
 
 #endif

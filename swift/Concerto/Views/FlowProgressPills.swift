@@ -1,3 +1,4 @@
+#if os(macOS)
 // FlowProgressPills - horizontal flow step indicator with current step highlighted and elapsed time.
 
 import SwiftUI
@@ -148,3 +149,5 @@ struct FlowProgressPills: View {
     )
     .padding()
 }
+
+#endif

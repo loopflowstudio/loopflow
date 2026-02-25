@@ -43,6 +43,10 @@ def main() -> int:
         (["cargo", "test", "--all"], "cargo test"),
         (["uv", "run", "pytest", "python/tests/"], "python tests"),
         (["swift", "test", "--package-path", str(SWIFT_DIR)], "swift tests"),
+        (
+            ["uv", "run", "python", "scripts/check_swift_multiplatform_boundaries.py"],
+            "swift multiplatform boundary checks",
+        ),
     ]
 
     results: list[tuple[str, bool]] = []

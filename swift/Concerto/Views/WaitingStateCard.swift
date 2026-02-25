@@ -1,3 +1,4 @@
+#if os(macOS)
 // WaitingStateCard - shows why a wave is blocked and provides action to resolve it.
 
 import SwiftUI
@@ -140,3 +141,5 @@ struct WaitingStateCard: View {
             .frame(width: 400)
     }
 }
+
+#endif

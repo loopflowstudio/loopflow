@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import LoopflowCore
 
@@ -264,3 +265,5 @@ private struct RunPRBadge: View {
         return "\(number) \(stateText)"
     }
 }
+
+#endif

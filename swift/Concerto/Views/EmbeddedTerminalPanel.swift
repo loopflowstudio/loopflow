@@ -1,3 +1,4 @@
+#if os(macOS)
 // Embedded terminal panel using Ghostty.
 
 import SwiftUI
@@ -136,3 +137,5 @@ struct EmbeddedTerminalPanel: View {
         .environment(OutputBuffer())
         .frame(width: 600)
 }
+
+#endif

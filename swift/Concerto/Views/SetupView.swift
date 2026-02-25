@@ -1,3 +1,4 @@
+#if os(macOS)
 // First-run setup view for installing loopflow.
 
 import SwiftUI
@@ -176,3 +177,5 @@ struct SetupView: View {
 #Preview {
     SetupView(isComplete: .constant(false))
 }
+
+#endif

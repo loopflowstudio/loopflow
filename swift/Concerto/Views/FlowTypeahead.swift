@@ -1,3 +1,4 @@
+#if os(macOS)
 // FlowTypeahead - unified flow/step picker with typeahead and candidate list.
 // Single-select. Flows (multi-step) shown first, then steps.
 
@@ -229,3 +230,5 @@ struct FlowTypeahead: View {
     .frame(width: 500)
     .padding()
 }
+
+#endif

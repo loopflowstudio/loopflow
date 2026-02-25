@@ -1,3 +1,4 @@
+#if os(macOS)
 // Window for screenshot snapshot mode.
 // Loads a repo, waits for UI to stabilize, snapshots, and exits.
 
@@ -155,3 +156,5 @@ private struct ScreenshotLayout: View {
         }
     }
 }
+
+#endif

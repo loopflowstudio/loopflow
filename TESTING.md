@@ -93,6 +93,7 @@ tests/e2e/test_rebase_conflict.sh
 ```bash
 uv run python scripts/validate_branch.py           # automated checks → launch Concerto
 uv run python scripts/validate_branch.py --checks-only  # automated checks only
+uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 uv run python scripts/test_session.py               # session API smoke test (starts lfd)
 uv run python scripts/dev.py run-debug              # build and launch lfd + Concerto
 ```

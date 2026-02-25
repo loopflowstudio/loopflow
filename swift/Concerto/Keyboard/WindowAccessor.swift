@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct WindowAccessor: NSViewRepresentable {
@@ -31,3 +32,5 @@ struct WindowAccessor: NSViewRepresentable {
         }
     }
 }
+
+#endif

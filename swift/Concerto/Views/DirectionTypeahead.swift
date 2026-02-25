@@ -1,3 +1,4 @@
+#if os(macOS)
 // DirectionTypeahead - fish-style typeahead for wave directions with chips.
 // Shows a filtered candidate list below the input for discoverability.
 
@@ -168,3 +169,5 @@ struct DirectionTypeahead: View {
     .frame(width: 400)
     .padding()
 }
+
+#endif

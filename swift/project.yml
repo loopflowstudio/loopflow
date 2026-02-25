@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.loopflow
   deploymentTarget:
     macOS: "15.0"
+    iOS: "18.0"
   xcodeVersion: "15.0"
 
 settings:
@@ -17,7 +18,7 @@ packages:
 targets:
   LoopflowCore:
     type: framework
-    platform: macOS
+    supportedDestinations: [macOS, iOS]
     sources:
       - path: LoopflowCore
         excludes:
@@ -30,7 +31,7 @@ targets:
 
   Concerto:
     type: application
-    platform: macOS
+    supportedDestinations: [macOS, iOS]
     sources:
       - path: Concerto
         excludes:
@@ -45,9 +46,13 @@ targets:
       # GhosttyKit, use `swift build` or add the framework manually after building
       # with: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
       - sdk: Carbon.framework
+        destinationFilters: [macOS]
       - sdk: QuartzCore.framework
+        destinationFilters: [macOS]
       - sdk: Metal.framework
+        destinationFilters: [macOS]
       - sdk: IOKit.framework
+        destinationFilters: [macOS]
     settings:
       base:
         INFOPLIST_FILE: Concerto/Info.plist

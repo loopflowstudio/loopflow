@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 struct CLIInstallManager {
@@ -113,3 +114,5 @@ struct CLIInstallManager {
         return parent.appendingPathComponent(destinationPath).standardizedFileURL
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 // Service for checking and installing loopflow and its dependencies.
 
 import Foundation
@@ -221,3 +222,5 @@ struct SetupService {
         }
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 // Type definitions for embedded Ghostty terminal.
 
 import Foundation
@@ -23,3 +24,5 @@ struct GhosttySession: Identifiable {
     var surface: ghostty_surface_t?
     #endif
 }
+
+#endif

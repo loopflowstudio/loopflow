@@ -124,15 +124,24 @@ final class RepoState {
     var availableRemoteRepos: [RemoteRepo] = []
 
     // Services
-    private let bundledDaemon: BundledDaemonManager
+    private let startBundledDaemon: @MainActor () async throws -> ServerConnection
+    private let shellCommandRunner: WaveService.ShellCommandRunner?
     private var waveService: WaveService
     private var eventService: EventService?
     private weak var outputBuffer: OutputBuffer?
 
-    init(bundledDaemon: BundledDaemonManager = BundledDaemonManager()) {
-        self.bundledDaemon = bundledDaemon
+    init(
+        startBundledDaemon: @escaping @MainActor () async throws -> ServerConnection,
+        shellCommandRunner: WaveService.ShellCommandRunner? = nil
+    ) {
+        self.startBundledDaemon = startBundledDaemon
+        self.shellCommandRunner = shellCommandRunner
         let connection = connectionStore.activeConnection
-        waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
+        waveService = Self.makeWaveService(
+            connection: connection,
+            token: connectionStore.token(for: connection),
+            shellCommandRunner: shellCommandRunner
+        )
 
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
             self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
@@ -692,7 +701,7 @@ final class RepoState {
             guard currentRepo != nil else {
                 throw WaveCreationReadinessError.missingRepo
             }
-            let bundledConnection = try await bundledDaemon.start()
+            let bundledConnection = try await startBundledDaemon()
             connectionStore.setBundledRuntimeConnection(bundledConnection)
             return connectionStore.activeConnection
         case .remote:
@@ -829,7 +838,11 @@ final class RepoState {
 
     private func rebuildServices(for connection: ServerConnection) {
         let token = connectionStore.token(for: connection)
-        waveService = Self.makeWaveService(connection: connection, token: token)
+        waveService = Self.makeWaveService(
+            connection: connection,
+            token: token,
+            shellCommandRunner: shellCommandRunner
+        )
         outputBuffer?.configureConnection(connection, tokenProvider: { token })
 
         Task {
@@ -907,10 +920,15 @@ final class RepoState {
         }
     }
 
-    private static func makeWaveService(connection: ServerConnection, token: String?) -> WaveService {
+    private static func makeWaveService(
+        connection: ServerConnection,
+        token: String?,
+        shellCommandRunner: WaveService.ShellCommandRunner?
+    ) -> WaveService {
         WaveService(
             connection: connection,
-            tokenProvider: { token }
+            tokenProvider: { token },
+            shellCommandRunner: shellCommandRunner
         )
     }
 

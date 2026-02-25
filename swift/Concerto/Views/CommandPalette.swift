@@ -1,7 +1,9 @@
+#if os(macOS)
 // Global command palette for searching and executing actions.
 // Activated with Cmd+K or /.
 
 import SwiftUI
+import LoopflowCore
 
 struct PaletteAction: Identifiable {
     let id: String
@@ -227,3 +229,5 @@ private struct ActionRow: View {
     .padding(Spacing.xxxl + Spacing.sm)
     .background(Color.gray.opacity(0.3))
 }
+
+#endif

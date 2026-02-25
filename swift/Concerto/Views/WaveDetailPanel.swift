@@ -1,3 +1,4 @@
+#if os(macOS)
 // Wave detail panel. Adapts to wave state:
 // - Idle → StepRunner (run individual steps)
 // - Running/waiting/etc → Progress + actions
@@ -845,3 +846,5 @@ struct WaveDetailPanel: View {
         .environment(OutputBuffer())
         .frame(width: 600, height: 700)
 }
+
+#endif

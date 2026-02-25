@@ -1,3 +1,4 @@
+#if os(macOS)
 // Service for snapshotting windows without Screen Recording permission.
 
 import AppKit
@@ -72,3 +73,5 @@ struct SnapshotService {
         return URL(fileURLWithPath: "/tmp/concerto-\(timestamp).png")
     }
 }
+
+#endif

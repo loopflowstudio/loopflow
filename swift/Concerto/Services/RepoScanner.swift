@@ -1,3 +1,4 @@
+#if os(macOS)
 // Scan local directories for git repositories.
 
 import Foundation
@@ -49,3 +50,5 @@ struct RepoScanner {
         return !content.contains("/.git/worktrees/")
     }
 }
+
+#endif

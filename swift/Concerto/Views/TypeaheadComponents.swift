@@ -1,3 +1,4 @@
+#if os(macOS)
 // TypeaheadComponents - shared building blocks for fish-style typeahead fields.
 
 import SwiftUI
@@ -199,3 +200,5 @@ struct WrappingHStack: Layout {
         return rows
     }
 }
+
+#endif

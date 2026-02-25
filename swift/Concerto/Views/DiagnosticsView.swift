@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import LoopflowCore
 
@@ -45,3 +46,5 @@ struct DiagnosticsView: View {
         logText = LoggingService.read()
     }
 }
+
+#endif

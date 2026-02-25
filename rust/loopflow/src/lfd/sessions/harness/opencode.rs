@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use reqwest::Method;
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::engine::agent::AgentConfig;
@@ -18,7 +18,7 @@ use crate::lfd::sessions::types::SessionEvent;
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
 pub struct OpenCodeHarness {
-    events: broadcast::Sender<SessionEvent>,
+    events: mpsc::UnboundedSender<SessionEvent>,
     client: reqwest::Client,
     config: Option<AgentConfig>,
     should_seed_prompt: bool,
@@ -38,7 +38,7 @@ impl std::fmt::Debug for OpenCodeHarness {
 }
 
 impl OpenCodeHarness {
-    pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<SessionEvent>) -> Self {
         Self {
             events,
             client: reqwest::Client::new(),
@@ -334,7 +334,7 @@ async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Re
 }
 
 fn send_disconnect_error(
-    event_tx: &broadcast::Sender<SessionEvent>,
+    event_tx: &mpsc::UnboundedSender<SessionEvent>,
     shutdown_requested: &AtomicBool,
     message: impl Into<String>,
 ) {

@@ -16,7 +16,9 @@ use crate::lfd::types::{Wave, WaveRun};
 
 use super::launch::AgentLaunchRequest;
 use super::WaveExecutor;
-use crate::lfd::executor::helpers::{build_step_prompt, fork_worktree_path};
+use crate::lfd::executor::helpers::{
+    build_agent_capabilities, build_step_prompt, fork_worktree_path,
+};
 
 const FORK_MANIFEST_RELATIVE_PATH: &str = ".lf/fork-manifest.json";
 
@@ -135,7 +137,7 @@ impl WaveExecutor {
                     None,
                 )
                 .await;
-                let (prompt, model, launch) = match prompt {
+                let (launch, process) = match prompt {
                     Ok(result) => result,
                     Err(err) => {
                         error!(
@@ -148,7 +150,9 @@ impl WaveExecutor {
                         return;
                     }
                 };
-                let cmd = build_agent_command(&model, &prompt, &launch);
+                let capabilities = build_agent_capabilities(&worktree);
+                let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
+                let cmd = build_agent_command(&launch, &process, &capabilities);
                 info!(
                     fork_run_id = %fork_run_id,
                     step = %step.step.name,

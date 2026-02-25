@@ -7,17 +7,6 @@ import LoopflowCore
 @MainActor
 @Observable
 final class RepoState {
-    enum WaveCreationReadinessError: LocalizedError {
-        case missingRepo
-
-        var errorDescription: String? {
-            switch self {
-            case .missingRepo:
-                "Select a repository in Connection Settings first."
-            }
-        }
-    }
-
     enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
@@ -67,7 +56,6 @@ final class RepoState {
     var repoTarget: RepoTarget?
     var flows: [Flow] = []
     var availableDirections: [String] = []
-    var waveSchemas: [WaveSchema] = []
 
     // Wave state — delegated to WaveStore
     let waveStore = WaveStore()
@@ -90,7 +78,19 @@ final class RepoState {
         if let state = chatStates[waveId] {
             return state
         }
-        let state = ChatState(waveId: waveId, waveService: waveService)
+        let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
+        let wave = waveStore.wave(for: waveId)
+        let state = ChatState(
+            waveId: waveId,
+            sessionConfig: AgentSessionConfig(
+                step: "design",
+                repoRoot: repoRoot,
+                directions: wave?.direction ?? [],
+                area: wave?.area.first,
+                wave: wave?.name.isEmpty == false ? wave?.name : nil
+            ),
+            waveService: waveService
+        )
         chatStates[waveId] = state
         return state
     }
@@ -317,6 +317,7 @@ final class RepoState {
 
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
+        chatStates.removeAll()
         currentRepo = url
         repoTarget = .local(url)
         errorMessage = nil
@@ -352,7 +353,7 @@ final class RepoState {
                         switch event {
                         case .connected(let connected):
                             self.updateConnectionState(.connected)
-                            self.waveStore.setAll(connected.waves.map { WaveViewModel(api: $0) })
+                            self.waveStore.setAll(connected.waves.map(self.makeWaveViewModel))
                             await self.refreshWorktrees()
                             await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
@@ -382,10 +383,11 @@ final class RepoState {
         switch event.type {
         case .created, .updated, .started, .stopped, .waiting:
             if let wave = event.wave {
-                waveStore.set(WaveViewModel(api: wave))
+                waveStore.set(makeWaveViewModel(api: wave))
             } else if let wave = try? await waveService.getWave(event.waveId) {
-                waveStore.set(WaveViewModel(api: wave))
+                waveStore.set(makeWaveViewModel(api: wave))
             }
+            loadWaveContent(for: event.waveId)
             // Update runs cache on run lifecycle events
             if event.type == .started || event.type == .stopped || event.type == .updated {
                 loadRuns(for: event.waveId)
@@ -416,7 +418,6 @@ final class RepoState {
             flows = result.flows
         }
         availableDirections = result.directions
-        waveSchemas = (try? await waveService.listWaveSchemas(repo: repo)) ?? []
     }
 
     // MARK: - Waves
@@ -430,7 +431,10 @@ final class RepoState {
         do {
             let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
-            waveStore.setAll(newWaves.map { WaveViewModel(api: $0) })
+            waveStore.setAll(newWaves.map(makeWaveViewModel))
+            if let selectedWaveId {
+                loadWaveContent(for: selectedWaveId)
+            }
         } catch {
             LoggingService.model("refreshWaves: error=\(error.localizedDescription)")
             waveStore.removeAll()
@@ -456,6 +460,8 @@ final class RepoState {
     }
 
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
+        loadWaveContent(for: wave.id)
+
         switch newStatus {
         case .waiting:
             let step = wave.recentSteps.first?.step ?? "step"
@@ -490,19 +496,14 @@ final class RepoState {
     }
 
     @discardableResult
-    func createWave(name: String, schemaRef: String? = nil) async throws -> Wave {
+    func createWave(name: String) async throws -> Wave {
         guard let repo = repoTarget else {
             LoggingService.model("createWave: no repoTarget")
             throw WaveServiceError.commandFailed("No repository selected")
         }
 
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let waveName: String
-        if normalizedName.isEmpty && schemaRef == nil {
-            waveName = NameGenerator.generate()
-        } else {
-            waveName = normalizedName
-        }
+        let waveName = normalizedName.isEmpty ? NameGenerator.generate() : normalizedName
         LoggingService.model("createWave: name=\(waveName) repo=\(repo.path)")
 
         let pendingId = "pending-\(UUID().uuidString)"
@@ -513,7 +514,7 @@ final class RepoState {
         selectedWaveId = pendingId
 
         do {
-            let wave = try await waveService.createWave(name: waveName, repo: repo, schema: schemaRef)
+            let wave = try await waveService.createWave(name: waveName, repo: repo)
             waveStore.replacePending(pendingId, with: WaveViewModel(api: wave))
             selectedWaveId = wave.id
             await refreshFlowsAsync()
@@ -523,16 +524,6 @@ final class RepoState {
             waveStore.removePending(pendingId)
             if selectedWaveId == pendingId { selectedWaveId = nil }
             throw error
-        }
-    }
-
-    func instantiateSchema(_ schema: WaveSchema, startImmediately: Bool = true) async throws {
-        let wave = try await createWave(name: schema.name, schemaRef: schema.schemaRef)
-        if startImmediately {
-            try await waveService.run(wave.id, overrides: nil)
-            _ = waveStore.applyOptimistic(wave.id) { $0.status = .running }
-            waveStore.commitMutation(wave.id)
-            scheduleRefresh(for: wave.id)
         }
     }
 
@@ -681,6 +672,7 @@ final class RepoState {
         } else {
             repoTarget = nil
         }
+        chatStates.removeAll()
 
         let probeService = Self.makeEventService(
             connection: connection,
@@ -700,18 +692,8 @@ final class RepoState {
         try await connect(to: connection, outputBuffer: outputBuffer)
     }
 
-    func ensureReadyToCreateWave(outputBuffer: OutputBuffer) async throws {
-        if !lfdConnected {
-            try await connectLfd(outputBuffer: outputBuffer)
-            try await Task.sleep(for: .milliseconds(500))
-        }
-
-        guard repoTarget != nil else {
-            throw WaveCreationReadinessError.missingRepo
-        }
-    }
-
     func selectRemoteRepo(path: String) {
+        chatStates.removeAll()
         let host = connectionStore.activeConnection.host
         repoTarget = .remote(path: path, host: host)
         currentRepo = URL(fileURLWithPath: path)
@@ -900,9 +882,28 @@ final class RepoState {
             try? await Task.sleep(for: .seconds(delay))
             guard waveStore.wave(for: waveId) != nil else { return }
             if let wave = try? await waveService.getWave(waveId) {
-                waveStore.set(WaveViewModel(api: wave))
+                waveStore.set(makeWaveViewModel(api: wave))
             }
         }
+    }
+
+    func loadWaveContent(for waveId: String) {
+        guard let repoRoot = currentRepo,
+              let wave = waveStore.wave(for: waveId),
+              repoTarget?.isRemote != true else {
+            return
+        }
+
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name)
+        _ = waveStore.applyOptimistic(waveId) { $0.content = content }
+        waveStore.commitMutation(waveId)
+    }
+
+    private func makeWaveViewModel(api wave: Wave) -> WaveViewModel {
+        WaveViewModel(
+            api: wave,
+            content: waveStore.wave(for: wave.id)?.content
+        )
     }
 }
 

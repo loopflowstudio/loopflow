@@ -5,7 +5,9 @@ use crate::engine::git::{fetch, rebase};
 use crate::engine::prompt::{
     default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
 };
-use crate::engine::{launch_agent, load_config_or_default, LaunchConfig};
+use crate::engine::{
+    launch_agent, load_config_or_default, AgentCapabilities, LaunchConfig, ProcessConfig,
+};
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -80,19 +82,24 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
         base_prompt, step_content, onto
     );
 
-    let launch_config = LaunchConfig {
+    let launch = LaunchConfig {
+        task_prompt: prompt,
+        model: Some(config.agent_model.clone()),
+        cwd: Some(repo.to_path_buf()),
+        skip_permissions: true,
+        ..Default::default()
+    };
+    let process = ProcessConfig {
         auto: true,
         stream: true,
-        skip_permissions: true,
-        model_variant: None,
-        chrome: config.chrome,
-        cwd: Some(repo.to_path_buf()),
-        context_file: None,
         ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
     };
 
     progress.status("Launching rebase agent...");
-    let result = launch_agent(&config.agent_model, &prompt, &launch_config)
+    let result = launch_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
     if result.exit_code != 0 {
         return Err(OpsError::AgentFailed(result.stderr));

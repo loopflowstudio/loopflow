@@ -8,9 +8,9 @@ import LoopflowCore
 final class WorktreeStore {
     private(set) var worktrees: [WorktreeInfo] = []
 
-    /// Worktrees not tracked by any wave.
+    /// Worktrees not tracked by any wave and not prunable (merged/empty).
     var orphans: [WorktreeInfo] {
-        worktrees.filter { !$0.hasWave }
+        worktrees.filter { !$0.hasWave && !$0.prunable }
     }
 
     func setAll(_ items: [WorktreeInfo]) {

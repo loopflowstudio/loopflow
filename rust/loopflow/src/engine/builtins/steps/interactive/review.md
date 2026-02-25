@@ -17,15 +17,19 @@ Summarize the shape of the change in 2-3 sentences. What's new, what moved, what
 
 ### 2. Demo plan
 
-Propose a concrete test plan the human can execute. Three parts:
+Produce a runnable script, not a list of commands. The human should be able to run one command and immediately start the manual walkthrough.
 
-**Setup.** Spell out every process that needs to be running and every prep step before the first test command. Don't assume the server is already up. Include build commands, daemon starts, seed data, environment variables — everything from cold start to ready.
+**Default: write or extend a script in `scripts/`.** Check `scripts/` first — reuse or extend an existing script if one covers similar ground. The script handles automated checks (build, lint, test) and ends by launching whatever the human needs for manual verification (e.g., `dev.py run-debug` for UI work). The bar: run one command, get a working environment, start clicking.
 
-**Test commands.** Specific commands to run, workflows to walk through, UX to exercise. Each command should include what to expect — status codes, output shapes, state changes. If there are multiple user paths, list them.
+The script should:
+- Run automated checks (fmt, clippy, cargo test, swift test, python tests — whichever apply)
+- Print a clear pass/fail summary
+- If all pass, launch the manual environment (lfd + Concerto, or whatever the change needs)
+- Print a short walkthrough checklist inline before launching
 
-**Validation.** How to inspect logs, database state, or output to confirm the change works correctly. Specify log locations, what patterns to grep for, and what "healthy" looks like versus failure modes.
+**Manual walkthrough checklist.** After the script launches the environment, tell the human what to exercise. Be specific about what to look for — UI states, expected behavior, edge cases. Keep it short enough to scan in 30 seconds.
 
-If the test workflow is more than a few commands, propose a Python script in `scripts/` that handles setup, exercise, validate, and teardown. The bar: an LLM agent should be able to run it, read the output, and know whether things are working without asking for help. E2e tests in `tests/e2e/` are trivial shell one-liners (`uv run python scripts/...`) that exist only as CI entry points — the scripts do the real work.
+**When a script isn't needed.** If the change is purely backend with no manual verification beyond tests passing, skip the script — just confirm the automated suite covers it.
 
 ### 3. Core model
 

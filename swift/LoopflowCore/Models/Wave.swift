@@ -133,11 +133,13 @@ public struct InteractiveSession: Sendable, Identifiable {
     }
 
     /// Build the shell command to run this session.
+    /// Runs the step, then auto-commits and pushes when the agent exits.
     public var command: String {
         var cmd = "lf \(step)"
         if let prompt = prompt {
             cmd += " \(shellEscape(prompt))"
         }
+        cmd += " && lf ops commit --push"
         return cmd
     }
 }

@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::engine::agent::{launch_agent, LaunchConfig};
+use loopflow::engine::agent::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
 use loopflow::engine::error::CoreError;
 use tempfile::TempDir;
 
@@ -72,15 +72,20 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-fn base_config() -> LaunchConfig {
+fn base_launch() -> LaunchConfig {
     LaunchConfig {
+        task_prompt: "prompt".to_string(),
+        model: Some("claude".to_string()),
+        skip_permissions: true,
+        cwd: None,
+        ..Default::default()
+    }
+}
+
+fn base_process() -> ProcessConfig {
+    ProcessConfig {
         auto: true,
         stream: false,
-        skip_permissions: true,
-        model_variant: None,
-        chrome: false,
-        cwd: None,
-        context_file: None,
         ..Default::default()
     }
 }
@@ -88,35 +93,59 @@ fn base_config() -> LaunchConfig {
 #[test]
 fn launch_returns_exit_code() {
     let _env = PathGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
-    let result = launch_agent("claude", "prompt", &base_config()).expect("launch");
+    let result = launch_agent(
+        &base_launch(),
+        &base_process(),
+        &AgentCapabilities::default(),
+    )
+    .expect("launch");
     assert_eq!(result.exit_code, 0);
 }
 
 #[test]
 fn launch_captures_stdout() {
     let _env = PathGuard::new(&[("claude", "#!/bin/sh\necho hello\n")]);
-    let result = launch_agent("claude", "prompt", &base_config()).expect("launch");
+    let result = launch_agent(
+        &base_launch(),
+        &base_process(),
+        &AgentCapabilities::default(),
+    )
+    .expect("launch");
     assert!(result.stdout.contains("hello"));
 }
 
 #[test]
 fn launch_captures_stderr() {
     let _env = PathGuard::new(&[("claude", "#!/bin/sh\necho error 1>&2\n")]);
-    let result = launch_agent("claude", "prompt", &base_config()).expect("launch");
+    let result = launch_agent(
+        &base_launch(),
+        &base_process(),
+        &AgentCapabilities::default(),
+    )
+    .expect("launch");
     assert!(result.stderr.contains("error"));
 }
 
 #[test]
 fn launch_nonzero_exit() {
     let _env = PathGuard::new(&[("claude", "#!/bin/sh\nexit 7\n")]);
-    let result = launch_agent("claude", "prompt", &base_config()).expect("launch");
+    let result = launch_agent(
+        &base_launch(),
+        &base_process(),
+        &AgentCapabilities::default(),
+    )
+    .expect("launch");
     assert_eq!(result.exit_code, 7);
 }
 
 #[test]
 fn launch_missing_binary_returns_error() {
     let _env = PathGuard::new_isolated(&[]);
-    let result = launch_agent("claude", "prompt", &base_config());
+    let result = launch_agent(
+        &base_launch(),
+        &base_process(),
+        &AgentCapabilities::default(),
+    );
     assert!(matches!(
         result,
         Err(CoreError::IoError(_)) | Err(CoreError::ExecutionFailed(_))
@@ -127,18 +156,23 @@ fn launch_missing_binary_returns_error() {
 fn launch_with_cwd() {
     let _env = PathGuard::new(&[("claude", "#!/bin/sh\npwd\n")]);
     let cwd = TempDir::new().expect("cwd");
-    let mut config = base_config();
-    config.cwd = Some(cwd.path().to_path_buf());
-    let result = launch_agent("claude", "prompt", &config).expect("launch");
+    let mut launch = base_launch();
+    launch.cwd = Some(cwd.path().to_path_buf());
+    let result =
+        launch_agent(&launch, &base_process(), &AgentCapabilities::default()).expect("launch");
     assert!(result.stdout.contains(&cwd.path().display().to_string()));
 }
 
 #[test]
 fn launch_streaming_mode() {
     let _env = PathGuard::new(&[("claude", "#!/bin/sh\necho first\necho second\n")]);
-    let mut config = base_config();
-    config.stream = true;
-    let result = launch_agent("claude", "prompt", &config).expect("launch");
+    let process = ProcessConfig {
+        auto: true,
+        stream: true,
+        ..Default::default()
+    };
+    let result =
+        launch_agent(&base_launch(), &process, &AgentCapabilities::default()).expect("launch");
     assert!(result.stdout.contains("first"));
     assert!(result.stdout.contains("second"));
 }

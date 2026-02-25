@@ -223,6 +223,69 @@ def cmd_run() -> int:
     return 0
 
 
+def _list_worktree_paths(repo_root: Path) -> list[Path]:
+    """List worktree paths from `git worktree list --porcelain`."""
+    result = run_capture(["git", "-C", str(repo_root), "worktree", "list", "--porcelain"])
+    if result.returncode != 0:
+        return []
+
+    worktrees: list[Path] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            worktrees.append(Path(line.split(" ", 1)[1]))
+    return worktrees
+
+
+def _seed_waves_from_worktrees() -> None:
+    """Create idle waves in lfd for checked-out worktrees that have wave/ definitions."""
+    worktrees = _list_worktree_paths(REPO_ROOT)
+    if not worktrees:
+        return
+
+    main_repo = worktrees[0]
+    wave_dir = main_repo / "wave"
+    if not wave_dir.is_dir():
+        return
+
+    repo_prefix = main_repo.name + "."
+    worktree_wave_names: list[str] = []
+    for wt in worktrees[1:]:
+        name = wt.name
+        if "-fork-" in name or ".ci-fix." in name or ".claude" in str(wt):
+            continue
+        if not name.startswith(repo_prefix):
+            continue
+        wave_name = name[len(repo_prefix):]
+        if (wave_dir / wave_name).is_dir():
+            worktree_wave_names.append(wave_name)
+
+    if not worktree_wave_names:
+        return
+
+    # Lazy-import to avoid pulling in httpx for non-lfd commands.
+    import loopflow.api as loopflow
+
+    try:
+        existing = {w.name for w in loopflow.waves(repo=str(main_repo))}
+    except Exception:
+        print("Warning: could not list waves from lfd, skipping wave seed")
+        return
+
+    seeded = 0
+    for wave_name in worktree_wave_names:
+        if wave_name in existing:
+            continue
+        try:
+            loopflow.create_wave(wave_name, repo=str(main_repo))
+            print(f"  Seeded wave: {wave_name}")
+            seeded += 1
+        except Exception as exc:
+            print(f"  Wave {wave_name}: {exc}")
+
+    if seeded:
+        print(f"Seeded {seeded} wave(s) from worktrees")
+
+
 def cmd_run_debug(with_lfd: bool = True, docker_lfd: bool = False) -> int:
     """Build and run with stdout visible."""
     lfd_process: subprocess.Popen[str] | None = None
@@ -247,6 +310,9 @@ def cmd_run_debug(with_lfd: bool = True, docker_lfd: bool = False) -> int:
             if lfd_log is not None:
                 lfd_log.close()
             return 1
+
+    if with_lfd:
+        _seed_waves_from_worktrees()
 
     print("Building and running Concerto (debug mode with logs)...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)

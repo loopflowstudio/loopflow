@@ -2,12 +2,15 @@ mod harness;
 pub mod types;
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, Mutex};
 
+use crate::engine::agent::LaunchConfig;
 use crate::lfd::id::LfdId;
+use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
 use crate::lfd::sessions::harness::{CreateHarnessFn, SessionHarness};
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
@@ -30,8 +33,14 @@ pub enum SessionManagerError {
     },
     #[error("unsupported provider: {0}")]
     UnsupportedProvider(String),
+    #[error("provider not implemented yet: {0}")]
+    ProviderNotImplemented(String),
     #[error("wave run already has an active session: {0}")]
     WaveRunSessionConflict(String),
+    #[error("invalid session config: {0}")]
+    InvalidConfig(String),
+    #[error("invalid repo_root: {0}")]
+    InvalidRepoRoot(String),
     #[error("turn already in progress")]
     TurnAlreadyInProgress,
     #[error("harness error: {0}")]
@@ -86,11 +95,8 @@ impl SessionManager {
         &self,
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
-        let provider = harness::canonical_provider(&params.provider)
-            .map(ToString::to_string)
-            .ok_or_else(|| {
-                SessionManagerError::UnsupportedProvider(params.provider.trim().to_lowercase())
-            })?;
+        let provider = resolve_provider(&params.provider)?;
+        let (session_config, prepared_prompt) = self.prepare_session_prompt(params.config).await?;
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
             if self
@@ -112,7 +118,7 @@ impl SessionManager {
             status: SessionStatus::Starting,
             wave_run_id: params.wave_run_id,
             provider_session_id: None,
-            config: params.config,
+            config: session_config,
             created_at: time::OffsetDateTime::now_utc(),
             ended_at: None,
         };
@@ -143,9 +149,45 @@ impl SessionManager {
         .await?;
 
         self.spawn_harness_event_bridge(session.id.clone(), runtime.clone(), harness_events_rx);
-        self.spawn_harness_startup(session.id.clone(), runtime.clone(), session.config.clone());
+        self.spawn_harness_startup(session.id.clone(), runtime.clone(), prepared_prompt);
 
         Ok(session)
+    }
+
+    async fn prepare_session_prompt(
+        &self,
+        mut config: SessionConfig,
+    ) -> Result<(SessionConfig, LaunchConfig), SessionManagerError> {
+        let repo_root = validate_repo_root(&config.repo_root)?;
+        let step = config.step.trim().to_string();
+        if step.is_empty() {
+            return Err(SessionManagerError::InvalidConfig(
+                "step is required".to_string(),
+            ));
+        }
+
+        let cwd = resolve_cwd(&repo_root, config.cwd.as_deref())?;
+        config.step = step.clone();
+        config.repo_root = repo_root.to_string_lossy().to_string();
+        config.cwd = cwd.as_ref().map(|path| path.to_string_lossy().to_string());
+        let prepared = prepare_step_prompt(PrepareStepPromptConfig {
+            repo_root: &repo_root,
+            step: &step,
+            run_mode: "interactive",
+            directions: &config.directions,
+            area: config.area.clone(),
+            wave: config.wave.clone(),
+            message: config.message.clone(),
+            model: config.model.clone(),
+            cwd,
+            max_turns: config.max_turns,
+            yolo_mode: config.yolo_mode,
+            summary_source: None,
+        })
+        .await
+        .map_err(|err| SessionManagerError::InvalidConfig(err.to_string()))?;
+
+        Ok((config, prepared))
     }
 
     pub async fn get_session(&self, session_id: &LfdId) -> Result<Session, SessionManagerError> {
@@ -311,13 +353,13 @@ impl SessionManager {
         &self,
         session_id: LfdId,
         runtime: Arc<SessionRuntime>,
-        config: SessionConfig,
+        launch: LaunchConfig,
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
             let result = {
                 let mut harness = runtime.harness.lock().await;
-                harness.start(&config).await
+                harness.start(&launch).await
             };
 
             match result {
@@ -459,6 +501,96 @@ impl SessionManager {
     }
 }
 
+fn resolve_provider(provider: &str) -> Result<String, SessionManagerError> {
+    let requested_provider = provider.trim().to_ascii_lowercase();
+    if matches!(requested_provider.as_str(), "gemini" | "opencode") {
+        return Err(SessionManagerError::ProviderNotImplemented(
+            requested_provider,
+        ));
+    }
+
+    harness::canonical_provider(&requested_provider)
+        .map(ToString::to_string)
+        .ok_or(SessionManagerError::UnsupportedProvider(requested_provider))
+}
+
+fn validate_repo_root(repo_root: &str) -> Result<PathBuf, SessionManagerError> {
+    let raw = repo_root.trim();
+    if raw.is_empty() {
+        return Err(SessionManagerError::InvalidRepoRoot(
+            "path is empty".to_string(),
+        ));
+    }
+
+    let path = PathBuf::from(raw);
+    if !path.exists() {
+        return Err(SessionManagerError::InvalidRepoRoot(format!(
+            "path does not exist: {raw}"
+        )));
+    }
+    if !path.is_dir() {
+        return Err(SessionManagerError::InvalidRepoRoot(format!(
+            "path is not a directory: {raw}"
+        )));
+    }
+    if !path.join(".lf").is_dir() {
+        return Err(SessionManagerError::InvalidRepoRoot(format!(
+            "missing .lf/ in repo root: {raw}"
+        )));
+    }
+    Ok(path)
+}
+
+fn resolve_cwd(
+    repo_root: &Path,
+    cwd: Option<&str>,
+) -> Result<Option<PathBuf>, SessionManagerError> {
+    let Some(trimmed) = cwd.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    let path = PathBuf::from(trimmed);
+    let resolved = if path.is_absolute() {
+        path
+    } else {
+        repo_root.join(path)
+    };
+
+    if !resolved.exists() {
+        return Err(SessionManagerError::InvalidConfig(format!(
+            "cwd does not exist: {}",
+            resolved.display()
+        )));
+    }
+    if !resolved.is_dir() {
+        return Err(SessionManagerError::InvalidConfig(format!(
+            "cwd is not a directory: {}",
+            resolved.display()
+        )));
+    }
+
+    let canonical_root = repo_root.canonicalize().map_err(|err| {
+        SessionManagerError::InvalidRepoRoot(format!(
+            "failed to resolve repo_root '{}': {err}",
+            repo_root.display()
+        ))
+    })?;
+    let canonical_cwd = resolved.canonicalize().map_err(|err| {
+        SessionManagerError::InvalidConfig(format!(
+            "failed to resolve cwd '{}': {err}",
+            resolved.display()
+        ))
+    })?;
+    if !canonical_cwd.starts_with(&canonical_root) {
+        return Err(SessionManagerError::InvalidConfig(format!(
+            "cwd must be inside repo_root: {}",
+            canonical_cwd.display()
+        )));
+    }
+
+    Ok(Some(canonical_cwd))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,7 +609,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for FakeHarness {
-        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
             Ok(())
         }
 
@@ -514,7 +646,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for BusyHarness {
-        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
             Ok(())
         }
 
@@ -543,7 +675,7 @@ mod tests {
 
     #[async_trait]
     impl SessionHarness for ResumeAwareHarness {
-        async fn start(&mut self, _config: &SessionConfig) -> Result<()> {
+        async fn start(&mut self, _config: &LaunchConfig) -> Result<()> {
             Ok(())
         }
 
@@ -629,6 +761,15 @@ mod tests {
         panic!("session never captured expected provider session id");
     }
 
+    fn test_session_config(repo_root: &std::path::Path) -> SessionConfig {
+        std::fs::create_dir_all(repo_root.join(".lf")).expect("create .lf for tests");
+        SessionConfig {
+            step: "design".to_string(),
+            repo_root: repo_root.to_string_lossy().to_string(),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
     async fn session_lifecycle_create_input_events_end() {
         let tmp = tempdir().expect("tempdir");
@@ -640,11 +781,14 @@ mod tests {
         );
 
         let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        std::fs::create_dir_all(tmp.path().join(".lf")).expect("create .lf for tests");
         let created = manager
             .create_session(CreateSessionParams {
                 provider: "codex".to_string(),
                 wave_run_id: Some("run_1".to_string()),
                 config: SessionConfig {
+                    step: "design".to_string(),
+                    repo_root: tmp.path().to_string_lossy().to_string(),
                     model: Some("gpt-5.1-codex".to_string()),
                     cwd: Some(tmp.path().to_string_lossy().to_string()),
                     ..Default::default()
@@ -721,6 +865,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_session_marks_known_unimplemented_provider() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::new(store);
+
+        let err = manager
+            .create_session(CreateSessionParams {
+                provider: "gemini".to_string(),
+                wave_run_id: None,
+                config: SessionConfig::default(),
+            })
+            .await
+            .expect_err("gemini should be explicitly not implemented");
+
+        assert!(matches!(
+            err,
+            SessionManagerError::ProviderNotImplemented(ref provider) if provider == "gemini"
+        ));
+    }
+
+    #[tokio::test]
+    async fn create_session_rejects_invalid_repo_root() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+
+        let err = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig {
+                    step: "design".to_string(),
+                    repo_root: tmp.path().join("missing").to_string_lossy().to_string(),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect_err("invalid repo root should fail");
+
+        assert!(matches!(err, SessionManagerError::InvalidRepoRoot(_)));
+    }
+
+    #[tokio::test]
+    async fn create_session_rejects_cwd_outside_repo_root() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let repo_root = tmp.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".lf")).expect("create .lf for tests");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).expect("create outside dir");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+
+        let err = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: SessionConfig {
+                    step: "design".to_string(),
+                    repo_root: repo_root.to_string_lossy().to_string(),
+                    cwd: Some(outside.to_string_lossy().to_string()),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect_err("cwd outside repo root should fail");
+
+        assert!(matches!(err, SessionManagerError::InvalidConfig(_)));
+    }
+
+    #[tokio::test]
     async fn create_session_enforces_single_active_session_per_wave_run() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
@@ -735,7 +964,7 @@ mod tests {
             .create_session(CreateSessionParams {
                 provider: "codex".to_string(),
                 wave_run_id: Some("run_1".to_string()),
-                config: SessionConfig::default(),
+                config: test_session_config(tmp.path()),
             })
             .await
             .expect("first session should create");
@@ -745,7 +974,7 @@ mod tests {
             .create_session(CreateSessionParams {
                 provider: "codex".to_string(),
                 wave_run_id: Some("run_1".to_string()),
-                config: SessionConfig::default(),
+                config: test_session_config(tmp.path()),
             })
             .await
             .expect_err("second active session should be rejected");
@@ -771,7 +1000,7 @@ mod tests {
             .create_session(CreateSessionParams {
                 provider: "claude".to_string(),
                 wave_run_id: None,
-                config: SessionConfig::default(),
+                config: test_session_config(tmp.path()),
             })
             .await
             .expect("create session");
@@ -805,7 +1034,7 @@ mod tests {
             .create_session(CreateSessionParams {
                 provider: "claude".to_string(),
                 wave_run_id: None,
-                config: SessionConfig::default(),
+                config: test_session_config(tmp.path()),
             })
             .await
             .expect("create session");

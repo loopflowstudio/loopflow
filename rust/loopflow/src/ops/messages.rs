@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::engine::agent::{launch_agent, LaunchConfig};
+use crate::engine::agent::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::prompt::count_tokens;
 
@@ -102,21 +102,25 @@ pub fn generate_pr_message_from_diff(repo: &Path, diff: &str) -> OpsResult<Messa
 
 fn generate_message(repo: &Path, prompt: &str) -> OpsResult<Message> {
     let config = load_config_or_default(Some(repo));
-    let launch_config = LaunchConfig {
-        auto: true,
-        stream: false,
-        skip_permissions: true,
-        model_variant: None,
-        chrome: config.chrome,
+    let launch = LaunchConfig {
+        task_prompt: format!(
+            "{}\n\nReturn JSON with keys: title, body. No extra text.",
+            prompt
+        ),
+        model: Some(config.agent_model.clone()),
         cwd: Some(repo.to_path_buf()),
-        context_file: None,
+        skip_permissions: true,
         ..Default::default()
     };
-    let prompt = format!(
-        "{}\n\nReturn JSON with keys: title, body. No extra text.",
-        prompt
-    );
-    let result = launch_agent(&config.agent_model, &prompt, &launch_config)
+    let process = ProcessConfig {
+        auto: true,
+        stream: false,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
+    };
+    let result = launch_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
     if result.exit_code != 0 {
         return Err(OpsError::AgentFailed(result.stderr));
@@ -205,29 +209,20 @@ fn extract_inline_json(text: &str) -> Option<MessagePayload> {
 }
 
 fn get_staged_diff(repo: &Path) -> OpsResult<Option<String>> {
-    let output = std::process::Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-    if diff.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(diff))
-    }
+    run_git_diff(repo, &["diff", "--cached"])
 }
 
 fn get_branch_diff(repo: &Path) -> OpsResult<Option<String>> {
     let main_repo =
         crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let base_branch = crate::engine::git::get_default_branch(&main_repo)?;
+    let range = format!("origin/{base_branch}...HEAD");
+    run_git_diff(repo, &["diff", &range])
+}
+
+fn run_git_diff(repo: &Path, args: &[&str]) -> OpsResult<Option<String>> {
     let output = std::process::Command::new("git")
-        .arg("diff")
-        .arg(format!("origin/{}...HEAD", base_branch))
+        .args(args)
         .current_dir(repo)
         .output()?;
     if !output.status.success() {

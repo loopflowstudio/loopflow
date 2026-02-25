@@ -2,7 +2,7 @@
 
 Unified session API for interactive coding agents. lfd spawns and manages provider processes (Codex, Claude, OpenCode), translates events into a canonical model, persists everything for replay. Concerto and future clients connect via HTTP/SSE.
 
-`lf` is unchanged. This is purely a new lfd API surface.
+`lf` headless runs are unchanged. Interactive `lf` commands (`design`, `explore`, `review`, `refine`) will move to the session API + Concerto UI in Phase 05.
 
 ## Vision
 
@@ -49,7 +49,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 | 02 | Claude Harness | `-p --resume` with structured output. Probes agent personality. | shipped |
 | 03 | Concerto UI | Typed transcript, item cards, session lifecycle, reconnect/replay | shipped |
 | 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
-| 05 | Claude `--sdk-url` | Reference only — not pursuing unless landscape changes | |
+| 05 | Runtime Convergence | Unify engine + session execution. Interactive `lf` → session API + Concerto chat UI. | |
 | 06 | OpenCode Harness | Third provider harness validates the abstraction | |
 | 07 | Provider Layer Unification | Make provider harnesses the shared core used by both `lf` CLI runs and `/v0/sessions` HTTP sessions | planned |
 

@@ -168,6 +168,8 @@ Prompts are executed by agents, but outputs are read by humans. Keep both audien
 - Verdicts should be unambiguous
 - Design docs should stand alone
 
+When a prompt produces a test plan or demo procedure, produce a runnable script in `scripts/` — not a list of commands. Check `scripts/` first and extend existing scripts when possible. The bar: one command to run, one environment to verify in.
+
 When in doubt about output format, optimize for the person who'll read it.
 
 ## Examples

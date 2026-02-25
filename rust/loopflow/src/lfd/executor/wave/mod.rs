@@ -30,8 +30,9 @@ use crate::lfd::types::{
 
 use super::docker::DockerExecutor;
 use super::helpers::{
-    advance_branch, auto_create_pr, build_agent_for_step, build_step_prompt,
-    flow_parents_for_index, is_active_wave_run_status, is_ephemeral_worktree_path,
+    advance_branch, auto_create_pr, build_agent_capabilities, build_agent_for_step,
+    build_step_prompt, flow_parents_for_index, is_active_wave_run_status,
+    is_ephemeral_worktree_path,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, EphemeralOwnerKind, EphemeralWorktree, JanitorReport, StartupRecovery};
@@ -510,7 +511,7 @@ impl WaveExecutor {
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
         let worktree = run.worktree.clone();
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
-        let (prompt, model, launch) = build_step_prompt(
+        let (launch, process) = build_step_prompt(
             &worktree,
             step,
             &run.snapshot.direction,
@@ -519,6 +520,8 @@ impl WaveExecutor {
             None,
         )
         .await?;
+        let capabilities = build_agent_capabilities(&worktree);
+        let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 
         let outcome = self
@@ -529,7 +532,7 @@ impl WaveExecutor {
                 worktree,
                 step: step.clone(),
                 model: model.clone(),
-                cmd: build_agent_command(&model, &prompt, &launch),
+                cmd: build_agent_command(&launch, &process, &capabilities),
                 output_prefix: None,
             })
             .await?;

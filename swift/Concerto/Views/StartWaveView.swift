@@ -1,14 +1,31 @@
 // Landing view shown when no wave is selected.
-// Single text field to start a new wave by name.
+// Collects a wave name, creates a wave, and auto-launches a step (default: design).
 
 import SwiftUI
 import LoopflowCore
 
 struct StartWaveView: View {
+    private enum InteractiveStep: String, CaseIterable {
+        case design
+        case explore
+        case review
+        case refine
+
+        var launchLabel: String {
+            switch self {
+            case .design: "Start designing"
+            case .explore: "Start exploring"
+            case .review: "Start reviewing"
+            case .refine: "Start refining"
+            }
+        }
+    }
+
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
     @State private var waveName = ""
+    @State private var selectedStep: InteractiveStep = .design
     @State private var isCreating = false
     @State private var errorMessage: String?
     @FocusState private var isTextFieldFocused: Bool
@@ -22,7 +39,7 @@ struct StartWaveView: View {
                     .font(Typography.heroTitle())
                     .foregroundStyle(palette.accent)
 
-                TextField("What do you want to build?", text: $waveName)
+                TextField("Wave name", text: $waveName)
                     .textFieldStyle(.plain)
                     .font(Typography.body())
                     .padding(Spacing.md)
@@ -30,8 +47,47 @@ struct StartWaveView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                     .frame(maxWidth: 400)
                     .focused($isTextFieldFocused)
-                    .onSubmit { createWave() }
+                    .onSubmit { startWave() }
                     .disabled(isCreating)
+
+                HStack(spacing: Spacing.sm) {
+                    Button {
+                        startWave()
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            if isCreating {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                            }
+                            Text(buttonLabel)
+                        }
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(isCreating || trimmedName.isEmpty)
+
+                    Menu {
+                        ForEach(InteractiveStep.allCases, id: \.rawValue) { step in
+                            Button {
+                                selectedStep = step
+                            } label: {
+                                HStack {
+                                    Text(step.rawValue)
+                                    if step == selectedStep {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .frame(width: HitTarget.comfortable, height: HitTarget.comfortable)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Choose which step to run")
+                }
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -46,23 +102,40 @@ struct StartWaveView: View {
         .onAppear { isTextFieldFocused = true }
     }
 
-    private func createWave() {
-        guard !isCreating else { return }
+    private var trimmedName: String {
+        waveName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var buttonLabel: String {
+        selectedStep.launchLabel
+    }
+
+    private func startWave() {
+        guard !isCreating, !trimmedName.isEmpty else { return }
+
         isCreating = true
         errorMessage = nil
+        let name = trimmedName
+        let step = selectedStep.rawValue
 
         Task {
             defer { isCreating = false }
-
             do {
-                try await repoState.ensureReadyToCreateWave(outputBuffer: outputBuffer)
-                let name = waveName.trimmingCharacters(in: .whitespacesAndNewlines)
-                try await repoState.createWave(name: name)
-                NotificationCenter.default.post(name: .editWaveName, object: nil)
+                let wave = try await repoState.createWave(name: name)
+                waveName = ""
+
+                guard let worktree = wave.localWorktree else {
+                    errorMessage = "Wave created but no worktree available."
+                    return
+                }
+
+                outputBuffer.launchInteractiveSession(
+                    waveId: wave.id,
+                    step: step,
+                    worktreePath: worktree
+                )
             } catch {
-                errorMessage = repoState.isConnected
-                    ? error.localizedDescription
-                    : repoState.connectionSummary
+                errorMessage = error.localizedDescription
             }
         }
     }

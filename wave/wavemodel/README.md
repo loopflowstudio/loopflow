@@ -12,7 +12,9 @@ The full experience: open Concerto, describe what you want to build, and the des
 
 - Database schema changes for wave content (stays in markdown)
 - Enforced validation of "at least one section" in tooling (convention first)
-- Full interactive `lf design` inside Concerto (depends on agentapi)
+- Per-tab step routing in Concerto (all chat tabs default to `step: design` for now)
+- Runtime convergence between wave executor and session orchestration (executor stays auto/headless; sessions are interactive — separate concerns until convergence work lands)
+- Real-time wave content refresh via filesystem watcher (on-demand loading works, live updates don't)
 
 ## Goals
 
@@ -22,14 +24,16 @@ The full experience: open Concerto, describe what you want to build, and the des
 - `lf design` is the primary wave creation entry point
 - Concerto orients new users toward design, not configuration
 - Wave content (Vision, Goals) is visible in the Concerto UI
+- Sessions validate that `repo_root` contains `.lf/` and `cwd` resolves inside it — wave content is only meaningful in initialized repos
 
 ## Risks
 
 - **README migration could lose nuance.** Mechanical restructuring might flatten content that was intentionally organized differently. Mitigate: preserve all content, only rename/regroup sections. *Phase 01 evidence: migrations preserved all content. Reorganization was clean — "North Star" → "Vision", design decisions and architecture moved into roadmap items. Risk is lower than expected for future migrations.*
-- **Concerto NUX depends on agentapi.** The full interactive design experience can't ship until interactive agent sessions work in Concerto. Mitigate: Phase 03 does what it can now (UI framing, content display), full experience completes later.
-- **Swift client has dead WaveSchema code.** Phase 02 removed the `GET /wave/schemas` endpoint but `LocalWaveService.swift`, `WaveSidebar.swift`, `RepoState.swift`, and `WaveServiceProtocol.swift` still reference `WaveSchema`. Returns `[]` so the app won't crash, but it's dead code in exactly the files Phase 03 modifies. Clean up before or at the start of Phase 03.
+- ~~**Concerto NUX depends on agentapi.**~~ *Resolved. The unified agent harness (Phase 04) shipped on the same branch, unlocking inline design sessions earlier than expected. `StartWaveView` creates a `ChatState` with `step: design` and sends the user's prompt as the first turn — no external terminal. Remaining gap: all chat tabs default to `step: design`; per-tab step routing is tracked as future work.*
+- ~~**Swift client has dead WaveSchema code.**~~ *Resolved in Phase 03. `WaveSchema.swift` deleted, references removed from `LocalWaveService`, `WaveSidebar`, `RepoState`, and `WaveServiceProtocol`. Clean removal, no regressions.*
 - **Step prompts may over-reference sections.** If every step checks every section, prompts get bloated and agents waste tokens on irrelevant context. Mitigate: each step references only the sections relevant to its job. *Phase 01 evidence: gate checks Goals/Risks/Metrics, review checks Vision/Goals/Risks, ingest reads all four for selection. No step references all four sections unconditionally.*
-- **Section placement varies across waves.** Scope boundaries appear as "Not here" under Vision (agentapi, remote), "Security boundary (non-goals)" at the end (security), or inline in Vision (wavemodel). Phase 03's README parser should match `## Vision`, `## Goals`, `## Risks`, `## Metrics` as the four sections and treat everything else as supplementary.
+- **Section placement varies across waves.** Scope boundaries appear as "Not here" under Vision (agentapi, remote), "Security boundary (non-goals)" at the end (security), or inline in Vision (wavemodel). *Phase 03 evidence: `WaveContentParser` matches `## Vision`, `## Goals`, `## Risks`, `## Metrics` by exact heading name. Everything else is treated as supplementary. Convention-based, intentionally lenient — non-standard headings are silently ignored.*
+- **Wave content loading has no filesystem watcher.** Content is loaded on-demand when a wave is selected and cached in `WaveViewModel`. Changes to wave READMEs on disk won't appear until the user re-selects the wave or status/activation changes trigger a refresh. *Phase 04 evidence: confirmed gap. Inline design sessions modify the README during conversation, but Concerto won't reflect those changes until the user navigates away and back. `workspace_changed` signaling is the likely fix, tracked as future work.*
 
 ## Metrics
 
@@ -37,5 +41,10 @@ The full experience: open Concerto, describe what you want to build, and the des
 - Roadmap lives as `##-*.md` files, not in the README *(Phase 01: done)*
 - 6 built-in steps reference README sections and roadmap files by convention *(Phase 01: done)*
 - `lf design` conversation produces wave directories directly (no intermediate `add-to-wave` step) *(Phase 02: done)*
-- New users in Concerto see "What do you want to build?" not "Configure a wave"
+- New users in Concerto see "What do you want to build?" not "Configure a wave" *(Phase 03: done)*
+- Wave Vision, Goals, Risks, and Roadmap visible in Concerto detail panel *(Phase 03: done)*
+- Prompt assembly shared between executor and sessions via `prepare_step_prompt()` *(Phase 04: done)*
+- Launch config cleanly separated into intent (`LaunchConfig`), execution (`ProcessConfig`), and capabilities (`AgentCapabilities`) *(Phase 04: done)*
+- Sessions receive step-level intent, not raw system prompts *(Phase 04: done)*
+- Inline design sessions work in Concerto without external terminal *(Phase 04: done)*
 

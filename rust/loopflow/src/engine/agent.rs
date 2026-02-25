@@ -55,18 +55,27 @@ pub struct LaunchResult {
 /// Configuration for launching an agent.
 #[derive(Debug, Clone, Default)]
 pub struct LaunchConfig {
-    /// Run in auto/batch mode (non-interactive)
-    pub auto: bool,
-    /// Stream output in real-time
-    pub stream: bool,
+    /// System/context prompt content.
+    pub system_prompt: String,
+    /// Task prompt content sent as the turn input.
+    pub task_prompt: String,
+    /// Model string (for example: "claude:opus" or "codex").
+    pub model: Option<String>,
+    /// Provider-specific max turn budget when supported.
+    pub max_turns: Option<u32>,
+    /// Working directory.
+    pub cwd: Option<std::path::PathBuf>,
     /// Skip permission prompts
     pub skip_permissions: bool,
-    /// Model variant (e.g., "opus", "sonnet")
-    pub model_variant: Option<String>,
-    /// Enable Chrome integration (Claude only)
-    pub chrome: bool,
-    /// Working directory
-    pub cwd: Option<std::path::PathBuf>,
+}
+
+/// Process/runtime options for launching an agent subprocess.
+#[derive(Debug, Clone, Default)]
+pub struct ProcessConfig {
+    /// Run in auto/batch mode (non-interactive).
+    pub auto: bool,
+    /// Stream output in real-time.
+    pub stream: bool,
     /// Path to context file for system prompt loading (model-agnostic).
     /// For Claude, this uses --append-system-prompt-file.
     pub context_file: Option<std::path::PathBuf>,
@@ -74,51 +83,75 @@ pub struct LaunchConfig {
     pub stream_format: StreamFormat,
 }
 
+/// Provider capability flags.
+#[derive(Debug, Clone, Default)]
+pub struct AgentCapabilities {
+    /// Enable Chrome integration (Claude only).
+    pub chrome: bool,
+}
+
 /// Build Claude CLI command.
-pub fn build_claude_command(config: &LaunchConfig) -> Vec<String> {
+pub fn build_claude_command(
+    launch: &LaunchConfig,
+    process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
+    model_variant: Option<&str>,
+) -> Vec<String> {
     let mut cmd = vec!["claude".to_string()];
 
-    if config.chrome {
+    if capabilities.chrome {
         cmd.push("--chrome".to_string());
     }
 
-    if let Some(ref variant) = config.model_variant {
+    if let Some(variant) = model_variant {
         cmd.push("--model".to_string());
-        cmd.push(variant.clone());
+        cmd.push(variant.to_string());
     }
 
     // Load context via system prompt file for cleaner input history
-    if let Some(ref context_file) = config.context_file {
+    if let Some(ref context_file) = process.context_file {
         cmd.push("--append-system-prompt-file".to_string());
         cmd.push(context_file.to_string_lossy().to_string());
+    } else if !launch.system_prompt.trim().is_empty() {
+        cmd.push("--append-system-prompt".to_string());
+        cmd.push(launch.system_prompt.clone());
     }
 
-    if config.auto {
+    if process.auto {
         cmd.push("--print".to_string());
         cmd.push("--dangerously-skip-permissions".to_string());
-        if config.stream {
+        if process.stream {
             cmd.push("--output-format".to_string());
             cmd.push("stream-json".to_string());
             cmd.push("--verbose".to_string());
         }
-    } else if config.skip_permissions {
+    } else if launch.skip_permissions {
         cmd.push("--dangerously-skip-permissions".to_string());
+    }
+
+    if let Some(max_turns) = launch.max_turns {
+        cmd.push("--max-turns".to_string());
+        cmd.push(max_turns.to_string());
     }
 
     cmd
 }
 
 /// Build Codex CLI command.
-pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
+pub fn build_codex_command(
+    launch: &LaunchConfig,
+    process: &ProcessConfig,
+    model_variant: Option<&str>,
+) -> Vec<String> {
     // `codex exec` for batch/auto mode, `codex` for interactive
-    let mut cmd = if config.auto {
+    let mut cmd = if process.auto {
         vec!["codex".to_string(), "exec".to_string()]
     } else {
         vec!["codex".to_string()]
     };
 
     // Load context via model_instructions_file (replaces AGENTS.md)
-    if let Some(ref context_file) = config.context_file {
+    if let Some(ref context_file) = process.context_file {
         cmd.push("-c".to_string());
         cmd.push(format!(
             "model_instructions_file=\"{}\"",
@@ -126,27 +159,27 @@ pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
         ));
     }
 
-    if let Some(ref variant) = config.model_variant {
+    if let Some(variant) = model_variant {
         cmd.push("-c".to_string());
-        cmd.push(format!("model=\"{}\"", variant));
+        cmd.push(format!("model=\"{variant}\""));
     }
 
-    if let Some(ref cwd) = config.cwd {
+    if let Some(ref cwd) = launch.cwd {
         cmd.push("-C".to_string());
         cmd.push(cwd.to_string_lossy().to_string());
     }
 
-    if config.stream && matches!(config.stream_format, StreamFormat::Raw) {
+    if process.stream && matches!(process.stream_format, StreamFormat::Raw) {
         cmd.push("--json".to_string());
     }
 
-    if config.skip_permissions {
+    if launch.skip_permissions {
         cmd.push("--yolo".to_string());
     } else {
         cmd.push("--sandbox".to_string());
         cmd.push("workspace-write".to_string());
 
-        if config.auto {
+        if process.auto {
             cmd.push("--full-auto".to_string());
         }
     }
@@ -155,20 +188,24 @@ pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
 }
 
 /// Build Gemini CLI command.
-pub fn build_gemini_command(config: &LaunchConfig) -> Vec<String> {
+pub fn build_gemini_command(
+    launch: &LaunchConfig,
+    process: &ProcessConfig,
+    model_variant: Option<&str>,
+) -> Vec<String> {
     let mut cmd = vec!["gemini".to_string()];
 
-    if let Some(ref variant) = config.model_variant {
+    if let Some(variant) = model_variant {
         cmd.push("-m".to_string());
-        cmd.push(variant.clone());
+        cmd.push(variant.to_string());
     }
 
-    if config.stream {
+    if process.stream {
         cmd.push("--output-format".to_string());
         cmd.push("stream-json".to_string());
     }
 
-    if config.skip_permissions {
+    if launch.skip_permissions {
         cmd.push("--yolo".to_string());
     }
 
@@ -176,20 +213,20 @@ pub fn build_gemini_command(config: &LaunchConfig) -> Vec<String> {
 }
 
 /// Build OpenCode CLI command.
-pub fn build_opencode_command(config: &LaunchConfig) -> Vec<String> {
+pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&str>) -> Vec<String> {
     // `opencode run` for batch/auto mode, `opencode` for interactive TUI
-    let mut cmd = if config.auto {
+    let mut cmd = if process.auto {
         vec!["opencode".to_string(), "run".to_string()]
     } else {
         vec!["opencode".to_string()]
     };
 
-    if let Some(ref variant) = config.model_variant {
+    if let Some(variant) = model_variant {
         cmd.push("--model".to_string());
-        cmd.push(variant.clone());
+        cmd.push(variant.to_string());
     }
 
-    if config.auto && config.stream {
+    if process.auto && process.stream {
         cmd.push("--format".to_string());
         cmd.push("json".to_string());
     }
@@ -200,15 +237,15 @@ pub fn build_opencode_command(config: &LaunchConfig) -> Vec<String> {
 /// Build the `OPENCODE_CONFIG_CONTENT` env var JSON string.
 ///
 /// Returns `None` when no config overrides are needed (interactive mode, no context).
-pub fn build_opencode_env(config: &LaunchConfig) -> Option<String> {
+pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     let mut oc_config = serde_json::Map::new();
-    if config.auto {
+    if process.auto {
         oc_config.insert(
             "permission".into(),
             serde_json::Value::String("allow".into()),
         );
     }
-    if let Some(ref context_file) = config.context_file {
+    if let Some(ref context_file) = process.context_file {
         oc_config.insert(
             "instructions".into(),
             serde_json::json!([context_file.to_string_lossy()]),
@@ -222,53 +259,56 @@ pub fn build_opencode_env(config: &LaunchConfig) -> Option<String> {
 }
 
 /// Build command for any model.
-pub fn build_model_command(model: &str, config: &LaunchConfig) -> Vec<String> {
-    match model {
-        "claude" => build_claude_command(config),
-        "codex" => build_codex_command(config),
-        "gemini" => build_gemini_command(config),
-        "opencode" => build_opencode_command(config),
-        _ => build_claude_command(config), // default to claude
+pub fn build_model_command(
+    launch: &LaunchConfig,
+    process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
+) -> Vec<String> {
+    let model = launch.model.as_deref().unwrap_or("claude");
+    let (backend, variant) = parse_model(model);
+    let model_variant = variant.as_deref();
+
+    match backend.as_str() {
+        "claude" => build_claude_command(launch, process, capabilities, model_variant),
+        "codex" => build_codex_command(launch, process, model_variant),
+        "gemini" => build_gemini_command(launch, process, model_variant),
+        "opencode" => build_opencode_command(process, model_variant),
+        _ => build_claude_command(launch, process, capabilities, Some(model)),
     }
 }
 
 /// Build a full CLI command (including prompt) for a model.
-pub fn build_agent_command(model: &str, prompt: &str, config: &LaunchConfig) -> Vec<String> {
-    let (backend, variant) = parse_model(model);
-
-    let mut launch_config = config.clone();
-    if launch_config.model_variant.is_none() {
-        launch_config.model_variant = variant;
+pub fn build_agent_command(
+    launch: &LaunchConfig,
+    process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
+) -> Vec<String> {
+    let mut cmd = build_model_command(launch, process, capabilities);
+    if !launch.task_prompt.is_empty() {
+        cmd.push(launch.task_prompt.clone());
     }
-
-    let mut cmd = build_model_command(&backend, &launch_config);
-    cmd.push(prompt.to_string());
     cmd
 }
 
 /// Launch an agent with the given prompt.
 ///
 /// # Arguments
-/// * `model` - Model string like "claude:opus" or "codex"
-/// * `prompt` - The prompt to send to the agent
-/// * `config` - Launch configuration
+/// * `launch` - Canonical launch config including prompt/model/cwd fields
+/// * `process` - Process execution options
+/// * `capabilities` - Provider capability flags
 ///
 /// # Returns
 /// LaunchResult with exit code and captured output (if any)
 pub fn launch_agent(
-    model: &str,
-    prompt: &str,
-    config: &LaunchConfig,
+    launch: &LaunchConfig,
+    process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
-    let (backend, variant) = parse_model(model);
+    let model = launch.model.as_deref().unwrap_or("claude");
+    let (backend, _variant) = parse_model(model);
 
-    let mut launch_config = config.clone();
-    if launch_config.model_variant.is_none() {
-        launch_config.model_variant = variant;
-    }
-
-    let cmd_args = build_model_command(&backend, &launch_config);
+    let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
@@ -283,11 +323,11 @@ pub fn launch_agent(
 
     let mut cmd = Command::new(program);
     cmd.args(args);
-    if !prompt.is_empty() {
-        cmd.arg(prompt);
+    if !launch.task_prompt.is_empty() {
+        cmd.arg(&launch.task_prompt);
     }
 
-    if let Some(ref cwd) = config.cwd {
+    if let Some(ref cwd) = launch.cwd {
         cmd.current_dir(cwd);
     }
 
@@ -299,7 +339,7 @@ pub fn launch_agent(
 
     // For Gemini, set GEMINI_SYSTEM_MD env var to load context
     if backend == "gemini" {
-        if let Some(ref context_file) = config.context_file {
+        if let Some(ref context_file) = process.context_file {
             cmd.env(
                 "GEMINI_SYSTEM_MD",
                 context_file.to_string_lossy().to_string(),
@@ -309,17 +349,17 @@ pub fn launch_agent(
 
     // For OpenCode, set OPENCODE_CONFIG_CONTENT env var for permissions and context
     if backend == "opencode" {
-        if let Some(env_val) = build_opencode_env(config) {
+        if let Some(env_val) = build_opencode_env(process) {
             cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
         }
     }
 
     propagate_rlm_env(&mut cmd);
 
-    if config.auto && config.stream {
+    if process.auto && process.stream {
         // Stream mode: capture stdout line by line
-        launch_streaming(&mut cmd, config.stream_format)
-    } else if config.auto {
+        launch_streaming(&mut cmd, process.stream_format)
+    } else if process.auto {
         // Batch mode: capture all output
         launch_batch(&mut cmd)
     } else {
@@ -548,9 +588,9 @@ pub fn check_cli_available(cli: &str) -> bool {
 pub trait Runner: Send + Sync {
     fn launch(
         &self,
-        model: &str,
-        prompt: &str,
-        config: &LaunchConfig,
+        launch: &LaunchConfig,
+        process: &ProcessConfig,
+        capabilities: &AgentCapabilities,
     ) -> Result<LaunchResult, CoreError>;
 }
 
@@ -561,11 +601,11 @@ pub struct DefaultRunner;
 impl Runner for DefaultRunner {
     fn launch(
         &self,
-        model: &str,
-        prompt: &str,
-        config: &LaunchConfig,
+        launch: &LaunchConfig,
+        process: &ProcessConfig,
+        capabilities: &AgentCapabilities,
     ) -> Result<LaunchResult, CoreError> {
-        launch_agent(model, prompt, config)
+        launch_agent(launch, process, capabilities)
     }
 }
 
@@ -573,74 +613,100 @@ impl Runner for DefaultRunner {
 mod tests {
     use super::*;
 
+    fn default_launch() -> LaunchConfig {
+        LaunchConfig {
+            task_prompt: "task".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn auto_process() -> ProcessConfig {
+        ProcessConfig {
+            auto: true,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn build_claude_command_auto() {
-        let config = LaunchConfig {
+        let launch = LaunchConfig {
+            skip_permissions: false,
+            ..default_launch()
+        };
+        let process = ProcessConfig {
             auto: true,
             stream: false,
-            skip_permissions: false,
             ..Default::default()
         };
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"--print".to_string()));
         assert!(cmd.contains(&"--dangerously-skip-permissions".to_string()));
     }
 
     #[test]
     fn build_claude_command_stream() {
-        let config = LaunchConfig {
+        let launch = default_launch();
+        let process = ProcessConfig {
             auto: true,
             stream: true,
             ..Default::default()
         };
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"stream-json".to_string()));
         assert!(cmd.contains(&"--verbose".to_string()));
     }
 
     #[test]
     fn build_claude_command_with_model_variant() {
-        let config = LaunchConfig {
-            model_variant: Some("opus".to_string()),
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&config);
+        let launch = default_launch();
+        let process = auto_process();
+        let cmd = build_claude_command(
+            &launch,
+            &process,
+            &AgentCapabilities::default(),
+            Some("opus"),
+        );
         assert!(cmd.contains(&"--model".to_string()));
         assert!(cmd.contains(&"opus".to_string()));
     }
 
     #[test]
     fn build_claude_command_with_chrome_flag() {
-        let config = LaunchConfig {
-            chrome: true,
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&config);
+        let launch = default_launch();
+        let process = auto_process();
+        let cmd =
+            build_claude_command(&launch, &process, &AgentCapabilities { chrome: true }, None);
         assert!(cmd.contains(&"--chrome".to_string()));
     }
 
     #[test]
     fn build_codex_command_auto() {
-        let config = LaunchConfig {
+        let launch = LaunchConfig {
+            skip_permissions: false,
+            ..default_launch()
+        };
+        let process = ProcessConfig {
             auto: true,
             stream: false,
-            skip_permissions: false,
             ..Default::default()
         };
-        let cmd = build_codex_command(&config);
+        let cmd = build_codex_command(&launch, &process, None);
         assert!(cmd.contains(&"exec".to_string()));
         assert!(cmd.contains(&"--full-auto".to_string()));
     }
 
     #[test]
     fn build_codex_command_interactive() {
-        let config = LaunchConfig {
+        let launch = LaunchConfig {
+            skip_permissions: false,
+            ..default_launch()
+        };
+        let process = ProcessConfig {
             auto: false,
             stream: false,
-            skip_permissions: false,
             ..Default::default()
         };
-        let cmd = build_codex_command(&config);
+        let cmd = build_codex_command(&launch, &process, None);
         assert!(
             !cmd.contains(&"exec".to_string()),
             "interactive mode should not use 'exec'"
@@ -650,105 +716,102 @@ mod tests {
 
     #[test]
     fn build_codex_command_with_model() {
-        let config = LaunchConfig {
-            model_variant: Some("o3".to_string()),
-            ..Default::default()
-        };
-        let cmd = build_codex_command(&config);
+        let launch = default_launch();
+        let process = auto_process();
+        let cmd = build_codex_command(&launch, &process, Some("o3"));
         assert!(cmd.contains(&"model=\"o3\"".to_string()));
     }
 
     #[test]
     fn build_codex_command_yolo() {
-        let config = LaunchConfig {
+        let launch = LaunchConfig {
             skip_permissions: true,
-            ..Default::default()
+            ..default_launch()
         };
-        let cmd = build_codex_command(&config);
+        let process = auto_process();
+        let cmd = build_codex_command(&launch, &process, None);
         assert!(cmd.contains(&"--yolo".to_string()));
         assert!(!cmd.contains(&"--sandbox".to_string()));
     }
 
     #[test]
     fn build_gemini_command_yolo() {
-        let config = LaunchConfig {
+        let launch = LaunchConfig {
             skip_permissions: true,
-            ..Default::default()
+            ..default_launch()
         };
-        let cmd = build_gemini_command(&config);
+        let process = auto_process();
+        let cmd = build_gemini_command(&launch, &process, None);
         assert!(cmd.contains(&"--yolo".to_string()));
     }
 
     #[test]
     fn build_gemini_command_with_model() {
-        let config = LaunchConfig {
-            model_variant: Some("gemini-1.5".to_string()),
-            ..Default::default()
-        };
-        let cmd = build_gemini_command(&config);
+        let launch = default_launch();
+        let process = auto_process();
+        let cmd = build_gemini_command(&launch, &process, Some("gemini-1.5"));
         assert!(cmd.contains(&"-m".to_string()));
         assert!(cmd.contains(&"gemini-1.5".to_string()));
     }
 
     #[test]
     fn build_claude_command_with_context_file() {
-        let config = LaunchConfig {
+        let launch = default_launch();
+        let process = ProcessConfig {
             context_file: Some(std::path::PathBuf::from("/tmp/context.md")),
             ..Default::default()
         };
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"--append-system-prompt-file".to_string()));
         assert!(cmd.contains(&"/tmp/context.md".to_string()));
     }
 
     #[test]
     fn build_codex_command_with_context_file() {
-        let config = LaunchConfig {
+        let launch = default_launch();
+        let process = ProcessConfig {
             context_file: Some(std::path::PathBuf::from("/tmp/context.md")),
             ..Default::default()
         };
-        let cmd = build_codex_command(&config);
+        let cmd = build_codex_command(&launch, &process, None);
         assert!(cmd.contains(&"-c".to_string()));
         assert!(cmd.contains(&"model_instructions_file=\"/tmp/context.md\"".to_string()));
     }
 
     #[test]
     fn build_opencode_command_auto() {
-        let config = LaunchConfig {
+        let process = ProcessConfig {
             auto: true,
             ..Default::default()
         };
-        let cmd = build_opencode_command(&config);
+        let cmd = build_opencode_command(&process, None);
         assert_eq!(cmd[0], "opencode");
         assert_eq!(cmd[1], "run");
     }
 
     #[test]
     fn build_opencode_command_interactive() {
-        let config = LaunchConfig::default();
-        let cmd = build_opencode_command(&config);
+        let process = ProcessConfig::default();
+        let cmd = build_opencode_command(&process, None);
         assert_eq!(cmd, vec!["opencode"]);
     }
 
     #[test]
     fn build_opencode_command_with_model() {
-        let config = LaunchConfig {
-            model_variant: Some("anthropic/claude-sonnet-4-5".to_string()),
-            ..Default::default()
-        };
-        let cmd = build_opencode_command(&config);
+        let process = ProcessConfig::default();
+        let cmd = build_opencode_command(&process, Some("anthropic/claude-sonnet-4-5"));
         assert!(cmd.contains(&"--model".to_string()));
         assert!(cmd.contains(&"anthropic/claude-sonnet-4-5".to_string()));
     }
 
     #[test]
     fn build_opencode_command_streaming() {
-        let config = LaunchConfig {
+        let process = ProcessConfig {
             auto: true,
             stream: true,
             ..Default::default()
         };
-        let cmd = build_opencode_command(&config);
+        let cmd = build_opencode_command(&process, None);
         assert!(cmd.contains(&"run".to_string()));
         assert!(cmd.contains(&"--format".to_string()));
         assert!(cmd.contains(&"json".to_string()));
@@ -758,12 +821,12 @@ mod tests {
 
     #[test]
     fn build_opencode_env_auto_and_context() {
-        let config = LaunchConfig {
+        let process = ProcessConfig {
             auto: true,
             context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
             ..Default::default()
         };
-        let env = build_opencode_env(&config).unwrap();
+        let env = build_opencode_env(&process).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert_eq!(v["permission"], "allow");
         assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
@@ -771,11 +834,11 @@ mod tests {
 
     #[test]
     fn build_opencode_env_auto_only() {
-        let config = LaunchConfig {
+        let process = ProcessConfig {
             auto: true,
             ..Default::default()
         };
-        let env = build_opencode_env(&config).unwrap();
+        let env = build_opencode_env(&process).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert_eq!(v["permission"], "allow");
         assert!(v.get("instructions").is_none());
@@ -783,11 +846,11 @@ mod tests {
 
     #[test]
     fn build_opencode_env_context_only() {
-        let config = LaunchConfig {
+        let process = ProcessConfig {
             context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
             ..Default::default()
         };
-        let env = build_opencode_env(&config).unwrap();
+        let env = build_opencode_env(&process).unwrap();
         let v: serde_json::Value = serde_json::from_str(&env).unwrap();
         assert!(v.get("permission").is_none());
         assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
@@ -795,19 +858,23 @@ mod tests {
 
     #[test]
     fn build_opencode_env_neither() {
-        let config = LaunchConfig::default();
-        assert!(build_opencode_env(&config).is_none());
+        assert!(build_opencode_env(&ProcessConfig::default()).is_none());
     }
 
     // ── build_agent_command: opencode integration ───────────────
 
     #[test]
     fn build_agent_command_opencode_default() {
-        let config = LaunchConfig {
+        let launch = LaunchConfig {
+            model: Some("opencode".to_string()),
+            task_prompt: "fix the bug".to_string(),
+            ..Default::default()
+        };
+        let process = ProcessConfig {
             auto: true,
             ..Default::default()
         };
-        let cmd = build_agent_command("opencode", "fix the bug", &config);
+        let cmd = build_agent_command(&launch, &process, &AgentCapabilities::default());
         assert_eq!(cmd[0], "opencode");
         assert_eq!(cmd[1], "run");
         assert_eq!(*cmd.last().unwrap(), "fix the bug");
@@ -815,11 +882,16 @@ mod tests {
 
     #[test]
     fn build_agent_command_opencode_with_variant() {
-        let config = LaunchConfig {
+        let launch = LaunchConfig {
+            model: Some("opencode:anthropic/claude-sonnet".to_string()),
+            task_prompt: "fix the bug".to_string(),
+            ..Default::default()
+        };
+        let process = ProcessConfig {
             auto: true,
             ..Default::default()
         };
-        let cmd = build_agent_command("opencode:anthropic/claude-sonnet", "fix the bug", &config);
+        let cmd = build_agent_command(&launch, &process, &AgentCapabilities::default());
         assert!(cmd.contains(&"--model".to_string()));
         assert!(cmd.contains(&"anthropic/claude-sonnet".to_string()));
         assert_eq!(*cmd.last().unwrap(), "fix the bug");

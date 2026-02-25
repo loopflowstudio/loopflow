@@ -8,14 +8,17 @@ use tokio::process::{Child, Command};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+use crate::engine::agent::LaunchConfig;
+use crate::engine::config::parse_model;
 use crate::lfd::sessions::harness::claude_mapping::ReaderState;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::sessions::harness::{claude_mapping, SessionHarness, SessionHarnessError};
-use crate::lfd::sessions::types::{SessionConfig, SessionEvent, TurnStatus};
+use crate::lfd::sessions::types::{SessionEvent, TurnStatus};
 
 pub struct ClaudeHarness {
     events: broadcast::Sender<SessionEvent>,
-    config: Option<SessionConfig>,
+    launch: Option<LaunchConfig>,
+    should_seed_task_prompt: bool,
     provider_session_id: Option<String>,
     turn_in_progress: Arc<AtomicBool>,
     child: Option<Child>,
@@ -31,7 +34,7 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 /// Build CLI args for a Claude invocation.
-fn build_args(content: &str, config: &SessionConfig, resume_id: Option<&str>) -> Vec<String> {
+fn build_args(content: &str, launch: &LaunchConfig, resume_id: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         content.to_string(),
@@ -45,23 +48,29 @@ fn build_args(content: &str, config: &SessionConfig, resume_id: Option<&str>) ->
         args.push(id.to_string());
     }
 
-    if let Some(model) = &config.model {
+    if let Some(model) = &launch.model {
+        let (backend, variant) = parse_model(model);
+        let model = if backend == "claude" {
+            variant.unwrap_or_else(|| model.to_string())
+        } else {
+            model.to_string()
+        };
         args.push("--model".to_string());
-        args.push(model.clone());
+        args.push(model);
     }
 
-    if config.yolo_mode {
+    if launch.skip_permissions {
         args.push("--dangerously-skip-permissions".to_string());
     }
 
-    if let Some(max_turns) = config.max_turns {
+    if let Some(max_turns) = launch.max_turns {
         args.push("--max-turns".to_string());
         args.push(max_turns.to_string());
     }
 
-    if let Some(system_prompt) = &config.system_prompt {
+    if !launch.system_prompt.trim().is_empty() {
         args.push("--append-system-prompt".to_string());
-        args.push(system_prompt.clone());
+        args.push(launch.system_prompt.clone());
     }
 
     args
@@ -71,7 +80,8 @@ impl ClaudeHarness {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
             events,
-            config: None,
+            launch: None,
+            should_seed_task_prompt: true,
             provider_session_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             child: None,
@@ -84,7 +94,7 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl SessionHarness for ClaudeHarness {
-    async fn start(&mut self, config: &SessionConfig) -> Result<()> {
+    async fn start(&mut self, config: &LaunchConfig) -> Result<()> {
         // Validate claude binary on PATH.
         let output = Command::new("claude").arg("--version").output().await;
         match output {
@@ -106,7 +116,8 @@ impl SessionHarness for ClaudeHarness {
             }
         }
 
-        self.config = Some(config.clone());
+        self.launch = Some(config.clone());
+        self.should_seed_task_prompt = true;
         Ok(())
     }
 
@@ -120,10 +131,17 @@ impl SessionHarness for ClaudeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
-        let config = self
-            .config
+        let launch = self
+            .launch
             .as_ref()
             .ok_or_else(|| anyhow!("claude harness not started"))?;
+        let mut turn_content = content.to_string();
+        if self.should_seed_task_prompt {
+            self.should_seed_task_prompt = false;
+            if !launch.task_prompt.trim().is_empty() {
+                turn_content = format!("{}\n\n{}", launch.task_prompt.trim(), content);
+            }
+        }
 
         let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
 
@@ -131,14 +149,14 @@ impl SessionHarness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        let args = build_args(content, config, self.provider_session_id.as_deref());
+        let args = build_args(&turn_content, launch, self.provider_session_id.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         cmd.stdin(std::process::Stdio::null());
 
-        if let Some(cwd) = &config.cwd {
+        if let Some(cwd) = &launch.cwd {
             cmd.current_dir(cwd);
         }
 
@@ -242,14 +260,15 @@ mod tests {
 
     #[test]
     fn build_args_minimal() {
-        let config = SessionConfig {
+        let launch = LaunchConfig {
+            system_prompt: String::new(),
+            task_prompt: "task".to_string(),
             model: None,
-            cwd: None,
-            system_prompt: None,
+            cwd: Some("/tmp".into()),
             max_turns: None,
-            yolo_mode: false,
+            skip_permissions: false,
         };
-        let args = build_args("hello", &config, None);
+        let args = build_args("hello", &launch, None);
         assert_eq!(
             args,
             vec!["-p", "hello", "--output-format", "stream-json", "--verbose"]
@@ -258,14 +277,15 @@ mod tests {
 
     #[test]
     fn build_args_full() {
-        let config = SessionConfig {
+        let launch = LaunchConfig {
+            system_prompt: "Be concise".to_string(),
+            task_prompt: "task".to_string(),
             model: Some("claude-sonnet-4-5-20250514".to_string()),
-            cwd: Some("/tmp".to_string()),
-            system_prompt: Some("Be concise".to_string()),
+            cwd: Some("/tmp".into()),
             max_turns: Some(5),
-            yolo_mode: true,
+            skip_permissions: true,
         };
-        let args = build_args("fix tests", &config, Some("sess_abc"));
+        let args = build_args("fix tests", &launch, Some("sess_abc"));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_abc".to_string()));
         assert!(args.contains(&"--model".to_string()));
@@ -279,21 +299,33 @@ mod tests {
 
     #[test]
     fn build_args_resume_without_extras() {
-        let config = SessionConfig::default();
-        let args = build_args("next", &config, Some("sess_123"));
+        let launch = LaunchConfig {
+            system_prompt: String::new(),
+            task_prompt: "task".to_string(),
+            model: None,
+            cwd: Some("/tmp".into()),
+            max_turns: None,
+            skip_permissions: false,
+        };
+        let args = build_args("next", &launch, Some("sess_123"));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_123".to_string()));
         assert!(!args.contains(&"--model".to_string()));
         assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(!args.contains(&"--max-turns".to_string()));
     }
 
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {
         let (tx, _rx) = broadcast::channel(16);
         let mut harness = ClaudeHarness::new(tx);
-        harness.config = Some(SessionConfig {
-            cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4())),
-            ..Default::default()
+        harness.launch = Some(LaunchConfig {
+            system_prompt: String::new(),
+            task_prompt: "task".to_string(),
+            model: None,
+            cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
+            max_turns: None,
+            skip_permissions: false,
         });
 
         let first = harness

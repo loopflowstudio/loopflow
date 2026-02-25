@@ -11,9 +11,7 @@ struct WaveSidebar: View {
     @State private var showingConnectionSettings = false
     @State private var actionError: String?
     @State private var showingActionError = false
-    @State private var isCreatingWave = false
-    @State private var showingInstantiateAllConfirm = false
-    @State private var pendingSchemas: [WaveSchema] = []
+    @AppStorage("wave-sidebar.show-orphan-worktrees") private var showingOrphanWorktrees = false
 
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
@@ -25,10 +23,6 @@ struct WaveSidebar: View {
 
     private var orphanWorktrees: [WorktreeInfo] {
         repoState.worktreeStore.orphans
-    }
-
-    private var uninstantiatedSchemas: [WaveSchema] {
-        repoState.waveSchemas.filter { !$0.isInstantiated }.sorted { $0.name < $1.name }
     }
 
     private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
@@ -99,22 +93,8 @@ struct WaveSidebar: View {
         } message: {
             Text(actionError ?? "An error occurred")
         }
-        .confirmationDialog(
-            "Instantiate schemas",
-            isPresented: $showingInstantiateAllConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Instantiate and start \(pendingSchemas.count) waves") {
-                instantiateSchemas(pendingSchemas, startImmediately: true)
-            }
-            Button("Cancel", role: .cancel) {
-                pendingSchemas = []
-            }
-        } message: {
-            Text(batchConfirmationMessage)
-        }
         .onReceive(NotificationCenter.default.publisher(for: .newWaveRequested)) { _ in
-            createWaveDirectly()
+            openDesignEntry()
         }
         .onReceive(NotificationCenter.default.publisher(for: .selectWave)) { notification in
             if let waveId = notification.userInfo?["waveId"] as? String,
@@ -196,7 +176,7 @@ struct WaveSidebar: View {
     }
 
     private var createButtonDisabled: Bool {
-        isCreatingWave || !repoState.isConnected || repoState.repoTarget == nil
+        !repoState.isConnected || repoState.repoTarget == nil
     }
 
     private var createButtonLabel: some View {
@@ -207,51 +187,15 @@ struct WaveSidebar: View {
 
     @ViewBuilder
     private var createButton: some View {
-        if uninstantiatedSchemas.isEmpty {
-            Button {
-                createWaveDirectly()
-            } label: {
-                createButtonLabel
-            }
-            .buttonStyle(.plain)
-            .disabled(createButtonDisabled)
-            .help(repoState.isConnected ? "Create wave (C)" : repoState.connectionSummary)
-            .accessibleButton("Create wave")
-        } else {
-            Menu {
-                Button {
-                    createWaveDirectly()
-                } label: {
-                    Label("New wave", systemImage: "plus")
-                }
-
-                Divider()
-
-                ForEach(uninstantiatedSchemas.prefix(8)) { schema in
-                    Button {
-                        instantiateSchemas([schema], startImmediately: true)
-                    } label: {
-                        Label(schema.name, systemImage: schemaIcon(schema))
-                    }
-                }
-
-                Divider()
-
-                Button {
-                    pendingSchemas = uninstantiatedSchemas
-                    showingInstantiateAllConfirm = true
-                } label: {
-                    Label("Instantiate all", systemImage: "sparkles")
-                }
-            } label: {
-                createButtonLabel
-            }
-            .menuStyle(.borderlessButton)
-            .tint(createButtonDisabled ? .white.opacity(0.35) : .white)
-            .disabled(createButtonDisabled)
-            .help(repoState.isConnected ? "Create or instantiate waves (C)" : repoState.connectionSummary)
-            .accessibleButton("Create or instantiate wave")
+        Button {
+            openDesignEntry()
+        } label: {
+            createButtonLabel
         }
+        .buttonStyle(.plain)
+        .disabled(createButtonDisabled)
+        .help(repoState.isConnected ? "Start designing (C)" : repoState.connectionSummary)
+        .accessibleButton("Start designing")
     }
 
     private var disconnectedState: some View {
@@ -314,45 +258,15 @@ struct WaveSidebar: View {
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.5))
 
-                if uninstantiatedSchemas.isEmpty {
-                    Button {
-                        createWaveDirectly()
-                    } label: {
-                        Label("Create Wave", systemImage: "plus")
-                            .font(Typography.caption())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(isCreatingWave)
-                    .accessibilityIdentifier("wave-empty-create")
-                } else {
-                    VStack(spacing: Spacing.xs) {
-                        ForEach(uninstantiatedSchemas.prefix(3)) { schema in
-                            Button {
-                                instantiateSchemas([schema], startImmediately: true)
-                            } label: {
-                                Label("Start \(schema.name)", systemImage: schemaIcon(schema))
-                                    .font(Typography.caption())
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .disabled(isCreatingWave)
-                        }
-
-                        if uninstantiatedSchemas.count > 1 {
-                            Button {
-                                pendingSchemas = uninstantiatedSchemas
-                                showingInstantiateAllConfirm = true
-                            } label: {
-                                Label("Instantiate all", systemImage: "sparkles")
-                                    .font(Typography.caption())
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(isCreatingWave)
-                        }
-                    }
+                Button {
+                    openDesignEntry()
+                } label: {
+                    Label("Start designing", systemImage: "sparkles")
+                        .font(Typography.caption())
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityIdentifier("wave-empty-create")
             }
 
             Spacer()
@@ -381,13 +295,31 @@ struct WaveSidebar: View {
                         .background(.white.opacity(0.15))
                         .padding(.vertical, Spacing.xs)
 
-                    sectionHeader("Worktrees", icon: "folder", count: orphanWorktrees.count)
-
-                    ForEach(orphanWorktrees) { worktree in
-                        WorktreeRow(worktree: worktree) {
-                            upgradeWorktree(worktree)
+                    DisclosureGroup(isExpanded: $showingOrphanWorktrees) {
+                        VStack(spacing: Spacing.xs) {
+                            ForEach(orphanWorktrees) { worktree in
+                                WorktreeRow(worktree: worktree) {
+                                    upgradeWorktree(worktree)
+                                }
+                            }
                         }
+                        .padding(.top, Spacing.xs)
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "folder")
+                                .foregroundStyle(.white.opacity(0.25))
+                            Text("WORKTREES")
+                                .foregroundStyle(.white.opacity(0.25))
+                                .tracking(0.5)
+                            Text("\(orphanWorktrees.count)")
+                                .foregroundStyle(.white.opacity(0.2))
+                        }
+                        .font(Typography.caption(9))
+                        .padding(.leading, Spacing.sm)
+                        .padding(.top, Spacing.sm)
+                        .padding(.bottom, Spacing.xs)
                     }
+                    .tint(.white.opacity(0.7))
                 }
             }
             .padding(.horizontal, Spacing.sm)
@@ -451,78 +383,20 @@ struct WaveSidebar: View {
         }
     }
 
-    private func createWaveDirectly() {
-        guard !isCreatingWave else { return }
-        isCreatingWave = true
-
-        Task {
-            defer { isCreatingWave = false }
-
-            do {
-                try await repoState.ensureReadyToCreateWave(outputBuffer: outputBuffer)
-                try await repoState.createWave(name: "")
-                NotificationCenter.default.post(name: .editWaveName, object: nil)
-            } catch {
-                actionError = repoState.isConnected
-                    ? error.localizedDescription
-                    : repoState.connectionSummary
-                showingActionError = true
-            }
-        }
-    }
-
-    private var batchConfirmationMessage: String {
-        guard !pendingSchemas.isEmpty else {
-            return "No schemas selected."
+    private func openDesignEntry() {
+        guard repoState.isConnected else {
+            actionError = repoState.connectionSummary
+            showingActionError = true
+            return
         }
 
-        let names = pendingSchemas.map(\.name).joined(separator: ", ")
-        let stimulusKinds = Set(
-            pendingSchemas.compactMap { schema in
-                schema.stimulus?.kind
-            }
-        )
-        let stimulusText = stimulusKinds.isEmpty ? "none" : stimulusKinds.sorted().joined(separator: ", ")
-        return "Schemas: \(names)\nStimuli: \(stimulusText)\nWaves will start immediately."
-    }
-
-    private func schemaIcon(_ schema: WaveSchema) -> String {
-        switch schema.stimulus?.kind {
-        case "cron": return "clock"
-        case "watch": return "eye"
-        case "loop": return "repeat"
-        default: return "waveform.path.ecg"
+        guard repoState.repoTarget != nil else {
+            actionError = "Select a repository in Connection Settings first."
+            showingActionError = true
+            return
         }
-    }
 
-    private func instantiateSchemas(_ schemas: [WaveSchema], startImmediately: Bool) {
-        guard !schemas.isEmpty else { return }
-        guard !isCreatingWave else { return }
-        isCreatingWave = true
-
-        Task {
-            defer {
-                isCreatingWave = false
-                pendingSchemas = []
-            }
-
-            do {
-                try await ensureLfdConnected()
-
-                for schema in schemas {
-                    try await repoState.instantiateSchema(schema, startImmediately: startImmediately)
-                }
-            } catch {
-                actionError = error.localizedDescription
-                showingActionError = true
-            }
-        }
-    }
-
-    private func ensureLfdConnected() async throws {
-        guard !repoState.lfdConnected else { return }
-        try await repoState.connectLfd(outputBuffer: outputBuffer)
-        try await Task.sleep(for: .milliseconds(500))
+        repoState.selectedWaveId = nil
     }
 }
 

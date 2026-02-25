@@ -85,3 +85,16 @@ Long-running workflow tests for `lf ops`:
 tests/e2e/test_full_cycle.sh
 tests/e2e/test_rebase_conflict.sh
 ```
+
+## Validation Scripts
+
+`scripts/` contains runnable validation and demo scripts. Use these for branch validation and manual UI walkthroughs.
+
+```bash
+uv run python scripts/validate_branch.py           # automated checks → launch Concerto
+uv run python scripts/validate_branch.py --checks-only  # automated checks only
+uv run python scripts/test_session.py               # session API smoke test (starts lfd)
+uv run python scripts/dev.py run-debug              # build and launch lfd + Concerto
+```
+
+When adding features that need manual verification, write or extend a script in `scripts/` rather than documenting a list of commands. One command to run, one environment to verify in.

@@ -37,7 +37,7 @@ uv pip install loopflow
 import loopflow.api as loopflow
 
 loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="ship", direction=["clarity"])
+loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
 loopflow.run_wave("engbot")
 ```
 
@@ -127,15 +127,15 @@ ln -s ../.lf/steps .claude/commands
 Chains steps together with commits between them.
 
 ```yaml
-# .lf/flows/ship.yaml
+# .lf/flows/build.yaml
 - implement
 - compress
 - gate
-- consolidate
+- update-wave
 ```
 
 ```bash
-lf --flow ship
+lf --flow build
 ```
 
 Or chain manually:
@@ -179,7 +179,7 @@ lfq create shipper .
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("shipper", flow="ship", area=["src/api/"])
+loopflow.update_wave("shipper", flow="build", area=["src/api/"])
 loopflow.run_wave("shipper")
 PY
 ```
@@ -190,7 +190,7 @@ Combined with flow and direction, area defines the wave:
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("shipper", flow="ship", area=["src/api/"], direction=["clarity"])
+loopflow.update_wave("shipper", flow="build", area=["src/api/"], direction=["clarity"])
 loopflow.run_wave("shipper")
 PY
 ```

@@ -113,7 +113,7 @@ lfq create shipper .
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("shipper", flow="ship", area=["src/"])
+loopflow.update_wave("shipper", flow="build", area=["src/"])
 loopflow.run_wave("shipper")
 PY
 ```

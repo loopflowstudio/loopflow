@@ -10,6 +10,8 @@ Stage 03 assumes manual/direct connection is already working from Stage 01. Disc
 
 **Pre-req from Stage 02:** ActionButtonsView exists in LoopflowCore but is not yet embedded in MobileWaveDetailView (iOS). Wire it up before or early in Stage 03 — it's a small change but needed for the "both devices see the same thing" story to hold.
 
+**Naming note from Stage 02:** ChatState → SessionState, WaveChatView → WaveSessionView across Swift. References below use the new names.
+
 ## What's already free
 
 lfd owns all state. Concerto is a thin client. Most multi-client already works:
@@ -40,7 +42,7 @@ Mobile clients disconnect frequently (background, network switch, lock screen). 
 
 - EventService WebSocket: reconnect with last sequence number for gap-free replay
 - Output streaming: reconnect to stream endpoint
-- ChatState: already has reconnect logic (sequence numbers, replay) — verify it works with real network interruption
+- SessionState: already has reconnect logic (sequence numbers, replay) — verify it works with real network interruption
 
 Hook into `UIApplication.didBecomeActiveNotification` on iOS:
 

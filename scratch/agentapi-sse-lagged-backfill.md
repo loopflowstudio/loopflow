@@ -2,70 +2,71 @@
 
 ## Problem
 
-`tokio::broadcast` drops old messages when an SSE receiver falls behind the 256-event buffer. Today `/v0/sessions/{id}/events` handles `RecvError::Lagged(_)` by skipping and continuing, which creates silent gaps for connected clients.
+`tokio::broadcast` drops messages once a receiver falls behind the 256-event ring buffer. Today `/v0/sessions/{id}/events` handles `RecvError::Lagged(_)` by skipping and continuing, so connected clients can silently miss chunks of a live transcript.
 
-Who benefits: Concerto users watching active sessions (especially bursty `text_delta` output) and any API client that keeps one long-lived SSE connection.
+Who benefits: Concerto users following active sessions (especially bursty `text_delta`) and API clients that keep one long-lived SSE connection.
 
-Why now: This blocks the hardening goal of “replay full event history and resume live streaming without data loss.” Reconnect (`after_seq`) is durable, but during-connection lag is still lossy.
+Why now: this is the last obvious gap against the Agent API wave goal **“Reconnect replays persisted events then follows live stream”** and metric **“Session reconnect replays full event history and resumes live streaming without data loss.”** Reconnect is durable (`after_seq`), but in-connection lag is still lossy.
 
 ## Approach
 
-Implement **in-stream backfill recovery** in `stream_session_events_handler`.
+Implement in-stream backfill recovery inside `stream_session_events_handler`.
 
-1. Keep current startup flow:
-   - subscribe to live broadcast
+1. Keep startup flow unchanged:
+   - subscribe to broadcast
    - replay persisted events from store (`after_seq`)
    - emit one `session.replay_completed` sentinel
-2. In the live loop, when `live_rx.recv()` returns `Lagged(skipped)`:
-   - query store for events `seq > last_seq` via `SessionManager::list_events(session_id, Some(last_seq))`
-   - emit backfilled events in ascending `seq`
-   - update `last_seq` per emitted event
-   - return to broadcast receive loop
-3. Enforce one dedup gate everywhere (replay, backfill, live): emit only when `event.seq > last_seq`.
-4. If store backfill fails, terminate this SSE stream (fail closed, not lossy-continue). Client reconnect with `after_seq` remains the recovery path.
-5. Add structured tracing for lag recovery (`session_id`, `skipped`, `last_seq_before`, `backfilled_count`).
-
-Implementation detail for testability: extract the live-forwarding loop into a small helper so lag/backfill behavior can be tested without full HTTP server setup.
+2. Extract the live-forwarding loop into a helper so lag behavior is testable without full HTTP setup.
+3. In that loop, enforce one monotonic dedup gate everywhere (replay, backfill, live): emit only if `event.seq > last_seq`.
+4. On `live_rx.recv()`:
+   - `Ok(event)`: emit through dedup gate, advance `last_seq`
+   - `Lagged(skipped)`: call `SessionManager::list_events(session_id, Some(last_seq))`, emit returned events in ascending `seq`, advance `last_seq`
+   - `Closed`: end stream normally
+5. If store backfill fails during lag recovery, terminate this SSE stream (fail closed). Recovery path is explicit reconnect with `after_seq`.
+6. Add structured tracing for every lag recovery attempt:
+   - `session_id`, `skipped`, `last_seq_before`, `backfilled_count`, and error details on failure.
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
-| Keep current behavior (skip on lag) | Simplest code path | Violates reliability goal; causes silent data loss |
-| Increase broadcast buffer size (e.g., 4096) | Fewer lag events under normal load | Delays failure but does not remove it; memory grows; still lossy at higher burst sizes |
-| Drop connection on lag and require reconnect | Correctness via existing `after_seq` replay | Adds visible disconnect churn; avoidable UX hit when server can recover in-stream |
+| Keep current behavior (skip on lag) | Smallest change | Violates reliability goal; causes silent data loss |
+| Increase broadcast buffer size (e.g., 4096) | Fewer lag events in normal load | Only delays failure; still lossy at higher burst rates; higher memory footprint |
+| Force disconnect on lag, require client reconnect | Correctness via existing replay contract | Adds avoidable disconnect churn; server can recover seamlessly in-stream |
 
 ## Key decisions
 
-- **Recover in the SSE route, not SessionManager**: only the SSE subscriber knows it lagged.
-- **Store sequence is source of truth**: backfill is cursored by `last_seq`, not by skipped count from broadcast.
-- **Monotonic emission contract**: never emit `seq <= last_seq`; this guarantees no duplicates across replay/backfill/live boundaries.
-- **Fail closed on backfill errors**: better to end stream than silently continue with gaps.
+- **Recover in SSE route, not `SessionManager`:** only the subscriber knows it lagged.
+- **Persisted sequence is source of truth:** backfill cursor is `last_seq`, never `skipped` count.
+- **One dedup contract across all paths:** no duplicate emissions at replay/live/backfill boundaries.
+- **Fail closed on backfill errors:** end stream instead of continuing with unknown gaps.
+- **No protocol expansion:** keep existing `session.replay_completed`; no new client event types.
 
 ### Wild success
 
-Users never notice lag recovery. Even under burst output, transcripts remain contiguous and ordered; multi-client viewing stays consistent because all clients converge on the same persisted sequence stream.
+Lag recovery becomes invisible. Under burst output, transcript ordering stays contiguous and duplicate-free; multi-client viewers converge on the same persisted sequence stream.
 
 ### Wild failure
 
-Six months later we rip it out because lag handling became flaky due to duplicate/gap edge cases and untestable async logic. Mitigation in this design: single monotonic seq gate, helper-level tests that force lag deterministically, and explicit tracing around every lag/backfill transition.
+We re-open this in six months because backfill emits duplicates or still leaves gaps under racey conditions. Mitigation: one seq gate, helper-level deterministic lag test, and structured lag/backfill tracing to debug real sessions quickly.
 
 ## Scope
 
 - In scope:
   - Lagged SSE receiver recovery using persisted store backfill
-  - Seq-based dedup across replay/backfill/live
-  - Test that forces `Lagged` and verifies contiguous delivery
-  - Tracing for lag/backfill transitions
+  - Sequence-based dedup across replay/backfill/live paths
+  - Deterministic Rust test that forces lag and verifies contiguous, duplicate-free delivery
+  - Tracing around lag/backfill transitions
 - Out of scope:
-  - Changing broadcast buffer sizes
-  - New client protocol events (existing `session.replay_completed` unchanged)
-  - Harness-side lag in `spawn_harness_event_bridge`
+  - Broadcast buffer size changes
+  - New SSE protocol events beyond existing sentinel
+  - Harness-side lag handling in `spawn_harness_event_bridge`
   - Replay pagination/performance redesign beyond this reliability fix
 
 ## Done when
 
-- New Rust test simulates lag (`Lagged`) and verifies the client receives a gap-free, duplicate-free contiguous seq stream.
-- Existing fast-path behavior (no lag) remains unchanged.
-- Verification command passes:
+- New Rust test (named with `lagged_receiver_backfill`) forces `RecvError::Lagged` and proves contiguous `seq` delivery with no duplicates.
+- Existing no-lag behavior is unchanged (same replay + sentinel + live stream semantics).
+- Traces clearly show lag recovery attempts and results.
+- Verification passes:
   - `cargo test -p loopflow lagged_receiver_backfill`

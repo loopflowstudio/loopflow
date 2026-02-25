@@ -1,5 +1,5 @@
 # Production override for remote deployment.
-# Usage: docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+# Usage: docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 #
 # Adds Caddy for TLS termination and sets auth to static token.
 # The base lfd port mapping is kept (harmless behind security group).

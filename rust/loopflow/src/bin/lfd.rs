@@ -149,6 +149,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
     }
 
+    let session_manager = SessionManager::new(store.clone());
+    match session_manager.recover_orphaned_sessions().await {
+        Ok(count) if count > 0 => {
+            tracing::info!(count, "recovered orphaned sessions from previous lfd");
+        }
+        Err(err) => tracing::warn!(error = %err, "session orphan recovery failed"),
+        _ => {}
+    }
+
     let loop_handles = scheduler.clone().start_loops(
         store.clone(),
         executor.clone(),
@@ -206,7 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_security: lfd_config.http_security,
         auth_failure_throttle: loopflow::lfd::auth::AuthFailureThrottle::new(),
         ci_failure_cache,
-        sessions: SessionManager::new(store),
+        sessions: session_manager,
     };
     let http_router = loopflow::lfd::http::router(http_state);
 

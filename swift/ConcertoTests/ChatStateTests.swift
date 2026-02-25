@@ -252,7 +252,59 @@ struct ChatStateTests {
     }
 
     @MainActor
-    @Test("send is rejected while reconnecting")
+    @Test("replay sentinel promotes stream phase from replaying to live")
+    func replaySentinelPromotesPhase() async {
+        let defaults = makeUserDefaults("replay-sentinel")
+        defaults.set("session_1", forKey: "chatSession.wave-test")
+
+        let service = MockChatService(
+            getSessionResults: [.success(activeSession(id: "session_1"))],
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .textDelta(turnId: "turn_1", content: "replayed"))),
+                    .success(AgentSessionEventEnvelope(replayCompletedLastSeq: 1)),
+                ], holdOpen: true)
+            ]
+        )
+
+        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
+        await state.reconnectIfNeeded()
+        await waitUntil { state.streamPhase == .live }
+
+        #expect(state.streamPhase == .live)
+        let assistantMessages = messages(in: state, role: .assistant)
+        #expect(assistantMessages.count == 1)
+        #expect(assistantMessages[0].content == "replayed")
+
+        state.onDisappear()
+    }
+
+    @MainActor
+    @Test("missing replay sentinel keeps stream in replaying phase")
+    func missingReplaySentinelKeepsReplaying() async {
+        let defaults = makeUserDefaults("missing-sentinel")
+        defaults.set("session_1", forKey: "chatSession.wave-test")
+
+        let service = MockChatService(
+            getSessionResults: [.success(activeSession(id: "session_1"))],
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                ], holdOpen: true)
+            ]
+        )
+
+        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
+        await state.reconnectIfNeeded()
+        try? await Task.sleep(for: .milliseconds(200))
+
+        #expect(state.streamPhase == .replaying)
+        state.onDisappear()
+    }
+
+    @MainActor
+    @Test("send is rejected while replaying")
     func sendRejectedDuringReconnect() async {
         let defaults = makeUserDefaults("reconnect-race")
         defaults.set("session_1", forKey: "chatSession.wave-test")

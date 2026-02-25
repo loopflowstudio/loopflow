@@ -466,6 +466,22 @@ impl Store {
         }
     }
 
+    pub async fn list_sessions_by_statuses(
+        &self,
+        statuses: &[SessionStatus],
+    ) -> StoreResult<Vec<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let statuses = statuses.to_vec();
+                run_sqlite(store, move |store| {
+                    store.list_sessions_by_statuses(&statuses)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_sessions_by_statuses(statuses).await,
+        }
+    }
+
     pub async fn list_session_events(
         &self,
         session_id: &LfdId,

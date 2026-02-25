@@ -292,6 +292,36 @@ impl SqliteStore {
         Ok(events)
     }
 
+    pub fn list_sessions_by_statuses(
+        &self,
+        statuses: &[SessionStatus],
+    ) -> StoreResult<Vec<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let placeholders: Vec<String> = statuses
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
+        let sql = format!(
+            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+             FROM sessions WHERE status IN ({})
+             ORDER BY created_at ASC",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<Box<dyn ToSql>> = statuses
+            .iter()
+            .map(|s| Box::new(s.as_i32() as i64) as Box<dyn ToSql>)
+            .collect();
+        let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut rows = stmt.query(param_refs.as_slice())?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(Self::map_session_row(row)?);
+        }
+        Ok(sessions)
+    }
+
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         self.read_waves(repo)
     }

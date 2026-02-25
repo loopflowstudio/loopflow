@@ -36,7 +36,9 @@ Spawn `opencode serve --port $PORT`, communicate via HTTP.
 
 ## What earlier phases taught us
 
-Phase 04 established a conformance replay test pattern: record real provider NDJSON/JSON-RPC traces, replay them through the harness, and assert canonical event output. The OpenCode adapter should follow this same pattern — record `opencode serve` SSE traces and build replay tests before wiring up the live adapter. This validates the event mapping independently of OpenCode availability.
+Phase 04 (hardening) established a conformance replay test pattern: record real provider traces, replay them through the harness, and assert canonical event output. Five traces exist today — Claude normal/crash/multi-tool, Codex normal/error — covering both happy paths and failure modes. The OpenCode adapter should follow this same pattern: record `opencode serve` SSE traces and build replay tests before wiring up the live adapter. This validates the event mapping independently of OpenCode availability.
+
+Phase 04 also showed that SSE lag recovery (store-backed backfill on `Lagged`) is load-bearing, not optional. The OpenCode adapter's HTTP+SSE transport means events flow through the same bridge→broadcast→SSE path and will benefit from this recovery automatically.
 
 ## Done when
 

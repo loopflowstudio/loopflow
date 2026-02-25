@@ -24,7 +24,8 @@ loopflow is a "smart router" — 91k lines orchestrating coding agents, not reim
 - **Abstraction creep.** Refactoring for elegance can add lines instead of removing them. Every change should net-reduce or hold steady on LOC.
 - **Over-decomposition.** Splitting traits/modules too far creates indirection without value. The store should be 4-5 focused traits, not 15 micro-traits.
 - **Chasing peers.** opencode and convex made different tradeoffs for different reasons. Adopt patterns that fit loopflow's delegation model, not patterns that fight it.
-- **Stale reference blast radius.** Direction taxonomy restructuring required three gate iterations to catch all stale references across docs, Swift previews, and wave configs. Structural renames in Pass 1 (store/docker) will have similar blast radius — plan for a sweep pass.
+- **Stale reference blast radius.** Direction taxonomy restructuring required three gate iterations to catch all stale references across docs, Swift previews, and wave configs. Pass 1 structural renames (docker module path, store capability imports) had narrower blast radius than expected — the `AgentExecutor` surface isolation helped.
+- **Metadata convention drift in docker recovery.** Pass 1 decomposition revealed that recovery correctness depends on label/mount conventions staying consistent across image, workspace, and recovery modules. These conventions are implicit. Pass 2 invariant tests should make them explicit.
 
 ## Roadmap (4 passes)
 
@@ -32,10 +33,20 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 
 | Pass | Phase doc | Scope | What it unlocks | Status |
 |---|---|---|---|---|
-| 1 | `01-core-boundary-cleanup.md` | Core boundary cleanup (`store` + `docker` + harness registry) | Lower blast radius in hotspot files; add harnesses without central switch edits | In progress |
-| 2 | `02-contract-hardening.md` | Contract hardening (prompt pipeline split + SQL catalog validation + recovery invariants tests) | Safer iteration on prompt/token policy and fewer runtime contract regressions | After Pass 1 |
+| 1 | *(shipped)* | Core boundary cleanup (`store` + `docker` + harness registry) | Lower blast radius in hotspot files; add harnesses without central switch edits | Done |
+| 2 | `02-contract-hardening.md` | Contract hardening (prompt pipeline split + SQL catalog validation + recovery invariants tests) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Next |
 | 3 | `03-orchestration-expansion.md` | Orchestration expansion (push triggers + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | Later |
 | 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |
+
+### Pass 1 retrospective
+
+Shipped all three targets: harness command registry (`engine/harness_commands/`), docker lifecycle decomposition (`docker/{image,workspace,recovery,io}`), store capability accessors. Net diff: +3,325 / -3,075 lines — deconcentration without bloat.
+
+What went as planned: docker lifecycle split and harness `HarnessCommandBuilder` trait both landed cleanly. `AgentExecutor` surface unchanged.
+
+What was partial: store backend `match` dispatch still exists inside trait impls. Capability accessors reduced forwarding boilerplate but didn't eliminate the backend-port adapter surface. This remaining work feeds into Pass 2.
+
+What we learned: docker recovery logic is still high-risk even after decomposition — the problem is metadata convention drift, not file size. Recovery invariant tests (already planned for Pass 2) are higher priority than originally estimated.
 
 ## Reference report
 
@@ -47,6 +58,7 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 - Quality directions are now shipped via direction taxonomy restructuring. Role-style directions (`infra-engineer`, `designer`, `product-engineer`) replaced with composable quality-focused groups (`infra/`, `ux/`, `craft/`, `creativity/`, `ceo/`). Gate and review steps updated with quality-language. Architecture report recommendations #2 (quality-tagged frontmatter) and #4 (API-boundary prompts) remain open.
 - `build.rs` codegen pattern is proven for compile-time discovery and validation. BFS expansion with dedup, compile-time directory scanning, `LazyLock<HashMap>` generation — all battle-tested. The same approach applies to Pass 2's SQL catalog validation.
 - Direction work was additive to `flow.rs`/`fork.rs`/`prompt.rs` — hotspot files from Pass 1 (`docker.rs`, `store/mod.rs`) were not disturbed. Confirms Pass 1 sequencing.
-- Stale references were the biggest friction source. Gate caught stale direction names in docs, Swift preview data, and wave configs across three iterations. Pass 1 renames will need a dedicated sweep.
-- Core risk moved from “too many features” to “too much responsibility in a few files.”
+- Stale references were the biggest friction source. Gate caught stale direction names in docs, Swift preview data, and wave configs across three iterations. Pass 1 renames had narrower blast radius than direction renames — `AgentExecutor` trait surface insulated callers from the docker module split.
+- Core risk moved from “too many features” to “too much responsibility in a few files.” Pass 1 addressed the worst hotspots; remaining concentration is in `prompt.rs` and store backend dispatch.
 - Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all four passes.
+- **Pass 1 shipped.** Harness command registry, docker lifecycle decomposition, and store capability accessors all landed. Store backend-port adapter extraction is partial — remaining `match` dispatch feeds into Pass 2. Known flaky test: `wave_worktree_tests::wave_rename_renames_branch` (unrelated, intermittent).

@@ -47,7 +47,7 @@ impl LfTagParser {
                 break;
             }
 
-            if let Some(open_idx) = self.stream_buffer.find(SUGGEST_ACTIONS_OPEN) {
+            if let Some(open_idx) = find_tag_start(&self.stream_buffer, SUGGEST_ACTIONS_OPEN) {
                 push_text_delta(
                     &mut events,
                     turn_id,
@@ -118,6 +118,29 @@ fn suffix_prefix_len(value: &str, marker: &str) -> usize {
     0
 }
 
+fn find_tag_start(buffer: &str, marker: &str) -> Option<usize> {
+    let mut search_from = 0;
+    while let Some(relative_idx) = buffer[search_from..].find(marker) {
+        let idx = search_from + relative_idx;
+        if is_line_start_or_indented(buffer, idx) {
+            return Some(idx);
+        }
+        search_from = idx + 1;
+    }
+    None
+}
+
+fn is_line_start_or_indented(buffer: &str, idx: usize) -> bool {
+    if idx == 0 {
+        return true;
+    }
+
+    let line_start = buffer[..idx].rfind('\n').map_or(0, |newline| newline + 1);
+    buffer[line_start..idx]
+        .chars()
+        .all(|char| matches!(char, ' ' | '\t' | '\r'))
+}
+
 fn push_text_delta(events: &mut Vec<SessionEvent>, turn_id: &str, content: String) {
     if content.is_empty() {
         return;
@@ -137,13 +160,13 @@ mod tests {
         let mut parser = LfTagParser::default();
         let events = parser.consume_text(
             "turn_1",
-            "Hello<lf:suggest_actions>[{\"label\":\"Land PR\"}]</lf:suggest_actions>Done",
+            "Hello\n<lf:suggest_actions>[{\"label\":\"Land PR\"}]</lf:suggest_actions>\nDone",
         );
 
         assert_eq!(events.len(), 3);
         assert!(matches!(
             events[0],
-            SessionEvent::TextDelta { ref content, .. } if content == "Hello"
+            SessionEvent::TextDelta { ref content, .. } if content == "Hello\n"
         ));
         assert!(matches!(
             events[1],
@@ -151,7 +174,7 @@ mod tests {
         ));
         assert!(matches!(
             events[2],
-            SessionEvent::TextDelta { ref content, .. } if content == "Done"
+            SessionEvent::TextDelta { ref content, .. } if content == "\nDone"
         ));
 
         let trailing = parser.finish_turn("turn_1");
@@ -202,6 +225,20 @@ mod tests {
         assert!(matches!(
             events[0],
             SessionEvent::TextDelta { ref content, .. } if content == "hello"
+        ));
+    }
+
+    #[test]
+    fn parser_ignores_inline_tag_examples() {
+        let mut parser = LfTagParser::default();
+        let input =
+            "Emit as `<lf:suggest_actions>[{\"label\":\"Run tests\"}]</lf:suggest_actions>`";
+        let events = parser.consume_text("turn_1", input);
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            SessionEvent::TextDelta { ref content, .. } if content == input
         ));
     }
 }

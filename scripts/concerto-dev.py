@@ -136,6 +136,42 @@ def _wait_for_lfd_ready(timeout_seconds: float = 20.0) -> bool:
     return False
 
 
+def _resolve_lfd_sqlite_path(db_path: str) -> Path:
+    candidate = Path(db_path)
+    if candidate.is_absolute():
+        return candidate
+    return Path.home() / ".lf" / candidate
+
+
+def _bundled_lfd_sqlite_path() -> Path:
+    return (
+        Path.home()
+        / "Library"
+        / "Application Support"
+        / "Concerto"
+        / "lfd"
+        / "concerto.db"
+    )
+
+
+def _remove_sqlite_database(db_path: Path) -> None:
+    removed_any = False
+    for suffix in ("", "-wal", "-shm"):
+        candidate = Path(f"{db_path}{suffix}")
+        if candidate.exists():
+            candidate.unlink()
+            removed_any = True
+    if removed_any:
+        print(f"Reset sqlite DB: {db_path}")
+
+
+def _reset_run_debug_databases(with_lfd: bool) -> None:
+    _remove_sqlite_database(_bundled_lfd_sqlite_path())
+    if with_lfd:
+        db_path = os.environ.get("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
+        _remove_sqlite_database(_resolve_lfd_sqlite_path(db_path))
+
+
 def _start_lfd_background(docker: bool = False) -> tuple[subprocess.Popen[str], TextIO]:
     if docker:
         raise RuntimeError("run-debug --with-lfd currently supports native lfd only")
@@ -300,6 +336,9 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
         if docker_lfd:
             print("run-debug --docker-lfd is not supported yet")
             return 1
+    _reset_run_debug_databases(with_lfd=with_lfd)
+
+    if with_lfd:
         try:
             lfd_process, lfd_log = _start_lfd_background(docker=False)
         except RuntimeError as error:

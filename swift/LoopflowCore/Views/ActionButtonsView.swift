@@ -9,6 +9,7 @@ public struct ActionButtonsView: View {
     public let onTap: (SuggestedAction) -> Void
 
     @State private var interactive = false
+    @State private var hitTestingTask: Task<Void, Never>?
 
     public init(actions: [SuggestedAction], onTap: @escaping (SuggestedAction) -> Void) {
         self.actions = actions
@@ -41,12 +42,15 @@ public struct ActionButtonsView: View {
         }
         .allowsHitTesting(interactive)
         .animation(DesignAnimation.standard(reduceMotion), value: actions)
+        .onAppear {
+            resetHitTestingDelay()
+        }
         .onChange(of: actions) { _, _ in
-            interactive = false
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(300))
-                interactive = true
-            }
+            resetHitTestingDelay()
+        }
+        .onDisappear {
+            hitTestingTask?.cancel()
+            hitTestingTask = nil
         }
     }
 
@@ -84,5 +88,15 @@ public struct ActionButtonsView: View {
         .buttonStyle(.plain)
         .frame(maxWidth: fullWidth ? .infinity : nil, alignment: .leading)
         .accessibleButton(action.label, hint: action.description)
+    }
+
+    private func resetHitTestingDelay() {
+        hitTestingTask?.cancel()
+        interactive = false
+        hitTestingTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            interactive = true
+        }
     }
 }

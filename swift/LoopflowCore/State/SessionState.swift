@@ -286,8 +286,10 @@ public final class SessionState {
         sessionConfig.clientCompact = compact
     }
 
-    public func composerTextDidChange(_ text: String) {
-        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    public func composerTextDidChange(from oldText: String, to newText: String) {
+        let oldIsEmpty = oldText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let newIsEmpty = newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if oldIsEmpty && !newIsEmpty {
             clearSuggestedActions()
         }
     }

@@ -528,9 +528,27 @@ struct SessionStateTests {
         )
         state.suggestedActions = [SuggestedAction(label: "Land PR")]
 
-        state.composerTextDidChange("l")
+        state.composerTextDidChange(from: "", to: "l")
 
         #expect(state.suggestedActions.isEmpty)
+    }
+
+    @MainActor
+    @Test("suggested actions do not clear when composer text stays empty")
+    func suggestedActionsDoNotClearOnEmptyComposerChanges() async {
+        let state = SessionState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: MockSessionService(),
+            userDefaults: makeUserDefaults("suggested-actions-empty-composer")
+        )
+        state.suggestedActions = [SuggestedAction(label: "Land PR")]
+
+        state.composerTextDidChange(from: "", to: "")
+        #expect(state.suggestedActions.map(\.label) == ["Land PR"])
+
+        state.composerTextDidChange(from: "", to: "   ")
+        #expect(state.suggestedActions.map(\.label) == ["Land PR"])
     }
 
     @MainActor

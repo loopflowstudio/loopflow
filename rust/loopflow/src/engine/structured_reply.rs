@@ -60,6 +60,8 @@ fn suggest_actions_reply(ctx: &ClientContext, action_style: Option<&str>) -> Str
             "REQUIRED: After every response where you complete a task, answer a question, or present results, \
 you MUST emit a suggest_actions block at the end of your reply. Never skip this. \
 The user's client renders these as tap targets — without them, the user has to type on a phone keyboard. \
+Emit the <lf:suggest_actions> block on its own lines at the very end of the message. \
+Do not wrap lf tags in backticks and do not mention lf tags in user-visible prose. \
 Suggest up to {max_actions} actions. Each action should be a short phrase that makes sense as a user message. \
 {style_guidance}"
         ),

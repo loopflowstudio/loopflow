@@ -21,26 +21,26 @@ class ScenarioResult:
 class ApiClient:
     """Thin authenticated HTTP client wrapper for lfd API tests."""
 
-    def __init__(self, base_url: str, token: str, timeout_seconds: float = 10.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout_seconds: float = 10.0,
+        verify: bool | str = True,
+    ) -> None:
         self._authed_client = httpx.Client(
             base_url=base_url,
             timeout=timeout_seconds,
+            verify=verify,
             headers={"Authorization": f"Bearer {token}"},
         )
-        self._anonymous_client = httpx.Client(base_url=base_url, timeout=timeout_seconds)
+        self._anonymous_client = httpx.Client(
+            base_url=base_url,
+            timeout=timeout_seconds,
+            verify=verify,
+        )
 
     def __enter__(self) -> "ApiClient":
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def __enter__(self) -> "ApiHarness":
         return self
 
     def __exit__(
@@ -61,10 +61,6 @@ class ApiClient:
 
 
 class ApiAssertions:
-    @staticmethod
-    def expect_json_object(response: httpx.Response) -> dict[str, Any]:
-        return _json_dict(response)
-
     @staticmethod
     def expect_json_object(response: httpx.Response) -> dict[str, Any]:
         return _json_dict(response)

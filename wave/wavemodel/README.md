@@ -12,8 +12,8 @@ The full experience: open Concerto, describe what you want to build, and the des
 
 - Database schema changes for wave content (stays in markdown)
 - Enforced validation of "at least one section" in tooling (convention first)
-- Per-tab step routing in Concerto (all chat tabs default to `step: design` for now)
-- Runtime convergence between wave executor and session orchestration (executor stays auto/headless; sessions are interactive — separate concerns until convergence work lands)
+- Per-tab step routing in Concerto (chat tabs infer step from active run, but no user-selectable step picker)
+- Full runtime convergence between wave executor and session orchestration (Phase 04 bridges the gap — executor creates and watches sessions — but rehydration after daemon restart is still missing)
 - Real-time wave content refresh via filesystem watcher (on-demand loading works, live updates don't)
 
 ## Goals
@@ -22,17 +22,19 @@ The full experience: open Concerto, describe what you want to build, and the des
 - The roadmap lives as `##-*.md` files alongside the README, not inside it
 - Steps reference README sections by name, roadmap by file convention
 - `lf design` is the primary wave creation entry point
-- Concerto orients new users toward design, not configuration
+- Concerto orients new users toward starting a wave, which launches the design-first flow
 - Wave content (Vision, Goals) is visible in the Concerto UI
 
 ## Risks
 
 - **README migration could lose nuance.** Mechanical restructuring might flatten content that was intentionally organized differently. Mitigate: preserve all content, only rename/regroup sections. *Phase 01 evidence: migrations preserved all content. Reorganization was clean — "North Star" → "Vision", design decisions and architecture moved into roadmap items. Risk is lower than expected for future migrations.*
-- ~~**Concerto NUX depends on agentapi.**~~ *Resolved. The unified agent harness (Phase 04) shipped on the same branch, unlocking inline design sessions earlier than expected. `StartWaveView` creates a `ChatState` with `step: design` and sends the user's prompt as the first turn — no external terminal. Remaining gap: all chat tabs default to `step: design`; per-tab step routing is tracked as future work. Bundled daemon further removes the install prerequisite — Concerto bundles lfd and lf, so NUX works end-to-end without external install.*
+- ~~**Concerto NUX depends on agentapi.**~~ *Resolved. Phase 04 shifted StartWaveView from design-prompt-first to wave-name-first: user enters a name, Concerto calls `POST /v0/waves` with `run: true`, lfd creates the wave and starts the `design-ship-review` flow. The executor creates an interactive session for the design step, and Concerto joins it via WebSocket `session_id`. No external terminal needed. Bundled daemon removes the install prerequisite — NUX works end-to-end.*
 - ~~**Swift client has dead WaveSchema code.**~~ *Resolved in Phase 03. `WaveSchema.swift` deleted, references removed from `LocalWaveService`, `WaveSidebar`, `RepoState`, and `WaveServiceProtocol`. Clean removal, no regressions.*
 - **Step prompts may over-reference sections.** If every step checks every section, prompts get bloated and agents waste tokens on irrelevant context. Mitigate: each step references only the sections relevant to its job. *Phase 01 evidence: gate checks Goals/Risks/Metrics, review checks Vision/Goals/Risks, ingest reads all four for selection. No step references all four sections unconditionally.*
 - **Section placement varies across waves.** Scope boundaries appear as "Not here" under Vision (agentapi, remote), "Security boundary (non-goals)" at the end (security), or inline in Vision (wavemodel). *Phase 03 evidence: `WaveContentParser` matches `## Vision`, `## Goals`, `## Risks`, `## Metrics` by exact heading name. Everything else is treated as supplementary. Convention-based, intentionally lenient — non-standard headings are silently ignored.*
-- **Wave content loading has no filesystem watcher.** Content is loaded on-demand when a wave is selected and cached in `WaveViewModel`. Changes to wave READMEs on disk won't appear until the user re-selects the wave or status/activation changes trigger a refresh. Acceptable for now, but the agent harness (04) may need to push content updates when design conversations modify the README in real time.
+- **Wave content loading has no filesystem watcher.** Content is loaded on-demand when a wave is selected and cached in `WaveViewModel`. Changes to wave READMEs on disk won't appear until the user re-selects the wave or status/activation changes trigger a refresh. *Phase 04 evidence: wave status events (waiting, started, stopped) do trigger `loadWaveContent`, so content refreshes on flow transitions. The gap is mid-session: a design conversation modifying the README won't be visible until the step completes and the wave transitions.*
+- **Daemon restart loses in-flight session watchers.** Session watchers are tokio tasks in executor memory. If `lfd` restarts while a run is `Waiting`, the watcher is gone and the run stays stuck in `Waiting` forever. No rehydration path exists yet. Mitigate: add startup recovery that scans for `Waiting` runs with `session_id` and re-attaches watchers.
+- **Resume contention after interactive step.** When a session ends and the watcher tries to resume the wave flow, it needs a scheduler slot. If the scheduler is full, the resume is delayed or fails. Currently the watcher retries once; prolonged contention isn't handled.
 
 ## Metrics
 
@@ -40,9 +42,12 @@ The full experience: open Concerto, describe what you want to build, and the des
 - Roadmap lives as `##-*.md` files, not in the README *(Phase 01: done)*
 - 6 built-in steps reference README sections and roadmap files by convention *(Phase 01: done)*
 - `lf design` conversation produces wave directories directly (no intermediate `add-to-wave` step) *(Phase 02: done)*
-- New users in Concerto see "What do you want to build?" not "Configure a wave" *(Phase 03: done)*
+- New users in Concerto see "Start a wave" not "Configure a wave" *(Phase 03: done, refined in Phase 04)*
 - Wave Vision, Goals, Risks, and Roadmap visible in Concerto detail panel *(Phase 03: done)*
 - Prompt assembly shared between executor and sessions via `prepare_step_prompt()` *(Phase 04: done)*
 - Sessions receive step-level intent, not raw system prompts *(Phase 04: done)*
 - Inline design sessions work in Concerto without external terminal *(Phase 04: done)*
+- Waves can be created and started in a single API call (`run: true`) *(Phase 04: done)*
+- Interactive flow steps create executor-owned sessions; Concerto joins via `session_id` *(Phase 04: done)*
+- Failed interactive sessions fail the wave run, not silently advance *(Phase 04: done)*
 

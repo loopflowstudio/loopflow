@@ -53,45 +53,60 @@ pub fn prepare_launch_prompt(
     config: &Config,
     input: LaunchPromptInput,
 ) -> Result<PreparedLaunchPrompt, CoreError> {
-    let mut directions = if input.include_config_directions {
-        config.direction.clone().unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    directions = merge_directions(&directions, &input.directions);
+    let LaunchPromptInput {
+        repo_root,
+        step,
+        run_mode,
+        directions: requested_directions,
+        area,
+        wave,
+        message,
+        model,
+        cwd,
+        max_turns,
+        yolo_mode,
+        include_config_directions,
+        include_config_area,
+        source_overrides,
+        summary,
+    } = input;
 
-    let area = if input.area.is_some() {
-        input.area.clone()
-    } else if input.include_config_area {
-        config.area.clone()
+    let config_directions: &[String] = if include_config_directions {
+        config.direction.as_deref().unwrap_or_default()
     } else {
-        None
+        &[]
     };
+    let directions = merge_directions(config_directions, &requested_directions);
 
-    let lfdocs = input.source_overrides.lfdocs.unwrap_or(config.lfdocs);
-    let diff_files = input
-        .source_overrides
-        .diff_files
-        .unwrap_or(config.diff_files);
-    let diff = input.source_overrides.diff.unwrap_or(config.diff);
-    let clipboard = input.source_overrides.clipboard.unwrap_or(config.paste);
+    let area = area.or_else(|| {
+        if include_config_area {
+            config.area.clone()
+        } else {
+            None
+        }
+    });
+
+    let lfdocs = source_overrides.lfdocs.unwrap_or(config.lfdocs);
+    let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
+    let diff = source_overrides.diff.unwrap_or(config.diff);
+    let clipboard = source_overrides.clipboard.unwrap_or(config.paste);
 
     let opts = GatherContextOpts {
-        repo_root: input.repo_root.clone(),
-        step: input.step.clone(),
-        message: input.message.clone(),
-        run_mode: input.run_mode.clone(),
+        repo_root: repo_root.clone(),
+        step,
+        message,
+        run_mode,
         directions,
         files: Vec::new(),
         sources: default_gather_sources(lfdocs, diff_files || diff, clipboard),
         area,
-        wave: input.wave.clone(),
+        wave,
     };
 
     let mut components = gather_context(&opts)?;
-    drop_native_instruction_docs(&mut components, &input.repo_root);
+    drop_native_instruction_docs(&mut components, &repo_root);
 
-    if let Some(summary) = input.summary.clone() {
+    if let Some(summary) = summary {
         components.summaries.push(Document {
             path: "wave-summary".to_string(),
             content: summary,
@@ -102,19 +117,16 @@ pub fn prepare_launch_prompt(
     let (components, breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
-    let step_model = components.step.as_ref().and_then(|step| step.model.clone());
-    let model = input
-        .model
-        .or(step_model)
+    let model = model
+        .or_else(|| components.step.as_ref().and_then(|step| step.model.clone()))
         .unwrap_or_else(|| config.agent_model.clone());
-    let cwd = input.cwd.unwrap_or_else(|| input.repo_root.clone());
     let launch = LaunchConfig {
         system_prompt: format_context_prompt(&components),
         task_prompt: format_task_prompt(&components),
         model: Some(model),
-        max_turns: input.max_turns,
-        cwd: Some(cwd),
-        skip_permissions: input.yolo_mode,
+        max_turns,
+        cwd: Some(cwd.unwrap_or(repo_root)),
+        skip_permissions: yolo_mode,
     };
 
     Ok(PreparedLaunchPrompt {

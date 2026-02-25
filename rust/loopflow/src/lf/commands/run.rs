@@ -38,7 +38,6 @@ struct PromptBuild {
     breakdown: ContextBreakdown,
     prompt: String,
     backend: String,
-    area: Option<String>,
     step_name: Option<String>,
     log_name: String,
 }
@@ -71,8 +70,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         debug!(s.name, s.interactive, "discovered step");
     }
 
-    let cli_directions = cli.direction.clone();
-
     let is_interactive = cli.interactive
         || (!cli.batch
             && (discovered_step
@@ -84,10 +81,10 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                     .unwrap_or(false)
                 || (step.is_none() && message.is_none())));
 
-    let cli_area = if !cli.area.is_empty() {
-        cli.area.first().map(|p| p.to_string_lossy().to_string())
+    let run_mode = if is_interactive {
+        "interactive"
     } else {
-        None
+        "auto"
     };
 
     info!("preparing launch prompt");
@@ -97,16 +94,12 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         LaunchPromptInput {
             repo_root: repo_root.clone(),
             step: step.map(|value| value.to_string()),
-            run_mode: Some(
-                if is_interactive {
-                    "interactive"
-                } else {
-                    "auto"
-                }
-                .to_string(),
-            ),
-            directions: cli_directions,
-            area: cli_area.clone(),
+            run_mode: Some(run_mode.to_string()),
+            directions: cli.direction.clone(),
+            area: cli
+                .area
+                .first()
+                .map(|path| path.to_string_lossy().to_string()),
             wave: cli.wave.clone(),
             message: message.map(|value| value.to_string()),
             model: cli.model.clone(),
@@ -132,7 +125,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .launch
         .model
         .clone()
-        .unwrap_or_else(|| config.agent_model.clone());
+        .expect("prepare_launch_prompt always sets launch model");
     let (backend, _variant) = parse_model(&model);
 
     let step_name = step.map(|value| value.to_string());
@@ -140,7 +133,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .as_deref()
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
         .to_string();
-    let area = prepared.components.area.clone();
     let process = ProcessConfig {
         auto: !is_interactive,
         stream: !is_interactive,
@@ -160,7 +152,6 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         breakdown: prepared.breakdown,
         prompt: prepared.prompt,
         backend,
-        area,
         step_name,
         log_name,
     })
@@ -184,7 +175,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         built.step_name.as_deref(),
         &direction_names,
         built.components.wave.as_deref(),
-        built.area.as_deref(),
+        built.components.area.as_deref(),
         cli.clipboard,
         cli_model,
     );

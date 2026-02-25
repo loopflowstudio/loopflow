@@ -1,3 +1,0 @@
-# Open questions
-
-- None currently.

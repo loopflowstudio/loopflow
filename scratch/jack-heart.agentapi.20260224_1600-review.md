@@ -11,6 +11,7 @@ Session-based agent runtime in `lfd` and design-first onboarding in Concerto.
 - Claude and Codex harness implementations with SSE event bridge, provider session ID tracking (for Claude resume), and crash escalation.
 - Store additions: session CRUD, event append/list, active-session-for-wave-run lookup, orphan listing by status.
 - Stricter validation: `repo_root` must exist and contain `.lf/`; `cwd` must resolve inside `repo_root`.
+- `lf release` converted from hardcoded CLI subcommand to agent step (`ops/release.md`), consistent with all other steps.
 
 **Swift (Concerto):**
 - `ChatState` manages session lifecycle, SSE streaming with replay/live phases, transcript items, and bounded output.
@@ -28,6 +29,7 @@ Session-based agent runtime in `lfd` and design-first onboarding in Concerto.
 | Broadcast channel for harness events | Decouples event production (harness) from consumption (persistence + SSE). Handles backpressure with lag warnings. | mpsc — can't have multiple consumers. Direct persistence from harness — couples harness to store. |
 | Orphan recovery on startup | Sessions left in Starting/Active after daemon restart are unrecoverable. Mark them Failed with an error event so clients see a clean state. | Leave them hanging — clients poll forever. |
 | Design-first onboarding | Users describe intent in natural language; the design step runs inline. Lower barrier than schema-first wave setup. | Schema picker (removed from main path, still available via API). |
+| Release as agent step | `lf release` was the only hardcoded CLI command for what should be an agent step. Moving to `ops/release.md` makes it consistent. | Keep the native Rust implementation — adds special-case code for one step. |
 
 ## How it fits together
 
@@ -65,14 +67,13 @@ Sessions are the orchestration boundary for interactive runs. The wave executor 
 
 ## Validation
 
-All six CI-equivalent checks pass locally:
+All CI-equivalent checks pass locally:
 
 | Check | Result |
 |-------|--------|
 | `cargo fmt --all -- --check` | pass |
 | `cargo clippy --all-targets -- -D warnings` | pass |
-| `cargo test --all` | pass |
+| `cargo test --all` | 448 passed (2 docker tests skipped — no socket on dev machine) |
 | `uv run pytest python/tests/` | 47 passed |
-| `swift test --package-path swift` | 131 tests passed |
-| `xcodebuild test -scheme Concerto` | 1 UI test passed |
+| `swift test --package-path swift` | 131 passed |
 | `tests/e2e/test_smoke.sh` | pass |

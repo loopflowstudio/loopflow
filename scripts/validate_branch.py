@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 
 
-def run(cmd: list[str], label: str, cwd: Path = REPO_ROOT) -> bool:
+def _run(cmd: list[str], label: str, cwd: Path = REPO_ROOT) -> bool:
     print(f"\n{'=' * 60}")
     print(f"  {label}")
     print(f"{'=' * 60}\n")
@@ -51,7 +51,7 @@ def main() -> int:
 
     results: list[tuple[str, bool]] = []
     for cmd, label in checks:
-        ok = run(cmd, label)
+        ok = _run(cmd, label)
         results.append((label, ok))
 
     print(f"\n{'=' * 60}")

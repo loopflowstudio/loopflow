@@ -30,8 +30,8 @@ PLATFORM_PREFIXES = (
 )
 
 
-def run_git_diff(*paths: str) -> str:
-    cmd = ["git", "diff", "--no-color", "--unified=0", MAIN_REF, "--", *paths]
+def _run_git_diff(*paths: str) -> str:
+    cmd = ["git", "diff", "--no-color", "--unified=0", f"{MAIN_REF}...HEAD", "--", *paths]
     result = subprocess.run(
         cmd,
         cwd=REPO_ROOT,
@@ -44,7 +44,7 @@ def run_git_diff(*paths: str) -> str:
     return result.stdout
 
 
-def parse_added_lines(diff_text: str) -> list[tuple[str, str]]:
+def _parse_added_lines(diff_text: str) -> list[tuple[str, str]]:
     file_path = ""
     added: list[tuple[str, str]] = []
 
@@ -59,7 +59,7 @@ def parse_added_lines(diff_text: str) -> list[tuple[str, str]]:
     return added
 
 
-def is_whole_file_platform_gate(path: str) -> bool:
+def _is_whole_file_platform_gate(path: str) -> bool:
     file_path = REPO_ROOT / path
     if not file_path.exists():
         return False
@@ -77,11 +77,11 @@ def is_whole_file_platform_gate(path: str) -> bool:
     return True
 
 
-def check_loopflowcore_imports() -> list[str]:
+def _check_loopflowcore_imports() -> list[str]:
     violations: list[str] = []
-    diff_text = run_git_diff("swift/LoopflowCore")
+    diff_text = _run_git_diff("swift/LoopflowCore")
 
-    for file_path, line in parse_added_lines(diff_text):
+    for file_path, line in _parse_added_lines(diff_text):
         if not file_path.startswith("swift/LoopflowCore/") or not file_path.endswith(".swift"):
             continue
         match = re.match(r"\s*import\s+([A-Za-z0-9_]+)", line)
@@ -94,11 +94,11 @@ def check_loopflowcore_imports() -> list[str]:
     return violations
 
 
-def check_new_if_boundaries() -> list[str]:
+def _check_new_if_boundaries() -> list[str]:
     violations: list[str] = []
-    diff_text = run_git_diff("swift")
+    diff_text = _run_git_diff("swift")
 
-    for file_path, line in parse_added_lines(diff_text):
+    for file_path, line in _parse_added_lines(diff_text):
         if not file_path.endswith(".swift"):
             continue
         if not re.match(r"\s*#if\b", line):
@@ -111,7 +111,7 @@ def check_new_if_boundaries() -> list[str]:
             continue
         if file_path.startswith(PLATFORM_PREFIXES):
             continue
-        if is_whole_file_platform_gate(file_path):
+        if _is_whole_file_platform_gate(file_path):
             continue
 
         violations.append(f"{file_path}: new non-shell `#if`")
@@ -120,7 +120,7 @@ def check_new_if_boundaries() -> list[str]:
 
 
 def main() -> int:
-    violations = [*check_loopflowcore_imports(), *check_new_if_boundaries()]
+    violations = [*_check_loopflowcore_imports(), *_check_new_if_boundaries()]
 
     if not violations:
         print("Swift multiplatform boundary checks passed.")

@@ -8,6 +8,8 @@ Multiple Concerto clients connect to the same lfd and see consistent state. No c
 
 Stage 03 assumes manual/direct connection is already working from Stage 01. Discovery UX is out of scope here (Stage 04).
 
+**Pre-req from Stage 02:** ActionButtonsView exists in LoopflowCore but is not yet embedded in MobileWaveDetailView (iOS). Wire it up before or early in Stage 03 — it's a small change but needed for the "both devices see the same thing" story to hold.
+
 ## What's already free
 
 lfd owns all state. Concerto is a thin client. Most multi-client already works:

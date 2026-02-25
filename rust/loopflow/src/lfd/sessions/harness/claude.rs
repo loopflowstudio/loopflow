@@ -17,7 +17,7 @@ use crate::lfd::sessions::types::{SessionEvent, TurnStatus};
 
 pub struct ClaudeHarness {
     events: broadcast::Sender<SessionEvent>,
-    launch: Option<AgentConfig>,
+    config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
     provider_session_id: Option<String>,
     turn_in_progress: Arc<AtomicBool>,
@@ -34,7 +34,7 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 /// Build CLI args for a Claude invocation.
-fn build_args(content: &str, launch: &AgentConfig, resume_id: Option<&str>) -> Vec<String> {
+fn build_args(content: &str, config: &AgentConfig, resume_id: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         content.to_string(),
@@ -48,7 +48,7 @@ fn build_args(content: &str, launch: &AgentConfig, resume_id: Option<&str>) -> V
         args.push(id.to_string());
     }
 
-    if let Some(model) = &launch.model {
+    if let Some(model) = &config.model {
         let (backend, variant) = parse_model(model);
         let model = if backend == "claude" {
             variant.unwrap_or_else(|| model.to_string())
@@ -59,18 +59,18 @@ fn build_args(content: &str, launch: &AgentConfig, resume_id: Option<&str>) -> V
         args.push(model);
     }
 
-    if launch.skip_permissions {
+    if config.skip_permissions {
         args.push("--dangerously-skip-permissions".to_string());
     }
 
-    if let Some(max_turns) = launch.max_turns {
+    if let Some(max_turns) = config.max_turns {
         args.push("--max-turns".to_string());
         args.push(max_turns.to_string());
     }
 
-    if !launch.system_prompt.trim().is_empty() {
+    if !config.system_prompt.trim().is_empty() {
         args.push("--append-system-prompt".to_string());
-        args.push(launch.system_prompt.clone());
+        args.push(config.system_prompt.clone());
     }
 
     args
@@ -80,7 +80,7 @@ impl ClaudeHarness {
     pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
         Self {
             events,
-            launch: None,
+            config: None,
             should_seed_task_prompt: true,
             provider_session_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
@@ -116,7 +116,7 @@ impl Harness for ClaudeHarness {
             }
         }
 
-        self.launch = Some(config.clone());
+        self.config = Some(config.clone());
         self.should_seed_task_prompt = true;
         Ok(())
     }
@@ -131,15 +131,15 @@ impl Harness for ClaudeHarness {
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
-        let launch = self
-            .launch
+        let config = self
+            .config
             .as_ref()
             .ok_or_else(|| anyhow!("claude harness not started"))?;
         let mut turn_content = content.to_string();
         if self.should_seed_task_prompt {
             self.should_seed_task_prompt = false;
-            if !launch.task_prompt.trim().is_empty() {
-                turn_content = format!("{}\n\n{}", launch.task_prompt.trim(), content);
+            if !config.task_prompt.trim().is_empty() {
+                turn_content = format!("{}\n\n{}", config.task_prompt.trim(), content);
             }
         }
 
@@ -149,14 +149,14 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        let args = build_args(&turn_content, launch, self.provider_session_id.as_deref());
+        let args = build_args(&turn_content, config, self.provider_session_id.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         cmd.stdin(std::process::Stdio::null());
 
-        if let Some(cwd) = &launch.cwd {
+        if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
 
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn build_args_minimal() {
-        let launch = AgentConfig {
+        let config = AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             model: None,
@@ -268,7 +268,7 @@ mod tests {
             max_turns: None,
             skip_permissions: false,
         };
-        let args = build_args("hello", &launch, None);
+        let args = build_args("hello", &config, None);
         assert_eq!(
             args,
             vec!["-p", "hello", "--output-format", "stream-json", "--verbose"]
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn build_args_full() {
-        let launch = AgentConfig {
+        let config = AgentConfig {
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
             model: Some("claude-sonnet-4-5-20250514".to_string()),
@@ -285,7 +285,7 @@ mod tests {
             max_turns: Some(5),
             skip_permissions: true,
         };
-        let args = build_args("fix tests", &launch, Some("sess_abc"));
+        let args = build_args("fix tests", &config, Some("sess_abc"));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_abc".to_string()));
         assert!(args.contains(&"--model".to_string()));
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn build_args_resume_without_extras() {
-        let launch = AgentConfig {
+        let config = AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             model: None,
@@ -307,7 +307,7 @@ mod tests {
             max_turns: None,
             skip_permissions: false,
         };
-        let args = build_args("next", &launch, Some("sess_123"));
+        let args = build_args("next", &config, Some("sess_123"));
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"sess_123".to_string()));
         assert!(!args.contains(&"--model".to_string()));
@@ -319,7 +319,7 @@ mod tests {
     async fn send_input_spawn_failure_releases_turn_guard() {
         let (tx, _rx) = broadcast::channel(16);
         let mut harness = ClaudeHarness::new(tx);
-        harness.launch = Some(AgentConfig {
+        harness.config = Some(AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             model: None,

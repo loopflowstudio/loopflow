@@ -62,6 +62,34 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.isEmpty)
     }
 
+    @Test("delete events with another repo do not remove local waves")
+    func deleteEventFromDifferentRepoIsIgnored() {
+        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-events-local")
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+
+        let localWave = makeWave(id: "wave-1", repoPath: repo.path, status: .running, diffStat: nil)
+        state.applyConnectedWaves([localWave])
+
+        let otherRepoPath = URL(fileURLWithPath: "/tmp/portfolio-events-other").normalizedFilePath
+        let remoteWave = makeWave(id: localWave.id, repoPath: otherRepoPath, status: .running, diffStat: nil)
+
+        state.applyWaveEvent(
+            WaveEvent(
+                type: .deleted,
+                waveId: localWave.id,
+                waveRunId: nil,
+                step: nil,
+                name: nil,
+                wave: remoteWave,
+                timestamp: Date()
+            )
+        )
+
+        #expect(state.waves.count == 1)
+        #expect(state.waves[0].id == localWave.id)
+    }
+
     private func makeWave(id: String, repoPath: String, status: WaveStatus, diffStat: String?) -> Wave {
         Wave(
             id: id,

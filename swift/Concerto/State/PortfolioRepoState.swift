@@ -50,6 +50,10 @@ final class PortfolioRepoState {
     func applyWaveEvent(_ event: WaveEvent) {
         switch event.type {
         case .deleted:
+            if let wave = event.wave,
+               wave.repo.normalizedFilePath != repoPath {
+                return
+            }
             waves.removeAll { $0.id == event.waveId }
         case .created, .updated, .started, .stopped, .waiting:
             guard let wave = event.wave,

@@ -83,6 +83,15 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 - `Models/` — Swift structs mirroring Python dataclasses
 - `Services/Ghostty/` — Embedded terminal integration
 
+## Portfolio Dashboard
+
+Concerto launches into a portfolio window instead of a single welcome panel:
+
+- Each repo appears as a card with live wave status, blocked count, and diff totals
+- Click a wave to open that repo window and focus the selected wave
+- Use the `+` card to scan `~/src` and add another main git worktree
+- Added repos persist between launches
+
 ## Wave Detail: Current + Runs
 
 Wave detail now has two tabs:

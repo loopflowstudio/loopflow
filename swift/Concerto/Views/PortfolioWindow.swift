@@ -135,7 +135,7 @@ struct PortfolioWindow: View {
             }
 
         case .wave(let waveEvent):
-            if waveEvent.wave == nil {
+            guard let wave = waveEvent.wave else {
                 Task {
                     for repoState in repoStates.values {
                         await repoState.refresh()
@@ -143,10 +143,7 @@ struct PortfolioWindow: View {
                 }
                 return
             }
-
-            for repoState in repoStates.values {
-                repoState.applyWaveEvent(waveEvent)
-            }
+            repoStates[wave.repo.normalizedFilePath]?.applyWaveEvent(waveEvent)
 
         case .worktree, .agentStarted, .agentEnded, .output:
             break
@@ -194,10 +191,6 @@ struct PortfolioRepoCard: View {
     let onOpenRepo: (URL) -> Void
     var onRemoveRepo: ((URL) -> Void)? = nil
 
-    private var visibleWaves: [WaveViewModel] {
-        Array(repoState.waves.prefix(5))
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Button {
@@ -227,7 +220,7 @@ struct PortfolioRepoCard: View {
                     .tint(.white)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, Spacing.md)
-            } else if visibleWaves.isEmpty {
+            } else if repoState.waves.isEmpty {
                 Text("No waves")
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.55))
@@ -236,15 +229,8 @@ struct PortfolioRepoCard: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                        ForEach(visibleWaves) { wave in
+                        ForEach(repoState.waves) { wave in
                             waveRow(wave)
-                        }
-
-                        if repoState.waves.count > visibleWaves.count {
-                            Text("\(repoState.waves.count - visibleWaves.count) more waves")
-                                .font(Typography.caption(11))
-                                .foregroundStyle(.white.opacity(0.45))
-                                .padding(.top, Spacing.xs)
                         }
                     }
                 }

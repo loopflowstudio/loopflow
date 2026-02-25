@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -70,11 +70,63 @@ Keep it medium length. Stay high-level; don't enumerate every file.
 "#;
 
 const DIFF_BUDGET: usize = 120_000;
+const TITLE_MAX_CHARS: usize = 100;
+const NON_TRIVIAL_DIFF_CHANGE_LINES: usize = 20;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageKind {
+    Commit,
+    PullRequest { non_trivial_diff: bool },
+}
+
+impl MessageKind {
+    fn requires_body(self) -> bool {
+        match self {
+            Self::Commit => false,
+            Self::PullRequest { non_trivial_diff } => non_trivial_diff,
+        }
+    }
+
+    fn log_label(self) -> &'static str {
+        match self {
+            Self::Commit => "commit-message",
+            Self::PullRequest { .. } => "pr-message",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     pub title: String,
     pub body: String,
+}
+
+impl Message {
+    pub fn validate(&self, require_body: bool) -> OpsResult<()> {
+        let title = self.title.trim();
+        if title.is_empty() {
+            return Err(OpsError::Parse("message title is empty".to_string()));
+        }
+        if title.chars().count() > TITLE_MAX_CHARS {
+            return Err(OpsError::Parse(format!(
+                "message title exceeds {TITLE_MAX_CHARS} characters"
+            )));
+        }
+
+        let lower_title = title.to_ascii_lowercase();
+        if lower_title.contains("http://") || lower_title.contains("https://") {
+            return Err(OpsError::Parse(
+                "message title must not contain URLs".to_string(),
+            ));
+        }
+
+        if require_body && self.body.trim().is_empty() {
+            return Err(OpsError::Parse(
+                "message body is required for non-trivial diffs".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,21 +138,25 @@ struct MessagePayload {
 pub fn generate_commit_message(repo: &Path) -> OpsResult<Message> {
     let diff = get_staged_diff(repo)?;
     let prompt = build_message_prompt(diff.as_deref(), COMMIT_MESSAGE_PROMPT);
-    generate_message(repo, &prompt)
+    generate_message(repo, &prompt, MessageKind::Commit)
 }
 
 pub fn generate_pr_message(repo: &Path) -> OpsResult<Message> {
     let diff = get_branch_diff(repo)?;
-    let prompt = build_message_prompt(diff.as_deref(), PR_MESSAGE_PROMPT);
-    generate_message(repo, &prompt)
+    generate_pr_message_with_diff(repo, diff.as_deref())
 }
 
 pub fn generate_pr_message_from_diff(repo: &Path, diff: &str) -> OpsResult<Message> {
-    let prompt = build_message_prompt(Some(diff), PR_MESSAGE_PROMPT);
-    generate_message(repo, &prompt)
+    generate_pr_message_with_diff(repo, Some(diff))
 }
 
-fn generate_message(repo: &Path, prompt: &str) -> OpsResult<Message> {
+fn generate_pr_message_with_diff(repo: &Path, diff: Option<&str>) -> OpsResult<Message> {
+    let non_trivial_diff = diff.is_some_and(is_non_trivial_diff);
+    let prompt = build_message_prompt(diff, PR_MESSAGE_PROMPT);
+    generate_message(repo, &prompt, MessageKind::PullRequest { non_trivial_diff })
+}
+
+fn generate_message(repo: &Path, prompt: &str, kind: MessageKind) -> OpsResult<Message> {
     let config = load_config_or_default(Some(repo));
     let launch = LaunchConfig {
         task_prompt: format!(
@@ -122,10 +178,19 @@ fn generate_message(repo: &Path, prompt: &str) -> OpsResult<Message> {
     };
     let result = launch_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
+    let log_path = write_message_output_log(repo, kind.log_label(), &result.stdout, &result.stderr);
     if result.exit_code != 0 {
-        return Err(OpsError::AgentFailed(result.stderr));
+        return Err(append_log_hint_to_error(
+            OpsError::AgentFailed(result.stderr),
+            log_path.as_deref(),
+        ));
     }
-    parse_message_output(&result.stdout)
+    let message = parse_message_output(&result.stdout)
+        .map_err(|err| append_log_hint_to_error(err, log_path.as_deref()))?;
+    message
+        .validate(kind.requires_body())
+        .map_err(|err| append_log_hint_to_error(err, log_path.as_deref()))?;
+    Ok(message)
 }
 
 fn build_message_prompt(diff: Option<&str>, task_prompt: &str) -> String {
@@ -156,28 +221,12 @@ fn parse_message_output(output: &str) -> OpsResult<Message> {
     if trimmed.is_empty() {
         return Err(OpsError::Parse("empty message output".to_string()));
     }
-    if let Some(payload) = extract_json_payload(trimmed) {
-        return Ok(Message {
-            title: payload.title,
-            body: payload.body,
-        });
-    }
-
-    let lines = trimmed
-        .lines()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        return Err(OpsError::Parse("empty message output".to_string()));
-    }
-    let title = lines[0].to_string();
-    let body = if lines.len() > 1 {
-        lines[1..].join("\n")
-    } else {
-        String::new()
-    };
-    Ok(Message { title, body })
+    let payload = extract_json_payload(trimmed)
+        .ok_or_else(|| OpsError::Parse("expected JSON with title and body".to_string()))?;
+    Ok(Message {
+        title: payload.title,
+        body: payload.body,
+    })
 }
 
 fn extract_json_payload(text: &str) -> Option<MessagePayload> {
@@ -206,6 +255,47 @@ fn extract_inline_json(text: &str) -> Option<MessagePayload> {
     }
     let candidate = text[start..=end].trim();
     serde_json::from_str::<MessagePayload>(candidate).ok()
+}
+
+fn is_non_trivial_diff(diff: &str) -> bool {
+    diff.lines()
+        .filter(|line| {
+            (line.starts_with('+') && !line.starts_with("+++"))
+                || (line.starts_with('-') && !line.starts_with("---"))
+        })
+        .count()
+        >= NON_TRIVIAL_DIFF_CHANGE_LINES
+}
+
+fn write_message_output_log(
+    repo: &Path,
+    label: &str,
+    stdout: &str,
+    stderr: &str,
+) -> Option<PathBuf> {
+    let log_dir = repo.join(".lf").join("logs");
+    std::fs::create_dir_all(&log_dir).ok()?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%f");
+    let filename = format!("{timestamp}-{}-{label}.log", std::process::id());
+    let path = log_dir.join(filename);
+    let contents = format!(
+        "message generation output\n\n=== stdout ===\n{stdout}\n\n=== stderr ===\n{stderr}\n"
+    );
+    std::fs::write(&path, contents).ok()?;
+    Some(path)
+}
+
+fn append_log_hint_to_error(err: OpsError, log_path: Option<&Path>) -> OpsError {
+    let Some(log_path) = log_path else {
+        return err;
+    };
+    let hint = format!(" (raw output logged at {})", log_path.display());
+    match err {
+        OpsError::Parse(message) => OpsError::Parse(format!("{message}{hint}")),
+        OpsError::Message(message) => OpsError::Message(format!("{message}{hint}")),
+        OpsError::AgentFailed(message) => OpsError::AgentFailed(format!("{message}{hint}")),
+        other => other,
+    }
 }
 
 fn get_staged_diff(repo: &Path) -> OpsResult<Option<String>> {
@@ -238,7 +328,11 @@ fn run_git_diff(repo: &Path, args: &[&str]) -> OpsResult<Option<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_message_output, Message};
+    use super::{
+        is_non_trivial_diff, parse_message_output, write_message_output_log, Message,
+        NON_TRIVIAL_DIFF_CHANGE_LINES, TITLE_MAX_CHARS,
+    };
+    use crate::ops::error::OpsError;
 
     #[test]
     fn parse_message_output_json() {
@@ -254,10 +348,75 @@ mod tests {
     }
 
     #[test]
-    fn parse_message_output_fallback() {
+    fn parse_message_output_rejects_non_json() {
         let output = "title line\nbody line";
-        let message = parse_message_output(output).expect("parse");
-        assert_eq!(message.title, "title line");
-        assert_eq!(message.body, "body line");
+        let error = parse_message_output(output).expect_err("parse should fail");
+        assert!(matches!(error, OpsError::Parse(message) if message.contains("expected JSON")));
+    }
+
+    #[test]
+    fn validate_rejects_url_in_title() {
+        let message = Message {
+            title: "updated pr #396: https://example.com".to_string(),
+            body: "body".to_string(),
+        };
+        let error = message.validate(false).expect_err("validation should fail");
+        assert!(
+            matches!(error, OpsError::Parse(message) if message.contains("must not contain URLs"))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_title_over_character_limit() {
+        let message = Message {
+            title: "a".repeat(TITLE_MAX_CHARS + 1),
+            body: "body".to_string(),
+        };
+        let error = message.validate(false).expect_err("validation should fail");
+        assert!(matches!(error, OpsError::Parse(message) if message.contains("exceeds")));
+    }
+
+    #[test]
+    fn validate_requires_body_for_non_trivial_diff() {
+        let message = Message {
+            title: "good title".to_string(),
+            body: "   ".to_string(),
+        };
+        let error = message.validate(true).expect_err("validation should fail");
+        assert!(matches!(error, OpsError::Parse(message) if message.contains("required")));
+    }
+
+    #[test]
+    fn validate_allows_empty_body_for_trivial_diff() {
+        let message = Message {
+            title: "good title".to_string(),
+            body: String::new(),
+        };
+        message.validate(false).expect("validation should pass");
+    }
+
+    #[test]
+    fn non_trivial_diff_detects_threshold_crossing() {
+        let mut diff = String::new();
+        for index in 0..NON_TRIVIAL_DIFF_CHANGE_LINES {
+            diff.push_str(&format!("+line {index}\n"));
+        }
+        assert!(is_non_trivial_diff(&diff));
+    }
+
+    #[test]
+    fn non_trivial_diff_ignores_trivial_changes() {
+        let diff = "+line 1\n+line 2\n";
+        assert!(!is_non_trivial_diff(diff));
+    }
+
+    #[test]
+    fn write_message_output_log_records_stdout_and_stderr() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = write_message_output_log(tempdir.path(), "pr-message", "hello", "warning")
+            .expect("log path");
+        let content = std::fs::read_to_string(path).expect("read log");
+        assert!(content.contains("hello"));
+        assert!(content.contains("warning"));
     }
 }

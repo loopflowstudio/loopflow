@@ -143,14 +143,16 @@ pub fn generate_commit_message(repo: &Path) -> OpsResult<Message> {
 
 pub fn generate_pr_message(repo: &Path) -> OpsResult<Message> {
     let diff = get_branch_diff(repo)?;
-    let non_trivial_diff = diff.as_deref().is_some_and(is_non_trivial_diff);
-    let prompt = build_message_prompt(diff.as_deref(), PR_MESSAGE_PROMPT);
-    generate_message(repo, &prompt, MessageKind::PullRequest { non_trivial_diff })
+    generate_pr_message_with_diff(repo, diff.as_deref())
 }
 
 pub fn generate_pr_message_from_diff(repo: &Path, diff: &str) -> OpsResult<Message> {
-    let non_trivial_diff = is_non_trivial_diff(diff);
-    let prompt = build_message_prompt(Some(diff), PR_MESSAGE_PROMPT);
+    generate_pr_message_with_diff(repo, Some(diff))
+}
+
+fn generate_pr_message_with_diff(repo: &Path, diff: Option<&str>) -> OpsResult<Message> {
+    let non_trivial_diff = diff.is_some_and(is_non_trivial_diff);
+    let prompt = build_message_prompt(diff, PR_MESSAGE_PROMPT);
     generate_message(repo, &prompt, MessageKind::PullRequest { non_trivial_diff })
 }
 
@@ -178,10 +180,10 @@ fn generate_message(repo: &Path, prompt: &str, kind: MessageKind) -> OpsResult<M
         .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
     let log_path = write_message_output_log(repo, kind.log_label(), &result.stdout, &result.stderr);
     if result.exit_code != 0 {
-        return Err(OpsError::AgentFailed(with_log_hint(
-            result.stderr,
+        return Err(append_log_hint_to_error(
+            OpsError::AgentFailed(result.stderr),
             log_path.as_deref(),
-        )));
+        ));
     }
     let message = parse_message_output(&result.stdout)
         .map_err(|err| append_log_hint_to_error(err, log_path.as_deref()))?;
@@ -293,13 +295,6 @@ fn append_log_hint_to_error(err: OpsError, log_path: Option<&Path>) -> OpsError 
         OpsError::Message(message) => OpsError::Message(format!("{message}{hint}")),
         OpsError::AgentFailed(message) => OpsError::AgentFailed(format!("{message}{hint}")),
         other => other,
-    }
-}
-
-fn with_log_hint(message: String, log_path: Option<&Path>) -> String {
-    match log_path {
-        Some(path) => format!("{message} (raw output logged at {})", path.display()),
-        None => message,
     }
 }
 

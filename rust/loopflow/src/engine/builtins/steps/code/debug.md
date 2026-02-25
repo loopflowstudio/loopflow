@@ -2,6 +2,7 @@
 requires: error message or stacktrace (via clipboard -c)
 produces: fixed code
 diff_files: false
+action_style: procedural
 ---
 Debug an error using the stacktrace or error message from clipboard.
 

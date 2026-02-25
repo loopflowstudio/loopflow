@@ -42,6 +42,7 @@ fn flow_parsing_parity() {
             name: "implement".to_string(),
             model: None,
             directions: vec![],
+            action_style: None,
             interactive: None,
             content: None,
         })
@@ -52,6 +53,7 @@ fn flow_parsing_parity() {
             name: "review".to_string(),
             model: None,
             directions: vec!["ux".to_string(), "security".to_string()],
+            action_style: None,
             interactive: Some(true),
             content: None,
         })

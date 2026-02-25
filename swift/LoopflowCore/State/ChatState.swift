@@ -129,12 +129,13 @@ public final class ChatState {
     public var turnState: ChatTurnState = .idle
     public var streamPhase: StreamPhase = .idle
     public var awaitingSessionJoin: Bool = false
+    public var suggestedActions: [SuggestedAction] = []
 
     public private(set) var itemsById: [String: SessionItem] = [:]
 
     private let sessionHarness: String
     private let sessionWaveRunId: String?
-    private let sessionConfig: AgentSessionConfig
+    private var sessionConfig: AgentSessionConfig
     private let waveService: any ChatService
     private let userDefaults: UserDefaults
     private let detailLimit = 16_000
@@ -241,6 +242,7 @@ public final class ChatState {
 
         guard turnState != .running && streamPhase != .ending else { return }
 
+        clearSuggestedActions()
         appendMessage(role: .user, content: text)
         turnState = .running
         awaitingSessionJoin = false
@@ -274,7 +276,25 @@ public final class ChatState {
         currentTurnId = nil
         turnState = .idle
         streamPhase = .idle
+        clearSuggestedActions()
         appendMessage(role: .system, content: "Session ended")
+    }
+
+    public func configureClientContext(compact: Bool) {
+        guard sessionId == nil else { return }
+        sessionConfig.clientHasUI = true
+        sessionConfig.clientCompact = compact
+    }
+
+    public func composerTextDidChange(_ text: String) {
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            clearSuggestedActions()
+        }
+    }
+
+    public func sendSuggestedAction(_ action: SuggestedAction) async {
+        clearSuggestedActions()
+        await send(action.label)
     }
 
     public func reconnectIfNeeded() async {
@@ -457,6 +477,7 @@ public final class ChatState {
         itemEntryIdByItemId.removeAll()
         assistantEntryIdByTurnId.removeAll()
         messageEntryIdByItemId.removeAll()
+        clearSuggestedActions()
     }
 
     private func appendMessage(role: ChatRole, content: String) {
@@ -527,6 +548,7 @@ public final class ChatState {
         case .turnStarted(let turnId):
             currentTurnId = turnId
             turnState = .running
+            clearSuggestedActions()
 
         case .turnCompleted(let turnId, let status):
             guard currentTurnId == nil || currentTurnId == turnId else { return }
@@ -559,9 +581,13 @@ public final class ChatState {
         case .diffUpdated(_, _):
             return
 
+        case .suggestedActions(_, let actions):
+            applySuggestedActions(actions)
+
         case .statusChanged(let status):
             if status == "ended" || status == "failed" {
                 streamPhase = .idle
+                clearSuggestedActions()
             }
 
         case .error(_, let message):
@@ -594,6 +620,27 @@ public final class ChatState {
         let message = ChatMessage(role: .assistant, content: delta)
         transcript.append(.message(message))
         assistantEntryIdByTurnId[turnId] = message.id
+    }
+
+    private func applySuggestedActions(_ payloads: [SuggestedActionPayload]) {
+        let sanitized = payloads
+            .compactMap { payload -> SuggestedAction? in
+                let label = payload.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !label.isEmpty else { return nil }
+                let description = payload.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return SuggestedAction(
+                    label: label,
+                    description: (description?.isEmpty == false) ? description : nil
+                )
+            }
+            .prefix(4)
+
+        guard !sanitized.isEmpty else { return }
+        suggestedActions = Array(sanitized)
+    }
+
+    private func clearSuggestedActions() {
+        suggestedActions.removeAll()
     }
 
     private func upsertItem(turnId: String, item: SessionItem) {

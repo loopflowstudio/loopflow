@@ -22,6 +22,7 @@ use crate::engine::worktrees::{
 };
 
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
+use crate::engine::synthetic::ClientContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::security::{sanitize_fs_component, validate_safe_id};
 use crate::lfd::store::SharedStore;
@@ -317,6 +318,7 @@ pub(crate) async fn build_step_prompt(
             include_config_area: true,
             source_overrides: Default::default(),
             summary,
+            client_context: ClientContext::default(),
         },
     )?;
 

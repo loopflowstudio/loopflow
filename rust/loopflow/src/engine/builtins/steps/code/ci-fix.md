@@ -2,6 +2,7 @@
 requires: wave PR with failing CI checks (or CI failure message context)
 produces: branch with CI failures fixed
 diff_files: false
+action_style: procedural
 ---
 Fix failing CI checks for the current wave PR.
 

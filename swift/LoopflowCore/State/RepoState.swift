@@ -124,7 +124,8 @@ public final class RepoState {
                 wave: {
                     guard let name = wave?.name, !name.isEmpty else { return nil }
                     return name
-                }()
+                }(),
+                clientHasUI: true
             ),
             waveService: waveService
         )

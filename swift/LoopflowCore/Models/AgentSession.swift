@@ -173,6 +173,8 @@ public struct AgentSessionConfig: Sendable, Hashable {
     public var cwd: String?
     public var maxTurns: Int?
     public var yoloMode: Bool
+    public var clientHasUI: Bool?
+    public var clientCompact: Bool?
 
     public init(
         step: String,
@@ -184,7 +186,9 @@ public struct AgentSessionConfig: Sendable, Hashable {
         model: String? = nil,
         cwd: String? = nil,
         maxTurns: Int? = nil,
-        yoloMode: Bool = false
+        yoloMode: Bool = false,
+        clientHasUI: Bool? = nil,
+        clientCompact: Bool? = nil
     ) {
         self.step = step
         self.repoRoot = repoRoot
@@ -196,6 +200,8 @@ public struct AgentSessionConfig: Sendable, Hashable {
         self.cwd = cwd
         self.maxTurns = maxTurns
         self.yoloMode = yoloMode
+        self.clientHasUI = clientHasUI
+        self.clientCompact = clientCompact
     }
 }
 
@@ -239,6 +245,7 @@ public enum AgentSessionEvent: Sendable, Hashable {
     case textDelta(turnId: String, content: String)
     case reasoningDelta(turnId: String, content: String)
     case diffUpdated(turnId: String, diff: String)
+    case suggestedActions(turnId: String, actions: [SuggestedActionPayload])
     case statusChanged(status: String)
     case error(code: String, message: String)
     case other(type: String, payload: JSONValue)

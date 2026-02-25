@@ -14,6 +14,7 @@ use crate::engine::config::parse_model;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
+use crate::engine::synthetic::{render_synthetic_guidance, SyntheticTool};
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
 /// to this process before exiting so the agent doesn't survive as an orphan.
@@ -67,6 +68,21 @@ pub struct AgentConfig {
     pub cwd: Option<std::path::PathBuf>,
     /// Skip permission prompts
     pub skip_permissions: bool,
+    /// Engine-injected synthetic tools (rendered via harness prompt guidance).
+    pub synthetic_tools: Vec<SyntheticTool>,
+}
+
+/// Build the effective system prompt including synthetic tool guidance.
+pub fn system_prompt_with_synthetic_tools(config: &AgentConfig) -> String {
+    let guidance = render_synthetic_guidance(&config.synthetic_tools);
+    if guidance.is_empty() {
+        return config.system_prompt.clone();
+    }
+    if config.system_prompt.trim().is_empty() {
+        return guidance;
+    }
+
+    format!("{}\n\n{guidance}", config.system_prompt.trim_end())
 }
 
 /// Process/runtime options for launching an agent subprocess.
@@ -188,7 +204,7 @@ pub fn build_claude_session_turn_args(
     let mut args = vec!["-p".to_string(), content.to_string()];
     let claude_args = ClaudeArgs {
         model: config.model.as_deref().and_then(ClaudeArgs::resolve_model),
-        system_prompt: Some(config.system_prompt.clone()),
+        system_prompt: Some(system_prompt_with_synthetic_tools(config)),
         system_prompt_file: None,
         skip_permissions: config.skip_permissions,
         max_turns: config.max_turns,
@@ -247,7 +263,7 @@ pub fn build_claude_command(
 
     let claude_args = ClaudeArgs {
         model: model_variant.map(str::to_string),
-        system_prompt: Some(launch.system_prompt.clone()),
+        system_prompt: Some(system_prompt_with_synthetic_tools(launch)),
         system_prompt_file: process.context_file.clone(),
         skip_permissions: process.auto || launch.skip_permissions,
         max_turns: launch.max_turns,
@@ -1202,6 +1218,7 @@ mod tests {
             cwd: Some("/tmp".into()),
             max_turns: None,
             skip_permissions: false,
+            synthetic_tools: Vec::new(),
         };
         let args = build_claude_session_turn_args("hello", &config, None);
         assert_eq!(
@@ -1219,6 +1236,7 @@ mod tests {
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
             skip_permissions: true,
+            synthetic_tools: Vec::new(),
         };
         let args = build_claude_session_turn_args("fix tests", &config, Some("sess_abc"));
         assert!(args.contains(&"--resume".to_string()));
@@ -1230,6 +1248,36 @@ mod tests {
         assert!(args.contains(&"5".to_string()));
         assert!(args.contains(&"--append-system-prompt".to_string()));
         assert!(args.contains(&"Be concise".to_string()));
+    }
+
+    #[test]
+    fn build_claude_session_turn_args_appends_synthetic_guidance() {
+        let config = AgentConfig {
+            system_prompt: "Base prompt".to_string(),
+            task_prompt: "task".to_string(),
+            model: None,
+            cwd: Some("/tmp".into()),
+            max_turns: None,
+            skip_permissions: false,
+            synthetic_tools: vec![SyntheticTool {
+                name: "suggest_actions".to_string(),
+                description: "Suggest actions".to_string(),
+                schema: serde_json::json!({"type": "array"}),
+                guidance: "Emit <lf:suggest_actions> JSON.".to_string(),
+            }],
+        };
+
+        let args = build_claude_session_turn_args("hello", &config, None);
+        let prompt_idx = args
+            .iter()
+            .position(|arg| arg == "--append-system-prompt")
+            .expect("expected --append-system-prompt");
+        let prompt = args
+            .get(prompt_idx + 1)
+            .expect("system prompt text should follow flag");
+        assert!(prompt.contains("Base prompt"));
+        assert!(prompt.contains("<lf:synthetic_tools>"));
+        assert!(prompt.contains("<lf:suggest_actions>"));
     }
 
     #[test]

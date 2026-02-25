@@ -2,6 +2,7 @@
 interactive: true
 requires: scratch/<slug>.md (elaborated design from kickoff)
 produces: scratch/<slug>.md (approved or revised) | direction to iterate
+action_style: exploratory
 ---
 Pressure-test the design with the human before implementation burns time.
 

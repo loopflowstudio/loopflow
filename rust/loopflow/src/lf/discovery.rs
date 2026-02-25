@@ -317,6 +317,7 @@ fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
             content: Some(content),
             model: None,
             directions: Vec::new(),
+            action_style: None,
             interactive: Some(true),
         });
     }

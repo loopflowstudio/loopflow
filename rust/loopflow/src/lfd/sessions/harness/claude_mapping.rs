@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use crate::lfd::sessions::harness::lf_tag::LfTagParser;
 use crate::lfd::sessions::types::{FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus};
 
 /// Reader-local state for tracking in-flight content blocks.
@@ -12,6 +13,8 @@ pub(super) struct ReaderState {
     tool_blocks: HashMap<usize, ToolUseState>,
     /// Map tool_use_id -> block index for direct completion lookup.
     tool_indexes: HashMap<String, usize>,
+    /// Streaming parser for synthetic `<lf:...>` tagged payloads.
+    tag_parser: LfTagParser,
 }
 
 #[derive(Debug, Default)]
@@ -170,10 +173,7 @@ pub(super) fn process_line(
             match delta_type {
                 "text_delta" => {
                     if let Some(text) = delta.get("text").and_then(Value::as_str) {
-                        let _ = events.send(SessionEvent::TextDelta {
-                            turn_id: turn_id.to_string(),
-                            content: text.to_string(),
-                        });
+                        emit_text_delta(events, state, turn_id, text);
                     }
                 }
                 "thinking_delta" | "summary_delta" => {
@@ -205,6 +205,7 @@ pub(super) fn process_line(
         }
 
         "result" => {
+            flush_text_delta_parser(events, state, turn_id);
             let status = if event
                 .get("is_error")
                 .and_then(Value::as_bool)
@@ -348,10 +349,7 @@ fn process_assistant_message(
             "text" => {
                 if let Some(text) = block.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
-                        let _ = events.send(SessionEvent::TextDelta {
-                            turn_id: turn_id.to_string(),
-                            content: text.to_string(),
-                        });
+                        emit_text_delta(events, state, turn_id, text);
                     }
                 }
             }
@@ -446,6 +444,27 @@ fn extract_tool_result_text(block: &Value) -> Option<String> {
         .get("content")
         .and_then(Value::as_str)
         .map(String::from)
+}
+
+fn emit_text_delta(
+    events: &broadcast::Sender<SessionEvent>,
+    state: &mut ReaderState,
+    turn_id: &str,
+    content: &str,
+) {
+    for event in state.tag_parser.consume_text(turn_id, content) {
+        let _ = events.send(event);
+    }
+}
+
+fn flush_text_delta_parser(
+    events: &broadcast::Sender<SessionEvent>,
+    state: &mut ReaderState,
+    turn_id: &str,
+) {
+    for event in state.tag_parser.finish_turn(turn_id) {
+        let _ = events.send(event);
+    }
 }
 
 #[cfg(test)]
@@ -577,6 +596,25 @@ mod tests {
                 assert_eq!(content, "Hello world");
             }
             other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_line_text_delta_emits_suggested_actions_event() {
+        let (tx, mut rx) = broadcast::channel(16);
+        let mut state = ReaderState::default();
+        let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<lf:suggest_actions>[{\"label\":\"Land PR\"}]</lf:suggest_actions>"}}"#;
+
+        process_line(line, "turn_1", &tx, &mut state);
+
+        let event = rx.try_recv().expect("should have event");
+        match event {
+            SessionEvent::SuggestedActions { turn_id, actions } => {
+                assert_eq!(turn_id, "turn_1");
+                assert_eq!(actions.len(), 1);
+                assert_eq!(actions[0].label, "Land PR");
+            }
+            other => panic!("expected SuggestedActions, got {other:?}"),
         }
     }
 

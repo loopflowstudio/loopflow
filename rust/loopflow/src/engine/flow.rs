@@ -15,6 +15,8 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub directions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_style: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
@@ -26,6 +28,7 @@ impl Step {
             name: name.to_string(),
             model: None,
             directions: Vec::new(),
+            action_style: None,
             interactive: None,
             content: None,
         }
@@ -150,6 +153,7 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
             name: name.to_string(),
             model: frontmatter.model,
             directions: frontmatter.directions,
+            action_style: frontmatter.action_style,
             interactive: frontmatter.interactive,
             content: Some(body),
         });
@@ -162,6 +166,7 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
             name: name.to_string(),
             model: frontmatter.model,
             directions: frontmatter.directions,
+            action_style: frontmatter.action_style,
             interactive: frontmatter.interactive,
             content: Some(body),
         });
@@ -174,6 +179,7 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
 struct StepFrontmatter {
     model: Option<String>,
     directions: Vec<String>,
+    action_style: Option<String>,
     interactive: Option<bool>,
 }
 
@@ -209,6 +215,10 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
         .get(key("model"))
         .and_then(|val| val.as_str())
         .map(|val| val.to_string());
+    let action_style = map
+        .get(key("action_style"))
+        .and_then(|val| val.as_str())
+        .map(|val| val.to_string());
     let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
     let mut directions = parse_string_list(map.get(key("directions")));
     if directions.is_empty() {
@@ -218,6 +228,7 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
     StepFrontmatter {
         model,
         directions,
+        action_style,
         interactive,
     }
 }
@@ -427,12 +438,17 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
                 .get(key("model"))
                 .and_then(|val| val.as_str())
                 .map(|val| val.to_string());
+            let action_style = map
+                .get(key("action_style"))
+                .and_then(|val| val.as_str())
+                .map(|val| val.to_string());
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
             let directions = parse_string_list(map.get(key("direction")));
             Ok(Step {
                 name,
                 model,
                 directions,
+                action_style,
                 interactive,
                 content: None,
             })
@@ -481,6 +497,7 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
                 name: step_name.to_string(),
                 model: None,
                 directions,
+                action_style: None,
                 interactive: None,
                 content: None,
             }));
@@ -537,6 +554,9 @@ fn resolve_step_reference(step: &Step, repo: &Path) -> Step {
     }
     if !step.directions.is_empty() {
         resolved.directions = step.directions.clone();
+    }
+    if let Some(action_style) = &step.action_style {
+        resolved.action_style = Some(action_style.clone());
     }
     if let Some(interactive) = step.interactive {
         resolved.interactive = Some(interactive);
@@ -745,6 +765,26 @@ Design the feature.
     }
 
     #[test]
+    fn load_step_parses_frontmatter_action_style() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("design.md"),
+            r#"---
+action_style: exploratory
+---
+# Design Step
+Design the feature.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("design", tmp.path()).unwrap();
+        assert_eq!(step.action_style.as_deref(), Some("exploratory"));
+    }
+
+    #[test]
     fn load_step_includes_frontmatter_directions() {
         let tmp = TempDir::new().unwrap();
         let steps_dir = tmp.path().join(".lf/steps");
@@ -792,7 +832,7 @@ Be careful.
     #[test]
     fn load_direction_finds_builtin_direction() {
         let tmp = TempDir::new().unwrap();
-        let result = load_direction("security", tmp.path());
+        let result = load_direction("ceo", tmp.path());
         assert!(
             result.is_ok(),
             "builtin direction should be found: {:?}",
@@ -817,6 +857,7 @@ Be careful.
                 name: "design".to_string(),
                 model: None,
                 directions: Vec::new(),
+                action_style: None,
                 interactive: Some(true),
                 content: None,
             })],

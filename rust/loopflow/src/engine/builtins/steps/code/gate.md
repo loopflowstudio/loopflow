@@ -1,6 +1,7 @@
 ---
 requires: code on branch
 produces: polished code, scratch/<branch>-review.md
+action_style: procedural
 ---
 Make the branch as ready to ship as possible, and as easy for reviewers to evaluate as possible.
 

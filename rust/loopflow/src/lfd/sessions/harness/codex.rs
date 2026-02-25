@@ -10,9 +10,12 @@ use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
+use crate::engine::agent::{
+    build_codex_thread_start_params, system_prompt_with_synthetic_tools, AgentConfig,
+};
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
+use crate::lfd::sessions::harness::lf_tag::LfTagParser;
 use crate::lfd::sessions::harness::{codex_mapping, Harness};
 use crate::lfd::sessions::types::SessionEvent;
 
@@ -141,8 +144,9 @@ impl Harness for CodexHarness {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {
                 let mut parts = Vec::new();
-                if !launch.system_prompt.trim().is_empty() {
-                    parts.push(launch.system_prompt.trim().to_string());
+                let system_prompt = system_prompt_with_synthetic_tools(launch);
+                if !system_prompt.trim().is_empty() {
+                    parts.push(system_prompt.trim().to_string());
                 }
                 if !launch.task_prompt.trim().is_empty() {
                     parts.push(launch.task_prompt.trim().to_string());
@@ -246,6 +250,7 @@ impl CodexHarness {
         let reader_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             let mut initialized_tx = Some(initialized_tx);
+            let mut tag_parser = LfTagParser::default();
 
             while let Ok(Some(line)) = lines.next_line().await {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -295,6 +300,9 @@ impl CodexHarness {
                     "turn/completed" => {
                         let tid =
                             resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id).await;
+                        for parsed_event in tag_parser.finish_turn(&tid) {
+                            let _ = event_tx.send(parsed_event);
+                        }
                         turn_in_progress.store(false, Ordering::Relaxed);
                         *current_turn_id.lock().await = None;
                         let status = codex_mapping::map_turn_status(&params);
@@ -320,10 +328,9 @@ impl CodexHarness {
                             let tid =
                                 resolve_turn_id(turn_id_from_params.as_deref(), &current_turn_id)
                                     .await;
-                            let _ = event_tx.send(SessionEvent::TextDelta {
-                                turn_id: tid,
-                                content,
-                            });
+                            for parsed_event in tag_parser.consume_text(&tid, &content) {
+                                let _ = event_tx.send(parsed_event);
+                            }
                         }
                     }
                     "item/agentMessage/completed" | "item/agentMessage/done" => {

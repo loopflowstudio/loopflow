@@ -3,6 +3,7 @@ import LoopflowCore
 
 struct WaveChatView: View {
     @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @Bindable var state: ChatState
 
@@ -39,6 +40,16 @@ struct WaveChatView: View {
                 }
             }
 
+            if !state.suggestedActions.isEmpty {
+                ActionButtonsView(actions: state.suggestedActions) { action in
+                    composerText = ""
+                    Task {
+                        await state.sendSuggestedAction(action)
+                    }
+                }
+                .padding(.horizontal, Spacing.lg)
+            }
+
             HStack(alignment: .bottom, spacing: Spacing.sm) {
                 TextField("Message", text: $composerText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
@@ -65,7 +76,14 @@ struct WaveChatView: View {
         }
         .background(palette.background)
         .task {
+            state.configureClientContext(compact: horizontalSizeClass == .compact)
             await state.onAppear()
+        }
+        .onChange(of: horizontalSizeClass) { _, value in
+            state.configureClientContext(compact: value == .compact)
+        }
+        .onChange(of: composerText) { _, value in
+            state.composerTextDidChange(value)
         }
         .onDisappear {
             state.onDisappear()

@@ -109,6 +109,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 clipboard: if cli.clipboard { Some(true) } else { None },
             },
             summary: None,
+            client_context: Default::default(),
         },
     )?;
     debug!(

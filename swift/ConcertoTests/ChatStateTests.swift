@@ -480,6 +480,58 @@ struct ChatStateTests {
         #expect(service.lastCreateSessionWaveRunId == "run_123")
         #expect(service.lastCreateSessionConfig == config)
     }
+
+    @MainActor
+    @Test("suggested actions sanitize labels, cap at four, and replace prior set")
+    func suggestedActionsSanitizeAndCap() async {
+        let service = MockChatService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .suggestedActions(
+                        turnId: "turn_1",
+                        actions: [
+                            SuggestedActionPayload(label: "Land PR", description: "Merge now"),
+                            SuggestedActionPayload(label: "  ", description: "bad"),
+                            SuggestedActionPayload(label: "Run tests"),
+                            SuggestedActionPayload(label: "Show diff"),
+                            SuggestedActionPayload(label: "Open PR"),
+                            SuggestedActionPayload(label: "Extra action"),
+                        ]
+                    ))),
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: service,
+            userDefaults: makeUserDefaults("suggested-actions")
+        )
+
+        await state.send("next")
+        await waitUntil { state.turnState == .completed }
+
+        #expect(state.suggestedActions.map(\.label) == ["Land PR", "Run tests", "Show diff", "Open PR"])
+        #expect(state.suggestedActions.count == 4)
+    }
+
+    @MainActor
+    @Test("suggested actions clear on manual typing")
+    func suggestedActionsClearOnTyping() async {
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: MockChatService(),
+            userDefaults: makeUserDefaults("suggested-actions-typing")
+        )
+        state.suggestedActions = [SuggestedAction(label: "Land PR")]
+
+        state.composerTextDidChange("l")
+
+        #expect(state.suggestedActions.isEmpty)
+    }
 }
 
 private struct StreamPlan {

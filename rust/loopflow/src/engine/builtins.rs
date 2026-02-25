@@ -55,6 +55,11 @@ pub fn get_builtin_direction(name: &str) -> Option<&'static str> {
     BUILTIN_DIRECTIONS.get(name).copied()
 }
 
+/// Returns members of a built-in direction group.
+pub fn get_builtin_direction_group(name: &str) -> Option<&'static [&'static str]> {
+    BUILTIN_DIRECTION_GROUPS.get(name).copied()
+}
+
 /// Returns the content of a built-in ops prompt, if it exists.
 pub fn get_builtin_ops_prompt(name: &str) -> Option<&'static str> {
     BUILTIN_OPS_PROMPTS.get(name).copied()

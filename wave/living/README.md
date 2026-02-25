@@ -30,7 +30,7 @@ A living wave:
 ## Risks
 
 - **Memory quality.** Agents write varying-quality observations. Wrong-but-plausible observations persist until consolidation catches them. Mitigate: consolidation step reviews memory for accuracy against current code.
-- **Memory bloat.** Without pressure, memory grows until it crowds out other context. Mitigate: SUMMARY.md always fits; topic files compete for budget; consolidation compresses.
+- **Memory bloat.** Without pressure, `MEMORY.md` grows until it crowds out other context. Mitigate: memory trims before summaries/docs in prompt assembly, and ops maintenance distills durable items into canonical docs.
 - **Cross-wave leakage.** Shared memory between listening waves could propagate bad observations. Mitigate: memory is wave-private by default; sharing is explicit.
 - **Orphaned skill files on crash.** If lfd crashes mid-session, injected `.claude/commands/` files linger. Harmless (overwritten on next injection) but messy. Tracked, not urgent.
 - **Skill injection gap.** Global `~/.lf/steps/` and external skills (superpowers, rams) are not injected yet — only builtins and repo-local. Acceptable for now; revisit when external skill sources mature.

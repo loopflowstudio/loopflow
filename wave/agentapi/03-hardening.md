@@ -1,6 +1,6 @@
-# 04: Hardening
+# Hardening
 
-Production failure modes that cause stuck or lost sessions. Do this after 05 and 06 — runtime convergence and the third adapter will reshape what needs hardening.
+Production failure modes that cause stuck or lost sessions. Do this after runtime convergence and the OpenCode adapter — both will reshape what needs hardening.
 
 ## What to address
 
@@ -14,7 +14,7 @@ These either work well enough today or belong in other phases:
 
 - **SSE broadcast lag**: reconnect with `after_seq` already provides full replay. In-stream backfill is polish.
 - **Concurrent clients**: works now. Fix when it breaks under real load.
-- **Provider conformance tests**: belongs with 06 (OpenCode adapter validates the abstraction).
+- **Provider conformance tests**: belongs with the OpenCode adapter (validates the abstraction).
 - **Claude reader-task-stop race**: `AtomicBool` guard prevents corruption. Event ordering is surprising but not broken.
 
 ## Done when

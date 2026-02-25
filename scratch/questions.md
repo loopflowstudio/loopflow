@@ -1,1 +1,0 @@
-- Decision: keep only trailing `{words}` optional in `parse_branch_name()`. `{timestamp}`/`{date}` remain required when present in schema to avoid misparsing arbitrary dotted names as metadata.

@@ -21,6 +21,7 @@ Commands:
     lfd --docker    Run lfd with Docker executor (postgres in container)
     agent-image     Build the Docker agent image
 
+    screenshots     Generate app screenshots
     ghostty-build   Build GhosttyKit xcframework locally
     ghostty-update  Build, upload to R2, and update Package.swift
 
@@ -824,6 +825,16 @@ def cmd_ghostty_update() -> int:
     return 0
 
 
+def cmd_screenshots() -> int:
+    """Generate app screenshots."""
+    script = REPO_ROOT / "scripts" / "generate_screenshots.py"
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=REPO_ROOT,
+    )
+    return result.returncode
+
+
 def _update_package_swift(url: str, checksum: str) -> None:
     """Update Package.swift with new URL and checksum."""
     import re
@@ -860,6 +871,7 @@ COMMANDS = {
     "logs": (cmd_logs, "Tail the app logs"),
     "lfd": (cmd_lfd, "Stop local lfd and run from this branch (--docker or -k)"),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
+    "screenshots": (cmd_screenshots, "Generate app screenshots"),
     "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
     "ghostty-update": (cmd_ghostty_update, "Build, upload to R2, update Package.swift"),
 }

@@ -136,7 +136,13 @@ public final class RepoState {
     }
 
     func interactiveSessionId(for waveId: String) -> String? {
-        waitingSessionIds[waveId]
+        if let sessionId = waitingSessionIds[waveId] {
+            return sessionId
+        }
+        guard waveStore.wave(for: waveId)?.status == .waiting else {
+            return nil
+        }
+        return UserDefaults.standard.string(forKey: "chatSession.\(waveId)")
     }
 
     // In-flight actions (land) — buttons disable while pending

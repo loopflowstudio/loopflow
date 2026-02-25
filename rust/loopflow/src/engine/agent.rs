@@ -705,7 +705,7 @@ mod tests {
         assert!(cmd.contains(&"workspace-write".to_string()));
         assert!(cmd.contains(&"--ask-for-approval".to_string()));
         assert!(cmd.contains(&"never".to_string()));
-        assert!(!cmd.contains(&"--ask-for-approval".to_string()));
+        assert!(!cmd.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(!cmd.contains(&"--full-auto".to_string()));
     }
 

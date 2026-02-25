@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct ActionButtonsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.palette) private var palette
 
     public let actions: [SuggestedAction]
@@ -36,7 +37,7 @@ public struct ActionButtonsView: View {
                 }
             }
         }
-        .animation(.default, value: actions)
+        .animation(DesignAnimation.standard(reduceMotion), value: actions)
     }
 
     @ViewBuilder
@@ -72,7 +73,6 @@ public struct ActionButtonsView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: fullWidth ? .infinity : nil, alignment: .leading)
-        .accessibilityLabel(action.label)
-        .accessibilityHint(action.description ?? "")
+        .accessibleButton(action.label, hint: action.description)
     }
 }

@@ -635,7 +635,6 @@ public final class ChatState {
             }
             .prefix(4)
 
-        guard !sanitized.isEmpty else { return }
         suggestedActions = Array(sanitized)
     }
 

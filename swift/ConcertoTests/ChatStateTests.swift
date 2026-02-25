@@ -532,6 +532,38 @@ struct ChatStateTests {
 
         #expect(state.suggestedActions.isEmpty)
     }
+
+    @MainActor
+    @Test("latest suggested actions payload replaces prior actions, including empty payloads")
+    func suggestedActionsLatestPayloadWins() async {
+        let service = MockChatService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .suggestedActions(
+                        turnId: "turn_1",
+                        actions: [SuggestedActionPayload(label: "Land PR")]
+                    ))),
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .suggestedActions(
+                        turnId: "turn_1",
+                        actions: []
+                    ))),
+                    .success(AgentSessionEventEnvelope(seq: 3, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+        let state = ChatState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: service,
+            userDefaults: makeUserDefaults("suggested-actions-latest")
+        )
+
+        await state.send("next")
+        await waitUntil { state.turnState == .completed }
+
+        #expect(state.suggestedActions.isEmpty)
+    }
 }
 
 private struct StreamPlan {

@@ -589,6 +589,16 @@ impl WaveExecutor {
             return Ok(());
         };
 
+        if session_status == SessionStatus::Failed {
+            self.fail_run(
+                &mut run,
+                &wave,
+                format!("interactive session {session_id} failed"),
+            )
+            .await?;
+            return Ok(());
+        }
+
         if let Err(err) = self.auto_commit_interactive_step(&run).await {
             self.fail_run(&mut run, &wave, err.to_string()).await?;
             return Ok(());
@@ -706,6 +716,7 @@ struct OrphanedForkCleanup {
 mod tests {
     use super::*;
     use crate::engine::worktree::create_worktree;
+    use crate::lfd::sessions::types::{Session, SessionConfig};
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::WaveRunSnapshot;
@@ -923,6 +934,89 @@ mod tests {
             wave_updated_count, 3,
             "expected wave_updated after each step advance and on completion"
         );
+    }
+
+    #[tokio::test]
+    async fn failed_interactive_session_marks_run_failed() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let (wave_id, run_id) = create_wave_and_run(&store, repo, "missing-flow").await;
+        let mut run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        run.status = WaveRunStatus::Waiting;
+        store
+            .update_wave_run(&run)
+            .await
+            .expect("run update should succeed");
+
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            provider: "claude".to_string(),
+            status: SessionStatus::Failed,
+            wave_run_id: Some(run_id.to_string()),
+            provider_session_id: None,
+            config: SessionConfig {
+                step: "design".to_string(),
+                repo_root: repo.to_string_lossy().to_string(),
+                ..Default::default()
+            },
+            created_at: OffsetDateTime::now_utc(),
+            ended_at: Some(OffsetDateTime::now_utc()),
+        };
+        store
+            .create_session(&session)
+            .await
+            .expect("session should be created");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .wait_for_interactive_session_and_resume(
+                wave_id.clone(),
+                run_id.clone(),
+                session_id.clone(),
+            )
+            .await
+            .expect("resume should succeed");
+
+        let updated_run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        assert_eq!(updated_run.status, WaveRunStatus::Failed);
+        assert!(updated_run
+            .error
+            .expect("failed run should include an error")
+            .contains(&session_id.to_string()));
+
+        let updated_wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        assert_eq!(updated_wave.status, WaveStatus::Failed);
     }
 
     #[tokio::test]

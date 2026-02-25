@@ -180,7 +180,8 @@ public final class ChatState {
     public func onAppear() async {
         if let sessionId {
             if streamTask == nil {
-                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: .live)
+                let phase: StreamPhase = lastAppliedSeq == nil ? .replaying : .live
+                startStream(sessionId: sessionId, afterSeq: lastAppliedSeq, phase: phase)
             }
             return
         }

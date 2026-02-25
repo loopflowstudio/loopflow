@@ -12,6 +12,7 @@ pub mod launch;
 pub mod naming;
 pub mod platform;
 pub mod prompt;
+pub mod skills;
 pub mod stream;
 pub mod worktree;
 pub mod worktrees;

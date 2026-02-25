@@ -1,6 +1,7 @@
 agent_model: claude:opus
 yolo: true
 chrome: false
+inject_skills: true
 
 lint: "cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings"
 test: "cargo test --all && uv run pytest python/tests/ && swift test --package-path swift && cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' && cd .. && tests/e2e/test_smoke.sh"

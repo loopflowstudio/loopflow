@@ -1,0 +1,6 @@
+flow: ship-wave
+area:
+  - rust/loopflow/src/engine/
+  - rust/loopflow/src/lfd/
+direction:
+  - living

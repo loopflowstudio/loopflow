@@ -686,6 +686,16 @@ impl WaveExecutor {
         .await?;
         let capabilities = build_agent_capabilities(&worktree);
         let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
+        let (backend, _) = crate::engine::config::parse_model(&model);
+
+        // Inject steps and directions as .claude/commands/ for Claude agents.
+        let injected_skills = if backend == "claude" {
+            let worktree_path = std::path::Path::new(&worktree);
+            crate::engine::skills::inject_skills(worktree_path, worktree_path)
+        } else {
+            Vec::new()
+        };
+
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 
         let outcome = self
@@ -700,7 +710,11 @@ impl WaveExecutor {
                 cmd: build_agent_command(&launch, &process, &capabilities),
                 output_prefix: None,
             })
-            .await?;
+            .await;
+
+        crate::engine::skills::cleanup_injected_skills(&injected_skills);
+
+        let outcome = outcome?;
 
         debug!(
             run_id = %run.id,

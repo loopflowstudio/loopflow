@@ -71,21 +71,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cancel = CancellationToken::new();
 
     let is_loopback = http_addr.ip().is_loopback();
-    let (auth_provider, registration_client, registration_creds) = if is_loopback {
-        // Loopback bind — local provider, no registration needed.
-        (loopflow::lfd::setup_local_auth(), None, None)
-    } else {
-        let (provider, client, creds) =
-            loopflow::lfd::setup_auth(&lfd_config, cancel.clone()).await;
-        if matches!(provider, AuthProvider::Local { .. }) {
-            tracing::warn!(
-                addr = %http_addr,
-                "binding to non-loopback address with auth.provider=local; \
-                 remote requests require the session token"
-            );
-        }
-        (provider, client, creds)
-    };
+    let (auth_provider, registration_client, registration_creds) =
+        if is_loopback && lfd_config.auth.provider == "local" {
+            // Loopback + local auth stays on startup session token behavior.
+            (loopflow::lfd::setup_local_auth(), None, None)
+        } else {
+            let (provider, client, creds) =
+                loopflow::lfd::setup_auth(&lfd_config, cancel.clone()).await;
+            if !is_loopback && matches!(provider, AuthProvider::Local { .. }) {
+                tracing::warn!(
+                    addr = %http_addr,
+                    "binding to non-loopback address with auth.provider=local; \
+                     remote requests require the session token"
+                );
+            }
+            (provider, client, creds)
+        };
 
     if matches!(&storage_config, StorageConfig::Postgres { .. }) {
         let version = migrate_store(&storage_config, false).await?;
@@ -271,12 +272,23 @@ fn storage_config_from_config(
             let db_candidate = std::env::var("LFD_DB_PATH")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("lfd.db"));
-            let db_path = path_within_root_planned(&db_root, &db_candidate).map_err(|err| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("invalid LFD_DB_PATH: {err}"),
-                )
-            })?;
+            let db_path = if db_candidate.is_absolute() {
+                let parent = db_candidate.parent().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "invalid LFD_DB_PATH: absolute path must include a parent directory",
+                    )
+                })?;
+                std::fs::create_dir_all(parent)?;
+                db_candidate
+            } else {
+                path_within_root_planned(&db_root, &db_candidate).map_err(|err| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("invalid LFD_DB_PATH: {err}"),
+                    )
+                })?
+            };
             Ok(StorageConfig::sqlite(db_path))
         }
         StorageType::Postgres => {
@@ -392,15 +404,25 @@ mod tests {
     }
 
     #[test]
-    fn storage_config_rejects_absolute_db_path_override_for_sqlite() {
+    fn storage_config_honors_absolute_db_path_override_for_sqlite() {
         let _lock = env_lock().lock().expect("env lock poisoned");
         let _guard = EnvGuard::snapshot(&["HOME", "LFD_DB_PATH", "LFD_DATABASE_URL"]);
         let _home = setup_sqlite_env();
-        std::env::set_var("LFD_DB_PATH", "/tmp/custom.db");
+        let absolute = tempdir()
+            .expect("tempdir")
+            .path()
+            .join("custom")
+            .join("lfd.db");
+        std::env::set_var("LFD_DB_PATH", &absolute);
 
-        let err = storage_config_from_config(&LfdConfig::default())
-            .expect_err("absolute sqlite path should fail");
-        assert!(err.to_string().contains("invalid LFD_DB_PATH"));
+        let config =
+            storage_config_from_config(&LfdConfig::default()).expect("sqlite config should parse");
+        match config {
+            StorageConfig::Sqlite { path, .. } => {
+                assert_eq!(path, absolute);
+            }
+            StorageConfig::Postgres { .. } => panic!("expected sqlite storage"),
+        }
     }
 
     #[test]

@@ -1,58 +1,42 @@
 import SwiftUI
 import LoopflowCore
 
-private enum ConnectionMode: String, CaseIterable {
-    case local
-    case remote
-}
-
 struct ConnectionSettingsView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
 
-    @State private var mode: ConnectionMode = .local
+    @State private var mode: ConnectionMode = .bundled
     @State private var serverURL = ""
     @State private var token = ""
     @State private var selectedRepoPath: String = ""
     @State private var isConnecting = false
     @State private var errorMessage: String?
+    @State private var cliMessage: String?
+    @State private var selectedInstallDirectory = CLIInstallManager.defaultInstallDir.path
+
+    private let cliInstallManager = CLIInstallManager()
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Connection")
-                    .font(Typography.sectionTitle())
-                    .foregroundStyle(palette.text)
-                Spacer()
-                Button("Close") { dismiss() }
-                    .buttonStyle(GhostButtonStyle())
-            }
-            .padding(.horizontal, Spacing.xl)
-            .padding(.top, Spacing.xl)
-            .padding(.bottom, Spacing.lg)
+            header
+            modePicker
 
-            // Mode picker
-            Picker("Mode", selection: $mode) {
-                Text("Local").tag(ConnectionMode.local)
-                Text("Remote").tag(ConnectionMode.remote)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, Spacing.xl)
-            .padding(.bottom, Spacing.lg)
-
-            // Content
             VStack(alignment: .leading, spacing: Spacing.lg) {
-                if mode == .local {
-                    localContent
+                if mode == .bundled {
+                    bundledContent
                 } else {
                     remoteContent
                 }
 
                 statusContent
+
+                if let cliMessage, mode == .bundled {
+                    Text(cliMessage)
+                        .font(Typography.caption(11))
+                        .foregroundStyle(palette.textSecondary)
+                }
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -68,38 +52,99 @@ struct ConnectionSettingsView: View {
             Spacer(minLength: 0)
         }
         .background(palette.background)
-        .frame(width: 400, height: mode == .local ? 320 : 440)
+        .frame(width: 420, height: mode == .bundled ? 520 : 460)
         .onAppear { loadFromCurrentConnection() }
     }
 
-    // MARK: - Local
+    private var header: some View {
+        HStack {
+            Text("Connection")
+                .font(Typography.sectionTitle())
+                .foregroundStyle(palette.text)
+            Spacer()
+            Button("Close") { dismiss() }
+                .buttonStyle(GhostButtonStyle())
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.top, Spacing.xl)
+        .padding(.bottom, Spacing.lg)
+    }
 
-    private var localContent: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Server")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
+    private var modePicker: some View {
+        Picker("Mode", selection: $mode) {
+            Text("Bundled").tag(ConnectionMode.bundled)
+            Text("Remote").tag(ConnectionMode.remote)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, Spacing.xl)
+        .padding(.bottom, Spacing.lg)
+    }
 
-            HStack(spacing: Spacing.sm) {
-                Circle()
-                    .fill(repoState.lfdConnected ? Color.statusSuccess : palette.border)
-                    .frame(width: 8, height: 8)
-                Text("http://127.0.0.1:2486")
-                    .font(Typography.code(13))
-                    .foregroundStyle(palette.text)
+    private var bundledContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text("Bundled lfd")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+
+                HStack(spacing: Spacing.sm) {
+                    Circle()
+                        .fill(repoState.lfdConnected ? Color.statusSuccess : palette.border)
+                        .frame(width: 8, height: 8)
+                    Text(repoState.connectionStore.activeConnection.displayName)
+                        .font(Typography.code(13))
+                        .foregroundStyle(palette.text)
+                }
+                .padding(Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.surfaceMuted)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+
+                Text("One lfd per repository. Runtime port and token are regenerated each launch.")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
             }
-            .padding(Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surfaceMuted)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
 
-            Text("Session token auto-discovered from ~/.lf/session-token")
-                .font(Typography.caption(11))
-                .foregroundStyle(palette.textSecondary)
+            cliToolsContent
         }
     }
 
-    // MARK: - Remote
+    private var cliToolsContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Install CLI tools")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+
+            Picker("Install directory", selection: $selectedInstallDirectory) {
+                Text(CLIInstallManager.defaultInstallDir.path).tag(CLIInstallManager.defaultInstallDir.path)
+                Text(CLIInstallManager.systemInstallDir.path).tag(CLIInstallManager.systemInstallDir.path)
+            }
+            .labelsHidden()
+
+            HStack(spacing: Spacing.sm) {
+                Button(isCLIInstalled ? "Uninstall CLI tools" : "Install CLI tools") {
+                    updateCLIInstallation()
+                }
+                .buttonStyle(DarkButtonStyle())
+
+                Text(selectedInstallDirectory)
+                    .font(Typography.code(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
+
+            if let pathExport = cliInstallManager.pathExportLineIfNeeded(for: selectedInstallDirectoryURL) {
+                Text(pathExport)
+                    .font(Typography.code(11))
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surfaceMuted)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+    }
 
     private var remoteContent: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -166,8 +211,6 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    // MARK: - Status
-
     private var statusContent: some View {
         HStack(spacing: Spacing.sm) {
             Circle()
@@ -189,8 +232,6 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    // MARK: - Actions
-
     private var actionsContent: some View {
         HStack(spacing: Spacing.sm) {
             Button {
@@ -199,22 +240,14 @@ struct ConnectionSettingsView: View {
                 if isConnecting {
                     ProgressView()
                         .controlSize(.small)
-                        .frame(width: 80)
+                        .frame(width: 90)
                 } else {
-                    Text(mode == .local ? "Reconnect" : "Connect")
-                        .frame(width: 80)
+                    Text(mode == .bundled ? "Reconnect" : "Connect")
+                        .frame(width: 90)
                 }
             }
             .buttonStyle(DarkButtonStyle())
             .disabled(isConnecting)
-
-            if mode == .remote {
-                Button("Switch to Local") {
-                    mode = .local
-                    connectLocal()
-                }
-                .buttonStyle(GhostButtonStyle())
-            }
 
             if case .trustRequired = repoState.connectionState {
                 Button("Trust Certificate") {
@@ -228,20 +261,27 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    // MARK: - Logic
+    private var selectedInstallDirectoryURL: URL {
+        URL(fileURLWithPath: selectedInstallDirectory, isDirectory: true)
+    }
+
+    private var isCLIInstalled: Bool {
+        cliInstallManager.isInstalled(in: selectedInstallDirectoryURL)
+    }
 
     private func loadFromCurrentConnection() {
-        let connection = repoState.connectionStore.activeConnection
-        if connection.isLocal {
-            mode = .local
-            serverURL = ""
-        } else {
-            mode = .remote
+        mode = repoState.connectionStore.mode
+        if mode == .remote {
+            let connection = repoState.connectionStore.configuredRemoteConnection
+                ?? repoState.connectionStore.activeConnection
             serverURL = connection.displayName
+            token = connection.staticToken
+                ?? repoState.connectionStore.token(for: connection)
+                ?? ""
+        } else {
+            serverURL = ""
+            token = ""
         }
-        token = connection.staticToken
-            ?? repoState.connectionStore.token(for: connection)
-            ?? ""
 
         if case .remote(let path, _) = repoState.repoTarget {
             selectedRepoPath = path
@@ -250,18 +290,23 @@ struct ConnectionSettingsView: View {
 
     private func connect() {
         errorMessage = nil
-
-        guard let connection = makeConnectionFromForm() else { return }
         isConnecting = true
 
         Task {
             do {
-                try await repoState.connect(to: connection, outputBuffer: outputBuffer)
-                if let first = repoState.availableRemoteRepos.first,
-                   !connection.isLocal,
-                   selectedRepoPath.isEmpty {
-                    selectedRepoPath = first.path
-                    repoState.selectRemoteRepo(path: first.path)
+                switch mode {
+                case .bundled:
+                    try await repoState.switchToBundled(outputBuffer: outputBuffer)
+                case .remote:
+                    guard let connection = makeRemoteConnectionFromForm() else {
+                        isConnecting = false
+                        return
+                    }
+                    try await repoState.connect(to: connection, outputBuffer: outputBuffer)
+                    if let first = repoState.availableRemoteRepos.first, selectedRepoPath.isEmpty {
+                        selectedRepoPath = first.path
+                        repoState.selectRemoteRepo(path: first.path)
+                    }
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -270,21 +315,21 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    private func connectLocal() {
-        Task {
-            do {
-                try await repoState.switchToLocal(outputBuffer: outputBuffer)
-            } catch {
-                errorMessage = error.localizedDescription
+    private func updateCLIInstallation() {
+        do {
+            if isCLIInstalled {
+                try cliInstallManager.uninstall(from: selectedInstallDirectoryURL)
+                cliMessage = "Removed symlinks from \(selectedInstallDirectory)."
+            } else {
+                try cliInstallManager.install(to: selectedInstallDirectoryURL)
+                cliMessage = "Installed lf and lfd to \(selectedInstallDirectory)."
             }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
-    private func makeConnectionFromForm() -> ServerConnection? {
-        if mode == .local {
-            return .local
-        }
-
+    private func makeRemoteConnectionFromForm() -> ServerConnection? {
         let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             errorMessage = "Server URL is required."

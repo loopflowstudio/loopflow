@@ -362,6 +362,7 @@ def cmd_release() -> int:
     shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
     shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
+    _copy_bundled_tools(app_dir / "MacOS", profile="release")
     (app_dir / "PkgInfo").write_text("APPL????")
 
     print(f"Created dist/{app_name}.app")
@@ -717,8 +718,28 @@ def _install_dev_app() -> None:
     shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
     shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
+    _copy_bundled_tools(app_dir / "MacOS", profile="debug")
 
     run(["codesign", "--force", "--deep", "--sign", "-", str(DEV_APP)])
+
+
+def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
+    if profile == "release":
+        cargo_cmd = ["cargo", "build", "--release", "--bin", "lf", "--bin", "lfd"]
+        bin_dir = REPO_ROOT / "target" / "release"
+    else:
+        cargo_cmd = ["cargo", "build", "--bin", "lf", "--bin", "lfd"]
+        bin_dir = REPO_ROOT / "target" / "debug"
+
+    result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
+    if result.returncode != 0:
+        raise RuntimeError("Failed to build bundled lf/lfd binaries")
+
+    for binary in ("lf", "lfd"):
+        source = bin_dir / binary
+        if not source.exists():
+            raise RuntimeError(f"Missing built binary: {source}")
+        shutil.copy(source, app_macos_dir / binary)
 
 
 # --- Ghostty commands ---

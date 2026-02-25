@@ -26,12 +26,13 @@ final class OutputBuffer {
     private let maxLines = 2000
     private var waveService = WaveService()
 
-    func configureConnection(_ connection: ServerConnection) {
+    func configureConnection(
+        _ connection: ServerConnection,
+        tokenProvider: (@Sendable () -> String?)? = nil
+    ) {
         waveService = WaveService(
             connection: connection,
-            tokenProvider: {
-                ConnectionSecretStore.shared.token(for: connection)
-            }
+            tokenProvider: tokenProvider
         )
     }
 

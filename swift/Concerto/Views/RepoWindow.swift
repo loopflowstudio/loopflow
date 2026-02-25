@@ -11,12 +11,10 @@ struct RepoWindow: View {
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
 
-    @State private var setupComplete = false
-    @State private var hasCheckedSetup = false
+    @State private var setupComplete = true
+    @State private var hasCheckedSetup = true
     @State private var hasOpenedRepo = false
     @State private var pendingWaveSelection: String?
-
-    private let setupService = SetupService()
 
     var body: some View {
         Group {
@@ -43,11 +41,7 @@ struct RepoWindow: View {
                 return
             }
 
-            // Check setup first
-            let status = setupService.checkDependencies()
-            setupComplete = status.lfInstalled
-            hasCheckedSetup = true
-
+            // Open repo immediately; bundled daemon mode does not require CLI install.
             await openRepoIfNeeded()
         }
         .onChange(of: setupComplete) { _, complete in
@@ -67,6 +61,9 @@ struct RepoWindow: View {
             guard repoPath == targetRepoPath else { return }
             pendingWaveSelection = waveId
             applyPendingWaveSelectionIfNeeded()
+        }
+        .onDisappear {
+            repoState.closeRepo()
         }
     }
 

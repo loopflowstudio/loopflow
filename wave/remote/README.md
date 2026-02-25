@@ -8,11 +8,12 @@ lfd runs on a remote Linux machine (containerized). Concerto connects from your 
 
 ## Roadmap
 
-Infrastructure phases (01-04) shipped the foundation. The remaining work is deployment-driven: deploy, dogfood, fix what breaks.
+Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shipped as the default local connection, validating protocol parity end-to-end. The remaining work is deployment-driven: deploy, dogfood, fix what breaks.
 
 | Step | What | Status |
 |------|------|--------|
 | 0 | Error mapping + remote editor/terminal launch | Shipped |
+| — | Bundled daemon runtime + connection mode switcher | Shipped |
 | 1 | Deploy lfd to EC2 (Docker + Caddy + static token) | Next |
 | 2 | Deploy lfd to Mac Mini (native + launchd), connect Concerto | |
 | 3 | Studio auth (Phase 07: JWT validation, sign-in UX) | |
@@ -25,6 +26,7 @@ Infrastructure phases (01-04) shipped the foundation. The remaining work is depl
 | 02 | Compose Stack | Full stack in Docker (lfd + postgres), test locally |
 | 03 | Pre-shared Token Auth | lfd accepts remote connections |
 | 04 | API Surface Gating | Security hardening for remote-facing API |
+| — | Bundled Daemon Runtime | Concerto runs lfd from app bundle; ephemeral port/token per launch; refcounted per-repo sharing; connection mode switcher (Bundled/Remote) in settings UI |
 
 ### Folded into step 0
 
@@ -35,7 +37,7 @@ Smoke tests for SSE/WSS through Caddy TLS proxy happen during deployment (steps 
 
 ## Goals
 
-- Keep protocol parity: Concerto talks to local and remote lfd via the same HTTP/WS surface
+- Keep protocol parity: Concerto talks to local and remote lfd via the same HTTP/WS surface *(validated: bundled and remote modes use identical handshake pipeline — TLS/auth/repo discovery/ws probe)*
 - Keep orchestration ownership in loopflow while editors handle their native remote transport
 - Ship remote connectivity incrementally: secure auth first, then UX and API breadth
 
@@ -65,6 +67,7 @@ Docker fork branches still rely on host-side git worktrees for prompt assembly (
 
 - Do we expose `executor.agent_timeout` in Concerto connection settings, or keep it daemon-config only in v1?
 - Should remote capability warnings live in wave detail only, or also in wave edit/config surfaces?
+- Connection settings now show Bundled/Remote mode. When studio auth ships, does "Remote" split into "Remote (static token)" and "Remote (studio auth)", or does studio auth replace static token for the Concerto UI path?
 
 ## Metrics
 

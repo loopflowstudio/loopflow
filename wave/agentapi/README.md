@@ -43,7 +43,6 @@ lfd exposes a harness-agnostic session API. Clients create sessions, send input,
 - Concerto renders typed transcript with item cards for all event types
 - Session lifecycle (create → interact → end) works identically for local and remote lfd
 
-
 ## Architecture
 
 ```

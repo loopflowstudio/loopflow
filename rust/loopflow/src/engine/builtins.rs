@@ -77,7 +77,7 @@ pub fn builtin_direction_names() -> Vec<&'static str> {
 }
 
 /// Return direction members for a built-in group name.
-pub fn get_builtin_direction_group(name: &str) -> Option<&'static [&'static str]> {
+pub fn builtin_direction_group(name: &str) -> Option<&'static [&'static str]> {
     BUILTIN_DIRECTION_GROUPS
         .iter()
         .find_map(|(group, members)| (*group == name).then_some(*members))

@@ -273,7 +273,7 @@ fn resolve_direction_group(name: &str, repo: &Path) -> Option<Vec<String>> {
         return Some(user_members);
     }
 
-    crate::engine::builtins::get_builtin_direction_group(name)
+    crate::engine::builtins::builtin_direction_group(name)
         .map(|members| members.iter().map(|member| (*member).to_string()).collect())
 }
 

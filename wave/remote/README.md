@@ -8,15 +8,29 @@ lfd runs on a remote Linux machine (containerized). Concerto connects from your 
 
 ## Roadmap
 
-Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shipped as the default local connection, validating protocol parity end-to-end. The remaining work is deployment-driven: deploy, dogfood, fix what breaks.
+Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shipped as the default local connection, validating protocol parity end-to-end. The next loop is operational: run remote day-to-day on real hosts, fix drift, then ship studio auth.
 
 | Step | What | Status |
 |------|------|--------|
 | 0 | Error mapping + remote editor/terminal launch | Shipped |
 | — | Bundled daemon runtime + connection mode switcher | Shipped |
-| 1 | Deploy lfd to EC2 (Docker + Caddy + static token) | Next |
-| 2 | Deploy lfd to Mac Mini (native + launchd), connect Concerto | |
-| 3 | Studio auth (Phase 07: JWT validation, sign-in UX) | |
+| 1 | EC2 dogfood lane: deploy (Docker + Caddy + static token) and run remote smoke from laptop | Next |
+| 2 | Mac Mini dogfood lane: deploy (native + launchd) and run the same smoke suite for parity | Next |
+| 3 | Fork executor cleanup before auth rollout (shared constants, branch threading, executor hook parity) | Next |
+| 4 | Studio auth (Phase 07: JWT validation, sign-in UX, daemon discovery) | After 1-3 |
+
+## Multi-repo execution model
+
+Remote delivery now spans two repos:
+
+- `loopflow.remote` (this repo): lfd/Concerto protocol behavior, fork parity, remote smoke workflow, and operator-facing deployment docs.
+- `../studio` (private mono repo): auth server, EC2 host lifecycle/provisioning, and studio-side daemon discovery surfaces.
+
+Keep ownership crisp:
+
+- Changes to HTTP/JWT/registration contracts must land with matching updates in both repos in the same iteration window.
+- Deployment dogfood issues found from Concerto-on-laptop runs get logged/fixed in the owning repo, then re-verified from this wave.
+- Studio auth is not "done" until both repos pass the same remote connection path end-to-end.
 
 ### Shipped infrastructure
 
@@ -28,18 +42,13 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 | 04 | API Surface Gating | Security hardening for remote-facing API |
 | — | Bundled Daemon Runtime | Concerto runs one bundled lfd from the app bundle; ephemeral port/token per launch; shared sqlite db; connection mode switcher (Bundled/Remote) in settings UI |
 
-### Folded into step 0
-
-- **Phase 05** (Concerto Remote Connection): error mapping for daemon timeout/fail-fast, protocol parity validation
-- **Phase 06** (Remote File Access): remote editor launch (Cursor/VSCode/Zed via SSH), remote terminal, "Copy SSH Command"
-
-Smoke tests for SSE/WSS through Caddy TLS proxy happen during deployment (steps 1-2), not as a separate phase.
+Phase 05 (remote connection correctness) and Phase 06 (remote editor/terminal access) were folded into step 0 and are treated as shipped baseline behavior.
 
 ## Goals
 
 - Keep protocol parity: Concerto talks to local and remote lfd via the same HTTP/WS surface *(validated: bundled and remote modes use identical handshake pipeline — TLS/auth/repo discovery/ws probe)*
 - Keep orchestration ownership in loopflow while editors handle their native remote transport
-- Ship remote connectivity incrementally: secure auth first, then UX and API breadth
+- Ship remote connectivity incrementally: dogfood deployment first, eliminate fork drift, then studio auth and API breadth
 
 ## Risks
 
@@ -48,6 +57,7 @@ Smoke tests for SSE/WSS through Caddy TLS proxy happen during deployment (steps 
 - **Stale PR state without GitHub token.** Queue UX must degrade gracefully when no token is configured — treat as degraded mode, not hard failure.
 - **Remote file access depends on editor SSH support.** Cursor/VSCode/Zed each have different Remote SSH implementations. If any breaks or changes behavior, the one-click workflow breaks for that editor. Mitigate: "Copy SSH Command" as universal fallback.
 - **Agent timeout configuration surface.** `executor.agent_timeout` is daemon-config only. If users need per-wave or per-session timeouts, the config model needs rethinking. Defer until dogfooding reveals whether this is a real need.
+- **Scope drift before dogfood.** New API/auth surface is easy to add before we have enough EC2/Mac Mini runtime data. Mitigate: run and fix deployment smoke first, then expand surface.
 
 ## Update after Phase 01E (Docker fork parity)
 

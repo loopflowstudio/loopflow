@@ -1,5 +1,5 @@
 # Open Questions
 
-## Phase 06 file still in wave backlog
+## Cross-repo sequencing for Studio auth
 
-`wave/remote/06-remote-file-access.md` still exists but the README says Phase 06 was "folded into step 0" which is marked "Shipped". Should this file be removed from the wave, or is there remaining work not covered by step 0?
+`loopflow.remote` and `../studio` both own pieces of the Studio-auth path. Do we want one integration owner per iteration (single PR plan spanning both repos), or keep independent tracks and sync at milestone checkpoints?

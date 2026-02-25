@@ -10,8 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::AgentConfig;
-use crate::engine::config::parse_model;
+use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
 use crate::lfd::sessions::harness::{codex_mapping, Harness};
@@ -411,22 +410,7 @@ impl CodexHarness {
             .map_err(|_| anyhow!("timed out waiting for codex initialize"))?
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
 
-        let mut thread_params = serde_json::Map::new();
-        if let Some(model) = launch.model.as_deref() {
-            let (backend, variant) = parse_model(model);
-            let model = if backend == "codex" {
-                variant.unwrap_or_else(|| model.to_string())
-            } else {
-                model.to_string()
-            };
-            thread_params.insert("model".to_string(), Value::String(model));
-        }
-        if let Some(cwd) = launch.cwd.as_ref() {
-            thread_params.insert(
-                "cwd".to_string(),
-                Value::String(cwd.to_string_lossy().to_string()),
-            );
-        }
+        let thread_params = build_codex_thread_start_params(launch);
         self.send_request("thread/start", Value::Object(thread_params))
             .await?;
 

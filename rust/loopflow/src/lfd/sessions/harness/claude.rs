@@ -8,7 +8,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::{AgentConfig, ClaudeArgs};
+use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::lfd::sessions::harness::claude_mapping::ReaderState;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::sessions::harness::{claude_mapping, Harness, HarnessError};
@@ -30,25 +30,6 @@ impl std::fmt::Debug for ClaudeHarness {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClaudeHarness").finish()
     }
-}
-
-/// Build CLI args for a Claude invocation.
-fn build_args(content: &str, config: &AgentConfig, resume_id: Option<&str>) -> Vec<String> {
-    let mut args = vec!["-p".to_string(), content.to_string()];
-
-    let claude_args = ClaudeArgs {
-        model: config.model.as_deref().and_then(ClaudeArgs::resolve_model),
-        system_prompt: Some(config.system_prompt.clone()),
-        system_prompt_file: None,
-        skip_permissions: config.skip_permissions,
-        max_turns: config.max_turns,
-        stream: true,
-        chrome: false,
-        resume_id: resume_id.map(str::to_string),
-    };
-    args.extend(claude_args.to_args());
-
-    args
 }
 
 impl ClaudeHarness {
@@ -124,7 +105,11 @@ impl Harness for ClaudeHarness {
             turn_id: turn_id.clone(),
         });
 
-        let args = build_args(&turn_content, config, self.provider_session_id.as_deref());
+        let args = build_claude_session_turn_args(
+            &turn_content,
+            config,
+            self.provider_session_id.as_deref(),
+        );
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         cmd.stdout(std::process::Stdio::piped());
@@ -233,62 +218,7 @@ impl Harness for ClaudeHarness {
 mod tests {
     use super::*;
 
-    #[test]
-    fn build_args_minimal() {
-        let config = AgentConfig {
-            system_prompt: String::new(),
-            task_prompt: "task".to_string(),
-            model: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            skip_permissions: false,
-        };
-        let args = build_args("hello", &config, None);
-        assert_eq!(
-            args,
-            vec!["-p", "hello", "--output-format", "stream-json", "--verbose"]
-        );
-    }
-
-    #[test]
-    fn build_args_full() {
-        let config = AgentConfig {
-            system_prompt: "Be concise".to_string(),
-            task_prompt: "task".to_string(),
-            model: Some("claude-sonnet-4-5-20250514".to_string()),
-            cwd: Some("/tmp".into()),
-            max_turns: Some(5),
-            skip_permissions: true,
-        };
-        let args = build_args("fix tests", &config, Some("sess_abc"));
-        assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"sess_abc".to_string()));
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"claude-sonnet-4-5-20250514".to_string()));
-        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(args.contains(&"--max-turns".to_string()));
-        assert!(args.contains(&"5".to_string()));
-        assert!(args.contains(&"--append-system-prompt".to_string()));
-        assert!(args.contains(&"Be concise".to_string()));
-    }
-
-    #[test]
-    fn build_args_resume_without_extras() {
-        let config = AgentConfig {
-            system_prompt: String::new(),
-            task_prompt: "task".to_string(),
-            model: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            skip_permissions: false,
-        };
-        let args = build_args("next", &config, Some("sess_123"));
-        assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"sess_123".to_string()));
-        assert!(!args.contains(&"--model".to_string()));
-        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(!args.contains(&"--max-turns".to_string()));
-    }
+    // build_claude_session_turn_args coverage lives in engine::agent::tests.
 
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {

@@ -176,6 +176,66 @@ impl ClaudeArgs {
     }
 }
 
+/// Build CLI args for a Claude session turn (`claude -p ...`).
+///
+/// This is shared by session harnesses so session turn invocation stays aligned
+/// with engine-owned Claude argument conventions.
+pub fn build_claude_session_turn_args(
+    content: &str,
+    config: &AgentConfig,
+    resume_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec!["-p".to_string(), content.to_string()];
+    let claude_args = ClaudeArgs {
+        model: config.model.as_deref().and_then(ClaudeArgs::resolve_model),
+        system_prompt: Some(config.system_prompt.clone()),
+        system_prompt_file: None,
+        skip_permissions: config.skip_permissions,
+        max_turns: config.max_turns,
+        stream: true,
+        chrome: false,
+        resume_id: resume_id.map(str::to_string),
+    };
+    args.extend(claude_args.to_args());
+    args
+}
+
+/// Resolve a model string to a Codex model override.
+///
+/// For `codex:<variant>`, returns `<variant>`. For bare `codex`, returns `None`
+/// so Codex can pick its own default. Non-codex model strings pass through.
+pub fn resolve_codex_model(model: &str) -> Option<String> {
+    let (backend, variant) = parse_model(model);
+    if backend == "codex" {
+        variant
+    } else {
+        Some(model.to_string())
+    }
+}
+
+/// Build `thread/start` params for Codex app-server sessions.
+///
+/// Mirrors model/cwd mapping used by one-shot Codex launches so session and
+/// non-session paths stay in sync.
+pub fn build_codex_thread_start_params(
+    launch: &AgentConfig,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut params = serde_json::Map::new();
+
+    if let Some(model) = launch.model.as_deref().and_then(resolve_codex_model) {
+        params.insert("model".to_string(), serde_json::Value::String(model));
+    }
+
+    if let Some(cwd) = launch.cwd.as_ref() {
+        params.insert(
+            "cwd".to_string(),
+            serde_json::Value::String(cwd.to_string_lossy().to_string()),
+        );
+    }
+
+    params
+}
+
 /// Build Claude CLI command.
 pub fn build_claude_command(
     launch: &AgentConfig,
@@ -327,6 +387,82 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone)]
+enum LaunchHarnessAdapter {
+    Claude { model_variant: Option<String> },
+    Codex { model_variant: Option<String> },
+    Gemini { model_variant: Option<String> },
+    Opencode { model_variant: Option<String> },
+    FallbackClaude { model: String },
+}
+
+impl LaunchHarnessAdapter {
+    fn select(model: &str) -> Self {
+        let (backend, variant) = parse_model(model);
+        match backend.as_str() {
+            "claude" => Self::Claude {
+                model_variant: variant,
+            },
+            "codex" => Self::Codex {
+                model_variant: resolve_codex_model(model),
+            },
+            "gemini" => Self::Gemini {
+                model_variant: variant,
+            },
+            "opencode" => Self::Opencode {
+                model_variant: variant,
+            },
+            _ => Self::FallbackClaude {
+                model: model.to_string(),
+            },
+        }
+    }
+
+    fn build_command(
+        &self,
+        launch: &AgentConfig,
+        process: &ProcessConfig,
+        capabilities: &AgentCapabilities,
+    ) -> Vec<String> {
+        match self {
+            Self::Claude { model_variant } => {
+                build_claude_command(launch, process, capabilities, model_variant.as_deref())
+            }
+            Self::Codex { model_variant } => {
+                build_codex_command(launch, process, model_variant.as_deref())
+            }
+            Self::Gemini { model_variant } => {
+                build_gemini_command(launch, process, model_variant.as_deref())
+            }
+            Self::Opencode { model_variant } => {
+                build_opencode_command(process, model_variant.as_deref())
+            }
+            Self::FallbackClaude { model } => {
+                build_claude_command(launch, process, capabilities, Some(model.as_str()))
+            }
+        }
+    }
+
+    fn apply_env(&self, cmd: &mut Command, process: &ProcessConfig) {
+        match self {
+            Self::Gemini { .. } => {
+                if let Some(ref context_file) = process.context_file {
+                    cmd.env(
+                        "GEMINI_SYSTEM_MD",
+                        context_file.to_string_lossy().to_string(),
+                    );
+                }
+            }
+            Self::Opencode { .. } => {
+                if let Some(env_val) = build_opencode_env(process) {
+                    cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Build command for any model.
 pub fn build_model_command(
     launch: &AgentConfig,
@@ -334,16 +470,8 @@ pub fn build_model_command(
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
     let model = launch.model.as_deref().unwrap_or("claude");
-    let (backend, variant) = parse_model(model);
-    let model_variant = variant.as_deref();
-
-    match backend.as_str() {
-        "claude" => build_claude_command(launch, process, capabilities, model_variant),
-        "codex" => build_codex_command(launch, process, model_variant),
-        "gemini" => build_gemini_command(launch, process, model_variant),
-        "opencode" => build_opencode_command(process, model_variant),
-        _ => build_claude_command(launch, process, capabilities, Some(model)),
-    }
+    let adapter = LaunchHarnessAdapter::select(model);
+    adapter.build_command(launch, process, capabilities)
 }
 
 /// Build a full CLI command (including prompt) for a model.
@@ -367,9 +495,8 @@ pub fn launch_agent(
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     let model = launch.model.as_deref().unwrap_or("claude");
-    let (backend, _variant) = parse_model(model);
-
-    let cmd_args = build_model_command(launch, process, capabilities);
+    let adapter = LaunchHarnessAdapter::select(model);
+    let cmd_args = adapter.build_command(launch, process, capabilities);
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
@@ -405,22 +532,7 @@ pub fn launch_agent(
     cmd.env_remove("OPENAI_API_KEY");
     cmd.env_remove("GEMINI_API_KEY");
 
-    // For Gemini, set GEMINI_SYSTEM_MD env var to load context
-    if backend == "gemini" {
-        if let Some(ref context_file) = process.context_file {
-            cmd.env(
-                "GEMINI_SYSTEM_MD",
-                context_file.to_string_lossy().to_string(),
-            );
-        }
-    }
-
-    // For OpenCode, set OPENCODE_CONFIG_CONTENT env var for permissions and context
-    if backend == "opencode" {
-        if let Some(env_val) = build_opencode_env(process) {
-            cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
-        }
-    }
+    adapter.apply_env(&mut cmd, process);
 
     propagate_rlm_env(&mut cmd);
 
@@ -1073,5 +1185,108 @@ mod tests {
             ClaudeArgs::resolve_model("claude-sonnet-4-5-20250514"),
             Some("claude-sonnet-4-5-20250514".to_string())
         );
+    }
+
+    #[test]
+    fn resolve_codex_model_bare() {
+        assert_eq!(resolve_codex_model("codex"), None);
+    }
+
+    #[test]
+    fn resolve_codex_model_with_variant() {
+        assert_eq!(resolve_codex_model("codex:o3"), Some("o3".to_string()));
+    }
+
+    #[test]
+    fn resolve_codex_model_passthrough_non_codex() {
+        assert_eq!(
+            resolve_codex_model("gpt-5.1-codex-high"),
+            Some("gpt-5.1-codex-high".to_string())
+        );
+    }
+
+    #[test]
+    fn build_codex_thread_start_params_with_variant_and_cwd() {
+        let launch = AgentConfig {
+            model: Some("codex:o3".to_string()),
+            cwd: Some("/tmp/repo".into()),
+            ..default_launch()
+        };
+
+        let params = build_codex_thread_start_params(&launch);
+        assert_eq!(
+            params.get("model"),
+            Some(&serde_json::Value::String("o3".to_string()))
+        );
+        assert_eq!(
+            params.get("cwd"),
+            Some(&serde_json::Value::String("/tmp/repo".to_string()))
+        );
+    }
+
+    #[test]
+    fn build_codex_thread_start_params_omits_model_for_bare_codex() {
+        let launch = AgentConfig {
+            model: Some("codex".to_string()),
+            cwd: Some("/tmp/repo".into()),
+            ..default_launch()
+        };
+
+        let params = build_codex_thread_start_params(&launch);
+        assert!(!params.contains_key("model"));
+        assert_eq!(
+            params.get("cwd"),
+            Some(&serde_json::Value::String("/tmp/repo".to_string()))
+        );
+    }
+
+    #[test]
+    fn build_claude_session_turn_args_minimal() {
+        let config = AgentConfig {
+            system_prompt: String::new(),
+            task_prompt: "task".to_string(),
+            model: None,
+            cwd: Some("/tmp".into()),
+            max_turns: None,
+            skip_permissions: false,
+        };
+        let args = build_claude_session_turn_args("hello", &config, None);
+        assert_eq!(
+            args,
+            vec!["-p", "hello", "--output-format", "stream-json", "--verbose"]
+        );
+    }
+
+    #[test]
+    fn build_claude_session_turn_args_full() {
+        let config = AgentConfig {
+            system_prompt: "Be concise".to_string(),
+            task_prompt: "task".to_string(),
+            model: Some("claude-sonnet-4-5-20250514".to_string()),
+            cwd: Some("/tmp".into()),
+            max_turns: Some(5),
+            skip_permissions: true,
+        };
+        let args = build_claude_session_turn_args("fix tests", &config, Some("sess_abc"));
+        assert!(args.contains(&"--resume".to_string()));
+        assert!(args.contains(&"sess_abc".to_string()));
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"claude-sonnet-4-5-20250514".to_string()));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(args.contains(&"--max-turns".to_string()));
+        assert!(args.contains(&"5".to_string()));
+        assert!(args.contains(&"--append-system-prompt".to_string()));
+        assert!(args.contains(&"Be concise".to_string()));
+    }
+
+    #[test]
+    fn build_model_command_uses_codex_default_for_bare_codex_model() {
+        let launch = AgentConfig {
+            model: Some("codex".to_string()),
+            ..default_launch()
+        };
+        let process = auto_process();
+        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
+        assert!(!cmd.iter().any(|arg| arg.contains("model=\"codex\"")));
     }
 }

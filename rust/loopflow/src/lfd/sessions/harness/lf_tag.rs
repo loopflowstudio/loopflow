@@ -24,9 +24,8 @@ impl LfTagParser {
             if self.in_suggest_actions_tag {
                 if let Some(close_idx) = self.stream_buffer.find(SUGGEST_ACTIONS_CLOSE) {
                     self.suggest_actions_payload
-                        .push_str(&self.stream_buffer[..close_idx]);
-                    self.stream_buffer =
-                        self.stream_buffer[close_idx + SUGGEST_ACTIONS_CLOSE.len()..].to_string();
+                        .push_str(&take_prefix(&mut self.stream_buffer, close_idx));
+                    drop_prefix(&mut self.stream_buffer, SUGGEST_ACTIONS_CLOSE.len());
                     self.in_suggest_actions_tag = false;
 
                     if let Ok(actions) = serde_json::from_str::<Vec<SuggestedActionPayload>>(
@@ -41,14 +40,10 @@ impl LfTagParser {
                     continue;
                 }
 
-                // Keep only the suffix that could still become a close tag.
-                let keep = suffix_prefix_len(&self.stream_buffer, SUGGEST_ACTIONS_CLOSE);
-                if self.stream_buffer.len() > keep {
-                    let split = self.stream_buffer.len() - keep;
-                    self.suggest_actions_payload
-                        .push_str(&self.stream_buffer[..split]);
-                    self.stream_buffer = self.stream_buffer[split..].to_string();
-                }
+                self.suggest_actions_payload.push_str(&take_stable_prefix(
+                    &mut self.stream_buffer,
+                    SUGGEST_ACTIONS_CLOSE,
+                ));
                 break;
             }
 
@@ -56,25 +51,18 @@ impl LfTagParser {
                 push_text_delta(
                     &mut events,
                     turn_id,
-                    self.stream_buffer[..open_idx].to_string(),
+                    take_prefix(&mut self.stream_buffer, open_idx),
                 );
-                self.stream_buffer =
-                    self.stream_buffer[open_idx + SUGGEST_ACTIONS_OPEN.len()..].to_string();
+                drop_prefix(&mut self.stream_buffer, SUGGEST_ACTIONS_OPEN.len());
                 self.in_suggest_actions_tag = true;
                 continue;
             }
 
-            // Keep only the suffix that could still become an open tag.
-            let keep = suffix_prefix_len(&self.stream_buffer, SUGGEST_ACTIONS_OPEN);
-            if self.stream_buffer.len() > keep {
-                let split = self.stream_buffer.len() - keep;
-                push_text_delta(
-                    &mut events,
-                    turn_id,
-                    self.stream_buffer[..split].to_string(),
-                );
-                self.stream_buffer = self.stream_buffer[split..].to_string();
-            }
+            push_text_delta(
+                &mut events,
+                turn_id,
+                take_stable_prefix(&mut self.stream_buffer, SUGGEST_ACTIONS_OPEN),
+            );
             break;
         }
 
@@ -83,22 +71,41 @@ impl LfTagParser {
 
     pub(super) fn finish_turn(&mut self, turn_id: &str) -> Vec<SessionEvent> {
         let mut events = Vec::new();
+        let trailing = std::mem::take(&mut self.stream_buffer);
 
         if self.in_suggest_actions_tag {
             let mut raw = String::from(SUGGEST_ACTIONS_OPEN);
             raw.push_str(&self.suggest_actions_payload);
-            raw.push_str(&self.stream_buffer);
+            raw.push_str(&trailing);
             push_text_delta(&mut events, turn_id, raw);
         } else {
-            push_text_delta(&mut events, turn_id, self.stream_buffer.clone());
+            push_text_delta(&mut events, turn_id, trailing);
         }
 
-        self.stream_buffer.clear();
         self.suggest_actions_payload.clear();
         self.in_suggest_actions_tag = false;
 
         events
     }
+}
+
+fn take_prefix(buffer: &mut String, byte_len: usize) -> String {
+    let tail = buffer.split_off(byte_len);
+    let prefix = std::mem::take(buffer);
+    *buffer = tail;
+    prefix
+}
+
+fn drop_prefix(buffer: &mut String, byte_len: usize) {
+    if byte_len > 0 {
+        buffer.drain(..byte_len);
+    }
+}
+
+fn take_stable_prefix(buffer: &mut String, marker: &str) -> String {
+    let keep = suffix_prefix_len(buffer, marker);
+    let stable_len = buffer.len().saturating_sub(keep);
+    take_prefix(buffer, stable_len)
 }
 
 fn suffix_prefix_len(value: &str, marker: &str) -> usize {

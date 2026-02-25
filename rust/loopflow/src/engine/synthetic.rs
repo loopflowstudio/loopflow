@@ -21,11 +21,11 @@ pub fn synthetic_tools_for_context(
     ctx: &ClientContext,
     action_style: Option<&str>,
 ) -> Vec<SyntheticTool> {
-    let mut tools = Vec::new();
     if ctx.has_ui {
-        tools.push(suggest_actions_tool(ctx, action_style));
+        vec![suggest_actions_tool(ctx, action_style)]
+    } else {
+        Vec::new()
     }
-    tools
 }
 
 /// Render synthetic tool guidance for provider system prompts.

@@ -1588,7 +1588,7 @@ mod tests {
 
         let created = manager
             .create_session(CreateSessionParams {
-                provider: "claude".to_string(),
+                harness: "claude".to_string(),
                 wave_run_id: None,
                 config: test_session_config(tmp.path()),
             })
@@ -1650,7 +1650,7 @@ mod tests {
 
         let created = manager
             .create_session(CreateSessionParams {
-                provider: "codex".to_string(),
+                harness: "codex".to_string(),
                 wave_run_id: Some(run_id.to_string()),
                 config: test_session_config(tmp.path()),
             })

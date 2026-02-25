@@ -319,7 +319,7 @@ mod tests {
         let session_id = LfdId::new();
         let session = Session {
             id: session_id.clone(),
-            provider: "claude".to_string(),
+            harness: "claude".to_string(),
             status: crate::lfd::sessions::types::SessionStatus::Active,
             wave_run_id: None,
             provider_session_id: None,

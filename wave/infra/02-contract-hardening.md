@@ -30,6 +30,7 @@ Contract hardening keeps feature velocity without hidden regressions.
    - Assert lfd endpoint semantics remain a subset of lfdhub public API semantics where features overlap.
    - Mark any local-only lfd endpoints explicitly.
 5. **Prompt quality-eval harness**
+   - Quality directions (`infra/`, `ux/`, `craft/`, `ceo/`) now provide concrete eval axes.
    - Add quality-axis evals (security/reliability/performance/api/ux) for critical prompt steps.
    - Track prompt bundle/version outcomes and guard against regressions.
 

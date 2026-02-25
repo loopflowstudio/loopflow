@@ -43,5 +43,7 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 
 - Session harness trait work is already shipped (`lfd/sessions/harness/mod.rs`); remove it from future infra debt lists.
 - Quality directions are now shipped via direction taxonomy restructuring. Role-style directions (`infra-engineer`, `designer`, `product-engineer`) replaced with composable quality-focused groups (`infra/`, `ux/`, `craft/`, `creativity/`, `ceo/`). Gate and review steps updated with quality-language. Architecture report recommendations #2 (quality-tagged frontmatter) and #4 (API-boundary prompts) remain open.
+- `build.rs` codegen pattern is proven for compile-time discovery and validation. The same approach (scan directories, generate maps, fail on inconsistency) applies to Pass 2's SQL catalog validation.
+- Direction work was additive to `flow.rs`/`fork.rs`/`prompt.rs` — hotspot files from Pass 1 (`docker.rs`, `store/mod.rs`) were not disturbed. Confirms Pass 1 sequencing.
 - Core risk moved from “too many features” to “too much responsibility in a few files.”
 - Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all three passes.

@@ -19,7 +19,12 @@ final class BundledDaemonRegistry {
         if var entry = entries[key] {
             entry.owners += 1
             entries[key] = entry
-            return try await entry.manager.start()
+            do {
+                return try await entry.manager.start()
+            } catch {
+                release(repoURL: canonicalURL)
+                throw error
+            }
         }
 
         let manager = BundledDaemonManager(repoURL: canonicalURL)

@@ -68,9 +68,7 @@ final class BundledDaemonManager {
 
         if case .starting = state {
             try await waitForHealth()
-            guard let connection = runtimeConnection else {
-                throw ManagerError.invalidRuntimeState
-            }
+            let connection = try requireRuntimeConnection()
             state = .running
             return connection
         }
@@ -115,9 +113,7 @@ final class BundledDaemonManager {
             self.port = port
 
             try await waitForHealth()
-            guard let connection = runtimeConnection else {
-                throw ManagerError.invalidRuntimeState
-            }
+            let connection = try requireRuntimeConnection()
             state = .running
             return connection
         } catch {
@@ -160,6 +156,13 @@ final class BundledDaemonManager {
             authMode: .staticToken,
             staticToken: token
         )
+    }
+
+    private func requireRuntimeConnection() throws -> ServerConnection {
+        guard let connection = runtimeConnection else {
+            throw ManagerError.invalidRuntimeState
+        }
+        return connection
     }
 
     private func waitForHealth(timeout: TimeInterval = 10) async throws {

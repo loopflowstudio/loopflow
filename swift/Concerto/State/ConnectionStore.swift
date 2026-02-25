@@ -9,6 +9,13 @@ final class ConnectionStore {
         var remoteConnection: ServerConnection?
     }
 
+    private struct InitialState {
+        var mode: ConnectionMode
+        var activeConnection: ServerConnection
+        var remoteConnection: ServerConnection?
+        var shouldPersist: Bool
+    }
+
     private let defaults: UserDefaults
     private static let defaultsKey = "concerto.connectionSettings.v2"
     private static let legacyDefaultsKey = "concerto.serverConnection.v1"
@@ -28,50 +35,12 @@ final class ConnectionStore {
         self.pinStore = pinStore
         self.defaults = defaults
 
-        let initialMode: ConnectionMode
-        let initialActiveConnection: ServerConnection
-        let initialRemoteConnection: ServerConnection?
-        let shouldPersistMigratedLegacy: Bool
+        let initial = Self.loadInitialState(defaults: defaults, secretStore: secretStore)
+        mode = initial.mode
+        activeConnection = initial.activeConnection
+        remoteConnection = initial.remoteConnection
 
-        if let loaded = Self.loadSettings(from: defaults) {
-            initialMode = loaded.mode
-            if var remote = loaded.remoteConnection {
-                remote.staticToken = secretStore.token(for: remote)
-                initialRemoteConnection = remote
-            } else {
-                initialRemoteConnection = nil
-            }
-            if initialMode == .remote, let remoteConnection = initialRemoteConnection {
-                initialActiveConnection = remoteConnection
-            } else {
-                initialActiveConnection = .local
-            }
-            shouldPersistMigratedLegacy = false
-        } else if let legacy = Self.loadLegacyConnection(from: defaults) {
-            if legacy.isLocal {
-                initialMode = .bundled
-                initialRemoteConnection = nil
-                initialActiveConnection = .local
-            } else {
-                var remote = legacy
-                remote.staticToken = secretStore.token(for: legacy)
-                initialMode = .remote
-                initialRemoteConnection = remote
-                initialActiveConnection = remote
-            }
-            shouldPersistMigratedLegacy = true
-        } else {
-            initialMode = .bundled
-            initialActiveConnection = .local
-            initialRemoteConnection = nil
-            shouldPersistMigratedLegacy = false
-        }
-
-        mode = initialMode
-        activeConnection = initialActiveConnection
-        remoteConnection = initialRemoteConnection
-
-        if shouldPersistMigratedLegacy {
+        if initial.shouldPersist {
             persistSettings()
         }
     }
@@ -159,5 +128,56 @@ final class ConnectionStore {
     private static func loadLegacyConnection(from defaults: UserDefaults) -> ServerConnection? {
         guard let data = defaults.data(forKey: Self.legacyDefaultsKey) else { return nil }
         return try? JSONDecoder().decode(ServerConnection.self, from: data)
+    }
+
+    private static func loadInitialState(
+        defaults: UserDefaults,
+        secretStore: ConnectionSecretStore
+    ) -> InitialState {
+        if let loaded = loadSettings(from: defaults) {
+            var remote = loaded.remoteConnection
+            if let persisted = remote {
+                remote?.staticToken = secretStore.token(for: persisted)
+            }
+            let activeConnection: ServerConnection
+            if loaded.mode == .remote, let remote {
+                activeConnection = remote
+            } else {
+                activeConnection = .local
+            }
+            return InitialState(
+                mode: loaded.mode,
+                activeConnection: activeConnection,
+                remoteConnection: remote,
+                shouldPersist: false
+            )
+        }
+
+        if let legacy = loadLegacyConnection(from: defaults) {
+            guard !legacy.isLocal else {
+                return InitialState(
+                    mode: .bundled,
+                    activeConnection: .local,
+                    remoteConnection: nil,
+                    shouldPersist: true
+                )
+            }
+
+            var remote = legacy
+            remote.staticToken = secretStore.token(for: legacy)
+            return InitialState(
+                mode: .remote,
+                activeConnection: remote,
+                remoteConnection: remote,
+                shouldPersist: true
+            )
+        }
+
+        return InitialState(
+            mode: .bundled,
+            activeConnection: .local,
+            remoteConnection: nil,
+            shouldPersist: false
+        )
     }
 }

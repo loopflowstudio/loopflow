@@ -7,6 +7,17 @@ import LoopflowCore
 @MainActor
 @Observable
 final class RepoState {
+    enum WaveCreationReadinessError: LocalizedError {
+        case missingRepo
+
+        var errorDescription: String? {
+            switch self {
+            case .missingRepo:
+                "Select a repository in Connection Settings first."
+            }
+        }
+    }
+
     enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
@@ -749,8 +760,15 @@ final class RepoState {
         await refreshWaves()
     }
 
-    func switchToBundled(outputBuffer: OutputBuffer) async throws {
-        try await connectBundled(outputBuffer: outputBuffer)
+    func ensureReadyToCreateWave(outputBuffer: OutputBuffer) async throws {
+        if !lfdConnected {
+            try await connectLfd(outputBuffer: outputBuffer)
+            try await Task.sleep(for: .milliseconds(500))
+        }
+
+        guard repoTarget != nil else {
+            throw WaveCreationReadinessError.missingRepo
+        }
     }
 
     func selectRemoteRepo(path: String) {

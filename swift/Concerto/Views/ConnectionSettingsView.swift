@@ -293,13 +293,13 @@ struct ConnectionSettingsView: View {
         isConnecting = true
 
         Task {
+            defer { isConnecting = false }
             do {
                 switch mode {
                 case .bundled:
-                    try await repoState.switchToBundled(outputBuffer: outputBuffer)
+                    try await repoState.connectBundled(outputBuffer: outputBuffer)
                 case .remote:
                     guard let connection = makeRemoteConnectionFromForm() else {
-                        isConnecting = false
                         return
                     }
                     try await repoState.connect(to: connection, outputBuffer: outputBuffer)
@@ -311,7 +311,6 @@ struct ConnectionSettingsView: View {
             } catch {
                 errorMessage = error.localizedDescription
             }
-            isConnecting = false
         }
     }
 

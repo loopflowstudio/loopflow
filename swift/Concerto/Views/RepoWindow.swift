@@ -10,45 +10,29 @@ struct RepoWindow: View {
 
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
-
-    @State private var setupComplete = true
-    @State private var hasCheckedSetup = true
     @State private var hasOpenedRepo = false
     @State private var pendingWaveSelection: String?
 
     var body: some View {
-        Group {
-            if !hasCheckedSetup {
-                ProgressView("Loading...")
-            } else if !setupComplete {
-                SetupView(isComplete: $setupComplete)
-            } else {
-                ContentView()
-                    .environment(repoState)
-                    .environment(outputBuffer)
-            }
-        }
+        ContentView()
+            .environment(repoState)
+            .environment(outputBuffer)
         .background(WindowAccessor { window in
             window?.representedURL = repoURL
         })
         .task {
             if let mode = RepoState.uiTestMode() {
-                setupComplete = true
-                hasCheckedSetup = true
                 hasOpenedRepo = true
                 let url = repoURL ?? URL(fileURLWithPath: "/tmp/loopflow-ui-tests")
                 repoState.configureForUITest(mode, repoURL: url)
                 return
             }
 
-            // Open repo immediately; bundled daemon mode does not require CLI install.
             await openRepoIfNeeded()
         }
-        .onChange(of: setupComplete) { _, complete in
-            if complete {
-                Task {
-                    await openRepoIfNeeded()
-                }
+        .onChange(of: repoURL) { _, _ in
+            Task {
+                await openRepoIfNeeded()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .selectPortfolioWave)) { notification in
@@ -68,7 +52,7 @@ struct RepoWindow: View {
     }
 
     private func openRepoIfNeeded() async {
-        guard setupComplete, let url = repoURL, !hasOpenedRepo else { return }
+        guard let url = repoURL, !hasOpenedRepo else { return }
         hasOpenedRepo = true
         await repoState.openRepo(url, outputBuffer: outputBuffer)
         portfolioService.addRepo(url)

@@ -1,6 +1,8 @@
 import Foundation
 
 struct CLIInstallManager {
+    private static let binaries = ["lf", "lfd"]
+
     enum InstallError: LocalizedError {
         case missingBundledExecutable(String)
         case invalidInstallDirectory(String)
@@ -38,12 +40,13 @@ struct CLIInstallManager {
         }
 
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        try installExecutable(named: "lf", into: directory)
-        try installExecutable(named: "lfd", into: directory)
+        for binary in Self.binaries {
+            try installExecutable(named: binary, into: directory)
+        }
     }
 
     func uninstall(from directory: URL) throws {
-        for binary in ["lf", "lfd"] {
+        for binary in Self.binaries {
             let linkURL = directory.appendingPathComponent(binary, isDirectory: false)
             if fileManager.fileExists(atPath: linkURL.path) {
                 try fileManager.removeItem(at: linkURL)
@@ -52,7 +55,7 @@ struct CLIInstallManager {
     }
 
     func isInstalled(in directory: URL) -> Bool {
-        for binary in ["lf", "lfd"] {
+        for binary in Self.binaries {
             guard let source = executableProvider(binary)?.resolvingSymlinksInPath() else { return false }
             let linkURL = directory.appendingPathComponent(binary, isDirectory: false)
             guard let destination = resolveSymlinkDestination(linkURL) else { return false }

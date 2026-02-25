@@ -1,4 +1,4 @@
-# 06: OpenCode Adapter
+# OpenCode Adapter
 
 Third adapter validates the session API is truly provider-agnostic.
 

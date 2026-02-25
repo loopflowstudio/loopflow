@@ -29,7 +29,7 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 
 ## Risks
 
-- **Provider layer drift.** `lf` CLI and `/v0/sessions` HTTP use separate execution paths through the same harnesses. Changes to one path can miss the other. Mitigate: shared conformance tests once the third harness validates the abstraction.
+- **Provider layer drift.** `lf` CLI and `/v0/sessions` HTTP use separate execution paths through the same harnesses. Prompt-level drift is now mitigated (shared `engine/launch.rs`). Process/runtime drift remains — `engine/agent` and `lfd/sessions/harness/*` still duplicate provider launch logic. Mitigate: runtime convergence (active in scratch/) extracts a shared engine harness; conformance tests once the third harness validates the abstraction.
 - **Claude `--resume` fragility.** Each turn spawns a new process with `--resume`. If the resume format changes or session state corrupts, the entire session breaks with no partial recovery. Mitigate: session events are persisted, so replay from a new session is possible even if resume fails.
 - **Container-only safety model.** No tool-level permission routing means local (non-container) sessions run with full agent permissions. Acceptable for v1 but becomes a gap if local interactive sessions grow in usage.
 - **SSE replay scalability.** Long sessions accumulate events; full replay on reconnect grows linearly. Not a problem at current scale but could become one with multi-hour sessions.
@@ -76,4 +76,4 @@ DELETE /v0/sessions/{id}         # end session
 
 ## Future direction
 
-After the OpenCode adapter validates the abstraction, unify the provider layer so `lf` and Session HTTP are explicitly two API surfaces over the same harness core.
+Prompt convergence shipped — `lf` and `lfd` share `engine/launch.rs` for prompt assembly. Runtime convergence is next (tracked in `scratch/agentapi-runtime-convergence.md`): extract a shared engine harness so `lf` and Session HTTP are explicitly two API surfaces over the same provider launch/lifecycle core. The OpenCode adapter will validate whether the harness abstraction holds across three transports.

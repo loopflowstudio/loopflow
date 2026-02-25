@@ -108,7 +108,7 @@ def main() -> int:
             runner.run_scenario("auth_rejection", lambda: _scenario_auth_rejection(api))
             runner.run_scenario(
                 "sse_streaming",
-                lambda: _scenario_sse_streaming(api, authed_stream, args, state),
+                lambda: _scenario_sse_streaming(api, authed_stream, args),
             )
             runner.run_scenario("websocket_connected", lambda: _scenario_websocket(ws, state))
             runner.run_scenario(
@@ -188,14 +188,15 @@ def _scenario_sse_streaming(
     api: ApiClient,
     authed_stream: httpx.Client,
     args: argparse.Namespace,
-    state: dict[str, Any],
 ) -> None:
+    repo_path = _resolve_repo_path(api, args.repo)
     create_response = api.request(
         "POST",
         "/v0/sessions",
         json={
             "harness": args.session_harness,
-            "config": {"step": "design", "repo_root": "."},
+            "step": "design",
+            "repo_root": repo_path,
         },
     )
     ApiAssertions.expect_status(create_response, 200)

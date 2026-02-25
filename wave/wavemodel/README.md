@@ -2,7 +2,7 @@
 
 Standard content model for waves and a design-first onboarding experience.
 
-**Status: in progress.** Phases 01–04 shipped (content model, design step, Concerto UX, interactive sessions). Phase 05 (flow lifecycle: rename, update-wave, loop signal) is next. Remaining follow-up items (daemon restart rehydration, filesystem watcher, per-tab routing) are tracked in "Not here" and can seed future waves.
+**Status: complete.** All five phases shipped: content model (01), design step (02), Concerto UX (03), interactive sessions (04), flow lifecycle (05). Follow-up items (daemon restart rehydration, filesystem watcher, per-tab routing) are tracked in "Not here" and can seed future waves.
 
 ## Vision
 
@@ -30,13 +30,15 @@ The full experience: open Concerto, describe what you want to build, and the des
 ## Risks
 
 - **README migration could lose nuance.** Mechanical restructuring might flatten content that was intentionally organized differently. Mitigate: preserve all content, only rename/regroup sections. *Phase 01 evidence: migrations preserved all content. Reorganization was clean — "North Star" → "Vision", design decisions and architecture moved into roadmap items. Risk is lower than expected for future migrations.*
-- ~~**Concerto NUX depends on agentapi.**~~ *Resolved. Phase 04 shifted StartWaveView from design-prompt-first to wave-name-first: user enters a name, Concerto calls `POST /v0/waves` with `run: true`, lfd creates the wave and starts the `design-ship-review` flow. The executor creates an interactive session for the design step, and Concerto joins it via WebSocket `session_id`. No external terminal needed. Bundled daemon removes the install prerequisite — NUX works end-to-end.*
+- ~~**Concerto NUX depends on agentapi.**~~ *Resolved. Phase 04 shifted StartWaveView from design-prompt-first to wave-name-first: user enters a name, Concerto calls `POST /v0/waves` with `run: true`, lfd creates the wave and starts the `ship` flow. The executor creates an interactive session for the design step, and Concerto joins it via WebSocket `session_id`. No external terminal needed. Bundled daemon removes the install prerequisite — NUX works end-to-end.*
 - ~~**Swift client has dead WaveSchema code.**~~ *Resolved in Phase 03. `WaveSchema.swift` deleted, references removed from `LocalWaveService`, `WaveSidebar`, `RepoState`, and `WaveServiceProtocol`. Clean removal, no regressions.*
-- **Step prompts may over-reference sections.** If every step checks every section, prompts get bloated and agents waste tokens on irrelevant context. Mitigate: each step references only the sections relevant to its job. *Phase 01 evidence: gate checks Goals/Risks/Metrics, review checks Vision/Goals/Risks, ingest reads all four for selection. No step references all four sections unconditionally.*
+- **Step prompts may over-reference sections.** If every step checks every section, prompts get bloated and agents waste tokens on irrelevant context. Mitigate: each step references only the sections relevant to its job. *Phase 01 evidence: gate checks Goals/Risks/Metrics, review checks Vision/Goals/Risks, ingest reads all four for selection. No step references all four sections unconditionally. Phase 05 evidence: update-wave prompt was simplified to focus on roadmap status and scratch promotion. consolidate and add-to-wave removed entirely — fewer steps means less surface area for over-referencing.*
 - **Section placement varies across waves.** Scope boundaries appear as "Not here" under Vision (agentapi, remote), "Security boundary (non-goals)" at the end (security), or inline in Vision (wavemodel). *Phase 03 evidence: `WaveContentParser` matches `## Vision`, `## Goals`, `## Risks`, `## Metrics` by exact heading name. Everything else is treated as supplementary. Convention-based, intentionally lenient — non-standard headings are silently ignored.*
 - **Wave content loading has no filesystem watcher.** Content is loaded on-demand when a wave is selected and cached in `WaveViewModel`. Changes to wave READMEs on disk won't appear until the user re-selects the wave or status/activation changes trigger a refresh. *Phase 04 evidence: wave status events (waiting, started, stopped) do trigger `loadWaveContent`, so content refreshes on flow transitions. The gap is mid-session: a design conversation modifying the README won't be visible until the step completes and the wave transitions.*
 - **Daemon restart loses in-flight session watchers.** Session watchers are tokio tasks in executor memory. If `lfd` restarts while a run is `Waiting`, the watcher is gone and the run stays stuck in `Waiting` forever. No rehydration path exists yet. Mitigate: add startup recovery that scans for `Waiting` runs with `session_id` and re-attaches watchers.
 - **Resume contention after interactive step.** When a session ends and the watcher tries to resume the wave flow, it needs a scheduler slot. If the scheduler is full, the resume is delayed or fails. Currently the watcher retries once; prolonged contention isn't handled.
+- **Backlog detection is heuristic.** Loop ticker treats any `.md` file (excluding `README.md`) in `wave/<name>/` as actionable. Non-actionable markdown (e.g., design notes someone parks in the wave dir) would prevent idle. *Phase 05: accepted trade-off — simple heuristic is better than a status-field parser. Convention: only actionable items live in the wave dir.*
+- **Flow rename is a breaking change.** External scripts referencing the old `ship` (headless) flow name or `design-ship-review` will break. `publish`, `consolidate`, `add-to-wave` are gone. *Phase 05: documented in scratch design doc and RELEASE_NOTES. Migration path is straightforward — rename references.*
 
 ## Metrics
 
@@ -52,4 +54,9 @@ The full experience: open Concerto, describe what you want to build, and the des
 - Waves can be created and started in a single API call (`run: true`) *(Phase 04: done)*
 - Interactive flow steps create executor-owned sessions; Concerto joins via `session_id` *(Phase 04: done)*
 - Failed interactive sessions fail the wave run, not silently advance *(Phase 04: done)*
+- `build` is the canonical headless flow; `ship` is the interactive flow *(Phase 05: done)*
+- All dependent flows route through `build` as a sub-flow *(Phase 05: done)*
+- `update-wave` is the only post-work reconciliation step; `consolidate`, `add-to-wave`, `publish` removed *(Phase 05: done)*
+- Loop ticker checks `wave/<name>/` for actionable markdown before creating runs *(Phase 05: done)*
+- Plan flows (`wave-reduce`, `wave-polish`, `wave-expand`) end in `update-wave` directly *(Phase 05: done)*
 

@@ -937,7 +937,7 @@ mod tests {
 
         let err = manager
             .create_session(CreateSessionParams {
-                harness: "openai".to_string(),
+                harness: "nonexistent".to_string(),
                 wave_run_id: None,
                 config: SessionConfig::default(),
             })
@@ -946,7 +946,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            SessionManagerError::UnsupportedHarness(ref name) if name == "openai"
+            SessionManagerError::UnsupportedHarness(ref name) if name == "nonexistent"
         ));
     }
 

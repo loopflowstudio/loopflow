@@ -1,188 +1,122 @@
 # 02: Action Buttons
 
-Agents surface next actions as tappable buttons. Primary mobile interaction, also works on desktop.
+## Problem
 
-## What to build
+Chat sessions frequently end with the user thinking "what should I do next?" and then typing a command manually. That friction is worst on iPhone, where typing is slow and one-handed use is common.
 
-A `suggest_actions` tool convention that agents use to surface clickable next-action buttons. The client renders them as tappable buttons below the chat. Tapping a button sends its text as the user's next message. Mobile-first but renders on Mac too.
+We need an agent-driven, tappable next-step surface that:
+- turns likely follow-up actions into one tap,
+- works in the existing session protocol,
+- behaves consistently on iPhone, iPad, and Mac.
 
-Stage 02 is UI/protocol convention work only. It does not include discovery (Stage 04) or multi-client transport changes (Stage 03).
+Who benefits:
+- mobile users running many short task loops,
+- new users who do not know canonical next commands,
+- desktop users who want faster repeat actions.
 
-## Protocol
+Why now:
+- Stage 01 established shared chat state + platform embedding boundaries,
+- this stage can ship value without waiting for discovery or transport work.
 
-The agent calls a tool named `suggest_actions` with structured input:
+## Approach
 
-```json
-{
-  "actions": [
-    {"label": "Land PR", "description": "Merge the PR and clean up"},
-    {"label": "Run tests again", "description": "Re-run the test suite"},
-    {"label": "Show me the diff"}
-  ]
-}
-```
+Ship a **protocol-first action strip** in two phases, with the UI and state logic shared in LoopflowCore.
 
-- `label` (required): button text, also the message sent when tapped
-- `description` (optional): subtitle or tooltip
+### Phase A (ship first): prompt-driven `suggest_actions`
 
-This is a regular tool_use in the session protocol. No new wire format. The client recognizes `suggest_actions` by name and renders buttons instead of the default tool card.
+1. Inject this instruction into `AgentSessionConfig.message` during session creation:
+   - ask for 2–4 concrete next actions,
+   - call `suggest_actions` after completing work or when waiting for user input,
+   - prefer actionable labels ("Land PR") over vague labels ("Continue").
+2. Do not wait for lfd tool registration; treat `suggest_actions` as a recognized tool name now.
 
-## System prompt (A — do first)
+### Phase B (follow immediately): formal tool registration
 
-Add to the agent's system text via the session config message field:
+1. Add `suggest_actions` to lfd-provided tool definitions with schema validation.
+2. Keep Phase A prompt guidance in place even after registration.
 
-```
-You have a tool called `suggest_actions`. Use it to suggest 2-4 next actions
-the user might want to take. Call it after completing a task, when waiting for
-user input, or when presenting results. Each action should be a short phrase
-that makes sense as a user message. Prefer concrete actions ("Land PR",
-"Run tests") over vague ones ("Continue", "Tell me more").
-```
+### Shared state and parsing (LoopflowCore)
 
-Concerto injects this into `AgentSessionConfig.message` when creating a session. No lfd changes needed. Can experiment immediately.
+1. Add `SuggestedAction` model (`label`, optional `description`, UUID id).
+2. Add `suggestedActions: [SuggestedAction]` to `ChatState`.
+3. Parse tool items where `name == "suggest_actions"` and input payload contains `actions`.
+4. Payload handling rules:
+   - keep only actions with non-empty `label`,
+   - cap to 4 actions,
+   - latest valid tool call replaces prior actions,
+   - invalid payload yields no update.
+5. Clear actions on:
+   - user send,
+   - agent turn start,
+   - user begins manual typing,
+   - session end/replay reset.
 
-## Tool registration (B — do after A works)
+### UI behavior
 
-lfd injects a formal tool definition for `suggest_actions` into the agent's tool list:
+1. Build shared `ActionButtonsView` in LoopflowCore.
+2. Render above composer in chat surfaces (through `WaveChatView`; iOS entry point remains `MobileWaveDetailView`).
+3. Layout:
+   - compact width (iPhone): vertical full-width cards with optional subtitle,
+   - regular width (iPad/Mac): horizontal wrapping pills.
+4. Accessibility:
+   - 44pt min touch target on iPhone,
+   - visible focus ring on keyboard platforms,
+   - VoiceOver reads label + description.
+5. Interaction:
+   - tap sends `label` through the exact same path as typed input,
+   - actions disappear immediately after tap.
 
-```json
-{
-  "name": "suggest_actions",
-  "description": "Suggest 2-4 next actions the user might want to take.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "actions": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": {"type": "string"},
-            "description": {"type": "string"}
-          },
-          "required": ["label"]
-        }
-      }
-    },
-    "required": ["actions"]
-  }
-}
-```
+### Wild success target
 
-This gives schema validation and makes the tool show up in the agent's tool list natively. Requires lfd changes — session creation adds the tool definition to the provider's tool set.
+Users begin treating the strip as the default continuation path: most follow-up turns after an assistant result are one tap, not manual typing.
 
-## Data model
+### Wild failure to design against
 
-```swift
-// In LoopflowCore
-public struct SuggestedAction: Sendable, Hashable, Identifiable {
-    public let id: UUID
-    public let label: String
-    public let description: String?
+Six months later we remove the feature because actions feel stale/noisy and users mistrust them. Mitigations in this design:
+- aggressive clearing rules,
+- strict payload sanitization,
+- no fallback UI when agent does not suggest actions.
 
-    public init(label: String, description: String? = nil) {
-        self.id = UUID()
-        self.label = label
-        self.description = description
-    }
-}
-```
+## Alternatives considered
 
-## ChatState additions
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Text-only suggestions inside assistant messages | Zero protocol work | Not tappable; no structured parsing; weak mobile benefit |
+| Client-generated suggestions (heuristics from transcript) | Works without agent tool use | Often wrong/out of context; hides model intent; harder to trust |
+| Wait for full lfd/tooling changes before any UI | Cleaner architecture | Delays user value; blocks experimentation on copy/placement |
 
-```swift
-// New property
-var suggestedActions: [SuggestedAction] = []
+## Key decisions
 
-// Parse from ToolItem when name == "suggest_actions"
-private func parseSuggestedActions(from item: ToolItem) -> [SuggestedAction]? {
-    guard item.name == "suggest_actions",
-          case .object(let obj) = item.input,
-          case .array(let actions) = obj["actions"] else { return nil }
+- **Adopt `suggest_actions` immediately via system prompt (Phase A).** Speed to user value beats waiting for backend formalization.
+- **Keep parsing in shared `ChatState`.** One behavior path for iOS + macOS avoids drift.
+- **Latest call wins.** Action sets are ephemeral guidance, not history.
+- **Clear aggressively.** Better to hide too early than show stale actions.
+- **Mobile-first rendering.** Full-width vertical actions on compact width are the default experience.
 
-    return actions.compactMap { value -> SuggestedAction? in
-        guard case .object(let action) = value,
-              let label = action["label"]?.stringValue else { return nil }
-        return SuggestedAction(
-            label: label,
-            description: action["description"]?.stringValue
-        )
-    }
-}
-```
+## Scope
 
-Clear actions when:
-- User sends a message → `suggestedActions = []`
-- Agent starts a new turn → `suggestedActions = []`
-- New `suggest_actions` tool completes → replaces previous
+- In scope:
+  - System prompt injection for `suggest_actions`
+  - Shared `SuggestedAction` model + `ChatState` parsing/clearing
+  - Shared `ActionButtonsView`
+  - Embedding in iOS/macOS chat surfaces
+  - Tap-to-send behavior parity with typed input
+  - lfd schema registration as Phase B of this same stage
 
-## View
-
-```swift
-// In LoopflowCore (shared view)
-public struct ActionButtonsView: View {
-    let actions: [SuggestedAction]
-    let onTap: (SuggestedAction) -> Void
-
-    @Environment(\.horizontalSizeClass) private var sizeClass
-
-    // iPhone: vertical stack, full-width buttons
-    // iPad/Mac: horizontal pills, wrapping flow layout
-}
-```
-
-**Integration note (from Stage 01):** Chat surfaces are platform-specific — MobileWaveDetailView on iOS, WaveChatView on macOS. ActionButtonsView lives in LoopflowCore as a shared component, but each platform's chat view embeds it. ChatState lives in `LoopflowCore/State/`, so `suggest_actions` parsing logic should stay there for both platforms.
-
-### iPhone rendering
-
-Action buttons render prominently above the composer:
-
-```
-┌─────────────────────────┐
-│  [agent message]        │
-│                         │
-│  ┌───────────────────┐  │
-│  │  Land PR          │  │  ← tappable, full-width
-│  │  Merge and clean  │  │
-│  └───────────────────┘  │
-│  ┌───────────────────┐  │
-│  │  Run tests again  │  │
-│  └───────────────────┘  │
-│  ┌───────────────────┐  │
-│  │  Show me the diff │  │
-│  └───────────────────┘  │
-│                         │
-│  [composer input]  [Send]│
-└─────────────────────────┘
-```
-
-### iPad / Mac rendering
-
-Horizontal pill buttons below the last message:
-
-```
-[Land PR]  [Run tests again]  [Show me the diff]
-```
-
-### Behavior
-
-- Tap sends `label` as user message (same as typing it and hitting send)
-- Buttons disappear after tap (or when agent starts responding)
-- Buttons also disappear when user types manually
-- Agent can call `suggest_actions` multiple times per conversation — latest wins
-- If agent doesn't call it, no buttons shown (graceful absence)
-
-## Constraints
-
-- Start with A (system prompt injection) — no lfd changes needed
-- B (tool registration) comes after A is working end-to-end
-- Don't block on lfd changes — can test with mock data while waiting
-- ActionButtonsView is a shared LoopflowCore component; platform chat views embed it rather than forking the button behavior
-- ChatState parsing is shared (`LoopflowCore/State/`); both platforms consume `suggestedActions` from the same state
+- Out of scope:
+  - Action discovery/ranking systems (Stage 04)
+  - New transport/wire formats (Stage 03)
+  - Persistence/analytics dashboards for suggested actions
+  - Multi-message or parameterized action payloads
 
 ## Done when
 
-- Agent calls `suggest_actions` via system prompt instructions, buttons render in MobileWaveDetailView (iOS) and WaveChatView (macOS)
-- Tapping a button sends the label as the next user message
-- Buttons clear on tap or when agent responds
-- Works on iPhone, iPad, and Mac
+- Observable behavior:
+  1. Agent emits a `suggest_actions` tool call and action buttons render in chat on iPhone, iPad, and Mac.
+  2. Tapping a button sends its label as a user message and clears buttons immediately.
+  3. Buttons also clear when typing manually or when a new agent turn starts.
+
+- Verification commands:
+  - `swift test --package-path swift`
+  - `uv run python scripts/concerto-dev.py run-ios` (manual iPhone/iPad verification)
+  - `uv run python scripts/concerto-dev.py run-debug` (manual macOS verification)

@@ -97,6 +97,26 @@ lf ops test
 
 Reads `.lf/config.yaml` and runs `test:` from repo root.
 
+## lf ops release
+
+Publish a release: generate notes, land PR, tag, push.
+
+```bash
+lf ops release              # bump patch, publish
+lf ops release minor        # bump minor
+lf ops release 1.0.0        # explicit version
+lf ops release -n           # dry run — show what would happen
+```
+
+Creates a worktree from `origin/main`, generates release notes via agent, commits, creates and lands a PR, then tags and pushes. CI picks up the tag and builds the release.
+
+| Flag | Description |
+|------|-------------|
+| `version` | Bump type (`patch`, `minor`, `major`) or explicit version (default: `patch`) |
+| `-n, --dry-run` | Preview the release without making changes |
+
+---
+
 ## lf ops doctor
 
 Check dependencies.

@@ -299,9 +299,6 @@ impl SessionManager {
                 runtime.clone(),
             )
             .await?;
-            if runtime.is_some() {
-                self.remove_runtime(session_id).await;
-            }
             return self.get_session(session_id).await;
         }
 
@@ -548,6 +545,11 @@ impl SessionManager {
             match result {
                 Ok(()) => {
                     if current_status != Some(SessionStatus::Starting) {
+                        if current_status.is_some_and(SessionStatus::is_terminal) {
+                            manager
+                                .stop_harness_runtime(&session_id, &runtime, "startup_aborted")
+                                .await;
+                        }
                         return;
                     }
                     if let Err(err) = manager
@@ -599,6 +601,9 @@ impl SessionManager {
                 }
                 Err(err) => {
                     if current_status.is_some_and(SessionStatus::is_terminal) {
+                        manager
+                            .stop_harness_runtime(&session_id, &runtime, "startup_aborted")
+                            .await;
                         return;
                     }
                     manager
@@ -765,6 +770,27 @@ impl SessionManager {
     async fn remove_runtime(&self, session_id: &LfdId) {
         let mut runtimes = self.inner.runtimes.lock().await;
         runtimes.remove(session_id);
+    }
+
+    async fn stop_harness_runtime(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        context: &'static str,
+    ) {
+        let stop_result = {
+            let mut harness = runtime.harness.lock().await;
+            harness.stop().await
+        };
+        if let Err(err) = stop_result {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %err,
+                context,
+                "failed to stop session harness"
+            );
+        }
+        self.remove_runtime(session_id).await;
     }
 
     async fn register_wave_session(&self, wave_run_id: Option<&str>) {
@@ -1549,7 +1575,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stop_session_while_starting_marks_failed_without_harness_stop() {
+    async fn stop_session_while_starting_marks_failed_and_cleans_up_harness() {
         STARTING_STOP_CALLED.store(false, Ordering::SeqCst);
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
@@ -1576,7 +1602,7 @@ mod tests {
         assert_eq!(stopped.status, SessionStatus::Failed);
         assert!(
             !STARTING_STOP_CALLED.load(Ordering::SeqCst),
-            "starting session stop should not call harness.stop"
+            "stop_session should not block on harness.stop while startup is running"
         );
 
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -1585,6 +1611,10 @@ mod tests {
             .await
             .expect("session should exist");
         assert_eq!(after_start_finishes.status, SessionStatus::Failed);
+        assert!(
+            STARTING_STOP_CALLED.load(Ordering::SeqCst),
+            "startup cleanup should stop the harness once startup returns"
+        );
     }
 
     #[tokio::test]

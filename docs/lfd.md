@@ -46,6 +46,8 @@ Send credentials in the `Authorization` header:
 curl -H "Authorization: Bearer <token>" http://127.0.0.1:2486/status
 ```
 
+`lfd` rejects malformed authorization values before provider validation. Use `Bearer <token>` with a non-empty token (max 4096 bytes) and no embedded whitespace/control characters.
+
 `lfd` rejects auth-like query parameters (`token`, `api_key`, `secret`, etc.) with `400 Bad Request`.
 
 ## Install

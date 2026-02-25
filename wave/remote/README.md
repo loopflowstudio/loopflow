@@ -17,7 +17,7 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 | 1 | EC2 dogfood lane: deploy (Docker + Caddy + static token) and run remote smoke from laptop | Next |
 | 2 | Mac Mini dogfood lane: deploy (native + launchd) and run the same smoke suite for parity | Next |
 | 3 | Fork executor cleanup before auth rollout (shared constants, branch threading, executor hook parity) | Next |
-| 4 | Studio auth (JWT validation, sign-in UX, daemon discovery) | After 1-3 |
+| 4 | Studio auth (JWT validation, sign-in UX, JWKS hardening) | After 1-3 |
 | 5 | API expansion (remote file browsing + metadata typeahead) | Later |
 | 6 | Hosted SaaS packaging | Later |
 

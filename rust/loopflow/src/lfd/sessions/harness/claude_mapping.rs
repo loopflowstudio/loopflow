@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 use crate::lfd::sessions::types::{FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus};
 
@@ -74,13 +74,31 @@ impl ReaderState {
         let index = self.tool_indexes.get(tool_use_id)?;
         self.tool_blocks.get(index)
     }
+
+    pub(super) fn drain_failed_items(&mut self) -> Vec<SessionItem> {
+        let mut tools: Vec<_> = self.tool_blocks.drain().map(|(_, tool)| tool).collect();
+        self.tool_indexes.clear();
+        tools.sort_by(|left, right| left.id.cmp(&right.id));
+        tools
+            .into_iter()
+            .map(|tool| {
+                build_item(
+                    &tool.name,
+                    &tool.id,
+                    tool.parsed_input(),
+                    ItemStatus::Failed,
+                    None,
+                )
+            })
+            .collect()
+    }
 }
 
 /// Parse a single NDJSON line and emit SessionEvents.
 pub(super) fn process_line(
     line: &str,
     turn_id: &str,
-    events: &broadcast::Sender<SessionEvent>,
+    events: &mpsc::UnboundedSender<SessionEvent>,
     state: &mut ReaderState,
 ) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -292,7 +310,7 @@ fn file_changes_from_input(tool_name: &str, input: Option<&Value>) -> Vec<FileEd
 fn process_assistant_message(
     value: &Value,
     turn_id: &str,
-    events: &broadcast::Sender<SessionEvent>,
+    events: &mpsc::UnboundedSender<SessionEvent>,
     state: &mut ReaderState,
 ) {
     let Some(blocks) = message_content(value) else {
@@ -345,7 +363,7 @@ fn process_assistant_message(
 fn process_user_message(
     value: &Value,
     turn_id: &str,
-    events: &broadcast::Sender<SessionEvent>,
+    events: &mpsc::UnboundedSender<SessionEvent>,
     state: &mut ReaderState,
 ) {
     let Some(blocks) = message_content(value) else {
@@ -506,7 +524,7 @@ mod tests {
 
     #[test]
     fn process_line_system_event() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"system","session_id":"sess_abc123","tools":[]}"#;
 
@@ -526,7 +544,7 @@ mod tests {
 
     #[test]
     fn process_line_wrapped_stream_event() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"stream_event":{"event":{"type":"system","session_id":"sess_wrapped"}}}"#;
 
@@ -546,7 +564,7 @@ mod tests {
 
     #[test]
     fn process_line_text_delta() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello world"}}"#;
 
@@ -564,7 +582,7 @@ mod tests {
 
     #[test]
     fn process_line_thinking_delta() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think..."}}"#;
 
@@ -582,7 +600,7 @@ mod tests {
 
     #[test]
     fn process_line_result_completes_turn() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false,"result":"done","session_id":"sess_abc"}"#;
 
@@ -601,7 +619,7 @@ mod tests {
 
     #[test]
     fn process_line_result_error_marks_failed() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"result","is_error":true,"result":"failed"}"#;
 
@@ -620,7 +638,7 @@ mod tests {
 
     #[test]
     fn process_line_tool_use_start() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_bash_1","name":"Bash"}}"#;
 
@@ -644,7 +662,7 @@ mod tests {
 
     #[test]
     fn process_line_input_json_delta_accumulates() {
-        let (tx, _rx) = broadcast::channel(16);
+        let (tx, _rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
 
         // Start a tool block first.
@@ -668,7 +686,7 @@ mod tests {
 
     #[test]
     fn process_line_user_text_emits_user_message_item() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"user","message":{"content":[{"type":"text","text":"Design the architecture before coding."}]}}"#;
 

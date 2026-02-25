@@ -16,7 +16,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
 };
-use crate::lfd::sessions::SessionManagerError;
+use crate::lfd::sessions::{SessionManager, SessionManagerError};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
@@ -125,6 +125,7 @@ pub async fn stream_session_events_handler(
         .list_events(&session_id, query.after_seq)
         .await
         .map_err(map_session_error)?;
+    let sessions = state.sessions.clone();
 
     let mut last_seq = query.after_seq.unwrap_or(-1);
     if let Some(last) = replay.last() {
@@ -161,7 +162,11 @@ pub async fn stream_session_events_handler(
                         return;
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    if !backfill_lagged_events(&sessions, &session_id, &mut last_seq, &tx).await {
+                        return;
+                    }
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
@@ -217,6 +222,37 @@ fn session_event_sse(event: &PersistedSessionEvent) -> SseEvent {
         .data(data)
 }
 
+async fn backfill_lagged_events(
+    sessions: &SessionManager,
+    session_id: &LfdId,
+    last_seq: &mut i64,
+    tx: &tokio::sync::mpsc::Sender<Result<SseEvent, Infallible>>,
+) -> bool {
+    let missed = match sessions.list_events(session_id, Some(*last_seq)).await {
+        Ok(events) => events,
+        Err(err) => {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %err,
+                "failed to backfill lagged session events"
+            );
+            return true;
+        }
+    };
+
+    for event in missed {
+        if event.seq <= *last_seq {
+            continue;
+        }
+        *last_seq = event.seq;
+        if tx.send(Ok(session_event_sse(&event))).await.is_err() {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn parse_session_id(value: &str) -> Result<LfdId, ApiError> {
     value
         .parse::<LfdId>()
@@ -261,5 +297,92 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiMessage::Untrusted(message),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lfd::store::{open_store, StorageConfig};
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn backfill_lagged_events_replays_from_store_after_last_seq() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            provider: "claude".to_string(),
+            status: crate::lfd::sessions::types::SessionStatus::Active,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig {
+                step: "design".to_string(),
+                repo_root: tmp.path().to_string_lossy().to_string(),
+                ..Default::default()
+            },
+            created_at: time::OffsetDateTime::now_utc(),
+            ended_at: None,
+        };
+        store
+            .create_session(&session)
+            .await
+            .expect("create session");
+
+        store
+            .append_session_event(
+                &session_id,
+                0,
+                &crate::lfd::sessions::types::SessionEvent::StatusChanged {
+                    status: crate::lfd::sessions::types::SessionStatus::Active,
+                },
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await
+            .expect("append status event");
+        store
+            .append_session_event(
+                &session_id,
+                1,
+                &crate::lfd::sessions::types::SessionEvent::TextDelta {
+                    turn_id: "turn_1".to_string(),
+                    content: "hello".to_string(),
+                },
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await
+            .expect("append delta event");
+        store
+            .append_session_event(
+                &session_id,
+                2,
+                &crate::lfd::sessions::types::SessionEvent::TurnCompleted {
+                    turn_id: "turn_1".to_string(),
+                    status: crate::lfd::sessions::types::TurnStatus::Completed,
+                },
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await
+            .expect("append completion event");
+
+        let sessions = SessionManager::new(store);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mut last_seq = 1;
+
+        let keep_streaming =
+            backfill_lagged_events(&sessions, &session_id, &mut last_seq, &tx).await;
+        assert!(keep_streaming);
+        assert_eq!(last_seq, 2);
+
+        let first = rx.recv().await.expect("first backfilled event");
+        assert!(first.is_ok());
+        assert!(rx.try_recv().is_err());
     }
 }

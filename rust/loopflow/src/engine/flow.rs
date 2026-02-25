@@ -795,7 +795,7 @@ Be careful.
     #[test]
     fn load_direction_finds_builtin_direction() {
         let tmp = TempDir::new().unwrap();
-        let result = load_direction("security", tmp.path());
+        let result = load_direction("product-engineer", tmp.path());
         assert!(
             result.is_ok(),
             "builtin direction should be found: {:?}",
@@ -1011,8 +1011,6 @@ Be careful.
     fn expand_direction_names_expands_builtin_group() {
         let tmp = TempDir::new().unwrap();
         let result = expand_direction_names(&["values".to_string()], tmp.path());
-        assert!(result.contains(&"clarity".to_string()));
-        assert!(result.contains(&"simplicity".to_string()));
         assert!(result.contains(&"craft".to_string()));
         assert!(result.contains(&"flow".to_string()));
         assert!(result.contains(&"scale".to_string()));

@@ -1,11 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
@@ -15,7 +16,7 @@ use crate::lfd::sessions::harness::{claude_mapping, Harness, HarnessError};
 use crate::lfd::sessions::types::{SessionEvent, TurnStatus};
 
 pub struct ClaudeHarness {
-    events: broadcast::Sender<SessionEvent>,
+    events: mpsc::UnboundedSender<SessionEvent>,
     config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
     provider_session_id: Option<String>,
@@ -33,7 +34,7 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 impl ClaudeHarness {
-    pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<SessionEvent>) -> Self {
         Self {
             events,
             config: None,
@@ -175,6 +176,12 @@ impl Harness for ClaudeHarness {
                     turn_id = %reader_turn_id,
                     "claude turn ended without result event"
                 );
+                for item in state.drain_failed_items() {
+                    let _ = events.send(SessionEvent::ItemCompleted {
+                        turn_id: reader_turn_id.clone(),
+                        item,
+                    });
+                }
                 let _ = events.send(SessionEvent::TurnCompleted {
                     turn_id: reader_turn_id,
                     status: TurnStatus::Failed,
@@ -199,7 +206,15 @@ impl Harness for ClaudeHarness {
         }
 
         if let Some(task) = self.reader_task.take() {
-            task.abort();
+            let mut task = task;
+            if tokio::time::timeout(Duration::from_secs(2), &mut task)
+                .await
+                .is_err()
+            {
+                tracing::warn!("timed out waiting for claude reader task shutdown; aborting");
+                task.abort();
+                let _ = task.await;
+            }
         }
         if let Some(task) = self.stderr_task.take() {
             task.abort();
@@ -222,7 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {
-        let (tx, _rx) = broadcast::channel(16);
+        let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {
             system_prompt: String::new(),

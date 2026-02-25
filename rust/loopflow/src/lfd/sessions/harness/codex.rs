@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
@@ -44,7 +44,7 @@ enum OutboundRpc {
 }
 
 pub struct CodexHarness {
-    events: broadcast::Sender<SessionEvent>,
+    events: mpsc::UnboundedSender<SessionEvent>,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
     writer_task: Option<JoinHandle<()>>,
@@ -65,7 +65,7 @@ impl std::fmt::Debug for CodexHarness {
 }
 
 impl CodexHarness {
-    pub fn new(events: broadcast::Sender<SessionEvent>) -> Self {
+    pub fn new(events: mpsc::UnboundedSender<SessionEvent>) -> Self {
         Self {
             events,
             child: None,

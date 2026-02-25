@@ -3,10 +3,12 @@ mod claude_mapping;
 pub mod codex;
 mod codex_mapping;
 mod common;
+#[cfg(test)]
+mod conformance_tests;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 use crate::engine::agent::AgentConfig;
 use crate::lfd::sessions::types::SessionEvent;
@@ -37,7 +39,8 @@ pub trait Harness: Send + Sync {
 }
 
 /// Constructor fn: `(harness_kind, event_tx) -> harness`.
-pub type CreateHarnessFn = fn(&str, broadcast::Sender<SessionEvent>) -> Result<Box<dyn Harness>>;
+pub type CreateHarnessFn =
+    fn(&str, mpsc::UnboundedSender<SessionEvent>) -> Result<Box<dyn Harness>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HarnessKind {
@@ -61,7 +64,7 @@ impl HarnessKind {
         }
     }
 
-    fn create(self, event_tx: broadcast::Sender<SessionEvent>) -> Box<dyn Harness> {
+    fn create(self, event_tx: mpsc::UnboundedSender<SessionEvent>) -> Box<dyn Harness> {
         match self {
             Self::Codex => Box::new(codex::CodexHarness::new(event_tx)),
             Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
@@ -75,7 +78,7 @@ pub fn canonical_harness(name: &str) -> Option<&'static str> {
 
 pub fn default_create_harness(
     name: &str,
-    event_tx: broadcast::Sender<SessionEvent>,
+    event_tx: mpsc::UnboundedSender<SessionEvent>,
 ) -> Result<Box<dyn Harness>> {
     if let Some(kind) = HarnessKind::parse(name) {
         return Ok(kind.create(event_tx));
@@ -99,7 +102,7 @@ mod tests {
 
     #[test]
     fn default_create_harness_rejects_unknown() {
-        let (tx, _rx) = broadcast::channel(16);
+        let (tx, _rx) = mpsc::unbounded_channel();
         match default_create_harness("lfharness", tx) {
             Ok(_) => panic!("should reject unknown harness"),
             Err(err) => assert!(err.to_string().contains("unsupported session harness")),

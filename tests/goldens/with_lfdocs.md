@@ -182,15 +182,27 @@ Run mode is auto (headless). Proceed without pausing for questions. If you need 
 You are building toward the rust program of work.
 Wave context is included in docs below.
 
-Persistent wave memory lives at wave/rust/MEMORY.md.
-Write durable observations for future agents:
-- codebase patterns and conventions discovered
-- user preferences and project norms observed
-- things that worked or failed
-- corrections when memory becomes stale or wrong
+## Wave memory
 
-Don't write session-specific notes.
-Keep memory concise and update existing entries when possible.
+Persistent memory at wave/rust/MEMORY.md. Budget: ~25k tokens.
+Read it before you start. Update it aggressively — correct stale entries,
+add observations, remove what's wrong. Don't wait until the end of your session.
+
+Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.
+- Patterns: codebase conventions, architecture, how things connect
+- Preferences: user workflow, tool choices, communication norms
+- Learnings: what worked, what failed, surprises
+
+What belongs elsewhere:
+- architectural decisions → wave docs or area docs
+- design rationale → scratch/ or wave plan
+- session-specific notes → nowhere (let them die)
+
+How to update:
+- Edit within sections. Don't rewrite the whole file.
+- Correct or remove entries that are wrong or stale.
+- Use absolute dates, not "today" or "recently".
+- When a section grows large, promote stable entries to wave/area docs and trim.
 
 <lf:memory path="wave/rust/MEMORY.md">
 - Keep prompts concise and concrete.

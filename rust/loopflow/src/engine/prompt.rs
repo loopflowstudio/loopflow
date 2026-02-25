@@ -1294,14 +1294,23 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
             "<lf:wave name=\"{}\">\n\
              You are building toward the {} program of work.\n\
              Wave context is included in docs below.\n\n\
-             Persistent wave memory lives at {}.\n\
-             Write durable observations for future agents:\n\
-             - codebase patterns and conventions discovered\n\
-             - user preferences and project norms observed\n\
-             - things that worked or failed\n\
-             - corrections when memory becomes stale or wrong\n\n\
-             Don't write session-specific notes.\n\
-             Keep memory concise and update existing entries when possible.\n\n\
+             ## Wave memory\n\n\
+             Persistent memory at {}. Budget: ~25k tokens.\n\
+             Read it before you start. Update it aggressively — correct stale entries,\n\
+             add observations, remove what's wrong. Don't wait until the end of your session.\n\n\
+             Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.\n\
+             - Patterns: codebase conventions, architecture, how things connect\n\
+             - Preferences: user workflow, tool choices, communication norms\n\
+             - Learnings: what worked, what failed, surprises\n\n\
+             What belongs elsewhere:\n\
+             - architectural decisions → wave docs or area docs\n\
+             - design rationale → scratch/ or wave plan\n\
+             - session-specific notes → nowhere (let them die)\n\n\
+             How to update:\n\
+             - Edit within sections. Don't rewrite the whole file.\n\
+             - Correct or remove entries that are wrong or stale.\n\
+             - Use absolute dates, not \"today\" or \"recently\".\n\
+             - When a section grows large, promote stable entries to wave/area docs and trim.\n\n\
              {}\n\
              </lf:wave>",
             wave, wave, memory_path, memory_content
@@ -1794,7 +1803,7 @@ mod tests {
         };
 
         let prompt = format_prompt(PromptFormatMode::Full, &components);
-        assert!(prompt.contains("Persistent wave memory lives at wave/living/MEMORY.md"));
+        assert!(prompt.contains("Persistent memory at wave/living/MEMORY.md"));
         assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
         assert!(prompt.contains("prefer focused tests"));
     }

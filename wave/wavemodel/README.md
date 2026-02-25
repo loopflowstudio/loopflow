@@ -24,6 +24,7 @@ The full experience: open Concerto, describe what you want to build, and the des
 - `lf design` is the primary wave creation entry point
 - Concerto orients new users toward design, not configuration
 - Wave content (Vision, Goals) is visible in the Concerto UI
+- Sessions validate that `repo_root` contains `.lf/` and `cwd` resolves inside it — wave content is only meaningful in initialized repos
 
 ## Risks
 
@@ -32,7 +33,7 @@ The full experience: open Concerto, describe what you want to build, and the des
 - ~~**Swift client has dead WaveSchema code.**~~ *Resolved in Phase 03. `WaveSchema.swift` deleted, references removed from `LocalWaveService`, `WaveSidebar`, `RepoState`, and `WaveServiceProtocol`. Clean removal, no regressions.*
 - **Step prompts may over-reference sections.** If every step checks every section, prompts get bloated and agents waste tokens on irrelevant context. Mitigate: each step references only the sections relevant to its job. *Phase 01 evidence: gate checks Goals/Risks/Metrics, review checks Vision/Goals/Risks, ingest reads all four for selection. No step references all four sections unconditionally.*
 - **Section placement varies across waves.** Scope boundaries appear as "Not here" under Vision (agentapi, remote), "Security boundary (non-goals)" at the end (security), or inline in Vision (wavemodel). *Phase 03 evidence: `WaveContentParser` matches `## Vision`, `## Goals`, `## Risks`, `## Metrics` by exact heading name. Everything else is treated as supplementary. Convention-based, intentionally lenient — non-standard headings are silently ignored.*
-- **Wave content loading has no filesystem watcher.** Content is loaded on-demand when a wave is selected and cached in `WaveViewModel`. Changes to wave READMEs on disk won't appear until the user re-selects the wave or status/activation changes trigger a refresh. Acceptable for now, but the agent harness (04) may need to push content updates when design conversations modify the README in real time.
+- **Wave content loading has no filesystem watcher.** Content is loaded on-demand when a wave is selected and cached in `WaveViewModel`. Changes to wave READMEs on disk won't appear until the user re-selects the wave or status/activation changes trigger a refresh. *Phase 04 evidence: confirmed gap. Inline design sessions modify the README during conversation, but Concerto won't reflect those changes until the user navigates away and back. `workspace_changed` signaling is the likely fix, tracked as future work.*
 
 ## Metrics
 
@@ -43,6 +44,7 @@ The full experience: open Concerto, describe what you want to build, and the des
 - New users in Concerto see "What do you want to build?" not "Configure a wave" *(Phase 03: done)*
 - Wave Vision, Goals, Risks, and Roadmap visible in Concerto detail panel *(Phase 03: done)*
 - Prompt assembly shared between executor and sessions via `prepare_step_prompt()` *(Phase 04: done)*
+- Launch config cleanly separated into intent (`LaunchConfig`), execution (`ProcessConfig`), and capabilities (`AgentCapabilities`) *(Phase 04: done)*
 - Sessions receive step-level intent, not raw system prompts *(Phase 04: done)*
 - Inline design sessions work in Concerto without external terminal *(Phase 04: done)*
 

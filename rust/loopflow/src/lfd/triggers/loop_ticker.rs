@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::Path;
 use std::time::Duration;
 
@@ -127,38 +128,21 @@ fn wave_backlog_empty(worktree: &Path, wave_name: &str) -> bool {
         }
     };
 
-    for entry in entries {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
+    !entries
+        .flatten()
+        .any(|entry| is_actionable_wave_item(&entry.path()))
+}
 
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if file_name == "README.md" {
-            continue;
-        }
-
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext == "yaml")
-        {
-            continue;
-        }
-
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext == "md")
-        {
-            return false;
-        }
+fn is_actionable_wave_item(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
     }
 
-    true
+    if path.file_name() == Some(OsStr::new("README.md")) {
+        return false;
+    }
+
+    path.extension() == Some(OsStr::new("md"))
 }
 
 #[cfg(test)]

@@ -1,9 +1,8 @@
 use crate::engine::{
-    check_cli_available, default_gather_sources, drop_native_instruction_docs,
-    format_context_prompt, format_prompt, format_task_prompt, gather_context, launch_agent,
-    load_config_or_default, parse_model, seed_rlm_env, trim_context_with_breakdown,
-    write_prompt_log, AgentCapabilities, Config, ContextBreakdown, GatherContextOpts, LaunchConfig,
-    ProcessConfig, PromptComponents, PromptFormatMode, StreamFormat, DEFAULT_CONTEXT_BUDGET,
+    check_cli_available, launch_agent, load_config_or_default, parse_model, prepare_launch_prompt,
+    seed_rlm_env, write_prompt_log, AgentCapabilities, Config, ContextBreakdown,
+    ContextSourceOverrides, LaunchConfig, LaunchPromptInput, ProcessConfig, PromptComponents,
+    StreamFormat, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -72,8 +71,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         debug!(s.name, s.interactive, "discovered step");
     }
 
-    let mut directions = config.direction.clone().unwrap_or_default();
-    directions.extend(cli.direction.clone());
+    let cli_directions = cli.direction.clone();
 
     let is_interactive = cli.interactive
         || (!cli.batch
@@ -86,75 +84,63 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                     .unwrap_or(false)
                 || (step.is_none() && message.is_none())));
 
-    let area = if !cli.area.is_empty() {
+    let cli_area = if !cli.area.is_empty() {
         cli.area.first().map(|p| p.to_string_lossy().to_string())
     } else {
-        config.area.clone()
+        None
     };
 
-    let include_clipboard = cli.clipboard || config.paste;
-    let lfdocs = cli.lfdocs_setting().unwrap_or(config.lfdocs);
-    let diff_files = cli.diff_files_setting().unwrap_or(config.diff_files);
-    let diff = cli.diff_setting().unwrap_or(config.diff);
-
-    info!("gathering context");
-    let gather_start = Instant::now();
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo_root.clone(),
-        step: step.map(|s| s.to_string()),
-        message: message.map(|s| s.to_string()),
-        run_mode: Some(
-            if is_interactive {
-                "interactive"
-            } else {
-                "auto"
-            }
-            .to_string(),
-        ),
-        directions,
-        files: Vec::new(),
-        sources: default_gather_sources(lfdocs, diff_files || diff, include_clipboard),
-        area: area.clone(),
-        wave: cli.wave.clone(),
-    })?;
+    info!("preparing launch prompt");
+    let prepare_start = Instant::now();
+    let prepared = prepare_launch_prompt(
+        &config,
+        LaunchPromptInput {
+            repo_root: repo_root.clone(),
+            step: step.map(|value| value.to_string()),
+            run_mode: Some(
+                if is_interactive {
+                    "interactive"
+                } else {
+                    "auto"
+                }
+                .to_string(),
+            ),
+            directions: cli_directions,
+            area: cli_area.clone(),
+            wave: cli.wave.clone(),
+            message: message.map(|value| value.to_string()),
+            model: cli.model.clone(),
+            cwd: Some(repo_root.clone()),
+            max_turns: None,
+            yolo_mode: cli.yolo || config.yolo,
+            include_config_directions: true,
+            include_config_area: true,
+            source_overrides: ContextSourceOverrides {
+                lfdocs: cli.lfdocs_setting(),
+                diff_files: cli.diff_files_setting(),
+                diff: cli.diff_setting(),
+                clipboard: if cli.clipboard { Some(true) } else { None },
+            },
+            summary: None,
+        },
+    )?;
     debug!(
-        elapsed_ms = gather_start.elapsed().as_millis(),
-        "gathered context"
+        elapsed_ms = prepare_start.elapsed().as_millis(),
+        "prepared launch prompt"
     );
-    let model = cli
+    let model = prepared
+        .launch
         .model
-        .as_deref()
-        .unwrap_or(&config.agent_model)
-        .to_string();
+        .clone()
+        .unwrap_or_else(|| config.agent_model.clone());
     let (backend, _variant) = parse_model(&model);
-
-    let mut components = components;
-    drop_native_instruction_docs(&mut components, &repo_root);
-    let trim_start = Instant::now();
-    let (components, breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
-    debug!(
-        elapsed_ms = trim_start.elapsed().as_millis(),
-        "trimmed context"
-    );
-
-    let prompt_start = Instant::now();
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
-    debug!(
-        elapsed_ms = prompt_start.elapsed().as_millis(),
-        "formatted prompt"
-    );
 
     let step_name = step.map(|value| value.to_string());
     let log_name = step_name
         .as_deref()
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
         .to_string();
-    let launch = LaunchConfig {
-        model: Some(model),
-        cwd: Some(repo_root.clone()),
-        skip_permissions: cli.yolo || config.yolo,
-        ..Default::default()
-    };
+    let area = prepared.components.area.clone();
     let process = ProcessConfig {
         auto: !is_interactive,
         stream: !is_interactive,
@@ -167,12 +153,12 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     Ok(PromptBuild {
         repo_root,
         config,
-        launch,
+        launch: prepared.launch,
         process,
         capabilities,
-        components,
-        breakdown,
-        prompt,
+        components: prepared.components,
+        breakdown: prepared.breakdown,
+        prompt: prepared.prompt,
         backend,
         area,
         step_name,
@@ -239,17 +225,10 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote prompt log"
     );
 
-    let context_prompt_start = Instant::now();
-    let context_prompt = format_context_prompt(&built.components);
-    let task_prompt = format_task_prompt(&built.components);
-    debug!(
-        elapsed_ms = context_prompt_start.elapsed().as_millis(),
-        "formatted context/task prompt"
-    );
     let context_file_start = Instant::now();
     let context_file = Some(write_prompt_log(
         &built.repo_root,
-        &context_prompt,
+        &built.launch.system_prompt,
         &format!("{}.context", built.log_name),
         None,
     )?);
@@ -258,20 +237,16 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote context log"
     );
 
-    let mut launch = built.launch.clone();
-    launch.system_prompt = context_prompt;
-    launch.task_prompt = task_prompt;
-
     let use_color = std::env::var("NO_COLOR").is_err() && std::io::stderr().is_terminal();
     let mut process = built.process.clone();
     process.context_file = context_file;
     process.stream_format = StreamFormat::Human(use_color);
-    debug!(?launch, ?process, ?built.capabilities, "launching agent");
+    debug!(launch = ?built.launch, ?process, ?built.capabilities, "launching agent");
 
     seed_rlm_env(&built.config);
     info!(backend = built.backend, "launching agent");
     let launch_start = Instant::now();
-    let result = launch_agent(&launch, &process, &built.capabilities)?;
+    let result = launch_agent(&built.launch, &process, &built.capabilities)?;
     debug!(
         elapsed_ms = launch_start.elapsed().as_millis(),
         "agent finished"

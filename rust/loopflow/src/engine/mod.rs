@@ -8,6 +8,7 @@ pub mod event;
 pub mod flow;
 pub mod fork;
 pub mod git;
+pub mod launch;
 pub mod naming;
 pub mod platform;
 pub mod prompt;
@@ -26,6 +27,9 @@ pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use flow::{
     expand_flow, load_direction, load_flow, load_step, next_action, ConcreteFork, ConcreteItem,
     ConcreteStep, Direction, Flow, FlowAction, FlowItem, Step,
+};
+pub use launch::{
+    prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,
 };
 pub use prompt::{
     count_tokens, default_gather_sources, drop_native_instruction_docs, format_context_prompt,

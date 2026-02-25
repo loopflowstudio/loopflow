@@ -260,10 +260,15 @@ pub(crate) async fn build_step_prompt(
     message: Option<String>,
 ) -> Result<(LaunchConfig, ProcessConfig)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
+    let run_mode = if step.step.interactive.unwrap_or(false) {
+        "interactive"
+    } else {
+        "auto"
+    };
     let mut launch = prepare_step_prompt(PrepareStepPromptConfig {
         repo_root: Path::new(worktree),
         step: &step.step.name,
-        run_mode: "auto",
+        run_mode,
         directions,
         area: None,
         wave: wave.map(str::to_string),

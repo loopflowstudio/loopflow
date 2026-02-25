@@ -136,7 +136,7 @@ impl PostgresStore {
         let config: SessionConfig = serde_json::from_str(row.get::<_, &str>(5))?;
         Ok(Session {
             id: row.get(0),
-            provider: row.get(1),
+            harness: row.get(1),
             status: SessionStatus::from_i32(row.get::<_, i32>(2)),
             wave_run_id: row.get(3),
             provider_session_id: row.get(4),
@@ -170,7 +170,7 @@ impl PostgresStore {
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     &[
                         &session.id,
-                        &session.provider,
+                        &session.harness,
                         &session.status.as_i32(),
                         &session.wave_run_id,
                         &session.provider_session_id,

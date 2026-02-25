@@ -23,7 +23,7 @@ public protocol WaveServiceProtocol: Sendable {
     func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus
     func removeStimulus(_ waveId: String, stimulusId: String) async throws
     func createSession(
-        provider: String,
+        harness: String,
         waveRunId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession

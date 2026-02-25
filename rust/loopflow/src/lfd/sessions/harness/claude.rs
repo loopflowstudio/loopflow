@@ -12,7 +12,7 @@ use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_model;
 use crate::lfd::sessions::harness::claude_mapping::ReaderState;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::sessions::harness::{claude_mapping, SessionHarness, SessionHarnessError};
+use crate::lfd::sessions::harness::{claude_mapping, Harness, HarnessError};
 use crate::lfd::sessions::types::{SessionEvent, TurnStatus};
 
 pub struct ClaudeHarness {
@@ -93,7 +93,7 @@ impl ClaudeHarness {
 }
 
 #[async_trait]
-impl SessionHarness for ClaudeHarness {
+impl Harness for ClaudeHarness {
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         // Validate claude binary on PATH.
         let output = Command::new("claude").arg("--version").output().await;
@@ -127,7 +127,7 @@ impl SessionHarness for ClaudeHarness {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Err(SessionHarnessError::TurnAlreadyInProgress.into());
+            return Err(HarnessError::TurnAlreadyInProgress.into());
         }
         let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
 
@@ -334,8 +334,8 @@ mod tests {
             .expect_err("spawn should fail for missing cwd");
         assert!(
             !matches!(
-                first.downcast_ref::<SessionHarnessError>(),
-                Some(SessionHarnessError::TurnAlreadyInProgress)
+                first.downcast_ref::<HarnessError>(),
+                Some(HarnessError::TurnAlreadyInProgress)
             ),
             "first failure should not be turn-in-progress"
         );
@@ -346,8 +346,8 @@ mod tests {
             .expect_err("turn guard should be released after setup failure");
         assert!(
             !matches!(
-                second.downcast_ref::<SessionHarnessError>(),
-                Some(SessionHarnessError::TurnAlreadyInProgress)
+                second.downcast_ref::<HarnessError>(),
+                Some(HarnessError::TurnAlreadyInProgress)
             ),
             "second failure should not be turn-in-progress"
         );

@@ -14,7 +14,7 @@ use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_model;
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
-use crate::lfd::sessions::harness::{codex_mapping, SessionHarness};
+use crate::lfd::sessions::harness::{codex_mapping, Harness};
 use crate::lfd::sessions::types::SessionEvent;
 
 async fn resolve_turn_id(
@@ -116,7 +116,7 @@ impl CodexHarness {
 }
 
 #[async_trait]
-impl SessionHarness for CodexHarness {
+impl Harness for CodexHarness {
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());

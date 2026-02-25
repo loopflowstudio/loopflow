@@ -227,11 +227,11 @@ class Client:
 
     def create_session(
         self,
-        provider: str,
+        harness: str,
         wave_run_id: Optional[str] = None,
         config: Optional[SessionConfig] = None,
     ) -> Session:
-        body: dict[str, Any] = {"provider": provider, "config": {}}
+        body: dict[str, Any] = {"harness": harness, "config": {}}
         if wave_run_id is not None:
             body["wave_run_id"] = wave_run_id
         if config is not None:

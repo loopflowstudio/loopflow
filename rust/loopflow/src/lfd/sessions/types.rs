@@ -246,7 +246,7 @@ pub struct SessionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: LfdId,
-    pub provider: String,
+    pub harness: String,
     pub status: SessionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wave_run_id: Option<String>,
@@ -268,7 +268,7 @@ pub struct PersistedSessionEvent {
 
 #[derive(Debug, Clone)]
 pub struct CreateSessionParams {
-    pub provider: String,
+    pub harness: String,
     pub wave_run_id: Option<String>,
     pub config: SessionConfig,
 }

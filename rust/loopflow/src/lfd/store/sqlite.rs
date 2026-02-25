@@ -111,7 +111,7 @@ impl SqliteStore {
         })?;
         Ok(Session {
             id: row.get(0)?,
-            provider: row.get(1)?,
+            harness: row.get(1)?,
             status: SessionStatus::from_i32(row.get::<_, i64>(2)? as i32),
             wave_run_id: row.get(3)?,
             provider_session_id: row.get(4)?,
@@ -143,7 +143,7 @@ impl SqliteStore {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 session.id,
-                session.provider,
+                session.harness,
                 session.status.as_i32() as i64,
                 session.wave_run_id,
                 session.provider_session_id,

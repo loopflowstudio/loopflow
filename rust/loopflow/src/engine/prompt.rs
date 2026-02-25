@@ -10,7 +10,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use crate::engine::error::CoreError;
-use crate::engine::flow::{load_direction, load_step, Direction, Step};
+use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
 use once_cell::sync::Lazy;
 use tiktoken_rs::CoreBPE;
 use tracing::debug;
@@ -425,13 +425,14 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     // Load directions
     let directions_start = Instant::now();
-    let mut directions = Vec::new();
+    let mut direction_names = Vec::new();
     if let Some(ref step) = step {
-        for name in &step.directions {
-            directions.push(load_direction(name, repo_root)?);
-        }
+        direction_names.extend(step.directions.clone());
     }
-    for name in &opts.directions {
+    direction_names.extend(opts.directions.clone());
+    let expanded_names = expand_direction_names(&direction_names, repo_root);
+    let mut directions = Vec::new();
+    for name in &expanded_names {
         directions.push(load_direction(name, repo_root)?);
     }
     debug!(

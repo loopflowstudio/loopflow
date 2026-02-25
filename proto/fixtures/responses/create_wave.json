@@ -4,7 +4,7 @@
     "name": "swift-falcon",
     "repo": "/Users/alice/repos/myproject",
     "flow": "ship",
-    "direction": ["product-engineer"],
+    "direction": ["clarity"],
     "area": ["src/api"],
     "stimulus": {
       "kind": "STIMULUS_LOOP"

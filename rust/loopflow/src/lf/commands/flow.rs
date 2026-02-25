@@ -1,3 +1,4 @@
+use crate::engine::flow::expand_direction_names;
 use crate::engine::fork::{
     fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
@@ -87,8 +88,9 @@ struct ForkBranchTask {
 }
 
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
-    let planned =
-        plan_fork_execution(&fork.branches, &cli.direction).map_err(|err| anyhow!(err))?;
+    let expanded_cli_directions = expand_direction_names(&cli.direction, repo);
+    let planned = plan_fork_execution(&fork.branches, &expanded_cli_directions)
+        .map_err(|err| anyhow!(err))?;
 
     let base_branch = current_branch(repo)?
         .ok_or_else(|| anyhow!("fork execution requires an active branch (detached HEAD)"))?;

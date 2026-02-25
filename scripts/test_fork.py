@@ -23,7 +23,7 @@ from lib.fork_scenarios import (
 def main() -> int:
     parser = argparse.ArgumentParser(description="Test Docker fork execution")
     parser.add_argument("--flow", default="wave-reduce")
-    parser.add_argument("--direction", default="product-engineer")
+    parser.add_argument("--direction", default="ux")
     parser.add_argument("--timeout", type=int, default=600, help="Seconds to wait")
     parser.add_argument("--skip-build", action="store_true")
     args = parser.parse_args()

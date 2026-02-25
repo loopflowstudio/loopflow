@@ -46,7 +46,7 @@ def fork_infra() -> Iterator[subprocess.Popen[str]]:
 def test_fork_execution(fork_infra: subprocess.Popen[str]) -> None:
     wave_name = create_test_wave_name()
     try:
-        create_and_run_wave("wave-reduce", "product-engineer", wave_name=wave_name)
+        create_and_run_wave("wave-reduce", "ux", wave_name=wave_name)
         success, output = wait_for_fork_launch(fork_infra, timeout=180, wave_name=wave_name)
         assert success, f"fork execution failed:\n{output[-2000:]}"
     finally:

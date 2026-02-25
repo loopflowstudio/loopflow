@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -249,18 +249,18 @@ pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
 pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
     let mut expanded = Vec::new();
     let mut seen = HashSet::new();
-    for name in names {
-        if let Some(members) = resolve_direction_group(name, repo) {
-            for member in members {
-                if seen.insert(member.clone()) {
-                    expanded.push(member);
-                }
-            }
+    let mut queue: VecDeque<String> = names.iter().cloned().collect();
+    while let Some(name) = queue.pop_front() {
+        if !seen.insert(name.clone()) {
             continue;
         }
-
-        if seen.insert(name.clone()) {
-            expanded.push(name.clone());
+        match resolve_direction_group(&name, repo) {
+            Some(members) => {
+                for member in members {
+                    queue.push_back(member);
+                }
+            }
+            None => expanded.push(name),
         }
     }
     expanded
@@ -790,7 +790,7 @@ Be careful.
     #[test]
     fn load_direction_finds_builtin_direction() {
         let tmp = TempDir::new().unwrap();
-        let result = load_direction("product-engineer", tmp.path());
+        let result = load_direction("security", tmp.path());
         assert!(
             result.is_ok(),
             "builtin direction should be found: {:?}",
@@ -963,8 +963,17 @@ Be careful.
     #[test]
     fn expand_direction_names_passes_through_non_groups() {
         let tmp = TempDir::new().unwrap();
+        let result = expand_direction_names(&["security".to_string()], tmp.path());
+        assert_eq!(result, vec!["security"]);
+    }
+
+    #[test]
+    fn expand_direction_names_expands_ceo_group() {
+        let tmp = TempDir::new().unwrap();
         let result = expand_direction_names(&["ceo".to_string()], tmp.path());
-        assert_eq!(result, vec!["ceo"]);
+        assert!(result.contains(&"focus".to_string()));
+        assert!(result.contains(&"immediacy".to_string()));
+        assert!(result.contains(&"truth".to_string()));
     }
 
     #[test]
@@ -982,11 +991,11 @@ Be careful.
     #[test]
     fn expand_direction_names_user_group_overrides_builtin_group() {
         let tmp = TempDir::new().unwrap();
-        let group_dir = tmp.path().join(".lf/directions/values");
+        let group_dir = tmp.path().join(".lf/directions/craft");
         fs::create_dir_all(&group_dir).unwrap();
-        fs::write(group_dir.join("custom.md"), "Custom values").unwrap();
+        fs::write(group_dir.join("custom.md"), "Custom craft").unwrap();
 
-        let result = expand_direction_names(&["values".to_string()], tmp.path());
+        let result = expand_direction_names(&["craft".to_string()], tmp.path());
         assert_eq!(result, vec!["custom"]);
     }
 
@@ -1003,10 +1012,40 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_expands_builtin_group() {
+    fn expand_direction_names_expands_builtin_craft_group() {
         let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["values".to_string()], tmp.path());
-        assert_eq!(result, vec!["craft", "flow", "scale"]);
+        let result = expand_direction_names(&["craft".to_string()], tmp.path());
+        assert!(result.contains(&"care".to_string()));
+        assert!(result.contains(&"clarity".to_string()));
+        assert!(result.contains(&"scale".to_string()));
+        assert!(result.contains(&"simplicity".to_string()));
+    }
+
+    #[test]
+    fn expand_direction_names_expands_builtin_creativity_group() {
+        let tmp = TempDir::new().unwrap();
+        let result = expand_direction_names(&["creativity".to_string()], tmp.path());
+        assert!(result.contains(&"alive".to_string()));
+        assert!(result.contains(&"musical".to_string()));
+    }
+
+    #[test]
+    fn expand_direction_names_recursive_group() {
+        let tmp = TempDir::new().unwrap();
+        let group_dir = tmp.path().join(".lf/directions/quality");
+        fs::create_dir_all(&group_dir).unwrap();
+        // "craft" is a builtin group — should expand recursively
+        fs::write(group_dir.join("craft.md"), "Craft direction").unwrap();
+        fs::write(group_dir.join("extra.md"), "Extra direction").unwrap();
+
+        let result = expand_direction_names(&["quality".to_string()], tmp.path());
+        // "craft" should NOT appear — it should expand to its members
+        assert!(!result.contains(&"craft".to_string()));
+        // But its members should be present
+        assert!(result.contains(&"care".to_string()));
+        assert!(result.contains(&"clarity".to_string()));
+        // And the non-group member should be present
+        assert!(result.contains(&"extra".to_string()));
     }
 
     #[test]

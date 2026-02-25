@@ -40,7 +40,7 @@ Validating flows...
 
 Directions:
 ✓ ceo
-✓ designer
+✓ ux
 ✗ missing-role (referenced in code/foo.yaml but not found)
 
 Summary: 2 errors found

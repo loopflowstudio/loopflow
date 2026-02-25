@@ -12,6 +12,8 @@ Polish means: the code is as good as it can be given the design intent, and a re
 
 Ship-ready code. Reviewer-friendly docs. No excuses left.
 
+If directions are loaded, use them as the quality lens for this polish pass.
+
 ## Phase 1: Polish Code
 
 Make the implementation as clean as possible.

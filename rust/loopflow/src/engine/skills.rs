@@ -163,8 +163,8 @@ mod tests {
         assert!(commands_dir.join("debug.md").exists());
 
         // Known builtin directions should be present with direction- prefix.
-        assert!(commands_dir.join("direction-craft.md").exists());
-        assert!(commands_dir.join("direction-flow.md").exists());
+        assert!(commands_dir.join("direction-care.md").exists());
+        assert!(commands_dir.join("direction-clarity.md").exists());
         assert!(commands_dir.join("direction-living.md").exists());
     }
 

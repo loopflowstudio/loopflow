@@ -22,9 +22,9 @@ Flows that produce wave items and analysis.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `wave-reduce` | research → fork(reduce×3) → publish | Find simplification opportunities |
-| `wave-polish` | research → fork(polish×3) → publish | Find polish priorities |
-| `wave-expand` | research → fork(expand×3) → publish | Find expansion opportunities |
+| `wave-reduce` | fork(reduce×3) → publish | Find simplification opportunities |
+| `wave-polish` | fork(polish×3) → publish | Find polish priorities |
+| `wave-expand` | fork(expand×3) → publish | Find expansion opportunities |
 | `publish` | consolidate → add-to-wave | Promote scratch/ to wave/ |
 
 ## Fork pattern
@@ -32,13 +32,12 @@ Flows that produce wave items and analysis.
 Plan flows use forks to get multiple perspectives:
 
 ```yaml
-- research
 - fork:
     step: reduce
     drafts:
-      - direction: infra-engineer
-      - direction: designer
-      - direction: product-engineer
+      - direction: infra
+      - direction: ux
+      - direction: ceo
 - publish
 ```
 

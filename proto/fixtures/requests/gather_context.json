@@ -3,7 +3,7 @@
   "step": "implement",
   "step_args": ["add OAuth login"],
   "run_mode": "auto",
-  "directions": ["product-engineer"],
+  "directions": ["clarity"],
   "config": {
     "diff_mode": "DIFF_FILES",
     "files": {

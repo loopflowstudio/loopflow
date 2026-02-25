@@ -321,14 +321,14 @@ struct StepRunner: View {
         Flow(name: "implement", steps: [Step(prompt: "implement")], type: .step),
         Flow(name: "debug", steps: [Step(prompt: "debug")], type: .step),
     ]
-    repoState.availableDirections = ["product-engineer", "designer", "infra-engineer", "ceo"]
+    repoState.availableDirections = ["ux", "clarity", "infra", "ceo"]
     let wave = WaveViewModel(
         api: Wave(
             id: "test",
             name: "test-wave",
             repo: "/tmp/test-repo",
             flow: "ship",
-            direction: ["product-engineer"],
+            direction: ["clarity"],
             area: ["src/api"]
         ),
         worktreePath: "/tmp/test-worktree"

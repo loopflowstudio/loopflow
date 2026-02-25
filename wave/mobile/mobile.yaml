@@ -2,5 +2,4 @@ flow: ship-wave
 area:
   - swift/
 direction:
-  - product-engineer
-  - designer
+  - ux

@@ -140,8 +140,8 @@ def flow():
 def flow():
     return Flow(
         Fork(
-            {"direction": "product-engineer"},
-            {"direction": "designer"},
+            {"direction": "infra"},
+            {"direction": "ux"},
             step="implement",
         ),
     )

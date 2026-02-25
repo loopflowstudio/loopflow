@@ -11,12 +11,12 @@ A wave is **area × direction × flow**. Stimuli (triggers) are separate entitie
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("shipper", repo=".", flow="ship", direction=["product-engineer"], area=["src/api/"])
+loopflow.create_wave("shipper", repo=".", flow="ship", direction=["clarity"], area=["src/api/"])
 loopflow.run_wave("shipper")
 PY
 ```
 
-This runs the `ship` flow on `src/api/` with the `product-engineer` direction—continuously, creating PRs until you stop it.
+This runs the `ship` flow on `src/api/` with the `clarity` direction—continuously, creating PRs until you stop it.
 
 Waves are independent by default. Use a `listen` stimulus when one wave should react to another.
 
@@ -97,10 +97,10 @@ Trigger a wave when another wave runs.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("designer", repo=".", flow="ship", area=["docs/"])
+loopflow.create_wave("ux", repo=".", flow="ship", area=["docs/"])
 loopflow.create_wave("infra", repo=".", flow="grind", area=["rust/"])
-loopflow.add_stimulus("designer", kind="listen", source_wave_id="infra")
-loopflow.run_wave("designer")
+loopflow.add_stimulus("ux", kind="listen", source_wave_id="infra")
+loopflow.run_wave("ux")
 PY
 ```
 
@@ -175,7 +175,7 @@ Status output:
 
 ```
 ID       STIMULUS   AREA                             STATUS     ITER  REPO
-abc1234  loop       src/ [ship] [product-engineer]  running    12    ~/repo
+abc1234  loop       src/ [ship] [clarity]           running    12    ~/repo
 ```
 
 ## Next

@@ -153,8 +153,8 @@ lf implement: add caching -m codex
 ### Apply a direction
 
 ```bash
-lf review -d designer
-lf implement -d product-engineer,designer
+lf review -d ux
+lf implement -d ux,clarity
 ```
 
 ### Include clipboard content

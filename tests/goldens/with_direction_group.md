@@ -178,41 +178,59 @@ Recursion depth is tracked automatically via `RLM_DEPTH`. Each nested `lf` invoc
 
 Run mode is auto (headless). Proceed without pausing for questions. If you need clarification, make the best assumption you can and append any open questions to `scratch/questions.md`.
 
-<lf:wave name="rust">
-You are building toward the rust program of work.
-Wave context is included in docs below.
-</lf:wave>
-
-Repository documentation. Follow STYLE carefully. May include design artifacts (scratch/) and internal docs (reports/).
-
-<lf:docs>
-<lf:design>
-# Design
-
-Current design notes.
-
-</lf:design>
-
-<lf:README>
-# Rust Roadmap
-
-Overview of Rust work.
-
-</lf:README>
-
-<lf:README>
-# Test Repo
-
-Root readme.
-
-</lf:README>
-</lf:docs>
-
 The step.
 
 <lf:step:test>
-# Test step
-
-Do the thing.
+Test step content with builtin direction group.
 
 </lf:step:test>
+
+Directions for this work.
+
+<lf:directions>
+<lf:direction:care>
+Quality and attention to detail. Take time to get it right. No shortcuts.
+
+What would this look like if we had infinite time? Now do 80% of that.
+
+- Edge cases handled, not ignored
+- Error messages a user will actually read
+- Naming that teaches — someone unfamiliar learns the domain by reading the code
+- Consistency that compounds — small decisions aligned across the codebase
+- Refactor when needed, not when convenient
+
+</lf:direction:care>
+<lf:direction:clarity>
+Design around data structures and public APIs. 1:1 mapping between real-world concepts and code.
+
+Code demonstrates its own correctness. If a feature exists, a test proves it works.
+
+- Name things after what they are: Document, FileEdit, Target — not DocumentHelper, EditResult, OutputHandler
+- Aim for a reader to understand the system by reading the types and their relationships
+- Make it easy to see what's done and what's broken
+- One source of truth per concept
+
+</lf:direction:clarity>
+<lf:direction:scale>
+Build for growth. Prefer horizontal scaling, stateless design, async patterns.
+
+Avoid premature optimization but design for 10x current load.
+
+- Caching, sharding, queues, idempotency — reach for these before inventing
+- Stateless where possible; explicit state where necessary
+- Design for 10x, not 100x — you'll rewrite before you get there
+- Measure first, scale second
+
+</lf:direction:scale>
+<lf:direction:simplicity>
+Every line of code earns its place. Readable, not terse — but recognize that lines can be net-negative.
+
+Start with minimal data structures and APIs. If the core is right, trimming excess is straightforward.
+
+- Unused code, obvious comments, impossible-condition checks — all net-negative
+- Don't add features, refactor code, or make improvements beyond what was asked
+- Three similar lines of code is better than a premature abstraction
+- When in doubt between two approaches, pick the simpler one
+
+</lf:direction:simplicity>
+</lf:directions>

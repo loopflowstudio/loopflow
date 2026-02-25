@@ -37,7 +37,7 @@ uv pip install loopflow
 import loopflow.api as loopflow
 
 loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
+loopflow.create_wave("engbot", repo=".", flow="ship", direction=["clarity"])
 loopflow.run_wave("engbot")
 ```
 
@@ -60,9 +60,9 @@ design ──┬──> impl-api ──┬──> integrate
 
 **Fork** explores multiple approaches and synthesizes:
 ```
-Fork ──┬──> impl (product-engineer) ──┐
-       ├──> impl (designer)         ──┼──> synthesize
-       └──> impl (infra-engineer)   ──┘
+Fork ──┬──> impl (infra) ──┐
+       ├──> impl (ux)    ──┼──> synthesize
+       └──> impl (ceo)   ──┘
 ```
 
 The synthesizer doesn't just pick a winner—it documents why approaches differed.
@@ -151,9 +151,9 @@ lf design: add auth && lf implement && lf polish
 Shapes how the coding agent judges and responds.
 
 ```markdown
-# .lf/directions/designer.md
+# .lf/directions/ux.md
 
-Create clear, actionable design documents that enable confident implementation.
+Optimize for user experience quality: visibility, feedback, consistency.
 
 ## Success
 
@@ -161,11 +161,12 @@ A design doc in scratch/ that another engineer could implement from.
 ```
 
 ```bash
-lf review --direction designer
-lf review --direction product-engineer,designer    # stack multiple
+lf review --direction ux
+lf review --direction ux,clarity    # stack multiple
 ```
 
-Directions compose. A `product-engineer` direction sets intent. A `designer` direction adds design perspective. Stack them to get both.
+Directions compose. A `ux` direction sets user-facing intent. A `clarity`
+direction adds code-model rigor. Stack them to get both.
 
 ---
 
@@ -189,7 +190,7 @@ Combined with flow and direction, area defines the wave:
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("shipper", flow="ship", area=["src/api/"], direction=["product-engineer"])
+loopflow.update_wave("shipper", flow="ship", area=["src/api/"], direction=["clarity"])
 loopflow.run_wave("shipper")
 PY
 ```

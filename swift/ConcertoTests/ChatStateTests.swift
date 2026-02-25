@@ -455,7 +455,7 @@ struct ChatStateTests {
         let config = AgentSessionConfig(
             step: "review",
             repoRoot: "/tmp/repo",
-            directions: ["designer"],
+            directions: ["ux"],
             area: "swift/Concerto",
             wave: "wavemodel",
             message: "Focus on UX",

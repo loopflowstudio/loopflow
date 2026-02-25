@@ -97,22 +97,18 @@ mod tests {
     #[test]
     fn merge_directions_preserves_order_and_deduplicates() {
         let merged = merge_directions(
-            &["designer".to_string(), "ceo".to_string()],
-            &["ceo".to_string(), "product-engineer".to_string()],
+            &["security".to_string(), "ceo".to_string()],
+            &["ceo".to_string(), "ux".to_string()],
         );
         assert_eq!(
             merged,
-            vec![
-                "designer".to_string(),
-                "ceo".to_string(),
-                "product-engineer".to_string()
-            ]
+            vec!["security".to_string(), "ceo".to_string(), "ux".to_string()]
         );
     }
 
     #[test]
     fn merge_directions_returns_base_when_extra_empty() {
-        let base = vec!["designer".to_string()];
+        let base = vec!["security".to_string()];
         let merged = merge_directions(&base, &[]);
         assert_eq!(merged, base);
     }
@@ -158,7 +154,7 @@ mod tests {
             ForkManifestBranch {
                 index: 0,
                 step: "reduce".to_string(),
-                direction: "designer".to_string(),
+                direction: "ux".to_string(),
                 worktree: "/tmp/repo-fork-0".to_string(),
                 branch: "main-fork-0".to_string(),
                 exit_code: 0,

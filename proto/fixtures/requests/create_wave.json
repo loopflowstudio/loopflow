@@ -2,7 +2,7 @@
   "repo": "/Users/alice/repos/myproject",
   "name": "swift-falcon",
   "flow": "ship",
-  "direction": ["product-engineer"],
+  "direction": ["clarity"],
   "area": ["src/api"],
   "idempotency_key": "create_wave_20260127_abc123"
 }

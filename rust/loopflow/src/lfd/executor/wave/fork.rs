@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::engine::agent::build_agent_command;
-use crate::engine::flow::{ConcreteFork, ConcreteItem, ConcreteStep, Step};
+use crate::engine::flow::{expand_direction_names, ConcreteFork, ConcreteItem, ConcreteStep, Step};
 use crate::engine::fork::{
     plan_fork_execution, ForkManifest, ForkManifestBranch, FORK_MANIFEST_RELATIVE_PATH,
     FORK_SYNTHESIZE_STEP,
@@ -38,7 +38,9 @@ impl WaveExecutor {
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
     ) -> Result<()> {
-        let planned = match plan_fork_execution(&fork.branches, &run.snapshot.direction) {
+        let expanded_snapshot_directions =
+            expand_direction_names(&run.snapshot.direction, Path::new(&run.snapshot.repo));
+        let planned = match plan_fork_execution(&fork.branches, &expanded_snapshot_directions) {
             Ok(branches) => branches,
             Err(err) => {
                 self.fail_run(run, wave, err).await?;

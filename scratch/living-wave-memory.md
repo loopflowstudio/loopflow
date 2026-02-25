@@ -26,6 +26,22 @@ Three changes:
 
 No new tools. No new APIs. No special write mechanism. Agents read memory because it's in the prompt. Agents write memory because the system prompt tells them to and they have `write_file` access.
 
+## Review adjustments (2026-02-25)
+
+After review-design discussion, the implementation target changed:
+
+- Use a single memory file: `wave/<name>/MEMORY.md` (not `wave/<name>/memory/*.md`)
+- Keep `DocumentSource::WaveMemory` for independent trimming/accounting
+- Present memory in a structured wave block (memory is part of wave context, not a side section)
+- Ensure both execution paths capture memory edits:
+  - headless wave steps
+  - interactive/live sessions
+- Distill stable memory into canonical docs during ops maintenance (`update-wave`, and `add-to-wave` while it exists), then trim duplicates from memory
+
+Persistence rule:
+- Read latest `MEMORY.md` before prompt build
+- Persist updates after each step/session (not only at PR land), with optional pre-land safety flush
+
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |

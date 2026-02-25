@@ -181,6 +181,22 @@ Run mode is auto (headless). Proceed without pausing for questions. If you need 
 <lf:wave name="rust">
 You are building toward the rust program of work.
 Wave context is included in docs below.
+
+Persistent wave memory lives at wave/rust/MEMORY.md.
+Write durable observations for future agents:
+- codebase patterns and conventions discovered
+- user preferences and project norms observed
+- things that worked or failed
+- corrections when memory becomes stale or wrong
+
+Don't write session-specific notes.
+Keep memory concise and update existing entries when possible.
+
+<lf:memory path="wave/rust/MEMORY.md">
+- Keep prompts concise and concrete.
+- Prefer behavior-focused tests over mock wiring.
+
+</lf:memory>
 </lf:wave>
 
 Repository documentation. Follow STYLE carefully. May include design artifacts (scratch/).

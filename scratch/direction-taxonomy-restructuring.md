@@ -11,7 +11,7 @@ Replaced role-based directions (`infra-engineer`, `designer`, `product-engineer`
 | `infra/` | security, performance, reliability, observability | System qualities |
 | `ux/` | visibility, feedback, consistency, affordance, error-prevention, accessibility, dynamics, aesthetics | User experience heuristics |
 | `craft/` | care, clarity, simplicity, scale | Building things right |
-| `creativity/` | alive, musical | Momentum and feel |
+| `creativity/` | alive, living, musical | Momentum and feel |
 | `ceo/` | focus, immediacy, truth | Strategic judgment |
 
 `-d craft` expands to all members; `-d clarity` works standalone. Compose freely via `-d ux,craft`.

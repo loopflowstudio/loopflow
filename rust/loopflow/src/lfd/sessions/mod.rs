@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::write_prompt_log;
 use crate::lfd::id::LfdId;
+use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionItem,
@@ -20,7 +21,6 @@ use crate::lfd::sessions::types::{
 };
 use crate::lfd::store::{SharedStore, StoreError};
 
-const HARNESS_EVENT_BUFFER: usize = 256;
 const LIVE_EVENT_BUFFER: usize = 256;
 
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +68,7 @@ impl std::fmt::Debug for SessionRuntime {
 struct SessionManagerInner {
     store: SharedStore,
     create_harness: CreateHarnessFn,
+    scheduler: Option<Arc<Scheduler>>,
     runtimes: Mutex<HashMap<LfdId, Arc<SessionRuntime>>>,
 }
 
@@ -84,14 +85,32 @@ pub struct SessionManager {
 
 impl SessionManager {
     pub fn new(store: SharedStore) -> Self {
-        Self::with_create_harness(store, harness::default_create_harness)
+        Self::with_create_harness_and_scheduler(store, harness::default_create_harness, None)
     }
 
+    pub fn new_with_scheduler(store: SharedStore, scheduler: Arc<Scheduler>) -> Self {
+        Self::with_create_harness_and_scheduler(
+            store,
+            harness::default_create_harness,
+            Some(scheduler),
+        )
+    }
+
+    #[cfg(test)]
     fn with_create_harness(store: SharedStore, create_harness: CreateHarnessFn) -> Self {
+        Self::with_create_harness_and_scheduler(store, create_harness, None)
+    }
+
+    fn with_create_harness_and_scheduler(
+        store: SharedStore,
+        create_harness: CreateHarnessFn,
+        scheduler: Option<Arc<Scheduler>>,
+    ) -> Self {
         Self {
             inner: Arc::new(SessionManagerInner {
                 store,
                 create_harness,
+                scheduler,
                 runtimes: Mutex::new(HashMap::new()),
             }),
         }
@@ -128,7 +147,7 @@ impl SessionManager {
             created_at: time::OffsetDateTime::now_utc(),
             ended_at: None,
         };
-        let (harness_events_tx, harness_events_rx) = broadcast::channel(HARNESS_EVENT_BUFFER);
+        let (harness_events_tx, harness_events_rx) = mpsc::unbounded_channel();
         let harness = (self.inner.create_harness)(&harness_name, harness_events_tx)
             .map_err(|err| SessionManagerError::Harness(err.to_string()))?;
         self.inner.store.create_session(&session).await?;
@@ -157,6 +176,8 @@ impl SessionManager {
         )
         .await?;
 
+        self.register_wave_session(session.wave_run_id.as_deref())
+            .await;
         self.spawn_harness_event_bridge(session.id.clone(), runtime.clone(), harness_events_rx);
         let auto_start = session.wave_run_id.is_some();
         let repo_root = PathBuf::from(&session.config.repo_root);
@@ -267,6 +288,18 @@ impl SessionManager {
         let session = self.get_session(session_id).await?;
         if session.status.is_terminal() {
             return Ok(session);
+        }
+
+        if session.status == SessionStatus::Starting {
+            let runtime = self.runtime(session_id).await;
+            self.set_status(
+                session_id,
+                SessionStatus::Failed,
+                Some(time::OffsetDateTime::now_utc().unix_timestamp()),
+                runtime.clone(),
+            )
+            .await?;
+            return self.get_session(session_id).await;
         }
 
         let runtime = self.runtime(session_id).await;
@@ -418,23 +451,23 @@ impl SessionManager {
         &self,
         session_id: LfdId,
         runtime: Arc<SessionRuntime>,
-        mut harness_events_rx: broadcast::Receiver<SessionEvent>,
+        mut harness_events_rx: mpsc::UnboundedReceiver<SessionEvent>,
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
-            loop {
-                match harness_events_rx.recv().await {
-                    Ok(SessionEvent::ProviderSessionId {
+            while let Some(event) = harness_events_rx.recv().await {
+                match event {
+                    SessionEvent::ProviderSessionId {
                         provider_session_id,
-                    }) => {
+                    } => {
                         manager
                             .handle_provider_session_id(&session_id, &runtime, provider_session_id)
                             .await;
                     }
-                    Ok(SessionEvent::Error {
+                    SessionEvent::Error {
                         ref code,
                         ref message,
-                    }) => {
+                    } => {
                         let fatal = is_terminal_harness_error(code);
                         manager
                             .append_runtime_event_or_warn(
@@ -453,15 +486,11 @@ impl SessionManager {
                                 .await;
                         }
                     }
-                    Ok(event) => {
+                    event => {
                         manager
                             .append_runtime_event_or_warn(&session_id, &runtime, event, "event")
                             .await;
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::warn!(session_id = %session_id, skipped, "session harness lagged")
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -500,8 +529,29 @@ impl SessionManager {
                 harness.start(&launch).await
             };
 
+            let current_status = match manager.inner.store.get_session(&session_id).await {
+                Ok(Some(session)) => Some(session.status),
+                Ok(None) => None,
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        error = %err,
+                        "failed to read session status after startup"
+                    );
+                    None
+                }
+            };
+
             match result {
                 Ok(()) => {
+                    if current_status != Some(SessionStatus::Starting) {
+                        if current_status.is_some_and(SessionStatus::is_terminal) {
+                            manager
+                                .stop_harness_runtime(&session_id, &runtime, "startup_aborted")
+                                .await;
+                        }
+                        return;
+                    }
                     if let Err(err) = manager
                         .set_status(
                             &session_id,
@@ -550,6 +600,12 @@ impl SessionManager {
                     }
                 }
                 Err(err) => {
+                    if current_status.is_some_and(SessionStatus::is_terminal) {
+                        manager
+                            .stop_harness_runtime(&session_id, &runtime, "startup_aborted")
+                            .await;
+                        return;
+                    }
                     manager
                         .mark_session_failed(
                             &session_id,
@@ -658,6 +714,10 @@ impl SessionManager {
                 .await?;
         }
 
+        if status.is_terminal() {
+            self.on_session_terminal(session_id).await;
+        }
+
         Ok(())
     }
 
@@ -710,6 +770,87 @@ impl SessionManager {
     async fn remove_runtime(&self, session_id: &LfdId) {
         let mut runtimes = self.inner.runtimes.lock().await;
         runtimes.remove(session_id);
+    }
+
+    async fn stop_harness_runtime(
+        &self,
+        session_id: &LfdId,
+        runtime: &Arc<SessionRuntime>,
+        context: &'static str,
+    ) {
+        let stop_result = {
+            let mut harness = runtime.harness.lock().await;
+            harness.stop().await
+        };
+        if let Err(err) = stop_result {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %err,
+                context,
+                "failed to stop session harness"
+            );
+        }
+        self.remove_runtime(session_id).await;
+    }
+
+    async fn register_wave_session(&self, wave_run_id: Option<&str>) {
+        let Some((scheduler, wave_id)) = self.scheduler_wave_id_for_run(wave_run_id).await else {
+            return;
+        };
+        if !scheduler.register_session(&wave_id) {
+            tracing::debug!(wave_id, "session already registered for wave");
+        }
+    }
+
+    async fn on_session_terminal(&self, session_id: &LfdId) {
+        let session = match self.inner.store.get_session(session_id).await {
+            Ok(Some(session)) => session,
+            Ok(None) => return,
+            Err(err) => {
+                tracing::warn!(session_id = %session_id, error = %err, "failed to load terminal session");
+                return;
+            }
+        };
+
+        let Some((scheduler, wave_id)) = self
+            .scheduler_wave_id_for_run(session.wave_run_id.as_deref())
+            .await
+        else {
+            return;
+        };
+        scheduler.unregister_session(&wave_id);
+    }
+
+    async fn scheduler_wave_id_for_run(
+        &self,
+        wave_run_id: Option<&str>,
+    ) -> Option<(Arc<Scheduler>, String)> {
+        let scheduler = self.inner.scheduler.clone()?;
+        let wave_run_id = wave_run_id?;
+        let wave_id = self.wave_id_for_wave_run(wave_run_id).await?;
+        Some((scheduler, wave_id))
+    }
+
+    async fn wave_id_for_wave_run(&self, wave_run_id: &str) -> Option<String> {
+        let run_id = match wave_run_id.parse::<LfdId>() {
+            Ok(run_id) => run_id,
+            Err(err) => {
+                tracing::warn!(wave_run_id, error = %err, "invalid wave_run_id on session");
+                return None;
+            }
+        };
+
+        match self.inner.store.get_wave_run(&run_id).await {
+            Ok(Some(run)) => Some(run.wave_id.to_string()),
+            Ok(None) => {
+                tracing::warn!(wave_run_id, "wave run referenced by session not found");
+                None
+            }
+            Err(err) => {
+                tracing::warn!(wave_run_id, error = %err, "failed to resolve wave for session");
+                None
+            }
+        }
     }
 }
 
@@ -809,17 +950,22 @@ fn normalized_seeded_user_prompt(prompt: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::harness::{Harness, HarnessError};
     use crate::lfd::sessions::types::{SessionConfig, SessionEvent, SessionItem, TurnStatus};
     use crate::lfd::store::{open_store, StorageConfig};
+    use crate::lfd::types::{Wave, WaveRun};
     use anyhow::Result;
     use async_trait::async_trait;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
     use tempfile::tempdir;
+    use tokio::sync::mpsc;
 
     #[derive(Debug)]
     struct FakeHarness {
-        tx: broadcast::Sender<SessionEvent>,
+        tx: mpsc::UnboundedSender<SessionEvent>,
     }
 
     #[async_trait]
@@ -851,7 +997,7 @@ mod tests {
 
     fn fake_create_harness(
         _harness: &str,
-        event_tx: broadcast::Sender<SessionEvent>,
+        event_tx: mpsc::UnboundedSender<SessionEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(FakeHarness { tx: event_tx }))
     }
@@ -876,14 +1022,14 @@ mod tests {
 
     fn busy_create_harness(
         _harness: &str,
-        _event_tx: broadcast::Sender<SessionEvent>,
+        _event_tx: mpsc::UnboundedSender<SessionEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(BusyHarness))
     }
 
     #[derive(Debug)]
     struct ResumeAwareHarness {
-        tx: broadcast::Sender<SessionEvent>,
+        tx: mpsc::UnboundedSender<SessionEvent>,
         send_count: usize,
         provider_session_id: Option<String>,
     }
@@ -931,13 +1077,42 @@ mod tests {
 
     fn resume_aware_create_harness(
         _harness: &str,
-        event_tx: broadcast::Sender<SessionEvent>,
+        event_tx: mpsc::UnboundedSender<SessionEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(ResumeAwareHarness {
             tx: event_tx,
             send_count: 0,
             provider_session_id: None,
         }))
+    }
+
+    static STARTING_STOP_CALLED: AtomicBool = AtomicBool::new(false);
+
+    #[derive(Debug)]
+    struct SlowStartHarness;
+
+    #[async_trait]
+    impl Harness for SlowStartHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            STARTING_STOP_CALLED.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn slow_start_create_harness(
+        _harness: &str,
+        _event_tx: mpsc::UnboundedSender<SessionEvent>,
+    ) -> Result<Box<dyn Harness>> {
+        Ok(Box::new(SlowStartHarness))
     }
 
     async fn wait_for_status(
@@ -1397,5 +1572,98 @@ mod tests {
             )
         });
         assert!(has_orphan_error);
+    }
+
+    #[tokio::test]
+    async fn stop_session_while_starting_marks_failed_and_cleans_up_harness() {
+        STARTING_STOP_CALLED.store(false, Ordering::SeqCst);
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, slow_start_create_harness);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                harness: "claude".to_string(),
+                wave_run_id: None,
+                config: test_session_config(tmp.path()),
+            })
+            .await
+            .expect("create session");
+
+        let stopped = manager
+            .stop_session(&created.id)
+            .await
+            .expect("stop session while starting");
+        assert_eq!(stopped.status, SessionStatus::Failed);
+        assert!(
+            !STARTING_STOP_CALLED.load(Ordering::SeqCst),
+            "stop_session should not block on harness.stop while startup is running"
+        );
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let after_start_finishes = manager
+            .get_session(&created.id)
+            .await
+            .expect("session should exist");
+        assert_eq!(after_start_finishes.status, SessionStatus::Failed);
+        assert!(
+            STARTING_STOP_CALLED.load(Ordering::SeqCst),
+            "startup cleanup should stop the harness once startup returns"
+        );
+    }
+
+    #[tokio::test]
+    async fn wave_session_registers_and_unregisters_scheduler_session() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let scheduler = Arc::new(Scheduler::new(1));
+        let manager = SessionManager::with_create_harness_and_scheduler(
+            store.clone(),
+            fake_create_harness,
+            Some(scheduler.clone()),
+        );
+
+        std::fs::create_dir_all(tmp.path().join(".lf")).expect("create .lf for tests");
+        let wave_id = LfdId::new();
+        let wave = Wave::new(
+            wave_id.clone(),
+            "wave-a".to_string(),
+            tmp.path().to_string_lossy().to_string(),
+        );
+        store.create_wave(&wave).await.expect("create wave");
+
+        let run_id = LfdId::new();
+        let mut run = WaveRun::new(run_id.clone(), wave_id.clone());
+        run.worktree = tmp.path().to_string_lossy().to_string();
+        run.branch = "wave-a".to_string();
+        store.create_wave_run(&run).await.expect("create wave run");
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                harness: "codex".to_string(),
+                wave_run_id: Some(run_id.to_string()),
+                config: test_session_config(tmp.path()),
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        assert!(scheduler.has_active_session(wave_id.as_str()));
+
+        manager
+            .stop_session(&created.id)
+            .await
+            .expect("stop session");
+        assert!(!scheduler.has_active_session(wave_id.as_str()));
     }
 }

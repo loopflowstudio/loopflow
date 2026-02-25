@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
     let event_hub = EventHub::new(1024);
-    let session_manager = SessionManager::new(store.clone());
+    let session_manager = SessionManager::new_with_scheduler(store.clone(), scheduler.clone());
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let executor = WaveExecutor::new(
         store.clone(),

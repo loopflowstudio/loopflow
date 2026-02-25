@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -242,6 +243,58 @@ pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
     })
 }
 
+/// Expand direction names, resolving groups to their member directions.
+/// User groups (.lf/directions/{name}/ directory) are checked first, then builtin groups.
+/// Non-group names pass through unchanged. Deduplicates while preserving order.
+pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
+    let mut expanded = Vec::new();
+    let mut seen = HashSet::new();
+    for name in names {
+        if let Some(members) = resolve_direction_group(name, repo) {
+            for member in members {
+                if seen.insert(member.clone()) {
+                    expanded.push(member);
+                }
+            }
+            continue;
+        }
+
+        if seen.insert(name.clone()) {
+            expanded.push(name.clone());
+        }
+    }
+    expanded
+}
+
+/// Check whether `name` is a direction group (user-defined directory or builtin group).
+fn resolve_direction_group(name: &str, repo: &Path) -> Option<Vec<String>> {
+    let user_members = markdown_stems_in_dir(&repo.join(".lf/directions").join(name));
+    if !user_members.is_empty() {
+        return Some(user_members);
+    }
+
+    crate::engine::builtins::builtin_direction_group(name)
+        .map(|members| members.iter().map(|member| (*member).to_string()).collect())
+}
+
+fn markdown_stems_in_dir(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut stems = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "md") {
+            if let Some(stem) = path.file_stem() {
+                stems.push(stem.to_string_lossy().to_string());
+            }
+        }
+    }
+    stems.sort();
+    stems
+}
+
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     let candidates = [
         repo.join(".lf/flows").join(format!("{name}.yaml")),
@@ -289,6 +342,20 @@ fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     if path.exists() {
         return Ok(path);
     }
+
+    let directions_dir = repo.join(".lf/directions");
+    if let Ok(entries) = fs::read_dir(&directions_dir) {
+        for entry in entries.flatten() {
+            let dir_path = entry.path();
+            if dir_path.is_dir() {
+                let candidate = dir_path.join(format!("{name}.md"));
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+
     Err(LoadError::DirectionNotFound(name.to_string()))
 }
 
@@ -866,9 +933,9 @@ Be careful.
 - fork:
     step: reduce
     drafts:
-      - direction: infra-engineer
-      - direction: designer
-      - direction: product-engineer
+      - direction: infra
+      - direction: ux
+      - direction: ceo
 - publish
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
@@ -891,6 +958,66 @@ Be careful.
             }
             _ => panic!("expected Fork item"),
         }
+    }
+
+    #[test]
+    fn expand_direction_names_passes_through_non_groups() {
+        let tmp = TempDir::new().unwrap();
+        let result = expand_direction_names(&["ceo".to_string()], tmp.path());
+        assert_eq!(result, vec!["ceo"]);
+    }
+
+    #[test]
+    fn expand_direction_names_expands_user_group() {
+        let tmp = TempDir::new().unwrap();
+        let group_dir = tmp.path().join(".lf/directions/mygroup");
+        fs::create_dir_all(&group_dir).unwrap();
+        fs::write(group_dir.join("alpha.md"), "Alpha direction").unwrap();
+        fs::write(group_dir.join("beta.md"), "Beta direction").unwrap();
+
+        let result = expand_direction_names(&["mygroup".to_string()], tmp.path());
+        assert_eq!(result, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn expand_direction_names_user_group_overrides_builtin_group() {
+        let tmp = TempDir::new().unwrap();
+        let group_dir = tmp.path().join(".lf/directions/values");
+        fs::create_dir_all(&group_dir).unwrap();
+        fs::write(group_dir.join("custom.md"), "Custom values").unwrap();
+
+        let result = expand_direction_names(&["values".to_string()], tmp.path());
+        assert_eq!(result, vec!["custom"]);
+    }
+
+    #[test]
+    fn expand_direction_names_deduplicates() {
+        let tmp = TempDir::new().unwrap();
+        let group_dir = tmp.path().join(".lf/directions/mygroup");
+        fs::create_dir_all(&group_dir).unwrap();
+        fs::write(group_dir.join("alpha.md"), "Alpha").unwrap();
+
+        let result =
+            expand_direction_names(&["alpha".to_string(), "mygroup".to_string()], tmp.path());
+        assert_eq!(result, vec!["alpha"]);
+    }
+
+    #[test]
+    fn expand_direction_names_expands_builtin_group() {
+        let tmp = TempDir::new().unwrap();
+        let result = expand_direction_names(&["values".to_string()], tmp.path());
+        assert_eq!(result, vec!["craft", "flow", "scale"]);
+    }
+
+    #[test]
+    fn find_direction_path_searches_subdirectories() {
+        let tmp = TempDir::new().unwrap();
+        let sub_dir = tmp.path().join(".lf/directions/mygroup");
+        fs::create_dir_all(&sub_dir).unwrap();
+        fs::write(sub_dir.join("nested.md"), "Nested direction").unwrap();
+
+        let result = find_direction_path("nested", tmp.path());
+        assert!(result.is_ok());
     }
 
     #[test]

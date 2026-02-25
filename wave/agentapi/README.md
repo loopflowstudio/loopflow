@@ -29,10 +29,12 @@ lfd exposes a harness-agnostic session API. Clients create sessions, send input,
 
 ## Risks
 
-- **Runtime drift (reduced).** `lf` CLI and `/v0/sessions` HTTP use separate execution paths through the same harnesses. Prompt drift is eliminated (shared `engine/launch.rs`). Arg-building drift is mostly eliminated — `ClaudeArgs`, `build_claude_session_turn_args()`, and `build_codex_thread_start_params()` now live in `engine/agent` and are shared by both paths. Remaining gap: the session harness trait (`Harness`) still lives in `lfd/sessions/harness/`; extracting it into `engine/` is the next runtime convergence step. Conformance tests validate once the third harness (OpenCode) lands.
+- **Runtime drift (reduced).** `lf` CLI and `/v0/sessions` HTTP use separate execution paths through the same harnesses. Prompt drift is eliminated (shared `engine/launch.rs`). Arg-building drift is mostly eliminated — `ClaudeArgs`, `build_claude_session_turn_args()`, and `build_codex_thread_start_params()` now live in `engine/agent` and are shared by both paths. Remaining gap: the session harness trait (`Harness`) still lives in `lfd/sessions/harness/`; extracting it into `engine/` is the next runtime convergence step. Conformance replay tests (Claude normal/crash/multi-tool, Codex normal/error) validate harness behavior against recorded traces.
 - **Claude `--resume` fragility.** Each turn spawns a new process with `--resume`. If the resume format changes or session state corrupts, the entire session breaks with no partial recovery. Mitigate: session events are persisted, so replay from a new session is possible even if resume fails.
 - **Container-only safety model.** No tool-level permission routing means local (non-container) sessions run with full agent permissions. Acceptable for v1 but becomes a gap if local interactive sessions grow in usage.
-- **SSE replay scalability.** Long sessions accumulate events; full replay on reconnect grows linearly. Not a problem at current scale but could become one with multi-hour sessions.
+- **SSE replay scalability (mitigated).** Long sessions accumulate events; full replay on reconnect grows linearly. Store-backed SSE lag recovery (backfill on `Lagged`) handles mid-stream reconnects without data loss, but total event volume still grows unbounded. Not a problem at current scale.
+- **Unbounded harness→bridge channel.** Unbounded `mpsc` chosen for correctness (no dropped events). Memory grows with unconsumed burst volume. Acceptable at current session lengths but worth monitoring.
+- **lfd restart orphans.** `SessionRuntime` lives in memory only. Active sessions become orphans on lfd restart. Events survive in the store but sessions need a startup recovery pass to mark orphaned `active`/`starting` sessions as `failed`.
 
 ## Metrics
 

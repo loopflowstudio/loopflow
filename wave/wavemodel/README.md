@@ -2,6 +2,8 @@
 
 Standard content model for waves and a design-first onboarding experience.
 
+**Status: complete.** All four phases shipped (01: content model, 02: design step, 03: Concerto UX, 04: interactive sessions). Remaining follow-up items (daemon restart rehydration, filesystem watcher, per-tab routing) are tracked in "Not here" and can seed future waves.
+
 ## Vision
 
 Every wave has a README with strategic content — Vision, Goals, Risks, Metrics — and a roadmap expressed as numbered `##-*.md` files alongside it. Waves start with `lf design`, not configuration. The content model is what makes waves more than cron jobs with a git branch.

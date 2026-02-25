@@ -4,12 +4,7 @@ import LoopflowCore
 
 extension RepoState {
     convenience init() {
-        self.init(
-            startBundledDaemon: {
-                throw WaveServiceError.commandFailed("Bundled daemon is unavailable on iOS. Use a remote lfd connection.")
-            },
-            shellCommandRunner: nil
-        )
+        self.init()
         connectionStore.setMode(.remote)
     }
 }

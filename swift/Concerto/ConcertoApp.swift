@@ -51,6 +51,13 @@ private enum AppFontRegistration {
     }
 }
 
+private func bootstrapConcertoApp() {
+    AppFontRegistration.registerBundledFonts()
+    Task {
+        try? await NotificationService.shared.requestAuthorization()
+    }
+}
+
 #if os(macOS)
 @main
 struct ConcertoApp: App {
@@ -63,10 +70,7 @@ struct ConcertoApp: App {
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
-        AppFontRegistration.registerBundledFonts()
-        Task {
-            try? await NotificationService.shared.requestAuthorization()
-        }
+        bootstrapConcertoApp()
     }
 
     var body: some Scene {
@@ -171,10 +175,7 @@ struct ConcertoApp: App {
 @main
 struct ConcertoApp: App {
     init() {
-        AppFontRegistration.registerBundledFonts()
-        Task {
-            try? await NotificationService.shared.requestAuthorization()
-        }
+        bootstrapConcertoApp()
     }
 
     var body: some Scene {

@@ -22,18 +22,24 @@ struct MobileRootView: View {
         UIDevice.current.userInterfaceIdiom == .pad || horizontalSizeClass == .regular
     }
 
-    private var needsConnectionSetup: Bool {
-        !repoState.isConnected || repoState.repoTarget == nil
+    /// True only on first launch before the user has ever connected.
+    private var needsInitialSetup: Bool {
+        repoState.repoTarget == nil
     }
 
     var body: some View {
         Group {
-            if needsConnectionSetup {
+            if needsInitialSetup {
                 ConnectionSetupView()
             } else if isPadLayout {
                 iPadLayout
             } else {
                 iPhoneLayout
+            }
+        }
+        .overlay(alignment: .top) {
+            if !needsInitialSetup {
+                ConnectionBanner(repoState: repoState, outputBuffer: outputBuffer)
             }
         }
         .environment(repoState)
@@ -88,6 +94,76 @@ struct MobileRootView: View {
         }
         .sheet(isPresented: $showingSettings) {
             ConnectionSetupView()
+        }
+    }
+}
+
+// MARK: - Connection Banner
+
+private struct ConnectionBanner: View {
+    let repoState: RepoState
+    let outputBuffer: OutputBuffer
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isReconnecting = false
+
+    private var bannerIcon: String? {
+        switch repoState.connectionState {
+        case .connected, .connecting:
+            return nil
+        case .reconnecting:
+            return "arrow.trianglehead.2.counterclockwise"
+        case .authFailed:
+            return "lock.slash"
+        case .disconnected, .trustRequired:
+            return "wifi.slash"
+        }
+    }
+
+    var body: some View {
+        if let bannerIcon {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: bannerIcon)
+                    .foregroundStyle(.white)
+
+                Text(repoState.connectionSummary)
+                    .font(Typography.caption())
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button {
+                    reconnect()
+                } label: {
+                    if isReconnecting {
+                        ProgressView()
+                            .tint(.white)
+                            .controlSize(.small)
+                    } else {
+                        Text("Reconnect")
+                            .font(Typography.caption())
+                            .foregroundStyle(.white)
+                    }
+                }
+                .disabled(isReconnecting)
+            }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
+            .background(Color.statusError.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+            .padding(.horizontal, Spacing.lg)
+            .padding(.top, Spacing.xs)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: bannerIcon != nil)
+        }
+    }
+
+    private func reconnect() {
+        isReconnecting = true
+        Task {
+            defer { isReconnecting = false }
+            try? await repoState.connectLfd(outputBuffer: outputBuffer)
         }
     }
 }

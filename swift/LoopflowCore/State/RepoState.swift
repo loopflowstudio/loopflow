@@ -141,14 +141,14 @@ public final class RepoState {
     public var availableRemoteRepos: [RemoteRepo] = []
 
     // Services
-    private let startBundledDaemon: @MainActor () async throws -> ServerConnection
+    private let startBundledDaemon: (@MainActor () async throws -> ServerConnection)?
     private let shellCommandRunner: WaveService.ShellCommandRunner?
     private var waveService: WaveService
     private var eventService: EventService?
     private weak var outputBuffer: OutputBuffer?
 
     public init(
-        startBundledDaemon: @escaping @MainActor () async throws -> ServerConnection,
+        startBundledDaemon: (@MainActor () async throws -> ServerConnection)? = nil,
         shellCommandRunner: WaveService.ShellCommandRunner? = nil
     ) {
         self.startBundledDaemon = startBundledDaemon
@@ -715,6 +715,9 @@ public final class RepoState {
     private func resolveConnection() async throws -> ServerConnection {
         switch connectionStore.mode {
         case .bundled:
+            guard let startBundledDaemon else {
+                throw WaveServiceError.commandFailed("Bundled daemon is not available on this platform.")
+            }
             guard currentRepo != nil else {
                 throw WaveCreationReadinessError.missingRepo
             }

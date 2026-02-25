@@ -1,39 +1,45 @@
 // WaveStore — dictionary-keyed wave state with derived groups and status tracking.
 
 import Foundation
-import LoopflowCore
 
-struct WaveGroups {
-    let active: [WaveViewModel]
-    let idle: [WaveViewModel]
+public struct WaveGroups: Sendable {
+    public let active: [WaveViewModel]
+    public let idle: [WaveViewModel]
 
-    var allInOrder: [WaveViewModel] { active + idle }
+    public var allInOrder: [WaveViewModel] { active + idle }
 
-    static let empty = WaveGroups(active: [], idle: [])
+    public static let empty = WaveGroups(active: [], idle: [])
+
+    public init(active: [WaveViewModel], idle: [WaveViewModel]) {
+        self.active = active
+        self.idle = idle
+    }
 }
 
 @MainActor
 @Observable
-final class WaveStore {
+public final class WaveStore {
     // Primary storage — dictionary keyed by wave ID
-    private(set) var waves: [String: WaveViewModel] = [:] {
+    public private(set) var waves: [String: WaveViewModel] = [:] {
         didSet { recompute() }
     }
 
     // Derived state — recomputed on any change to waves
-    private(set) var ordered: [WaveViewModel] = []
-    private(set) var groups: WaveGroups = .empty
+    public private(set) var ordered: [WaveViewModel] = []
+    public private(set) var groups: WaveGroups = .empty
 
     // Status tracking for notifications
     private var previousStatuses: [String: WaveStatus] = [:]
-    var onStatusChange: ((WaveViewModel, WaveStatus?, WaveStatus) -> Void)?
+    public var onStatusChange: ((WaveViewModel, WaveStatus?, WaveStatus) -> Void)?
 
     // Pending optimistic mutations — events skip these waves until committed
     private var pendingMutations: Set<String> = []
 
     // MARK: - Mutations
 
-    func set(_ wave: WaveViewModel) {
+    public init() {}
+
+    public func set(_ wave: WaveViewModel) {
         guard !pendingMutations.contains(wave.id) else { return }
         _set(wave)
     }
@@ -47,7 +53,7 @@ final class WaveStore {
         waves[wave.id] = wave
     }
 
-    func setAll(_ newWaves: [WaveViewModel]) {
+    public func setAll(_ newWaves: [WaveViewModel]) {
         var updatedWaves: [String: WaveViewModel] = [:]
         var updatedStatuses: [String: WaveStatus] = [:]
 
@@ -75,20 +81,20 @@ final class WaveStore {
     }
 
     @discardableResult
-    func remove(_ id: String) -> WaveViewModel? {
+    public func remove(_ id: String) -> WaveViewModel? {
         let removed = waves.removeValue(forKey: id)
         previousStatuses.removeValue(forKey: id)
         return removed
     }
 
-    func removeAll() {
+    public func removeAll() {
         waves = [:]
         previousStatuses = [:]
     }
 
     // MARK: - Optimistic mutations
 
-    func applyOptimistic(_ id: String, _ mutation: (inout WaveViewModel) -> Void) -> WaveViewModel? {
+    public func applyOptimistic(_ id: String, _ mutation: (inout WaveViewModel) -> Void) -> WaveViewModel? {
         guard var wave = waves[id] else { return nil }
         let snapshot = wave
         mutation(&wave)
@@ -97,41 +103,41 @@ final class WaveStore {
         return snapshot
     }
 
-    func commitMutation(_ id: String) {
+    public func commitMutation(_ id: String) {
         pendingMutations.remove(id)
     }
 
-    func rollback(_ snapshot: WaveViewModel) {
+    public func rollback(_ snapshot: WaveViewModel) {
         pendingMutations.remove(snapshot.id)
         _set(snapshot)
     }
 
     // MARK: - Pending create/delete
 
-    func insertPending(_ wave: WaveViewModel) {
+    public func insertPending(_ wave: WaveViewModel) {
         pendingMutations.insert(wave.id)
         _set(wave)
     }
 
-    func replacePending(_ pendingId: String, with wave: WaveViewModel) {
+    public func replacePending(_ pendingId: String, with wave: WaveViewModel) {
         pendingMutations.remove(pendingId)
         remove(pendingId)
         _set(wave)
     }
 
-    func removePending(_ id: String) {
+    public func removePending(_ id: String) {
         pendingMutations.remove(id)
         remove(id)
     }
 
-    func applyDelete(_ id: String) {
+    public func applyDelete(_ id: String) {
         pendingMutations.insert(id)
         remove(id)
     }
 
     // MARK: - Queries
 
-    func wave(for id: String) -> WaveViewModel? { waves[id] }
+    public func wave(for id: String) -> WaveViewModel? { waves[id] }
 
     // MARK: - Private
 

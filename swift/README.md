@@ -79,8 +79,8 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 
 ## Architecture
 
-- `Concerto/State/RepoState.swift` — app orchestrator for waves, connection, and stores
-- `Concerto/State/*Store.swift` — focused state containers (`WaveStore`, `RunStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`)
+- `LoopflowCore/State/RepoState.swift` — shared app orchestrator for waves, connection, and stores
+- `LoopflowCore/State/*.swift` — shared state containers (`WaveStore`, `RunStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`, `ChatState`)
 - `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
 - `Concerto/Views` — app shell views and macOS-first composition
 - `Concerto/Services/Ghostty` — embedded terminal integration (macOS-only)

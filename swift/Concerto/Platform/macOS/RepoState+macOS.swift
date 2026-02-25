@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import LoopflowCore
 
 extension RepoState {
     convenience init() {

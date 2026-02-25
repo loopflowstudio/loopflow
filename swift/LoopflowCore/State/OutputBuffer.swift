@@ -1,17 +1,21 @@
 // OutputBuffer - agent output buffering for active runs.
 
 import Foundation
-import LoopflowCore
 
-struct OutputLine: Identifiable {
-    let id = UUID()
-    let text: String
-    let timestamp: Date
+public struct OutputLine: Identifiable {
+    public let id = UUID()
+    public let text: String
+    public let timestamp: Date
+
+    public init(text: String, timestamp: Date) {
+        self.text = text
+        self.timestamp = timestamp
+    }
 }
 
 @MainActor
 @Observable
-final class OutputBuffer {
+public final class OutputBuffer {
     // Output keyed by wave_id
     private var waveOutput: [String: [OutputLine]] = [:]
 
@@ -21,12 +25,14 @@ final class OutputBuffer {
     private var streamGeneration: [String: Int] = [:]
 
     // Interactive session (one at a time for MVP)
-    var interactiveSession: InteractiveSession?
+    public var interactiveSession: InteractiveSession?
 
     private let maxLines = 2000
     private var waveService = WaveService()
 
-    func configureConnection(
+    public init() {}
+
+    public func configureConnection(
         _ connection: ServerConnection,
         tokenProvider: (@Sendable () -> String?)? = nil
     ) {
@@ -41,7 +47,7 @@ final class OutputBuffer {
     /// Append output from the WebSocket event handler. Skipped if a
     /// streaming connection is active for this wave (it provides the
     /// same lines and handles replay).
-    func appendOutput(waveId: String, text: String, timestamp: Date) {
+    public func appendOutput(waveId: String, text: String, timestamp: Date) {
         // If a stream is active for this wave, it's already feeding output.
         if streamTasks[waveId] != nil { return }
         appendLine(waveId: waveId, text: text, timestamp: timestamp)
@@ -57,11 +63,11 @@ final class OutputBuffer {
         }
     }
 
-    func output(for waveId: String) -> [OutputLine] {
+    public func output(for waveId: String) -> [OutputLine] {
         waveOutput[waveId] ?? []
     }
 
-    func clearOutput(for waveId: String) {
+    public func clearOutput(for waveId: String) {
         streamTasks[waveId]?.cancel()
         streamTasks.removeValue(forKey: waveId)
         waveOutput.removeValue(forKey: waveId)
@@ -71,7 +77,7 @@ final class OutputBuffer {
 
     /// Connect to the replay+follow endpoint for a wave. Populates
     /// the buffer with historical output then continues with live lines.
-    func startStreaming(waveId: String) {
+    public func startStreaming(waveId: String) {
         // Don't start a second stream for the same wave
         if streamTasks[waveId] != nil { return }
 
@@ -103,13 +109,13 @@ final class OutputBuffer {
     }
 
     /// Stop streaming for a wave (e.g. when deselected).
-    func stopStreaming(waveId: String) {
+    public func stopStreaming(waveId: String) {
         streamTasks[waveId]?.cancel()
         streamTasks.removeValue(forKey: waveId)
     }
 
     /// Most recent output line for a wave (for activity summary display).
-    func recentOutput(for waveId: String, maxLength: Int = 60) -> String? {
+    public func recentOutput(for waveId: String, maxLength: Int = 60) -> String? {
         guard let lastLine = waveOutput[waveId]?.last else {
             return nil
         }
@@ -121,7 +127,7 @@ final class OutputBuffer {
 
     // MARK: - Interactive Sessions
 
-    func launchInteractiveSession(waveId: String, step: String, worktreePath: String, prompt: String? = nil) {
+    public func launchInteractiveSession(waveId: String, step: String, worktreePath: String, prompt: String? = nil) {
         interactiveSession = InteractiveSession(
             waveId: waveId,
             step: step,
@@ -130,11 +136,11 @@ final class OutputBuffer {
         )
     }
 
-    func endInteractiveSession() {
+    public func endInteractiveSession() {
         interactiveSession = nil
     }
 
-    func hasActiveSession(for waveId: String) -> Bool {
+    public func hasActiveSession(for waveId: String) -> Bool {
         interactiveSession?.waveId == waveId
     }
 }

@@ -8,11 +8,12 @@ Make Concerto build and run on iOS (iPhone + iPad) alongside macOS.
 
 Single-target multiplatform build with iOS shells and platform boundaries. The architecture diverged from the original plan in two meaningful ways:
 
-**State stayed in Concerto.** RepoState and stores remain in `Concerto/State/`, not LoopflowCore. Platform-specific initializers (`RepoState+iOS.swift`, `RepoState+macOS.swift`) inject capabilities at the call site. This works — iOS shell doesn't need LoopflowCore to own the state to function as a remote client.
+**State moved to LoopflowCore.** RepoState and shared stores live in `LoopflowCore/State/` with public APIs. Platform-specific initializers (`RepoState+iOS.swift`, `RepoState+macOS.swift`) stay in shell files and inject capabilities at the call site.
 
 **iOS got its own views.** Instead of moving macOS views (WaveSidebar, WaveDetailPanel) into LoopflowCore and sharing them, iOS got purpose-built views: MobileWaveListView, MobileWaveDetailView, ConnectionSetupView. Mobile UX needs differ enough from desktop that sharing the same view hierarchy would have been forced.
 
 **What moved to LoopflowCore:**
+- State: RepoState, WaveStore, RunStore, WorktreeStore, ConnectionStore, OutputBuffer, ChatState
 - Design tokens: BrandColors, DesignSystem (spacing, typography, colors, button styles)
 - Models: ConnectionProfile, ServerConnection
 - Services: unchanged (WaveService, AuthService, EventService already there)
@@ -30,8 +31,6 @@ Single-target multiplatform build with iOS shells and platform boundaries. The a
 - macOS behavior unchanged
 
 ## What remains
-
-**State extraction** was the planned step 2 but was deferred. RepoState in LoopflowCore with public APIs would let Symphonia (separate repo) share state — that's the motivating use case, not iOS itself. Track as follow-up when Symphonia integration starts.
 
 **Interactive end-to-end validation** is light. Build coverage is confirmed but full device flows (connection setup → connect to lfd → wave list → detail → output) haven't been validated against a live lfd on simulator.
 
@@ -211,8 +210,6 @@ Boundary checks also pass:
 
 ## Post-ship notes
 
-**Achieved:** builds, simulators, boundary checks, macOS regression pass all green.
-
-**Deferred:** state extraction to LoopflowCore. Not needed for iOS remote client — motivating use case is Symphonia sharing state, which is future work. Revisit when Symphonia integration begins.
+**Achieved:** builds, simulators, boundary checks, macOS regression pass all green, and shared state extracted to `LoopflowCore/State`.
 
 **Learned:** purpose-built mobile views are simpler than sharing desktop views through LoopflowCore. This means Stage 02 action buttons need to land in both MobileWaveDetailView (iOS) and WaveChatView (macOS), but the shared ActionButtonsView component can still live in LoopflowCore.

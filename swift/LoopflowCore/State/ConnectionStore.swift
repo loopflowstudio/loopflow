@@ -1,9 +1,8 @@
 import Foundation
-import LoopflowCore
 
 @MainActor
 @Observable
-final class ConnectionStore {
+public final class ConnectionStore {
     private enum PersistedSettings: Codable {
         case bundled(ServerConnection?)
         case remote(ServerConnection)
@@ -71,11 +70,11 @@ final class ConnectionStore {
     private let secretStore: ConnectionSecretStore
     private let pinStore: CertificatePinStore
 
-    var mode: ConnectionMode
-    var activeConnection: ServerConnection
+    public var mode: ConnectionMode
+    public var activeConnection: ServerConnection
     private var remoteConnection: ServerConnection?
 
-    init(
+    public init(
         secretStore: ConnectionSecretStore = .shared,
         pinStore: CertificatePinStore = .shared,
         defaults: UserDefaults = .standard
@@ -94,7 +93,7 @@ final class ConnectionStore {
         }
     }
 
-    func setMode(_ mode: ConnectionMode) {
+    public func setMode(_ mode: ConnectionMode) {
         self.mode = mode
         if mode == .remote, let remoteConnection {
             activeConnection = remoteConnection
@@ -104,7 +103,7 @@ final class ConnectionStore {
         persistSettings()
     }
 
-    func setRemoteConnection(_ connection: ServerConnection) {
+    public func setRemoteConnection(_ connection: ServerConnection) {
         var next = connection
         if next.authMode.requiresToken {
             if let token = next.staticToken {
@@ -123,25 +122,25 @@ final class ConnectionStore {
         persistSettings()
     }
 
-    func setBundledRuntimeConnection(_ connection: ServerConnection) {
+    public func setBundledRuntimeConnection(_ connection: ServerConnection) {
         mode = .bundled
         activeConnection = connection
         persistSettings()
     }
 
-    var configuredRemoteConnection: ServerConnection? {
+    public var configuredRemoteConnection: ServerConnection? {
         remoteConnection
     }
 
-    func token(for connection: ServerConnection) -> String? {
+    public func token(for connection: ServerConnection) -> String? {
         connection.staticToken ?? secretStore.token(for: connection)
     }
 
-    func clearPinnedCertificate(for connection: ServerConnection? = nil) {
+    public func clearPinnedCertificate(for connection: ServerConnection? = nil) {
         pinStore.clearPinnedFingerprint(for: connection ?? activeConnection)
     }
 
-    func trustNewCertificate(_ requirement: TrustRequirement) {
+    public func trustNewCertificate(_ requirement: TrustRequirement) {
         guard case let .certificateChanged(host, port, _, newFingerprint) = requirement else {
             return
         }

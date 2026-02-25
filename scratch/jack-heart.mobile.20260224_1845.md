@@ -17,18 +17,15 @@ Ship one `Concerto` target that works across macOS, iPhone, and iPad while keepi
 - iOS shell exists (`MobileRootView`, connection setup, wave list/detail).
 - macOS shell behavior remains intact (windowing, keyboard routing, Ghostty/local bootstrap).
 - Shared design tokens moved into `LoopflowCore`.
+- Shared state extraction landed in `swift/LoopflowCore/State/` (`RepoState`, stores, `OutputBuffer`, `ChatState`).
 
 ## Remaining work to fully close Stage 01
 
-1. **State extraction gap**
-   - `RepoState` and related stores are still in `swift/Concerto/State/`.
-   - Move shared state into `swift/LoopflowCore/State/` with explicit public APIs.
-
-2. **Runtime validation gap (iOS)**
+1. **Runtime validation gap (iOS)**
    - Build coverage is in place, but interactive end-to-end validation is still light.
    - Re-run full device flows: connection setup → connect to `lfd` → wave list/detail/output on iPhone and iPad.
 
-3. **Environment-specific validation instability**
+2. **Environment-specific validation instability**
    - macOS `xcodebuild test` currently fails in this environment at `ConcertoUITests-Runner` startup.
    - `cargo test --all` fails docker-dependent tests when Docker socket is unavailable.
 
@@ -43,4 +40,4 @@ Ship one `Concerto` target that works across macOS, iPhone, and iPad while keepi
 
 ## Exit condition for follow-up PR
 
-Stage 01 is fully closed when shared state extraction lands and simulator/runtime validation is re-confirmed without architecture gaps.
+Stage 01 is fully closed when simulator/runtime validation is re-confirmed on iPhone+iPad flows without architecture gaps.

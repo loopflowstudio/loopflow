@@ -284,9 +284,6 @@ pub(crate) async fn build_step_prompt(
         None,
     )
     .ok();
-    if launch.model.is_none() {
-        launch.model = Some(config.agent_model.clone());
-    }
     launch.cwd = Some(cwd);
     launch.skip_permissions = config.yolo;
 

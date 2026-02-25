@@ -614,12 +614,15 @@ fn validate_repo_root(repo_root: &str) -> Result<PathBuf, SessionManagerError> {
             "path is not a directory: {raw}"
         )));
     }
-    if !path.join(".lf").is_dir() {
+    let canonical = path.canonicalize().map_err(|err| {
+        SessionManagerError::InvalidRepoRoot(format!("failed to resolve repo_root '{raw}': {err}"))
+    })?;
+    if !canonical.join(".lf").is_dir() {
         return Err(SessionManagerError::InvalidRepoRoot(format!(
             "missing .lf/ in repo root: {raw}"
         )));
     }
-    Ok(path)
+    Ok(canonical)
 }
 
 fn resolve_cwd(
@@ -650,19 +653,13 @@ fn resolve_cwd(
         )));
     }
 
-    let canonical_root = repo_root.canonicalize().map_err(|err| {
-        SessionManagerError::InvalidRepoRoot(format!(
-            "failed to resolve repo_root '{}': {err}",
-            repo_root.display()
-        ))
-    })?;
     let canonical_cwd = resolved.canonicalize().map_err(|err| {
         SessionManagerError::InvalidConfig(format!(
             "failed to resolve cwd '{}': {err}",
             resolved.display()
         ))
     })?;
-    if !canonical_cwd.starts_with(&canonical_root) {
+    if !canonical_cwd.starts_with(repo_root) {
         return Err(SessionManagerError::InvalidConfig(format!(
             "cwd must be inside repo_root: {}",
             canonical_cwd.display()

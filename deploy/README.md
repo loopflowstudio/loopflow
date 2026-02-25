@@ -52,8 +52,11 @@ export LFD_EXECUTOR_IMAGE='loopflow/agent:latest'
 ```bash
 uv run python scripts/test_remote_smoke.py \
   --url https://lfd.example.com \
-  --token "$LFD_AUTH_TOKEN"
+  --token "$LFD_AUTH_TOKEN" \
+  --repo /absolute/path/to/loopflow/on/remote
 ```
+
+On fresh hosts with no existing waves, `--repo` is required. Once waves exist, the script can default to the first `/v0/repos` entry.
 
 For internal-CA deployments, pass custom trust or run insecure:
 
@@ -94,10 +97,10 @@ docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml ps
 curl -f https://lfd.example.com/health
 
 # Caddy logs
-docker logs docker-caddy-1 --tail 200
+docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml logs --tail 200 caddy
 
 # lfd logs
-docker logs docker-lfd-1 --tail 200
+docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml logs --tail 200 lfd
 ```
 
 Common failures:

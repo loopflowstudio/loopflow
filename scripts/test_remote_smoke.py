@@ -200,54 +200,64 @@ def _scenario_sse_streaming(
     session_harness: str,
     events_timeout: float,
 ) -> None:
-    create_response = api.request(
-        "POST",
-        "/v0/sessions",
-        json={
-            "harness": session_harness,
-            "step": "design",
-            "repo_root": repo_path,
-        },
-    )
-    ApiAssertions.expect_status(create_response, 200)
-    session_payload = ApiAssertions.expect_json_object(create_response)
-    session_id = _require_field(session_payload, "id")
+    session_id: str | None = None
+    try:
+        create_response = api.request(
+            "POST",
+            "/v0/sessions",
+            json={
+                "harness": session_harness,
+                "step": "design",
+                "repo_root": repo_path,
+            },
+        )
+        ApiAssertions.expect_status(create_response, 200)
+        session_payload = ApiAssertions.expect_json_object(create_response)
+        session_id = _require_field(session_payload, "id")
 
-    input_response = api.request(
-        "POST",
-        f"/v0/sessions/{session_id}/input",
-        json={"content": "Reply with one short sentence."},
-    )
-    ApiAssertions.expect_status(input_response, 200)
+        input_response = api.request(
+            "POST",
+            f"/v0/sessions/{session_id}/input",
+            json={"content": "Reply with one short sentence."},
+        )
+        ApiAssertions.expect_status(input_response, 200)
 
-    deadline = time.monotonic() + events_timeout
-    seen_session_event = False
-    current_event_name = ""
+        deadline = time.monotonic() + events_timeout
+        seen_session_event = False
+        current_event_name = ""
 
-    with authed_stream.stream("GET", f"/v0/sessions/{session_id}/events") as response:
-        ApiAssertions.expect_status(response, 200)
-        for line in response.iter_lines():
-            if time.monotonic() > deadline:
-                break
-            if not line:
-                continue
-            if line.startswith("event:"):
-                current_event_name = line[6:].strip()
-                continue
-            if not line.startswith("data:") or current_event_name != "session.event":
-                continue
+        with authed_stream.stream("GET", f"/v0/sessions/{session_id}/events") as response:
+            ApiAssertions.expect_status(response, 200)
+            for line in response.iter_lines():
+                if time.monotonic() > deadline:
+                    break
+                if not line:
+                    continue
+                if line.startswith("event:"):
+                    current_event_name = line[6:].strip()
+                    continue
+                if not line.startswith("data:") or current_event_name != "session.event":
+                    continue
 
-            payload = line[5:].strip()
-            if not payload:
-                continue
+                payload = line[5:].strip()
+                if not payload:
+                    continue
 
-            event = json.loads(payload)
-            if isinstance(event, dict):
-                seen_session_event = True
-                break
+                event = json.loads(payload)
+                if isinstance(event, dict):
+                    seen_session_event = True
+                    break
 
-    if not seen_session_event:
-        raise AssertionError(f"no session.event received from SSE stream within {events_timeout}s")
+        if not seen_session_event:
+            raise AssertionError(
+                f"no session.event received from SSE stream within {events_timeout}s"
+            )
+    finally:
+        if session_id:
+            try:
+                api.request("DELETE", f"/v0/sessions/{session_id}")
+            except Exception:
+                pass
 
 
 def _scenario_websocket(ws: WebSocketClient) -> None:
@@ -341,17 +351,18 @@ def _resolve_repo_path(api: ApiClient, repo_override: str | None) -> str:
     payload = ApiAssertions.expect_json_object(response)
     items = payload.get("data")
     if not isinstance(items, list) or not items:
-        raise AssertionError(f"/v0/repos returned no repos: {payload!r}")
+        raise AssertionError(
+            "no repos returned by /v0/repos; pass --repo /absolute/path/on/remote-host "
+            "for first-run smoke on a fresh lfd host"
+        )
 
-    first = items[0]
-    if not isinstance(first, dict):
-        raise AssertionError(f"invalid repo entry: {first!r}")
+    for item in items:
+        if isinstance(item, dict):
+            path = item.get("path")
+            if isinstance(path, str) and path:
+                return path
 
-    path = first.get("path")
-    if not isinstance(path, str) or not path:
-        raise AssertionError(f"repo path missing in entry: {first!r}")
-
-    return path
+    raise AssertionError(f"/v0/repos entries missing usable path values: {payload!r}")
 
 
 def _cleanup_waves(api: ApiClient, wave_ids: list[str]) -> None:
@@ -406,18 +417,48 @@ def _resolve_tls(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run remote lfd smoke checks over TLS proxy")
-    parser.add_argument("--url", required=True, help="Remote lfd base URL (https://lfd.example.com)")
+    parser.add_argument(
+        "--url",
+        required=True,
+        help="Remote lfd base URL (https://lfd.example.com)",
+    )
     parser.add_argument("--token", required=True, help="Bearer token for remote auth")
     parser.add_argument(
         "--repo",
         default=None,
-        help="Repo path for wave creation (defaults to first /v0/repos entry)",
+        help=(
+            "Repo path on the remote host. Required on fresh hosts without existing waves; "
+            "otherwise defaults to first /v0/repos entry."
+        ),
     )
-    parser.add_argument("--timeout", type=float, default=20.0, help="HTTP and websocket timeout in seconds")
-    parser.add_argument("--events-timeout", type=float, default=30.0, help="Seconds to wait for a session SSE event")
-    parser.add_argument("--logs-timeout", type=float, default=30.0, help="Seconds to wait for wave log output")
-    parser.add_argument("--session-harness", default="claude", help="Harness for SSE session scenario")
-    parser.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=20.0,
+        help="HTTP and websocket timeout in seconds",
+    )
+    parser.add_argument(
+        "--events-timeout",
+        type=float,
+        default=30.0,
+        help="Seconds to wait for a session SSE event",
+    )
+    parser.add_argument(
+        "--logs-timeout",
+        type=float,
+        default=30.0,
+        help="Seconds to wait for wave log output",
+    )
+    parser.add_argument(
+        "--session-harness",
+        default="claude",
+        help="Harness for SSE session scenario",
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="Disable TLS certificate verification",
+    )
     parser.add_argument(
         "--ca-cert",
         default=None,

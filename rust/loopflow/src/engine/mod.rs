@@ -8,6 +8,7 @@ pub mod event;
 pub mod flow;
 pub mod fork;
 pub mod git;
+mod harness_commands;
 pub mod launch;
 pub mod naming;
 pub mod platform;

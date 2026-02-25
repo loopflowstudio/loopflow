@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use crate::engine::config::parse_model;
 use crate::engine::error::CoreError;
+use crate::engine::harness_commands::builder_for_model;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 
@@ -387,82 +388,6 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     }
 }
 
-#[derive(Debug, Clone)]
-enum LaunchHarnessAdapter {
-    Claude { model_variant: Option<String> },
-    Codex { model_variant: Option<String> },
-    Gemini { model_variant: Option<String> },
-    Opencode { model_variant: Option<String> },
-    FallbackClaude { model: String },
-}
-
-impl LaunchHarnessAdapter {
-    fn select(model: &str) -> Self {
-        let (backend, variant) = parse_model(model);
-        match backend.as_str() {
-            "claude" => Self::Claude {
-                model_variant: variant,
-            },
-            "codex" => Self::Codex {
-                model_variant: resolve_codex_model(model),
-            },
-            "gemini" => Self::Gemini {
-                model_variant: variant,
-            },
-            "opencode" => Self::Opencode {
-                model_variant: variant,
-            },
-            _ => Self::FallbackClaude {
-                model: model.to_string(),
-            },
-        }
-    }
-
-    fn build_command(
-        &self,
-        launch: &AgentConfig,
-        process: &ProcessConfig,
-        capabilities: &AgentCapabilities,
-    ) -> Vec<String> {
-        match self {
-            Self::Claude { model_variant } => {
-                build_claude_command(launch, process, capabilities, model_variant.as_deref())
-            }
-            Self::Codex { model_variant } => {
-                build_codex_command(launch, process, model_variant.as_deref())
-            }
-            Self::Gemini { model_variant } => {
-                build_gemini_command(launch, process, model_variant.as_deref())
-            }
-            Self::Opencode { model_variant } => {
-                build_opencode_command(process, model_variant.as_deref())
-            }
-            Self::FallbackClaude { model } => {
-                build_claude_command(launch, process, capabilities, Some(model.as_str()))
-            }
-        }
-    }
-
-    fn apply_env(&self, cmd: &mut Command, process: &ProcessConfig) {
-        match self {
-            Self::Gemini { .. } => {
-                if let Some(ref context_file) = process.context_file {
-                    cmd.env(
-                        "GEMINI_SYSTEM_MD",
-                        context_file.to_string_lossy().to_string(),
-                    );
-                }
-            }
-            Self::Opencode { .. } => {
-                if let Some(env_val) = build_opencode_env(process) {
-                    cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 /// Build command for any model.
 pub fn build_model_command(
     launch: &AgentConfig,
@@ -470,8 +395,7 @@ pub fn build_model_command(
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
     let model = launch.model.as_deref().unwrap_or("claude");
-    let adapter = LaunchHarnessAdapter::select(model);
-    adapter.build_command(launch, process, capabilities)
+    builder_for_model(model).build_command(launch, process, capabilities)
 }
 
 /// Build a full CLI command (including prompt) for a model.
@@ -495,8 +419,8 @@ pub fn launch_agent(
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     let model = launch.model.as_deref().unwrap_or("claude");
-    let adapter = LaunchHarnessAdapter::select(model);
-    let cmd_args = adapter.build_command(launch, process, capabilities);
+    let harness_builder = builder_for_model(model);
+    let cmd_args = harness_builder.build_command(launch, process, capabilities);
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
@@ -532,7 +456,7 @@ pub fn launch_agent(
     cmd.env_remove("OPENAI_API_KEY");
     cmd.env_remove("GEMINI_API_KEY");
 
-    adapter.apply_env(&mut cmd, process);
+    harness_builder.apply_env(&mut cmd, process);
 
     propagate_rlm_env(&mut cmd);
 

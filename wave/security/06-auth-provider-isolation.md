@@ -2,7 +2,7 @@
 
 Finalize remote auth-provider hardening: fail closed on JWKS issues, reject malformed bearer tokens before provider validation, and document revocation behavior. This phase hardens the `Studio` path where remote deployments carry higher exposure.
 
-Depends on remote/07 (Studio auth client wiring) since it hardens the `Studio` auth provider path.
+Depends on remote/04 (Studio auth) since it hardens the `Studio` auth provider path.
 
 ## What exists today
 
@@ -16,7 +16,7 @@ Remaining gaps:
 
 **Studio validator caching**: `ConnectionValidator` caches validation results for 60 seconds. If a token is revoked server-side, it remains valid in lfd for up to 60 seconds. Acceptable for the threat model, but should be documented.
 
-**No JWKS validation yet**: The `Studio` provider currently validates connection tokens via the registration service (HTTP call to `auth.loopflow.studio`). Phase remote/07 plans to add local JWKS validation. The failure mode matters: if JWKS fetch fails on startup, does lfd reject all Studio auth (fail closed) or accept all (fail open)?
+**No JWKS validation yet**: The `Studio` provider currently validates connection tokens via the registration service (HTTP call to `auth.loopflow.studio`). Phase remote/04 plans to add local JWKS validation. The failure mode matters: if JWKS fetch fails on startup, does lfd reject all Studio auth (fail closed) or accept all (fail open)?
 
 **Token format not pre-validated**: The `extract_token` function strips `Bearer ` prefix and trims whitespace, but does not enforce provider-appropriate token bounds/shape. A malformed header token still reaches provider validation logic.
 
@@ -34,7 +34,7 @@ This phase prevents auth ambiguity:
 
 This phase does not provide:
 
-- Fine-grained per-wave authorization (remote/09 scope).
+- Fine-grained per-wave authorization (remote/06 scope).
 - Full zero-trust service-to-service identity across all internal components.
 
 ## Implementation
@@ -45,7 +45,7 @@ Phase 01 removed the loopback read bypass entirely. All providers require creden
 
 ### JWKS fail-closed
 
-When remote/07 adds JWKS validation to the `Studio` provider:
+When remote/04 adds JWKS validation to the `Studio` provider:
 
 - On startup: if JWKS fetch fails after 3 retries with backoff, lfd should start but log a warning and reject all `Studio` auth requests until JWKS is available. Not block startup entirely (that would prevent health checks and diagnostics).
 - On refresh: if JWKS refresh fails, continue using the cached keyset. Log a warning. Only reject tokens if the cached keyset has expired (e.g., older than 24 hours with no successful refresh).
@@ -83,10 +83,10 @@ Shipped in Phase 04 as part of HTTP security hardening. `trusted_proxy_cidrs` de
 
 ### Document token revocation latency
 
-The 60-second cache in `ConnectionValidator` means revoked Studio tokens remain valid for up to 60 seconds. Document this in the remote/07 design doc as an accepted tradeoff (vs. calling the auth service on every request).
+The 60-second cache in `ConnectionValidator` means revoked Studio tokens remain valid for up to 60 seconds. Document this in the remote/04 design doc as an accepted tradeoff (vs. calling the auth service on every request).
 
 ## What this doesn't do
 
-- Doesn't add per-wave authorization (which waves can a token access) — that's remote/09 (multi-tenant)
+- Doesn't add per-wave authorization (which waves can a token access) — that's remote/06 (multi-tenant)
 - Doesn't add mutual TLS between services — overkill for the current deployment topology
 - Doesn't add OAuth/OIDC for third-party identity providers — Studio auth handles identity

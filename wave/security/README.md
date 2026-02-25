@@ -13,7 +13,7 @@ Every lfd deployment — local, containerized, remote — enforces auth, validat
 | 03 | Container Hardening | Resource limits, non-root agent user, cross-worktree isolation | None | [03-container-hardening.md](03-container-hardening.md) | done |
 | 04 | API Surface Gating | Rate limiting, body size limits, error sanitization, WebSocket caps, outbound token/header leakage prevention, proxy trust | 01 | — (shipped, see scratch/) | done |
 | 05 | Credential Hygiene | Token separation/rotation, config write secret preservation, log/status redaction, transport hygiene | None | — (shipped, see [scratch/security-credential-hygiene.md](../../scratch/security-credential-hygiene.md)) | done |
-| 06 | Auth Provider Isolation | JWKS fail-closed, token format pre-validation, revocation semantics | remote/07 | [06-auth-provider-isolation.md](06-auth-provider-isolation.md) | next (blocked on remote/07) |
+| 06 | Auth Provider Isolation | JWKS fail-closed, token format pre-validation, revocation semantics | remote/04 | [06-auth-provider-isolation.md](06-auth-provider-isolation.md) | next (blocked on remote/04) |
 
 ## Goals
 
@@ -38,7 +38,7 @@ These are non-negotiable properties. Each phase should add tests that assert the
 
 Near-term sequencing now:
 
-1. **Phase 06** next when remote/07 lands (JWKS fail-closed and token format pre-validation)
+1. **Phase 06** next when remote/04 lands (JWKS fail-closed and token format pre-validation)
 2. Keep the lightweight credential model restart-based unless operator pain proves otherwise
 
 ## Post-ship adjustments (after phase 05)
@@ -49,7 +49,7 @@ What changed after implementation:
 - **Registration exposure split cleanly by audience.** `/health` now returns only `{ enabled, registered }`; `/status` keeps detailed registration state but sanitizes `last_error`.
 - **Transport hygiene moved earlier in the stack.** Query-based credentials are now rejected globally (including unauthenticated routes), and that rejection runs before trace logging middleware so sensitive query strings do not enter request traces.
 - **Static token rotation is explicitly restart-based.** `lfd token rotate` generates and prints a one-time token with a restart runbook. No dual-token grace window or hot-reload was added.
-- **Phase 06 scope is sharper.** Provider fallback and proxy trust concerns are already closed; remaining work is JWKS fail-closed behavior, token format pre-validation, and revocation latency documentation once remote/07 lands.
+- **Phase 06 scope is sharper.** Provider fallback and proxy trust concerns are already closed; remaining work is JWKS fail-closed behavior, token format pre-validation, and revocation latency documentation once remote/04 lands.
 
 ## Threat Model
 
@@ -65,7 +65,7 @@ lfd is an HTTP+WebSocket server that spawns Docker containers running AI coding 
 ### What might change
 
 - Trusted vs untrusted execution tiers are currently deferred; priority could shift if threat posture changes.
-- Auth-provider isolation details depend on remote/07 sequencing and may force roadmap reshuffling.
+- Auth-provider isolation details depend on remote/04 sequencing and may force roadmap reshuffling.
 - Runtime hardening defaults may need adjustment if operator environments show unexpected constraints.
 - Redaction and query-key denylists are heuristic; we may need to extend pattern coverage as real-world error formats evolve.
 
@@ -91,9 +91,9 @@ lfd is an HTTP+WebSocket server that spawns Docker containers running AI coding 
 
 ## What's not here
 
-- Prompt injection defenses (agent-generated content influencing future runs) — revisit at remote/09 (hosted)
+- Prompt injection defenses (agent-generated content influencing future runs) — revisit at remote/06 (hosted)
 - SSRF guards — revisit when lfd gains URL-fetching endpoints
-- Multi-tenant authorization (per-user wave access) — revisit at remote/09
+- Multi-tenant authorization (per-user wave access) — revisit at remote/06
 - Mobile client security — separate wave when mobile ships
 
 ## Current scope cut (agreed)

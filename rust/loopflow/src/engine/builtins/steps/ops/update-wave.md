@@ -22,6 +22,7 @@ After a build, `wave/<wave>/` should reflect reality:
 5. Promote actionable items into `wave/<wave>/`.
 6. If destination files already exist, merge/dedupe content intentionally.
 7. Remove scratch files that were promoted.
+8. If `wave/<wave>/MEMORY.md` exists, distill stable observations into canonical docs and trim duplicated memory entries.
 
 ## Promotion rules
 
@@ -29,6 +30,7 @@ After a build, `wave/<wave>/` should reflect reality:
 - Keep one canonical copy in `wave/<wave>/`.
 - If a destination exists, merge content; do not clobber existing files.
 - Skip disposable notes that are already captured elsewhere.
+- If memory observations were promoted into canonical docs, `MEMORY.md` should not keep duplicated long-form copies.
 
 ## Output
 

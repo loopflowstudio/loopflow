@@ -52,6 +52,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     let docs_tokens = breakdown.source_tokens(DocumentSource::RepoDoc)
         + breakdown.source_tokens(DocumentSource::Wave)
         + breakdown.source_tokens(DocumentSource::Summary);
+    let wave_memory_tokens = breakdown.source_tokens(DocumentSource::WaveMemory);
     let area_tokens = breakdown.source_tokens(DocumentSource::Area);
     let clipboard_tokens = breakdown.source_tokens(DocumentSource::Clipboard);
 
@@ -90,6 +91,10 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     if breakdown.doc_count > 0 {
         let docs_detail = format!("{} files", breakdown.doc_count);
         lines.push(format_row("docs", docs_tokens, &docs_detail));
+    }
+
+    if wave_memory_tokens > 0 {
+        lines.push(format_row("memory", wave_memory_tokens, "wave"));
     }
 
     // Area

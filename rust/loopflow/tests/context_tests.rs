@@ -709,6 +709,64 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
 }
 
 #[test]
+fn wave_memory_is_loaded_separately_from_wave_docs() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+
+    fs::create_dir_all(repo.join("wave/living")).unwrap();
+    fs::write(repo.join("wave/living/README.md"), "# Living").unwrap();
+    fs::write(repo.join("wave/living/plan.md"), "# Plan").unwrap();
+    fs::write(
+        repo.join("wave/living/MEMORY.md"),
+        "- keep tests focused on behavior",
+    )
+    .unwrap();
+    write_step(repo, "implement", "Do work.");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("implement".to_string()),
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec![],
+        files: vec![],
+        sources: vec![DocumentSource::RepoDoc],
+        area: None,
+        wave: Some("living".to_string()),
+    })
+    .unwrap();
+
+    let wave_docs: Vec<_> = components
+        .docs
+        .iter()
+        .filter(|d| d.source == DocumentSource::Wave)
+        .collect();
+    assert_eq!(
+        wave_docs.len(),
+        2,
+        "README.md and plan.md should be wave docs"
+    );
+    assert!(wave_docs.iter().all(|d| !d.path.ends_with("MEMORY.md")));
+
+    assert!(components.wave_memory.is_some());
+    assert_eq!(
+        components.wave_memory.as_ref().map(|doc| doc.path.as_str()),
+        Some("wave/living/MEMORY.md")
+    );
+    assert!(components
+        .wave_memory
+        .as_ref()
+        .expect("wave memory should be loaded")
+        .content
+        .contains("keep tests focused on behavior"));
+
+    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
+}
+
+#[test]
 fn loopflow_doc_always_included() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

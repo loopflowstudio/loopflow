@@ -1,0 +1,2 @@
+- Keep prompts concise and concrete.
+- Prefer behavior-focused tests over mock wiring.

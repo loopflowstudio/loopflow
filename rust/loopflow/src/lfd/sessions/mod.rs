@@ -856,7 +856,7 @@ impl SessionManager {
 
 fn resolve_harness(name: &str) -> Result<String, SessionManagerError> {
     let requested = name.trim().to_ascii_lowercase();
-    if matches!(requested.as_str(), "gemini" | "opencode") {
+    if matches!(requested.as_str(), "gemini") {
         return Err(SessionManagerError::HarnessNotImplemented(requested));
     }
 
@@ -1343,6 +1343,39 @@ mod tests {
             err,
             SessionManagerError::HarnessNotImplemented(ref name) if name == "gemini"
         ));
+    }
+
+    #[tokio::test]
+    async fn create_session_accepts_opencode_harness_name() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let repo_root = tmp.path().join("repo");
+        std::fs::create_dir_all(repo_root.join(".lf")).expect("create .lf for tests");
+        std::fs::create_dir_all(repo_root.join(".lf/steps")).expect("create .lf/steps");
+        std::fs::write(repo_root.join(".lf/steps/design.md"), "stub design")
+            .expect("write stub step");
+
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+
+        let created = manager
+            .create_session(CreateSessionParams {
+                harness: "opencode".to_string(),
+                wave_run_id: None,
+                config: SessionConfig {
+                    step: "design".to_string(),
+                    repo_root: repo_root.to_string_lossy().to_string(),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect("opencode should resolve as a supported harness");
+
+        assert_eq!(created.harness, "opencode");
     }
 
     #[tokio::test]

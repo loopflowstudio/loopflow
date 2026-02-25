@@ -1,12 +1,12 @@
 # Agent API
 
-Unified session API for interactive coding agents. lfd spawns and manages provider processes (Codex, Claude, OpenCode), translates events into a canonical model, persists everything for replay. Concerto and future clients connect via HTTP/SSE.
+Unified session API for interactive coding agents. lfd spawns and manages harness processes (Codex, Claude, OpenCode), translates events into a canonical model, persists everything for replay. Concerto and future clients connect via HTTP/SSE.
 
 `lf` headless runs are unchanged. Interactive `lf` commands (`design`, `explore`, `review`, `refine`) will move to the session API + Concerto UI (runtime convergence — active in scratch/).
 
 ## Vision
 
-lfd exposes a provider-agnostic session API. Clients create sessions, send input, subscribe to events, and end sessions. lfd owns the agent lifecycle — spawning processes, translating events, persisting state. Clients connect and disconnect freely; sessions survive reconnect.
+lfd exposes a harness-agnostic session API. Clients create sessions, send input, subscribe to events, and end sessions. lfd owns the agent lifecycle — spawning processes, translating events, persisting state. Clients connect and disconnect freely; sessions survive reconnect.
 
 ### Not here
 
@@ -17,26 +17,26 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 
 ## Goals
 
-- Provider-agnostic: same client code works regardless of which agent runs the session
-- Harness-first: build working harnesses end-to-end before abstracting (protocol emerged from real provider behavior)
+- Harness-agnostic: same client code works regardless of which agent runs the session
+- Harness-first: build working harnesses end-to-end before abstracting (protocol emerged from real harness behavior)
 - lfd owns the session lifecycle — Concerto is a thin client, agent processes survive close/reopen
 - Turn+item event model with typed items (`Command`, `File`, `Message`, `Thought`, `Tool`) and explicit lifecycles
 - Container-first safety — harnesses run in yolo/bypass mode, safety comes from the container
-- Provider-owned auth — Codex and Claude handle their own OAuth/login, lfd never collects raw credentials
+- Harness-owned auth — Codex and Claude handle their own OAuth/login, lfd never collects raw credentials
 - At most one active session per wave run at a time
 - Session end is idempotent; UI disconnect does not affect session state
 - Reconnect replays persisted events then follows live stream
 
 ## Risks
 
-- **Provider layer drift.** `lf` CLI and `/v0/sessions` HTTP use separate execution paths through the same harnesses. Prompt-level drift is now mitigated (shared `engine/launch.rs`). Process/runtime drift remains — `engine/agent` and `lfd/sessions/harness/*` still duplicate provider launch logic. Mitigate: runtime convergence (active in scratch/) extracts a shared engine harness; conformance tests once the third harness validates the abstraction.
+- **Runtime drift (reduced).** `lf` CLI and `/v0/sessions` HTTP use separate execution paths through the same harnesses. Prompt drift is eliminated (shared `engine/launch.rs`). Arg-building drift is mostly eliminated — `ClaudeArgs`, `build_claude_session_turn_args()`, and `build_codex_thread_start_params()` now live in `engine/agent` and are shared by both paths. Remaining gap: the session harness trait (`Harness`) still lives in `lfd/sessions/harness/`; extracting it into `engine/` is the next runtime convergence step. Conformance tests validate once the third harness (OpenCode) lands.
 - **Claude `--resume` fragility.** Each turn spawns a new process with `--resume`. If the resume format changes or session state corrupts, the entire session breaks with no partial recovery. Mitigate: session events are persisted, so replay from a new session is possible even if resume fails.
 - **Container-only safety model.** No tool-level permission routing means local (non-container) sessions run with full agent permissions. Acceptable for v1 but becomes a gap if local interactive sessions grow in usage.
 - **SSE replay scalability.** Long sessions accumulate events; full replay on reconnect grows linearly. Not a problem at current scale but could become one with multi-hour sessions.
 
 ## Metrics
 
-- All three provider harnesses (Codex, Claude, OpenCode) pass shared conformance tests
+- All three harnesses (Codex, Claude, OpenCode) pass shared conformance tests
 - Session reconnect replays full event history and resumes live streaming without data loss
 - Concerto renders typed transcript with item cards for all event types
 - Session lifecycle (create → interact → end) works identically for local and remote lfd
@@ -48,9 +48,9 @@ Concerto ──HTTP/SSE──▶ lfd session API
                          ├── SessionManager (lifecycle, state machine)
                          │     └── SessionRuntime (harness + broadcast + seq counter)
                          ├── session store (sessions + session_events tables)
-                         └── provider harness (Codex | Claude | OpenCode)
+                         └── Harness impl (Codex | Claude | OpenCode)
                                ├── event bridge task (harness → store + broadcast)
-                               └── provider process
+                               └── agent process
                                      Codex: codex --app-server (JSON-RPC stdio)
                                      Claude: claude -p --resume (NDJSON stdio)
                                      OpenCode: opencode serve (HTTP + SSE)
@@ -59,21 +59,23 @@ Concerto ──HTTP/SSE──▶ lfd session API
 ## API
 
 ```
-POST   /v0/sessions              # create session (provider, config)
+POST   /v0/sessions              # create session (harness, config)
 GET    /v0/sessions/{id}         # session status + metadata
 POST   /v0/sessions/{id}/input   # send user message
 GET    /v0/sessions/{id}/events  # SSE replay + follow
 DELETE /v0/sessions/{id}         # end session
 ```
 
-## Provider Comparison
+## Harness Comparison
 
-| Provider | Process model | Output | Input | Auth |
-|----------|--------------|--------|-------|------|
-| Codex | subprocess stdio | JSON-RPC notifications | JSON-RPC requests | OAuth (provider-owned) |
-| Claude | subprocess stdio | NDJSON (stream-json) | New process per turn (`--resume`) | OAuth (provider-owned) |
-| OpenCode | HTTP client | SSE events | REST calls | Provider-owned |
+| Harness | Process model | Output | Input | Auth |
+|---------|--------------|--------|-------|------|
+| Codex | subprocess stdio | JSON-RPC notifications | JSON-RPC requests | OAuth (harness-owned) |
+| Claude | subprocess stdio | NDJSON (stream-json) | New process per turn (`--resume`) | OAuth (harness-owned) |
+| OpenCode | HTTP client | SSE events | REST calls | Harness-owned |
 
 ## Future direction
 
-Prompt convergence shipped — `lf` and `lfd` share `engine/launch.rs` for prompt assembly. Runtime convergence is next (tracked in `scratch/agentapi-runtime-convergence.md`): extract a shared engine harness so `lf` and Session HTTP are explicitly two API surfaces over the same provider launch/lifecycle core. The OpenCode adapter will validate whether the harness abstraction holds across three transports.
+Prompt convergence and naming cleanup shipped. `lf` and `lfd` share `engine/launch.rs` for prompt assembly, `ClaudeArgs` for Claude flag construction, and `build_codex_thread_start_params()` for Codex session setup. The "provider" concept is replaced by "harness" throughout (DB, API, types).
+
+Runtime convergence continues (tracked in `scratch/agentapi-runtime-convergence.md`): extract the `Harness` trait from `lfd/sessions/harness/` into `engine/` so `lf` one-shot and `lfd` sessions are explicitly two API surfaces over the same harness lifecycle core. The OpenCode adapter will validate whether the harness abstraction holds across three transports.

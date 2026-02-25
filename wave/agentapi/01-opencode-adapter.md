@@ -36,7 +36,7 @@ Spawn `opencode serve --port $PORT`, communicate via HTTP.
 
 ## Done when
 
-- `POST /sessions` with `provider: "opencode"` spawns OpenCode server
+- `POST /sessions` with `harness: "opencode"` spawns OpenCode server
 - Events stream through `GET /sessions/{id}/events` as SSE
 - `POST /sessions/{id}/input` sends a message, OpenCode responds
 - `DELETE /sessions/{id}` stops the agent

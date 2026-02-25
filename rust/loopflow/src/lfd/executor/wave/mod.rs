@@ -592,6 +592,7 @@ mod tests {
     #[derive(Debug, Clone, Default)]
     struct ForkRunnerCall {
         cwd: String,
+        branch: Option<String>,
         output_prefix: Option<String>,
         prompt_logs: String,
     }
@@ -613,6 +614,7 @@ mod tests {
         ) -> Result<i32> {
             let call = ForkRunnerCall {
                 cwd: cwd.to_string_lossy().to_string(),
+                branch: context.branch.map(str::to_string),
                 output_prefix: context.output_prefix.map(str::to_string),
                 prompt_logs: read_prompt_logs(cwd),
             };
@@ -1056,6 +1058,7 @@ mod tests {
             .find(|call| call.output_prefix.as_deref() == Some("[fork-0] "))
             .expect("fork call should be recorded");
         assert!(fork_call.cwd.ends_with("-fork-0"));
+        assert_eq!(fork_call.branch, Some(format!("{run_id}-fork-0")));
         assert!(fork_call.prompt_logs.contains("BASE_DIRECTION_MARKER"));
         assert!(fork_call.prompt_logs.contains("BRANCH_DIRECTION_MARKER"));
 
@@ -1064,6 +1067,7 @@ mod tests {
             .find(|call| call.output_prefix.is_none() && !call.cwd.ends_with("-fork-0"))
             .expect("synthesize call should be recorded");
         assert_eq!(synth_call.cwd, repo.path().to_string_lossy());
+        assert_eq!(synth_call.branch.as_deref(), Some("main"));
     }
 
     #[tokio::test]

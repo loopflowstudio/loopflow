@@ -1,54 +1,113 @@
 # 01: Core Boundary Cleanup
 
-Deconcentrate hotspot files by cleaning core boundaries first (`store`, `docker`, provider command wiring).
+## Problem
 
-## Why this phase exists
+`lfd/store/mod.rs` (1,849 lines), `lfd/executor/docker.rs` (2,839 lines), and `engine/agent.rs` (provider command switching) are concentrated seams where small changes create large regression blast radius.
 
-Current risk is concentrated responsibility in a small set of files:
+This pass serves maintainers and contributors first: faster reviews, safer refactors, and simpler provider additions. Users benefit indirectly through fewer orchestration regressions and more predictable wave execution.
 
-- `lfd/store/mod.rs` carries a large forwarding façade plus backend-dispatch glue.
-- `lfd/executor/docker.rs` mixes image lifecycle, workspace lifecycle, recovery, and container IO.
-- `engine/agent.rs` uses central switch-based provider command wiring.
+Why now: wave pass 1 is explicitly the deconcentration pass before contract-hardening and orchestration expansion. If we skip this, later features compound complexity instead of leverage.
 
-Before adding more capability, reduce blast radius and make boundaries explicit.
+Wave-goal alignment:
+- Advances **"Eliminate boilerplate and duplicated patterns"** by removing store forwarder/match repetition.
+- Advances **"Make extension points trait-based, not switch-based"** by replacing provider command branching with provider-owned builders.
+- Advances **"Maintain architectural compactness as features grow"** by splitting `docker` responsibilities into lifecycle modules.
+
+## Approach
+
+Choose a structural refactor with hard seams, not helper-function cleanup.
+
+### 1) Store boundary: ports over façade forwarding
+
+- Add a first-class `SessionStore` trait and fold session operations into the same dispatch model as wave/execution/admin.
+- Introduce backend adapters:
+  - `SqliteStoreBackend` (preserves `spawn_blocking` via `run_sqlite`)
+  - `PostgresStoreBackend`
+- Define a composed backend port:
+  - `StoreBackendPort: WaveStateStore + ExecutionStore + SessionStore + StoreAdmin`
+- Change `Store` to hold one backend port object and expose capability accessors (`wave_state()`, `execution()`, `sessions()`, `admin()`) instead of dozens of forwarders.
+- Migrate call sites to capability traits; remove forwarding-heavy `impl Store` methods once call sites are updated.
+
+Concrete target: `store/mod.rs` no longer contains per-method backend `match` blocks for normal data paths.
+
+### 2) Docker executor: lifecycle modules with one orchestrator
+
+Replace single-file `docker.rs` with `executor/docker/` module tree:
+
+- `mod.rs` — `DockerExecutor` orchestration and `AgentExecutor` impl
+- `image.rs` — pull/build/tag/ensure image lifecycle
+- `workspace.rs` — volume identity, shared clone, worktree prep/cleanup
+- `recovery.rs` — startup reattach, orphan detection/cleanup
+- `io.rs` — run/terminate/log streaming/container wait paths
+- `types.rs` — shared structs/constants used across modules
+
+Rules:
+- no user-visible behavior changes
+- preserve existing labels, mount contract, recovery semantics
+- keep cross-module data flow explicit via typed structs (`DockerWorkspace`, `RehydrationPlan`, etc.)
+
+Concrete target: no single docker module exceeds ~900 lines.
+
+### 3) Provider command registry: provider-owned builders
+
+- Create `engine/provider_commands/` with a `ProviderCommandBuilder` trait:
+  - `build_command(...) -> Vec<String>`
+  - `apply_env(...)`
+- Move provider-specific command logic into modules:
+  - `claude.rs`, `codex.rs`, `gemini.rs`, `opencode.rs`
+- Add a registry lookup keyed by parsed backend string; `build_model_command()` becomes a thin delegator.
+- Keep unknown-model behavior parity through an explicit fallback builder (current fallback-to-Claude behavior).
+
+Concrete target: adding a provider requires adding a provider module + registration entry, with no central `match` branch growth.
+
+### 4) Mandatory sweep pass after each decomposition
+
+After store, provider, and docker changes, run stale-reference sweeps (code + docs + tests) to catch rename fallout early.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Macro-generate forwarding in `store/mod.rs` and keep current shape | Fewer handwritten lines, but responsibility concentration remains and session dispatch inconsistency survives | Hides pain instead of fixing boundaries |
+| Full rewrite of store/executor APIs in one big migration | Clean slate architecture | High semantic risk; violates pass contract of structural-not-semantic change |
+| Keep central provider switch and only extract helper functions | Small diff, easy review | Fails wave goal to make extension points trait/registry-based; central branching pressure remains |
+
+## Key decisions
+
+- **Decision: remove forwarding-heavy store façade instead of polishing it.**
+  - Why: boilerplate is the problem, not formatting.
+- **Decision: split docker by lifecycle ownership, not by technical primitive (git/docker/fs).**
+  - Why: lifecycle seams map to failure domains (image/workspace/recovery/IO).
+- **Decision: provider modules own command construction and env wiring.**
+  - Why: provider-specific behavior should evolve in provider-specific files.
+- **Decision: enforce sweep passes as part of implementation, not optional cleanup.**
+  - Why: prior direction-taxonomy work proved stale-reference blast radius is real.
+
+Wild success we are designing for:
+- new provider onboarding is a self-contained file addition
+- docker recovery bugs are fixed in `recovery.rs` without touching workspace/image code
+- store changes stop causing multi-domain merge conflicts in one hotspot file
+
+Wild failure we are designing against:
+- **Abstraction creep** (more traits/modules but same complexity): mitigate with line-count targets and deleting old façades.
+- **Over-decomposition** (indirection tax): cap store capability surfaces to wave/execution/session/admin only.
+- **New risk: async boundary mistakes in sqlite adapter** (blocking work accidentally running on async runtime): preserve `run_sqlite` as the only sqlite execution path.
 
 ## Scope
 
-### In scope
+- In scope:
+  - Store backend port + session trait unification + call-site migration
+  - Docker lifecycle module split with unchanged executor contract
+  - Provider command registry and provider-owned command/env builders
+  - Stale-reference sweep passes after each structural move
+- Out of scope:
+  - Prompt budgeting or prompt rendering behavior changes
+  - Trigger model changes (polling/webhooks)
+  - Flow language changes
+  - Session API behavior changes
+  - New product capabilities (per `wave/infra` Vision “Not here”)
 
-1. **Store boundary cleanup**
-   - Reduce or remove `impl Store` forwarding boilerplate.
-   - Unify session storage dispatch pattern with the rest of the store surface.
-   - Keep call sites clear and migration-safe.
-2. **Docker executor decomposition**
-   - Split `docker.rs` into focused modules by lifecycle boundary:
-     - image lifecycle
-     - workspace lifecycle
-     - recovery/reattach
-     - container IO
-   - Keep `AgentExecutor` behavior and external contract unchanged.
-3. **Provider command registry**
-   - Replace central switch-style command construction with provider-owned builders.
-   - New provider support should require adding a provider module, not editing central match logic.
-
-### Out of scope
-
-- Prompt budgeting algorithm changes
-- Trigger model changes (polling/webhooks)
-- Flow language changes
-- Session API behavior changes
-
-## Contract
-
-- Existing user-facing behavior remains stable (CLI flags, wave execution outcomes, session behavior).
-- Boundary changes are structural, not semantic.
-- Provider command behavior remains parity-checked per provider.
-
-## Learned from direction taxonomy
-
-Structural renames have higher stale-reference blast radius than expected. The direction restructuring required three gate passes to catch all stale references (docs, Swift previews, wave configs, test fixtures). Plan a sweep pass after each decomposition step — grep for old module paths and type names across the full repo, not just Rust.
-
-## Validation
+## Done when
 
 - `cargo fmt --all -- --check`
 - `cargo clippy -p loopflow --all-targets -- -D warnings`
@@ -56,9 +115,7 @@ Structural renames have higher stale-reference blast radius than expected. The d
 - `cargo test -p loopflow docker_`
 - `cargo test -p loopflow build_model_command`
 
-## Done when
-
-- `store` surface no longer pays heavy forwarding tax for normal call paths.
-- `docker` executor logic is decomposed into lifecycle-focused modules with clear ownership.
-- Provider command construction is trait/registry-based instead of central branching.
-- Existing behavior is preserved with passing tests and no contract regressions.
+And these observable outcomes hold:
+- `store/mod.rs` no longer carries forwarding-heavy normal call paths (wave goal: **"Eliminate boilerplate and duplicated patterns"**).
+- Docker executor logic is split into lifecycle-owned modules with `AgentExecutor` behavior parity (wave goal: **"Maintain architectural compactness as features grow"**).
+- Provider command construction is registry/trait based, not switch growth in central code (wave goal: **"Make extension points trait-based, not switch-based"**).

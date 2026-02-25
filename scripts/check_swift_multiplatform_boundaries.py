@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MAIN_REF = "main"
 
 MAC_ONLY_IMPORTS = {
     "AppKit",
@@ -30,8 +29,23 @@ PLATFORM_PREFIXES = (
 )
 
 
+def _resolve_main_ref() -> str:
+    for ref in ("main", "origin/main"):
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", ref],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return ref
+    raise RuntimeError("cannot find main branch as 'main' or 'origin/main'")
+
+
 def _run_git_diff(*paths: str) -> str:
-    cmd = ["git", "diff", "--no-color", "--unified=0", f"{MAIN_REF}...HEAD", "--", *paths]
+    base = _resolve_main_ref()
+    cmd = ["git", "diff", "--no-color", "--unified=0", f"{base}...HEAD", "--", *paths]
     result = subprocess.run(
         cmd,
         cwd=REPO_ROOT,

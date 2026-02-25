@@ -23,7 +23,9 @@ Ship this phase only when both repos pass the same end-to-end flow.
 ### In scope (`loopflow.remote`)
 
 - Replace studio `ConnectionValidator` path with cached JWKS validation in lfd
-- Validate claims (`iss`, `aud`, `exp`) and enforce `allowed_users`
+- Validate claims (`iss`, `aud`, `exp`, `nbf`) and enforce `allowed_users`; reject `alg:none`
+- JWKS fail-closed: reject Studio auth when keys unavailable on startup or stale on refresh; don't block startup
+- Operator docs: revocation window (cache TTL + refresh cadence) and JWKS outage behavior
 - Wire `TokenProvider` into API/event requests in Concerto
 - Add sign-in + daemon picker flow in connection UX
 - Keep static-token mode available as fallback
@@ -63,5 +65,8 @@ From laptop, verify both EC2 and Mac Mini lanes:
 
 - Studio-auth remote connection works end-to-end on both lanes
 - lfd auth is local-JWKS validated and resilient to auth-server latency
+- JWKS startup/refresh failures are fail-closed with explicit stale-key policy
+- JWT claim checks (`iss`, `aud`, `exp`, `nbf`) and `alg:none` rejection are enforced
+- Operator docs cover revocation window and JWKS outage behavior
 - Concerto UX supports sign-in, refresh, and machine selection without manual host entry
 - Failure modes are explicit (auth failed, token expired, no daemons, discovery unavailable)

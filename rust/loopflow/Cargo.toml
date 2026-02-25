@@ -23,10 +23,6 @@ path = "src/bin/lfd.rs"
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 
-[[bin]]
-name = "lf-agent"
-path = "src/bin/lf-agent.rs"
-
 # --- Dependencies from loopflow-engine ---
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }
@@ -67,7 +63,6 @@ git2 = "0.20"
 hmac = "0.12"
 humantime = "2"
 ipnet = "2"
-portable-pty = "0.9"
 reqwest = { version = "0.13", features = ["json"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }

@@ -44,6 +44,10 @@ Before adding more capability, reduce blast radius and make boundaries explicit.
 - Boundary changes are structural, not semantic.
 - Provider command behavior remains parity-checked per provider.
 
+## Learned from direction taxonomy
+
+Structural renames have higher stale-reference blast radius than expected. The direction restructuring required three gate passes to catch all stale references (docs, Swift previews, wave configs, test fixtures). Plan a sweep pass after each decomposition step — grep for old module paths and type names across the full repo, not just Rust.
+
 ## Validation
 
 - `cargo fmt --all -- --check`

@@ -24,8 +24,9 @@ loopflow is a "smart router" — 91k lines orchestrating coding agents, not reim
 - **Abstraction creep.** Refactoring for elegance can add lines instead of removing them. Every change should net-reduce or hold steady on LOC.
 - **Over-decomposition.** Splitting traits/modules too far creates indirection without value. The store should be 4-5 focused traits, not 15 micro-traits.
 - **Chasing peers.** opencode and convex made different tradeoffs for different reasons. Adopt patterns that fit loopflow's delegation model, not patterns that fight it.
+- **Stale reference blast radius.** Direction taxonomy restructuring required three gate iterations to catch all stale references across docs, Swift previews, and wave configs. Structural renames in Pass 1 (store/docker) will have similar blast radius — plan for a sweep pass.
 
-## Roadmap (3 passes)
+## Roadmap (4 passes)
 
 Deep-review findings shifted priority toward deconcentrating hotspot files before adding more feature surface.
 
@@ -44,7 +45,8 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 
 - Session harness trait work is already shipped (`lfd/sessions/harness/mod.rs`); remove it from future infra debt lists.
 - Quality directions are now shipped via direction taxonomy restructuring. Role-style directions (`infra-engineer`, `designer`, `product-engineer`) replaced with composable quality-focused groups (`infra/`, `ux/`, `craft/`, `creativity/`, `ceo/`). Gate and review steps updated with quality-language. Architecture report recommendations #2 (quality-tagged frontmatter) and #4 (API-boundary prompts) remain open.
-- `build.rs` codegen pattern is proven for compile-time discovery and validation. The same approach (scan directories, generate maps, fail on inconsistency) applies to Pass 2's SQL catalog validation.
+- `build.rs` codegen pattern is proven for compile-time discovery and validation. BFS expansion with dedup, compile-time directory scanning, `LazyLock<HashMap>` generation — all battle-tested. The same approach applies to Pass 2's SQL catalog validation.
 - Direction work was additive to `flow.rs`/`fork.rs`/`prompt.rs` — hotspot files from Pass 1 (`docker.rs`, `store/mod.rs`) were not disturbed. Confirms Pass 1 sequencing.
+- Stale references were the biggest friction source. Gate caught stale direction names in docs, Swift preview data, and wave configs across three iterations. Pass 1 renames will need a dedicated sweep.
 - Core risk moved from “too many features” to “too much responsibility in a few files.”
-- Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all three passes.
+- Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all four passes.

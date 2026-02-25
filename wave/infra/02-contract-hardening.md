@@ -22,6 +22,7 @@ Contract hardening keeps feature velocity without hidden regressions.
 2. **SQL catalog validation**
    - Add build-time checks for query coverage and placeholder sanity across SQLite/Postgres.
    - Fail fast on missing or malformed query definitions.
+   - Pattern proven by direction taxonomy: `build.rs` scans directories, generates `LazyLock<HashMap>`, validated at compile time. Apply the same approach to SQL catalog.
 3. **Invariant-focused test expansion**
    - Recovery invariants (startup cleanup, orphan handling, reattach expectations).
    - Workspace invariants (branch resolution precedence, ephemeral cleanup contract).

@@ -266,7 +266,6 @@ pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
     expanded
 }
 
-
 /// Check whether `name` is a direction group (user-defined directory or builtin group).
 fn resolve_direction_group(name: &str, repo: &Path) -> Option<Vec<String>> {
     let user_members = markdown_stems_in_dir(&repo.join(".lf/directions").join(name));

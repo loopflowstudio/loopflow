@@ -29,7 +29,8 @@ Repo-level groups (`.lf/directions/<group>/`) solve this for project-specific pr
 4. **Resolution integration**
    - Wave execution in lfd resolves direction aliases before passing to the engine's `expand_direction_names()`.
    - Resolution order: lfd aliases → repo groups → builtin groups → standalone pass-through.
-   - Aliases expand one level (no recursive alias resolution).
+   - Aliases expand one level (no recursive alias resolution). The engine's `expand_direction_names()` already handles recursive BFS expansion with dedup for builtin/repo groups — lfd aliases just prepend one resolution layer.
+   - Integration point: call `expand_direction_names()` in `flow.rs` already serves `prompt.rs`, `fork.rs`, and `lf/commands/flow.rs`. lfd alias resolution happens upstream in the executor before reaching this function.
 
 ### Out of scope
 

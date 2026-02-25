@@ -200,6 +200,25 @@ Test step body.
     }
 
     #[test]
+    fn prepare_launch_prompt_prefers_explicit_model_override() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                step: Some("test".to_string()),
+                model: Some("claude:sonnet".to_string()),
+                run_mode: Some("auto".to_string()),
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.launch.model.as_deref(), Some("claude:sonnet"));
+    }
+
+    #[test]
     fn prepare_launch_prompt_merges_config_directions_when_enabled() {
         let tmp = create_repo_fixture();
         let config = Config {
@@ -226,5 +245,28 @@ Test step body.
             .map(|direction| direction.name.clone())
             .collect();
         assert_eq!(names, vec!["config".to_string(), "thorough".to_string()]);
+    }
+
+    #[test]
+    fn prepare_launch_prompt_uses_config_area_when_enabled() {
+        let tmp = create_repo_fixture();
+        fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
+        fs::write(tmp.path().join("docs/README.md"), "area doc").expect("write area doc");
+        let config = Config {
+            area: Some("docs".to_string()),
+            ..default_test_config()
+        };
+
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                include_config_area: true,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.components.area.as_deref(), Some("docs"));
     }
 }

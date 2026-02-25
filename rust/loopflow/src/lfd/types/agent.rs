@@ -1,4 +1,4 @@
-//! Agent types.
+//! Agent run types.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -43,7 +43,7 @@ impl AgentStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Agent {
+pub struct AgentRun {
     pub id: LfdId,
     pub step: String,
     pub repo: String,
@@ -60,7 +60,7 @@ pub struct Agent {
     pub run_mode: String,
 }
 
-impl Agent {
+impl AgentRun {
     #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, step: String, repo: String, worktree: String) -> Self {
         Self {

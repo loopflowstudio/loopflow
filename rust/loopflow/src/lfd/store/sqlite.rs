@@ -18,7 +18,7 @@ use crate::lfd::store::rows::{
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    Agent, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
+    AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, LivePullRequestState, PendingActivation,
     QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStatus,
     WaveStatus,
 };
@@ -899,7 +899,7 @@ impl SqliteStore {
         Ok(deleted as u32)
     }
 
-    pub fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+    pub fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
         self.list_agent_history(None, None, None)
     }
 
@@ -908,7 +908,7 @@ impl SqliteStore {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<Agent>> {
+    ) -> StoreResult<Vec<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = Self::sql(list_agent_history_query(
             worktree.is_some(),
@@ -940,7 +940,7 @@ impl SqliteStore {
         Ok(runs)
     }
 
-    pub fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetAgentById))?;
         let run = stmt
@@ -949,7 +949,7 @@ impl SqliteStore {
         run.transpose()
     }
 
-    pub fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetWaitingAgentForWave))?;
         let run = stmt
@@ -961,7 +961,7 @@ impl SqliteStore {
         run.transpose()
     }
 
-    pub fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+    pub fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let started_at = agent
             .started_at
@@ -1017,7 +1017,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+    pub fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetActiveAgentsForWave))?;
         let rows = stmt.query_map(params![wave_id], |row| Ok(map_agent_row(row)))?;
@@ -1045,7 +1045,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+    pub fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let cutoff = now_unix() - older_than_secs as i64;
         let mut stmt = conn.prepare(Self::sql(Query::GetStuckAgents))?;

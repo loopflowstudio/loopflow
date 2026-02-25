@@ -23,7 +23,7 @@ use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
 use crate::lfd::security::{sanitize_fs_component, validate_safe_id};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    Agent, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
+    AgentRun, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
     WaveRunStatus, WaveStatus,
 };
 
@@ -318,8 +318,8 @@ pub(crate) fn build_agent_for_step(
     step: &ConcreteStep,
     status: AgentStatus,
     model: &str,
-) -> Agent {
-    Agent {
+) -> AgentRun {
+    AgentRun {
         id: LfdId::new(),
         step: step.step.name.clone(),
         repo: repo.to_string(),

@@ -29,7 +29,7 @@ use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{Agent, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{AgentRun, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
 
 use super::{handle_output_line, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
 
@@ -189,7 +189,7 @@ struct DockerWorkspace {
 
 #[derive(Debug, Clone)]
 struct ReattachTarget {
-    agent: Agent,
+    agent: AgentRun,
     wave_id: LfdId,
     wave_run_id: LfdId,
     container_id: String,
@@ -198,7 +198,7 @@ struct ReattachTarget {
 #[derive(Debug, Clone)]
 struct RehydrationPlan {
     reattach: Vec<ReattachTarget>,
-    lost: Vec<Agent>,
+    lost: Vec<AgentRun>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -455,7 +455,7 @@ impl DockerExecutor {
     async fn find_running_container(
         &self,
         backend: &dyn DockerRecoveryBackend,
-        agent: &Agent,
+        agent: &AgentRun,
     ) -> Result<Option<String>> {
         let container_name = Self::build_container_name(agent.id.as_str());
         let persisted_ref = agent
@@ -555,7 +555,7 @@ impl DockerExecutor {
     async fn reattach_agent(
         &self,
         output: &OutputHub,
-        agent: &Agent,
+        agent: &AgentRun,
         wave_id: &LfdId,
         wave_run_id: &LfdId,
     ) -> Result<i32> {
@@ -600,7 +600,7 @@ impl DockerExecutor {
 
     async fn finalize_reattached_agent(
         &self,
-        agent: &Agent,
+        agent: &AgentRun,
         wave_id: &LfdId,
         wave_run_id: &LfdId,
         result: Result<i32>,
@@ -650,7 +650,7 @@ impl DockerExecutor {
         Ok(())
     }
 
-    async fn mark_agent_lost(&self, agent: &Agent) -> Result<()> {
+    async fn mark_agent_lost(&self, agent: &AgentRun) -> Result<()> {
         let ended_at = OffsetDateTime::now_utc().unix_timestamp();
         let _ = self
             .store
@@ -2577,8 +2577,8 @@ mod tests {
         (wave, run)
     }
 
-    fn make_running_agent(run: &WaveRun, container_id: Option<&str>, name: &str) -> Agent {
-        Agent {
+    fn make_running_agent(run: &WaveRun, container_id: Option<&str>, name: &str) -> AgentRun {
+        AgentRun {
             id: LfdId::new(),
             step: name.to_string(),
             repo: run.snapshot.repo.clone(),

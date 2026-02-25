@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
-    Agent, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PendingActivation,
+    AgentRun, ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PendingActivation,
     QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
 };
 
@@ -300,7 +300,7 @@ impl Store {
         ExecutionStore::delete_fork_runs(self, wave_run_id, step_index).await
     }
 
-    pub async fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+    pub async fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
         ExecutionStore::list_agents(self).await
     }
 
@@ -309,19 +309,22 @@ impl Store {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<Agent>> {
+    ) -> StoreResult<Vec<AgentRun>> {
         ExecutionStore::list_agent_history(self, worktree, repo, limit).await
     }
 
-    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         ExecutionStore::get_agent(self, agent_id).await
     }
 
-    pub async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+    pub async fn get_waiting_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+    ) -> StoreResult<Option<AgentRun>> {
         ExecutionStore::get_waiting_agent_for_wave(self, wave_id).await
     }
 
-    pub async fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+    pub async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
         ExecutionStore::start_agent(self, agent).await
     }
 
@@ -339,7 +342,7 @@ impl Store {
         ExecutionStore::end_agent(self, agent_id, status, ended_at).await
     }
 
-    pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+    pub async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
         ExecutionStore::get_active_agents_for_wave(self, wave_id).await
     }
 
@@ -352,7 +355,7 @@ impl Store {
         ExecutionStore::end_active_agent_for_wave(self, wave_id, status, ended_at).await
     }
 
-    pub async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+    pub async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
         ExecutionStore::get_stuck_agents(self, older_than_secs).await
     }
 
@@ -582,16 +585,16 @@ pub trait ExecutionStore: Send + Sync {
     async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
     async fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
 
-    async fn list_agents(&self) -> StoreResult<Vec<Agent>>;
+    async fn list_agents(&self) -> StoreResult<Vec<AgentRun>>;
     async fn list_agent_history(
         &self,
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<Agent>>;
-    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>>;
-    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>>;
-    async fn start_agent(&self, agent: &Agent) -> StoreResult<()>;
+    ) -> StoreResult<Vec<AgentRun>>;
+    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>>;
+    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<AgentRun>>;
+    async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()>;
     async fn update_agent_status(
         &self,
         agent_id: &LfdId,
@@ -600,14 +603,14 @@ pub trait ExecutionStore: Send + Sync {
         container_id: Option<&str>,
     ) -> StoreResult<()>;
     async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
-    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>>;
+    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>>;
     async fn end_active_agent_for_wave(
         &self,
         wave_id: &LfdId,
         status: i32,
         ended_at: i64,
     ) -> StoreResult<()>;
-    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>>;
+    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>>;
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
 }
@@ -1128,7 +1131,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+    async fn list_agents(&self) -> StoreResult<Vec<AgentRun>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_agents()).await,
             StoreBackend::Postgres(store) => store.list_agents().await,
@@ -1140,7 +1143,7 @@ impl ExecutionStore for Store {
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<Agent>> {
+    ) -> StoreResult<Vec<AgentRun>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let worktree = worktree.map(str::to_string);
@@ -1154,7 +1157,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
+    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let agent_id = agent_id.clone();
@@ -1164,7 +1167,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+    async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<AgentRun>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
@@ -1177,7 +1180,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
+    async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let agent = agent.clone();
@@ -1224,7 +1227,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+    async fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<AgentRun>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
@@ -1259,7 +1262,7 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
+    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 run_sqlite(store, move |store| store.get_stuck_agents(older_than_secs)).await
@@ -1338,7 +1341,7 @@ mod tests {
     use super::{ExecutionStore, ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Agent, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
+        AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
         QueueBlock, QueueBlockReason, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind,
         Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
         WaveStatus,
@@ -1492,7 +1495,7 @@ mod tests {
             .expect("delete fork runs");
         assert_eq!(deleted_forks, 1);
 
-        let agent = Agent {
+        let agent = AgentRun {
             id: LfdId::new(),
             step: "plan".to_string(),
             repo: "/repo".to_string(),

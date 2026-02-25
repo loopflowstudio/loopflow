@@ -750,9 +750,15 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
     );
     assert!(wave_docs.iter().all(|d| !d.path.ends_with("MEMORY.md")));
 
-    assert_eq!(components.wave_memory.len(), 1);
-    assert_eq!(components.wave_memory[0].path, "wave/living/MEMORY.md");
-    assert!(components.wave_memory[0]
+    assert!(components.wave_memory.is_some());
+    assert_eq!(
+        components.wave_memory.as_ref().map(|doc| doc.path.as_str()),
+        Some("wave/living/MEMORY.md")
+    );
+    assert!(components
+        .wave_memory
+        .as_ref()
+        .expect("wave memory should be loaded")
         .content
         .contains("keep tests focused on behavior"));
 

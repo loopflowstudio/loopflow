@@ -7,7 +7,8 @@ use tracing::{debug, error, info, warn};
 use crate::engine::agent::build_agent_command;
 use crate::engine::flow::{ConcreteFork, ConcreteItem, ConcreteStep, Step};
 use crate::engine::fork::{
-    plan_fork_execution, ForkManifest, ForkManifestBranch, FORK_SYNTHESIZE_STEP,
+    plan_fork_execution, ForkManifest, ForkManifestBranch, FORK_MANIFEST_RELATIVE_PATH,
+    FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::worktree::create_worktree;
 use crate::lfd::id::LfdId;
@@ -19,8 +20,6 @@ use super::WaveExecutor;
 use crate::lfd::executor::helpers::{
     build_agent_capabilities, build_step_prompt, fork_worktree_path,
 };
-
-const FORK_MANIFEST_RELATIVE_PATH: &str = ".lf/fork-manifest.json";
 
 #[derive(Debug, Clone)]
 struct ForkBranchExecution {
@@ -98,6 +97,7 @@ impl WaveExecutor {
             let worktree = execution.run.worktree.clone();
             let fork_run_id = execution.run.id.clone();
             let branch_label = execution.label.clone();
+            let branch_name = execution.branch_name.clone();
             let branch_index = execution.run.branch_index as usize;
             let fork_run = execution.run.clone();
             let step = execution.step.clone();
@@ -165,6 +165,7 @@ impl WaveExecutor {
                     .launch_agent(AgentLaunchRequest {
                         wave_id: fork_wave_id.clone(),
                         wave_run_id: wave_run_id.clone(),
+                        branch: Some(branch_name),
                         repo: wave_repo.clone(),
                         worktree: worktree.clone(),
                         step: step.clone(),
@@ -254,9 +255,7 @@ impl WaveExecutor {
         }
         let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
 
-        let manifest = ForkManifest {
-            branches: outcomes.clone(),
-        };
+        let manifest = ForkManifest { branches: outcomes };
         let manifest_json = match serde_json::to_vec_pretty(&manifest) {
             Ok(json) => json,
             Err(err) => {

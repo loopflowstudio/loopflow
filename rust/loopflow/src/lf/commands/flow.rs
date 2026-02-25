@@ -1,12 +1,15 @@
 use crate::engine::fork::{
-    cleanup_fork_worktrees, fork_worktree_path, plan_fork_execution, write_fork_manifest,
-    ForkManifestBranch, FORK_SYNTHESIZE_STEP,
+    fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch,
+    FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
 use crate::engine::{expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
+use crate::lfd::executor::{
+    cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
+};
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -103,7 +106,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
                 branch_name
             )
         }) {
-            cleanup_fork_worktrees(None, &worktrees);
+            cleanup_fork_worktrees(&worktrees);
             return Err(err);
         }
 
@@ -169,15 +172,16 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     }
     let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
 
-    let manifest_path = match write_fork_manifest(repo, &outcomes) {
-        Ok(path) => path,
-        Err(err) => {
-            cleanup_fork_worktrees(None, &worktrees);
-            return Err(err.into());
-        }
-    };
+    let manifest = ForkManifest { branches: outcomes };
+    let manifest_json =
+        serde_json::to_vec_pretty(&manifest).context("failed to encode fork manifest as JSON")?;
+    if let Err(err) = write_workspace_file(repo, FORK_MANIFEST_RELATIVE_PATH, &manifest_json) {
+        cleanup_fork_worktrees(&worktrees);
+        return Err(err);
+    }
+
     let synthesize_result = crate::lf::commands::run::run(Some(FORK_SYNTHESIZE_STEP), message, cli);
-    cleanup_fork_worktrees(Some(&manifest_path), &worktrees);
+    cleanup_fork_artifacts(repo, &worktrees);
 
     synthesize_result?;
 
@@ -186,6 +190,30 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     }
 
     Ok(())
+}
+
+fn cleanup_fork_artifacts(repo: &Path, worktrees: &[PathBuf]) {
+    if let Err(err) = remove_workspace_file(repo, FORK_MANIFEST_RELATIVE_PATH) {
+        eprintln!(
+            "failed to remove fork manifest {} in {}: {}",
+            FORK_MANIFEST_RELATIVE_PATH,
+            repo.display(),
+            err
+        );
+    }
+    cleanup_fork_worktrees(worktrees);
+}
+
+fn cleanup_fork_worktrees(worktrees: &[PathBuf]) {
+    for worktree in worktrees {
+        if let Err(err) = cleanup_workspace_worktree(worktree) {
+            eprintln!(
+                "failed to clean up fork worktree {}: {}",
+                worktree.display(),
+                err
+            );
+        }
+    }
 }
 
 fn run_fork_branch(

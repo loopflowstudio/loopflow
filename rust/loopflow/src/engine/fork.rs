@@ -1,13 +1,10 @@
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::error::CoreError;
 use crate::engine::flow::ConcreteStep;
-use crate::engine::worktree::remove_worktree;
 
-const FORK_MANIFEST_FILE: &str = ".lf/fork-manifest.json";
+pub const FORK_MANIFEST_RELATIVE_PATH: &str = ".lf/fork-manifest.json";
 pub const FORK_SYNTHESIZE_STEP: &str = "synthesize";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -16,7 +13,7 @@ pub struct ForkManifest {
 }
 
 /// A single fork branch result. Used both as the execution outcome and the
-/// manifest entry persisted to `.lf/fork-manifest.json`.
+/// manifest entry persisted to [`FORK_MANIFEST_RELATIVE_PATH`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkManifestBranch {
     pub index: usize,
@@ -37,16 +34,11 @@ pub struct ForkBranchExecutionPlan {
 
 /// Compute sibling worktree path for a fork branch.
 ///
-/// Given `/tmp/myrepo` and index 2, returns `/tmp/myrepo.fork-2`.
+/// Given `/tmp/myrepo` and index 2, returns `/tmp/myrepo-fork-2`.
 pub fn fork_worktree_path(repo: &Path, index: usize) -> PathBuf {
-    let name = repo
-        .file_name()
-        .expect("repo path should have a file name")
-        .to_string_lossy()
-        .into_owned();
-    repo.parent()
-        .expect("repo path should have a parent directory")
-        .join(format!("{name}.fork-{index}"))
+    let mut path = repo.as_os_str().to_os_string();
+    path.push(format!("-fork-{index}"));
+    PathBuf::from(path)
 }
 
 /// Merge base directions with extra directions, preserving order and deduplicating.
@@ -90,84 +82,16 @@ pub fn plan_fork_execution(
     (0..branches.len()).map(build_branch).collect()
 }
 
-/// Write fork manifest to `.lf/fork-manifest.json` in the repo root.
-pub fn write_fork_manifest(
-    repo: &Path,
-    branches: &[ForkManifestBranch],
-) -> Result<PathBuf, CoreError> {
-    let manifest_path = repo.join(FORK_MANIFEST_FILE);
-    if let Some(parent) = manifest_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let manifest = ForkManifest {
-        branches: branches.to_vec(),
-    };
-    let json =
-        serde_json::to_string_pretty(&manifest).map_err(|e| CoreError::IoError(e.to_string()))?;
-    std::fs::write(&manifest_path, json)?;
-    Ok(manifest_path)
-}
-
-/// Remove fork worktrees and optionally the manifest file.
-pub fn cleanup_fork_worktrees(manifest_path: Option<&Path>, worktrees: &[PathBuf]) {
-    if let Some(manifest_path) = manifest_path {
-        if let Err(err) = std::fs::remove_file(manifest_path) {
-            if err.kind() != ErrorKind::NotFound {
-                eprintln!(
-                    "failed to remove fork manifest {}: {}",
-                    manifest_path.display(),
-                    err
-                );
-            }
-        }
-    }
-
-    std::thread::scope(|s| {
-        for worktree in worktrees {
-            s.spawn(|| {
-                if let Err(err) = remove_worktree(worktree, true) {
-                    eprintln!(
-                        "failed to clean up fork worktree {}: {}",
-                        worktree.display(),
-                        err
-                    );
-                }
-            });
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::flow::{ConcreteStep, Step};
-    use tempfile::tempdir;
 
     #[test]
-    fn fork_worktree_path_uses_dotted_sibling_convention() {
+    fn fork_worktree_path_uses_dash_suffix() {
         let repo = PathBuf::from("/tmp/loopflow.remote.feature");
         let fork = fork_worktree_path(&repo, 2);
-        assert_eq!(fork, PathBuf::from("/tmp/loopflow.remote.feature.fork-2"));
-    }
-
-    #[test]
-    fn write_fork_manifest_persists_branch_results() {
-        let tmp = tempdir().expect("tempdir");
-        let branches = vec![ForkManifestBranch {
-            index: 1,
-            step: "reduce".to_string(),
-            direction: "designer".to_string(),
-            worktree: "/tmp/repo.fork-1".to_string(),
-            branch: "feature-fork-1".to_string(),
-            exit_code: 0,
-        }];
-
-        let path = write_fork_manifest(tmp.path(), &branches).expect("write manifest");
-        let raw = std::fs::read_to_string(path).expect("read manifest");
-        let manifest: ForkManifest = serde_json::from_str(&raw).expect("parse manifest");
-
-        assert_eq!(manifest.branches, branches);
+        assert_eq!(fork, PathBuf::from("/tmp/loopflow.remote.feature-fork-2"));
     }
 
     #[test]
@@ -235,7 +159,7 @@ mod tests {
                 index: 0,
                 step: "reduce".to_string(),
                 direction: "designer".to_string(),
-                worktree: "/tmp/repo.fork-0".to_string(),
+                worktree: "/tmp/repo-fork-0".to_string(),
                 branch: "main-fork-0".to_string(),
                 exit_code: 0,
             },
@@ -243,7 +167,7 @@ mod tests {
                 index: 1,
                 step: "reduce".to_string(),
                 direction: "infra".to_string(),
-                worktree: "/tmp/repo.fork-1".to_string(),
+                worktree: "/tmp/repo-fork-1".to_string(),
                 branch: "main-fork-1".to_string(),
                 exit_code: 42,
             },

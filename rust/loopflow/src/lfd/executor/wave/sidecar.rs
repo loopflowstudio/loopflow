@@ -142,6 +142,7 @@ impl WaveExecutor {
             .launch_agent(AgentLaunchRequest {
                 wave_id: wave.id().clone(),
                 wave_run_id: run.id.clone(),
+                branch: Some(run.branch.clone()),
                 repo: run.snapshot.repo.clone(),
                 worktree: run.worktree.clone(),
                 step,

@@ -15,6 +15,7 @@ use crate::lfd::executor::AgentRunContext;
 pub(super) struct AgentLaunchRequest {
     pub wave_id: LfdId,
     pub wave_run_id: LfdId,
+    pub branch: Option<String>,
     pub repo: String,
     pub worktree: String,
     pub step: ConcreteStep,
@@ -34,33 +35,45 @@ impl WaveExecutor {
         &self,
         request: AgentLaunchRequest,
     ) -> Result<AgentLaunchOutcome> {
+        let AgentLaunchRequest {
+            wave_id,
+            wave_run_id,
+            branch,
+            repo,
+            worktree,
+            step,
+            model,
+            cmd,
+            output_prefix,
+        } = request;
         let agent = build_agent_for_step(
-            &request.wave_run_id,
-            &request.repo,
-            &request.worktree,
-            &request.step,
+            &wave_run_id,
+            &repo,
+            &worktree,
+            &step,
             AgentStatus::Running,
-            &request.model,
+            &model,
         );
         let agent_id = agent.id.clone();
         self.store.start_agent(&agent).await?;
         self.event_hub.send(Event::agent_started(
             agent_id.clone(),
-            request.step.step.name.clone(),
-            request.worktree.clone(),
+            step.step.name.clone(),
+            worktree.clone(),
         ));
 
         let exit_code = self
             .runner
             .run(
-                request.cmd,
-                Path::new(&request.worktree),
+                cmd,
+                Path::new(&worktree),
                 AgentRunContext {
-                    wave_id: request.wave_id.as_str(),
+                    wave_id: wave_id.as_str(),
                     agent_id: agent_id.as_str(),
-                    wave_run_id: request.wave_run_id.as_str(),
+                    wave_run_id: wave_run_id.as_str(),
+                    branch: branch.as_deref(),
                     output: &self.output,
-                    output_prefix: request.output_prefix.as_deref(),
+                    output_prefix: output_prefix.as_deref(),
                 },
             )
             .await;

@@ -17,7 +17,7 @@ use crate::lfd::types::Wave;
 pub use helpers::{create_wave_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
-fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
+pub(crate) fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
     let path = cwd.join(relative_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -26,7 +26,7 @@ fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Resu
     Ok(())
 }
 
-fn remove_workspace_file(cwd: &Path, relative_path: &str) -> Result<()> {
+pub(crate) fn remove_workspace_file(cwd: &Path, relative_path: &str) -> Result<()> {
     let path = cwd.join(relative_path);
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -35,7 +35,7 @@ fn remove_workspace_file(cwd: &Path, relative_path: &str) -> Result<()> {
     }
 }
 
-fn cleanup_host_worktree(worktree: &Path) -> Result<()> {
+pub(crate) fn cleanup_workspace_worktree(worktree: &Path) -> Result<()> {
     if !worktree.exists() {
         return Ok(());
     }
@@ -53,6 +53,7 @@ pub struct AgentRunContext<'a> {
     pub wave_id: &'a str,
     pub agent_id: &'a str,
     pub wave_run_id: &'a str,
+    pub branch: Option<&'a str>,
     pub output: &'a OutputHub,
     pub output_prefix: Option<&'a str>,
 }
@@ -94,12 +95,15 @@ pub trait AgentExecutor: Send + Sync {
         remove_workspace_file(cwd, relative_path)
     }
     async fn cleanup_ephemeral_worktree(&self, _repo: &Path, worktree: &Path) -> Result<()> {
-        cleanup_host_worktree(worktree)
+        cleanup_workspace_worktree(worktree)
     }
     async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
         Ok(StartupRecovery::default())
     }
-    async fn cleanup_wave(&self, _wave: &Wave) -> Result<()> {
+    async fn ensure_wave_workspace(&self, _wave: &Wave) -> Result<()> {
+        Ok(())
+    }
+    async fn cleanup_wave_workspace(&self, _wave: &Wave) -> Result<()> {
         Ok(())
     }
 }

@@ -12,7 +12,6 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
-use crate::lfd::config::ExecutorType;
 use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
     stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
@@ -210,7 +209,7 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    if let Err(err) = ensure_local_wave_worktree(&state, &wave).await {
+    if let Err(err) = ensure_wave_workspace(&state, &wave).await {
         let wave_id = wave.id().clone();
         let _ = state.store.delete_wave(&wave_id).await;
         return Err(err);
@@ -245,25 +244,20 @@ pub async fn create_wave_handler(
     Ok(Json(view))
 }
 
-async fn ensure_local_wave_worktree(
+async fn ensure_wave_workspace(
     state: &HttpState,
     wave: &Wave,
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
-    if state.executor.executor_type() != ExecutorType::Local {
-        return Ok(());
-    }
-
-    let repo_for_wt = wave.repo().clone();
-    let name_for_wt = wave.name().clone();
-    run_blocking_result(
-        move || {
-            ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
-                .map(|_| ())
-                .map_err(|err| format!("failed to create worktree: {err}"))
-        },
-        StatusCode::INTERNAL_SERVER_ERROR,
-    )
-    .await
+    state
+        .executor
+        .ensure_wave_workspace(wave)
+        .await
+        .map_err(|err| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiMessage::Untrusted(format!("failed to create worktree: {err}")),
+            )
+        })
 }
 
 fn parse_stimulus(
@@ -439,14 +433,12 @@ pub async fn delete_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    if state.executor.executor_type() == ExecutorType::Docker {
-        if let Err(err) = state.executor.cleanup_wave_workspace(&wave).await {
-            warn!(
-                wave_id = %wave.id(),
-                error = %err,
-                "failed to remove docker-backed wave workspace"
-            );
-        }
+    if let Err(err) = state.executor.cleanup_wave_workspace(&wave).await {
+        warn!(
+            wave_id = %wave.id(),
+            error = %err,
+            "failed to remove executor wave workspace"
+        );
     }
 
     // Clean up the worktree on disk.

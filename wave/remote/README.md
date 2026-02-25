@@ -46,15 +46,6 @@ Keep ownership crisp:
 
 Phase 05 (remote connection correctness) and Phase 06 (remote editor/terminal access) were folded into step 0 and are treated as shipped baseline behavior.
 
-Phase docs for remaining work live in this directory:
-
-- `01-ec2-dogfood.md`
-- `02-mac-mini-dogfood.md`
-- `03-fork-executor-cleanup.md`
-- `04-studio-auth.md`
-- `05-api-expansion.md`
-- `06-hosted.md`
-
 ## Goals
 
 - Keep protocol parity: Concerto talks to local and remote lfd via the same HTTP/WS surface *(validated: bundled and remote modes use identical handshake pipeline — TLS/auth/repo discovery/ws probe)*
@@ -69,30 +60,3 @@ Phase docs for remaining work live in this directory:
 - **Remote file access depends on editor SSH support.** Cursor/VSCode/Zed each have different Remote SSH implementations. If any breaks or changes behavior, the one-click workflow breaks for that editor. Mitigate: "Copy SSH Command" as universal fallback.
 - **Agent timeout configuration surface.** `executor.agent_timeout` is daemon-config only. If users need per-wave or per-session timeouts, the config model needs rethinking. Defer until dogfooding reveals whether this is a real need.
 - **Scope drift before dogfood.** New API/auth surface is easy to add before we have enough EC2/Mac Mini runtime data. Mitigate: run and fix deployment smoke first, then expand surface.
-
-## Update after Phase 01E (Docker fork parity)
-
-Phases 01A–01E are fully shipped. What we now treat as non-negotiable for remote work:
-
-- Fork semantics are the same in CLI, daemon, and Docker executor: run all branches, then synthesize.
-- Docker forks use sibling worktrees in container volumes (`/workspace/repos/<repo>/worktrees/<wave>-fork-N`).
-- Scheduler slot release and orphan-fork cleanup must be restart-safe (covers both native and Docker).
-- Agent timeout is explicit operator config (`executor.agent_timeout`), not hidden watchdog behavior.
-- Executor trait abstraction (`AgentExecutor`) handles workspace file ops — no Docker-specific downcasts in fork orchestration.
-
-### Known limitation: host-side git worktrees for prompt assembly
-
-Docker fork branches still rely on host-side git worktrees for prompt assembly (`build_step_prompt` needs local step/context files before container launch). This is acceptable — prompt assembly happens before container launch, and the worktrees are cleaned up after the fork completes. Moving to host placeholder dirs would require either pre-prompt container→host sync or a prompt build path that doesn't depend on host worktree materialization.
-
-### Open questions for deployment
-
-- Do we expose `executor.agent_timeout` in Concerto connection settings, or keep it daemon-config only in v1?
-- Should remote capability warnings live in wave detail only, or also in wave edit/config surfaces?
-- Connection settings now show Bundled/Remote mode. When studio auth ships, does "Remote" split into "Remote (static token)" and "Remote (studio auth)", or does studio auth replace static token for the Concerto UI path?
-
-## Metrics
-
-- Remote Concerto sessions can perform wave CRUD, event streaming, and log access over WAN
-- SSE chat events and WebSocket run events both succeed through TLS proxy paths
-- Remote workflows preserve local behavior expectations (same protocol semantics, auth-gated access)
-- One-click wave-to-editor workflow works via Remote SSH

@@ -113,7 +113,7 @@ Stream events (replay + live tail):
 curl -N "http://127.0.0.1:2486/v0/sessions/<session_id>/events"
 ```
 
-Supported harnesses: `codex`, `claude`. Session item payloads use normalized item types:
+Supported harnesses: `codex`, `claude`, `opencode`. Session item payloads use normalized item types:
 `command`, `file`, `message`, `thought`, and generic `tool`.
 
 Stop the session:

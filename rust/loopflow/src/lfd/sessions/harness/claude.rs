@@ -8,8 +8,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::engine::agent::AgentConfig;
-use crate::engine::config::parse_model;
+use crate::engine::agent::{AgentConfig, ClaudeArgs};
 use crate::lfd::sessions::harness::claude_mapping::ReaderState;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::sessions::harness::{claude_mapping, Harness, HarnessError};
@@ -35,43 +34,22 @@ impl std::fmt::Debug for ClaudeHarness {
 
 /// Build CLI args for a Claude invocation.
 fn build_args(content: &str, config: &AgentConfig, resume_id: Option<&str>) -> Vec<String> {
-    let mut args = vec![
-        "-p".to_string(),
-        content.to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-    ];
+    let mut args = vec!["-p".to_string(), content.to_string()];
 
-    if let Some(id) = resume_id {
-        args.push("--resume".to_string());
-        args.push(id.to_string());
-    }
-
-    if let Some(model) = &config.model {
-        let (backend, variant) = parse_model(model);
-        let model = if backend == "claude" {
-            variant.unwrap_or_else(|| model.to_string())
-        } else {
-            model.to_string()
-        };
-        args.push("--model".to_string());
-        args.push(model);
-    }
-
-    if config.skip_permissions {
-        args.push("--dangerously-skip-permissions".to_string());
-    }
-
-    if let Some(max_turns) = config.max_turns {
-        args.push("--max-turns".to_string());
-        args.push(max_turns.to_string());
-    }
-
-    if !config.system_prompt.trim().is_empty() {
-        args.push("--append-system-prompt".to_string());
-        args.push(config.system_prompt.clone());
-    }
+    let claude_args = ClaudeArgs {
+        model: config
+            .model
+            .as_deref()
+            .and_then(ClaudeArgs::resolve_model),
+        system_prompt: Some(config.system_prompt.clone()),
+        system_prompt_file: None,
+        skip_permissions: config.skip_permissions,
+        max_turns: config.max_turns,
+        stream: true,
+        chrome: false,
+        resume_id: resume_id.map(str::to_string),
+    };
+    args.extend(claude_args.to_args());
 
     args
 }

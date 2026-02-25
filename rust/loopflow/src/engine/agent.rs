@@ -90,6 +90,92 @@ pub struct AgentCapabilities {
     pub chrome: bool,
 }
 
+/// Common Claude CLI arguments shared across engine and session paths.
+///
+/// Both `build_claude_command` (engine one-shot) and the session harness
+/// `build_args` construct a `ClaudeArgs` and call `to_args()`, then add
+/// their mode-specific flags on top (`--print` for engine, `-p` for harness).
+#[derive(Debug, Clone, Default)]
+pub struct ClaudeArgs {
+    /// Model variant (already resolved, no "claude:" prefix).
+    pub model: Option<String>,
+    /// System prompt text for `--append-system-prompt`.
+    pub system_prompt: Option<String>,
+    /// System prompt file for `--append-system-prompt-file` (takes precedence over text).
+    pub system_prompt_file: Option<std::path::PathBuf>,
+    /// Skip permission prompts.
+    pub skip_permissions: bool,
+    /// Max turn budget.
+    pub max_turns: Option<u32>,
+    /// Enable streaming output (`--output-format stream-json --verbose`).
+    pub stream: bool,
+    /// Enable Chrome integration.
+    pub chrome: bool,
+    /// Resume an existing Claude Code session.
+    pub resume_id: Option<String>,
+}
+
+impl ClaudeArgs {
+    /// Resolve a model string to a Claude `--model` variant.
+    ///
+    /// Strips the `claude:` prefix if present, applies defaults (bare `"claude"` → `"opus"`),
+    /// and passes through non-claude model strings unchanged.
+    pub fn resolve_model(model: &str) -> Option<String> {
+        let (backend, variant) = parse_model(model);
+        if backend == "claude" {
+            variant
+        } else {
+            Some(model.to_string())
+        }
+    }
+
+    /// Build `Vec<String>` of Claude CLI args (without program name or prompt content).
+    pub fn to_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+
+        if self.chrome {
+            args.push("--chrome".to_string());
+        }
+
+        if let Some(ref model) = self.model {
+            args.push("--model".to_string());
+            args.push(model.clone());
+        }
+
+        if let Some(ref file) = self.system_prompt_file {
+            args.push("--append-system-prompt-file".to_string());
+            args.push(file.to_string_lossy().to_string());
+        } else if let Some(ref text) = self.system_prompt {
+            if !text.trim().is_empty() {
+                args.push("--append-system-prompt".to_string());
+                args.push(text.clone());
+            }
+        }
+
+        if self.skip_permissions {
+            args.push("--dangerously-skip-permissions".to_string());
+        }
+
+        if let Some(max_turns) = self.max_turns {
+            args.push("--max-turns".to_string());
+            args.push(max_turns.to_string());
+        }
+
+        if self.stream {
+            args.push("--output-format".to_string());
+            args.push("stream-json".to_string());
+            args.push("--verbose".to_string());
+        }
+
+        if let Some(ref id) = self.resume_id {
+            args.push("--resume".to_string());
+            args.push(id.clone());
+        }
+
+        args
+    }
+}
+
 /// Build Claude CLI command.
 pub fn build_claude_command(
     launch: &AgentConfig,
@@ -99,39 +185,20 @@ pub fn build_claude_command(
 ) -> Vec<String> {
     let mut cmd = vec!["claude".to_string()];
 
-    if capabilities.chrome {
-        cmd.push("--chrome".to_string());
-    }
-
-    if let Some(variant) = model_variant {
-        cmd.push("--model".to_string());
-        cmd.push(variant.to_string());
-    }
-
-    // Load context via system prompt file for cleaner input history
-    if let Some(ref context_file) = process.context_file {
-        cmd.push("--append-system-prompt-file".to_string());
-        cmd.push(context_file.to_string_lossy().to_string());
-    } else if !launch.system_prompt.trim().is_empty() {
-        cmd.push("--append-system-prompt".to_string());
-        cmd.push(launch.system_prompt.clone());
-    }
+    let claude_args = ClaudeArgs {
+        model: model_variant.map(str::to_string),
+        system_prompt: Some(launch.system_prompt.clone()),
+        system_prompt_file: process.context_file.clone(),
+        skip_permissions: process.auto || launch.skip_permissions,
+        max_turns: launch.max_turns,
+        stream: process.auto && process.stream,
+        chrome: capabilities.chrome,
+        resume_id: None,
+    };
+    cmd.extend(claude_args.to_args());
 
     if process.auto {
         cmd.push("--print".to_string());
-        cmd.push("--dangerously-skip-permissions".to_string());
-        if process.stream {
-            cmd.push("--output-format".to_string());
-            cmd.push("stream-json".to_string());
-            cmd.push("--verbose".to_string());
-        }
-    } else if launch.skip_permissions {
-        cmd.push("--dangerously-skip-permissions".to_string());
-    }
-
-    if let Some(max_turns) = launch.max_turns {
-        cmd.push("--max-turns".to_string());
-        cmd.push(max_turns.to_string());
     }
 
     cmd
@@ -910,5 +977,109 @@ mod tests {
         assert!(cmd.contains(&"--model".to_string()));
         assert!(cmd.contains(&"anthropic/claude-sonnet".to_string()));
         assert_eq!(*cmd.last().unwrap(), "fix the bug");
+    }
+
+    // ── ClaudeArgs ────────────────────────────────────────────────
+
+    #[test]
+    fn claude_args_empty() {
+        let args = ClaudeArgs::default().to_args();
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn claude_args_model() {
+        let args = ClaudeArgs {
+            model: Some("opus".to_string()),
+            ..Default::default()
+        }
+        .to_args();
+        assert_eq!(args, vec!["--model", "opus"]);
+    }
+
+    #[test]
+    fn claude_args_system_prompt_file_takes_precedence() {
+        let args = ClaudeArgs {
+            system_prompt: Some("inline text".to_string()),
+            system_prompt_file: Some("/tmp/context.md".into()),
+            ..Default::default()
+        }
+        .to_args();
+        assert!(args.contains(&"--append-system-prompt-file".to_string()));
+        assert!(args.contains(&"/tmp/context.md".to_string()));
+        assert!(!args.contains(&"--append-system-prompt".to_string()));
+    }
+
+    #[test]
+    fn claude_args_system_prompt_text() {
+        let args = ClaudeArgs {
+            system_prompt: Some("Be concise".to_string()),
+            ..Default::default()
+        }
+        .to_args();
+        assert_eq!(
+            args,
+            vec!["--append-system-prompt", "Be concise"]
+        );
+    }
+
+    #[test]
+    fn claude_args_empty_system_prompt_skipped() {
+        let args = ClaudeArgs {
+            system_prompt: Some("  ".to_string()),
+            ..Default::default()
+        }
+        .to_args();
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn claude_args_all_flags() {
+        let args = ClaudeArgs {
+            model: Some("sonnet".to_string()),
+            system_prompt: Some("Be brief".to_string()),
+            system_prompt_file: None,
+            skip_permissions: true,
+            max_turns: Some(10),
+            stream: true,
+            chrome: true,
+            resume_id: Some("sess_abc".to_string()),
+        }
+        .to_args();
+        assert!(args.contains(&"--chrome".to_string()));
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"sonnet".to_string()));
+        assert!(args.contains(&"--append-system-prompt".to_string()));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(args.contains(&"--max-turns".to_string()));
+        assert!(args.contains(&"10".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+        assert!(args.contains(&"--resume".to_string()));
+        assert!(args.contains(&"sess_abc".to_string()));
+    }
+
+    #[test]
+    fn claude_args_resolve_model_bare() {
+        // "claude" → default variant "opus"
+        assert_eq!(ClaudeArgs::resolve_model("claude"), Some("opus".to_string()));
+    }
+
+    #[test]
+    fn claude_args_resolve_model_with_variant() {
+        assert_eq!(
+            ClaudeArgs::resolve_model("claude:sonnet"),
+            Some("sonnet".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_args_resolve_model_full_string() {
+        // Non-claude backend passes through unchanged
+        assert_eq!(
+            ClaudeArgs::resolve_model("claude-sonnet-4-5-20250514"),
+            Some("claude-sonnet-4-5-20250514".to_string())
+        );
     }
 }

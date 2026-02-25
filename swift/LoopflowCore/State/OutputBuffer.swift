@@ -68,8 +68,7 @@ public final class OutputBuffer {
     }
 
     public func clearOutput(for waveId: String) {
-        streamTasks[waveId]?.cancel()
-        streamTasks.removeValue(forKey: waveId)
+        cancelStream(for: waveId)
         waveOutput.removeValue(forKey: waveId)
     }
 
@@ -110,8 +109,7 @@ public final class OutputBuffer {
 
     /// Stop streaming for a wave (e.g. when deselected).
     public func stopStreaming(waveId: String) {
-        streamTasks[waveId]?.cancel()
-        streamTasks.removeValue(forKey: waveId)
+        cancelStream(for: waveId)
     }
 
     /// Most recent output line for a wave (for activity summary display).
@@ -142,5 +140,11 @@ public final class OutputBuffer {
 
     public func hasActiveSession(for waveId: String) -> Bool {
         interactiveSession?.waveId == waveId
+    }
+
+    private func cancelStream(for waveId: String) {
+        streamTasks[waveId]?.cancel()
+        streamTasks.removeValue(forKey: waveId)
+        streamGeneration.removeValue(forKey: waveId)
     }
 }

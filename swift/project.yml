@@ -37,6 +37,9 @@ targets:
         excludes:
           - Info.plist
           - Fonts
+          - Platform/macOS
+      - path: Concerto/Platform/macOS
+        destinationFilters: [macOS]
       - path: Concerto/Fonts
         buildPhase: resources
         type: folder

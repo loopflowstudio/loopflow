@@ -32,9 +32,9 @@ Single-target multiplatform build with iOS shells and platform boundaries. The a
 
 ## What remains
 
-**Interactive end-to-end validation** is light. Build coverage is confirmed but full device flows (connection setup → connect to lfd → wave list → detail → output) haven't been validated against a live lfd on simulator.
+**Interactive end-to-end validation** is light. Build coverage is confirmed but full device flows (connection setup → connect to lfd → wave list → detail → output) haven't been validated against a live lfd on simulator. Blocked on headless simulator interaction primitives — needs either manual testing or a UI automation target.
 
-**Migrate macOS views to `Platform/macOS/`.** ~40 files in `Concerto/Views/` and `Concerto/Services/` have whole-file `#if os(macOS)` gates. They should move to `Concerto/Platform/macOS/` to match the iOS directory convention and reduce visual noise. Pure mechanical move—no behavior change.
+~~**Migrate macOS views to `Platform/macOS/`.**~~ *Done. ~40 files moved. Mixed-platform files (LiveOutput.swift, WaveChatView.swift) left in `Concerto/Views/` intentionally — they have partial `#if` guards, not whole-file gates. `project.yml` destination filters keep Platform/macOS sources macOS-only.*
 
 ## What to build
 

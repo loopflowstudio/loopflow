@@ -26,26 +26,11 @@ No session awareness or handoff needed. Multiple clients just connect and see th
 
 iOS Concerto connects to a remote lfd (no local daemon). Needs:
 
-- Connection setup screen (host, port, optional auth token)
-- Saved connection profiles (like SSH configs)
+- Connection setup screen (host, port, optional auth token) — *shipped in Stage 01 as ConnectionSetupView*
+- Saved connection profiles (like SSH configs) — *revisit here if needed; Stage 01 tried ConnectionProfile and removed it — ConnectionStore with ConnectionMode (bundled/remote) was sufficient for single-connection use*
 - Reconnect handling (mobile goes to background, comes back)
 
-```swift
-// In LoopflowCore
-public struct ConnectionProfile: Codable, Identifiable, Sendable, Hashable {
-    public let id: UUID
-    public var name: String           // "My Mac", "Dev Server"
-    public var connection: ServerConnection
-    public var lastConnectedAt: Date?
-}
-
-public final class ConnectionProfileStore {
-    public func profiles() -> [ConnectionProfile]
-    public func save(_ profile: ConnectionProfile)
-    public func delete(_ id: UUID)
-    public func mostRecent() -> ConnectionProfile?
-}
-```
+**Note from Stage 01:** ConnectionProfileStore was prototyped and removed. The current ConnectionStore handles one active connection. If multi-client needs multiple saved connections (e.g., switching between lfds), reintroduce profiles. If users only connect to one lfd at a time, the current model may suffice — just persist the last-used host:port.
 
 ### Reconnect resilience
 

@@ -37,9 +37,9 @@ A living wave:
 
 ## Metrics
 
-- Agent in run N can read observations written by agent in run N-1
-- Memory stays under budget without manual intervention (consolidation keeps it trim)
-- Cold start (new wave, no memory) is indistinguishable from current behavior
+- ~~Agent in run N can read observations written by agent in run N-1~~ **Verified** — Phase 02 wires `MEMORY.md` into prompt assembly via `DocumentSource::WaveMemory`
+- Memory stays under budget without manual intervention (trimming drops memory before summaries/docs; ops steps distill into canonical docs)
+- ~~Cold start (new wave, no memory) is indistinguishable from current behavior~~ **Verified** — absent `MEMORY.md` shows `(no memory yet)` marker, no errors
 - ~~Skill injection works across all three launch paths (CLI, session, wave executor)~~ **Verified** — Phase 01 wired injection into CLI, wave executor, and sessions
 
 ## Phases
@@ -47,15 +47,27 @@ A living wave:
 | # | Phase | What it unlocks | Status |
 |---|-------|----------------|--------|
 | 01 | Skill injection | Agents see loopflow steps/directions as native commands | shipped |
-| 02 | Wave memory | Agents read/write durable observations scoped to their wave | next |
-| 03 | Surface-adaptive prompts | Same step adapts to headless, session, TUI, mobile | |
-| 04 | Memory lifecycle | Consolidation, aging, inheritance on split-wave | |
+| 02 | Wave memory | Agents read/write durable observations scoped to their wave | shipped |
+| 03 | Surface-adaptive prompts | Same step adapts to headless, session, TUI, mobile | next |
+| 04 | Memory lifecycle | Aging, inheritance on split-wave, read-failure logging | |
 
 ### Phase 01 retrospective
 
 Shipped simpler than designed. The `collect_injectable_skills()` abstraction from the original design collapsed into `inject_skills()` which does collection and writing in one pass. Track-and-remove cleanup works. One gate fix was needed: sessions had to thread `repo_root` separately from `cwd` to discover repo-local steps when the working directory differs from the repo root.
 
 Scope narrower than planned: only builtins and repo-local steps/directions are injected. Global `~/.lf/steps/` and external skill sources (superpowers, rams) are not yet included. This is fine — the pattern is established and extending it is straightforward.
+
+### Phase 02 retrospective
+
+Shipped simpler than designed — again. The original design specified a `memory/` directory with topic files (`SUMMARY.md`, `codebase.md`, `patterns.md`, `preferences.md`). This collapsed into a single `wave/<wave>/MEMORY.md` file. A single file is easier to reason about, easier for agents to write, and creates natural size pressure — one file can't grow invisibly the way a directory of topic files can.
+
+Memory distillation landed in `update-wave` and `add-to-wave` ops prompts rather than extending the `consolidate` step. This is lighter-weight: ops steps that already touch wave docs now also prune memory, rather than adding a separate memory-consolidation pass.
+
+Trimming order (memory drops before summaries/docs) is the right default. Task context matters more than accumulated observations — an agent that forgets past patterns but can see the current diff will do better than one that remembers everything but can't see what it's working on.
+
+Two known gaps remain:
+1. **Persistence across execution surfaces.** Unverified whether any headless/session path could lose `MEMORY.md` edits due to detached workspaces. Open question tracked in `scratch/questions.md`.
+2. **Read-failure visibility.** `MEMORY.md` read errors soft-fail silently. Acceptable for now but should get logging before memory becomes load-bearing.
 
 ## Architecture
 

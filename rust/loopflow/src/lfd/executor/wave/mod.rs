@@ -24,8 +24,8 @@ use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::sessions::types::{CreateSessionParams, SessionConfig, SessionStatus};
-use crate::lfd::sessions::SessionManager;
+use crate::lfd::sessions::types::{CreateSessionParams, Session, SessionConfig, SessionStatus};
+use crate::lfd::sessions::{SessionManager, SessionManagerError};
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::types::{
@@ -523,10 +523,7 @@ impl WaveExecutor {
         wave: &Wave,
         run: &WaveRun,
         step: &ConcreteStep,
-    ) -> std::result::Result<
-        crate::lfd::sessions::types::Session,
-        crate::lfd::sessions::SessionManagerError,
-    > {
+    ) -> std::result::Result<Session, SessionManagerError> {
         let repo_config = load_config_or_default(Some(Path::new(&run.worktree)));
         let model = step
             .step
@@ -637,6 +634,7 @@ impl WaveExecutor {
     }
 
     async fn resume_run_execution(&self, run: WaveRun) -> Result<()> {
+        // Retry for up to 60s (120 × 500ms) waiting for a scheduler slot.
         for _ in 0..120 {
             if let Some(current) = self.store.get_wave_run(&run.id).await? {
                 if current.status != WaveRunStatus::Running {

@@ -235,9 +235,22 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     debug!(launch = ?built.agent_config, ?process, ?built.capabilities, "launching agent");
 
     seed_rlm_env(&built.config);
+
+    // Inject steps and directions as .claude/commands/ for Claude agents.
+    // Default off for CLI; always on for lfd. Enable with `inject_skills: true` in .lf/config.yaml.
+    let injected_skills = if built.config.inject_skills && built.backend == "claude" {
+        crate::engine::skills::inject_skills(&built.repo_root, &built.repo_root)
+    } else {
+        Vec::new()
+    };
+
     info!(backend = built.backend, "launching agent");
     let launch_start = Instant::now();
-    let result = launch_agent(&built.agent_config, &process, &built.capabilities)?;
+    let result = launch_agent(&built.agent_config, &process, &built.capabilities);
+
+    crate::engine::skills::cleanup_injected_skills(&injected_skills);
+
+    let result = result?;
     debug!(
         elapsed_ms = launch_start.elapsed().as_millis(),
         "agent finished"

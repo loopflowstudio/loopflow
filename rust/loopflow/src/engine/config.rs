@@ -250,6 +250,11 @@ pub struct Config {
     #[serde(default)]
     pub budgets: BudgetConfig,
 
+    /// Inject built-in steps and directions as agent-native commands (e.g. .claude/commands/).
+    /// Always on for lfd; opt-in for lf CLI.
+    #[serde(default)]
+    pub inject_skills: bool,
+
     /// Model for RLM sub-agents (default: same as agent_model)
     #[serde(default)]
     pub rlm_model: Option<String>,
@@ -311,6 +316,7 @@ impl Default for Config {
             test: None,
             autoprune: AutopruneConfig::default(),
             budgets: BudgetConfig::default(),
+            inject_skills: false,
             rlm_model: None,
             rlm_max_parallel: default_rlm_max_parallel(),
             rlm_max_depth: default_rlm_max_depth(),

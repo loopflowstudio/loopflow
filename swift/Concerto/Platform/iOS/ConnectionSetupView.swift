@@ -7,9 +7,6 @@ struct ConnectionSetupView: View {
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
 
-    @Bindable var profileStore: MobileConnectionProfilesStore
-
-    @State private var profileName = "My Mac"
     @State private var host = ""
     @State private var port = "2486"
     @State private var useTLS = false
@@ -21,36 +18,7 @@ struct ConnectionSetupView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Saved Connections") {
-                    if profileStore.profiles.isEmpty {
-                        Text("No saved connections")
-                            .foregroundStyle(palette.textSecondary)
-                    } else {
-                        ForEach(profileStore.profiles) { profile in
-                            Button {
-                                load(profile)
-                            } label: {
-                                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                                    Text(profile.name)
-                                        .foregroundStyle(palette.text)
-                                    Text(profile.connection.displayName)
-                                        .font(Typography.caption(11))
-                                        .foregroundStyle(palette.textSecondary)
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    profileStore.delete(profile)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                        }
-                    }
-                }
-
                 Section("Server") {
-                    TextField("Connection Name", text: $profileName)
                     TextField("Host", text: $host)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -113,29 +81,17 @@ struct ConnectionSetupView: View {
     private func loadFromCurrentConnection() {
         let connection = repoState.connectionStore.configuredRemoteConnection ?? repoState.connectionStore.activeConnection
         if !connection.isLocal {
-            apply(
-                connection: connection,
-                token: connection.staticToken
-                    ?? repoState.connectionStore.token(for: connection)
-                    ?? ""
-            )
+            host = connection.host
+            port = "\(connection.port)"
+            useTLS = connection.useTLS
+            token = connection.staticToken
+                ?? repoState.connectionStore.token(for: connection)
+                ?? ""
         }
 
         if case .remote(let path, _) = repoState.repoTarget {
             selectedRepoPath = path
         }
-    }
-
-    private func load(_ profile: ConnectionProfile) {
-        profileName = profile.name
-        apply(connection: profile.connection, token: profile.connection.staticToken ?? "")
-    }
-
-    private func apply(connection: ServerConnection, token: String) {
-        host = connection.host
-        port = "\(connection.port)"
-        useTLS = connection.useTLS
-        self.token = token
     }
 
     private func connect() {
@@ -147,7 +103,6 @@ struct ConnectionSetupView: View {
             do {
                 let connection = try makeConnection()
                 try await repoState.connect(to: connection, outputBuffer: outputBuffer)
-                _ = profileStore.upsert(name: profileName, connection: connection)
                 if selectedRepoPath.isEmpty, let first = repoState.availableRemoteRepos.first {
                     selectedRepoPath = first.path
                     repoState.selectRemoteRepo(path: first.path)

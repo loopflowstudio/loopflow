@@ -37,10 +37,7 @@ fn build_args(content: &str, config: &AgentConfig, resume_id: Option<&str>) -> V
     let mut args = vec!["-p".to_string(), content.to_string()];
 
     let claude_args = ClaudeArgs {
-        model: config
-            .model
-            .as_deref()
-            .and_then(ClaudeArgs::resolve_model),
+        model: config.model.as_deref().and_then(ClaudeArgs::resolve_model),
         system_prompt: Some(config.system_prompt.clone()),
         system_prompt_file: None,
         skip_permissions: config.skip_permissions,

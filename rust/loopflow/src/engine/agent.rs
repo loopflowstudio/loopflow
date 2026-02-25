@@ -1017,10 +1017,7 @@ mod tests {
             ..Default::default()
         }
         .to_args();
-        assert_eq!(
-            args,
-            vec!["--append-system-prompt", "Be concise"]
-        );
+        assert_eq!(args, vec!["--append-system-prompt", "Be concise"]);
     }
 
     #[test]
@@ -1063,7 +1060,10 @@ mod tests {
     #[test]
     fn claude_args_resolve_model_bare() {
         // "claude" → default variant "opus"
-        assert_eq!(ClaudeArgs::resolve_model("claude"), Some("opus".to_string()));
+        assert_eq!(
+            ClaudeArgs::resolve_model("claude"),
+            Some("opus".to_string())
+        );
     }
 
     #[test]

@@ -12,7 +12,6 @@ use std::time::Instant;
 
 use crate::engine::config::parse_model;
 use crate::engine::error::CoreError;
-use crate::engine::harness_commands::builder_for_model;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 
@@ -388,6 +387,26 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     }
 }
 
+/// Apply harness-specific environment variables to a command.
+fn apply_harness_env(harness: &str, cmd: &mut Command, process: &ProcessConfig) {
+    match harness {
+        "gemini" => {
+            if let Some(ref context_file) = process.context_file {
+                cmd.env(
+                    "GEMINI_SYSTEM_MD",
+                    context_file.to_string_lossy().to_string(),
+                );
+            }
+        }
+        "opencode" => {
+            if let Some(env_val) = build_opencode_env(process) {
+                cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Build command for any model.
 pub fn build_model_command(
     launch: &AgentConfig,
@@ -395,7 +414,16 @@ pub fn build_model_command(
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
     let model = launch.model.as_deref().unwrap_or("claude");
-    builder_for_model(model).build_command(launch, process, capabilities)
+    let (harness, variant) = parse_model(model);
+    let variant = variant.as_deref();
+    match harness.as_str() {
+        "codex" => build_codex_command(launch, process, variant),
+        "gemini" => build_gemini_command(launch, process, variant),
+        "opencode" => build_opencode_command(process, variant),
+        "claude" => build_claude_command(launch, process, capabilities, variant),
+        // Unknown harness: fall back to Claude with the full model string as variant.
+        _ => build_claude_command(launch, process, capabilities, Some(model)),
+    }
 }
 
 /// Build a full CLI command (including prompt) for a model.
@@ -418,9 +446,7 @@ pub fn launch_agent(
     capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
-    let model = launch.model.as_deref().unwrap_or("claude");
-    let harness_builder = builder_for_model(model);
-    let cmd_args = harness_builder.build_command(launch, process, capabilities);
+    let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
@@ -456,7 +482,10 @@ pub fn launch_agent(
     cmd.env_remove("OPENAI_API_KEY");
     cmd.env_remove("GEMINI_API_KEY");
 
-    harness_builder.apply_env(&mut cmd, process);
+    // Harness-specific environment setup.
+    let model = launch.model.as_deref().unwrap_or("claude");
+    let (harness, _) = parse_model(model);
+    apply_harness_env(&harness, &mut cmd, process);
 
     propagate_rlm_env(&mut cmd);
 

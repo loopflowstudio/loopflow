@@ -4,32 +4,21 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use bollard::container::LogOutput;
 use bollard::errors::Error as DockerError;
-use bollard::models::{
-    ContainerCreateBody, ContainerInspectResponse, HostConfig, Mount, MountTypeEnum,
-    VolumeCreateOptions,
-};
+use bollard::models::{ContainerCreateBody, ContainerInspectResponse, HostConfig, Mount};
 use bollard::query_parameters::{
-    BuildImageOptions, BuilderVersion, CreateContainerOptions, CreateImageOptions,
-    InspectContainerOptions, ListContainersOptions, LogsOptions, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions, WaitContainerOptions,
+    CreateContainerOptions, InspectContainerOptions, ListContainersOptions, LogsOptions,
+    RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
 };
 use bollard::Docker;
-use bytes::Bytes;
-use futures_util::StreamExt;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use time::OffsetDateTime;
-
-use crate::engine::git::current_branch;
-use crate::engine::stream::StreamParser;
 use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{AgentRun, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{AgentRun, AgentStatus, Wave};
 
 use super::{handle_output_line, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
 

@@ -14,10 +14,11 @@ This pass is structural (deconcentration), not a behavior change pass.
 
 ### Harness command construction
 
-- `engine::agent` no longer owns harness-specific command branching.
-- Harness behavior moved into `engine/harness_commands/` modules (`claude`, `codex`, `gemini`, `opencode`) behind `HarnessCommandBuilder`.
-- Unknown-model fallback behavior is preserved with explicit Claude fallback handling.
-- Regression coverage added: `build_model_command_falls_back_to_claude_for_unknown_model`.
+- `build_model_command()` dispatches directly via `match` to per-harness builder functions (`build_claude_command`, `build_codex_command`, `build_gemini_command`, `build_opencode_command`) — all in `engine/agent.rs`.
+- No trait, no separate modules. The initial `HarnessCommandBuilder` trait extraction was compressed back: functions are simpler than a trait with one method and one impl per module.
+- `apply_harness_env()` handles model-specific env var setup (Gemini system prompt, OpenCode config).
+- Unknown-model fallback behavior preserved: falls back to Claude with the full model string as variant.
+- Regression coverage: `build_model_command_falls_back_to_claude_for_unknown_model`, `build_model_command_uses_codex_default_for_bare_codex_model`.
 
 ### Docker executor decomposition
 
@@ -28,6 +29,7 @@ This pass is structural (deconcentration), not a behavior change pass.
   - `docker/recovery.rs`
   - `docker/io.rs`
   - `docker/tests.rs`
+- Each submodule uses explicit imports (no `use super::*`), making cross-module dependencies visible.
 - Labels, mounts, and startup recovery contracts are preserved.
 - Executor behavior remains behind the same `AgentExecutor` surface.
 

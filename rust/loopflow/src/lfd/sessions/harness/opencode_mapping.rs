@@ -69,7 +69,7 @@ pub(super) fn map_event(raw: &Value, state: &mut ReaderState) -> MappedEvent {
         "message.part.updated" => map_part_updated(properties, state, &mut mapped),
         "permission.asked" => map_permission(properties, &mut mapped),
         "session.diff" => map_diff(properties, state, &mut mapped),
-        "session.error" => map_error(properties, &mut mapped),
+        "session.error" => map_error(properties, state, &mut mapped),
         _ => {}
     }
 
@@ -119,6 +119,11 @@ fn complete_turn(state: &mut ReaderState, status: TurnStatus, mapped: &mut Mappe
 
 fn parse_session_state(properties: &Value) -> SessionState {
     let value = string_by_keys(properties, &["status", "value"])
+        .or_else(|| {
+            properties
+                .get("session")
+                .and_then(|session| string_by_keys(session, &["status", "value"]))
+        })
         .unwrap_or_default()
         .to_ascii_lowercase();
 
@@ -217,11 +222,17 @@ fn map_diff(properties: &Value, state: &ReaderState, mapped: &mut MappedEvent) {
     });
 }
 
-fn map_error(properties: &Value, mapped: &mut MappedEvent) {
+fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
     let code =
         string_by_keys(properties, &["code"]).unwrap_or_else(|| "opencode_error".to_string());
     let message = string_by_keys(properties, &["message", "error"])
         .unwrap_or_else(|| "opencode error".to_string());
+
+    if state.status == SessionState::Active {
+        state.status = SessionState::Error;
+        complete_turn(state, TurnStatus::Failed, mapped);
+    }
+
     mapped.events.push(SessionEvent::Error { code, message });
 }
 
@@ -383,7 +394,14 @@ fn unsigned_field(value: &Value, key: &str) -> Option<u64> {
 }
 
 fn session_id(properties: &Value) -> Option<&str> {
-    value_by_keys(properties, &["sessionID", "sessionId", "session_id"]).and_then(Value::as_str)
+    value_by_keys(properties, &["sessionID", "sessionId", "session_id"])
+        .and_then(Value::as_str)
+        .or_else(|| {
+            properties
+                .get("session")
+                .and_then(|session| value_by_keys(session, &["id", "sessionID", "sessionId"]))
+                .and_then(Value::as_str)
+        })
 }
 
 #[cfg(test)]
@@ -577,5 +595,58 @@ mod tests {
             &mut state,
         );
         assert!(mapped.events.is_empty());
+    }
+
+    #[test]
+    fn session_error_while_active_completes_turn_as_failed() {
+        let mut state = ReaderState::new("session_1".to_string());
+        let _ = map_event(
+            &json!({
+                "type": "session.status",
+                "properties": { "sessionID": "session_1", "status": "active" }
+            }),
+            &mut state,
+        );
+
+        let mapped = map_event(
+            &json!({
+                "type": "session.error",
+                "properties": {
+                    "sessionID": "session_1",
+                    "code": "boom",
+                    "message": "failed"
+                }
+            }),
+            &mut state,
+        );
+
+        assert_eq!(mapped.events.len(), 2);
+        assert!(matches!(
+            mapped.events[0],
+            SessionEvent::TurnCompleted {
+                status: TurnStatus::Failed,
+                ..
+            }
+        ));
+        assert!(matches!(mapped.events[1], SessionEvent::Error { .. }));
+    }
+
+    #[test]
+    fn accepts_nested_session_id_shape() {
+        let mut state = ReaderState::new("session_1".to_string());
+        let mapped = map_event(
+            &json!({
+                "type": "session.status",
+                "properties": {
+                    "session": { "id": "session_1", "status": "active" }
+                }
+            }),
+            &mut state,
+        );
+
+        assert!(matches!(
+            mapped.events.first(),
+            Some(SessionEvent::TurnStarted { .. })
+        ));
     }
 }

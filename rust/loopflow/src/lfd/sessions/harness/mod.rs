@@ -118,4 +118,10 @@ mod tests {
             Err(err) => assert!(err.to_string().contains("unsupported session harness")),
         }
     }
+
+    #[test]
+    fn terminal_harness_error_recognizes_opencode_disconnect() {
+        assert!(is_terminal_harness_error("opencode_disconnected"));
+        assert!(!is_terminal_harness_error("opencode_error"));
+    }
 }

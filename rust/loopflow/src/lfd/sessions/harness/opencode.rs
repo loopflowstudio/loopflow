@@ -493,8 +493,10 @@ struct SseParser {
 
 impl SseParser {
     fn push(&mut self, chunk: &[u8]) -> Vec<String> {
-        self.buffer
-            .push_str(&String::from_utf8_lossy(chunk).replace("\r\n", "\n"));
+        self.buffer.push_str(&String::from_utf8_lossy(chunk));
+        if self.buffer.contains('\r') {
+            self.buffer = self.buffer.replace("\r\n", "\n").replace('\r', "\n");
+        }
 
         let mut events = Vec::new();
         while let Some(separator) = self.buffer.find("\n\n") {
@@ -525,6 +527,7 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn build_turn_content_includes_task_prompt_on_first_turn() {
@@ -544,5 +547,25 @@ mod tests {
         let mut parser = SseParser::default();
         let events = parser.push(b"event: message\ndata: {\"a\":1}\n\n");
         assert_eq!(events, vec!["{\"a\":1}".to_string()]);
+    }
+
+    #[test]
+    fn sse_parser_handles_split_crlf_frames() {
+        let mut parser = SseParser::default();
+        assert!(parser.push(b"data: {\"a\":").is_empty());
+        let events = parser.push(b"1}\r\n\r\n");
+        assert_eq!(events, vec!["{\"a\":1}".to_string()]);
+    }
+
+    #[test]
+    fn parse_session_id_supports_top_level_and_nested_shapes() {
+        assert_eq!(
+            parse_session_id(&json!({"id": "session_1"})),
+            Some("session_1".to_string())
+        );
+        assert_eq!(
+            parse_session_id(&json!({"session": {"id": "session_2"}})),
+            Some("session_2".to_string())
+        );
     }
 }

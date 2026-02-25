@@ -286,6 +286,7 @@ enum ShortcutCatalog {
 
 extension Notification.Name {
     static let toggleCommandPalette = Notification.Name("toggleCommandPalette")
+    static let selectPortfolioWave = Notification.Name("selectPortfolioWave")
     static let newWaveRequested = Notification.Name("newWaveRequested")
     static let editWaveName = Notification.Name("editWaveName")
     static let moveFocusDown = Notification.Name("moveFocusDown")

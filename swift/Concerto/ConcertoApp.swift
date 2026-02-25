@@ -7,7 +7,7 @@ import LoopflowCore
 
 @main
 struct ConcertoApp: App {
-    @State private var recentsService = RecentsService()
+    @State private var portfolioService = PortfolioService()
     @State private var keyboardRouter = KeyboardRouter()
     @Environment(\.openWindow) private var openWindow
     @Environment(\.colorScheme) private var systemScheme
@@ -62,18 +62,18 @@ struct ConcertoApp: App {
         let uiTestMode = RepoState.uiTestMode()
         let screenshotMode = RepoState.ScreenshotMode.fromArgs()
 
-        // Welcome/main window - shown on launch
+        // Portfolio window - shown on launch
         WindowGroup {
             Group {
                 if let screenshot = screenshotMode {
-                    ScreenshotWindow(mode: screenshot, recentsService: recentsService)
+                    ScreenshotWindow(mode: screenshot)
                 } else if uiTestMode != nil {
                     RepoWindow(
                         repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
-                        recentsService: recentsService
+                        portfolioService: portfolioService
                     )
                 } else {
-                    WelcomeWindow(recentsService: recentsService)
+                    PortfolioWindow(portfolioService: portfolioService)
                 }
             }
             .tint(.loopflowBurgundy)
@@ -82,11 +82,11 @@ struct ConcertoApp: App {
             .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
-        .defaultSize(width: 500, height: 400)
+        .defaultSize(width: 1080, height: 760)
 
         // Repo windows - opened explicitly for each repository
         WindowGroup(id: "repo", for: URL.self) { $repoURL in
-            RepoWindow(repoURL: repoURL, recentsService: recentsService)
+            RepoWindow(repoURL: repoURL, portfolioService: portfolioService)
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(preferredScheme)
                 .environment(\.palette, resolvedPalette)

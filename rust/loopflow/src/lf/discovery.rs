@@ -458,14 +458,43 @@ pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
         .into_iter()
         .map(|name| name.to_string())
         .collect();
+    directions.extend(
+        crate::engine::builtins::builtin_direction_group_names()
+            .into_iter()
+            .map(|name| name.to_string()),
+    );
 
     if let Some(repo) = repo {
-        directions.extend(list_md_stems(&[repo.join(".lf/directions")]));
+        directions.extend(list_user_direction_names(repo));
     }
 
     let mut list: Vec<_> = directions.into_iter().collect();
     list.sort();
     list
+}
+
+fn list_user_direction_names(repo: &Path) -> HashSet<String> {
+    let directions_dir = repo.join(".lf/directions");
+    let mut names: HashSet<String> = list_md_stems(std::slice::from_ref(&directions_dir))
+        .into_iter()
+        .collect();
+    let Ok(entries) = std::fs::read_dir(&directions_dir) else {
+        return names;
+    };
+
+    let mut group_dirs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(group_name) = path.file_name() {
+                names.insert(group_name.to_string_lossy().to_string());
+            }
+            group_dirs.push(path);
+        }
+    }
+
+    names.extend(list_md_stems(&group_dirs));
+    names
 }
 
 // =============================================================================

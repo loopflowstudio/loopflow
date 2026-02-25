@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::path::Path;
 use std::time::Duration;
 
@@ -81,8 +80,9 @@ async fn tick_loop_waves(
         }
 
         let worktree = worktree_path(Path::new(wave.repo()), wave.name());
-        if worktree.exists() && wave_backlog_empty(&worktree, wave.name()) {
-            tracing::info!(wave = %wave.name(), "wave backlog empty, skipping loop tick");
+        let wave_dir = worktree.join("wave").join(wave.name());
+        if worktree.exists() && !wave_dir.exists() {
+            tracing::info!(wave = %wave.name(), "wave dir removed, skipping loop tick");
             continue;
         }
 
@@ -110,70 +110,5 @@ async fn tick_loop_waves(
             run,
             slot_guard,
         );
-    }
-}
-
-fn wave_backlog_empty(worktree: &Path, wave_name: &str) -> bool {
-    let backlog_dir = worktree.join("wave").join(wave_name);
-    let entries = match std::fs::read_dir(&backlog_dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return true,
-        Err(err) => {
-            tracing::warn!(
-                path = %backlog_dir.display(),
-                error = %err,
-                "failed to read wave backlog"
-            );
-            return false;
-        }
-    };
-
-    !entries
-        .flatten()
-        .any(|entry| is_actionable_wave_item(&entry.path()))
-}
-
-fn is_actionable_wave_item(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
-    }
-
-    if path.file_name() == Some(OsStr::new("README.md")) {
-        return false;
-    }
-
-    path.extension() == Some(OsStr::new("md"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::wave_backlog_empty;
-    use std::fs;
-
-    #[test]
-    fn wave_backlog_empty_returns_true_for_missing_wave_dir() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        assert!(wave_backlog_empty(temp.path(), "demo"));
-    }
-
-    #[test]
-    fn wave_backlog_empty_ignores_readme_and_yaml_files() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let wave_dir = temp.path().join("wave").join("demo");
-        fs::create_dir_all(&wave_dir).expect("create wave dir");
-        fs::write(wave_dir.join("README.md"), "# demo").expect("write readme");
-        fs::write(wave_dir.join("demo.yaml"), "flow: build").expect("write yaml");
-
-        assert!(wave_backlog_empty(temp.path(), "demo"));
-    }
-
-    #[test]
-    fn wave_backlog_empty_detects_actionable_markdown_items() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let wave_dir = temp.path().join("wave").join("demo");
-        fs::create_dir_all(&wave_dir).expect("create wave dir");
-        fs::write(wave_dir.join("01-next.md"), "next item").expect("write item");
-
-        assert!(!wave_backlog_empty(temp.path(), "demo"));
     }
 }

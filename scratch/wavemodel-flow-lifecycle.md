@@ -40,21 +40,16 @@ Plan flows now end in `update-wave` directly:
 - `wave-polish`
 - `wave-expand`
 
-### Loop behavior and backlog signal
+### Loop behavior and wave presence
 
-Loop ticker now checks backlog from the canonical wave worktree before creating a run.
+Loop ticker checks for the presence of `wave/<name>/` in the canonical worktree before creating a run. If the directory exists, the wave has work. If it's been removed, the wave is done.
 
-Backlog is considered empty when `wave/<name>/` has no actionable top-level markdown items:
-- include: `*.md`
-- exclude: `README.md`
-- ignore: `*.yaml`
-
-If backlog is empty, ticker skips creating a new loop run.
+Remove `wave/<name>/` to signal a wave is complete.
 
 ## Operational semantics
 
-- Empty backlog means “no queued wave items,” not “last run succeeded.”
-- No auto-pause on empty backlog. Wave remains idle with loop stimulus enabled.
+- Wave dir present = wave has work. Wave dir removed = wave is done.
+- No content parsing or backlog heuristics. Presence is the only signal.
 - This PR assumes one canonical worktree per wave (no sidecar/per-run worktrees).
 
 ## Migration impact
@@ -68,7 +63,7 @@ Any external scripts using old names must migrate:
 
 ### Known risk areas
 
-- Backlog detection only sees top-level actionable markdown files in `wave/<name>/`.
+- Ticker only checks directory presence, not contents.
 - Environments without Docker socket may fail Docker-dependent local tests.
 
 ## Scope boundary

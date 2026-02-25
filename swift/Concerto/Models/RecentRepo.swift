@@ -1,10 +1,10 @@
-// Recent repository entry for persistence.
+// Portfolio repository entry for persistence.
 
 import Foundation
 
-struct RecentRepo: Codable, Identifiable {
+struct PortfolioRepo: Codable, Identifiable, Hashable {
     let path: String
-    let lastOpened: Date
+    var lastOpened: Date
 
     var id: String { path }
     var url: URL { URL(fileURLWithPath: path) }

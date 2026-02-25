@@ -6,7 +6,7 @@ import LoopflowCore
 
 struct RepoWindow: View {
     let repoURL: URL?
-    let recentsService: RecentsService
+    let portfolioService: PortfolioService
 
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
@@ -14,6 +14,7 @@ struct RepoWindow: View {
     @State private var setupComplete = false
     @State private var hasCheckedSetup = false
     @State private var hasOpenedRepo = false
+    @State private var pendingWaveSelection: String?
 
     private let setupService = SetupService()
 
@@ -51,7 +52,8 @@ struct RepoWindow: View {
             if setupComplete, let url = repoURL, !hasOpenedRepo {
                 hasOpenedRepo = true
                 await repoState.openRepo(url, outputBuffer: outputBuffer)
-                recentsService.addRecent(url)
+                portfolioService.addRepo(url)
+                applyPendingWaveSelectionIfNeeded()
             }
         }
         .onChange(of: setupComplete) { _, complete in
@@ -59,9 +61,31 @@ struct RepoWindow: View {
                 hasOpenedRepo = true
                 Task {
                     await repoState.openRepo(url, outputBuffer: outputBuffer)
-                    recentsService.addRecent(url)
+                    portfolioService.addRepo(url)
+                    applyPendingWaveSelectionIfNeeded()
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .selectPortfolioWave)) { notification in
+            guard let targetRepoPath = notification.userInfo?["repoPath"] as? String,
+                  let waveId = notification.userInfo?["waveId"] as? String else {
+                return
+            }
+
+            let repoPath = repoURL?.standardizedFileURL.path(percentEncoded: false)
+            guard repoPath == targetRepoPath else { return }
+            pendingWaveSelection = waveId
+            applyPendingWaveSelectionIfNeeded()
+        }
+    }
+
+    private func applyPendingWaveSelectionIfNeeded() {
+        guard hasOpenedRepo, let waveId = pendingWaveSelection else { return }
+        NotificationCenter.default.post(
+            name: .selectWave,
+            object: nil,
+            userInfo: ["waveId": waveId]
+        )
+        pendingWaveSelection = nil
     }
 }

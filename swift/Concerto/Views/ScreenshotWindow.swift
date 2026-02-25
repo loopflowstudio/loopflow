@@ -21,7 +21,7 @@ extension EnvironmentValues {
 
 struct ScreenshotWindow: View {
     let mode: RepoState.ScreenshotMode
-    let recentsService: RecentsService
+    let portfolioService: PortfolioService
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
     @State private var hasLoaded = false

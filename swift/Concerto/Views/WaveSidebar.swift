@@ -97,8 +97,7 @@ struct WaveSidebar: View {
             openDesignEntry()
         }
         .onReceive(NotificationCenter.default.publisher(for: .selectWave)) { notification in
-            if let waveId = notification.userInfo?["waveId"] as? String,
-               repoState.waveStore.wave(for: waveId) != nil {
+            if let waveId = notification.userInfo?["waveId"] as? String {
                 selectWave(waveId)
             }
         }

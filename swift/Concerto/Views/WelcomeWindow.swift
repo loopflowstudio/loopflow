@@ -4,7 +4,7 @@ import SwiftUI
 import LoopflowCore
 
 struct WelcomeWindow: View {
-    let recentsService: RecentsService
+    let portfolioService: PortfolioService
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
@@ -23,14 +23,14 @@ struct WelcomeWindow: View {
             }
 
             // Recent repos
-            if !recentsService.recentRepos.isEmpty {
+            if !portfolioService.repos.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent Repositories")
                         .font(Typography.sectionTitle())
                         .padding(.horizontal, 4)
 
                     VStack(spacing: 4) {
-                        ForEach(recentsService.recentRepos) { recent in
+                        ForEach(portfolioService.repos) { recent in
                             Button {
                                 openRepo(recent.url)
                             } label: {

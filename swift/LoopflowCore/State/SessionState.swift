@@ -286,14 +286,6 @@ public final class SessionState {
         sessionConfig.clientCompact = compact
     }
 
-    public func composerTextDidChange(from oldText: String, to newText: String) {
-        let oldIsEmpty = oldText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let newIsEmpty = newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if oldIsEmpty && !newIsEmpty {
-            clearSuggestedActions()
-        }
-    }
-
     public func sendSuggestedAction(_ action: SuggestedAction) async {
         clearSuggestedActions()
         await send(action.label)
@@ -550,7 +542,6 @@ public final class SessionState {
         case .turnStarted(let turnId):
             currentTurnId = turnId
             turnState = .running
-            clearSuggestedActions()
 
         case .turnCompleted(let turnId, let status):
             guard currentTurnId == nil || currentTurnId == turnId else { return }

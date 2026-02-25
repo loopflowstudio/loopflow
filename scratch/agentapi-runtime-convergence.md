@@ -1,72 +1,152 @@
 # Runtime Convergence
 
-Unify the two agent execution paths (`lf` engine and `lfd` sessions) into one runtime. Interactive `lf` commands use the session API and Concerto's chat UI instead of spawning a terminal.
+## Problem
 
-## What exists after this
+Loopflow currently has two independent agent runtimes:
 
-One execution path for all agent work:
+1. `lf` spawns providers directly via `engine/agent.rs`.
+2. `lfd` sessions spawn providers via `lfd/sessions/harness/*` and persist typed events.
 
-- **Headless runs** (wave executor, `lf implement --auto`): session API in batch mode, no UI
-- **Interactive runs** (`lf design`, `lf explore`, `lf review`): session API, Concerto chat UI
+That split creates product drift and operational risk:
 
-`lf` interactive commands create a session via lfd, open Concerto to that session, and the user works through the chat interface. No terminal agent process. The ghostty/warp terminal launch path is removed for interactive steps.
+- provider launch behavior can diverge between CLI and session API
+- prompt assembly is duplicated (`build_step_prompt`, `prepare_step_prompt`, `lf::commands::run::build_prompt`)
+- interactive `lf design/explore/review/refine` cannot reconnect/replay because they are terminal-local processes
+- wave executor steps do not share session history/replay semantics with interactive sessions
 
-The wave executor routes step runs through the same session orchestration that interactive sessions use. `build_step_prompt()` and `prepare_step_prompt()` merge into one function. `LaunchConfig` flows through `SessionManager` for both paths.
+Who benefits:
 
-## What to unify
+- **Users:** consistent behavior between `lf` and Concerto, resumable interactive sessions
+- **Maintainers:** one provider integration surface, one conformance test suite
+- **Wave operators:** run history and replay for automated steps, not just interactive chat
 
-### Provider layer
+Why now: this directly addresses the wave risk **“Provider layer drift”** and advances goals **“lfd owns the session lifecycle”** and **“Provider-agnostic: same client code works regardless of which agent runs the session.”**
 
-`engine/agent.rs` builds CLI commands and spawns subprocesses directly. `sessions/harness/*.rs` does the same thing with event streaming. Both know how to launch Claude, Codex, etc. Merge these:
+## Approach
 
-- One provider module that owns process spawning, argument construction, and event translation
-- `SessionHarness` becomes the shared execution primitive
-- `launch_agent()` becomes "create a session, send one turn, wait for completion, return stdout/stderr"
-- `build_claude_command` / `build_codex_command` move into their respective harnesses
+Adopt a **session-runtime-first architecture** with one execution core and two entrypoints (CLI + HTTP).
 
-### Prompt assembly
+### 1) One runtime core, two surfaces
 
-`build_step_prompt()` (executor/helpers.rs) and `prepare_step_prompt()` (lfd/prompt.rs) do the same work with different signatures. Merge into one function that returns `LaunchConfig`.
+Create a shared runtime module used by both `lf` and `lfd`:
 
-### Interactive `lf` → Concerto
+- shared session orchestration primitive (create/start/input/stop/wait)
+- shared provider launch + mapping logic (Claude/Codex/OpenCode)
+- shared prompt-prep path returning `LaunchConfig`
 
-`lf design` currently spawns `claude -p` in a terminal. Change to:
+`lfd` keeps HTTP/SSE as an API surface over this runtime. `lf` uses the same runtime through a local client facade (not direct subprocess spawning).
 
-1. `lf design` creates a session via lfd (same as Concerto's StartWaveView)
-2. `lf` opens Concerto and navigates to that session
-3. User interacts through Concerto's chat UI
-4. `lf` exits after launching (or optionally waits for session end)
+### 2) Unify prompt assembly into one function
 
-This means `lf` interactive commands become thin launchers: create session + open UI.
+Replace split prompt-prep paths with one builder used by:
 
-### Wave executor
+- interactive `lf` launch
+- wave executor step launch
+- session API create-session flow
 
-Route wave executor step runs through `SessionManager`:
+This single function owns:
 
-1. Executor creates a session with `auto: true`
-2. Session harness runs the step
-3. Events are persisted (same store as interactive sessions)
-4. Executor reads completion status from session, not subprocess exit code
+- context gathering and trimming
+- step loading and merged directions
+- summary attachment
+- `LaunchConfig` + run-mode-specific process options
 
-This gives wave runs the same event history and replay capability as interactive sessions.
+### 3) Move provider command builders into harness layer
 
-## What doesn't change
+`engine/agent.rs` stops owning provider CLI arg construction.
 
-- `lf` headless/auto mode still runs without Concerto (sessions are the runtime, but no UI required)
-- Provider harness behavior (Codex JSON-RPC, Claude NDJSON) stays the same
-- Session API endpoints stay the same
-- Event model stays the same
+- Claude/Codex/OpenCode command builders live with their harnesses
+- batch and interactive entrypoints call the same harness-owned builders
+- provider-specific normalization remains inside mapping modules
 
-## Risks
+### 4) Interactive `lf` becomes a session launcher
 
-- **Latency**: routing through lfd adds overhead vs direct subprocess spawn. For headless runs this is acceptable. For interactive, the session API is already the path.
-- **lfd dependency**: `lf` interactive now requires lfd running. Currently `lf design` works standalone. Need graceful fallback or clear error.
-- **Concerto dependency**: interactive sessions need Concerto installed. Terminal fallback for environments without it?
+For interactive steps (`design`, `explore`, `review`, `refine`):
+
+1. `lf` creates a session through lfd
+2. `lf` opens Concerto via a deep link containing repo + session id
+3. Concerto attaches to that existing session in `WaveChatView`
+4. `lf` exits after launch
+
+No terminal-agent fallback path. If lfd/Concerto is unavailable, fail with explicit fix instructions.
+
+### 5) Wave executor runs steps via sessions
+
+For local/native execution mode, wave step execution becomes:
+
+1. create session (`auto: true` / batch mode)
+2. stream and persist session events
+3. map terminal session status to agent success/failure
+4. advance run state from session completion
+
+This gives wave runs the same replayable event history as interactive sessions.
+
+### 6) Conformance tests enforce parity
+
+Add shared provider conformance tests that run both entry surfaces against identical traces/scenarios:
+
+- create/start/input/end lifecycle
+- turn/item event shape parity
+- error and interruption behavior parity
+
+If a provider change breaks one surface, tests fail both.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep dual runtime, add adapters | Lowest short-term churn | Preserves drift risk and duplicates provider work forever |
+| HTTP-only everything (`lf` always calls daemon API) | Very clean architecture | Hard cutover risk; poor offline/dev ergonomics; large migration blast radius |
+| Session-runtime-first shared core with CLI + HTTP surfaces (chosen) | Requires runtime extraction and API reshaping | Best long-term convergence while keeping explicit surfaces for CLI and daemon |
+
+## Key decisions
+
+- **No terminal fallback for interactive `lf`.** Two interactive paths recreate drift immediately.
+- **Deep-link contract is explicit and versioned.** Concerto navigation uses a stable URL payload (session id + repo + step context).
+- **Session ownership stays in lfd.** Supports the goal that disconnecting UI does not affect session state.
+- **Convergence prioritizes local/native execution first.** Containerized wave execution parity is tracked as follow-on work, not hidden complexity.
+
+### Wild success (what makes this great)
+
+- Users launch `lf design`, immediately land in chat UI, reconnect from Concerto after restarts, and never lose transcript state.
+- `lf` and session API produce identical provider behavior, so docs and debugging become straightforward.
+- Wave runs gain replayable typed event history, enabling better diagnostics and future UI reuse.
+
+### Wild failure (what kills this in 6 months)
+
+- Fragile app handoff (session created but Concerto fails to attach).
+- Silent lfd dependency failures that feel like random command breakage.
+- “Temporary” dual paths left in place after migration.
+
+Mitigations in this design:
+
+- health check + actionable startup errors before interactive launch
+- deep-link ack/attach validation path in Concerto
+- explicit deletion of legacy direct-launch code after cutover
+
+## Scope
+
+- In scope:
+  - single prompt-prep builder used by session API + wave executor + `lf` launch flow
+  - harness-owned provider command builders
+  - interactive `lf` → create session → open Concerto
+  - wave executor local/native path routed through session runtime
+  - shared provider conformance tests across CLI/session surfaces
+- Out of scope:
+  - approval-routing/permission redesign
+  - advanced multi-panel Concerto UI work
+  - multi-agent per step
+  - cross-wave session sharing
+  - full container executor parity in this phase
 
 ## Done when
 
-- `build_step_prompt` and `prepare_step_prompt` are one function
-- Wave executor creates sessions instead of calling `launch_agent` directly
-- `lf design` opens Concerto instead of spawning a terminal agent
-- `engine/agent.rs` command builders live inside harness modules
-- One set of provider conformance tests covers both `lf` and session paths
+- `build_step_prompt` and `prepare_step_prompt` are replaced by one shared launch builder.
+- Interactive `lf design/explore/review/refine` no longer spawn agent subprocesses directly; they create sessions and open Concerto.
+- Wave executor local/native step runs are session-backed and emit persisted session events.
+- Provider command builders are removed from `engine/agent.rs` and owned by harness modules.
+- Shared provider conformance tests pass for both CLI-launched and session-API-launched runs.
+- This phase advances wave goals (from `wave/agentapi/README.md`):
+  - **“lfd owns the session lifecycle”**
+  - **“Provider-agnostic: same client code works regardless of which agent runs the session”**
+  - **“Reconnect replays persisted events then follows live stream”**

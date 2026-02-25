@@ -88,9 +88,6 @@ struct WaveSessionView: View {
         .onChange(of: horizontalSizeClass) { _, value in
             state.configureClientContext(compact: value == .compact)
         }
-        .onChange(of: composerText) { oldValue, newValue in
-            state.composerTextDidChange(from: oldValue, to: newValue)
-        }
         .onDisappear {
             state.onDisappear()
         }

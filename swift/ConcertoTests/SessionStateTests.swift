@@ -518,37 +518,19 @@ struct SessionStateTests {
     }
 
     @MainActor
-    @Test("suggested actions clear on manual typing")
-    func suggestedActionsClearOnTyping() async {
+    @Test("suggested actions clear on user send")
+    func suggestedActionsClearOnUserSend() async {
         let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: MockSessionService(),
-            userDefaults: makeUserDefaults("suggested-actions-typing")
+            userDefaults: makeUserDefaults("suggested-actions-send")
         )
         state.suggestedActions = [SuggestedAction(label: "Land PR")]
 
-        state.composerTextDidChange(from: "", to: "l")
+        await state.send("next")
 
         #expect(state.suggestedActions.isEmpty)
-    }
-
-    @MainActor
-    @Test("suggested actions do not clear when composer text stays empty")
-    func suggestedActionsDoNotClearOnEmptyComposerChanges() async {
-        let state = SessionState(
-            waveId: "wave-test",
-            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
-            waveService: MockSessionService(),
-            userDefaults: makeUserDefaults("suggested-actions-empty-composer")
-        )
-        state.suggestedActions = [SuggestedAction(label: "Land PR")]
-
-        state.composerTextDidChange(from: "", to: "")
-        #expect(state.suggestedActions.map(\.label) == ["Land PR"])
-
-        state.composerTextDidChange(from: "", to: "   ")
-        #expect(state.suggestedActions.map(\.label) == ["Land PR"])
     }
 
     @MainActor

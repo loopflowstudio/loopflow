@@ -1,126 +1,46 @@
-# Stage 01: Multiplatform Concerto
+# Stage 01: Multiplatform Concerto — Current State
 
-## Problem
+## Goal
 
-Concerto is macOS-only today, so waves become invisible the moment you leave your desk. Stage 01 makes Concerto truly multiplatform without splitting the product into separate codebases.
+Ship one `Concerto` target that works across macOS, iPhone, and iPad while keeping core mobile-relevant behavior reusable.
 
-This design directly advances wave/mobile goals:
+## Decisions to keep
 
-- "One Concerto target, three form factors (Mac unchanged, iPad close to Mac, iPhone minimal)"
-- "LoopflowCore as shared library: models, services, and reusable views — consumed by Concerto and Symphonia"
+- Keep a single app target/scheme; branch only at platform shell boundaries.
+- Keep iOS remote-only in Stage 01 (no local repo/worktree flows).
+- Use capability injection for platform-only behavior instead of spreading `#if` through shared code.
+- Enforce multiplatform boundaries with `scripts/check_swift_multiplatform_boundaries.py`.
 
-Who benefits now:
+## Current baseline
 
-- **Mac users** keep current behavior while future mobile work lands on shared code.
-- **iPhone users** can check wave status/output and take lightweight actions anywhere.
-- **iPad users** get near-desktop information density with touch-safe interaction.
+- iOS + macOS builds are wired under one target.
+- iOS shell exists (`MobileRootView`, connection setup, wave list/detail).
+- macOS shell behavior remains intact (windowing, keyboard routing, Ghostty/local bootstrap).
+- Shared design tokens moved into `LoopflowCore`.
 
-Why now: Stage 02 (action buttons) and Stage 03 (multi-client continuity) both depend on shared chat/state/view infrastructure. Without this extraction first, later stages duplicate work.
+## Remaining work to fully close Stage 01
 
-## Approach
+1. **State extraction gap**
+   - `RepoState` and related stores are still in `swift/Concerto/State/`.
+   - Move shared state into `swift/LoopflowCore/State/` with explicit public APIs.
 
-Build this as a **core-first extraction with platform shells** (not a parallel iOS app).
+2. **Runtime validation gap (iOS)**
+   - Build coverage is in place, but interactive end-to-end validation is still light.
+   - Re-run full device flows: connection setup → connect to `lfd` → wave list/detail/output on iPhone and iPad.
 
-1. **Make the package truly multiplatform**
-   - Add `.iOS(.v18)` to `swift/Package.swift`.
-   - Gate Ghostty dependency, `GHOSTTY_ENABLED`, and Carbon/Metal/IOKit linker settings to macOS only.
-   - Keep one `Concerto` target and one scheme.
+3. **Environment-specific validation instability**
+   - macOS `xcodebuild test` currently fails in this environment at `ConcertoUITests-Runner` startup.
+   - `cargo test --all` fails docker-dependent tests when Docker socket is unavailable.
 
-2. **Move shared state into LoopflowCore with explicit platform capabilities**
-   - Move to `swift/LoopflowCore/State/`: `RepoState`, `WaveStore`, `RunStore`, `WorktreeStore`, `OutputBuffer`, `ChatState`, `ConnectionStore`, `ConnectionMode`.
-   - Make shared types/public initializers explicit so both Concerto and Symphonia can construct them.
-   - Remove hard dependency on `BundledDaemonManager` from `RepoState` by injecting a runtime capability:
-     - macOS shell injects bundled-daemon support.
-     - iOS shell injects remote-only behavior.
-   - Result: `RepoState` stays the orchestrator, but LoopflowCore has no macOS framework dependency.
+## Validation notes for this branch
 
-3. **Move reusable UI primitives + shared wave UI to LoopflowCore**
-   - Move design tokens/resources (`BrandColors`, `DesignSystem`, `Typography`, palette environment).
-   - Move shared wave/chat/output views that do not require AppKit-only APIs.
-   - Replace direct platform calls (for example PR opening) with injected actions or SwiftUI environment actions so the same view compiles on both platforms.
+- Passed: `swift test --package-path swift`
+- Passed: `uv run python scripts/check_swift_multiplatform_boundaries.py`
+- Passed on available simulators:
+  - iPhone 17
+  - iPad Pro 11-inch (M5)
+- Stage doc targets (iPhone 16, iPad Pro 11-inch M4) were unavailable in this environment.
 
-4. **Create platform-specific shells in Concerto**
-   - **macOS shell**: preserve current multi-window architecture (`PortfolioWindow`, `RepoWindow`, command palette, keyboard router, Ghostty).
-   - **iOS shell**: add `MobileRootView`:
-     - iPhone: `TabView` (Waves, Settings) + `NavigationStack` list→detail.
-     - iPad: `NavigationSplitView` with no terminal/command palette/keyboard router.
-   - Add `ConnectionSetupView` for iOS remote connection + saved profiles (no local repo picker).
+## Exit condition for follow-up PR
 
-5. **Resource and behavior parity pass**
-   - Ensure bundled fonts are available to LoopflowCore-rendered views on both platforms.
-   - Keep mac behavior unchanged while introducing iOS-only code paths behind platform checks.
-
-Execution order (required):
-1. Package/platform gating (builds compile for iOS)
-2. State extraction + capability boundaries
-3. Shared view extraction needed for iOS wave/chat/output
-4. iOS shell wiring (iPhone + iPad navigation)
-5. Resource parity + regression pass
-
-Research patterns applied:
-- Single shared state + platform-specific scenes (Apple multiplatform baseline).
-- iPhone list→detail with tab root (ChatGPT/Claude mobile navigation pattern).
-- Capability injection over `#if` sprawl for platform-only behavior.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Separate `ConcertoMobile` app target | Fastest short-term iOS launch | Duplicates state/views and fights the goal of one target + shared core |
-| Keep RepoState in Concerto, only add iOS views | Lowest refactor risk | Blocks Symphonia reuse and makes Stage 02/03 branch into platform forks |
-| Big-bang full move in one PR | Fewer intermediate states | High regression risk on macOS; impossible to isolate failures cleanly |
-
-## Key decisions
-
-- **Choose one target with shell branching, not separate apps.** Product stays coherent and maintainable.
-- **RepoState moves to LoopflowCore now.** It is the seam that unlocks reusable chat/wave behavior.
-- **Use injected capabilities for bundled daemon and external actions.** Avoids leaking AppKit/Process assumptions into core.
-- **Use file-structure boundaries to minimize long-term macros.** Keep platform-only logic in platform shell files, not shared files.
-- **iOS is remote-client only in Stage 01.** No local file picker, no local git/worktree management.
-- **Phone is intentionally minimal.** Status/output/chat entry points only; no step runner/typeahead/embedded terminal.
-- **Preserve wave/mobile “Not here” constraints.** Explicitly exclude embedded terminal, phone step runner/typeahead, offline mode, App Store packaging.
-
-Boundary guardrails:
-- `#if` allowed only in app entry wiring and platform shell files.
-- Shared state/views/models in LoopflowCore stay macro-free.
-- Platform behavior enters shared code through injected capabilities (protocols/environment actions), not platform checks.
-- Add a lightweight CI/script check to block macOS-only imports in LoopflowCore and new non-shell `#if` usage.
-
-Wild success details we are designing for:
-- User starts a wave on Mac, opens iPhone, and sees live wave/output within one connection flow.
-- iPad feels like “Mac without keyboard tricks,” not “blown-up phone.”
-- Stage 02 action buttons drop into shared chat UI without another architecture rewrite.
-
-Wild failure to avoid (from wave risks):
-- Platform-gating turns into scattered `#if` churn across every file.
-- View extraction drags app-level dependencies into LoopflowCore.
-- Navigation mismatches between iPhone/iPad/macOS create three divergent products.
-
-New risk introduced here:
-- Font/resource packaging can silently regress when views move modules. Mitigate with explicit resource wiring and simulator checks on both iOS form factors.
-
-## Scope
-
-- In scope:
-  - Package/platform gating for iOS build support.
-  - State extraction to LoopflowCore with public APIs.
-  - Shared view/design-system extraction.
-  - iOS root navigation + connection setup + wave list/detail.
-  - macOS behavior parity validation.
-- Out of scope:
-  - `suggest_actions` rendering/behavior (Stage 02).
-  - Multi-client protocol or lfd concurrency changes (Stage 03).
-  - Embedded terminal on iOS.
-  - Phone step runner/typeaheads.
-  - Offline mode or App Store distribution.
-
-## Done when
-
-- Builds pass:
-  - `swift test --package-path swift`
-  - `cd swift && xcodegen generate && xcodebuild -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=iOS Simulator,name=iPhone 16' build`
-  - `cd swift && xcodebuild -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=iOS Simulator,name=iPad Pro (11-inch) (M4)' build`
-- Boundary checks pass: no macOS-only imports in LoopflowCore and no net-new non-shell `#if` usage.
-- iPhone simulator flow works end-to-end: connection setup → connect to lfd → wave list → wave detail/output.
-- iPad simulator shows split layout with touch-safe interactions and no terminal/command palette.
-- macOS workflow remains unchanged (existing windows, keyboard router, terminal integration).
+Stage 01 is fully closed when shared state extraction lands and simulator/runtime validation is re-confirmed without architecture gaps.

@@ -49,9 +49,9 @@ struct WaveModelTests {
 
     @Test("displayName generates from area and flow when name is empty")
     func displayNameGeneratesFromConfig() {
-        let wave = makeWave(flow: "ship", area: ["src/auth"])
+        let wave = makeWave(flow: "build", area: ["src/auth"])
 
-        #expect(wave.displayName == "src/auth · ship")
+        #expect(wave.displayName == "src/auth · build")
     }
 
     @Test("displayName shows 'root' for dot area")
@@ -196,12 +196,12 @@ struct WaveModelTests {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
-            flow: "ship",
+            flow: "build",
             area: ["src/"],
             stimuli: [Stimulus(kind: .loop)]
         )
 
-        #expect(wave.detailText == "src/ · ship · loop")
+        #expect(wave.detailText == "src/ · build · loop")
     }
 
     @Test("detailText omits stimulus when none active")
@@ -430,7 +430,7 @@ struct FlowStepProgressTests {
         let run0 = WaveRun(
             id: "run-1",
             waveId: "wave-1",
-            flow: "ship",
+            flow: "build",
             area: ".",
             repo: "/tmp/repo",
             stepIndex: 0
@@ -438,7 +438,7 @@ struct FlowStepProgressTests {
         let run1 = WaveRun(
             id: "run-1",
             waveId: "wave-1",
-            flow: "ship",
+            flow: "build",
             area: ".",
             repo: "/tmp/repo",
             stepIndex: 2
@@ -448,9 +448,9 @@ struct FlowStepProgressTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "ship",
+                flow: "build",
                 status: .running,
-                flowSteps: ["implement", "compress", "gate", "consolidate"],
+                flowSteps: ["implement", "compress", "gate", "update-wave"],
                 activeRun: run0
             )
         )
@@ -458,9 +458,9 @@ struct FlowStepProgressTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "ship",
+                flow: "build",
                 status: .running,
-                flowSteps: ["implement", "compress", "gate", "consolidate"],
+                flowSteps: ["implement", "compress", "gate", "update-wave"],
                 activeRun: run1
             )
         )
@@ -581,7 +581,7 @@ struct WaveRunHelpersTests {
         let run = WaveRun(
             id: "run-1",
             waveId: "wave-1",
-            flow: "ship",
+            flow: "build",
             area: ".",
             repo: "/tmp/repo",
             startedAt: start,
@@ -596,7 +596,7 @@ struct WaveRunHelpersTests {
         let run = WaveRun(
             id: "run-1",
             waveId: "wave-1",
-            flow: "ship",
+            flow: "build",
             area: ".",
             repo: "/tmp/repo",
             createdAt: Date().addingTimeInterval(-60)

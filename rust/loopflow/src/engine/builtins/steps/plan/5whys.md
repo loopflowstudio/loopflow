@@ -74,4 +74,4 @@ Problem → Cause 1 → Cause 2 → Cause 3 → Root Cause
 - [ ] <specific change 2>
 ```
 
-The `ship` flow following this step will implement the structural and systemic fixes.
+The `build` flow following this step will implement the structural and systemic fixes.

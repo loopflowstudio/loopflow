@@ -17,7 +17,7 @@ WAVE_FULL = {
     **WAVE_MINIMAL,
     "stimuli": [{"id": "stim-1", "kind": "loop"}],
     "created_at": "2026-02-08T01:56:54Z",
-    "flow_steps": ["review", "iterate", "ship", "gate"],
+    "flow_steps": ["review", "iterate", "build", "gate"],
     "commits": [
         {"sha": "a1b2c3d", "message": "implement: add retry logic"},
         {"sha": "e4f5g6h", "message": "design: initial sketch"},

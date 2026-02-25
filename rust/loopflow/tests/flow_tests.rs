@@ -240,21 +240,21 @@ fn expand_flow_prefers_step_over_single_step_flow() {
     }
 }
 
-/// The builtin wave-reduce flow should expand to 3 items:
-/// fork(reduce×3), consolidate, add-to-wave.
+/// The builtin wave-reduce flow should expand to 2 items:
+/// fork(reduce×3), update-wave.
 #[test]
-fn builtin_wave_reduce_expands_publish_subflow() {
+fn builtin_wave_reduce_expands_to_update_wave() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
     let flow = load_flow("wave-reduce", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
 
-    // fork + consolidate + add-to-wave = 3
+    // fork + update-wave = 2
     assert_eq!(
         items.len(),
-        3,
-        "wave-reduce should expand publish into consolidate + add-to-wave"
+        2,
+        "wave-reduce should expand into fork + update-wave"
     );
 
     // Step 0: fork (reduce × 3 directions)
@@ -277,14 +277,9 @@ fn builtin_wave_reduce_expands_publish_subflow() {
             ]
         );
     }
-    // Step 1: consolidate (from publish sub-flow)
+    // Step 1: update-wave
     match &items[1] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "consolidate"),
-        _ => panic!("expected consolidate step"),
-    }
-    // Step 2: add-to-wave (from publish sub-flow)
-    match &items[2] {
-        ConcreteItem::Step(s) => assert_eq!(s.step.name, "add-to-wave"),
-        _ => panic!("expected add-to-wave step"),
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "update-wave"),
+        _ => panic!("expected update-wave step"),
     }
 }

@@ -48,10 +48,10 @@ mod tests {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
-        fs::write(dir.join("scan.yaml"), "flow: ship\narea: ['.']\n").expect("write");
+        fs::write(dir.join("scan.yaml"), "flow: build\narea: ['.']\n").expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.flow, "ship");
+        assert_eq!(config.flow, "build");
         assert_eq!(config.area, vec!["."]);
     }
 

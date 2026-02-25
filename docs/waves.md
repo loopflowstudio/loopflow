@@ -11,7 +11,7 @@ A wave is **area × direction × flow**. Stimuli (triggers) are separate entitie
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("shipper", repo=".", flow="ship", direction=["clarity"], area=["src/api/"])
+loopflow.create_wave("shipper", repo=".", flow="build", direction=["clarity"], area=["src/api/"])
 loopflow.run_wave("shipper")
 PY
 ```
@@ -38,7 +38,7 @@ Single execution. Run a flow once then stop.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("runner", repo=".", flow="ship", area=["swift/"])
+loopflow.create_wave("runner", repo=".", flow="build", area=["swift/"])
 loopflow.run_wave("runner")
 PY
 ```
@@ -51,7 +51,7 @@ Continuous work. Each iteration picks a task, runs the flow, creates a PR.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("looper", repo=".", flow="ship", area=["src/"])
+loopflow.create_wave("looper", repo=".", flow="build", area=["src/"])
 loopflow.update_wave("looper", stimulus=loopflow.Stimulus(kind="loop"))
 loopflow.run_wave("looper")
 PY
@@ -67,7 +67,7 @@ React to changes. When files in the area change on main, activates one iteration
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("watcher", repo=".", flow="ship", area=["src/api/"])
+loopflow.create_wave("watcher", repo=".", flow="build", area=["src/api/"])
 loopflow.update_wave("watcher", stimulus=loopflow.Stimulus(kind="watch"))
 loopflow.run_wave("watcher")
 PY
@@ -83,7 +83,7 @@ Run on schedule. 24-hour grace period for laptops.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("cronner", repo=".", flow="ship", area=["."])
+loopflow.create_wave("cronner", repo=".", flow="build", area=["."])
 loopflow.update_wave("cronner", stimulus=loopflow.Stimulus(kind="cron", cron="0 9 * * *"))
 loopflow.run_wave("cronner")
 PY
@@ -97,7 +97,7 @@ Trigger a wave when another wave runs.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("ux", repo=".", flow="ship", area=["docs/"])
+loopflow.create_wave("ux", repo=".", flow="build", area=["docs/"])
 loopflow.create_wave("infra", repo=".", flow="grind", area=["rust/"])
 loopflow.add_stimulus("ux", kind="listen", source_wave_id="infra")
 loopflow.run_wave("ux")
@@ -113,7 +113,7 @@ A wave can have multiple stimuli. Any stimulus firing activates the wave.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("swift-falcon", repo=".", flow="ship", area=["src/"])
+loopflow.create_wave("swift-falcon", repo=".", flow="build", area=["src/"])
 loopflow.update_wave("swift-falcon", stimulus=loopflow.Stimulus(kind="watch"))
 loopflow.run_wave("swift-falcon")
 PY
@@ -157,7 +157,7 @@ Run exactly one iteration using the once stimulus:
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("runner", repo=".", flow="ship", area=["src/"])
+loopflow.create_wave("runner", repo=".", flow="build", area=["src/"])
 loopflow.run_wave("runner")
 PY
 ```

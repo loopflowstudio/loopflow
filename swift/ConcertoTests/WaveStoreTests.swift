@@ -12,7 +12,7 @@ struct WaveStoreOptimisticTests {
         id: String = "wave-1",
         name: String = "original",
         status: WaveStatus = .idle,
-        flow: String = "ship",
+        flow: String = "build",
         area: [String] = ["src/"],
         direction: [String] = [],
         openPRCount: Int = 0,
@@ -86,7 +86,7 @@ struct WaveStoreOptimisticTests {
     @Test("applyOptimistic with multiple fields updates all")
     func applyOptimisticMultipleFields() {
         let store = WaveStore()
-        store.set(makeWave(flow: "ship", area: ["src/"], direction: []))
+        store.set(makeWave(flow: "build", area: ["src/"], direction: []))
 
         let snapshot = store.applyOptimistic("wave-1") { w in
             w.flow = "debug"
@@ -99,7 +99,7 @@ struct WaveStoreOptimisticTests {
         #expect(wave.area == ["lib/"])
         #expect(wave.direction == ["ux"])
 
-        #expect(snapshot?.flow == "ship")
+        #expect(snapshot?.flow == "build")
         #expect(snapshot?.area == ["src/"])
         #expect(snapshot?.direction == [])
     }
@@ -107,7 +107,7 @@ struct WaveStoreOptimisticTests {
     @Test("rollback after multiple field mutation restores all fields")
     func rollbackRestoresAllFields() {
         let store = WaveStore()
-        store.set(makeWave(name: "original", flow: "ship", area: ["src/"]))
+        store.set(makeWave(name: "original", flow: "build", area: ["src/"]))
 
         let snapshot = store.applyOptimistic("wave-1") { w in
             w.name = "renamed"
@@ -119,7 +119,7 @@ struct WaveStoreOptimisticTests {
 
         let wave = store.wave(for: "wave-1")!
         #expect(wave.name == "original")
-        #expect(wave.flow == "ship")
+        #expect(wave.flow == "build")
         #expect(wave.area == ["src/"])
     }
 

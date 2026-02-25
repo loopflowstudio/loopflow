@@ -369,7 +369,7 @@ mod tests {
             wave_id: LfdId::new(),
             snapshot: WaveRunSnapshot {
                 repo: ".".to_string(),
-                flow: "ship".to_string(),
+                flow: "build".to_string(),
                 direction: Vec::new(),
                 area: Vec::new(),
                 pr: Some(PullRequest {
@@ -415,7 +415,7 @@ mod tests {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
             repo: repo.to_string(),
-            flow: "ship".to_string(),
+            flow: "build".to_string(),
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

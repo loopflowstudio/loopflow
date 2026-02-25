@@ -1,9 +1,11 @@
+use std::path::Path;
 use std::time::Duration;
 
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
+use crate::engine::worktrees::worktree_path;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
@@ -74,6 +76,13 @@ async fn tick_loop_waves(
         }
 
         if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
+            continue;
+        }
+
+        let worktree = worktree_path(Path::new(wave.repo()), wave.name());
+        let wave_dir = worktree.join("wave").join(wave.name());
+        if worktree.exists() && !wave_dir.exists() {
+            tracing::info!(wave = %wave.name(), "wave dir removed, skipping loop tick");
             continue;
         }
 

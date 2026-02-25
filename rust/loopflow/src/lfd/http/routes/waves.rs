@@ -180,7 +180,7 @@ pub async fn create_wave_handler(
         .transpose()?;
     let flow = flow
         .or_else(|| wave_config.as_ref().map(|c| c.flow.clone()))
-        .unwrap_or_else(|| "ship".to_string());
+        .unwrap_or_else(|| "build".to_string());
     let direction = direction
         .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();

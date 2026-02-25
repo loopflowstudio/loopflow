@@ -1,49 +1,37 @@
 ---
-requires: diff vs main, wave/<wave>/
-produces: wave/<wave>/ (updated)
+requires: diff vs main, wave/<wave>/, scratch/
+produces: wave/<wave>/ (updated), scratch/ (promoted files removed)
 ---
-Revise the wave plan based on what we just shipped.
+Reconcile wave state after work.
 
 ## Goal
 
-After shipping a wave item, the plan should reflect what we learned. A wave plan written before building is a hypothesis. This step updates the hypothesis with evidence.
+After a build, `wave/<wave>/` should reflect reality:
+
+- Completed work is marked accurately
+- New actionable follow-ups from `scratch/` are promoted
+- Duplicates are merged (never silently overwritten)
+- Promoted scratch files are removed
 
 ## Workflow
 
-1. Read the diff — what was actually built?
-2. Read the remaining wave items in `wave/<wave>/`
-3. Read `wave/<wave>/README.md` for strategic context
-4. Compare what was built to what was planned. Note surprises — things that were harder, easier, or different than expected.
-5. Update the wave plan.
+1. Read the diff to understand what was actually built.
+2. Read `wave/<wave>/README.md` and roadmap items in `wave/<wave>/`.
+3. Update wave status/roadmap files based on what shipped.
+4. Review `scratch/` for unfinished or actionable artifacts.
+5. Promote actionable items into `wave/<wave>/`.
+6. If destination files already exist, merge/dedupe content intentionally.
+7. Remove scratch files that were promoted.
 
-## What to look for
+## Promotion rules
 
-**Assumptions that broke.** The plan assumed X, but building revealed Y. Does this change what comes next?
-
-**Scope that shifted.** Did the shipped item end up bigger or smaller than planned? Does that compress or expand later phases?
-
-**New questions.** Did building this surface questions we didn't have before? Add them to the relevant phase.
-
-**Resolved questions.** Did building this answer open questions from later phases? Update them.
-
-**Sequence changes.** Given what we know now, is the ordering still right? Should something move earlier because it's more uncertain than we thought? Should something be dropped because building this made it unnecessary?
-
-## What to update
-
-- **Roadmap** (`##-*.md`) — update status, revise scope based on what we learned, add new items if the plan grew
-- **Risks** — add new risks discovered during implementation, resolve answered questions
-- **Goals** — refine success criteria if they evolved, update invariants if new ones emerged
-- **Metrics** — note any observable signals from what we shipped
-- **Vision** — should rarely change. If it does, flag it explicitly — vision drift is a design decision, not a side effect
-
-## What not to do
-
-- Don't rewrite phases that are still far out. Update the next 1-2 phases; leave distant ones alone.
-- Don't remove open questions just because they're uncomfortable. If we still don't know, say so.
-- Don't add items just because you see opportunities. This step maintains the plan, it doesn't expand scope.
+- Promote work items that represent clear next actions.
+- Keep one canonical copy in `wave/<wave>/`.
+- If a destination exists, merge content; do not clobber existing files.
+- Skip disposable notes that are already captured elsewhere.
 
 ## Output
 
-Updated files in `wave/<wave>/`. Commit the changes with a message describing what shifted and why.
+Updated files under `wave/<wave>/` plus cleanup of promoted `scratch/` files.
 
-If nothing changed — the plan still holds — write a brief note in the commit: "wave: reviewed after <item>, no changes needed."
+If no wave changes are needed, leave a short note in the commit message: `wave: reviewed, no changes needed`.

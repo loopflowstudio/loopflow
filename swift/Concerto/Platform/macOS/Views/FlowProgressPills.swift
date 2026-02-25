@@ -113,7 +113,7 @@ struct FlowProgressPills: View {
 #Preview("Running - Step 2 of 4") {
     ThemePreview {
         FlowProgressPills(
-            steps: ["implement", "compress", "gate", "consolidate"],
+            steps: ["implement", "compress", "gate", "update-wave"],
             currentIndex: 1,
             startedAt: Date().addingTimeInterval(-125),
             onRestartStep: {}
@@ -124,7 +124,7 @@ struct FlowProgressPills: View {
 
 #Preview("Running - First Step") {
     FlowProgressPills(
-        steps: ["design", "implement", "ship"],
+        steps: ["design", "build", "review"],
         currentIndex: 0,
         startedAt: Date().addingTimeInterval(-30) // 30s ago
     )
@@ -148,4 +148,3 @@ struct FlowProgressPills: View {
     )
     .padding()
 }
-

@@ -17,7 +17,7 @@ struct RunStoreTests {
         WaveRun(
             id: id,
             waveId: waveId,
-            flow: "ship",
+            flow: "build",
             area: "src/",
             repo: "/tmp/repo",
             status: status,

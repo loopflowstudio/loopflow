@@ -13,7 +13,7 @@ The included context defines your area of responsibility. Address issues within 
 1. Read the review in scratch/ or the feedback provided
 2. Identify the highest-impact improvement to address
 3. Write a focused design doc in scratch/<branch>.md
-4. The design feeds into `ship` (implement → reduce → polish)
+4. The design feeds into `build` (implement → compress → gate → update-wave)
 
 ## Focus
 

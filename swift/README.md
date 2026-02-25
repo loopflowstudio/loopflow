@@ -82,8 +82,10 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 - `LoopflowCore/State/RepoState.swift` — shared app orchestrator for waves, connection, and stores
 - `LoopflowCore/State/*.swift` — shared state containers (`WaveStore`, `RunStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`, `ChatState`)
 - `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
-- `Concerto/Views` — app shell views and macOS-first composition
-- `Concerto/Services/Ghostty` — embedded terminal integration (macOS-only)
+- `Concerto/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveChatView`)
+- `Concerto/Platform/macOS` — macOS-only views, services, and keyboard handling
+- `Concerto/Platform/iOS` — iOS-only views (`ConnectionSetupView`, `MobileWaveDetailView`, `MobileWaveListView`)
+- `Concerto/Platform/macOS/Services/Ghostty` — embedded terminal integration (macOS-only)
 
 ## Multiplatform Boundary Rules
 
@@ -190,5 +192,5 @@ In bundled mode, Settings also supports optional CLI symlink install for `lf` + 
 Or via Xcode:
 ```bash
 xcodegen generate
-xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'
+xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```

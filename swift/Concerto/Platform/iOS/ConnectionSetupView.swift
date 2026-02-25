@@ -5,7 +5,6 @@ import LoopflowCore
 struct ConnectionSetupView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
-    @Environment(\.palette) private var palette
 
     @State private var host = ""
     @State private var port = "2486"

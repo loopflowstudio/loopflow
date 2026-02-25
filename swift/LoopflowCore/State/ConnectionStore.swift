@@ -95,11 +95,7 @@ public final class ConnectionStore {
 
     public func setMode(_ mode: ConnectionMode) {
         self.mode = mode
-        if mode == .remote, let remoteConnection {
-            activeConnection = remoteConnection
-        } else {
-            activeConnection = .local
-        }
+        activeConnection = (mode == .remote ? remoteConnection : nil) ?? .local
         persistSettings()
     }
 
@@ -184,76 +180,93 @@ public final class ConnectionStore {
         return try? JSONDecoder().decode(LegacyPersistedSettings.self, from: data)
     }
 
+    private static func bundledState(
+        remoteConnection: ServerConnection?,
+        secretStore: ConnectionSecretStore,
+        shouldPersist: Bool
+    ) -> InitialState {
+        var remote = remoteConnection
+        if let persisted = remote {
+            remote?.staticToken = secretStore.token(for: persisted)
+        }
+
+        return InitialState(
+            mode: .bundled,
+            activeConnection: .local,
+            remoteConnection: remote,
+            shouldPersist: shouldPersist
+        )
+    }
+
+    private static func remoteState(
+        from connection: ServerConnection,
+        secretStore: ConnectionSecretStore,
+        shouldPersist: Bool
+    ) -> InitialState {
+        var remote = connection
+        remote.staticToken = secretStore.token(for: connection)
+        return InitialState(
+            mode: .remote,
+            activeConnection: remote,
+            remoteConnection: remote,
+            shouldPersist: shouldPersist
+        )
+    }
+
     private static func loadInitialState(
         defaults: UserDefaults,
         secretStore: ConnectionSecretStore
     ) -> InitialState {
         if let loaded = loadSettings(from: defaults) {
             switch loaded {
-            case .bundled(var remote):
-                if let persisted = remote {
-                    remote?.staticToken = secretStore.token(for: persisted)
-                }
-                return InitialState(
-                    mode: .bundled,
-                    activeConnection: .local,
+            case .bundled(let remote):
+                return bundledState(
                     remoteConnection: remote,
+                    secretStore: secretStore,
                     shouldPersist: false
                 )
-            case .remote(var remote):
-                remote.staticToken = secretStore.token(for: remote)
-                return InitialState(
-                    mode: .remote,
-                    activeConnection: remote,
-                    remoteConnection: remote,
+            case .remote(let remote):
+                return remoteState(
+                    from: remote,
+                    secretStore: secretStore,
                     shouldPersist: false
                 )
             }
         }
 
         if let legacySettings = loadLegacySettings(from: defaults) {
-            if legacySettings.mode == .remote, var remote = legacySettings.remoteConnection {
-                remote.staticToken = secretStore.token(for: remote)
-                return InitialState(
-                    mode: .remote,
-                    activeConnection: remote,
-                    remoteConnection: remote,
+            if legacySettings.mode == .remote, let remote = legacySettings.remoteConnection {
+                return remoteState(
+                    from: remote,
+                    secretStore: secretStore,
                     shouldPersist: true
                 )
             }
-
-            return InitialState(
-                mode: .bundled,
-                activeConnection: .local,
+            return bundledState(
                 remoteConnection: nil,
+                secretStore: secretStore,
                 shouldPersist: true
             )
         }
 
         if let legacy = loadLegacyConnection(from: defaults) {
-            guard !legacy.isLocal else {
-                return InitialState(
-                    mode: .bundled,
-                    activeConnection: .local,
+            if legacy.isLocal {
+                return bundledState(
                     remoteConnection: nil,
+                    secretStore: secretStore,
                     shouldPersist: true
                 )
             }
-
-            var remote = legacy
-            remote.staticToken = secretStore.token(for: legacy)
-            return InitialState(
-                mode: .remote,
-                activeConnection: remote,
-                remoteConnection: remote,
+            return remoteState(
+                from: legacy,
+                secretStore: secretStore,
                 shouldPersist: true
             )
         }
 
-        return InitialState(
-            mode: .bundled,
-            activeConnection: .local,
+        return bundledState(
             remoteConnection: nil,
+            secretStore: secretStore,
             shouldPersist: false
         )
     }

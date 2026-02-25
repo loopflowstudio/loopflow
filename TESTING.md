@@ -11,7 +11,7 @@ cargo clippy -- -D warnings            # Rust lints (warnings = errors)
 cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 swift test --package-path swift        # Swift package tests
-cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'  # Concerto UI
+cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Concerto UI
 tests/e2e/test_smoke.sh               # E2E smoke
 uv run pytest tests/e2e/test_api_smoke.py -v  # API smoke (live lfd HTTP)
 ```
@@ -43,7 +43,7 @@ UI tests for the macOS app. Requires Xcode and xcodegen.
 ```bash
 cd swift
 xcodegen generate
-xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'
+xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
 ## What CI Runs

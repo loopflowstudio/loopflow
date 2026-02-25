@@ -28,7 +28,7 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 
 ## Phase boundaries
 
-- **01-multiplatform**: ~~shared core extraction +~~ iOS shells + manual remote connection + design token extraction + boundary enforcement. No discovery. *Shipped. State extraction deferred — iOS works without it via platform-specific initializers. Views are purpose-built per platform, not shared.*
+- **01-multiplatform**: ~~shared core extraction +~~ iOS shells + manual remote connection + design token extraction + boundary enforcement + macOS file migration to Platform/macOS/. No discovery. *Shipped. State extracted to LoopflowCore. iOS got purpose-built views. macOS files migrated. Mixed-platform files (LiveOutput, WaveChatView) left in place intentionally — they have partial guards, not whole-file gates.*
 - **02-action-buttons**: `suggest_actions` UX in platform-specific chat surfaces (MobileWaveDetailView on iOS, WaveChatView on macOS) backed by shared ActionButtonsView component. No discovery and no multi-client protocol work.
 - **03-multi-client**: reliability and correctness for concurrent clients on one lfd. Manual connection path remains primary.
 - **04-lfd-discovery**: optional zero-config discovery via studio + Tailscale, additive to manual host/port connection.
@@ -46,7 +46,8 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 
 - ~~Platform-gating macOS code (Ghostty, Carbon, NSOpenPanel, keyboard router) may be messier than expected~~ *Resolved: manageable with `#if os(macOS)` at file level and platform-conditional Package.swift settings.*
 - ~~Moving views into LoopflowCore requires careful dependency management (views can't depend on app-level state)~~ *Resolved differently: iOS got purpose-built views instead. Shared components (ActionButtonsView, DesignSystem) live in LoopflowCore; platform views stay in Concerto.*
-- iOS and macOS views diverging means feature work (like action buttons) touches both platforms — more surface area per feature
+- iOS and macOS views diverging means feature work (like action buttons) touches both platforms — more surface area per feature. *Confirmed by Stage 01: this is real but manageable. Purpose-built views are simpler than forced sharing.*
+- ~~ConnectionProfile abstraction needed early for iOS connection management~~ *Dropped: tried in Stage 01, removed. Simple ConnectionMode (bundled/remote) + ConnectionStore suffices. Profiles may return in Stage 03 if saved connections become important.*
 - Action button quality depends on agent prompt engineering — bad suggestions = bad UX
 - Multi-client session handoff may need lfd changes if sessions assume single-client
 - SwiftUI multiplatform has rough edges (NavigationSplitView behaves differently on iOS)
@@ -56,7 +57,7 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 ## Metrics
 
 - ~~Concerto builds and runs on iOS Simulator~~ *Done (iPhone 17, iPad Pro 11-inch M5).*
-- Can see wave list, tap into a wave, see live output on iPhone *(builds confirmed; interactive validation against live lfd pending)*
+- Can see wave list, tap into a wave, see live output on iPhone *(builds confirmed; interactive validation against live lfd pending — blocked on headless simulator interaction primitives)*
 - Agent surfaces action buttons, tapping one sends the message
 - Same lfd instance serves both Mac and iOS Concerto simultaneously
 - Login on mobile → see running lfds → tap to connect (no manual IP/port entry)

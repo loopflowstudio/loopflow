@@ -115,7 +115,10 @@ public final class RepoState {
                 repoRoot: repoRoot,
                 directions: wave?.direction ?? [],
                 area: wave?.area.first,
-                wave: wave?.name.isEmpty == false ? wave?.name : nil
+                wave: {
+                    guard let name = wave?.name, !name.isEmpty else { return nil }
+                    return name
+                }()
             ),
             waveService: waveService
         )

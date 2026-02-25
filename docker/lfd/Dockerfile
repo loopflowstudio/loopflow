@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /build/target/release/lf /usr/local/bin/lf
 COPY --from=builder /build/target/release/lfd /usr/local/bin/lfd
 
-COPY pyproject.toml /build/pyproject.toml
+COPY pyproject.toml README.md /build/
 COPY python /build/python
 RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 pip3 install --break-system-packages /build \
     && rm -rf /build

@@ -35,7 +35,7 @@ struct RepoScanner {
     private func isMainGitWorktree(_ url: URL) -> Bool {
         let gitMarker = url.appendingPathComponent(".git")
         var isDirectory = ObjCBool(false)
-        let exists = fileManager.fileExists(atPath: gitMarker.path(percentEncoded: false), isDirectory: &isDirectory)
+        let exists = fileManager.fileExists(atPath: gitMarker.normalizedFilePath, isDirectory: &isDirectory)
         guard exists else { return false }
 
         if isDirectory.boolValue {
@@ -50,6 +50,6 @@ struct RepoScanner {
     }
 
     private func standardizedURL(_ url: URL) -> URL {
-        URL(fileURLWithPath: url.standardizedFileURL.path(percentEncoded: false), isDirectory: true)
+        url.standardizedFileURL
     }
 }

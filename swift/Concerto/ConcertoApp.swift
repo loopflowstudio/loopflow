@@ -62,11 +62,11 @@ struct ConcertoApp: App {
         let uiTestMode = RepoState.uiTestMode()
         let screenshotMode = RepoState.ScreenshotMode.fromArgs()
 
-        // Welcome/main window - shown on launch
+        // Portfolio window - shown on launch
         WindowGroup {
             Group {
                 if let screenshot = screenshotMode {
-                    ScreenshotWindow(mode: screenshot, portfolioService: portfolioService)
+                    ScreenshotWindow(mode: screenshot)
                 } else if uiTestMode != nil {
                     RepoWindow(
                         repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),

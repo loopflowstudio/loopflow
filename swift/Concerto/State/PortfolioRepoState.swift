@@ -19,7 +19,7 @@ final class PortfolioRepoState {
     init(repo: PortfolioRepo, connection: ServerConnection, token: String?) {
         self.repo = repo
         self.connection = connection
-        self.repoPath = Self.normalizePath(repo.path)
+        self.repoPath = repo.path.normalizedFilePath
         self.waveService = WaveService(connection: connection, tokenProvider: { token })
     }
 
@@ -42,7 +42,7 @@ final class PortfolioRepoState {
 
     func applyConnectedWaves(_ connectedWaves: [Wave]) {
         let filtered = connectedWaves
-            .filter { Self.normalizePath($0.repo) == repoPath }
+            .filter { $0.repo.normalizedFilePath == repoPath }
             .map { WaveViewModel(api: $0) }
         waves = Self.sortWaves(filtered)
     }
@@ -53,7 +53,7 @@ final class PortfolioRepoState {
             waves.removeAll { $0.id == event.waveId }
         case .created, .updated, .started, .stopped, .waiting:
             guard let wave = event.wave,
-                  Self.normalizePath(wave.repo) == repoPath else {
+                  wave.repo.normalizedFilePath == repoPath else {
                 return
             }
             upsertWave(WaveViewModel(api: wave))
@@ -61,14 +61,8 @@ final class PortfolioRepoState {
     }
 
     func updateConnectionState(_ state: ConnectionState) {
-        let connected: Bool
-        if case .connected = state {
-            connected = true
-        } else {
-            connected = false
-        }
-        isConnected = connected
-        if !connected && waves.isEmpty {
+        isConnected = if case .connected = state { true } else { false }
+        if !isConnected && waves.isEmpty {
             isLoading = false
         }
     }
@@ -81,20 +75,25 @@ final class PortfolioRepoState {
         waves.filter { $0.status == .waiting }.count
     }
 
-    var totalInsertions: Int {
-        waves.reduce(0) { partial, wave in
-            partial + Self.parseDiffStat(wave.diffStat).insertions
+    var totalDiff: (insertions: Int, deletions: Int) {
+        waves.reduce(into: (insertions: 0, deletions: 0)) { partial, wave in
+            let stat = Self.parseDiffStat(wave.diffStat)
+            partial.insertions += stat.insertions
+            partial.deletions += stat.deletions
         }
+    }
+
+    var totalInsertions: Int {
+        totalDiff.insertions
     }
 
     var totalDeletions: Int {
-        waves.reduce(0) { partial, wave in
-            partial + Self.parseDiffStat(wave.diffStat).deletions
-        }
+        totalDiff.deletions
     }
 
     var totalDiffLines: Int {
-        totalInsertions + totalDeletions
+        let diff = totalDiff
+        return diff.insertions + diff.deletions
     }
 
     var needsAttention: Bool {
@@ -155,9 +154,5 @@ final class PortfolioRepoState {
             return 0
         }
         return Int(text[valueRange]) ?? 0
-    }
-
-    private static func normalizePath(_ path: String) -> String {
-        URL(fileURLWithPath: path).standardizedFileURL.path(percentEncoded: false)
     }
 }

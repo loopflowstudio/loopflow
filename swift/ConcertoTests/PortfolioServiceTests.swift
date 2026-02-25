@@ -21,8 +21,8 @@ struct PortfolioServiceTests {
         service.addRepo(repoA)
 
         #expect(service.repos.count == 2)
-        #expect(service.repos.first?.path == repoA.standardizedFileURL.path(percentEncoded: false))
-        #expect(service.repos.last?.path == repoB.standardizedFileURL.path(percentEncoded: false))
+        #expect(service.repos.first?.path == repoA.normalizedFilePath)
+        #expect(service.repos.last?.path == repoB.normalizedFilePath)
     }
 
     @Test("loads existing repos from legacy recent key")
@@ -34,7 +34,7 @@ struct PortfolioServiceTests {
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
 
         let legacyRepo = PortfolioRepo(
-            path: repo.standardizedFileURL.path(percentEncoded: false),
+            path: repo.normalizedFilePath,
             lastOpened: Date()
         )
         let data = try JSONEncoder().encode([legacyRepo])
@@ -64,7 +64,7 @@ struct PortfolioServiceTests {
 
         service.removeRepo(repoA)
         #expect(service.repos.count == 1)
-        #expect(service.repos[0].path == repoB.standardizedFileURL.path(percentEncoded: false))
+        #expect(service.repos[0].path == repoB.normalizedFilePath)
 
         service.clearAll()
         #expect(service.repos.isEmpty)

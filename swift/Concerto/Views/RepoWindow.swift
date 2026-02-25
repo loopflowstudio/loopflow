@@ -48,21 +48,12 @@ struct RepoWindow: View {
             setupComplete = status.lfInstalled
             hasCheckedSetup = true
 
-            // Then open repo if setup is complete
-            if setupComplete, let url = repoURL, !hasOpenedRepo {
-                hasOpenedRepo = true
-                await repoState.openRepo(url, outputBuffer: outputBuffer)
-                portfolioService.addRepo(url)
-                applyPendingWaveSelectionIfNeeded()
-            }
+            await openRepoIfNeeded()
         }
         .onChange(of: setupComplete) { _, complete in
-            if complete, let url = repoURL, !hasOpenedRepo {
-                hasOpenedRepo = true
+            if complete {
                 Task {
-                    await repoState.openRepo(url, outputBuffer: outputBuffer)
-                    portfolioService.addRepo(url)
-                    applyPendingWaveSelectionIfNeeded()
+                    await openRepoIfNeeded()
                 }
             }
         }
@@ -72,11 +63,19 @@ struct RepoWindow: View {
                 return
             }
 
-            let repoPath = repoURL?.standardizedFileURL.path(percentEncoded: false)
+            let repoPath = repoURL?.normalizedFilePath
             guard repoPath == targetRepoPath else { return }
             pendingWaveSelection = waveId
             applyPendingWaveSelectionIfNeeded()
         }
+    }
+
+    private func openRepoIfNeeded() async {
+        guard setupComplete, let url = repoURL, !hasOpenedRepo else { return }
+        hasOpenedRepo = true
+        await repoState.openRepo(url, outputBuffer: outputBuffer)
+        portfolioService.addRepo(url)
+        applyPendingWaveSelectionIfNeeded()
     }
 
     private func applyPendingWaveSelectionIfNeeded() {

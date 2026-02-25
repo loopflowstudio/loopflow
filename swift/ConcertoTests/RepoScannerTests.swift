@@ -26,11 +26,11 @@ struct RepoScannerTests {
 
         let scanner = RepoScanner()
         let found = scanner.scanMainWorktrees(in: root)
-        let foundPaths = Set(found.map { $0.path(percentEncoded: false) })
+        let foundPaths = Set(found.map(\.normalizedFilePath))
 
-        #expect(foundPaths.contains(mainRepo.standardizedFileURL.path(percentEncoded: false)))
-        #expect(!foundPaths.contains(linkedWorktree.standardizedFileURL.path(percentEncoded: false)))
-        #expect(!foundPaths.contains(nonRepo.standardizedFileURL.path(percentEncoded: false)))
+        #expect(foundPaths.contains(mainRepo.normalizedFilePath))
+        #expect(!foundPaths.contains(linkedWorktree.normalizedFilePath))
+        #expect(!foundPaths.contains(nonRepo.normalizedFilePath))
     }
 
     private func makeTempDirectory(prefix: String) throws -> URL {

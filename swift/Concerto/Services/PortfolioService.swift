@@ -22,21 +22,14 @@ final class PortfolioService {
     }
 
     func addRepo(_ url: URL) {
-        let path = url.standardizedFileURL.path(percentEncoded: false)
-
-        // Remove existing entry for this path
+        let path = url.normalizedFilePath
         repos.removeAll { $0.path == path }
-
-        // Add to front
-        let repo = PortfolioRepo(path: path, lastOpened: Date())
-        repos.insert(repo, at: 0)
-
+        repos.insert(PortfolioRepo(path: path, lastOpened: Date()), at: 0)
         saveRepos()
     }
 
     func removeRepo(_ url: URL) {
-        let path = url.standardizedFileURL.path(percentEncoded: false)
-        repos.removeAll { $0.path == path }
+        repos.removeAll { $0.path == url.normalizedFilePath }
         saveRepos()
     }
 
@@ -46,21 +39,23 @@ final class PortfolioService {
     }
 
     private func loadRepos() {
-        if let data = defaults.data(forKey: key),
-           let decoded = try? JSONDecoder().decode([PortfolioRepo].self, from: data) {
-            repos = normalizedRepos(decoded)
+        if let storedRepos = decodedRepos(forKey: key) {
+            repos = normalizedRepos(storedRepos)
             return
         }
 
-        guard let legacyData = defaults.data(forKey: legacyKey),
-              let legacyDecoded = try? JSONDecoder().decode([PortfolioRepo].self, from: legacyData) else {
+        guard let legacyRepos = decodedRepos(forKey: legacyKey) else {
             repos = []
             return
         }
 
-        // Filter out repos that no longer exist
-        repos = normalizedRepos(legacyDecoded)
+        repos = normalizedRepos(legacyRepos)
         saveRepos()
+    }
+
+    private func decodedRepos(forKey key: String) -> [PortfolioRepo]? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode([PortfolioRepo].self, from: data)
     }
 
     private func saveRepos() {
@@ -73,7 +68,7 @@ final class PortfolioService {
         var normalized: [PortfolioRepo] = []
 
         for entry in entries.sorted(by: { $0.lastOpened > $1.lastOpened }) {
-            let path = URL(fileURLWithPath: entry.path).standardizedFileURL.path(percentEncoded: false)
+            let path = entry.path.normalizedFilePath
             guard FileManager.default.fileExists(atPath: path), !seen.contains(path) else {
                 continue
             }

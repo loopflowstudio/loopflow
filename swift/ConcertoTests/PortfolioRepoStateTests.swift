@@ -9,7 +9,7 @@ struct PortfolioRepoStateTests {
     @Test("summary metrics count blocked and diff totals")
     func summaryMetrics() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-state")
-        let repo = PortfolioRepo(path: repoURL.path(percentEncoded: false), lastOpened: Date())
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
 
         state.applyConnectedWaves([
@@ -29,7 +29,7 @@ struct PortfolioRepoStateTests {
     @Test("wave events update and delete local waves")
     func waveEventsUpdateState() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-events")
-        let repo = PortfolioRepo(path: repoURL.path(percentEncoded: false), lastOpened: Date())
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
 
         let createdWave = makeWave(id: "wave-1", repoPath: repo.path, status: .running, diffStat: nil)

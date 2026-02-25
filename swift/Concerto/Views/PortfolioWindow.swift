@@ -63,7 +63,8 @@ struct PortfolioWindow: View {
         }
         .background(Color.loopflowBurgundy.ignoresSafeArea())
         .task {
-            await bootstrap()
+            await syncRepoStates()
+            await startEventSubscription()
         }
         .onChange(of: repoPaths) { _, _ in
             Task {
@@ -77,11 +78,6 @@ struct PortfolioWindow: View {
             }
             eventService = nil
         }
-    }
-
-    private func bootstrap() async {
-        await syncRepoStates()
-        await startEventSubscription()
     }
 
     private func syncRepoStates() async {
@@ -131,7 +127,7 @@ struct PortfolioWindow: View {
         switch event {
         case .connected(let connected):
             let grouped = Dictionary(grouping: connected.waves) {
-                URL(fileURLWithPath: $0.repo).standardizedFileURL.path(percentEncoded: false)
+                $0.repo.normalizedFilePath
             }
 
             for repo in portfolioService.repos {
@@ -186,7 +182,7 @@ struct PortfolioWindow: View {
             object: nil,
             userInfo: [
                 "waveId": waveId,
-                "repoPath": repoURL.standardizedFileURL.path(percentEncoded: false),
+                "repoPath": repoURL.normalizedFilePath,
             ]
         )
     }
@@ -277,7 +273,8 @@ struct PortfolioRepoCard: View {
     }
 
     private var summaryText: String {
-        "\(repoState.waves.count) waves · \(repoState.blockedCount) blocked · +\(repoState.totalInsertions) -\(repoState.totalDeletions)"
+        let diff = repoState.totalDiff
+        return "\(repoState.waves.count) waves · \(repoState.blockedCount) blocked · +\(diff.insertions) -\(diff.deletions)"
     }
 
     @ViewBuilder
@@ -368,7 +365,7 @@ struct RepoTypeahead: View {
 
     private var filteredCandidates: [URL] {
         let available = candidates.filter { url in
-            !excludedPaths.contains(url.standardizedFileURL.path(percentEncoded: false))
+            !excludedPaths.contains(url.normalizedFilePath)
         }
 
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -383,7 +380,7 @@ struct RepoTypeahead: View {
 
         return available.filter { url in
             let name = url.lastPathComponent.lowercased()
-            let path = url.path(percentEncoded: false).lowercased()
+            let path = url.normalizedFilePath.lowercased()
             return terms.allSatisfy { term in
                 name.contains(term) || path.contains(term)
             }
@@ -426,7 +423,7 @@ struct RepoTypeahead: View {
                                     Text(url.lastPathComponent)
                                         .font(Typography.body())
                                         .foregroundStyle(.white)
-                                    Text(url.path(percentEncoded: false))
+                                    Text(url.normalizedFilePath)
                                         .font(Typography.caption())
                                         .foregroundStyle(.white.opacity(0.6))
                                         .lineLimit(1)

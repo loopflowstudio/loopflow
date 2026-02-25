@@ -7,9 +7,11 @@ use crate::engine::agent::{launch_agent, AgentCapabilities, LaunchConfig, Proces
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::command::run_command;
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::get_default_branch;
-use crate::engine::worktrees::main_repo_root;
+use crate::engine::git::{delete_local_branch, get_default_branch, sync_main, worktree_remove};
+use crate::engine::worktrees::{create_with_schema, main_repo_root};
+use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::land::{land, LandOptions};
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
 
@@ -238,4 +240,130 @@ fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
         stderr: err.stderr,
     })?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+// =========================================================================
+// lf ops release — full publish workflow
+// =========================================================================
+
+#[derive(Debug, Clone)]
+pub struct PublishOptions {
+    pub version_input: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
+pub struct PublishResult {
+    pub version: String,
+}
+
+/// Full release workflow: sync main, create worktree, generate release notes,
+/// commit, land, tag, push tag.
+///
+/// Runs from any branch — always works off a fresh worktree from origin/main.
+pub fn publish_release(
+    repo: &Path,
+    options: &PublishOptions,
+    progress: &impl Progress,
+) -> OpsResult<PublishResult> {
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+
+    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+
+    // Resolve version before creating worktree so dry-run can report it.
+    let prev_tag = latest_tag(&main_repo)?;
+    let version = resolve_version(&prev_tag, &options.version_input)?;
+    let wt_name = format!("release-v{version}");
+
+    if options.dry_run {
+        progress.status(&format!("Would publish v{version}"));
+        progress.status(&format!("  Create worktree: {wt_name}"));
+        progress.status("  Generate release notes");
+        progress.status("  Commit, PR, and land");
+        progress.status(&format!("  Tag v{version} and push"));
+        return Ok(PublishResult { version });
+    }
+
+    // 1. Sync main
+    progress.status("Syncing main...");
+    let main_branch = get_default_branch(&main_repo)?;
+    sync_main(&main_repo, &main_branch)?;
+
+    // 2. Create worktree off main
+    progress.status(&format!("Creating worktree {wt_name}..."));
+    let wt = create_with_schema(&main_repo, &wt_name, Some(&main_branch), None)?;
+    let wt_path = wt.path;
+    let wt_branch = wt.branch;
+
+    let publish_result = publish_in_worktree(&wt_path, &version, progress);
+
+    // Clean up worktree regardless of success/failure
+    cleanup_worktree(&main_repo, &wt_path, &wt_branch, progress);
+
+    publish_result?;
+
+    // 5. Sync main to get the merged commit, then tag
+    progress.status("Syncing main after merge...");
+    sync_main(&main_repo, &main_branch)?;
+
+    progress.status(&format!("Tagging v{version}..."));
+    tag_and_push(&main_repo, &version)?;
+
+    progress.status(&format!("v{version} published. CI will build and release."));
+    Ok(PublishResult { version })
+}
+
+/// Run the release workflow inside the worktree. Separated so cleanup
+/// can happen regardless of success or failure.
+fn publish_in_worktree(wt_path: &Path, version: &str, progress: &impl Progress) -> OpsResult<()> {
+    // 3. Generate release notes
+    progress.status(&format!("Generating release notes for v{version}..."));
+    generate_release(wt_path, version, progress)?;
+
+    // 4. Commit and land
+    progress.status("Committing release notes...");
+    commit_workflow(
+        wt_path,
+        &CommitOptions {
+            add: true,
+            lint: false,
+            push: false,
+            create_draft_pr: false,
+            task: "release".to_string(),
+            flow_parents: Vec::new(),
+            message: Some(format!("release: v{version}")),
+        },
+        progress,
+    )?;
+
+    progress.status("Creating PR and landing...");
+    land(
+        wt_path,
+        &LandOptions {
+            strict: false,
+            local: false,
+            create_pr: true,
+            worktree: None,
+            lint: false,
+        },
+        progress,
+    )?;
+
+    Ok(())
+}
+
+fn cleanup_worktree(main_repo: &Path, wt_path: &Path, branch: &str, progress: &impl Progress) {
+    if let Err(e) = worktree_remove(main_repo, wt_path) {
+        progress.error(&format!("Warning: could not remove worktree: {e}"));
+    }
+    let _ = delete_local_branch(main_repo, branch);
+}
+
+fn tag_and_push(repo: &Path, version: &str) -> OpsResult<()> {
+    let tag = format!("v{version}");
+    run_stdout(repo, "git", &["tag", &tag])?;
+    run_stdout(repo, "git", &["push", "origin", &tag])?;
+    Ok(())
 }

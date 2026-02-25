@@ -41,8 +41,8 @@ Concerto bundles `lfd` and `lf` into the app bundle. By default, each opened rep
 
 Long-running dev commands tee stdout to stable files under `~/.lf/logs/dev/`:
 
-- `uv run python scripts/dev.py lfd` → `~/.lf/logs/dev/<repo>.lfd.log`
-- `uv run python scripts/dev.py run-debug` → `~/.lf/logs/dev/<repo>.concerto-run-debug.log`
+- `uv run python scripts/concerto-dev.py lfd` → `~/.lf/logs/dev/<repo>.lfd.log`
+- `uv run python scripts/concerto-dev.py run-debug` → `~/.lf/logs/dev/<repo>.concerto-run-debug.log`
 
 ### Xcode Project
 

@@ -19,7 +19,7 @@ Summarize the shape of the change in 2-3 sentences. What's new, what moved, what
 
 Produce a runnable script, not a list of commands. The human should be able to run one command and immediately start the manual walkthrough.
 
-**Default: write or extend a script in `scripts/`.** Check `scripts/` first — reuse or extend an existing script if one covers similar ground. The script handles automated checks (build, lint, test) and ends by launching whatever the human needs for manual verification (e.g., `dev.py run-debug` for UI work). The bar: run one command, get a working environment, start clicking.
+**Default: write or extend a script in `scripts/`.** Check `scripts/` first — reuse or extend an existing script if one covers similar ground. The script handles automated checks (build, lint, test) and ends by launching whatever the human needs for manual verification (e.g., `concerto-dev.py run-debug` for UI work). The bar: run one command, get a working environment, start clicking.
 
 The script should:
 - Run automated checks (fmt, clippy, cargo test, swift test, python tests — whichever apply)

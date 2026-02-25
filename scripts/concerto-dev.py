@@ -2,7 +2,7 @@
 """Development commands for Concerto (Swift app) and GhosttyKit.
 
 Usage:
-    uv run python scripts/dev.py <command>
+    uv run python scripts/concerto-dev.py <command>
 
 Commands:
     setup           Install/check repo dev environment tools
@@ -12,6 +12,9 @@ Commands:
     run-debug       Build and run with stdout visible (default: one-shot local lfd + UI)
     run-debug --no-lfd
                     Run UI only (skip automatic lfd lifecycle)
+    run-ios         Build and launch in iOS Simulator
+    run-ios --device "iPad Pro 13-inch (M4)"
+                    Target a specific simulator device
     release         Build release .app and .dmg
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
@@ -337,6 +340,107 @@ def cmd_run_debug(with_lfd: bool = True, docker_lfd: bool = False) -> int:
     if lfd_log is not None:
         lfd_log.close()
     return app_exit
+
+
+def _find_default_iphone_simulator() -> str:
+    """Find the first available iPhone simulator, preferring one already booted."""
+    result = run_capture(["xcrun", "simctl", "list", "devices", "available", "-j"])
+    if result.returncode != 0:
+        return "iPhone 16"
+
+    import json
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return "iPhone 16"
+
+    for runtime, devices in data.get("devices", {}).items():
+        if "iOS" not in runtime:
+            continue
+        for device in devices:
+            if device.get("state") == "Booted" and "iPhone" in device.get("name", ""):
+                return device["name"]
+
+    for runtime, devices in data.get("devices", {}).items():
+        if "iOS" not in runtime:
+            continue
+        for device in devices:
+            if "iPhone" in device.get("name", ""):
+                return device["name"]
+
+    return "iPhone 16"
+
+
+def cmd_run_ios(device: str | None = None) -> int:
+    """Build and launch Concerto in the iOS Simulator."""
+    device = device or _find_default_iphone_simulator()
+
+    # Regenerate xcode project to pick up current file layout
+    print("Generating Xcode project...")
+    result = run(["xcodegen", "generate"], cwd=SWIFT_DIR, check=False)
+    if result.returncode != 0:
+        print("xcodegen failed. Install with: brew install xcodegen")
+        return result.returncode
+
+    project = SWIFT_DIR / "LoopflowSwift.xcodeproj"
+    destination = f"platform=iOS Simulator,name={device}"
+
+    print(f"Building Concerto for {device}...")
+    result = run(
+        [
+            "xcodebuild", "build",
+            "-scheme", "Concerto",
+            "-project", str(project),
+            "-destination", destination,
+            "-configuration", "Debug",
+        ],
+        cwd=SWIFT_DIR,
+        check=False,
+    )
+    if result.returncode != 0:
+        return result.returncode
+
+    # Find the built .app
+    settings = run_capture(
+        [
+            "xcodebuild", "-showBuildSettings",
+            "-scheme", "Concerto",
+            "-project", str(project),
+            "-destination", destination,
+            "-configuration", "Debug",
+        ],
+        cwd=SWIFT_DIR,
+    )
+    app_path = None
+    for line in settings.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("BUILT_PRODUCTS_DIR = "):
+            products_dir = line.split(" = ", 1)[1].strip()
+            app_path = Path(products_dir) / "Concerto.app"
+            break
+
+    if not app_path or not app_path.exists():
+        print("Could not locate built Concerto.app in derived data")
+        return 1
+
+    # Boot simulator and install
+    print(f"Booting {device}...")
+    run(["xcrun", "simctl", "boot", device], check=False)  # already booted is fine
+    run(["open", "-a", "Simulator"], check=False)
+
+    print("Installing Concerto...")
+    result = run(["xcrun", "simctl", "install", "booted", str(app_path)], check=False)
+    if result.returncode != 0:
+        return result.returncode
+
+    print(f"Launching Concerto on {device}...")
+    print("Press Ctrl+C to quit")
+    print("---")
+    return run(
+        ["xcrun", "simctl", "launch", "--console-pty", "booted", "com.loopflow.concerto"],
+        check=False,
+    ).returncode
 
 
 def cmd_release() -> int:
@@ -886,6 +990,7 @@ COMMANDS = {
     "test": (cmd_test, "Build and run tests"),
     "run": (cmd_run, "Build and launch the app"),
     "run-debug": (cmd_run_debug, "Build and run with stdout visible (default includes one-shot local lfd stack)"),
+    "run-ios": (cmd_run_ios, "Build and launch in iOS Simulator"),
     "release": (cmd_release, "Build release .app and .dmg"),
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
@@ -932,6 +1037,13 @@ def main() -> int:
                 action="store_true",
                 help="Reserved for future container lfd support with --with-lfd",
             )
+        if name == "run-ios":
+            sub.add_argument(
+                "--device",
+                type=str,
+                default=None,
+                help='Simulator device name (default: first available iPhone, e.g. "iPad Pro 13-inch (M4)")',
+            )
         if name == "setup":
             sub.add_argument(
                 "--install",
@@ -956,6 +1068,8 @@ def main() -> int:
     if args.command == "run-debug":
         with_lfd = True if args.with_lfd else not args.no_lfd
         return func(with_lfd=with_lfd, docker_lfd=args.docker_lfd)
+    if args.command == "run-ios":
+        return func(device=args.device)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
     return func()

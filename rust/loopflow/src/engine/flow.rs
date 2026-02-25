@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -249,12 +249,18 @@ pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
 pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
     let mut expanded = Vec::new();
     let mut seen = HashSet::new();
-    for name in names {
-        let members = resolve_direction_group(name, repo).unwrap_or_else(|| vec![name.clone()]);
-        for member in members {
-            if seen.insert(member.clone()) {
-                expanded.push(member);
+    let mut queue: VecDeque<String> = names.iter().cloned().collect();
+    while let Some(name) = queue.pop_front() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        match resolve_direction_group(&name, repo) {
+            Some(members) => {
+                for member in members {
+                    queue.push_back(member);
+                }
             }
+            None => expanded.push(name),
         }
     }
     expanded
@@ -1022,6 +1028,25 @@ Be careful.
         let result = expand_direction_names(&["creativity".to_string()], tmp.path());
         assert!(result.contains(&"alive".to_string()));
         assert!(result.contains(&"musical".to_string()));
+    }
+
+    #[test]
+    fn expand_direction_names_recursive_group() {
+        let tmp = TempDir::new().unwrap();
+        let group_dir = tmp.path().join(".lf/directions/quality");
+        fs::create_dir_all(&group_dir).unwrap();
+        // "craft" is a builtin group — should expand recursively
+        fs::write(group_dir.join("craft.md"), "Craft direction").unwrap();
+        fs::write(group_dir.join("extra.md"), "Extra direction").unwrap();
+
+        let result = expand_direction_names(&["quality".to_string()], tmp.path());
+        // "craft" should NOT appear — it should expand to its members
+        assert!(!result.contains(&"craft".to_string()));
+        // But its members should be present
+        assert!(result.contains(&"care".to_string()));
+        assert!(result.contains(&"clarity".to_string()));
+        // And the non-group member should be present
+        assert!(result.contains(&"extra".to_string()));
     }
 
     #[test]

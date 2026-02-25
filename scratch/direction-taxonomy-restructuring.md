@@ -22,7 +22,7 @@ Replaced role-based directions (`infra-engineer`, `designer`, `product-engineer`
 
 **No compatibility aliases.** `infra-engineer`, `designer`, `product-engineer`, `values` are gone. Users get a clear error. No external consumers.
 
-**Build-time codegen for group membership.** `build.rs` scans `directions/*/` at compile time and generates a `phf::Map`. No runtime filesystem scanning for builtins.
+**Build-time codegen for group membership.** `build.rs` scans `directions/*/` at compile time and generates a `LazyLock<HashMap>`. No runtime filesystem scanning for builtins.
 
 **User groups override builtins.** `.lf/directions/craft/` takes precedence over the builtin `craft/` group.
 
@@ -30,7 +30,7 @@ Replaced role-based directions (`infra-engineer`, `designer`, `product-engineer`
 
 `expand_direction_names()` in `flow.rs` is the single expansion point. It checks user groups first, then builtin groups, then passes through unrecognized names as standalone directions. Both `prompt.rs` (context gathering) and `fork.rs` (fork execution) call this before loading direction content.
 
-The build script generates `BUILTIN_DIRECTION_GROUPS` as a `phf::Map<&str, &[&str]>` compiled into the binary. Discovery (`lf list`) reads the same map.
+The build script generates `BUILTIN_DIRECTION_GROUPS` as a `LazyLock<HashMap><&str, &[&str]>` compiled into the binary. Discovery (`lf list`) reads the same map.
 
 ## What changed from the original branch
 

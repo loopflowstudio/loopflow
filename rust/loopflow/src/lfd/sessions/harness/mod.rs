@@ -24,6 +24,10 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
     )
 }
 
+pub fn is_terminal_harness_error(code: &str) -> bool {
+    matches!(code, "codex_disconnected" | "claude_harness_crashed")
+}
+
 #[async_trait]
 pub trait SessionHarness: Send + Sync {
     async fn start(&mut self, config: &LaunchConfig) -> Result<()>;

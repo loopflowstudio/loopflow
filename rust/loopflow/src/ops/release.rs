@@ -173,8 +173,8 @@ fn generate_release_notes(
     let launch = LaunchConfig {
         task_prompt: prompt,
         model: Some(config.agent_model.clone()),
-        cwd: Some(repo.to_path_buf()),
         skip_permissions: true,
+        cwd: Some(repo.to_path_buf()),
         ..Default::default()
     };
     let process = ProcessConfig {

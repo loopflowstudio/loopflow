@@ -341,6 +341,25 @@ impl PostgresStore {
         .await
     }
 
+    pub async fn list_sessions_by_statuses(
+        &self,
+        statuses: &[SessionStatus],
+    ) -> StoreResult<Vec<Session>> {
+        let status_ints: Vec<i32> = statuses.iter().map(|s| s.as_i32()).collect();
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                     FROM sessions WHERE status = ANY($1)
+                     ORDER BY created_at ASC",
+                    &[&status_ints],
+                )
+                .await?;
+            rows.iter().map(Self::map_session_row).collect()
+        })
+        .await
+    }
+
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         self.read_waves(repo).await
     }

@@ -139,6 +139,13 @@ pub async fn stream_session_events_handler(
             }
         }
 
+        let sentinel = SseEvent::default()
+            .event("session.replay_completed")
+            .data(serde_json::json!({ "last_seq": last_seq }).to_string());
+        if tx.send(Ok(sentinel)).await.is_err() {
+            return;
+        }
+
         let Some(mut live_rx) = live_rx else {
             return;
         };

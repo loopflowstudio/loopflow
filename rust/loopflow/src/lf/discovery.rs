@@ -59,7 +59,9 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
     ),
     (
         "Quality",
-        &["review", "research", "polish", "lint", "debug", "gate"],
+        &[
+            "review", "research", "polish", "lint", "debug", "ci-fix", "gate",
+        ],
     ),
     ("Scan", &["scan/scan-report", "scan/scan-plan"]),
     ("Git", &["commit", "rebase"]),
@@ -73,6 +75,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
             "consolidate",
             "synthesize",
             "validate",
+            "release",
         ],
     ),
 ];
@@ -92,6 +95,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("polish", "Fix issues, run tests"),
         ("lint", "Run linter, fix issues"),
         ("debug", "Fix errors from clipboard"),
+        ("ci-fix", "Fix latest CI failures for current PR"),
         ("commit", "Commit with generated message"),
         ("rebase", "Rebase onto main"),
         ("refine", "Iteratively refine text"),
@@ -106,6 +110,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("consolidate", "Reorganize scratch/ for wave"),
         ("synthesize", "Combine multiple perspectives"),
         ("validate", "Validate flows, steps, and directions"),
+        ("release", "Generate release notes from merged PRs"),
         ("scan/scan-report", "Scan deps and APIs for issues"),
         ("scan/scan-plan", "Turn scan report into action plan"),
     ])

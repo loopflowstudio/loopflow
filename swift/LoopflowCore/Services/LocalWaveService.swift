@@ -763,6 +763,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                     }
 
                     var pendingSeq: Int?
+                    var pendingEventType: String?
                     for try await line in bytes.lines {
                         if line.hasPrefix("id:") {
                             let value = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
@@ -770,13 +771,27 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                             continue
                         }
 
+                        if line.hasPrefix("event:") {
+                            pendingEventType = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                            continue
+                        }
+
                         guard line.hasPrefix("data:") else { continue }
                         let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                         guard !payload.isEmpty else { continue }
 
+                        if pendingEventType == "session.replay_completed" {
+                            let lastSeq = Self.parseReplayCompletedLastSeq(payload)
+                            continuation.yield(AgentSessionEventEnvelope(replayCompletedLastSeq: lastSeq))
+                            pendingSeq = nil
+                            pendingEventType = nil
+                            continue
+                        }
+
                         let event = try Self.parseSessionEvent(payload)
                         continuation.yield(AgentSessionEventEnvelope(seq: pendingSeq, event: event))
                         pendingSeq = nil
+                        pendingEventType = nil
                     }
 
                     continuation.finish()
@@ -1104,6 +1119,14 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let cwd = config.cwd { json["cwd"] = cwd }
         if let maxTurns = config.maxTurns { json["max_turns"] = maxTurns }
         return json
+    }
+
+    private static func parseReplayCompletedLastSeq(_ raw: String) -> Int? {
+        guard let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let lastSeq = json["last_seq"] as? Int
+        else { return nil }
+        return lastSeq
     }
 
     private static func parseSessionEvent(_ raw: String) throws -> AgentSessionEvent {

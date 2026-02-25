@@ -109,7 +109,7 @@ enum ChatTurnState {
 
 enum StreamPhase {
     case idle
-    case reconnecting
+    case replaying
     case live
     case ending
 }
@@ -160,11 +160,11 @@ final class ChatState {
     }
 
     var isLoading: Bool {
-        turnState == .running || streamPhase == .reconnecting || streamPhase == .ending
+        turnState == .running || streamPhase == .replaying || streamPhase == .ending
     }
 
     var canSend: Bool {
-        turnState != .running && streamPhase != .reconnecting && streamPhase != .ending
+        turnState != .running && streamPhase != .replaying && streamPhase != .ending
     }
 
     var canEndSession: Bool {
@@ -193,8 +193,8 @@ final class ChatState {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        guard streamPhase != .reconnecting else {
-            appendMessage(role: .system, content: "Reconnecting… Please wait.")
+        guard streamPhase != .replaying else {
+            appendMessage(role: .system, content: "Replaying… Please wait.")
             return
         }
 
@@ -239,7 +239,7 @@ final class ChatState {
         guard sessionId == nil else { return }
         guard let storedSessionId = userDefaults.string(forKey: sessionIdKey) else { return }
 
-        streamPhase = .reconnecting
+        streamPhase = .replaying
 
         do {
             let session = try await waveService.getSession(storedSessionId)
@@ -251,8 +251,8 @@ final class ChatState {
 
             sessionId = session.id
             resetForReplay()
-            appendMessage(role: .system, content: "Reconnecting…")
-            startStream(sessionId: storedSessionId, afterSeq: nil, phase: .reconnecting)
+            appendMessage(role: .system, content: "Replaying…")
+            startStream(sessionId: storedSessionId, afterSeq: nil, phase: .replaying)
         } catch {
             persistSessionId(nil)
             streamPhase = .idle
@@ -343,7 +343,7 @@ final class ChatState {
                 sessionId: sessionId,
                 afterSeq: afterSeq,
                 generation: generation,
-                reconnecting: phase == .reconnecting
+                reconnecting: phase == .replaying
             )
         }
     }
@@ -354,15 +354,11 @@ final class ChatState {
         generation: Int,
         reconnecting: Bool
     ) async {
-        let liveFallbackTask = reconnecting ? Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            self?.promoteToLiveIfCurrent(generation: generation)
-        } : nil
-
         do {
             for try await envelope in waveService.streamSessionEvents(sessionId: sessionId, afterSeq: afterSeq) {
-                if reconnecting {
+                if envelope.replayCompletedLastSeq != nil {
                     promoteToLiveIfCurrent(generation: generation)
+                    continue
                 }
                 applyEnvelope(envelope)
             }
@@ -371,24 +367,18 @@ final class ChatState {
                 promoteToLiveIfCurrent(generation: generation)
             }
         } catch is CancellationError {
-            liveFallbackTask?.cancel()
             return
         } catch {
-            guard generation == streamGeneration else {
-                liveFallbackTask?.cancel()
-                return
-            }
+            guard generation == streamGeneration else { return }
             appendMessage(role: .error, content: error.localizedDescription)
             turnState = .failed
             if streamPhase != .ending {
                 streamPhase = .idle
             }
             streamTask = nil
-            liveFallbackTask?.cancel()
             return
         }
 
-        liveFallbackTask?.cancel()
         guard generation == streamGeneration else { return }
         streamTask = nil
         if streamPhase != .ending {
@@ -398,7 +388,7 @@ final class ChatState {
 
     private func promoteToLiveIfCurrent(generation: Int) {
         guard generation == streamGeneration else { return }
-        if streamPhase == .reconnecting {
+        if streamPhase == .replaying {
             streamPhase = .live
         }
     }
@@ -427,6 +417,8 @@ final class ChatState {
     }
 
     private func applyEnvelope(_ envelope: AgentSessionEventEnvelope) {
+        guard let event = envelope.event else { return }
+
         if let seq = envelope.seq {
             if let lastAppliedSeq, seq <= lastAppliedSeq {
                 return
@@ -434,7 +426,7 @@ final class ChatState {
             lastAppliedSeq = seq
         }
 
-        reduce(envelope.event)
+        reduce(event)
     }
 
     private func reduce(_ event: AgentSessionEvent) {

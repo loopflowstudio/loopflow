@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, Mutex};
 use crate::engine::agent::LaunchConfig;
 use crate::lfd::id::LfdId;
 use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
-use crate::lfd::sessions::harness::{CreateHarnessFn, SessionHarness};
+use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, SessionHarness};
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
 };
@@ -311,6 +311,59 @@ impl SessionManager {
             .map(|runtime| runtime.events_tx.subscribe()))
     }
 
+    pub async fn recover_orphaned_sessions(&self) -> Result<u32, SessionManagerError> {
+        let sessions = self
+            .inner
+            .store
+            .list_sessions_by_statuses(&[SessionStatus::Starting, SessionStatus::Active])
+            .await?;
+        if sessions.is_empty() {
+            return Ok(0);
+        }
+
+        let now = time::OffsetDateTime::now_utc();
+        for session in &sessions {
+            let existing_events = self
+                .inner
+                .store
+                .list_session_events(&session.id, None)
+                .await?;
+            let mut next_seq = existing_events
+                .last()
+                .map(|event| event.seq + 1)
+                .unwrap_or(0);
+
+            let error_event = SessionEvent::Error {
+                code: "lfd_restarted_orphaned_session".to_string(),
+                message: "session was orphaned when lfd restarted".to_string(),
+            };
+            self.inner
+                .store
+                .append_session_event(&session.id, next_seq, &error_event, now.unix_timestamp())
+                .await?;
+            next_seq += 1;
+
+            let status_event = SessionEvent::StatusChanged {
+                status: SessionStatus::Failed,
+            };
+            self.inner
+                .store
+                .append_session_event(&session.id, next_seq, &status_event, now.unix_timestamp())
+                .await?;
+
+            self.inner
+                .store
+                .update_session_status(
+                    &session.id,
+                    SessionStatus::Failed,
+                    Some(now.unix_timestamp()),
+                )
+                .await?;
+        }
+
+        Ok(sessions.len() as u32)
+    }
+
     fn spawn_harness_event_bridge(
         &self,
         session_id: LfdId,
@@ -327,6 +380,34 @@ impl SessionManager {
                         manager
                             .handle_provider_session_id(&session_id, &runtime, provider_session_id)
                             .await;
+                    }
+                    Ok(SessionEvent::Error {
+                        ref code,
+                        ref message,
+                    }) => {
+                        let fatal = is_terminal_harness_error(code);
+                        if let Err(err) = manager
+                            .append_runtime_event(
+                                &session_id,
+                                &runtime,
+                                SessionEvent::Error {
+                                    code: code.clone(),
+                                    message: message.clone(),
+                                },
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                error = %err,
+                                "failed to persist harness error event"
+                            );
+                        }
+                        if fatal {
+                            manager
+                                .mark_session_failed(&session_id, &runtime, code, message.clone())
+                                .await;
+                        }
                     }
                     Ok(event) => {
                         if let Err(err) = manager
@@ -533,12 +614,15 @@ fn validate_repo_root(repo_root: &str) -> Result<PathBuf, SessionManagerError> {
             "path is not a directory: {raw}"
         )));
     }
-    if !path.join(".lf").is_dir() {
+    let canonical = path.canonicalize().map_err(|err| {
+        SessionManagerError::InvalidRepoRoot(format!("failed to resolve repo_root '{raw}': {err}"))
+    })?;
+    if !canonical.join(".lf").is_dir() {
         return Err(SessionManagerError::InvalidRepoRoot(format!(
             "missing .lf/ in repo root: {raw}"
         )));
     }
-    Ok(path)
+    Ok(canonical)
 }
 
 fn resolve_cwd(
@@ -569,19 +653,13 @@ fn resolve_cwd(
         )));
     }
 
-    let canonical_root = repo_root.canonicalize().map_err(|err| {
-        SessionManagerError::InvalidRepoRoot(format!(
-            "failed to resolve repo_root '{}': {err}",
-            repo_root.display()
-        ))
-    })?;
     let canonical_cwd = resolved.canonicalize().map_err(|err| {
         SessionManagerError::InvalidConfig(format!(
             "failed to resolve cwd '{}': {err}",
             resolved.display()
         ))
     })?;
-    if !canonical_cwd.starts_with(&canonical_root) {
+    if !canonical_cwd.starts_with(repo_root) {
         return Err(SessionManagerError::InvalidConfig(format!(
             "cwd must be inside repo_root: {}",
             canonical_cwd.display()
@@ -1069,5 +1147,53 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert!(saw_resume);
+    }
+
+    #[tokio::test]
+    async fn recover_orphaned_sessions_marks_active_as_failed() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+
+        let manager = SessionManager::with_create_harness(store.clone(), fake_create_harness);
+        let created = manager
+            .create_session(CreateSessionParams {
+                provider: "claude".to_string(),
+                wave_run_id: None,
+                config: test_session_config(tmp.path()),
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        // Simulate a new SessionManager on restart (no runtimes, orphaned session in DB).
+        let fresh_manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let recovered = fresh_manager
+            .recover_orphaned_sessions()
+            .await
+            .expect("orphan recovery");
+        assert_eq!(recovered, 1);
+
+        let session = fresh_manager
+            .get_session(&created.id)
+            .await
+            .expect("session should exist");
+        assert_eq!(session.status, SessionStatus::Failed);
+
+        let events = fresh_manager
+            .list_events(&created.id, None)
+            .await
+            .expect("list events");
+        let has_orphan_error = events.iter().any(|event| {
+            matches!(
+                &event.event,
+                SessionEvent::Error { code, .. } if code == "lfd_restarted_orphaned_session"
+            )
+        });
+        assert!(has_orphan_error);
     }
 }

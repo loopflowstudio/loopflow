@@ -27,7 +27,7 @@ struct WaveChatView: View {
                         }
 
                         if state.isLoading {
-                            ProgressView(state.streamPhase == .reconnecting ? "Reconnecting…" : "Thinking…")
+                            ProgressView(state.streamPhase == .replaying ? "Replaying…" : "Thinking…")
                                 .font(Typography.caption())
                                 .foregroundStyle(palette.textSecondary)
                                 .padding(.top, Spacing.sm)

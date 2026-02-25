@@ -215,6 +215,21 @@ impl DockerExecutor {
         .is_ok()
     }
 
+    async fn ensure_workspace_directory(&self, volume_name: &str, path: &Path) -> Result<()> {
+        self.run_helper_command(
+            "mkdir",
+            vec![
+                "mkdir".to_string(),
+                "-p".to_string(),
+                path.to_string_lossy().to_string(),
+            ],
+            self.build_mounts(volume_name),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     pub(super) async fn ensure_shared_clone(&self, workspace: &DockerWorkspace) -> Result<()> {
         if self
             .is_git_repo(workspace, &workspace.container_shared_clone)
@@ -227,17 +242,8 @@ impl DockerExecutor {
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| anyhow!("invalid shared clone path"))?;
-        self.run_helper_command(
-            "mkdir",
-            vec![
-                "mkdir".to_string(),
-                "-p".to_string(),
-                root_path.to_string_lossy().to_string(),
-            ],
-            self.build_mounts(&workspace.volume.volume_name),
-            None,
-        )
-        .await?;
+        self.ensure_workspace_directory(&workspace.volume.volume_name, &root_path)
+            .await?;
 
         let remote = canonical_repo_url(&workspace.repo_source);
         let (source, include_local_repo) = if let Some(url) = remote {
@@ -292,17 +298,8 @@ impl DockerExecutor {
             .parent()
             .map(Path::to_path_buf)
             .ok_or_else(|| anyhow!("invalid worktree path"))?;
-        self.run_helper_command(
-            "mkdir",
-            vec![
-                "mkdir".to_string(),
-                "-p".to_string(),
-                parent.to_string_lossy().to_string(),
-            ],
-            self.build_mounts(&workspace.volume.volume_name),
-            None,
-        )
-        .await?;
+        self.ensure_workspace_directory(&workspace.volume.volume_name, &parent)
+            .await?;
 
         let local_branch_ref = format!("refs/heads/{}", workspace.branch);
         let has_local_branch = self

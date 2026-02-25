@@ -19,32 +19,13 @@ pub(crate) trait HarnessCommandBuilder: Send + Sync {
     fn apply_env(&self, _cmd: &mut Command, _process: &ProcessConfig) {}
 }
 
-type BuilderFactory =
-    fn(model: &str, model_variant: Option<String>) -> Box<dyn HarnessCommandBuilder>;
+type BuilderFactory = fn(model_variant: Option<String>) -> Box<dyn HarnessCommandBuilder>;
 
-#[derive(Debug, Clone, Copy)]
-struct HarnessRegistration {
-    harness: &'static str,
-    build: BuilderFactory,
-}
-
-const REGISTRY: &[HarnessRegistration] = &[
-    HarnessRegistration {
-        harness: "claude",
-        build: claude::build,
-    },
-    HarnessRegistration {
-        harness: "codex",
-        build: codex::build,
-    },
-    HarnessRegistration {
-        harness: "gemini",
-        build: gemini::build,
-    },
-    HarnessRegistration {
-        harness: "opencode",
-        build: opencode::build,
-    },
+const REGISTRY: &[(&str, BuilderFactory)] = &[
+    ("claude", claude::build),
+    ("codex", codex::build),
+    ("gemini", gemini::build),
+    ("opencode", opencode::build),
 ];
 
 pub(crate) fn builder_for_model(model: &str) -> Box<dyn HarnessCommandBuilder> {
@@ -52,7 +33,7 @@ pub(crate) fn builder_for_model(model: &str) -> Box<dyn HarnessCommandBuilder> {
 
     REGISTRY
         .iter()
-        .find(|registration| registration.harness == harness)
-        .map(|registration| (registration.build)(model, variant))
+        .find(|(name, _)| *name == harness)
+        .map(|(_, build)| build(variant))
         .unwrap_or_else(|| claude::build_fallback(model))
 }

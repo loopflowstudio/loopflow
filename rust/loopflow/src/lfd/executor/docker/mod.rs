@@ -36,7 +36,6 @@ use super::{handle_output_line, AgentExecutor, AgentRunContext, OutputContext, S
 mod image;
 mod io;
 mod recovery;
-mod types;
 mod workspace;
 
 #[derive(Clone)]

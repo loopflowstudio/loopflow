@@ -28,6 +28,6 @@ impl HarnessCommandBuilder for OpenCodeCommandBuilder {
     }
 }
 
-pub(crate) fn build(_model: &str, model_variant: Option<String>) -> Box<dyn HarnessCommandBuilder> {
+pub(crate) fn build(model_variant: Option<String>) -> Box<dyn HarnessCommandBuilder> {
     Box::new(OpenCodeCommandBuilder { model_variant })
 }

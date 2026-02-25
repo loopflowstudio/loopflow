@@ -3,14 +3,8 @@ use crate::engine::agent::{build_claude_command, AgentCapabilities, AgentConfig,
 use super::HarnessCommandBuilder;
 
 #[derive(Debug, Clone)]
-pub(crate) struct ClaudeCommandBuilder {
+struct ClaudeCommandBuilder {
     model_variant: Option<String>,
-}
-
-impl ClaudeCommandBuilder {
-    fn new(model_variant: Option<String>) -> Self {
-        Self { model_variant }
-    }
 }
 
 impl HarnessCommandBuilder for ClaudeCommandBuilder {
@@ -24,10 +18,12 @@ impl HarnessCommandBuilder for ClaudeCommandBuilder {
     }
 }
 
-pub(crate) fn build(_model: &str, model_variant: Option<String>) -> Box<dyn HarnessCommandBuilder> {
-    Box::new(ClaudeCommandBuilder::new(model_variant))
+pub(crate) fn build(model_variant: Option<String>) -> Box<dyn HarnessCommandBuilder> {
+    Box::new(ClaudeCommandBuilder { model_variant })
 }
 
 pub(crate) fn build_fallback(model: &str) -> Box<dyn HarnessCommandBuilder> {
-    Box::new(ClaudeCommandBuilder::new(Some(model.to_string())))
+    Box::new(ClaudeCommandBuilder {
+        model_variant: Some(model.to_string()),
+    })
 }

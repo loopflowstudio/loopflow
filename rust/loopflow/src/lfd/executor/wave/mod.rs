@@ -338,10 +338,11 @@ impl WaveExecutor {
                         .create_interactive_session(&wave, &run, &step)
                         .await
                         .map_err(|err| anyhow!("failed to create interactive session: {err}"))?;
+                    let session_id = session.id.clone();
                     self.spawn_interactive_session_watcher(
                         wave.id().clone(),
                         run.id.clone(),
-                        session.id.clone(),
+                        session_id.clone(),
                     );
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
@@ -351,7 +352,7 @@ impl WaveExecutor {
                         wave.id().clone(),
                         run.id.clone(),
                         step.step.name.clone(),
-                        Some(session.id),
+                        Some(session_id),
                     ));
                     return Ok(());
                 }

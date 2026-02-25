@@ -454,6 +454,28 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
     }
 }
 
+fn resolve_step_reference(step: &Step, repo: &Path) -> Step {
+    if step.content.is_some() {
+        return step.clone();
+    }
+
+    let Ok(mut resolved) = load_step(&step.name, repo) else {
+        return step.clone();
+    };
+
+    if let Some(model) = &step.model {
+        resolved.model = Some(model.clone());
+    }
+    if !step.directions.is_empty() {
+        resolved.directions = step.directions.clone();
+    }
+    if let Some(interactive) = step.interactive {
+        resolved.interactive = Some(interactive);
+    }
+
+    resolved
+}
+
 fn expand_with_chain(
     flow: &Flow,
     repo: &Path,
@@ -498,7 +520,7 @@ fn expand_with_chain(
                     }
                 }
                 items.push(ConcreteItem::Step(ConcreteStep {
-                    step: step.clone(),
+                    step: resolve_step_reference(step, repo),
                     flow_parents: chain.clone(),
                 }));
             }
@@ -735,6 +757,58 @@ Be careful.
         let items = expand_flow(&flow, repo.path()).unwrap();
         let action = next_action(&items, 0);
         assert!(matches!(action, FlowAction::WaitInteractive { .. }));
+    }
+
+    #[test]
+    fn expand_flow_resolves_interactive_from_step_frontmatter() {
+        // A bare step name reference in a flow should pick up interactive: true
+        // from the step file's frontmatter, not remain None.
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("my-design.md"),
+            "---\ninteractive: true\n---\nDesign it.",
+        )
+        .unwrap();
+
+        let flow = Flow {
+            name: "test-flow".to_string(),
+            items: vec![FlowItem::Step(Step::named("my-design"))],
+        };
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        assert_eq!(items.len(), 1);
+        let action = next_action(&items, 0);
+        assert!(
+            matches!(action, FlowAction::WaitInteractive { .. }),
+            "bare step reference should resolve interactive from frontmatter"
+        );
+    }
+
+    #[test]
+    fn expand_flow_resolves_builtin_interactive_step() {
+        // The builtin "design" step has interactive: true in its frontmatter.
+        // A flow referencing it by name should produce WaitInteractive.
+        let tmp = TempDir::new().unwrap();
+        let flow = Flow {
+            name: "test-flow".to_string(),
+            items: vec![FlowItem::Step(Step::named("design"))],
+        };
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        let design = items
+            .iter()
+            .find(|item| matches!(item, ConcreteItem::Step(s) if s.step.name == "design"));
+        assert!(
+            design.is_some(),
+            "expanded flow should contain a design step"
+        );
+        if let Some(ConcreteItem::Step(step)) = design {
+            assert_eq!(
+                step.step.interactive,
+                Some(true),
+                "builtin design step should have interactive: true after expansion"
+            );
+        }
     }
 
     #[test]

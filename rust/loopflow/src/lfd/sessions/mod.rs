@@ -151,7 +151,13 @@ impl SessionManager {
         .await?;
 
         self.spawn_harness_event_bridge(session.id.clone(), runtime.clone(), harness_events_rx);
-        self.spawn_harness_startup(session.id.clone(), runtime.clone(), prepared_prompt);
+        let auto_start = session.wave_run_id.is_some();
+        self.spawn_harness_startup(
+            session.id.clone(),
+            runtime.clone(),
+            prepared_prompt,
+            auto_start,
+        );
 
         Ok(session)
     }
@@ -432,6 +438,7 @@ impl SessionManager {
         session_id: LfdId,
         runtime: Arc<SessionRuntime>,
         launch: AgentConfig,
+        auto_start: bool,
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
@@ -456,6 +463,23 @@ impl SessionManager {
                             error = %err,
                             "failed to set active session status"
                         );
+                        return;
+                    }
+
+                    // Auto-start: send empty input so the harness delivers
+                    // the task_prompt (step content) as the agent's first turn.
+                    if auto_start {
+                        let send_result = {
+                            let mut harness = runtime.harness.lock().await;
+                            harness.send_input("").await
+                        };
+                        if let Err(err) = send_result {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                error = %err,
+                                "session auto-start failed"
+                            );
+                        }
                     }
                 }
                 Err(err) => {

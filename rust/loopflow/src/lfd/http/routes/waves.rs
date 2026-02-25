@@ -248,12 +248,7 @@ pub async fn create_wave_handler(
     }
 
     let response_wave = if run {
-        state
-            .store
-            .get_wave(wave.id())
-            .await
-            .map_err(map_store_error)?
-            .unwrap_or(wave)
+        wait_for_wave_start_settle(&state, wave).await
     } else {
         wave
     };
@@ -262,6 +257,23 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
+}
+
+async fn wait_for_wave_start_settle(state: &HttpState, mut wave: Wave) -> Wave {
+    // Give the executor a moment to settle (e.g., hit WaitInteractive)
+    // so the response reflects the actual state instead of transient Running.
+    let wave_id = wave.id().clone();
+    for _ in 0..10 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        let Ok(Some(updated)) = state.store.get_wave(&wave_id).await else {
+            continue;
+        };
+        if updated.status != WaveStatus::Running {
+            return updated;
+        }
+        wave = updated;
+    }
+    wave
 }
 
 async fn ensure_wave_workspace(

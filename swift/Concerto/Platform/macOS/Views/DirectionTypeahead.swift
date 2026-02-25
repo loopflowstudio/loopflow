@@ -147,7 +147,7 @@ struct DirectionTypeahead: View {
 #Preview {
     let repoState = RepoState()
     repoState.currentRepo = URL(fileURLWithPath: "/Users/jack/src/loopflow")
-    repoState.availableDirections = ["ux", "clarity", "infra", "ceo", "conductor", "improviser", "listener", "craft", "flow", "scale"]
+    repoState.availableDirections = ["ux", "clarity", "infra", "ceo", "conductor", "improviser", "listener", "craft", "creativity", "simplicity"]
 
     let wave = WaveViewModel(
         api: Wave(

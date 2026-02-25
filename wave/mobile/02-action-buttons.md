@@ -131,6 +131,8 @@ public struct ActionButtonsView: View {
 }
 ```
 
+**Integration note (from Stage 01):** Chat surfaces are platform-specific — MobileWaveDetailView on iOS, WaveChatView on macOS. ActionButtonsView lives in LoopflowCore as a shared component, but each platform's chat view embeds it. ChatState is in `Concerto/State/` (not LoopflowCore), so `suggest_actions` parsing logic goes there and both platforms can access it.
+
 ### iPhone rendering
 
 Action buttons render prominently above the composer:
@@ -175,11 +177,12 @@ Horizontal pill buttons below the last message:
 - Start with A (system prompt injection) — no lfd changes needed
 - B (tool registration) comes after A is working end-to-end
 - Don't block on lfd changes — can test with mock data while waiting
-- Keep behavior in shared chat surfaces; avoid platform-specific forks for the same action-button behavior
+- ActionButtonsView is a shared LoopflowCore component; platform chat views embed it rather than forking the button behavior
+- ChatState parsing is shared (Concerto/State/); both platforms consume `suggestedActions` from the same state
 
 ## Done when
 
-- Agent calls `suggest_actions` via system prompt instructions, buttons render in WaveChatView
+- Agent calls `suggest_actions` via system prompt instructions, buttons render in MobileWaveDetailView (iOS) and WaveChatView (macOS)
 - Tapping a button sends the label as the next user message
 - Buttons clear on tap or when agent responds
 - Works on iPhone, iPad, and Mac

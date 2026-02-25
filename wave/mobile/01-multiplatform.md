@@ -2,11 +2,40 @@
 
 Make Concerto build and run on iOS (iPhone + iPad) alongside macOS.
 
+**Status: shipped** (branch `jack-heart.mobile.20260224_1845`)
+
+## What shipped
+
+Single-target multiplatform build with iOS shells and platform boundaries. The architecture diverged from the original plan in two meaningful ways:
+
+**State stayed in Concerto.** RepoState and stores remain in `Concerto/State/`, not LoopflowCore. Platform-specific initializers (`RepoState+iOS.swift`, `RepoState+macOS.swift`) inject capabilities at the call site. This works — iOS shell doesn't need LoopflowCore to own the state to function as a remote client.
+
+**iOS got its own views.** Instead of moving macOS views (WaveSidebar, WaveDetailPanel) into LoopflowCore and sharing them, iOS got purpose-built views: MobileWaveListView, MobileWaveDetailView, ConnectionSetupView. Mobile UX needs differ enough from desktop that sharing the same view hierarchy would have been forced.
+
+**What moved to LoopflowCore:**
+- Design tokens: BrandColors, DesignSystem (spacing, typography, colors, button styles)
+- Models: ConnectionProfile, ServerConnection
+- Services: unchanged (WaveService, AuthService, EventService already there)
+
+**What shipped in Concerto:**
+- `ConcertoApp.swift`: `#if os(macOS)/#else` at app entry — macOS multi-window, iOS single WindowGroup
+- `Platform/iOS/`: MobileRootView (TabView phone / NavigationSplitView tablet), ConnectionSetupView, MobileWaveListView, MobileWaveDetailView, MobileConnectionProfilesStore, WaveStatus+Color, RepoState+iOS
+- `Platform/macOS/`: LocalShellCommandRunner, RepoState+macOS
+- Boundary enforcement: `scripts/check_swift_multiplatform_boundaries.py` blocks macOS-only imports in LoopflowCore and non-shell `#if` usage
+
+**Validation:**
+- `swift test --package-path swift` passes
+- `check_swift_multiplatform_boundaries.py` passes
+- Builds and runs on iPhone 17 and iPad Pro 11-inch (M5) simulators
+- macOS behavior unchanged
+
+## What remains
+
+**State extraction** was the planned step 2 but was deferred. RepoState in LoopflowCore with public APIs would let Symphonia (separate repo) share state — that's the motivating use case, not iOS itself. Track as follow-up when Symphonia integration starts.
+
+**Interactive end-to-end validation** is light. Build coverage is confirmed but full device flows (connection setup → connect to lfd → wave list → detail → output) haven't been validated against a live lfd on simulator.
+
 ## What to build
-
-Concerto becomes a multiplatform SwiftUI app. One target, one scheme, three form factors. LoopflowCore absorbs everything shared — models, services, state (including RepoState), and reusable views. Concerto becomes a thin app shell with platform-specific code. macOS-specific code (Ghostty, keyboard router, Carbon frameworks) gets platform-gated.
-
-Stage 01 is about architecture + shells. It does **not** include discovery, action-button UX, or multi-client protocol changes.
 
 ## Approach
 
@@ -179,3 +208,11 @@ swift test --package-path swift
 Boundary checks also pass:
 - No macOS-only imports in `LoopflowCore`
 - No net-new non-shell `#if` usage
+
+## Post-ship notes
+
+**Achieved:** builds, simulators, boundary checks, macOS regression pass all green.
+
+**Deferred:** state extraction to LoopflowCore. Not needed for iOS remote client — motivating use case is Symphonia sharing state, which is future work. Revisit when Symphonia integration begins.
+
+**Learned:** purpose-built mobile views are simpler than sharing desktop views through LoopflowCore. This means Stage 02 action buttons need to land in both MobileWaveDetailView (iOS) and WaveChatView (macOS), but the shared ActionButtonsView component can still live in LoopflowCore.

@@ -660,7 +660,7 @@ struct InteractiveSessionTests {
             step: "design",
             worktreePath: "/tmp/wt"
         )
-        #expect(session.command == "lf design")
+        #expect(session.command == "lf design && lf ops commit --push")
     }
 
     @Test("command includes shell-escaped prompt")
@@ -671,7 +671,7 @@ struct InteractiveSessionTests {
             worktreePath: "/tmp/wt",
             prompt: "add rate limiting"
         )
-        #expect(session.command == "lf design 'add rate limiting'")
+        #expect(session.command == "lf design 'add rate limiting' && lf ops commit --push")
     }
 
     @Test("command escapes single quotes in prompt")
@@ -682,7 +682,7 @@ struct InteractiveSessionTests {
             worktreePath: "/tmp/wt",
             prompt: "fix the user's auth flow"
         )
-        #expect(session.command == "lf debug 'fix the user'\\''s auth flow'")
+        #expect(session.command == "lf debug 'fix the user'\\''s auth flow' && lf ops commit --push")
     }
 
     @Test("command handles special shell characters")
@@ -694,7 +694,7 @@ struct InteractiveSessionTests {
             prompt: "add $HOME expansion & pipes | redirects > /dev/null"
         )
         // Single quotes protect all special characters except single quotes themselves
-        #expect(session.command == "lf implement 'add $HOME expansion & pipes | redirects > /dev/null'")
+        #expect(session.command == "lf implement 'add $HOME expansion & pipes | redirects > /dev/null' && lf ops commit --push")
     }
 }
 

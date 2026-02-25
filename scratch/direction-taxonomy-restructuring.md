@@ -1,94 +1,54 @@
 # Direction Taxonomy Restructuring
 
-## Status
+## Status: Complete
 
-Implementation pass needed. Review complete — taxonomy finalized, code changes in progress on branch.
+Replaced role-based directions (`infra-engineer`, `designer`, `product-engineer`, `ceo.md`, `values/`) with composable quality-focused direction groups organized by concern.
 
-## Goal
+## Taxonomy
 
-Replace role-style directions with composable quality-focused direction groups, and make `-d <group>` work consistently across prompt context gathering and fork execution.
+| Group | Members | Focus |
+|-------|---------|-------|
+| `infra/` | security, performance, reliability, observability | System qualities |
+| `ux/` | visibility, feedback, consistency, affordance, error-prevention, accessibility, dynamics, aesthetics | User experience heuristics |
+| `craft/` | care, clarity, simplicity, scale | Building things right |
+| `creativity/` | alive, musical | Momentum and feel |
+| `ceo/` | focus, immediacy, truth | Strategic judgment |
 
-## Final taxonomy
-
-```
-rust/loopflow/src/engine/builtins/directions/
-  infra/
-    security.md
-    performance.md
-    reliability.md
-    observability.md
-  ux/
-    visibility.md
-    feedback.md
-    consistency.md
-    affordance.md
-    error-prevention.md
-    accessibility.md
-    dynamics.md
-    aesthetics.md
-  craft/
-    care.md
-    clarity.md
-    scale.md
-    simplicity.md
-  creativity/
-    alive.md
-    musical.md
-  ceo/
-    focus.md
-    immediacy.md
-    truth.md
-```
-
-## What changed from the original branch
-
-The original branch shipped `values/` as a flat group and `ceo.md` as a standalone file. Review restructured both:
-
-1. **`ceo.md` → `ceo/` group** — decomposed into three orthogonal voices:
-   - `immediacy.md` — speed, bias to action, decide don't deliberate
-   - `focus.md` — kill things, stop what isn't working, errors of omission
-   - `truth.md` — contrarian truth, 10x thinking, raise the ceiling
-
-2. **`values/` → `craft/` + `creativity/`** — the old values group mixed two concerns:
-   - `craft/` — building things right: care (renamed from craft.md), clarity, simplicity, scale
-   - `creativity/` — momentum and feel: alive (fleshed out from thin flow.md), musical (new)
-
-## What needs to happen
-
-The code changes are already applied on the branch. The implementation pass should:
-
-1. Verify all tests pass: `cargo fmt`, `cargo clippy`, `cargo test -p loopflow --test flow_tests --test context_tests --test discovery_tests --test golden_prompt`, `cargo test -p loopflow -- engine::flow::tests`, `uv run pytest python/tests/ -q`
-2. Regenerate golden prompt if needed (the `with_direction_group` golden now uses `craft` instead of `values`)
-3. Commit the taxonomy changes as a single atomic commit on top of the existing branch
+`-d craft` expands to all members; `-d clarity` works standalone. Compose freely via `-d ux,craft`.
 
 ## Key decisions
 
-- All groups expand before loading concrete direction files — downstream logic unchanged.
-- User groups (`.lf/directions/<group>/`) take precedence over builtin groups.
-- No compatibility aliases for removed names (`infra-engineer`, `designer`, `product-engineer`, `values`).
-- Short names for CLI users; Concerto can use full paths for disambiguation.
-- Fork flows (`wave-reduce` etc.) are demos — the `infra`/`ux`/`ceo` fork split has no deep justification.
+**Groups over roles.** Old directions coupled concerns (designer = ux + craft + aesthetics). New directions are orthogonal.
 
-## Files changed (relative to original branch)
+**No compatibility aliases.** `infra-engineer`, `designer`, `product-engineer`, `values` are gone. Users get a clear error. No external consumers.
 
-### Created
-- `directions/ceo/immediacy.md`
-- `directions/ceo/focus.md`
-- `directions/ceo/truth.md`
-- `directions/craft/care.md`
-- `directions/craft/clarity.md`
-- `directions/craft/simplicity.md`
-- `directions/craft/scale.md`
-- `directions/creativity/alive.md`
-- `directions/creativity/musical.md`
+**Build-time codegen for group membership.** `build.rs` scans `directions/*/` at compile time and generates a `phf::Map`. No runtime filesystem scanning for builtins.
 
-### Deleted
-- `directions/ceo.md` (decomposed into group)
-- `directions/values/` (entire directory — replaced by craft/ and creativity/)
+**User groups override builtins.** `.lf/directions/craft/` takes precedence over the builtin `craft/` group.
 
-### Modified
-- `rust/loopflow/src/engine/flow.rs` — updated tests for new groups
-- `tests/goldens/with_direction_group.yaml` — `values` → `craft`
-- `tests/goldens/with_direction_group.md` — regenerated
-- `wave/infra/00-architecture-report.md` — updated group names
-- `wave/infra/README.md` — updated group names
+## How it fits together
+
+`expand_direction_names()` in `flow.rs` is the single expansion point. It checks user groups first, then builtin groups, then passes through unrecognized names as standalone directions. Both `prompt.rs` (context gathering) and `fork.rs` (fork execution) call this before loading direction content.
+
+The build script generates `BUILTIN_DIRECTION_GROUPS` as a `phf::Map<&str, &[&str]>` compiled into the binary. Discovery (`lf list`) reads the same map.
+
+## What changed from the original branch
+
+1. **`ceo.md` → `ceo/` group** — decomposed into immediacy (speed, bias to action), focus (kill things, errors of omission), truth (contrarian thinking, raise the ceiling)
+
+2. **`values/` → `craft/` + `creativity/`** — craft covers building things right (care, clarity, simplicity, scale); creativity covers momentum and feel (alive, musical)
+
+## Risks noted
+
+- **No migration path.** Users with `direction: values` in config will get an error. Intentional.
+- **Fork flow defaults are arbitrary.** `wave-reduce` forks across `infra`, `ux`, `ceo`. Demo split, not principled.
+- **21 direction files.** More surface area than the old 4 roles. Maintenance cost increases.
+
+## Test results
+
+All suites pass: `cargo fmt`, `cargo clippy`, `cargo test` (60 tests including flow, context, discovery, golden), `uv run pytest python/tests/` (47 tests).
+
+## Gate fixes applied
+
+- Fixed stale `values` reference in `docs/config.md`
+- Fixed stale `values` references in `PROMPT_STYLE.md`

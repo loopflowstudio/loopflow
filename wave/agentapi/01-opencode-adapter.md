@@ -34,6 +34,10 @@ Spawn `opencode serve --port $PORT`, communicate via HTTP.
 - No API changes required to support the third adapter
 - If changes are needed, they must work for Codex and Claude too
 
+## What earlier phases taught us
+
+Phase 04 established a conformance replay test pattern: record real provider NDJSON/JSON-RPC traces, replay them through the harness, and assert canonical event output. The OpenCode adapter should follow this same pattern — record `opencode serve` SSE traces and build replay tests before wiring up the live adapter. This validates the event mapping independently of OpenCode availability.
+
 ## Done when
 
 - `POST /sessions` with `harness: "opencode"` spawns OpenCode server
@@ -41,4 +45,5 @@ Spawn `opencode serve --port $PORT`, communicate via HTTP.
 - `POST /sessions/{id}/input` sends a message, OpenCode responds
 - `DELETE /sessions/{id}` stops the agent
 - No session API changes required
+- All three adapters pass conformance replay tests against recorded traces
 - All three adapters pass the same integration test pattern: create → input → events → end

@@ -174,13 +174,15 @@ pub fn build_codex_command(
     }
 
     if launch.skip_permissions {
-        cmd.push("--yolo".to_string());
+        cmd.push("--dangerously-bypass-approvals-and-sandbox".to_string());
     } else {
         cmd.push("--sandbox".to_string());
         cmd.push("workspace-write".to_string());
 
+        // Non-interactive runs should never block on approval prompts.
         if process.auto {
-            cmd.push("--full-auto".to_string());
+            cmd.push("--ask-for-approval".to_string());
+            cmd.push("never".to_string());
         }
     }
 
@@ -699,7 +701,12 @@ mod tests {
         };
         let cmd = build_codex_command(&launch, &process, None);
         assert!(cmd.contains(&"exec".to_string()));
-        assert!(cmd.contains(&"--full-auto".to_string()));
+        assert!(cmd.contains(&"--sandbox".to_string()));
+        assert!(cmd.contains(&"workspace-write".to_string()));
+        assert!(cmd.contains(&"--ask-for-approval".to_string()));
+        assert!(cmd.contains(&"never".to_string()));
+        assert!(!cmd.contains(&"--ask-for-approval".to_string()));
+        assert!(!cmd.contains(&"--full-auto".to_string()));
     }
 
     #[test]
@@ -737,8 +744,9 @@ mod tests {
         };
         let process = auto_process();
         let cmd = build_codex_command(&launch, &process, None);
-        assert!(cmd.contains(&"--yolo".to_string()));
+        assert!(cmd.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(!cmd.contains(&"--sandbox".to_string()));
+        assert!(!cmd.contains(&"--ask-for-approval".to_string()));
     }
 
     #[test]

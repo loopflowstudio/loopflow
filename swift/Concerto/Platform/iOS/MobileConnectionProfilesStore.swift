@@ -15,15 +15,6 @@ final class MobileConnectionProfilesStore {
         profiles = loadProfiles()
     }
 
-    func saveProfile(_ profile: ConnectionProfile) {
-        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-            profiles[index] = profile
-        } else {
-            profiles.insert(profile, at: 0)
-        }
-        persist()
-    }
-
     func upsert(
         name: String,
         connection: ServerConnection

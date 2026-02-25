@@ -113,12 +113,12 @@ struct ConnectionSetupView: View {
     private func loadFromCurrentConnection() {
         let connection = repoState.connectionStore.configuredRemoteConnection ?? repoState.connectionStore.activeConnection
         if !connection.isLocal {
-            host = connection.host
-            port = "\(connection.port)"
-            useTLS = connection.useTLS
-            token = connection.staticToken
-                ?? repoState.connectionStore.token(for: connection)
-                ?? ""
+            apply(
+                connection: connection,
+                token: connection.staticToken
+                    ?? repoState.connectionStore.token(for: connection)
+                    ?? ""
+            )
         }
 
         if case .remote(let path, _) = repoState.repoTarget {
@@ -128,10 +128,14 @@ struct ConnectionSetupView: View {
 
     private func load(_ profile: ConnectionProfile) {
         profileName = profile.name
-        host = profile.connection.host
-        port = "\(profile.connection.port)"
-        useTLS = profile.connection.useTLS
-        token = profile.connection.staticToken ?? ""
+        apply(connection: profile.connection, token: profile.connection.staticToken ?? "")
+    }
+
+    private func apply(connection: ServerConnection, token: String) {
+        host = connection.host
+        port = "\(connection.port)"
+        useTLS = connection.useTLS
+        self.token = token
     }
 
     private func connect() {

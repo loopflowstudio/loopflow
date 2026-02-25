@@ -15,16 +15,8 @@ struct MobileRootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
-    private var preferredScheme: ColorScheme? {
-        AppearanceMode(rawValue: appearanceMode)?.colorScheme
-    }
-
-    private var resolvedPalette: LoopflowPalette {
-        switch AppearanceMode(rawValue: appearanceMode) {
-        case .light: return .light
-        case .dark: return .dark
-        case .system, .none: return systemScheme == .dark ? .dark : .light
-        }
+    private var theme: (preferredScheme: ColorScheme?, palette: LoopflowPalette) {
+        AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
     }
 
     private var isPadLayout: Bool {
@@ -47,8 +39,8 @@ struct MobileRootView: View {
         }
         .environment(repoState)
         .environment(outputBuffer)
-        .preferredColorScheme(preferredScheme)
-        .environment(\.palette, resolvedPalette)
+        .preferredColorScheme(theme.preferredScheme)
+        .environment(\.palette, theme.palette)
     }
 
     private var iPhoneLayout: some View {

@@ -2,6 +2,27 @@ import SwiftUI
 import CoreText
 import LoopflowCore
 
+extension AppearanceMode {
+    static func resolvedTheme(
+        rawValue: String,
+        systemScheme: ColorScheme
+    ) -> (preferredScheme: ColorScheme?, palette: LoopflowPalette) {
+        let mode = AppearanceMode(rawValue: rawValue) ?? .system
+        let palette: LoopflowPalette
+
+        switch mode {
+        case .light:
+            palette = .light
+        case .dark:
+            palette = .dark
+        case .system:
+            palette = systemScheme == .dark ? .dark : .light
+        }
+
+        return (mode.colorScheme, palette)
+    }
+}
+
 private enum AppFontRegistration {
     private static var fontBundle: Bundle {
         #if SWIFT_PACKAGE
@@ -48,16 +69,8 @@ struct ConcertoApp: App {
         }
     }
 
-    private var resolvedPalette: LoopflowPalette {
-        switch AppearanceMode(rawValue: appearanceMode) {
-        case .light: return .light
-        case .dark: return .dark
-        case .system, .none: return systemScheme == .dark ? .dark : .light
-        }
-    }
-
     var body: some Scene {
-        let preferredScheme = AppearanceMode(rawValue: appearanceMode)?.colorScheme
+        let theme = AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
         let uiTestMode = RepoState.uiTestMode()
         let screenshotMode = RepoState.ScreenshotMode.fromArgs()
 
@@ -75,8 +88,8 @@ struct ConcertoApp: App {
                 }
             }
             .tint(.loopflowBurgundy)
-            .preferredColorScheme(preferredScheme)
-            .environment(\.palette, resolvedPalette)
+            .preferredColorScheme(theme.preferredScheme)
+            .environment(\.palette, theme.palette)
             .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
@@ -85,8 +98,8 @@ struct ConcertoApp: App {
         WindowGroup(id: "repo", for: URL.self) { $repoURL in
             RepoWindow(repoURL: repoURL, portfolioService: portfolioService)
                 .tint(.loopflowBurgundy)
-                .preferredColorScheme(preferredScheme)
-                .environment(\.palette, resolvedPalette)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
                 .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
@@ -94,8 +107,8 @@ struct ConcertoApp: App {
 
         Window("Terminal Test", id: "terminal-test") {
             TerminalTestWindow()
-                .preferredColorScheme(preferredScheme)
-                .environment(\.palette, resolvedPalette)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
         }
         .defaultSize(width: 800, height: 600)
 

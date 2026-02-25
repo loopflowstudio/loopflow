@@ -32,7 +32,7 @@ struct MobileWaveDetailView: View {
                             Spacer()
                             Text(wave.statusText)
                                 .font(Typography.caption())
-                                .foregroundStyle(statusColor(wave.status))
+                                .foregroundStyle(wave.status.mobileStatusColor)
                         }
                         Text(wave.areaDisplay)
                             .font(Typography.caption())
@@ -81,16 +81,6 @@ struct MobileWaveDetailView: View {
             }
         }
         .background(palette.background)
-    }
-
-    private func statusColor(_ status: WaveStatus) -> Color {
-        switch status {
-        case .idle: return .statusNeutral
-        case .running: return .statusSuccess
-        case .waiting: return .statusWarning
-        case .failed: return .statusError
-        case .paused: return .statusInfo
-        }
     }
 }
 

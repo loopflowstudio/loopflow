@@ -25,7 +25,7 @@ struct MobileWaveListView: View {
                                 Spacer()
                                 Text(wave.statusText)
                                     .font(Typography.caption(11))
-                                    .foregroundStyle(statusColor(wave.status))
+                                    .foregroundStyle(wave.status.mobileStatusColor)
                             }
                             Text(wave.areaDisplay)
                                 .font(Typography.caption(11))
@@ -47,16 +47,6 @@ struct MobileWaveListView: View {
         .navigationTitle("Waves")
         .refreshable {
             await repoState.refreshWaves()
-        }
-    }
-
-    private func statusColor(_ status: WaveStatus) -> Color {
-        switch status {
-        case .idle: return .statusNeutral
-        case .running: return .statusSuccess
-        case .waiting: return .statusWarning
-        case .failed: return .statusError
-        case .paused: return .statusInfo
         }
     }
 }

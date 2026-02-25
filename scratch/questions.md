@@ -1,1 +1,0 @@
-- Should `BundledDaemonRegistry` also register an app-termination hook to force-stop daemons, or is `RepoWindow.onDisappear -> RepoState.closeRepo()` sufficient for lifecycle guarantees?

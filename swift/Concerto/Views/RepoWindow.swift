@@ -10,7 +10,7 @@ struct RepoWindow: View {
 
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
-    @State private var hasOpenedRepo = false
+    @State private var openedRepoPath: String?
     @State private var pendingWaveSelection: String?
 
     var body: some View {
@@ -22,8 +22,8 @@ struct RepoWindow: View {
         })
         .task {
             if let mode = RepoState.uiTestMode() {
-                hasOpenedRepo = true
                 let url = repoURL ?? URL(fileURLWithPath: "/tmp/loopflow-ui-tests")
+                openedRepoPath = canonicalPath(url)
                 repoState.configureForUITest(mode, repoURL: url)
                 return
             }
@@ -48,24 +48,31 @@ struct RepoWindow: View {
         }
         .onDisappear {
             repoState.closeRepo()
+            openedRepoPath = nil
         }
     }
 
     private func openRepoIfNeeded() async {
-        guard let url = repoURL, !hasOpenedRepo else { return }
-        hasOpenedRepo = true
+        guard let url = repoURL else { return }
+        let canonical = canonicalPath(url)
+        guard openedRepoPath != canonical else { return }
+        openedRepoPath = canonical
         await repoState.openRepo(url, outputBuffer: outputBuffer)
         portfolioService.addRepo(url)
         applyPendingWaveSelectionIfNeeded()
     }
 
     private func applyPendingWaveSelectionIfNeeded() {
-        guard hasOpenedRepo, let waveId = pendingWaveSelection else { return }
+        guard openedRepoPath != nil, let waveId = pendingWaveSelection else { return }
         NotificationCenter.default.post(
             name: .selectWave,
             object: nil,
             userInfo: ["waveId": waveId]
         )
         pendingWaveSelection = nil
+    }
+
+    private func canonicalPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 }

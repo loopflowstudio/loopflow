@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import LoopflowCore
 
 @MainActor
@@ -11,6 +12,19 @@ final class BundledDaemonRegistry {
     }
 
     private var entries: [String: Entry] = [:]
+    private var terminationObserver: NSObjectProtocol?
+
+    private init() {
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.stopAll()
+            }
+        }
+    }
 
     func acquire(repoURL: URL) async throws -> ServerConnection {
         let canonicalURL = canonicalRepoURL(from: repoURL)

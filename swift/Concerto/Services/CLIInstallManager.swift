@@ -6,6 +6,7 @@ struct CLIInstallManager {
     enum InstallError: LocalizedError {
         case missingBundledExecutable(String)
         case invalidInstallDirectory(String)
+        case existingFileConflict(String)
 
         var errorDescription: String? {
             switch self {
@@ -13,6 +14,8 @@ struct CLIInstallManager {
                 return "Missing bundled executable: \(name)"
             case .invalidInstallDirectory(let path):
                 return "Install directory is not valid: \(path)"
+            case .existingFileConflict(let path):
+                return "Refusing to overwrite existing non-symlink file at \(path)."
             }
         }
     }
@@ -47,9 +50,13 @@ struct CLIInstallManager {
 
     func uninstall(from directory: URL) throws {
         for binary in Self.binaries {
+            guard let source = executableProvider(binary)?.resolvingSymlinksInPath() else { continue }
             let linkURL = directory.appendingPathComponent(binary, isDirectory: false)
             if fileManager.fileExists(atPath: linkURL.path) {
-                try fileManager.removeItem(at: linkURL)
+                guard let destination = resolveSymlinkDestination(linkURL) else { continue }
+                if destination.resolvingSymlinksInPath().path == source.path {
+                    try fileManager.removeItem(at: linkURL)
+                }
             }
         }
     }
@@ -82,6 +89,9 @@ struct CLIInstallManager {
 
         let linkURL = directory.appendingPathComponent(name, isDirectory: false)
         if fileManager.fileExists(atPath: linkURL.path) {
+            guard resolveSymlinkDestination(linkURL) != nil else {
+                throw InstallError.existingFileConflict(linkURL.path)
+            }
             try fileManager.removeItem(at: linkURL)
         }
 

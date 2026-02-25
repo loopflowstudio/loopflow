@@ -12,7 +12,7 @@ use crate::engine::platform::kill_process;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::AgentStatus;
+use crate::lfd::types::{AgentStatus, Wave};
 
 use super::{read_stream, AgentExecutor, AgentRunContext, OutputContext, StartupRecovery};
 
@@ -121,6 +121,16 @@ impl AgentExecutor for LocalProcessExecutor {
             ..Default::default()
         })
     }
+
+    async fn ensure_wave_workspace(&self, wave: &Wave) -> Result<()> {
+        let repo = wave.repo().clone();
+        let wave_name = wave.name().clone();
+        tokio::task::spawn_blocking(move || {
+            super::ensure_wave_worktree(Path::new(&repo), &wave_name).map(|_| ())
+        })
+        .await
+        .map_err(|err| anyhow!("failed preparing wave workspace: {err}"))?
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +161,7 @@ mod tests {
                     wave_id: "wave-timeout",
                     agent_id: "agent-timeout",
                     wave_run_id: "run-timeout",
+                    branch: None,
                     output: &output,
                     output_prefix: None,
                 },

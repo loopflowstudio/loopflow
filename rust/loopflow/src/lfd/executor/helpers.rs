@@ -14,7 +14,6 @@ use crate::engine::git::{
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::write_prompt_log;
-use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{
     branch_exists, create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
 };
@@ -113,7 +112,9 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
 }
 
 pub(crate) fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
-    format!("{}-fork-{branch_index}", run.worktree)
+    crate::engine::fork::fork_worktree_path(Path::new(&run.worktree), branch_index as usize)
+        .to_string_lossy()
+        .to_string()
 }
 
 pub(crate) fn ci_fix_worktree_path(repo: &Path, wave_name: &str, run_id: &LfdId) -> PathBuf {
@@ -177,17 +178,7 @@ pub(crate) fn create_ci_fix_worktree(
 }
 
 pub(crate) fn cleanup_ci_fix_worktree(worktree: &Path) -> Result<()> {
-    if !worktree.exists() {
-        return Ok(());
-    }
-
-    if worktree.join(".git").exists() {
-        remove_worktree(worktree, true)?;
-        return Ok(());
-    }
-
-    std::fs::remove_dir_all(worktree)?;
-    Ok(())
+    super::cleanup_workspace_worktree(worktree)
 }
 
 pub(crate) fn commit_and_push_ci_fix(
@@ -224,7 +215,18 @@ pub(crate) fn is_active_wave_run_status(status: WaveRunStatus) -> bool {
 }
 
 pub(crate) fn is_ephemeral_worktree_path(path: &str) -> bool {
-    path.contains("-fork-") || path.contains(".ci-fix.")
+    let worktree_name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path);
+    has_fork_suffix(worktree_name) || worktree_name.contains(".ci-fix.")
+}
+
+fn has_fork_suffix(path_component: &str) -> bool {
+    let Some((_, suffix)) = path_component.rsplit_once("-fork-") else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit())
 }
 
 pub(crate) fn format_ci_failure_message(failure: &CiFailure) -> String {
@@ -408,4 +410,22 @@ pub(crate) fn short_hash(value: &str, chars: usize) -> String {
     let mut hash = hex::encode(digest);
     hash.truncate(chars);
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_ephemeral_worktree_path;
+
+    #[test]
+    fn is_ephemeral_worktree_path_detects_numeric_fork_suffix() {
+        assert!(is_ephemeral_worktree_path("/tmp/repo.wave-fork-0"));
+        assert!(is_ephemeral_worktree_path("/tmp/repo-fork-123"));
+        assert!(!is_ephemeral_worktree_path("/tmp/repo.wave-fork-x"));
+        assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.fork-1"));
+    }
+
+    #[test]
+    fn is_ephemeral_worktree_path_detects_ci_fix_marker() {
+        assert!(is_ephemeral_worktree_path("/tmp/repo.wave.ci-fix.deadbeef"));
+    }
 }

@@ -35,7 +35,7 @@ fn remove_workspace_file(cwd: &Path, relative_path: &str) -> Result<()> {
     }
 }
 
-fn cleanup_host_worktree(worktree: &Path) -> Result<()> {
+pub(crate) fn cleanup_workspace_worktree(worktree: &Path) -> Result<()> {
     if !worktree.exists() {
         return Ok(());
     }
@@ -53,6 +53,7 @@ pub struct AgentRunContext<'a> {
     pub wave_id: &'a str,
     pub agent_id: &'a str,
     pub wave_run_id: &'a str,
+    pub branch: Option<&'a str>,
     pub output: &'a OutputHub,
     pub output_prefix: Option<&'a str>,
 }
@@ -94,12 +95,15 @@ pub trait AgentExecutor: Send + Sync {
         remove_workspace_file(cwd, relative_path)
     }
     async fn cleanup_ephemeral_worktree(&self, _repo: &Path, worktree: &Path) -> Result<()> {
-        cleanup_host_worktree(worktree)
+        cleanup_workspace_worktree(worktree)
     }
     async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
         Ok(StartupRecovery::default())
     }
-    async fn cleanup_wave(&self, _wave: &Wave) -> Result<()> {
+    async fn ensure_wave_workspace(&self, _wave: &Wave) -> Result<()> {
+        Ok(())
+    }
+    async fn cleanup_wave_workspace(&self, _wave: &Wave) -> Result<()> {
         Ok(())
     }
 }

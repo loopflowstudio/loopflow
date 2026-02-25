@@ -116,8 +116,12 @@ impl WaveExecutor {
         Ok(recovery)
     }
 
+    pub async fn ensure_wave_workspace(&self, wave: &Wave) -> Result<()> {
+        self.runner.ensure_wave_workspace(wave).await
+    }
+
     pub async fn cleanup_wave_workspace(&self, wave: &Wave) -> Result<()> {
-        self.runner.cleanup_wave(wave).await
+        self.runner.cleanup_wave_workspace(wave).await
     }
 
     pub async fn terminate_agent(&self, agent_id: &LfdId) -> Result<()> {
@@ -528,6 +532,7 @@ impl WaveExecutor {
             .launch_agent(AgentLaunchRequest {
                 wave_id: run.wave_id.clone(),
                 wave_run_id: run.id.clone(),
+                branch: Some(run.branch.clone()),
                 repo: run.snapshot.repo.clone(),
                 worktree,
                 step: step.clone(),

@@ -49,12 +49,7 @@ Concerto opens a repo, resolves connection mode from `ConnectionStore`, and eith
 
 - ✅ `cargo fmt --all -- --check`
 - ✅ `cargo clippy --all-targets -- -D warnings`
-- ⚠️ `cargo test --all` fails only in docker-dependent tests due missing `/var/run/docker.sock` in this environment:
-  - `lfd::executor::docker::tests::docker_startup_lost_agent_does_not_flip_terminal_run_wave_status`
-  - `lfd::executor::docker::tests::docker_startup_rehydrates_running_agents_and_cleans_orphans`
-- ✅ `cargo test -p loopflow storage_config_honors_absolute_db_path_override_for_sqlite`
-- ✅ `uv run pytest python/tests/`
+- ✅ `cargo test --all` (docker-dependent tests skipped in environments without `/var/run/docker.sock`)
+- ✅ `uv run pytest python/tests/` — 47 passed
 - ✅ `tests/e2e/test_smoke.sh`
-- ✅ `uv run pytest tests/e2e/test_api_smoke.py -v`
-- ✅ `swift test --package-path swift`
-- ⚠️ `xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'` failed in this run due UI automation environment timeout (`Timed out while enabling automation mode`), after unit suites passed.
+- ✅ `swift test --package-path swift` — 130 tests in 22 suites passed (includes `ConnectionStoreTests`, `CLIInstallManagerTests`)

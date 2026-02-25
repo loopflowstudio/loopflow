@@ -61,7 +61,7 @@ impl WaveExecutor {
         )?;
 
         let mut snapshot = source_run.snapshot.clone();
-        snapshot.flow = "debug".to_string();
+        snapshot.flow = "ci-fix".to_string();
         snapshot.pr = None;
         let mut run = WaveRun {
             id: sidecar_run_id.clone(),
@@ -122,7 +122,7 @@ impl WaveExecutor {
         failure: &CiFailure,
     ) -> Result<()> {
         let step = ConcreteStep {
-            step: Step::named("debug"),
+            step: Step::named("ci-fix"),
             flow_parents: Vec::new(),
         };
         let message = format_ci_failure_message(failure);
@@ -153,7 +153,7 @@ impl WaveExecutor {
 
         if outcome.exit_code != 0 {
             return Err(anyhow!(
-                "CI fix debug step failed with exit code {}",
+                "CI fix step failed with exit code {}",
                 outcome.exit_code
             ));
         }

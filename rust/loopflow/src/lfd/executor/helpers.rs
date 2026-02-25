@@ -197,7 +197,7 @@ pub(crate) fn commit_and_push_ci_fix(
 ) -> Result<()> {
     if !is_clean(worktree)? {
         stage_all(worktree)?;
-        let message = format!("lf debug: fix CI check {check_name}");
+        let message = format!("lf ci-fix: fix CI check {check_name}");
         commit(worktree, &message)?;
     }
 

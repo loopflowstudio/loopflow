@@ -45,6 +45,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | Step | What it does |
 |------|--------------|
 | `debug` | Fix an error |
+| `ci-fix` | Fix failing CI checks for the current PR |
 | `implement` | Build from a design doc |
 | `compress` | Simplify touched code |
 | `gate` | Ship-ready code and reviewer-friendly docs |

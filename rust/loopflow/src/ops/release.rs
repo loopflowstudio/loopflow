@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::agent::{launch_agent, LaunchConfig};
+use crate::engine::agent::{launch_agent, AgentCapabilities, LaunchConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::command::run_command;
 use crate::engine::config::load_config_or_default;
@@ -170,16 +170,23 @@ fn generate_release_notes(
     );
 
     let config = load_config_or_default(Some(repo));
-    let launch_config = LaunchConfig {
-        auto: true,
-        stream: false,
-        skip_permissions: true,
-        chrome: config.chrome,
+    let launch = LaunchConfig {
+        task_prompt: prompt,
+        model: Some(config.agent_model.clone()),
         cwd: Some(repo.to_path_buf()),
+        skip_permissions: true,
         ..Default::default()
     };
+    let process = ProcessConfig {
+        auto: true,
+        stream: false,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
+    };
 
-    let result = launch_agent(&config.agent_model, &prompt, &launch_config)
+    let result = launch_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
     if result.exit_code != 0 {
         return Err(OpsError::AgentFailed(result.stderr));

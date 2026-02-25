@@ -134,7 +134,7 @@ Two patterns, intentionally different:
 
 Connection settings support two modes:
 
-- **Bundled** (default): Concerto starts repo-scoped `lfd` automatically.
+- **Bundled** (default): Concerto starts one bundled `lfd` process automatically.
 - **Remote**: Concerto connects to an externally managed `lfd`.
 
 In bundled mode, Settings also supports optional CLI symlink install for `lf` + `lfd` (for `~/.local/bin` or `/usr/local/bin`).

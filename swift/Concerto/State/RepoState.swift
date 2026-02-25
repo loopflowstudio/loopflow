@@ -124,14 +124,13 @@ final class RepoState {
     var availableRemoteRepos: [RemoteRepo] = []
 
     // Services
-    private let bundledDaemonRegistry: BundledDaemonRegistry
-    private var bundledRepoLease: URL?
+    private let bundledDaemon: BundledDaemonManager
     private var waveService: WaveService
     private var eventService: EventService?
     private weak var outputBuffer: OutputBuffer?
 
-    init(bundledDaemonRegistry: BundledDaemonRegistry = .shared) {
-        self.bundledDaemonRegistry = bundledDaemonRegistry
+    init(bundledDaemon: BundledDaemonManager = BundledDaemonManager()) {
+        self.bundledDaemon = bundledDaemon
         let connection = connectionStore.activeConnection
         waveService = Self.makeWaveService(connection: connection, token: connectionStore.token(for: connection))
 
@@ -332,9 +331,6 @@ final class RepoState {
     func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         let canonicalURL = canonicalRepoURL(url)
-        if let bundledRepoLease, bundledRepoLease.path != canonicalURL.path {
-            releaseBundledDaemonIfNeeded()
-        }
 
         chatStates.removeAll()
         currentRepo = canonicalURL
@@ -358,7 +354,6 @@ final class RepoState {
     }
 
     func closeRepo() {
-        releaseBundledDaemonIfNeeded()
         Task {
             await eventService?.disconnect()
         }
@@ -677,43 +672,36 @@ final class RepoState {
     }
 
     func connectLfd(outputBuffer: OutputBuffer) async throws {
+        let connection = try await resolveConnection()
+        try await performConnectionHandshake(connection: connection, outputBuffer: outputBuffer)
+    }
+
+    func connect(to connection: ServerConnection, outputBuffer: OutputBuffer) async throws {
+        connectionStore.setRemoteConnection(connection)
+        try await connectLfd(outputBuffer: outputBuffer)
+    }
+
+    func connectBundled(outputBuffer: OutputBuffer) async throws {
+        connectionStore.setMode(.bundled)
+        try await connectLfd(outputBuffer: outputBuffer)
+    }
+
+    private func resolveConnection() async throws -> ServerConnection {
         switch connectionStore.mode {
         case .bundled:
-            try await connectBundled(outputBuffer: outputBuffer)
+            guard currentRepo != nil else {
+                throw WaveCreationReadinessError.missingRepo
+            }
+            let bundledConnection = try await bundledDaemon.start()
+            connectionStore.setBundledRuntimeConnection(bundledConnection)
+            return connectionStore.activeConnection
         case .remote:
             guard let connection = connectionStore.configuredRemoteConnection else {
                 throw WaveServiceError.commandFailed("Configure a remote server in Connection Settings.")
             }
-            try await connect(to: connection, outputBuffer: outputBuffer)
+            connectionStore.setMode(.remote)
+            return connection
         }
-    }
-
-    func connect(to connection: ServerConnection, outputBuffer: OutputBuffer) async throws {
-        releaseBundledDaemonIfNeeded()
-        connectionStore.setRemoteConnection(connection)
-        try await performConnectionHandshake(connection: connectionStore.activeConnection, outputBuffer: outputBuffer)
-    }
-
-    func connectBundled(outputBuffer: OutputBuffer) async throws {
-        guard let currentRepo else {
-            throw WaveCreationReadinessError.missingRepo
-        }
-
-        let canonicalRepo = canonicalRepoURL(currentRepo)
-        if let bundledRepoLease, bundledRepoLease.path != canonicalRepo.path {
-            releaseBundledDaemonIfNeeded()
-        }
-
-        if bundledRepoLease == nil {
-            let bundledConnection = try await bundledDaemonRegistry.acquire(repoURL: canonicalRepo)
-            bundledRepoLease = canonicalRepo
-            connectionStore.setBundledRuntimeConnection(bundledConnection)
-        }
-
-        try await performConnectionHandshake(
-            connection: connectionStore.activeConnection,
-            outputBuffer: outputBuffer
-        )
     }
 
     private func performConnectionHandshake(
@@ -848,13 +836,6 @@ final class RepoState {
             await eventService?.disconnect()
         }
         eventService = nil
-    }
-
-    private func releaseBundledDaemonIfNeeded() {
-        guard let bundledRepoLease else { return }
-        bundledDaemonRegistry.release(repoURL: bundledRepoLease)
-        self.bundledRepoLease = nil
-        connectionStore.resetBundledRuntimeConnection()
     }
 
     private func canonicalRepoURL(_ url: URL) -> URL {

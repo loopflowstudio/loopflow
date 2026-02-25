@@ -4,7 +4,56 @@ import LoopflowCore
 @MainActor
 @Observable
 final class ConnectionStore {
-    private struct PersistedSettings: Codable {
+    private enum PersistedSettings: Codable {
+        case bundled(ServerConnection?)
+        case remote(ServerConnection)
+
+        private enum CodingKeys: String, CodingKey {
+            case mode
+            case remoteConnection
+        }
+
+        private enum ModeValue: String, Codable {
+            case bundled
+            case remote
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let mode = try container.decode(ModeValue.self, forKey: .mode)
+            switch mode {
+            case .bundled:
+                let remote = try container.decodeIfPresent(ServerConnection.self, forKey: .remoteConnection)
+                self = .bundled(remote)
+            case .remote:
+                guard let connection = try container.decodeIfPresent(
+                    ServerConnection.self,
+                    forKey: .remoteConnection
+                ) else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .remoteConnection,
+                        in: container,
+                        debugDescription: "Remote mode requires a remote connection."
+                    )
+                }
+                self = .remote(connection)
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .bundled(let remote):
+                try container.encode(ModeValue.bundled, forKey: .mode)
+                try container.encodeIfPresent(remote, forKey: .remoteConnection)
+            case .remote(let connection):
+                try container.encode(ModeValue.remote, forKey: .mode)
+                try container.encode(connection, forKey: .remoteConnection)
+            }
+        }
+    }
+
+    private struct LegacyPersistedSettings: Codable {
         var mode: ConnectionMode
         var remoteConnection: ServerConnection?
     }
@@ -80,11 +129,6 @@ final class ConnectionStore {
         persistSettings()
     }
 
-    func resetBundledRuntimeConnection() {
-        guard mode == .bundled else { return }
-        activeConnection = .local
-    }
-
     var configuredRemoteConnection: ServerConnection? {
         remoteConnection
     }
@@ -112,10 +156,16 @@ final class ConnectionStore {
     }
 
     private func persistSettings() {
-        var persistedRemote = remoteConnection
-        persistedRemote?.staticToken = nil
+        let value: PersistedSettings
+        if mode == .remote, var remoteConnection {
+            remoteConnection.staticToken = nil
+            value = .remote(remoteConnection)
+        } else {
+            var persistedRemote = remoteConnection
+            persistedRemote?.staticToken = nil
+            value = .bundled(persistedRemote)
+        }
 
-        let value = PersistedSettings(mode: mode, remoteConnection: persistedRemote)
         guard let data = try? JSONEncoder().encode(value) else { return }
         defaults.set(data, forKey: Self.defaultsKey)
     }
@@ -130,26 +180,54 @@ final class ConnectionStore {
         return try? JSONDecoder().decode(ServerConnection.self, from: data)
     }
 
+    private static func loadLegacySettings(from defaults: UserDefaults) -> LegacyPersistedSettings? {
+        guard let data = defaults.data(forKey: Self.defaultsKey) else { return nil }
+        return try? JSONDecoder().decode(LegacyPersistedSettings.self, from: data)
+    }
+
     private static func loadInitialState(
         defaults: UserDefaults,
         secretStore: ConnectionSecretStore
     ) -> InitialState {
         if let loaded = loadSettings(from: defaults) {
-            var remote = loaded.remoteConnection
-            if let persisted = remote {
-                remote?.staticToken = secretStore.token(for: persisted)
+            switch loaded {
+            case .bundled(var remote):
+                if let persisted = remote {
+                    remote?.staticToken = secretStore.token(for: persisted)
+                }
+                return InitialState(
+                    mode: .bundled,
+                    activeConnection: .local,
+                    remoteConnection: remote,
+                    shouldPersist: false
+                )
+            case .remote(var remote):
+                remote.staticToken = secretStore.token(for: remote)
+                return InitialState(
+                    mode: .remote,
+                    activeConnection: remote,
+                    remoteConnection: remote,
+                    shouldPersist: false
+                )
             }
-            let activeConnection: ServerConnection
-            if loaded.mode == .remote, let remote {
-                activeConnection = remote
-            } else {
-                activeConnection = .local
+        }
+
+        if let legacySettings = loadLegacySettings(from: defaults) {
+            if legacySettings.mode == .remote, var remote = legacySettings.remoteConnection {
+                remote.staticToken = secretStore.token(for: remote)
+                return InitialState(
+                    mode: .remote,
+                    activeConnection: remote,
+                    remoteConnection: remote,
+                    shouldPersist: true
+                )
             }
+
             return InitialState(
-                mode: loaded.mode,
-                activeConnection: activeConnection,
-                remoteConnection: remote,
-                shouldPersist: false
+                mode: .bundled,
+                activeConnection: .local,
+                remoteConnection: nil,
+                shouldPersist: true
             )
         }
 

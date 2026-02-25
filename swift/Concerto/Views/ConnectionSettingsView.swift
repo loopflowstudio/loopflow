@@ -101,7 +101,7 @@ struct ConnectionSettingsView: View {
                 .background(palette.surfaceMuted)
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
 
-                Text("One lfd per repository. Runtime port and token are regenerated each launch.")
+                Text("Concerto runs one bundled lfd. Runtime port and token are regenerated each launch.")
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
             }

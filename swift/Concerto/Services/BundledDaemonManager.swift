@@ -1,7 +1,7 @@
-import CryptoKit
 import Foundation
 import Security
 import Darwin
+import AppKit
 import LoopflowCore
 
 @MainActor
@@ -40,25 +40,33 @@ final class BundledDaemonManager {
         }
     }
 
-    private let repoURL: URL
     private let executableProvider: @Sendable (String) -> URL?
     private let urlSession: URLSession
     private var process: Process?
+    private var terminationObserver: NSObjectProtocol?
 
     private(set) var port: Int?
     private(set) var token: String?
     private(set) var state: DaemonState = .stopped
 
     init(
-        repoURL: URL,
         executableProvider: @escaping @Sendable (String) -> URL? = { name in
             Bundle.main.url(forAuxiliaryExecutable: name)
         },
         urlSession: URLSession = .shared
     ) {
-        self.repoURL = repoURL
         self.executableProvider = executableProvider
         self.urlSession = urlSession
+
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.stop()
+            }
+        }
     }
 
     func start() async throws -> ServerConnection {
@@ -203,13 +211,7 @@ final class BundledDaemonManager {
         }
 
         try FileManager.default.createDirectory(at: supportRoot, withIntermediateDirectories: true)
-        return supportRoot.appendingPathComponent("\(repoID).db", isDirectory: false)
-    }
-
-    private var repoID: String {
-        let canonicalPath = repoURL.resolvingSymlinksInPath().standardizedFileURL.path
-        let digest = SHA256.hash(data: Data(canonicalPath.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+        return supportRoot.appendingPathComponent("concerto.db", isDirectory: false)
     }
 
     private func generateSessionToken() throws -> String {

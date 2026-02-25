@@ -26,7 +26,7 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 | 02 | Compose Stack | Full stack in Docker (lfd + postgres), test locally |
 | 03 | Pre-shared Token Auth | lfd accepts remote connections |
 | 04 | API Surface Gating | Security hardening for remote-facing API |
-| — | Bundled Daemon Runtime | Concerto runs lfd from app bundle; ephemeral port/token per launch; refcounted per-repo sharing; connection mode switcher (Bundled/Remote) in settings UI |
+| — | Bundled Daemon Runtime | Concerto runs one bundled lfd from the app bundle; ephemeral port/token per launch; shared sqlite db; connection mode switcher (Bundled/Remote) in settings UI |
 
 ### Folded into step 0
 

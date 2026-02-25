@@ -129,28 +129,8 @@ pub async fn auth_middleware(
 
     let auth_result = match provided_token {
         ParsedToken::Malformed => Err(malformed_token_error(&state.auth)),
-        ParsedToken::Missing => match &state.auth {
-            AuthProvider::Local { session_token } => authorize_expected_token(session_token, None),
-            AuthProvider::Static { token } => authorize_expected_token(token, None),
-            AuthProvider::Studio { .. } => {
-                Err((StatusCode::UNAUTHORIZED, "missing connection token"))
-            }
-        },
-        ParsedToken::Present(token) => match &state.auth {
-            AuthProvider::Local { session_token } => {
-                authorize_expected_token(session_token, Some(token))
-            }
-            AuthProvider::Static {
-                token: expected_token,
-            } => authorize_expected_token(expected_token, Some(token)),
-            AuthProvider::Studio { validator } => {
-                if validator.validate(token).await {
-                    Ok(())
-                } else {
-                    Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
-                }
-            }
-        },
+        ParsedToken::Missing => authorize_with_provider(&state.auth, None).await,
+        ParsedToken::Present(token) => authorize_with_provider(&state.auth, Some(token)).await,
     };
 
     match auth_result {
@@ -170,6 +150,37 @@ pub async fn auth_middleware(
                 http::api_error_response(status, message)
             }
         }
+    }
+}
+
+async fn authorize_with_provider(
+    auth: &AuthProvider,
+    provided_token: Option<&str>,
+) -> Result<(), (StatusCode, &'static str)> {
+    match auth {
+        AuthProvider::Local { session_token } => {
+            authorize_expected_token(session_token, provided_token)
+        }
+        AuthProvider::Static { token } => authorize_expected_token(token, provided_token),
+        AuthProvider::Studio { validator } => {
+            authorize_connection_token(validator, provided_token).await
+        }
+    }
+}
+
+async fn authorize_connection_token(
+    validator: &ConnectionValidator,
+    provided_token: Option<&str>,
+) -> Result<(), (StatusCode, &'static str)> {
+    match provided_token {
+        Some(token) => {
+            if validator.validate(token).await {
+                Ok(())
+            } else {
+                Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
+            }
+        }
+        None => Err((StatusCode::UNAUTHORIZED, "missing connection token")),
     }
 }
 
@@ -208,14 +219,14 @@ fn extract_token(headers: &HeaderMap) -> ParsedToken<'_> {
     let Ok(auth) = auth_value.to_str() else {
         return ParsedToken::Malformed;
     };
-    if !auth
-        .get(..7)
-        .is_some_and(|value| value.eq_ignore_ascii_case("Bearer "))
-    {
+    let Some((scheme, value)) = auth.split_once(' ') else {
+        return ParsedToken::Malformed;
+    };
+    if !scheme.eq_ignore_ascii_case("bearer") {
         return ParsedToken::Malformed;
     }
 
-    let token = auth[7..].trim();
+    let token = value.trim();
     if token.is_empty() || token.len() > MAX_BEARER_TOKEN_BYTES {
         return ParsedToken::Malformed;
     }
@@ -568,10 +579,12 @@ mod tests {
         spawn_server(app).await
     }
 
-    #[tokio::test]
-    async fn middleware_rejects_malformed_studio_header_before_validator_call() {
-        let validation_calls = Arc::new(AtomicUsize::new(0));
-        let validator_base_url = spawn_connection_validator(true, validation_calls.clone()).await;
+    async fn spawn_studio_protected_app(
+        validator_valid: bool,
+        validation_calls: Arc<AtomicUsize>,
+    ) -> String {
+        let validator_base_url =
+            spawn_connection_validator(validator_valid, validation_calls).await;
         let state = test_http_state(AuthProvider::Studio {
             validator: ConnectionValidator::new(&validator_base_url),
         })
@@ -583,14 +596,23 @@ mod tests {
                 auth_middleware,
             ))
             .with_state(state);
-        let base_url = spawn_server(app).await;
+        spawn_server(app).await
+    }
 
-        let response = reqwest::Client::new()
+    async fn get_protected(base_url: &str, authorization: &str) -> reqwest::Response {
+        reqwest::Client::new()
             .get(format!("{base_url}/protected"))
-            .header("authorization", "Bearer malformed token")
+            .header("authorization", authorization)
             .send()
             .await
-            .expect("request");
+            .expect("request")
+    }
+
+    #[tokio::test]
+    async fn middleware_rejects_malformed_studio_header_before_validator_call() {
+        let validation_calls = Arc::new(AtomicUsize::new(0));
+        let base_url = spawn_studio_protected_app(true, validation_calls.clone()).await;
+        let response = get_protected(&base_url, "Bearer malformed token").await;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let payload: serde_json::Value = response.json().await.expect("json response");
@@ -601,26 +623,8 @@ mod tests {
     #[tokio::test]
     async fn middleware_calls_studio_validator_for_present_token() {
         let validation_calls = Arc::new(AtomicUsize::new(0));
-        let validator_base_url = spawn_connection_validator(false, validation_calls.clone()).await;
-        let state = test_http_state(AuthProvider::Studio {
-            validator: ConnectionValidator::new(&validator_base_url),
-        })
-        .await;
-        let app = Router::new()
-            .route("/protected", get(|| async { StatusCode::OK }))
-            .route_layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                auth_middleware,
-            ))
-            .with_state(state);
-        let base_url = spawn_server(app).await;
-
-        let response = reqwest::Client::new()
-            .get(format!("{base_url}/protected"))
-            .header("authorization", "Bearer plausible-token")
-            .send()
-            .await
-            .expect("request");
+        let base_url = spawn_studio_protected_app(false, validation_calls.clone()).await;
+        let response = get_protected(&base_url, "Bearer plausible-token").await;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let payload: serde_json::Value = response.json().await.expect("json response");

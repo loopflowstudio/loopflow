@@ -1,82 +1,77 @@
 # Fork Executor Cleanup
 
-## Problem
+## Status
 
-Fork execution now works in CLI, daemon, and Docker, but the implementation is still split across parallel code paths with different assumptions:
+Completed on branch `jack-heart.remote.20260224_2049`.
 
-- Fork manifest path is duplicated (`engine::fork` vs `lfd::executor::wave::fork`).
-- Fork worktree naming differs (`.fork-N` in CLI path builder vs `-fork-N` elsewhere).
-- Docker still infers branch names from filesystem paths for fork runs.
-- CLI fork cleanup/write still bypasses executor trait hooks.
+This document is the canonical summary for this work item. It replaces earlier split planning/review notes.
 
-That drift is exactly how parity regresses. This cleanup advances the remote wave goal to **“Keep protocol parity”** and the post-01E invariant that fork semantics stay identical across local + Docker execution.
+## Goal
 
-## Approach
+Keep fork execution behavior consistent across CLI, daemon, and Docker by enforcing one shared fork contract (paths, branch identity, and workspace lifecycle handling).
 
-Make one execution contract and route all fork workspace mutations through executor hooks.
+## Implemented
 
-1. **Canonicalize fork paths/constants in `engine::fork`**
-   - Export a single manifest constant (`.lf/fork-manifest.json`) from `engine::fork`.
-   - Make `engine::fork::fork_worktree_path` the only fork worktree builder and standardize on `-fork-N` suffix.
-   - Delete duplicate fork path helpers/constants in daemon code and switch call sites to shared functions.
-   - Update `is_ephemeral_worktree_path` to match the same suffix contract.
-
-2. **Thread explicit branch identity through execution**
-   - Add `branch: Option<&str>` to `AgentRunContext`.
-   - Add branch to `AgentLaunchRequest`; fill it from run/fork orchestration (`run.branch` and `branch_name`).
-   - In Docker executor, resolve workspace branch as:
-     1) explicit context branch, 2) current git branch, 3) fallback.
-   - Remove `infer_fork_branch_from_worktree` and `wave_run_id`-based branch guessing from normal execution paths.
-   - Keep filesystem inference only where we truly reattach/recover without full run context.
-
-3. **Unify CLI fork file ops through `AgentExecutor` hooks**
-   - Switch CLI fork manifest write/remove and fork worktree cleanup to `write_to_workspace`, `remove_from_workspace`, and `cleanup_ephemeral_worktree`.
-   - Remove `write_fork_manifest` / `cleanup_fork_worktrees` once no caller remains.
-   - Do not introduce a new runner abstraction; reuse the existing executor trait contract.
-
-4. **Finish small structural cleanup**
-   - Deduplicate `cleanup_host_worktree` and `cleanup_ci_fix_worktree` behind one shared helper.
-   - Move wave lifecycle executor-specific behavior out of HTTP route `executor_type` branching and behind trait methods.
-   - Simplify Docker workspace resolution helpers after explicit branch threading lands.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Keep current split, patch only obvious bugs | Lowest short-term effort | Drift remains; parity bugs return when one path changes first |
-| Add a dedicated `ForkRunner` abstraction for CLI + daemon | Could centralize all fork flow logic | Extra abstraction layer duplicates `AgentExecutor` responsibilities |
-| Push all fork execution into daemon and make CLI proxy it | Strong unification | Big behavior shift, out of scope for cleanup follow-up |
+- Canonicalized fork contract in `engine::fork`:
+  - Exported `FORK_MANIFEST_RELATIVE_PATH`.
+  - Standardized `fork_worktree_path()` to `-fork-N` naming.
+  - Removed direct manifest write/cleanup helpers from `engine::fork`.
+- Routed CLI fork artifact operations through executor hooks:
+  - Manifest write: `write_to_workspace`.
+  - Manifest remove: `remove_from_workspace`.
+  - Worktree cleanup: `cleanup_ephemeral_worktree`.
+- Threaded explicit branch identity through execution:
+  - `AgentRunContext` now carries `branch: Option<&str>`.
+  - `AgentLaunchRequest` now carries `branch: Option<String>`.
+  - Docker normal execution resolves branch by precedence:
+    1. explicit context branch,
+    2. checked-out git branch,
+    3. fallback branch.
+  - Filesystem-based branch inference is retained only for recovery paths without full context.
+- Unified workspace lifecycle behavior behind executor trait methods:
+  - Added `ensure_wave_workspace`.
+  - Renamed `cleanup_wave` to `cleanup_wave_workspace`.
+  - Removed HTTP route branching on `executor_type` for wave workspace side effects.
+- Deduplicated worktree cleanup helpers behind shared `cleanup_workspace_worktree`.
+- Tightened ephemeral worktree detection to `-fork-<digits>` suffix and added unit tests.
+- Added launch assertion coverage ensuring branch context propagates into runner calls.
+- Updated wave planning artifacts:
+  - Moved `wave/remote/fork-executor-cleanup.md` into `scratch/remote-fork-executor-cleanup.md`.
+  - Removed `wave/remote/06-remote-file-access.md` from this branch’s wave queue.
 
 ## Key decisions
 
-- **Use explicit branch context over path inference.** Branch identity is execution data, not a filename heuristic.
-- **One fork naming rule (`-fork-N`) everywhere.** Janitor, cleanup, Docker mapping, and tests all key off the same suffix.
-- **Executor trait is the only workspace mutation boundary.** File writes/cleanup for fork artifacts must use trait hooks, not ad-hoc filesystem calls.
-- **Accept one controlled breaking change:** legacy `.fork-N` naming is not kept as an active compatibility mode.
+- Prefer explicit branch context over filename/path inference during normal execution.
+- Enforce one fork naming convention (`-fork-N`) across CLI, daemon, Docker, and janitor logic.
+- Treat `AgentExecutor` as the workspace mutation boundary for fork artifacts.
+- Do not keep active compatibility shims for legacy `.fork-N` names.
 
-**Wild success check:** adding a new executor backend requires implementing trait hooks, with zero fork-specific conditionals in orchestration or routes.
+## Scope boundaries
 
-**Wild failure check:** if context branch plumbing is incomplete, Docker writes/syncs the wrong workspace branch. Mitigation: explicit branch-precedence tests and fork end-to-end tests in both local and Docker paths.
+Out of scope (unchanged):
 
-## Scope
+- Fork planning semantics (`plan_fork_execution`, `merge_directions`)
+- Manifest schema (`ForkManifest`, `ForkManifestBranch`)
+- Scheduler slot behavior
+- Docker rehydration/mutation lock model
 
-- In scope:
-  - Priority 1–4 refactors above
-  - Targeted test updates for path naming, branch resolution, and cleanup behavior
-  - Route cleanup that removes executor-type branching for wave lifecycle hooks
-- Out of scope:
-  - Fork planning (`plan_fork_execution`, `merge_directions`)
-  - Manifest schema (`ForkManifest`, `ForkManifestBranch`)
-  - Scheduler slot behavior
-  - Docker container rehydration/mutation lock model
+## Validation
 
-## Done when
+Executed:
 
-- There is one fork manifest path constant and one fork worktree path builder used by both CLI and daemon code.
-- Docker normal run path no longer infers fork branch from worktree name when branch context is available.
-- CLI fork path uses executor workspace hooks for manifest + cleanup (no direct `engine::fork` fs helpers left).
-- Wave HTTP routes no longer branch on `executor_type` for wave lifecycle side effects.
-- Validation passes:
-  - `cargo test -p loopflow fork_worktree_path`
-  - `cargo test -p loopflow resolve_workspace_branch`
-  - `cargo test -p loopflow execute_fork_`
+- `cargo fmt --all -- --check`
+- `cargo clippy -p loopflow --all-targets -- -D warnings`
+- `cargo test -p loopflow fork_worktree_path`
+- `cargo test -p loopflow resolve_workspace_branch`
+- `cargo test -p loopflow execute_fork_`
+- `cargo test -p loopflow execute_fork_merges_directions_and_prefixes_branch_logs`
+- `cargo test -p loopflow is_ephemeral_worktree_path`
+
+Additional run:
+
+- `cargo test -p loopflow` (2 Docker startup tests failed in this environment due missing `/var/run/docker.sock`)
+
+## Residual risk
+
+- Fork cleanup now goes through executor hooks sequentially; very large fork counts may clean up slightly slower than previous threaded cleanup.
+- Recovery behavior still relies on filesystem inference when run context is unavailable.

@@ -69,9 +69,51 @@ jobs:
         with:
           packages-dir: dist/
 
+  # Build Concerto DMG and upload to R2
+  build-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build DMG
+        run: python3 scripts/dev.py release
+        working-directory: ${{ github.workspace }}
+      - name: Upload DMG to R2
+        run: |
+          pip3 install boto3
+          python3 - <<'SCRIPT'
+          import boto3, os
+          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          client = boto3.client(
+              "s3",
+              endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+              aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+              aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+              region_name="auto",
+          )
+          bucket = "loopflow-downloads"
+          dmg = "swift/dist/LoopflowConcerto.dmg"
+          for key, cache in [
+              (f"LoopflowConcerto-{version}.dmg", "public, max-age=31536000, immutable"),
+              ("LoopflowConcerto-latest.dmg", "public, max-age=60"),
+          ]:
+              client.upload_file(dmg, bucket, key, ExtraArgs={
+                  "ContentType": "application/x-apple-diskimage",
+                  "CacheControl": cache,
+              })
+              print(f"Uploaded {key}")
+          SCRIPT
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg
+          path: swift/dist/LoopflowConcerto.dmg
+
   # Create GitHub Release with native binaries
   release:
-    needs: build-native
+    needs: [build-native, build-dmg]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -82,6 +124,10 @@ jobs:
           pattern: native-*
           merge-multiple: true
           path: dist/native
+      - uses: actions/download-artifact@v4
+        with:
+          name: dmg
+          path: dist/dmg
       - name: Generate shell installer
         run: |
           cat > dist/install.sh << 'INSTALLER'
@@ -178,4 +224,5 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             dist/native/*.tar.gz
+            dist/dmg/*.dmg
             dist/install.sh

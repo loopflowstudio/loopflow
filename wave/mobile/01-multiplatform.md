@@ -20,7 +20,7 @@ Single-target multiplatform build with iOS shells and platform boundaries. The a
 
 **What shipped in Concerto:**
 - `ConcertoApp.swift`: `#if os(macOS)/#else` at app entry — macOS multi-window, iOS single WindowGroup
-- `Platform/iOS/`: MobileRootView (TabView phone / NavigationSplitView tablet), ConnectionSetupView, MobileWaveListView, MobileWaveDetailView, MobileConnectionProfilesStore, WaveStatus+Color, RepoState+iOS
+- `Platform/iOS/`: MobileRootView (TabView phone / NavigationSplitView tablet), ConnectionSetupView, MobileWaveListView, MobileWaveDetailView, RepoState+iOS
 - `Platform/macOS/`: LocalShellCommandRunner, RepoState+macOS
 - Boundary enforcement: `scripts/check_swift_multiplatform_boundaries.py` blocks macOS-only imports in LoopflowCore and non-shell `#if` usage
 
@@ -33,6 +33,8 @@ Single-target multiplatform build with iOS shells and platform boundaries. The a
 ## What remains
 
 **Interactive end-to-end validation** is light. Build coverage is confirmed but full device flows (connection setup → connect to lfd → wave list → detail → output) haven't been validated against a live lfd on simulator.
+
+**Migrate macOS views to `Platform/macOS/`.** ~40 files in `Concerto/Views/` and `Concerto/Services/` have whole-file `#if os(macOS)` gates. They should move to `Concerto/Platform/macOS/` to match the iOS directory convention and reduce visual noise. Pure mechanical move—no behavior change.
 
 ## What to build
 

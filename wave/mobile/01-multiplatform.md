@@ -6,6 +6,8 @@ Make Concerto build and run on iOS (iPhone + iPad) alongside macOS.
 
 Concerto becomes a multiplatform SwiftUI app. One target, one scheme, three form factors. LoopflowCore absorbs everything shared — models, services, state (including RepoState), and reusable views. Concerto becomes a thin app shell with platform-specific code. macOS-specific code (Ghostty, keyboard router, Carbon frameworks) gets platform-gated.
 
+Stage 01 is about architecture + shells. It does **not** include discovery, action-button UX, or multi-client protocol changes.
+
 ## Approach
 
 ### Package.swift changes
@@ -30,13 +32,18 @@ LoopflowCore becomes the full shared library. Everything that doesn't touch macO
 - ChatState (+ ChatMessage, TranscriptEntry, ChatService protocol)
 - ConnectionStore
 
-**Views:**
+**Views required in Stage 01:**
 - WaveSidebar, WaveRow, WaveDetailPanel
 - WaveChatView, ChatBubble, TranscriptItemCardView
 - LiveOutput, FlowProgressPills, IterationTimeline
 - NextActionsBar, WaitingStateCard
 - StartWaveView, ConnectionSettingsView, DiagnosticsView
 - DesignSystem, BrandColors, Typography
+
+**Views explicitly deferred if not needed for iOS MVP flow:**
+- Desktop-only helpers and secondary polish views that do not block:
+  - iPhone: connection setup → wave list → wave detail/output
+  - iPad: split layout without terminal/command palette/keyboard router
 
 **What stays in Concerto (macOS-only):**
 - EmbeddedTerminalPanel, TerminalTestWindow (Ghostty)
@@ -119,6 +126,25 @@ macOS uses NSOpenPanel. iOS options:
 - No local file picker (iOS doesn't have local git repos)
 
 This means iOS is always a remote client connecting to lfd. The "repo" concept becomes "lfd connection."
+Running `lfd` as a standalone local daemon on iPhone/iPad is out of scope.
+
+## Implementation order (ship in seams)
+
+1. Package/platform gating compiles for iOS.
+2. State extraction + capability boundaries (`RepoState`/stores in LoopflowCore).
+3. Shared views required for iOS MVP flow.
+4. iOS shell wiring (phone + tablet navigation).
+5. Resource parity + regression pass.
+
+Each seam should be independently buildable before moving to the next.
+
+## Boundary enforcement
+
+- Put platform-specific code in platform shell files, not shared files.
+- Keep long-term `#if` footprint low:
+  - allowed in app entry wiring and platform shell files
+  - avoid in shared LoopflowCore state/views/models
+- Inject platform behavior (daemon, notifications, external actions) through capability boundaries instead of inline platform checks.
 
 ### New types
 
@@ -137,6 +163,7 @@ public struct ConnectionProfile: Codable, Identifiable, Sendable, Hashable {
 - Mac behavior must not change — all existing Mac UX preserved
 - LoopflowCore must not depend on any macOS-specific frameworks
 - Font resources (Cormorant Garamond, Lato, JetBrains Mono) must be available to LoopflowCore
+- No discovery flow in Stage 01 (handled in 04-lfd-discovery)
 
 ## Done when
 
@@ -148,3 +175,7 @@ swift build --sdk ... # or via Xcode
 # Mac behavior unchanged — all existing tests pass
 swift test --package-path swift
 ```
+
+Boundary checks also pass:
+- No macOS-only imports in `LoopflowCore`
+- No net-new non-shell `#if` usage

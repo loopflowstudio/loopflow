@@ -1,6 +1,6 @@
-# Concerto — macOS App
+# Concerto — Swift Apps
 
-Visual interface for loopflow. SwiftUI, requires macOS 15+.
+Visual interface for loopflow. SwiftUI today on macOS, with iOS support staged in.
 
 ## Quick Start
 
@@ -79,11 +79,53 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 
 ## Architecture
 
-- `AppState.swift` — Central observable state
-- `Services/` — Data loading, no UI
-- `Views/` — SwiftUI views
-- `Models/` — Swift structs mirroring Python dataclasses
-- `Services/Ghostty/` — Embedded terminal integration
+- `Concerto/State/RepoState.swift` — app orchestrator for waves, connection, and stores
+- `Concerto/State/*Store.swift` — focused state containers (`WaveStore`, `RunStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`)
+- `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
+- `Concerto/Views` — app shell views and macOS-first composition
+- `Concerto/Services/Ghostty` — embedded terminal integration (macOS-only)
+
+## Multiplatform Boundary Rules
+
+Use these rules for every new Swift change. The goal is low long-term `#if` footprint.
+
+### 1) Put shared logic in LoopflowCore
+
+- Shared models, state, and reusable views live in `LoopflowCore`.
+- `LoopflowCore` must not import AppKit, Carbon, Ghostty, or other macOS-only frameworks.
+
+### 2) Keep platform code in shell files
+
+- Put macOS-only code under `Concerto/Platform/macOS/` (or existing macOS-specific folders such as `Services/Ghostty/`).
+- Put iOS-only code under `Concerto/Platform/iOS/`.
+- Prefer whole-file platform splits over inline branching.
+
+### 3) Minimize `#if` usage
+
+- Allowed: app entry wiring and platform shell files.
+- Avoid: `#if` inside shared view/state/model files.
+- If a feature needs platform behavior, inject a capability (protocol or environment action) from the shell.
+
+### 4) Use capability injection, not platform checks in core
+
+Examples:
+- PR opening / external links
+- local notifications behavior
+- bundled-daemon availability
+
+Define the capability in shared code, implement it in platform shell code.
+
+### 5) Gate platform dependencies in Package.swift
+
+- Platform-specific dependencies and linker settings must be conditionally applied.
+- Shared targets should compile unchanged across supported platforms.
+
+### Multiplatform PR checklist
+
+- [ ] New shared code compiles without platform-only imports
+- [ ] `#if` appears only in platform shell or app wiring files
+- [ ] Platform behavior is injected through capability boundaries
+- [ ] `Package.swift` platform gating is explicit and minimal
 
 ## Portfolio Dashboard
 

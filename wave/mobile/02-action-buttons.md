@@ -6,6 +6,8 @@ Agents surface next actions as tappable buttons. Primary mobile interaction, als
 
 A `suggest_actions` tool convention that agents use to surface clickable next-action buttons. The client renders them as tappable buttons below the chat. Tapping a button sends its text as the user's next message. Mobile-first but renders on Mac too.
 
+Stage 02 is UI/protocol convention work only. It does not include discovery (Stage 04) or multi-client transport changes (Stage 03).
+
 ## Protocol
 
 The agent calls a tool named `suggest_actions` with structured input:
@@ -173,6 +175,7 @@ Horizontal pill buttons below the last message:
 - Start with A (system prompt injection) — no lfd changes needed
 - B (tool registration) comes after A is working end-to-end
 - Don't block on lfd changes — can test with mock data while waiting
+- Keep behavior in shared chat surfaces; avoid platform-specific forks for the same action-button behavior
 
 ## Done when
 

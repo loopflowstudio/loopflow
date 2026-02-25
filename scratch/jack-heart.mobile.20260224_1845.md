@@ -50,6 +50,13 @@ Build this as a **core-first extraction with platform shells** (not a parallel i
    - Ensure bundled fonts are available to LoopflowCore-rendered views on both platforms.
    - Keep mac behavior unchanged while introducing iOS-only code paths behind platform checks.
 
+Execution order (required):
+1. Package/platform gating (builds compile for iOS)
+2. State extraction + capability boundaries
+3. Shared view extraction needed for iOS wave/chat/output
+4. iOS shell wiring (iPhone + iPad navigation)
+5. Resource parity + regression pass
+
 Research patterns applied:
 - Single shared state + platform-specific scenes (Apple multiplatform baseline).
 - iPhone list→detail with tab root (ChatGPT/Claude mobile navigation pattern).
@@ -68,9 +75,16 @@ Research patterns applied:
 - **Choose one target with shell branching, not separate apps.** Product stays coherent and maintainable.
 - **RepoState moves to LoopflowCore now.** It is the seam that unlocks reusable chat/wave behavior.
 - **Use injected capabilities for bundled daemon and external actions.** Avoids leaking AppKit/Process assumptions into core.
+- **Use file-structure boundaries to minimize long-term macros.** Keep platform-only logic in platform shell files, not shared files.
 - **iOS is remote-client only in Stage 01.** No local file picker, no local git/worktree management.
 - **Phone is intentionally minimal.** Status/output/chat entry points only; no step runner/typeahead/embedded terminal.
 - **Preserve wave/mobile “Not here” constraints.** Explicitly exclude embedded terminal, phone step runner/typeahead, offline mode, App Store packaging.
+
+Boundary guardrails:
+- `#if` allowed only in app entry wiring and platform shell files.
+- Shared state/views/models in LoopflowCore stay macro-free.
+- Platform behavior enters shared code through injected capabilities (protocols/environment actions), not platform checks.
+- Add a lightweight CI/script check to block macOS-only imports in LoopflowCore and new non-shell `#if` usage.
 
 Wild success details we are designing for:
 - User starts a wave on Mac, opens iPhone, and sees live wave/output within one connection flow.
@@ -106,6 +120,7 @@ New risk introduced here:
   - `swift test --package-path swift`
   - `cd swift && xcodegen generate && xcodebuild -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=iOS Simulator,name=iPhone 16' build`
   - `cd swift && xcodebuild -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=iOS Simulator,name=iPad Pro (11-inch) (M4)' build`
+- Boundary checks pass: no macOS-only imports in LoopflowCore and no net-new non-shell `#if` usage.
 - iPhone simulator flow works end-to-end: connection setup → connect to lfd → wave list → wave detail/output.
 - iPad simulator shows split layout with touch-safe interactions and no terminal/command palette.
 - macOS workflow remains unchanged (existing windows, keyboard router, terminal integration).

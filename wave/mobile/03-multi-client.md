@@ -6,6 +6,8 @@ Multiple devices connect to the same lfd. See the same waves, same sessions, sam
 
 Multiple Concerto clients connect to the same lfd and see consistent state. No client awareness — just a shared view. Both clients see the transcript, both can send messages. Like two browser tabs open to the same chat.
 
+Stage 03 assumes manual/direct connection is already working from Stage 01. Discovery UX is out of scope here (Stage 04).
+
 ## What's already free
 
 lfd owns all state. Concerto is a thin client. Most multi-client already works:
@@ -78,6 +80,7 @@ If lfd has single-client assumptions (e.g. one WebSocket per repo), fix those.
 - No lfd API changes unless concurrent clients are actually broken
 - No client registration, device tracking, or session awareness
 - Mac client behavior must not change
+- No studio/Tailscale discovery flow changes in this stage
 
 ## Done when
 

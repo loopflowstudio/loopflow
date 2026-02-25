@@ -166,7 +166,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO sessions (id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at)
+                    "INSERT INTO sessions (id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                     &[
                         &session.id,
@@ -189,7 +189,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
                      FROM sessions
                      WHERE id = $1",
                     &[&session_id],
@@ -208,7 +208,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
                      FROM sessions
                      WHERE wave_run_id = $1 AND status = ANY($2)
                      ORDER BY created_at DESC
@@ -349,7 +349,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+                    "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
                      FROM sessions WHERE status = ANY($1)
                      ORDER BY created_at ASC",
                     &[&status_ints],

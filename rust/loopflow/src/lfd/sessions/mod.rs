@@ -928,7 +928,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_session_rejects_unsupported_provider() {
+    async fn create_session_rejects_unsupported_harness() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store = Arc::new(
@@ -936,7 +936,7 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        // Use default_create_harness (not fake) so unsupported harnesss are rejected.
+        // Use default_create_harness (not fake) so unsupported harnesses are rejected.
         let manager = SessionManager::new(store);
 
         let err = manager
@@ -955,7 +955,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_session_marks_known_unimplemented_provider() {
+    async fn create_session_marks_known_unimplemented_harness() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
         let store = Arc::new(

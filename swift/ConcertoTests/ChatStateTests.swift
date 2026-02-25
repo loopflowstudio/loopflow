@@ -382,7 +382,7 @@ struct ChatStateTests {
         )
         let state = ChatState(
             waveId: "wave-test",
-            sessionProvider: "codex",
+            sessionHarness: "codex",
             sessionWaveRunId: "run_123",
             sessionConfig: config,
             waveService: service,

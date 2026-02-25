@@ -91,7 +91,7 @@ public enum TranscriptEntry: Identifiable, Equatable {
 
 public protocol ChatService: Sendable {
     func createSession(
-        provider: String,
+        harness: String,
         waveRunId: String?,
         config: AgentSessionConfig
     ) async throws -> AgentSession
@@ -131,7 +131,7 @@ public final class ChatState {
 
     public private(set) var itemsById: [String: SessionItem] = [:]
 
-    private let sessionProvider: String
+    private let sessionHarness: String
     private let sessionWaveRunId: String?
     private let sessionConfig: AgentSessionConfig
     private let waveService: any ChatService
@@ -151,14 +151,14 @@ public final class ChatState {
 
     public init(
         waveId: String,
-        sessionProvider: String = "claude",
+        sessionHarness: String = "claude",
         sessionWaveRunId: String? = nil,
         sessionConfig: AgentSessionConfig,
         waveService: any ChatService = LocalWaveService(),
         userDefaults: UserDefaults = .standard
     ) {
         self.waveId = waveId
-        self.sessionProvider = sessionProvider
+        self.sessionHarness = sessionHarness
         self.sessionWaveRunId = sessionWaveRunId
         self.sessionConfig = sessionConfig
         self.waveService = waveService
@@ -284,7 +284,7 @@ public final class ChatState {
 
         resetSessionCaches()
         let session = try await waveService.createSession(
-            provider: sessionProvider,
+            harness: sessionHarness,
             waveRunId: sessionWaveRunId,
             config: sessionConfig
         )

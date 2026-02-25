@@ -61,7 +61,7 @@ pub struct AgentConfig {
     pub task_prompt: String,
     /// Model string (for example: "claude:opus" or "codex").
     pub model: Option<String>,
-    /// Provider-specific max turn budget when supported.
+    /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
@@ -83,7 +83,7 @@ pub struct ProcessConfig {
     pub stream_format: StreamFormat,
 }
 
-/// Provider capability flags.
+/// Agent capability flags.
 #[derive(Debug, Clone, Default)]
 pub struct AgentCapabilities {
     /// Enable Chrome integration (Claude only).
@@ -95,7 +95,7 @@ pub struct AgentCapabilities {
 /// Both `build_claude_command` (engine one-shot) and the session harness
 /// `build_args` construct a `ClaudeArgs` and call `to_args()`, then add
 /// their mode-specific flags on top (`--print` for engine, `-p` for harness).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeArgs {
     /// Model variant (already resolved, no "claude:" prefix).
     pub model: Option<String>,
@@ -359,15 +359,7 @@ pub fn build_agent_command(
     cmd
 }
 
-/// Launch an agent with the given prompt.
-///
-/// # Arguments
-/// * `launch` - Canonical launch config including prompt/model/cwd fields
-/// * `process` - Process execution options
-/// * `capabilities` - Provider capability flags
-///
-/// # Returns
-/// LaunchResult with exit code and captured output (if any)
+/// Launch an agent subprocess and wait for it to exit.
 pub fn launch_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,

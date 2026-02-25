@@ -139,7 +139,7 @@ impl SqliteStore {
     pub fn create_session(&self, session: &Session) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO sessions (id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at)
+            "INSERT INTO sessions (id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 session.id,
@@ -158,7 +158,7 @@ impl SqliteStore {
     pub fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+            "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
              FROM sessions WHERE id = ?1",
         )?;
         let row = stmt
@@ -173,7 +173,7 @@ impl SqliteStore {
     ) -> StoreResult<Option<Session>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+            "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
              FROM sessions
              WHERE wave_run_id = ?1 AND status IN (?2, ?3, ?4)
              ORDER BY created_at DESC
@@ -303,7 +303,7 @@ impl SqliteStore {
             .map(|(i, _)| format!("?{}", i + 1))
             .collect();
         let sql = format!(
-            "SELECT id, provider, status, wave_run_id, provider_session_id, config, created_at, ended_at
+            "SELECT id, harness, status, wave_run_id, provider_session_id, config, created_at, ended_at
              FROM sessions WHERE status IN ({})
              ORDER BY created_at ASC",
             placeholders.join(", ")

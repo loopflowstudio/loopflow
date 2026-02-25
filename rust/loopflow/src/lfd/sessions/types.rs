@@ -118,7 +118,7 @@ pub enum SessionItem {
         #[serde(default)]
         text: String,
     },
-    /// Generic fallback for providers that don't distinguish item types.
+    /// Generic fallback for harnesses that don't distinguish item types.
     Tool {
         id: String,
         name: String,

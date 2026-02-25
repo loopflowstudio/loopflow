@@ -67,6 +67,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "013_remove_chord_tree",
         sql: include_str!("migrations/013_remove_chord_tree.sql"),
     },
+    Migration {
+        version: "014_rename_provider_to_harness",
+        sql: include_str!("migrations/014_rename_provider_to_harness.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

@@ -17,7 +17,9 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 | 1 | EC2 dogfood lane: deploy (Docker + Caddy + static token) and run remote smoke from laptop | Next |
 | 2 | Mac Mini dogfood lane: deploy (native + launchd) and run the same smoke suite for parity | Next |
 | 3 | Fork executor cleanup before auth rollout (shared constants, branch threading, executor hook parity) | Next |
-| 4 | Studio auth (Phase 07: JWT validation, sign-in UX, daemon discovery) | After 1-3 |
+| 4 | Studio auth (JWT validation, sign-in UX, daemon discovery) | After 1-3 |
+| 5 | API expansion (remote file browsing + metadata typeahead) | Later |
+| 6 | Hosted SaaS packaging | Later |
 
 ## Multi-repo execution model
 
@@ -43,6 +45,15 @@ Keep ownership crisp:
 | — | Bundled Daemon Runtime | Concerto runs one bundled lfd from the app bundle; ephemeral port/token per launch; shared sqlite db; connection mode switcher (Bundled/Remote) in settings UI |
 
 Phase 05 (remote connection correctness) and Phase 06 (remote editor/terminal access) were folded into step 0 and are treated as shipped baseline behavior.
+
+Phase docs for remaining work live in this directory:
+
+- `01-ec2-dogfood.md`
+- `02-mac-mini-dogfood.md`
+- `03-fork-executor-cleanup.md`
+- `04-studio-auth.md`
+- `05-api-expansion.md`
+- `06-hosted.md`
 
 ## Goals
 

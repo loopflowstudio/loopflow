@@ -37,9 +37,9 @@ Worktree path derivation now uses `sanitize_fs_component` instead of ad-hoc slas
 
 `POST /hooks/git` now requires an absolute path, canonicalizes it, and rejects non-directory or invalid paths before emitting worktree update events.
 
-### Phase 08 contract documented
+### Remote API expansion contract documented
 
-`wave/remote/08-api-expansion.md` now explicitly requires `path_within_root_existing`/`path_within_root_planned` before file reads, metadata lookups, or directory listing.
+`wave/remote/05-api-expansion.md` explicitly requires `path_within_root_existing`/`path_within_root_planned` before file reads, metadata lookups, or directory listing.
 
 ## Test coverage
 

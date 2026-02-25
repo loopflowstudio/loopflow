@@ -1213,4 +1213,18 @@ mod tests {
         let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
         assert!(!cmd.iter().any(|arg| arg.contains("model=\"codex\"")));
     }
+
+    #[test]
+    fn build_model_command_falls_back_to_claude_for_unknown_model() {
+        let unknown_model = "gpt-5.1-codex-high";
+        let launch = AgentConfig {
+            model: Some(unknown_model.to_string()),
+            ..default_launch()
+        };
+        let process = auto_process();
+        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
+        assert_eq!(cmd.first(), Some(&"claude".to_string()));
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&unknown_model.to_string()));
+    }
 }

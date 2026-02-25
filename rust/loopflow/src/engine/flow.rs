@@ -831,7 +831,7 @@ Be careful.
     #[test]
     fn load_direction_finds_builtin_direction() {
         let tmp = TempDir::new().unwrap();
-        let result = load_direction("ceo", tmp.path());
+        let result = load_direction("focus", tmp.path());
         assert!(
             result.is_ok(),
             "builtin direction should be found: {:?}",

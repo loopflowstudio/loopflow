@@ -486,15 +486,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             "createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path) flow=\(flow) run=\(run)"
         )
 
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "repo": repo.path,
             "name": name.isEmpty ? NSNull() : name,
             "flow": flow,
             "direction": [],
+            "run": run,
         ]
-        if run {
-            body["run"] = true
-        }
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves"),
             method: "POST",

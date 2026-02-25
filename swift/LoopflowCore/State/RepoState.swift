@@ -91,7 +91,6 @@ public final class RepoState {
     public let worktreeStore = WorktreeStore()
     private var chatStates: [String: ChatState] = [:]
     private var waitingSessionIds: [String: String] = [:]
-    private var waitingSteps: [String: String] = [:]
 
     public var waves: [WaveViewModel] { waveStore.ordered }
     public var waveGroups: WaveGroups { waveStore.groups }
@@ -104,7 +103,7 @@ public final class RepoState {
         set { selectedWaveId = newValue?.id }
     }
 
-    public func chatState(for waveId: String, joinSessionId: String? = nil, step: String? = nil) -> ChatState {
+    public func chatState(for waveId: String, joinSessionId: String? = nil) -> ChatState {
         if let state = chatStates[waveId] {
             if let joinSessionId {
                 state.joinSession(joinSessionId)
@@ -113,7 +112,7 @@ public final class RepoState {
         }
         let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
         let wave = waveStore.wave(for: waveId)
-        let sessionStep = step ?? waitingSteps[waveId] ?? wave?.activeRun?.currentStep ?? "design"
+        let sessionStep = wave?.activeRun?.currentStep ?? "design"
         let state = ChatState(
             waveId: waveId,
             sessionConfig: AgentSessionConfig(
@@ -382,7 +381,6 @@ public final class RepoState {
 
         chatStates.removeAll()
         waitingSessionIds.removeAll()
-        waitingSteps.removeAll()
         currentRepo = canonicalURL
         repoTarget = .local(canonicalURL)
         errorMessage = nil
@@ -409,7 +407,6 @@ public final class RepoState {
         }
         eventService = nil
         waitingSessionIds.removeAll()
-        waitingSteps.removeAll()
     }
 
     // MARK: - Event Subscription
@@ -472,16 +469,12 @@ public final class RepoState {
             }
 
             if event.type == .waiting {
-                if let step = event.step {
-                    waitingSteps[event.waveId] = step
-                }
                 if let sessionId = event.sessionId {
                     waitingSessionIds[event.waveId] = sessionId
-                    _ = chatState(for: event.waveId, joinSessionId: sessionId, step: event.step)
+                    _ = chatState(for: event.waveId, joinSessionId: sessionId)
                 }
             } else if refreshedWave?.status != .waiting {
                 waitingSessionIds.removeValue(forKey: event.waveId)
-                waitingSteps.removeValue(forKey: event.waveId)
             }
 
             loadWaveContent(for: event.waveId)
@@ -498,7 +491,6 @@ public final class RepoState {
             waveStore.remove(event.waveId)
             runStore.clear(for: event.waveId)
             waitingSessionIds.removeValue(forKey: event.waveId)
-            waitingSteps.removeValue(forKey: event.waveId)
             if selectedWaveId == event.waveId {
                 selectedWaveId = nil
             }

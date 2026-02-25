@@ -244,7 +244,7 @@ pub async fn create_wave_handler(
         .send(Event::wave_created(wave.id().clone(), wave.name().clone()));
 
     if run {
-        let _ = start_wave_run(&state, &mut wave, None).await?;
+        start_wave_run(&state, &mut wave, None).await?;
     }
 
     let response_wave = if run {

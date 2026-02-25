@@ -266,6 +266,7 @@ pub fn expand_direction_names(names: &[String], repo: &Path) -> Vec<String> {
     expanded
 }
 
+
 /// Check whether `name` is a direction group (user-defined directory or builtin group).
 fn resolve_direction_group(name: &str, repo: &Path) -> Option<Vec<String>> {
     let user_members = markdown_stems_in_dir(&repo.join(".lf/directions").join(name));
@@ -790,7 +791,7 @@ Be careful.
     #[test]
     fn load_direction_finds_builtin_direction() {
         let tmp = TempDir::new().unwrap();
-        let result = load_direction("product-engineer", tmp.path());
+        let result = load_direction("security", tmp.path());
         assert!(
             result.is_ok(),
             "builtin direction should be found: {:?}",

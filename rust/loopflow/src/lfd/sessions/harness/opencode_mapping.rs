@@ -22,8 +22,8 @@ impl ReaderState {
         }
     }
 
-    fn current_turn_id(&self) -> Option<String> {
-        self.current_turn_id.clone()
+    fn current_turn_id(&self) -> Option<&str> {
+        self.current_turn_id.as_deref()
     }
 
     fn accepts(&self, properties: &Value) -> bool {
@@ -118,10 +118,7 @@ fn complete_turn(state: &mut ReaderState, status: TurnStatus, mapped: &mut Mappe
 }
 
 fn parse_session_state(properties: &Value) -> SessionState {
-    let value = properties
-        .get("status")
-        .or_else(|| properties.get("value"))
-        .and_then(Value::as_str)
+    let value = string_by_keys(properties, &["status", "value"])
         .unwrap_or_default()
         .to_ascii_lowercase();
 
@@ -143,18 +140,20 @@ fn map_part_updated(properties: &Value, state: &mut ReaderState, mapped: &mut Ma
 
     if part_type.contains("reasoning") || part_type.contains("thinking") {
         if let (Some(turn_id), Some(content)) = (state.current_turn_id(), delta_text(part)) {
-            mapped
-                .events
-                .push(SessionEvent::ReasoningDelta { turn_id, content });
+            mapped.events.push(SessionEvent::ReasoningDelta {
+                turn_id: turn_id.to_string(),
+                content,
+            });
         }
         return;
     }
 
     if part_type.contains("text") && !part_type.contains("tool") {
         if let (Some(turn_id), Some(content)) = (state.current_turn_id(), delta_text(part)) {
-            mapped
-                .events
-                .push(SessionEvent::TextDelta { turn_id, content });
+            mapped.events.push(SessionEvent::TextDelta {
+                turn_id: turn_id.to_string(),
+                content,
+            });
         }
         return;
     }
@@ -168,6 +167,7 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
     let Some(turn_id) = state.current_turn_id() else {
         return;
     };
+    let turn_id = turn_id.to_string();
 
     let tool_id = tool_id(part);
     let status = tool_status(part);
@@ -195,13 +195,8 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
 }
 
 fn map_permission(properties: &Value, mapped: &mut MappedEvent) {
-    let request_id = properties
-        .get("requestID")
-        .or_else(|| properties.get("requestId"))
-        .or_else(|| properties.get("id"))
-        .and_then(Value::as_str);
-    if let Some(request_id) = request_id {
-        mapped.permission_requests.push(request_id.to_string());
+    if let Some(request_id) = string_by_keys(properties, &["requestID", "requestId", "id"]) {
+        mapped.permission_requests.push(request_id);
     }
 }
 
@@ -216,24 +211,42 @@ fn map_diff(properties: &Value, state: &ReaderState, mapped: &mut MappedEvent) {
     else {
         return;
     };
-    mapped
-        .events
-        .push(SessionEvent::DiffUpdated { turn_id, diff });
+    mapped.events.push(SessionEvent::DiffUpdated {
+        turn_id: turn_id.to_string(),
+        diff,
+    });
 }
 
 fn map_error(properties: &Value, mapped: &mut MappedEvent) {
-    let code = properties
-        .get("code")
-        .and_then(Value::as_str)
-        .unwrap_or("opencode_error")
-        .to_string();
-    let message = properties
-        .get("message")
-        .or_else(|| properties.get("error"))
-        .and_then(Value::as_str)
-        .unwrap_or("opencode error")
-        .to_string();
+    let code =
+        string_by_keys(properties, &["code"]).unwrap_or_else(|| "opencode_error".to_string());
+    let message = string_by_keys(properties, &["message", "error"])
+        .unwrap_or_else(|| "opencode error".to_string());
     mapped.events.push(SessionEvent::Error { code, message });
+}
+
+fn value_by_keys<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter().find_map(|key| value.get(*key))
+}
+
+fn string_by_keys(value: &Value, keys: &[&str]) -> Option<String> {
+    value_by_keys(value, keys)
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn part_or_input_value<'a>(
+    part: &'a Value,
+    input: Option<&'a Value>,
+    keys: &[&str],
+) -> Option<&'a Value> {
+    value_by_keys(part, keys).or_else(|| input.and_then(|value| value_by_keys(value, keys)))
+}
+
+fn part_or_input_text(part: &Value, input: Option<&Value>, keys: &[&str]) -> Option<String> {
+    part_or_input_value(part, input, keys)
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 fn delta_text(part: &Value) -> Option<String> {
@@ -245,20 +258,13 @@ fn delta_text(part: &Value) -> Option<String> {
 }
 
 fn tool_id(part: &Value) -> String {
-    part.get("id")
-        .or_else(|| part.get("toolCallID"))
-        .or_else(|| part.get("toolUseID"))
-        .and_then(Value::as_str)
-        .unwrap_or("tool_unknown")
-        .to_string()
+    string_by_keys(part, &["id", "toolCallID", "toolUseID"])
+        .unwrap_or_else(|| "tool_unknown".to_string())
 }
 
 fn tool_status(part: &Value) -> ItemStatus {
-    let raw = part
-        .get("state")
-        .or_else(|| part.get("status"))
-        .and_then(Value::as_str)
-        .unwrap_or("running")
+    let raw = string_by_keys(part, &["state", "status"])
+        .unwrap_or_else(|| "running".to_string())
         .to_ascii_lowercase();
     match raw.as_str() {
         "completed" | "complete" | "done" | "success" => ItemStatus::Completed,
@@ -275,19 +281,18 @@ fn build_tool_item(
     include_output: bool,
 ) -> SessionItem {
     let input = tool_input(part);
+    let input_ref = input.as_ref();
     let output = if include_output {
         tool_output(part)
     } else {
         None
     };
 
-    if has_command_field(part, input.as_ref()) {
+    if let Some(command) = part_or_input_value(part, input_ref, &["command"]) {
         return SessionItem::Command {
             id: tool_id.to_string(),
-            command: command_args(part, input.as_ref()),
-            cwd: text_field(part, "cwd")
-                .or_else(|| input.as_ref().and_then(|value| text_field(value, "cwd")))
-                .unwrap_or_default(),
+            command: command_args(command),
+            cwd: part_or_input_text(part, input_ref, &["cwd"]).unwrap_or_default(),
             status,
             output,
             exit_code: integer_field(part, "exitCode"),
@@ -295,12 +300,7 @@ fn build_tool_item(
         };
     }
 
-    if has_file_path_field(part, input.as_ref()) {
-        let path = text_field(part, "file")
-            .or_else(|| text_field(part, "path"))
-            .or_else(|| input.as_ref().and_then(|value| text_field(value, "file")))
-            .or_else(|| input.as_ref().and_then(|value| text_field(value, "path")))
-            .unwrap_or_default();
+    if let Some(path) = part_or_input_text(part, input_ref, &["file", "path"]) {
         return SessionItem::File {
             id: tool_id.to_string(),
             changes: if path.is_empty() {
@@ -308,8 +308,8 @@ fn build_tool_item(
             } else {
                 vec![FileEdit {
                     path,
-                    kind: text_field(part, "kind"),
-                    diff: text_field(part, "diff"),
+                    kind: string_by_keys(part, &["kind"]),
+                    diff: string_by_keys(part, &["diff"]),
                 }]
             },
             status,
@@ -326,18 +326,13 @@ fn build_tool_item(
 }
 
 fn tool_name(part: &Value) -> String {
-    if let Some(name) = part
-        .get("name")
-        .or_else(|| part.get("toolName"))
-        .or_else(|| part.get("tool"))
-        .and_then(Value::as_str)
-    {
-        return name.to_string();
+    if let Some(name) = string_by_keys(part, &["name", "toolName", "tool"]) {
+        return name;
     }
 
     if let Some(name) = part
         .get("tool")
-        .and_then(|value| value.get("name"))
+        .and_then(|value| value_by_keys(value, &["name"]))
         .and_then(Value::as_str)
     {
         return name.to_string();
@@ -347,17 +342,11 @@ fn tool_name(part: &Value) -> String {
 }
 
 fn tool_input(part: &Value) -> Option<Value> {
-    part.get("input")
-        .cloned()
-        .or_else(|| part.get("arguments").cloned())
-        .or_else(|| part.get("args").cloned())
+    value_by_keys(part, &["input", "arguments", "args"]).cloned()
 }
 
 fn tool_output(part: &Value) -> Option<String> {
-    part.get("output")
-        .or_else(|| part.get("result"))
-        .or_else(|| part.get("error"))
-        .and_then(value_as_string)
+    value_by_keys(part, &["output", "result", "error"]).and_then(value_as_string)
 }
 
 fn value_as_string(value: &Value) -> Option<String> {
@@ -368,41 +357,18 @@ fn value_as_string(value: &Value) -> Option<String> {
     }
 }
 
-fn command_args(part: &Value, input: Option<&Value>) -> Vec<String> {
-    if let Some(command) = part
-        .get("command")
-        .or_else(|| input.and_then(|value| value.get("command")))
-    {
-        if let Some(array) = command.as_array() {
-            return array
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToString::to_string)
-                .collect();
-        }
-        if let Some(text) = command.as_str() {
-            return text.split_whitespace().map(ToString::to_string).collect();
-        }
+fn command_args(command: &Value) -> Vec<String> {
+    if let Some(array) = command.as_array() {
+        return array
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToString::to_string)
+            .collect();
+    }
+    if let Some(text) = command.as_str() {
+        return text.split_whitespace().map(ToString::to_string).collect();
     }
     Vec::new()
-}
-
-fn has_command_field(part: &Value, input: Option<&Value>) -> bool {
-    part.get("command").is_some() || input.and_then(|value| value.get("command")).is_some()
-}
-
-fn has_file_path_field(part: &Value, input: Option<&Value>) -> bool {
-    part.get("file").is_some()
-        || part.get("path").is_some()
-        || input.and_then(|value| value.get("file")).is_some()
-        || input.and_then(|value| value.get("path")).is_some()
-}
-
-fn text_field(value: &Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
 }
 
 fn integer_field(value: &Value, key: &str) -> Option<i32> {
@@ -417,11 +383,7 @@ fn unsigned_field(value: &Value, key: &str) -> Option<u64> {
 }
 
 fn session_id(properties: &Value) -> Option<&str> {
-    properties
-        .get("sessionID")
-        .or_else(|| properties.get("sessionId"))
-        .or_else(|| properties.get("session_id"))
-        .and_then(Value::as_str)
+    value_by_keys(properties, &["sessionID", "sessionId", "session_id"]).and_then(Value::as_str)
 }
 
 #[cfg(test)]

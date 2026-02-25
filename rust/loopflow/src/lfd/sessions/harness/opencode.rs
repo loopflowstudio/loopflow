@@ -15,6 +15,8 @@ use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressG
 use crate::lfd::sessions::harness::{opencode_mapping, Harness, HarnessError};
 use crate::lfd::sessions::types::SessionEvent;
 
+const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
+
 pub struct OpenCodeHarness {
     events: broadcast::Sender<SessionEvent>,
     client: reqwest::Client,
@@ -76,44 +78,15 @@ impl OpenCodeHarness {
 
         let base_url = format!("http://127.0.0.1:{port}");
         if let Err(err) = wait_for_server(&self.client, &base_url, &mut child).await {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
+            shutdown_child(&mut child).await;
             return Err(err);
         }
 
-        let session_url = format!("{base_url}/session");
-        let session_response = match send_request_with_retry(
-            &self.client,
-            Method::POST,
-            &session_url,
-            Some(json!({})),
-        )
-        .await
-        {
-            Ok(response) => response,
+        let provider_session_id = match create_provider_session(&self.client, &base_url).await {
+            Ok(provider_session_id) => provider_session_id,
             Err(err) => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
+                shutdown_child(&mut child).await;
                 return Err(err);
-            }
-        };
-        let body: Value = match session_response.json().await {
-            Ok(body) => body,
-            Err(err) => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-                return Err(anyhow!("failed to parse opencode session response: {err}"));
-            }
-        };
-        let provider_session_id = match parse_session_id(&body) {
-            Some(provider_session_id) => provider_session_id,
-            None => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-                return Err(anyhow!(
-                    "opencode session response did not include session id: {}",
-                    body
-                ));
             }
         };
 
@@ -136,22 +109,20 @@ impl OpenCodeHarness {
             let mut response = match request.send().await {
                 Ok(response) => response,
                 Err(err) => {
-                    if !shutdown_requested.load(Ordering::Relaxed) {
-                        let _ = event_tx.send(SessionEvent::Error {
-                            code: "opencode_disconnected".to_string(),
-                            message: format!("failed to connect to OpenCode SSE stream: {err}"),
-                        });
-                    }
+                    send_disconnect_error(
+                        &event_tx,
+                        &shutdown_requested,
+                        format!("failed to connect to OpenCode SSE stream: {err}"),
+                    );
                     return;
                 }
             };
             if let Err(err) = response.error_for_status_ref() {
-                if !shutdown_requested.load(Ordering::Relaxed) {
-                    let _ = event_tx.send(SessionEvent::Error {
-                        code: "opencode_disconnected".to_string(),
-                        message: format!("OpenCode SSE stream failed: {err}"),
-                    });
-                }
+                send_disconnect_error(
+                    &event_tx,
+                    &shutdown_requested,
+                    format!("OpenCode SSE stream failed: {err}"),
+                );
                 return;
             }
 
@@ -222,12 +193,11 @@ impl OpenCodeHarness {
             }
 
             turn_in_progress.store(false, Ordering::SeqCst);
-            if !shutdown_requested.load(Ordering::Relaxed) {
-                let _ = event_tx.send(SessionEvent::Error {
-                    code: "opencode_disconnected".to_string(),
-                    message: "OpenCode event stream disconnected".to_string(),
-                });
-            }
+            send_disconnect_error(
+                &event_tx,
+                &shutdown_requested,
+                "OpenCode event stream disconnected",
+            );
         });
 
         let stderr_task = spawn_stderr_logger(stderr, "lfd::sessions::opencode");
@@ -290,14 +260,7 @@ impl Harness for OpenCodeHarness {
             .clone()
             .ok_or_else(|| anyhow!("opencode provider session id is not available"))?;
 
-        let mut payload = json!({
-            "parts": [
-                { "type": "text", "text": turn_content }
-            ]
-        });
-        if first_turn && !config.system_prompt.trim().is_empty() {
-            payload["system"] = Value::String(config.system_prompt.trim().to_string());
-        }
+        let payload = build_turn_payload(&turn_content, config, first_turn);
 
         let message_url = format!("{base_url}/session/{provider_session_id}/message");
         send_request_with_retry(&self.client, Method::POST, &message_url, Some(payload)).await?;
@@ -323,8 +286,7 @@ impl Harness for OpenCodeHarness {
         }
 
         if let Some(child) = self.child.as_mut() {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
+            shutdown_child(child).await;
         }
         self.child = None;
 
@@ -347,6 +309,43 @@ impl Harness for OpenCodeHarness {
     fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
         self.provider_session_id = provider_session_id;
     }
+}
+
+async fn shutdown_child(child: &mut Child) {
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+}
+
+async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Result<String> {
+    let session_url = format!("{base_url}/session");
+    let response =
+        send_request_with_retry(client, Method::POST, &session_url, Some(json!({}))).await?;
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|err| anyhow!("failed to parse opencode session response: {err}"))?;
+
+    parse_session_id(&body).ok_or_else(|| {
+        anyhow!(
+            "opencode session response did not include session id: {}",
+            body
+        )
+    })
+}
+
+fn send_disconnect_error(
+    event_tx: &broadcast::Sender<SessionEvent>,
+    shutdown_requested: &AtomicBool,
+    message: impl Into<String>,
+) {
+    if shutdown_requested.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let _ = event_tx.send(SessionEvent::Error {
+        code: OPENCODE_DISCONNECTED_CODE.to_string(),
+        message: message.into(),
+    });
 }
 
 fn allocate_port() -> Result<u16> {
@@ -471,6 +470,20 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
             Some(text.to_string())
         }
     }
+}
+
+fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> Value {
+    let mut payload = json!({
+        "parts": [
+            { "type": "text", "text": content }
+        ]
+    });
+
+    if first_turn && !config.system_prompt.trim().is_empty() {
+        payload["system"] = Value::String(config.system_prompt.trim().to_string());
+    }
+
+    payload
 }
 
 #[derive(Debug, Default)]

@@ -48,9 +48,9 @@ lfd exposes a provider-agnostic session API. Clients create sessions, send input
 | 01 | Unified Session API + Codex | Session API, event model, storage, SSE replay. Codex as first harness. | shipped |
 | 02 | Claude Harness | `-p --resume` with structured output. Probes agent personality. | shipped |
 | 03 | Concerto UI | Typed transcript, item cards, session lifecycle, reconnect/replay | shipped |
-| 04 | Hardening | Reconnect, concurrent clients, crash recovery, wave integration | |
 | 05 | Runtime Convergence | Unify engine + session execution. Interactive `lf` → session API + Concerto chat UI. | |
 | 06 | OpenCode Harness | Third provider harness validates the abstraction | |
+| 04 | Hardening | Crash recovery, orphan cleanup, wave integration. Production failure modes. | |
 | 07 | Provider Layer Unification | Make provider harnesses the shared core used by both `lf` CLI runs and `/v0/sessions` HTTP sessions | planned |
 
 ## Architecture

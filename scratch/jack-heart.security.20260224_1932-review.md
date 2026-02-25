@@ -42,3 +42,4 @@
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test -p loopflow lfd::auth::tests`
+- `cargo test --all` *(fails locally on docker-only tests because `/var/run/docker.sock` is unavailable in this environment; auth tests pass)*

@@ -62,7 +62,7 @@ For most settings, repo overrides global. For additive settings (`context`, `exc
 ```yaml
 # ~/.lf/config.yaml (global)
 agent_model: claude:opus
-direction: product-engineer
+direction: clarity
 
 # .lf/config.yaml (repo)
 agent_model: codex        # overrides global
@@ -76,7 +76,7 @@ Example repo config:
 agent_model: claude:opus
 push: true
 
-direction: product-engineer
+direction: clarity
 
 context:
   - src/schema.py
@@ -236,10 +236,12 @@ Directions shape judgment and intent—how the coding agent approaches work.
 
 | | |
 |---|---|
-| **CLI** | `--direction designer` or `--direction product-engineer,designer` |
-| **Config** | `direction: product-engineer` or `direction: [product-engineer, designer]` |
+| **CLI** | `--direction ux` or `--direction ux,clarity` |
+| **Config** | `direction: clarity` or `direction: [ux, clarity]` |
 
-Direction files live in `.lf/directions/` as markdown. Built-in directions: `adapt`, `roadmap`, `ship`, `product-engineer`, `designer`, `infra-engineer`, `ceo`.
+Direction files live in `.lf/directions/` as markdown. Built-in direction groups:
+`infra`, `ux`, `values`. Standalone direction: `ceo`. Group members are also
+available directly (for example `security`, `feedback`, `clarity`, `craft`).
 
 ### Chrome
 

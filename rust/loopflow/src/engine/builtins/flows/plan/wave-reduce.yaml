@@ -1,7 +1,7 @@
 - fork:
     step: reduce
     drafts:
-      - direction: infra-engineer
-      - direction: designer
-      - direction: product-engineer
+      - direction: infra
+      - direction: ux
+      - direction: ceo
 - publish

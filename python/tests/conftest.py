@@ -7,7 +7,7 @@ WAVE_MINIMAL = {
     "name": "reduce",
     "repo": "/tmp/repo",
     "flow": "reduce",
-    "direction": ["infra-engineer"],
+    "direction": ["infra"],
     "area": [],
     "status": "running",
     "iteration": 0,

@@ -68,7 +68,7 @@ Goals follow a consistent pattern:
 
 **Action goals** (adapt, wave-plan, ship): What mode to operate in. These can reference loopflow-specific process—reading `wave/`, updating frontmatter status, choosing between modes. They're about *using the system*.
 
-**Perspective goals** (product-engineer, designer, infra-engineer, ceo): How to think. These should be broad and transferable—they'd make sense at any company. Focus on judgment, values, and trade-offs. Minimal process.
+**Perspective goals** (ux, infra, values, ceo): How to think. These should be broad and transferable—they'd make sense at any company. Focus on judgment, values, and trade-offs. Minimal process.
 
 ### Principles over process
 
@@ -106,7 +106,7 @@ Directions are not roleplay. A direction is intent—what you're optimizing for 
 
 Directions can be:
 - **User patterns**: conductor, improviser, listener—make this kind of user thrive
-- **Perspectives**: product-engineer, designer, infra-engineer—think with these concerns
+- **Perspectives**: ux, infra, values, ceo—think with these concerns
 - **Metrics**: performance, security, accessibility—optimize for this quality
 - **Values**: simplicity, craft—hold this standard
 

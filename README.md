@@ -124,7 +124,7 @@ Forks run a step in parallel with different directions, then synthesize the resu
 lf flow wave-reduce    # runs reduce 3x with different perspectives
 ```
 
-`wave-reduce` forks `reduce` across infra-engineer, designer, and product-engineer directions, then synthesizes and publishes to wave/.
+`wave-reduce` forks `reduce` across infra, ux, and ceo directions, then synthesizes and publishes to wave/.
 
 ## Playing in the Waves
 
@@ -141,7 +141,7 @@ Configure flow/area/direction with `loopflow.update_wave(...)`, then start it wi
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("engbot", flow="ship", direction=["designer"], area=["designs/"])
+loopflow.update_wave("engbot", flow="ship", direction=["ux"], area=["designs/"])
 loopflow.run_wave("engbot")
 PY
 ```
@@ -149,7 +149,7 @@ PY
 You can compose multiple directions to add additional nuance or perspectives.
 
 ```bash
-lf research -d designer,product-engineer
+lf research -d ux,clarity
 lf research -d ceo
 ```
 
@@ -190,11 +190,11 @@ uv pip install loopflow
 import loopflow.api as loopflow
 
 loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
-loopflow.create_wave("designer", repo=".", flow="ship", direction=["designer"], area=["docs/"])
-loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra-engineer"], area=["rust/"])
-loopflow.add_stimulus("designer", kind="listen", source_wave_id="infra")
-loopflow.run_wave("designer")
+loopflow.create_wave("engbot", repo=".", flow="ship", direction=["clarity"])
+loopflow.create_wave("ux", repo=".", flow="ship", direction=["ux"], area=["docs/"])
+loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra"], area=["rust/"])
+loopflow.add_stimulus("ux", kind="listen", source_wave_id="infra")
+loopflow.run_wave("ux")
 ```
 
 [Documentation →](docs/index.md)

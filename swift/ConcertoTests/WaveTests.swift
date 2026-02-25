@@ -148,10 +148,10 @@ struct WaveModelTests {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
-            direction: ["product-engineer", "designer"]
+            direction: ["clarity", "ux"]
         )
 
-        #expect(wave.directionDisplay == "product-engineer, designer")
+        #expect(wave.directionDisplay == "clarity, ux")
     }
 
     @Test("directionDisplay returns empty for nil direction")
@@ -521,7 +521,7 @@ struct ParseWaveFromJSONTests {
             "name": "ux",
             "repo": "/tmp/repo",
             "flow": "start",
-            "direction": ["designer"],
+            "direction": ["ux"],
             "area": ["."],
             "status": "running",
             "iteration": 0,
@@ -532,7 +532,7 @@ struct ParseWaveFromJSONTests {
                 "wave_id": "wave-1",
                 "flow": "start",
                 "repo": "/tmp/repo",
-                "direction": ["designer"],
+                "direction": ["ux"],
                 "area": ["."],
                 "iteration": 0,
                 "step_index": 1,

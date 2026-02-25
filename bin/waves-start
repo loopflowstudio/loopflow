@@ -4,8 +4,8 @@ set -e
 cd "$(git rev-parse --show-toplevel)"
 
 # One wave per area, multiple directions per wave
-uv run lfd loop ship swift/ -d product-engineer -d designer
-uv run lfd loop ship src/loopflow/ -d product-engineer -d designer
-uv run lfd loop ship . -d infra-engineer
+uv run lfd loop ship swift/ -d ux -d clarity
+uv run lfd loop ship src/loopflow/ -d ux -d clarity
+uv run lfd loop ship . -d infra
 
 uv run lfd status

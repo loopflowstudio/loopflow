@@ -37,6 +37,10 @@ fn main() {
         "BUILTIN_DIRECTIONS",
         &out_dir.join("builtin_directions.rs"),
     );
+    generate_direction_groups(
+        &builtins_dir.join("directions"),
+        &out_dir.join("builtin_direction_groups.rs"),
+    );
 
     generate_map(
         &builtins_dir.join("ops"),
@@ -158,6 +162,74 @@ fn generate_flow_categories(flows_dir: &Path, out_path: &Path) {
             .expect("write to String");
     }
     writeln!(code, "];").expect("write to String");
+
+    fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+}
+
+/// Generate `BUILTIN_DIRECTION_GROUPS` from immediate subdirectories under
+/// builtins/directions. Top-level files are excluded from groups.
+fn generate_direction_groups(directions_dir: &Path, out_path: &Path) {
+    let mut groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    let Ok(entries) = fs::read_dir(directions_dir) else {
+        fs::write(
+            out_path,
+            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(|| std::collections::HashMap::new());\n",
+        )
+        .expect("write empty direction groups");
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let group_name = path
+            .file_name()
+            .expect("group dir has no name")
+            .to_string_lossy()
+            .to_string();
+
+        let mut members = Vec::new();
+        if let Ok(files) = fs::read_dir(&path) {
+            for file in files.flatten() {
+                let file_path = file.path();
+                if file_path.extension().is_some_and(|e| e == "md") {
+                    let member = file_path
+                        .file_stem()
+                        .expect("direction file has no stem")
+                        .to_string_lossy()
+                        .to_string();
+                    members.push(member);
+                }
+            }
+        }
+        members.sort();
+        if !members.is_empty() {
+            groups.insert(group_name, members);
+        }
+    }
+
+    let mut code = String::new();
+    writeln!(
+        code,
+        "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(|| {{"
+    )
+    .expect("write to String");
+    writeln!(code, "    let mut m = std::collections::HashMap::new();").expect("write to String");
+    for (group, members) in &groups {
+        let member_list = members
+            .iter()
+            .map(|member| format!("\"{member}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(code, "    m.insert(\"{group}\", vec![{member_list}]);").expect("write to String");
+    }
+    writeln!(code, "    m").expect("write to String");
+    writeln!(code, "}});").expect("write to String");
 
     fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
 }

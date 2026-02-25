@@ -29,7 +29,7 @@ fn flow_parsing_parity() {
 - step:
     name: review
     interactive: true
-    direction: [designer, product-engineer]
+    direction: [ux, security]
 "#,
     );
 
@@ -51,7 +51,7 @@ fn flow_parsing_parity() {
         FlowItem::Step(Step {
             name: "review".to_string(),
             model: None,
-            directions: vec!["designer".to_string(), "product-engineer".to_string()],
+            directions: vec!["ux".to_string(), "security".to_string()],
             interactive: Some(true),
             content: None,
         })
@@ -262,6 +262,21 @@ fn builtin_wave_reduce_expands_publish_subflow() {
         matches!(&items[0], ConcreteItem::Fork(_)),
         "expected fork at index 0"
     );
+    if let ConcreteItem::Fork(fork) = &items[0] {
+        let branch_directions: Vec<Vec<String>> = fork
+            .branches
+            .iter()
+            .map(|branch| branch.step.directions.clone())
+            .collect();
+        assert_eq!(
+            branch_directions,
+            vec![
+                vec!["infra".to_string()],
+                vec!["ux".to_string()],
+                vec!["ceo".to_string()]
+            ]
+        );
+    }
     // Step 1: consolidate (from publish sub-flow)
     match &items[1] {
         ConcreteItem::Step(s) => assert_eq!(s.step.name, "consolidate"),

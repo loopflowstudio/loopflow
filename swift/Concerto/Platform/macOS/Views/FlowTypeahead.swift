@@ -216,7 +216,7 @@ struct FlowTypeahead: View {
             name: "test-wave",
             repo: "/Users/jack/src/loopflow",
             flow: "ship",
-            direction: ["product-engineer"],
+            direction: ["clarity"],
             area: ["swift"]
         ),
         recentSteps: []

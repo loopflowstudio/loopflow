@@ -3,66 +3,59 @@ interactive: true
 requires: scratch/<slug>.md (elaborated design from kickoff)
 produces: scratch/<slug>.md (approved or revised) | direction to iterate
 ---
-Walk the human through the design before implementation burns time.
+Pressure-test the design with the human before implementation burns time.
 
 Kickoff produced a bold, opinionated design. This step checks whether the boldness points in the right direction. The design doc is a bet — this is the last cheap moment to change it.
 
-## Arc
+## Approach
 
-Each phase is a conversation pause. Present findings, wait for reaction, adjust. Don't monologue through all phases — pause after each and let the human steer.
+Use a structure that matches the design and conversation. Don't force a rigid phase protocol.
 
-### 1. Orient
+Pause after each major point. Let the human steer depth and order.
 
-Summarize the design in 2-3 sentences. What problem it solves, the approach chosen, the key bet. Then state your honest first reaction — what excited you, what worried you.
+Pick the lenses that matter most here. Combine or skip as needed:
 
-### 2. Scope check
+- **Intent and key bet** — summarize the problem, approach, and biggest bet.
+- **Scope and seams** — is this the right unit of work, or should it split?
+- **Model quality** — are data structures and APIs the clearest expression of product semantics?
+- **Alternatives and tradeoffs** — surface real options and sketch them.
+- **Failure modes** — identify where this is most likely to break.
+- **Execution path** — decide what to fix now vs defer to the wave roadmap.
 
-Is this the right size? One commit or should it break further? Check:
+## Collaborative execution loop
 
-- Does the design try to do too much in one pass?
-- Are there natural seams where it could split into independently shippable pieces?
-- Is anything marked "in scope" that could wait?
+Use review as a working session, not a verdict ceremony.
 
-If scope looks wrong, say so now. Scope changes after implementation started are expensive.
+During the session:
+- Fix straightforward issues directly in the design/code path.
+- Co-design unresolved decisions with the user; don't decide alone when tradeoffs are product-defining.
+- Near the end, run an explicit scope check and offer 2-3 package options:
+  - **Minimal** — smallest safe ship-now set.
+  - **One more big push** — one additional high-leverage improvement, then ship.
+  - **Do it all** — full intended scope now, with longer cycle/risk.
+- Use this scope check to balance two forces:
+  - there is fixed overhead per PR, so too-small changes may under-deliver impact,
+  - larger changes reduce iteration speed and can exceed ~1000 LOC guidance.
+- For each package, state what lands now, what defers to the wave roadmap, and what extra risk/validation it adds.
+- Confirm the user has ingested and validated the updated design with explicit feedback.
 
-### 3. Model
+End state: updated design is validated by the user and ready to drive implementation/PR progress.
 
-Walk through the central data structures and APIs the design proposes. Are the names right? Are the boundaries between types right? Does the type hierarchy match how users think about this?
+## Quality coverage
 
-Read existing code that this design extends or replaces. Does the proposed model fit naturally, or does it fight the existing architecture?
+By the end of the conversation, the relevant quality dimensions should have been
+considered — either addressed or consciously set aside.
 
-### 4. Decisions
+If directions are loaded, they define the quality lens. Otherwise, make sure these
+areas got appropriate attention:
 
-Surface the key decisions and their alternatives. Kickoff's "Alternatives considered" table is the starting point, but probe deeper:
+- User experience (visibility, feedback, consistency)
+- Correctness and test confidence
+- Reliability, performance, security
+- Modularity and change impact
 
-- Are there approaches kickoff didn't consider?
-- Do the tradeoff assessments hold up?
-- Is the chosen approach bold enough, or did it default to safe?
-- Is it too bold — betting on something unproven when a known solution exists?
-
-Frame each as "here's the tradeoff" not "here's what's wrong."
-
-### 5. Failure modes
-
-Kickoff imagined wild success and wild failure. Stress-test those:
-
-- What's the most likely way this fails in practice?
-- What assumption, if wrong, would require a rewrite?
-- What dependency could block progress mid-implementation?
-
-Name the single biggest risk. Ask the human if they're comfortable with it.
-
-### 6. Verdict
-
-After the conversation, land on one of three outcomes:
-
-**Ship it.** The design is solid. Move to implementation. Note any minor adjustments discussed — update the design doc inline before ending.
-
-**Iterate.** The direction is right but the design needs rework. Summarize what needs to change and why. The human can either revise the doc themselves or re-run kickoff with the new constraints.
-
-**Rethink.** The approach is wrong. Capture what we learned about why, so the next attempt doesn't repeat the same dead end. Write learnings into `scratch/questions.md`.
-
-State the verdict clearly. If ship, update `scratch/<slug>.md` with any adjustments from the conversation.
+No mandatory format. If a dimension isn't relevant, that's fine — just be sure
+it's a conscious choice, not an oversight.
 
 ## Guidance
 

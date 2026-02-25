@@ -214,7 +214,7 @@ mod tests {
             ]),
             system_tokens: 3000,
             step_name: Some("implement".to_string()),
-            direction_names: vec!["product-engineer".to_string()],
+            direction_names: vec!["security".to_string()],
             diff_tier: DiffTier::UnifiedDiff,
             diff_file_count: 8,
             doc_count: 3,
@@ -222,7 +222,7 @@ mod tests {
         };
         let header = format_context_header(&breakdown, 75_000);
         assert!(header.contains("\u{2500}\u{2500} implement \u{2500}"));
-        assert!(header.contains("product-engineer"));
+        assert!(header.contains("security"));
         assert!(header.contains("unified (8 files)"));
         assert!(header.contains("3 files"));
         assert!(header.contains("15% of 75k"));
@@ -238,7 +238,7 @@ mod tests {
     fn format_reproducible_command_full() {
         let cmd = format_reproducible_command(
             Some("implement"),
-            &["product-engineer".to_string()],
+            &["security".to_string()],
             Some("rust"),
             Some("src/"),
             true,
@@ -246,7 +246,7 @@ mod tests {
         );
         assert_eq!(
             cmd,
-            "lf implement -d product-engineer --wave rust -a src/ -c -m claude:opus"
+            "lf implement -d security --wave rust -a src/ -c -m claude:opus"
         );
     }
 }

@@ -59,13 +59,13 @@ def update_wave_happy(client: Client, state: dict[str, str]) -> None:
     wave = client.update_wave(
         state["primary_wave_id"],
         flow="grind",
-        direction=["designer"],
+        direction=["ux"],
         area=["docs/"],
         status="paused",
     )
     _expect_wave(wave)
     assert wave.flow == "grind"
-    assert wave.direction == ["designer"]
+    assert wave.direction == ["ux"]
     assert wave.area == ["docs/"]
     assert wave.status == "paused"
 

@@ -91,13 +91,13 @@ struct WaveStoreOptimisticTests {
         let snapshot = store.applyOptimistic("wave-1") { w in
             w.flow = "debug"
             w.area = ["lib/"]
-            w.direction = ["designer"]
+            w.direction = ["ux"]
         }
 
         let wave = store.wave(for: "wave-1")!
         #expect(wave.flow == "debug")
         #expect(wave.area == ["lib/"])
-        #expect(wave.direction == ["designer"])
+        #expect(wave.direction == ["ux"])
 
         #expect(snapshot?.flow == "ship")
         #expect(snapshot?.area == ["src/"])

@@ -49,6 +49,12 @@ fn write_direction(repo: &Path, name: &str, content: &str) {
     fs::write(dir.join(format!("{name}.md")), content).unwrap();
 }
 
+fn write_direction_group(repo: &Path, group: &str, name: &str, content: &str) {
+    let dir = repo.join(".lf/directions").join(group);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(format!("{name}.md")), content).unwrap();
+}
+
 // =============================================================================
 // Basic context gathering
 // =============================================================================
@@ -128,6 +134,72 @@ fn gather_context_with_directions() {
     .unwrap();
 
     assert_eq!(components.directions.len(), 2);
+}
+
+#[test]
+fn gather_context_expands_builtin_direction_group() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    write_step(repo, "review", "Review the code.");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("review".to_string()),
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec!["infra".to_string()],
+        files: vec![],
+        sources: vec![],
+        area: None,
+        wave: None,
+    })
+    .unwrap();
+
+    let direction_names: Vec<String> = components
+        .directions
+        .iter()
+        .map(|direction| direction.name.clone())
+        .collect();
+    assert!(direction_names.contains(&"security".to_string()));
+    assert!(direction_names.contains(&"performance".to_string()));
+    assert!(direction_names.contains(&"reliability".to_string()));
+    assert!(direction_names.contains(&"observability".to_string()));
+}
+
+#[test]
+fn gather_context_expands_user_direction_group() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    write_step(repo, "review", "Review the code.");
+    write_direction_group(repo, "mygroup", "alpha", "Alpha direction");
+    write_direction_group(repo, "mygroup", "beta", "Beta direction");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("review".to_string()),
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec!["mygroup".to_string()],
+        files: vec![],
+        sources: vec![],
+        area: None,
+        wave: None,
+    })
+    .unwrap();
+
+    let direction_names: Vec<String> = components
+        .directions
+        .iter()
+        .map(|direction| direction.name.clone())
+        .collect();
+    assert_eq!(
+        direction_names,
+        vec!["alpha".to_string(), "beta".to_string()]
+    );
 }
 
 // =============================================================================

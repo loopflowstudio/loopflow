@@ -101,10 +101,16 @@ fn discover_directions() {
     let dir = repo.path().join(".lf/directions");
     std::fs::create_dir_all(&dir).expect("create directions dir");
     std::fs::write(dir.join("focus.md"), "Be focused.").expect("write direction");
+    let group_dir = dir.join("mygroup");
+    std::fs::create_dir_all(&group_dir).expect("create group dir");
+    std::fs::write(group_dir.join("alpha.md"), "Alpha").expect("write group direction");
 
     let directions = list_directions(Some(repo.path()));
     assert!(directions.contains(&"focus".to_string()));
-    assert!(directions.contains(&"product-engineer".to_string()));
+    assert!(directions.contains(&"mygroup".to_string()));
+    assert!(directions.contains(&"alpha".to_string()));
+    assert!(directions.contains(&"security".to_string()));
+    assert!(directions.contains(&"infra".to_string()));
 }
 
 #[test]

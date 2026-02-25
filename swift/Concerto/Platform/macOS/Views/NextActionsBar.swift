@@ -87,7 +87,7 @@ struct NextActionsBar: View {
             name: "test-wave",
             repo: "/tmp/test-repo",
             flow: "design",
-            direction: ["product-engineer"],
+            direction: ["clarity"],
             area: ["src/api"]
         ),
         worktreePath: "/tmp/test-worktree",

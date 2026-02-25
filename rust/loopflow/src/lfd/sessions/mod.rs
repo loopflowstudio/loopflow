@@ -9,8 +9,10 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::engine::agent::AgentConfig;
+use crate::engine::config::load_config_or_default;
+use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
+use crate::engine::prompt::write_prompt_log;
 use crate::lfd::id::LfdId;
-use crate::lfd::prompt::{prepare_step_prompt, PrepareStepPromptConfig};
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
 use crate::lfd::sessions::types::{
     CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
@@ -170,24 +172,32 @@ impl SessionManager {
         config.step = step.clone();
         config.repo_root = repo_root.to_string_lossy().to_string();
         config.cwd = cwd.as_ref().map(|path| path.to_string_lossy().to_string());
-        let prepared = prepare_step_prompt(PrepareStepPromptConfig {
-            repo_root: &repo_root,
-            step: &step,
-            run_mode: "interactive",
-            directions: &config.directions,
-            area: config.area.clone(),
-            wave: config.wave.clone(),
-            message: config.message.clone(),
-            model: config.model.clone(),
-            cwd,
-            max_turns: config.max_turns,
-            yolo_mode: config.yolo_mode,
-            summary_source: None,
-        })
-        .await
+
+        let file_config = load_config_or_default(Some(&repo_root));
+        let prepared = prepare_launch_prompt(
+            &file_config,
+            LaunchPromptInput {
+                repo_root: repo_root.to_path_buf(),
+                step: Some(step.clone()),
+                run_mode: Some("interactive".to_string()),
+                directions: config.directions.clone(),
+                area: config.area.clone(),
+                wave: config.wave.clone(),
+                message: config.message.clone(),
+                model: config.model.clone(),
+                cwd,
+                max_turns: config.max_turns,
+                yolo_mode: config.yolo_mode,
+                include_config_directions: false,
+                include_config_area: true,
+                source_overrides: Default::default(),
+                summary: None,
+            },
+        )
         .map_err(|err| SessionManagerError::InvalidConfig(err.to_string()))?;
 
-        Ok((config, prepared))
+        let _ = write_prompt_log(&repo_root, &prepared.prompt, &step, None);
+        Ok((config, prepared.config))
     }
 
     pub async fn get_session(&self, session_id: &LfdId) -> Result<Session, SessionManagerError> {

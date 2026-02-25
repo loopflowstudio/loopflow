@@ -1,2 +1,0 @@
-- Open question: confirm OpenCode `POST /session` request/response schema (currently assumes empty `{}` request body and a response containing `id`/`sessionID`/`sessionId`).
-- Open question: confirm `message.part.updated` payload shape for `ToolPart` fields (`id`, `state`, `command`, `path`, `input`, `output`) used by the coarse `Command`/`File`/`Tool` mapping heuristics.

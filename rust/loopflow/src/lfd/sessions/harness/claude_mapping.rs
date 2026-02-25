@@ -447,7 +447,7 @@ fn extract_tool_result_text(block: &Value) -> Option<String> {
 }
 
 fn emit_text_delta(
-    events: &broadcast::Sender<SessionEvent>,
+    events: &mpsc::UnboundedSender<SessionEvent>,
     state: &mut ReaderState,
     turn_id: &str,
     content: &str,
@@ -458,7 +458,7 @@ fn emit_text_delta(
 }
 
 fn flush_text_delta_parser(
-    events: &broadcast::Sender<SessionEvent>,
+    events: &mpsc::UnboundedSender<SessionEvent>,
     state: &mut ReaderState,
     turn_id: &str,
 ) {
@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn process_line_text_delta_emits_suggested_actions_event() {
-        let (tx, mut rx) = broadcast::channel(16);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
         let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<lf:suggest_actions>[{\"label\":\"Land PR\"}]</lf:suggest_actions>"}}"#;
 

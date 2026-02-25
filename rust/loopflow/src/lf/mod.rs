@@ -226,6 +226,14 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ShellCommand,
     },
+    /// Publish a release: generate notes, land PR, tag
+    Release {
+        /// Bump type or explicit version (default: patch)
+        #[arg(default_value = "patch")]
+        version: String,
+        #[arg(short = 'n', long = "dry-run")]
+        dry_run: bool,
+    },
     /// Run configured lint checks
     Lint,
     /// Run configured test checks

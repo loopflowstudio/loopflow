@@ -6,8 +6,9 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
-    AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
+    abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, publish_release,
+    rebase_with_recovery, AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions,
+    Progress, PublishOptions, RebaseOptions,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, Write};
@@ -56,6 +57,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
+        OpsCommand::Release { version, dry_run } => release_publish(version, *dry_run, &progress),
         OpsCommand::Lint => run_check("lint"),
         OpsCommand::Test => run_check("test"),
     }
@@ -220,6 +222,22 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
         },
         progress,
     )?;
+    Ok(())
+}
+
+fn release_publish(version: &str, dry_run: bool, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let result = publish_release(
+        &repo_root,
+        &PublishOptions {
+            version_input: version.to_string(),
+            dry_run,
+        },
+        progress,
+    )?;
+    if !dry_run {
+        println!("v{}", result.version);
+    }
     Ok(())
 }
 

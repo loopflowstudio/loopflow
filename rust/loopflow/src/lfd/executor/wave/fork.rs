@@ -255,9 +255,7 @@ impl WaveExecutor {
         }
         let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
 
-        let manifest = ForkManifest {
-            branches: outcomes.clone(),
-        };
+        let manifest = ForkManifest { branches: outcomes };
         let manifest_json = match serde_json::to_vec_pretty(&manifest) {
             Ok(json) => json,
             Err(err) => {

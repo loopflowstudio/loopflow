@@ -181,9 +181,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     }
     let failed = outcomes.iter().filter(|o| o.exit_code != 0).count();
 
-    let manifest = ForkManifest {
-        branches: outcomes.clone(),
-    };
+    let manifest = ForkManifest { branches: outcomes };
     let manifest_json =
         serde_json::to_vec_pretty(&manifest).context("failed to encode fork manifest as JSON")?;
     if let Err(err) = runtime.block_on(workspace_executor.write_to_workspace(

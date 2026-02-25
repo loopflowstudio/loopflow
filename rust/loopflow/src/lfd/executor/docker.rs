@@ -1386,13 +1386,9 @@ impl DockerExecutor {
         })
     }
 
-    fn resolve_workspace_for_host_worktree(
-        host_worktree: &Path,
-        context_branch: Option<&str>,
-        fallback_branch: &str,
-    ) -> DockerWorkspace {
+    fn resolve_workspace_for_host_worktree(host_worktree: &Path) -> DockerWorkspace {
         let repo_source = Self::resolve_host_repo_from_worktree(host_worktree);
-        let branch = Self::resolve_workspace_branch(host_worktree, context_branch, fallback_branch);
+        let branch = Self::resolve_workspace_branch(host_worktree, None, "main");
         Self::docker_workspace_for_host_worktree(&repo_source, host_worktree, &branch)
     }
 
@@ -1405,40 +1401,37 @@ impl DockerExecutor {
             return branch.to_string();
         }
 
-        if cwd.join(".git").exists() {
-            if let Ok(Some(branch)) = current_branch(cwd) {
-                if !branch.trim().is_empty() && branch != "HEAD" {
-                    return branch;
-                }
-            }
-        }
-
-        if fallback.trim().is_empty() {
-            "main".to_string()
-        } else {
-            fallback.to_string()
-        }
+        Self::checked_out_branch(cwd).unwrap_or_else(|| Self::fallback_workspace_branch(fallback))
     }
 
     fn resolve_workspace_branch_for_recovery(
         cwd: &Path,
-        wave_run_id: Option<&str>,
+        wave_run_id: &str,
         fallback: &str,
     ) -> String {
-        if cwd.join(".git").exists() {
-            if let Ok(Some(branch)) = current_branch(cwd) {
-                if !branch.trim().is_empty() && branch != "HEAD" {
-                    return branch;
-                }
-            }
+        if let Some(branch) = Self::checked_out_branch(cwd) {
+            return branch;
         }
 
-        if let Some(wave_run_id) = wave_run_id {
-            if let Some(branch) = Self::infer_fork_branch_from_worktree(cwd, wave_run_id) {
-                return branch;
-            }
+        if let Some(branch) = Self::infer_fork_branch_from_worktree(cwd, wave_run_id) {
+            return branch;
         }
 
+        Self::fallback_workspace_branch(fallback)
+    }
+
+    fn checked_out_branch(cwd: &Path) -> Option<String> {
+        if !cwd.join(".git").exists() {
+            return None;
+        }
+        let branch = current_branch(cwd).ok().flatten()?;
+        if branch.trim().is_empty() || branch == "HEAD" {
+            return None;
+        }
+        Some(branch)
+    }
+
+    fn fallback_workspace_branch(fallback: &str) -> String {
         if fallback.trim().is_empty() {
             "main".to_string()
         } else {
@@ -1446,13 +1439,11 @@ impl DockerExecutor {
         }
     }
 
-    async fn resolve_workspace(
+    async fn resolve_workspace_inputs(
         &self,
         wave_id: &str,
         wave_run_id: &str,
-        cwd: &Path,
-        context_branch: Option<&str>,
-    ) -> Result<DockerWorkspace> {
+    ) -> Result<(PathBuf, String)> {
         let wave_id = LfdId::from_raw(wave_id);
         let wave = self
             .store
@@ -1467,6 +1458,18 @@ impl DockerExecutor {
             .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
         let repo_source = Self::resolve_host_repo(&run.snapshot.repo);
         let fallback_branch = Self::resolve_wave_run_branch(&run, &wave);
+        Ok((repo_source, fallback_branch))
+    }
+
+    async fn resolve_workspace(
+        &self,
+        wave_id: &str,
+        wave_run_id: &str,
+        cwd: &Path,
+        context_branch: Option<&str>,
+    ) -> Result<DockerWorkspace> {
+        let (repo_source, fallback_branch) =
+            self.resolve_workspace_inputs(wave_id, wave_run_id).await?;
         let branch = Self::resolve_workspace_branch(cwd, context_branch, &fallback_branch);
         Ok(Self::docker_workspace_for_host_worktree(
             &repo_source,
@@ -1481,22 +1484,10 @@ impl DockerExecutor {
         wave_run_id: &str,
         cwd: &Path,
     ) -> Result<DockerWorkspace> {
-        let wave_id = LfdId::from_raw(wave_id);
-        let wave = self
-            .store
-            .get_wave(&wave_id)
-            .await?
-            .ok_or_else(|| anyhow!("wave not found for docker run"))?;
-        let run_id = LfdId::from_raw(wave_run_id);
-        let run = self
-            .store
-            .get_wave_run(&run_id)
-            .await?
-            .ok_or_else(|| anyhow!("wave run not found for docker run"))?;
-        let repo_source = Self::resolve_host_repo(&run.snapshot.repo);
-        let fallback_branch = Self::resolve_wave_run_branch(&run, &wave);
+        let (repo_source, fallback_branch) =
+            self.resolve_workspace_inputs(wave_id, wave_run_id).await?;
         let branch =
-            Self::resolve_workspace_branch_for_recovery(cwd, Some(wave_run_id), &fallback_branch);
+            Self::resolve_workspace_branch_for_recovery(cwd, wave_run_id, &fallback_branch);
         Ok(Self::docker_workspace_for_host_worktree(
             &repo_source,
             cwd,
@@ -2169,7 +2160,7 @@ impl AgentExecutor for DockerExecutor {
     ) -> Result<()> {
         super::write_workspace_file(cwd, relative_path, content)?;
 
-        let workspace = Self::resolve_workspace_for_host_worktree(cwd, None, "main");
+        let workspace = Self::resolve_workspace_for_host_worktree(cwd);
         self.ensure_container_worktree(&workspace).await?;
         self.prepared_runs
             .lock()
@@ -2183,7 +2174,7 @@ impl AgentExecutor for DockerExecutor {
     async fn remove_from_workspace(&self, cwd: &Path, relative_path: &str) -> Result<()> {
         super::remove_workspace_file(cwd, relative_path)?;
 
-        let workspace = Self::resolve_workspace_for_host_worktree(cwd, None, "main");
+        let workspace = Self::resolve_workspace_for_host_worktree(cwd);
         if self
             .docker
             .inspect_volume(&workspace.volume.volume_name)
@@ -2317,8 +2308,7 @@ mod tests {
     #[test]
     fn resolve_workspace_branch_for_recovery_infers_fork_branch_from_path() {
         let cwd = Path::new("/tmp/repo.wave-fork-2");
-        let branch =
-            DockerExecutor::resolve_workspace_branch_for_recovery(cwd, Some("run-123"), "main");
+        let branch = DockerExecutor::resolve_workspace_branch_for_recovery(cwd, "run-123", "main");
         assert_eq!(branch, "run-123-fork-2");
     }
 

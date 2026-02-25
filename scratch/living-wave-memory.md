@@ -1,169 +1,262 @@
-# Living Waves
+# Wave Memory
 
-A wave that learns from its own runs and rewrites itself to fit.
+## Problem
 
----
+Every agent in a wave starts from zero. The codebase summary tells it what the code looks like, but not what the wave has learned — which tests need `--no-sandbox`, which patterns the user prefers, what failed last time. Agents repeat mistakes. Knowledge evaporates between runs.
 
-## What a wave is today
+Wave memory gives agents accumulated observations from prior runs. Not conversation logs — distilled knowledge. A wave that runs 20 times should be sharper than one running for the first time.
 
-A wave is a named scope: flow + area + direction + stimulus. It spawns agents, each agent runs a step, the step produces artifacts (code, docs, PRs). Between runs, the wave persists as config and planning docs in `wave/<name>/`. But every agent starts fresh — no awareness of prior runs, no accumulation.
+This is Phase 02 of the living wave, advancing these goals from `wave/living/README.md`:
+- "Every wave-spawned agent starts with the wave's accumulated knowledge"
+- "Agents write durable observations back to wave memory without special tools"
+- "Memory consolidates naturally through existing steps"
+- "The system prompt is the only injection point — no new APIs for memory"
 
-The summary mechanism (`ensure_summary_fresh`) is the closest thing to memory: it hashes the area files, runs a summarize agent when stale, and injects the result into future prompts. But summaries describe the *codebase*, not the *wave's experience*.
+## Approach
 
-## What a living wave adds
+Add `DocumentSource::WaveMemory` to the context pipeline. Memory files live at `wave/<name>/memory/` and flow through prompt assembly like any other document source — gathered, budgeted, trimmed, formatted.
 
-A living wave remembers what it has learned. Not conversation logs — observations. Patterns the codebase follows. Preferences the user has expressed. Things that failed. Things that worked.
+Three changes:
 
-Three properties:
+1. **Gather**: New `gather_wave_memory()` function reads `wave/<name>/memory/*.md` files. `SUMMARY.md` goes into `PromptComponents::summaries` (survives trimming longer). Topic files go into a new `PromptComponents::wave_memory` vec.
 
-**Recall.** Every agent in the wave starts with accumulated observations from prior runs. The wave curates what each agent sees — not raw history, but distilled knowledge.
+2. **Format**: New `<lf:memory>` section in `format_reference_sections()`, positioned after wave context and before docs. Tells the agent where memory lives and how to write back.
 
-**Observation.** Agents write back to wave memory when they learn something durable. "This test suite needs `--no-sandbox` on CI." "The user prefers commits under 200 lines." "The auth module uses refresh tokens, not session cookies."
+3. **Trim**: Wave memory topic files trim before docs but after area docs. `SUMMARY.md` inherits existing summary trimming behavior. Natural pressure: large memory → agents only see the summary → consolidation responds by compressing.
 
-**Metabolism.** Memory doesn't just grow. It consolidates, ages, and gets rewritten. Stale observations drop. Redundant ones merge. The wave maintains its own clarity.
+No new tools. No new APIs. No special write mechanism. Agents read memory because it's in the prompt. Agents write memory because the system prompt tells them to and they have `write_file` access.
 
-## Memory structure
+## Alternatives considered
 
-```
-wave/<name>/
-  <name>.yaml        ← config (exists today)
-  README.md          ← vision (exists today)
-  01-phase.md        ← planning (exists today)
-  memory/
-    SUMMARY.md       ← one-page overview, regenerated periodically
-    codebase.md      ← what the code looks like, how it's organized
-    patterns.md      ← what works, what doesn't, conventions learned
-    preferences.md   ← user preferences, project norms observed
-```
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Database-backed memory (SQLite/KV store) | Structured queries, dedup built in | Adds a dependency agents can't directly interact with. Plain files are readable, diffable, git-trackable. Over-engineering for markdown observations. |
+| Append-only log with search | No risk of losing observations | Grows without bound. Agents would need a search tool. Consolidation becomes mandatory, not optional. Memory should be curated, not accumulated. |
+| Memory as part of existing wave docs | No new DocumentSource needed | Blurs the line between planning (wave docs) and learned knowledge (memory). Different trimming priorities — memory should outlast area docs but not compete with the wave's own README. |
+| Agent-local memory (per-agent files) | Each agent accumulates independently | Contradicts the design: agents are stateless, waves persist. Agent-local memory creates identity where the architecture explicitly avoids it. |
 
-Memory files are plain markdown. Agents read and write them directly — no special tools, no structured format. The system prompt tells agents where memory lives and when to write.
+## Key decisions
 
-`SUMMARY.md` is special: it's the only file that always fits in context. When the full memory directory is too large for the token budget, `SUMMARY.md` is included and the rest is dropped. Think of it as the wave's working memory vs long-term storage.
+**Memory is a new DocumentSource, not folded into Wave.** Wave docs (README, phases) are authored by humans and define intent. Memory is written by agents and captures experience. They need different trimming priorities: wave docs should survive longer than memory topic files when budget is tight.
 
-## How memory flows through context
+**SUMMARY.md routes through `summaries`, topic files through `wave_memory`.** This reuses existing trimming behavior. Summaries drop after area docs but before main docs. Topic files drop even earlier (new trimming tier between area docs and summaries). When memory is too large, the summary survives and provides the essential context.
 
-Memory enters through `gather_context()` as another document source, alongside step content, directions, diff, area docs, and repo docs.
+**The `<lf:memory>` prompt section includes write instructions.** Rather than a separate "memory awareness" bolt-on, the section that delivers memory content also tells the agent how to contribute. One section, both directions. This keeps the prompt focused and the mechanism obvious.
 
-Priority when budget is tight:
+**Consolidation extends, not replaces.** The existing `consolidate` step gets a new section for memory review. It's the same step, same position in flows (end of `ship`), same agent. No new step.
 
-1. Step (the task — what to do)
-2. Direction (the perspective — how to think)
-3. Diff (what's changed on this branch)
-4. Wave memory (what the wave knows)
-5. Summary (area summary — codebase overview)
-6. Area docs (architecture context)
-7. Repo docs (reference)
+**Memory is wave-private.** Cross-wave memory sharing (for chords/listening) is out of scope. The design doc raises it as an open question — keep it open. Wave-private memory is simpler and avoids the cross-wave contamination risk called out in `wave/living/README.md`.
 
-When memory exceeds its budget allocation, `SUMMARY.md` survives and the topic files are trimmed or dropped. This creates natural pressure: if memory is too large, agents see the summary but not the details. The `consolidate` step can respond to this by compressing topic files.
+**No bootstrap step.** New waves start with no memory. The first few runs build it organically. The existing summary mechanism handles cold starts. Adding a `seed-memory` step would front-load complexity for a problem that solves itself after 2-3 runs.
 
-## How agents interact with memory
+## Implementation
 
-### Reading
+### 1. `DocumentSource::WaveMemory` variant
 
-Automatic. The wave executor includes memory files in the prompt. Agents don't request memory — it's already there. Same as how directions and area docs work today.
-
-### Writing
-
-Prompt-driven. The system prompt tells the agent:
-
-```
-This wave has persistent memory at wave/{name}/memory/.
-Read existing memory files at the start of your work.
-Write observations that should persist for future agents:
-- Codebase patterns and conventions you discover
-- User preferences you observe
-- Things that worked or failed
-- Corrections to existing memory
-
-Don't write session-specific notes. Only durable observations.
-Update existing files rather than creating new ones when possible.
+```rust
+// prompt.rs
+pub enum DocumentSource {
+    Step,
+    Direction,
+    Wave,
+    WaveMemory,  // new
+    Area,
+    Diff,
+    Clipboard,
+    RepoDoc,
+    Summary,
+}
 ```
 
-No special tool. The agent has file access. Writing to `wave/<name>/memory/patterns.md` is the same as writing to any other file. The instruction shapes behavior; the filesystem is the mechanism.
+### 2. `PromptComponents::wave_memory` field
 
-### Why no tool?
-
-A memory tool would be an abstraction over `write_file`. It would need a schema, a key-value model, maybe tags. That's building a database. The filesystem already works: agents can read, write, create, organize. The system prompt provides the structure. If a future agent reorganizes memory files, that's fine — it's self-meta-programming.
-
-## Metabolism: memory lifecycle
-
-### Growth
-
-First agent to observe something writes it. Second agent adds. Files grow naturally.
-
-### Consolidation
-
-The existing `consolidate` step (already part of the `ship` flow) is the right place. After implementation work, consolidation merges duplicates, removes stale observations, and updates `SUMMARY.md`. This isn't a special mechanism — it's just a step that reads memory and rewrites it.
-
-Consolidation prompt addition:
-
-```
-Review wave/{name}/memory/ for:
-- Duplicate or redundant observations (merge them)
-- Stale information contradicted by current code (remove it)
-- SUMMARY.md accuracy (regenerate if needed)
-- Overall size (compress if memory exceeds ~2000 tokens)
+```rust
+pub struct PromptComponents {
+    // ... existing fields ...
+    /// Wave memory topic files (patterns.md, preferences.md, etc.)
+    pub wave_memory: Vec<Document>,
+}
 ```
 
-### Aging
+### 3. `gather_wave_memory()` function
 
-Observations that haven't been referenced or updated in N runs could be flagged for review. Not automatic deletion — agents during consolidation decide what's still relevant.
+```rust
+fn gather_wave_memory(repo_root: &Path, wave: Option<&str>) -> Result<(Vec<Document>, Vec<Document>), CoreError> {
+    // Returns (summaries, topic_files)
+    let Some(wave_name) = wave else { return Ok((vec![], vec![])) };
+    let memory_dir = repo_root.join("wave").join(wave_name).join("memory");
+    if !memory_dir.is_dir() { return Ok((vec![], vec![])) }
 
-### Inheritance
+    let mut summaries = Vec::new();
+    let mut topics = Vec::new();
 
-When `split-wave` creates children, memory can optionally copy from parent. Not automatic — the split step decides what's relevant to each child wave.
+    // SUMMARY.md → summaries (survives trimming longer)
+    let summary = memory_dir.join("SUMMARY.md");
+    if summary.is_file() {
+        if let Ok(content) = fs::read_to_string(&summary) {
+            summaries.push(Document {
+                path: format!("wave/{}/memory/SUMMARY.md", wave_name),
+                content,
+                source: DocumentSource::WaveMemory,
+            });
+        }
+    }
 
-## What memory is NOT
+    // Other .md files → topic files (trim earlier)
+    let mut entries: Vec<_> = fs::read_dir(&memory_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let path = e.path();
+            path.is_file()
+                && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                && path.file_name().map(|n| n != "SUMMARY.md").unwrap_or(false)
+        })
+        .collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if let Ok(content) = fs::read_to_string(&path) {
+            topics.push(Document {
+                path: format!("wave/{}/memory/{}", wave_name, path.file_name().unwrap_or_default().to_string_lossy()),
+                content,
+                source: DocumentSource::WaveMemory,
+            });
+        }
+    }
 
-**Not conversation history.** Waves don't store transcripts. Each run produces observations, not logs.
+    Ok((summaries, topics))
+}
+```
 
-**Not agent identity.** Agents are stateless. The wave provides context; the agent doesn't "remember" its prior self.
+Called from `gather_documents()` after wave docs:
 
-**Not a database.** No schemas, no queries, no structured records. Plain markdown files that agents read and write.
+```rust
+if spec.includes(DocumentSource::WaveMemory) {
+    let (mem_summaries, mem_topics) = gather_wave_memory(&spec.repo_root, spec.wave.as_deref())?;
+    // summaries and topics returned separately for different trimming
+}
+```
 
-**Not append-only.** Memory gets rewritten, consolidated, corrected. An observation from run 3 might be wrong by run 7. The agent that discovers this corrects the file.
+### 4. Trimming order update
 
-## Relationship to existing mechanisms
+Current: area docs → summaries → docs → diff → clipboard
 
-| Mechanism | Scope | Lifecycle | Content |
-|-----------|-------|-----------|---------|
-| **Summary** (exists) | Wave × area | Regenerated when area files change | Codebase structure overview |
-| **Wave docs** (exists) | Wave | Persists in git | Vision, phases, planning |
-| **Wave memory** (new) | Wave | Grows/consolidates across runs | Learned observations |
-| **scratch/** | Branch | Deleted on merge | Design docs, review notes |
+New: area docs → **wave memory topics** → summaries → docs → diff → clipboard
 
-Summaries describe what the code *is*. Memory describes what the wave has *learned*. Wave docs describe what the wave *intends*. These are complementary, not competing.
+```rust
+// In trim_context_with_breakdown(), after area docs trimming:
 
-## What changes
+// 1.5. Drop wave memory topic files (learned observations, regenerable via consolidation)
+while total > max_tokens && !components.wave_memory.is_empty() {
+    components.wave_memory.pop();
+    if let Some(tokens) = wave_memory_tokens.pop() {
+        breakdown.subtract_source_tokens(DocumentSource::WaveMemory, tokens);
+        total = total.saturating_sub(tokens);
+    }
+}
+```
 
-`DocumentSource` gets a new variant: `WaveMemory`. The gathering pipeline reads `wave/<name>/memory/*.md` when assembling context for a wave-scoped run. The trimming pipeline allocates budget between memory and other sources.
+Memory SUMMARY.md routes through `summaries` and gets the same treatment as codebase summaries.
 
-The system prompt for wave-scoped agents gets a memory section: where memory lives, when to write, what kinds of observations belong.
+### 5. Prompt formatting
 
-The `consolidate` step gets memory awareness: review, compress, regenerate `SUMMARY.md`.
+New section in `format_reference_sections()`, after wave context (line ~1232) and before docs:
 
-`split-wave` gets an option for memory inheritance.
+```rust
+// Wave memory
+if !components.wave_memory.is_empty() || components.summaries.iter().any(|s| s.source == DocumentSource::WaveMemory) {
+    let wave_name = components.wave.as_deref().unwrap_or("unknown");
+    let mut memory_parts = Vec::new();
 
-## What doesn't change
+    // Include memory SUMMARY.md from summaries
+    for s in &components.summaries {
+        if s.source == DocumentSource::WaveMemory {
+            memory_parts.push(format!("<lf:memory-summary>\n{}\n</lf:memory-summary>", s.content));
+        }
+    }
 
-No new tools. No new APIs. No structured memory format. No agent identity. No conversation persistence.
+    // Include topic files
+    for doc in &components.wave_memory {
+        let name = Path::new(&doc.path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| doc.path.clone());
+        memory_parts.push(format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name));
+    }
 
-The wave executor, prompt assembly, and context trimming already handle multiple document sources with budget allocation. Memory is one more source.
+    let memory_body = memory_parts.join("\n\n");
+    parts.push(format!(
+        "This wave has persistent memory at wave/{wave_name}/memory/.\n\
+         Write observations that should persist for future agents:\n\
+         - Codebase patterns and conventions you discover\n\
+         - User preferences you observe\n\
+         - Things that worked or failed\n\
+         - Corrections to existing memory\n\n\
+         Don't write session-specific notes. Only durable observations.\n\
+         Update existing files rather than creating new ones when possible.\n\n\
+         <lf:memory>\n{memory_body}\n</lf:memory>"
+    ));
+}
+```
 
-## Open questions
+### 6. Consolidate step extension
 
-- **Memory vs summary overlap.** The summary mechanism already generates codebase descriptions. Should wave memory replace it, extend it, or stay parallel? Leaning: parallel — summaries are automated and area-scoped; memory is agent-written and wave-scoped.
+Add to the existing `consolidate.md` prompt:
 
-- **Cross-wave memory.** Should waves that `listen` to each other share memory? Or is memory always wave-private? A chord might benefit from shared observations across its constituent waves.
+```markdown
+## Wave memory (if wave-scoped)
 
-- **Memory in CLI.** When running `lf implement -w engbot`, should the CLI agent see engbot's memory? Leaning yes — if you're working in a wave's context, you should see what it knows.
+If this run is wave-scoped, review `wave/{wave}/memory/` for:
+- Duplicate or redundant observations — merge them
+- Stale information contradicted by current code — remove it
+- SUMMARY.md accuracy — regenerate if needed
+- Overall size — compress if memory exceeds ~2000 tokens total
+```
 
-- **Memory quality.** Agents will write varying-quality observations. Consolidation handles staleness, but what about wrong observations that seem plausible? This might need a human-in-the-loop review step for critical waves.
+### 7. `gather_wave_docs()` exclusion
 
-- **Bootstrap.** A new wave has no memory. Should there be a `seed-memory` step that reads the codebase and bootstraps initial observations? Or is the summary mechanism already sufficient for cold starts?
+Update `gather_wave_docs()` to skip the `memory/` subdirectory — memory files have their own gathering path and DocumentSource:
 
-## Lessons from Phase 01
+```rust
+fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
+    // ... existing code ...
+    // Skip memory/ directory — handled by gather_wave_memory()
+    let mut entries: Vec<_> = fs::read_dir(&wave_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let path = e.path();
+            path.is_file()  // already excludes directories
+                && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                && path.file_name().map(|n| n != "README.md").unwrap_or(false)
+        })
+        .collect();
+```
 
-- **repo_root vs cwd matters.** Skill injection needed separate repo_root (where to read from) and target_dir (where to write to). Memory will have the same pattern: memory lives at `wave/<name>/memory/` relative to repo_root, but the agent runs in a potentially different cwd. The `DocumentSource::WaveMemory` implementation should resolve paths against repo_root, not cwd.
-- **Synchronous I/O is fine at this scale.** Skill injection uses sync fs ops inside async contexts — acceptable for dozens of files. Memory files will be similarly small (a few markdown files). No need for `tokio::fs` yet.
-- **System prompt is the injection point.** Skill injection proved that agents don't need special tools — they just need to be told what's available and where. Memory follows the same pattern: tell agents where memory lives, let them use standard file operations.
+Note: `gather_wave_docs()` already filters to `is_file()`, so the `memory/` directory is already excluded. No change needed here. But if the function ever changes to recurse into subdirectories, memory files would be double-counted. Worth a comment.
+
+## Scope
+
+**In scope:**
+- `DocumentSource::WaveMemory` variant
+- `PromptComponents::wave_memory` field
+- `gather_wave_memory()` function
+- Trimming tier for wave memory topics
+- `<lf:memory>` prompt section with write instructions
+- Consolidate step memory awareness
+- Tests: golden prompt test with memory files present, trimming test verifying drop order
+
+**Out of scope:**
+- Cross-wave memory sharing (open question, keep it open)
+- Memory inheritance on split-wave (Phase 04 — memory lifecycle)
+- Bootstrap/seed-memory step (organic growth is sufficient)
+- Memory aging (Phase 04)
+- CLI memory visibility (`lf implement -w engbot` seeing memory — trivial to add later since it flows through the same `gather_context` path, but not blocking)
+- Agent identity or conversation persistence (explicitly not here per wave vision)
+
+## Done when
+
+1. `cargo test --all` passes with new `WaveMemory` variant wired through gather → trim → format
+2. Golden prompt test: a wave run with `wave/<name>/memory/{SUMMARY.md, patterns.md}` produces a prompt containing `<lf:memory>` with both files' content and write instructions
+3. Trimming test: wave memory topics drop before summaries, memory SUMMARY.md drops with summaries
+4. Manual verification: run `lf implement -w living` with memory files present, confirm agent sees memory in prompt log (`.lf/log/*-implement.context`)
+5. Consolidate step extended (prompt update only — no Rust changes needed)

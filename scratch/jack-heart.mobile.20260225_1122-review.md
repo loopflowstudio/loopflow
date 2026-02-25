@@ -43,7 +43,7 @@ Swift SessionState
 ## Risks and bottlenecks
 
 - **Prompt compliance**: Suggestion quality depends on the model following prompt guidance. No enforcement mechanism exists. A model that ignores or misformats the tag silently produces no suggestions (safe failure, but invisible).
-- **Tag parsing robustness**: `LfTagParser` handles split chunks and malformed JSON gracefully (tested). Edge case: a model that outputs `<lf:suggest_actions>` as part of a code block would be mistakenly parsed. Low probability in practice.
+- **Tag parsing robustness**: `LfTagParser` handles split chunks and malformed JSON gracefully (tested). Tags are only matched at line start or after whitespace, so inline references (e.g. inside backtick code spans) are ignored. Edge case: a tag on its own line inside a fenced code block could still be parsed. Low probability — prompt guidance explicitly tells the model not to wrap lf tags in backticks or mention them in prose.
 - **No persistence**: Suggestions are ephemeral. If the user navigates away and back, they're gone. Acceptable for Stage 02; persistence is out of scope.
 
 ## What's not included
@@ -87,3 +87,12 @@ All passing locally:
 | `swift test --package-path swift` | 151 passed |
 
 Environment-limited: Docker-socket tests and `xcodebuild` UI tests not runnable locally (no Docker socket, Xcode linker issue).
+
+## Post-review polish (gate pass)
+
+Changes made during the gate pass after the initial review:
+
+- **Inline tag filtering**: `LfTagParser.find_tag_start` only matches `<lf:suggest_actions>` at line start or after whitespace, preventing false matches on inline code examples.
+- **Prompt hardening**: Guidance now tells the model to emit the tag on its own lines and not wrap lf tags in backticks.
+- **Hit-testing simplification**: `ActionButtonsView` uses `.task(id:)` instead of manual `Task` + `onAppear/onChange/onDisappear`.
+- **Reduced clearing triggers**: Removed `composerTextDidChange` (suggestions persist until user sends) and `clearSuggestedActions` from `turnStarted` (new suggestions replace old ones via `applySuggestedActions`).

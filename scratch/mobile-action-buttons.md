@@ -64,10 +64,11 @@ Reduce follow-up friction in chat by turning likely next steps into one-tap acti
 ### Clear/hide rules
 
 Suggested actions are cleared on:
-- user send,
-- user manual typing start,
-- new agent turn start,
-- session end/reset.
+- user send (including tapping an action button),
+- session end/reset,
+- session status becomes ended or failed.
+
+New suggestions from the agent replace old ones (latest payload wins).
 
 ## Validation status
 
@@ -87,7 +88,7 @@ Suggested actions are cleared on:
 ## Risks and follow-ups
 
 - Suggestion quality is still prompt-compliance-dependent; no strict provider tool contract.
-- Text-tag protocol is robust to stream splits but still a malformed-input surface.
+- Text-tag protocol is robust to stream splits and ignores inline tag references (only matches tags at line start). Still a malformed-input surface for tags on their own line inside code blocks, though prompt guidance discourages this.
 - Future structured replies (for example `memory`) should reuse this exact pipeline before adding new transport or protocol complexity.
 
 ## Out of scope (still)

@@ -161,3 +161,9 @@ The wave executor, prompt assembly, and context trimming already handle multiple
 - **Memory quality.** Agents will write varying-quality observations. Consolidation handles staleness, but what about wrong observations that seem plausible? This might need a human-in-the-loop review step for critical waves.
 
 - **Bootstrap.** A new wave has no memory. Should there be a `seed-memory` step that reads the codebase and bootstraps initial observations? Or is the summary mechanism already sufficient for cold starts?
+
+## Lessons from Phase 01
+
+- **repo_root vs cwd matters.** Skill injection needed separate repo_root (where to read from) and target_dir (where to write to). Memory will have the same pattern: memory lives at `wave/<name>/memory/` relative to repo_root, but the agent runs in a potentially different cwd. The `DocumentSource::WaveMemory` implementation should resolve paths against repo_root, not cwd.
+- **Synchronous I/O is fine at this scale.** Skill injection uses sync fs ops inside async contexts — acceptable for dozens of files. Memory files will be similarly small (a few markdown files). No need for `tokio::fs` yet.
+- **System prompt is the injection point.** Skill injection proved that agents don't need special tools — they just need to be told what's available and where. Memory follows the same pattern: tell agents where memory lives, let them use standard file operations.

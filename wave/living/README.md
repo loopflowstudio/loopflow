@@ -32,22 +32,30 @@ A living wave:
 - **Memory quality.** Agents write varying-quality observations. Wrong-but-plausible observations persist until consolidation catches them. Mitigate: consolidation step reviews memory for accuracy against current code.
 - **Memory bloat.** Without pressure, memory grows until it crowds out other context. Mitigate: SUMMARY.md always fits; topic files compete for budget; consolidation compresses.
 - **Cross-wave leakage.** Shared memory between listening waves could propagate bad observations. Mitigate: memory is wave-private by default; sharing is explicit.
+- **Orphaned skill files on crash.** If lfd crashes mid-session, injected `.claude/commands/` files linger. Harmless (overwritten on next injection) but messy. Tracked, not urgent.
+- **Skill injection gap.** Global `~/.lf/steps/` and external skills (superpowers, rams) are not injected yet — only builtins and repo-local. Acceptable for now; revisit when external skill sources mature.
 
 ## Metrics
 
 - Agent in run N can read observations written by agent in run N-1
 - Memory stays under budget without manual intervention (consolidation keeps it trim)
 - Cold start (new wave, no memory) is indistinguishable from current behavior
-- Skill injection works across all three launch paths (CLI, session, wave executor)
+- ~~Skill injection works across all three launch paths (CLI, session, wave executor)~~ **Verified** — Phase 01 wired injection into CLI, wave executor, and sessions
 
 ## Phases
 
 | # | Phase | What it unlocks | Status |
 |---|-------|----------------|--------|
 | 01 | Skill injection | Agents see loopflow steps/directions as native commands | shipped |
-| 02 | Wave memory | Agents read/write durable observations scoped to their wave | |
+| 02 | Wave memory | Agents read/write durable observations scoped to their wave | next |
 | 03 | Surface-adaptive prompts | Same step adapts to headless, session, TUI, mobile | |
 | 04 | Memory lifecycle | Consolidation, aging, inheritance on split-wave | |
+
+### Phase 01 retrospective
+
+Shipped simpler than designed. The `collect_injectable_skills()` abstraction from the original design collapsed into `inject_skills()` which does collection and writing in one pass. Track-and-remove cleanup works. One gate fix was needed: sessions had to thread `repo_root` separately from `cwd` to discover repo-local steps when the working directory differs from the repo root.
+
+Scope narrower than planned: only builtins and repo-local steps/directions are injected. Global `~/.lf/steps/` and external skill sources (superpowers, rams) are not yet included. This is fine — the pattern is established and extending it is straightforward.
 
 ## Architecture
 

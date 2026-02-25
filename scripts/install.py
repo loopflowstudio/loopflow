@@ -215,7 +215,7 @@ def local(
 ):
     """Build and install locally (no publish)."""
     if dry_run:
-        typer.echo("Would build wheel with maturin")
+        typer.echo("Would build wheel with uv")
         typer.echo("Would install wheel with uv pip install")
         typer.echo("Would install lf/lfd binaries")
         typer.echo("Would install Concerto to /Applications")

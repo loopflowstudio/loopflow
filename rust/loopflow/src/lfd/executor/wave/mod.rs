@@ -531,7 +531,7 @@ impl WaveExecutor {
             .model
             .clone()
             .unwrap_or_else(|| repo_config.agent_model.clone());
-        let (provider, _) = parse_model(&model);
+        let (harness, _) = parse_model(&model);
         let session_config = SessionConfig {
             step: step.step.name.clone(),
             repo_root: run.worktree.clone(),
@@ -545,7 +545,7 @@ impl WaveExecutor {
         let session = self
             .sessions
             .create_session(CreateSessionParams {
-                provider,
+                harness,
                 wave_run_id: Some(run.id.to_string()),
                 config: session_config,
             })
@@ -970,7 +970,7 @@ mod tests {
         let session_id = LfdId::new();
         let session = Session {
             id: session_id.clone(),
-            provider: "claude".to_string(),
+            harness: "claude".to_string(),
             status: SessionStatus::Failed,
             wave_run_id: Some(run_id.to_string()),
             provider_session_id: None,

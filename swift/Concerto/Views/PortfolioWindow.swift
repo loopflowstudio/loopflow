@@ -7,6 +7,7 @@ struct PortfolioWindow: View {
     let portfolioService: PortfolioService
 
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.palette) private var palette
 
     @State private var connectionStore = ConnectionStore()
     @State private var repoStates: [String: PortfolioRepoState] = [:]
@@ -61,7 +62,7 @@ struct PortfolioWindow: View {
                 .padding(Spacing.xxl)
             }
         }
-        .background(Color.loopflowCream.ignoresSafeArea())
+        .background(palette.background.ignoresSafeArea())
         .task {
             await syncRepoStates()
             await startEventSubscription()

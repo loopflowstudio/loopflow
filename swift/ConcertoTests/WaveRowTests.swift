@@ -12,7 +12,7 @@ struct WaveRowViewTests {
     private func makeWave(
         name: String = "swift-falcon",
         area: [String] = ["src/"],
-        flow: String = "ship",
+        flow: String = "build",
         stimuli: [Stimulus] = []
     ) -> WaveViewModel {
         WaveViewModel(

@@ -41,7 +41,7 @@ struct RepoStateInteractiveSessionTests {
                 id: id,
                 name: id,
                 repo: "/tmp/repo",
-                flow: "design-ship-review",
+                flow: "ship",
                 direction: [],
                 area: ["."],
                 stimuli: [],

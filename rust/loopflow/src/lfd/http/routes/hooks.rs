@@ -572,7 +572,7 @@ mod tests {
             wave_id: LfdId::new(),
             snapshot: WaveRunSnapshot {
                 repo: ".".to_string(),
-                flow: "ship".to_string(),
+                flow: "build".to_string(),
                 direction: Vec::new(),
                 area: Vec::new(),
                 pr: Some(PullRequest {

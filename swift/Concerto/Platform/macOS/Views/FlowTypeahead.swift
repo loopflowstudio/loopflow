@@ -187,10 +187,16 @@ struct FlowTypeahead: View {
     let repoState = RepoState()
     repoState.currentRepo = URL(fileURLWithPath: "/Users/jack/src/loopflow")
     repoState.flows = [
-        Flow(name: "ship", steps: [
+        Flow(name: "build", steps: [
             Step(prompt: "implement"),
             Step(prompt: "compress"),
-            Step(prompt: "gate")
+            Step(prompt: "gate"),
+            Step(prompt: "update-wave")
+        ], type: .flow),
+        Flow(name: "ship", steps: [
+            Step(prompt: "design"),
+            Step(prompt: "build"),
+            Step(prompt: "review")
         ], type: .flow),
         Flow(name: "design-and-ship", steps: [
             Step(prompt: "design"),
@@ -199,9 +205,9 @@ struct FlowTypeahead: View {
             Step(prompt: "polish")
         ], type: .flow),
         Flow(name: "grind", steps: [
-            Step(prompt: "review"),
+            Step(prompt: "research"),
             Step(prompt: "iterate"),
-            Step(prompt: "ship"),
+            Step(prompt: "build"),
             Step(prompt: "gate")
         ], type: .flow),
         Flow(name: "design", steps: [Step(prompt: "design")], type: .step),
@@ -215,7 +221,7 @@ struct FlowTypeahead: View {
             id: "test",
             name: "test-wave",
             repo: "/Users/jack/src/loopflow",
-            flow: "ship",
+            flow: "build",
             direction: ["clarity"],
             area: ["swift"]
         ),
@@ -229,4 +235,3 @@ struct FlowTypeahead: View {
     .frame(width: 500)
     .padding()
 }
-

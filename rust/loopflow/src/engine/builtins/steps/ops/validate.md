@@ -29,7 +29,7 @@ Print validation results:
 ```
 Validating flows...
 
-✓ code/ship.yaml
+✓ code/build.yaml
   - implement ✓
   - compress ✓
   - gate ✓

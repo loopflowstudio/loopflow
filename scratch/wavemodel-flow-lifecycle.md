@@ -1,20 +1,22 @@
-# Flow lifecycle: rename, update-wave, loop signal
+# Flow lifecycle: rename, unify update-wave, loop signal
 
 ## Problem
 
-Three naming/behavior issues compound into a confusing wave lifecycle:
+Four naming/behavior issues compound into a confusing wave lifecycle:
 
 1. **`ship` names the wrong thing.** `ship` (implement → compress → gate → consolidate) is the headless build engine. `design-ship-review` (design → ship → review) is what you actually "ship" with. The names are backwards.
 
-2. **`consolidate` is the wrong terminal step.** A build should end by recording what was done against the wave plan, not reorganizing scratch/. `update-wave` already exists for this purpose but isn't wired into `build`.
+2. **Post-run wave maintenance is fragmented.** `consolidate`, `add-to-wave`, and `update-wave` overlap. The split forces users and flows to guess which post-work prompt to run.
 
-3. **Waves don't know when they're done.** The loop ticker fires every 5s regardless of whether work remains. A wave with `Loop` stimulus runs forever until manually stopped. The wave/ directory — the source of truth for remaining work — is never consulted.
+3. **Build completion is miswired.** A build should end by reconciling wave state, not scratch housekeeping. `update-wave` should be the terminal build step.
 
-These three changes are tightly coupled: the rename enables the `update-wave` swap, and `update-wave` draining wave/ items enables the loop signal.
+4. **Loop waves don't know when they're done.** The loop ticker fires every 5s regardless of remaining backlog. `wave/` (the source of truth for queued work) is never consulted between runs.
+
+These changes are coupled: renaming clarifies intent, one canonical `update-wave` simplifies lifecycle behavior, and loop-ticker backlog checks let waves self-drain.
 
 ## Approach
 
-Three phases, each building on the last. All three ship in one PR.
+Three phases, shipped in one PR.
 
 ### Phase 1: Rename ship → build, design-ship-review → ship
 
@@ -32,57 +34,17 @@ Cascade through all flows that embed `ship` as a sub-flow:
 | `pair` | design → ship | design → build |
 | `grind` | research → iterate → ship → gate | research → iterate → build → gate |
 | `incident` | debug → 5whys → ship | debug → 5whys → build |
-| `ship-wave` | start → ship → update-wave | start → build → update-wave |
+| `ship-wave` | start → ship → update-wave | start → build |
 | `ship-roadmap` | ingest → kickoff → review-design → ship → review | ingest → kickoff → review-design → build → review |
 | `scan` | scan-report → scan-plan → ship | scan-report → scan-plan → build |
 
-`design-and-ship` stays as-is — it uses design → implement → reduce → polish, no sub-flow reference.
+`design-and-ship` stays as-is — it uses design → implement → reduce → polish and does not reference the `ship` sub-flow.
 
-**Files to change:**
+### Phase 2: One canonical post-work prompt — `update-wave`
 
-Flow YAMLs (rename + update references):
-- `rust/loopflow/src/engine/builtins/flows/code/ship.yaml` → rename to `build.yaml`
-- `rust/loopflow/src/engine/builtins/flows/code/design-ship-review.yaml` → rename to `ship.yaml`
-- `rust/loopflow/src/engine/builtins/flows/code/pair.yaml` — `ship` → `build`
-- `rust/loopflow/src/engine/builtins/flows/code/grind.yaml` — `ship` → `build`
-- `rust/loopflow/src/engine/builtins/flows/code/incident.yaml` — `ship` → `build`
-- `rust/loopflow/src/engine/builtins/flows/code/ship-wave.yaml` — `ship` → `build`
-- `rust/loopflow/src/engine/builtins/flows/code/ship-roadmap.yaml` — `ship` → `build`
-- `rust/loopflow/src/engine/builtins/flows/scan/scan.yaml` — `ship` → `build`
+Unify post-work behavior under `update-wave`.
 
-Rust defaults and discovery:
-- `rust/loopflow/src/lfd/http/routes/waves.rs` line 183 — default flow `"ship"` → `"build"`
-- `rust/loopflow/src/lf/discovery.rs` — flow descriptions referencing `ship`
-
-Swift defaults:
-- `swift/LoopflowCore/State/RepoState.swift` — `createWave` default `"ship-roadmap"` stays, `createAndRunWave` default `"design-ship-review"` → `"ship"`
-- `swift/LoopflowCore/Services/LocalWaveService.swift` — default `"ship-roadmap"` stays
-- `swift/Concerto/Platform/macOS/Views/FlowProgressPills.swift` — preview steps
-
-Wave configs on disk:
-- `wave/living/living.yaml` — `flow: ship-wave` stays (unchanged)
-- `wave/mobile/mobile.yaml` — `flow: ship-wave` stays (unchanged)
-
-Test fixtures:
-- `rust/loopflow/src/lfd/http/routes/mod.rs` — `flow: "ship"` → `"build"`
-- `rust/loopflow/src/lfd/http/routes/hooks.rs` — `flow: "ship"` → `"build"`
-- `rust/loopflow/src/lfd/http/routes/wave_config.rs` — `flow: ship` → `build`
-- `rust/loopflow/src/lfd/queue.rs` — `flow: "ship"` → `"build"`
-- `swift/ConcertoTests/WaveTests.swift` — `flow: "ship"` → `"build"`, hardcoded `flowSteps` arrays
-- `swift/ConcertoTests/WaveStoreTests.swift` — `makeWave(flow: "ship")` → `"build"`
-- `swift/ConcertoTests/WaveRowTests.swift` — `makeWave(flow: "ship")` → `"build"`
-- `swift/ConcertoTests/PortfolioRepoStateTests.swift` — `flow: "ship"` → `"build"`
-- `swift/ConcertoTests/RunStoreTests.swift` — `flow: "ship"` → `"build"`
-- `swift/ConcertoTests/RepoStateInteractiveSessionTests.swift` — `"design-ship-review"` → `"ship"`
-- `python/tests/conftest.py` — `flow_steps` containing `"ship"` → `"build"`
-- `python/tests/test_models.py` — assertion on `flow_steps`
-
-Documentation:
-- `README.md` — flow tables, examples
-
-### Phase 2: update-wave replaces consolidate in build
-
-Swap the terminal step of `build` from `consolidate` to `update-wave`.
+#### Flow changes
 
 `build.yaml` becomes:
 ```yaml
@@ -92,105 +54,141 @@ Swap the terminal step of `build` from `consolidate` to `update-wave`.
 - update-wave
 ```
 
-`consolidate` stays in the `publish` flow (consolidate → add-to-wave) — it's the right pre-publish step for plan flows where you're organizing proposals, not completing work.
+Plan flows stop routing through `publish` and call `update-wave` directly:
 
-The `ship-wave` flow currently has `start → ship → update-wave`. After this change, `build` already ends with `update-wave`, so `ship-wave` would run `update-wave` twice. Fix: `ship-wave` becomes `start → build` (dropping the explicit `update-wave` since `build` now includes it).
+- `wave-reduce`: `fork(reduce×3) → update-wave`
+- `wave-polish`: `fork(polish×3) → update-wave`
+- `wave-expand`: `fork(expand×3) → update-wave`
 
-Updated `ship-wave.yaml`:
+`ship-wave` becomes:
 ```yaml
 - start
 - build
 ```
 
-### Phase 3: wave/ as loop signal
+#### Deletions
 
-Add a wave/ directory check to the loop ticker. When wave/ for a given wave has no remaining items (no `*.md` files excluding `README.md` and `*.yaml`), skip the run.
+- Delete step: `consolidate`
+- Delete step: `add-to-wave`
+- Delete flow: `publish`
 
-**Why this works:** `advance_branch` creates new branches from the worktree HEAD (`git checkout -b`), not from `origin/main`. So when `update-wave` removes a completed item from `wave/<name>/` and commits, that removal carries forward to the next run's branch. The wave/ directory on the worktree is the authoritative state.
+#### New `update-wave` contract
 
-**Implementation in `loop_ticker.rs`:**
+`update-wave` now owns all post-work reconciliation:
 
-After the existing checks (not paused, no active session, no active run), add:
+1. Update roadmap/status in `wave/<wave>/`
+2. Promote unfinished/actionable items from `scratch/` into `wave/<wave>/`
+3. Merge/dedupe collisions in `wave/<wave>/` (no silent overwrite)
+4. Remove promoted scratch artifacts
+
+This removes ambiguity: there is one post-work step, one behavior model.
+
+### Phase 3: `wave/` backlog as loop signal (between runs only)
+
+Add a backlog check in `loop_ticker.rs` after existing guards (not paused, no active session, no active run), before creating a run.
+
+#### Canonical workspace model (locked for this PR)
+
+**One canonical worktree per wave.** Use the wave worktree path derived from repo + wave name.
+
+- No sidecar/per-run worktree changes in this PR
+- No concurrent runs sharing the same wave worktree
+- Backlog is checked only at run boundaries (ticker), never mid-run
+
+#### Implementation sketch
 
 ```rust
-// Check if wave/ has remaining items
-let worktree = match store.get_wave_worktree(&wave).await {
-    Ok(Some(wt)) => wt,
-    _ => continue,
-};
-if wave_backlog_empty(&worktree, wave.name()) {
-    tracing::info!(wave = %wave.name(), "wave/ empty, skipping loop tick");
-    // Optionally: auto-pause the wave
+let worktree = worktree_path(Path::new(wave.repo()), wave.name());
+if worktree.exists() && wave_backlog_empty(&worktree, wave.name()) {
+    tracing::info!(wave = %wave.name(), "wave backlog empty, skipping loop tick");
     continue;
 }
 ```
 
-`wave_backlog_empty` checks `wave/<name>/` in the worktree for `.md` files that aren't `README.md`. If none exist, the backlog is drained.
+`wave_backlog_empty` checks `wave/<name>/` for actionable markdown items:
 
-**Edge case — first run:** Before any run, the worktree may not exist yet (it's created by `create_wave_run_with_id`). If there's no worktree, fall through to the existing behavior (start the run; the `ingest`/`start` step will populate wave/ or the agent will find nothing to do).
+- count `*.md`
+- exclude `README.md`
+- ignore `*.yaml`
 
-**Edge case — wave/ populated by design step:** The first run through `ship` (design → build → review) may populate wave/ during the design step. The loop signal only matters for subsequent runs. Since the loop ticker checks *before* spawning a run, this works naturally.
+If no actionable markdown files remain, skip starting a new run.
 
-**Behavior change:** A wave with `Loop` stimulus now auto-stops when its backlog is drained. No manual `stop_wave` needed. To restart, add new items to wave/ and re-run.
+#### Semantics
+
+Backlog-empty means **no queued wave items**. It does **not** guarantee the most recent run succeeded.
+
+(With current lifecycle, `ingest` moves a picked item from `wave/` to `scratch/` early; failed work may therefore live in `scratch/` until a later `update-wave` reconciliation.)
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
-| Keep `ship` name, rename `design-ship-review` to `deliver` | Less churn | "Build" is the universal word for headless compilation. "Ship" means getting it to users. The current names fight intuition. |
-| Database-tracked wave items instead of filesystem | Daemon has full visibility | Agents already work with wave/ on disk. Adding DB tracking duplicates state. The filesystem is the source of truth — read it directly. |
-| update-wave writes a signal file for the loop ticker | Explicit contract between step and daemon | Unnecessary indirection. The daemon can read wave/ directly. Signal files add a protocol to maintain. |
-| Check wave/ in executor at run start (early exit) | Catches edge cases | The loop ticker is the right place — don't create a run just to immediately abort it. But could be added as defense-in-depth later. |
-| Keep consolidate in build, add update-wave after | Preserves scratch/ cleanup | Build should be about the work, not housekeeping. Scratch/ cleanup can happen in the PR land step or not at all. |
+| Keep `consolidate` + `add-to-wave` + `update-wave` | Smaller prompt changes | Keeps lifecycle ambiguous; users must pick between overlapping prompts |
+| Keep `publish` flow and swap internals | Less flow churn | Adds indirection with no user value once `update-wave` is canonical |
+| Per-run worktrees now | Cleaner long-term isolation | Requires defining canonical backlog state first; too large for this PR |
+| Check backlog inside executor after run creation | Defensive | Wastes run creation overhead; ticker is the right decision point |
 
 ## Key decisions
 
-**`build` is the new default flow for API wave creation.** The `waves.rs` default changes from `"ship"` to `"build"`. This is the right default — most programmatic wave creation wants headless builds, not interactive design sessions.
+**`build` is the new default flow for API wave creation.** `waves.rs` default changes from `"ship"` to `"build"`.
 
-**`ship-wave` drops its explicit `update-wave`.** Since `build` now includes `update-wave`, the old `start → ship → update-wave` would double-update. New: `start → build`.
+**`update-wave` is the only post-work step.** Remove `consolidate`, `add-to-wave`, and `publish`.
 
-**The loop ticker reads the filesystem.** This is a new responsibility for the daemon — it currently only reads wave/ at creation time. The cost is one directory listing per tick per looping wave (cheap). The benefit is waves that self-terminate.
+**Loop ticker reads backlog from the canonical wave worktree.** This PR locks to one worktree per wave.
 
-**No auto-pause on empty.** When wave/ is empty, the loop ticker skips the run but doesn't change wave status to Paused. The wave stays Idle with its Loop stimulus active. If someone adds items to wave/, the next tick picks them up. This is simpler and more useful than requiring an explicit re-run.
+**No auto-pause on empty.** Empty backlog skips new loop runs but wave status remains Idle with Loop stimulus enabled.
 
 ## Scope
 
 **In scope:**
 - Rename flow YAMLs and all references across Rust, Swift, Python, tests
-- Swap consolidate → update-wave in the build flow
-- Collapse ship-wave from 3 steps to 2
-- Add wave/ backlog check in loop_ticker.rs
-- Update README flow tables
-- Update RELEASE_NOTES if needed
+- Rename `ship.yaml` → `build.yaml`, `design-ship-review.yaml` → `ship.yaml`
+- Replace build terminal step with `update-wave`
+- Collapse `ship-wave` to `start → build`
+- Delete `consolidate` step
+- Delete `add-to-wave` step
+- Delete `publish` flow
+- Point plan flows to `update-wave`
+- Update `update-wave` prompt to include scratch→wave promotion and cleanup
+- Add loop ticker backlog check against canonical wave worktree
+- Update README and builtins flow docs
 
 **Out of scope:**
-- Changing the `update-wave` step prompt (it already does the right thing)
-- Changing the `consolidate` step (it stays in `publish`)
-- Changing wave config format or YAML schema
-- Adding wave item status to the daemon database
+- Per-run worktree architecture changes
+- Sidecar/worktree isolation changes
+- Wave config schema changes
+- DB-backed wave item tracking
 - Changing `advance_branch` behavior
-- Renaming `design-and-ship` (it doesn't use the `ship` sub-flow)
+- Renaming `design-and-ship`
 
 ## Done when
 
 ```bash
-# All tests pass with new names
+# Tests
 cargo test --all
 uv run pytest python/tests/
 swift test --package-path swift
 
-# No remaining references to old names in flow definitions
-rg '"ship"' rust/loopflow/src/engine/builtins/flows/  # should only match scan desc or similar
-rg 'design-ship-review' rust/ swift/ python/          # should return nothing
+# Rename complete
+rg 'design-ship-review' rust/ swift/ python/              # no matches
+rg '\bflow:\s*ship\b|"ship"' rust/loopflow/src/lfd      # only intentional usages
 
-# Loop ticker has wave/ check
-rg 'wave_backlog_empty\|backlog.*empty' rust/loopflow/src/lfd/triggers/loop_ticker.rs
+# Consolidation removed
+rg '\bconsolidate\b|\badd-to-wave\b' rust/loopflow/src README.md swift/ python/  # no step/flow refs
+rg '\bpublish\b' rust/loopflow/src/engine/builtins/flows  # no publish flow refs
 
-# build flow ends with update-wave
+# Flow definitions
 cat rust/loopflow/src/engine/builtins/flows/code/build.yaml
-# → implement, compress, gate, update-wave
+# -> implement, compress, gate, update-wave
 
-# ship-wave is 2 steps
 cat rust/loopflow/src/engine/builtins/flows/code/ship-wave.yaml
-# → start, build
+# -> start, build
+
+cat rust/loopflow/src/engine/builtins/flows/plan/wave-reduce.yaml
+cat rust/loopflow/src/engine/builtins/flows/plan/wave-polish.yaml
+cat rust/loopflow/src/engine/builtins/flows/plan/wave-expand.yaml
+# -> each ends with update-wave
+
+# Loop ticker check exists and uses canonical worktree path
+rg 'wave_backlog_empty|worktree_path\(' rust/loopflow/src/lfd/triggers/loop_ticker.rs
 ```

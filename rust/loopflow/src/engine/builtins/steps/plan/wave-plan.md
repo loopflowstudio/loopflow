@@ -6,7 +6,7 @@ Synthesize analysis into a wave plan — a sequenced plan for building something
 
 ## Scope
 
-The included context defines your area. Propose items that belong to this area. When promoted via `add-to-wave`, items go to `wave/<wave>/`.
+The included context defines your area. Propose items that belong to this area. When reconciled via `update-wave`, items should live in `wave/<wave>/`.
 
 ## Workflow
 

@@ -257,7 +257,7 @@ public final class RepoState {
                     id: "mock-wave-1",
                     name: "swift-falcon",
                     repo: repo,
-                    flow: "ship",
+                    flow: "build",
                     direction: [],
                     area: ["src/auth"],
                     stimuli: [Stimulus(kind: .loop)],
@@ -274,7 +274,7 @@ public final class RepoState {
                     id: "mock-wave-2",
                     name: "crystal-melody",
                     repo: repo,
-                    flow: "ship",
+                    flow: "build",
                     direction: ["clarity"],
                     area: ["src/api"],
                     stimuli: [Stimulus(kind: .loop)],
@@ -320,7 +320,7 @@ public final class RepoState {
                     id: "mock-wave-5",
                     name: "broken-deploy",
                     repo: repo,
-                    flow: "ship",
+                    flow: "build",
                     direction: ["clarity"],
                     area: ["src/deploy"],
                     stimuli: [],
@@ -329,7 +329,7 @@ public final class RepoState {
                     activeRun: WaveRun(
                         id: "run-failed-1",
                         waveId: "mock-wave-5",
-                        flow: "ship",
+                        flow: "build",
                         area: "src/deploy",
                         repo: repo,
                         direction: ["clarity"],
@@ -350,7 +350,7 @@ public final class RepoState {
             WaveRun(
                 id: "run-1",
                 waveId: "mock-wave-1",
-                flow: "ship",
+                flow: "build",
                 area: "src/auth",
                 repo: repo,
                 direction: [],
@@ -366,7 +366,7 @@ public final class RepoState {
             WaveRun(
                 id: "run-2",
                 waveId: "mock-wave-1",
-                flow: "ship",
+                flow: "build",
                 area: "src/auth",
                 repo: repo,
                 direction: [],
@@ -382,7 +382,7 @@ public final class RepoState {
             WaveRun(
                 id: "run-3",
                 waveId: "mock-wave-1",
-                flow: "ship",
+                flow: "build",
                 area: "src/auth",
                 repo: repo,
                 direction: [],
@@ -635,7 +635,7 @@ public final class RepoState {
 
     @discardableResult
     public func createAndRunWave(name: String) async throws -> Wave {
-        try await createWaveInternal(name: name, flow: "design-ship-review", run: true)
+        try await createWaveInternal(name: name, flow: "ship", run: true)
     }
 
     @discardableResult

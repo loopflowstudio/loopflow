@@ -71,8 +71,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
 | Step | What it does |
 |------|--------------|
-| `consolidate` | Reorganize scratch/ for wave |
-| `add-to-wave` | Promote from scratch/ to wave/ |
+| `update-wave` | Reconcile wave status and backlog after work |
 | `split-wave` | Split a wave into smaller independent waves |
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
@@ -82,7 +81,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
 ```bash
 lf design && lf implement && lf gate    # chain steps manually
-lf flow ship                            # or use a named flow
+lf flow build                           # or use a named flow
 ```
 
 Steps chain into flows. Flows feed into waves.
@@ -91,30 +90,29 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `ship` | implement → compress → gate → consolidate |
+| `build` | implement → compress → gate → update-wave |
 | `design-and-ship` | design → implement → reduce → polish |
-| `design-ship-review` | design → ship → review |
-| `pair` | design → ship |
-| `grind` | research → iterate → ship → gate |
-| `incident` | debug → 5whys → ship |
+| `ship` | design → build → review |
+| `pair` | design → build |
+| `grind` | research → iterate → build → gate |
+| `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
-| `ship-wave` | start → ship → update-wave |
-| `ship-roadmap` | ingest → kickoff → review-design → ship → review |
+| `ship-wave` | start → build |
+| `ship-roadmap` | ingest → kickoff → review-design → build → review |
 
 ### Plan flows (`plan/`)
 
 | Flow | Steps |
 |------|-------|
-| `wave-reduce` | fork(reduce×3) → publish |
-| `wave-polish` | fork(polish×3) → publish |
-| `wave-expand` | fork(expand×3) → publish |
-| `publish` | consolidate → add-to-wave |
+| `wave-reduce` | fork(reduce×3) → update-wave |
+| `wave-polish` | fork(polish×3) → update-wave |
+| `wave-expand` | fork(expand×3) → update-wave |
 
 ### Scan flows (`scan/`)
 
 | Flow | Steps |
 |------|-------|
-| `scan` | scan/scan-report → scan/scan-plan → ship |
+| `scan` | scan/scan-report → scan/scan-plan → build |
 
 ### Forks
 
@@ -124,7 +122,7 @@ Forks run a step in parallel with different directions, then synthesize the resu
 lf flow wave-reduce    # runs reduce 3x with different perspectives
 ```
 
-`wave-reduce` forks `reduce` across infra, ux, and ceo directions, then synthesizes and publishes to wave/.
+`wave-reduce` forks `reduce` across infra, ux, and ceo directions, then reconciles results with `update-wave`.
 
 ## Playing in the Waves
 
@@ -141,7 +139,7 @@ Configure flow/area/direction with `loopflow.update_wave(...)`, then start it wi
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("engbot", flow="ship", direction=["ux"], area=["designs/"])
+loopflow.update_wave("engbot", flow="build", direction=["ux"], area=["designs/"])
 loopflow.run_wave("engbot")
 PY
 ```
@@ -190,8 +188,8 @@ uv pip install loopflow
 import loopflow.api as loopflow
 
 loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="ship", direction=["clarity"])
-loopflow.create_wave("ux", repo=".", flow="ship", direction=["ux"], area=["docs/"])
+loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
+loopflow.create_wave("ux", repo=".", flow="build", direction=["ux"], area=["docs/"])
 loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra"], area=["rust/"])
 loopflow.add_stimulus("ux", kind="listen", source_wave_id="infra")
 loopflow.run_wave("ux")

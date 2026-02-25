@@ -589,7 +589,7 @@ mod tests {
             id: LfdId::new(),
             name: "queue-wave".to_string(),
             repo: repo.to_string(),
-            flow: "ship".to_string(),
+            flow: "build".to_string(),
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

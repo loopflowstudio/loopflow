@@ -99,7 +99,7 @@ struct PortfolioRepoStateTests {
             id: id,
             name: id,
             repo: repoPath,
-            flow: "ship",
+            flow: "build",
             direction: [],
             area: ["."],
             stimuli: [],

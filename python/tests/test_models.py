@@ -29,7 +29,7 @@ class TestWaveModel:
         assert wave.commits[0].sha == "a1b2c3d"
         assert wave.commits[0].message == "implement: add retry logic"
         assert wave.diff_stat == " 3 files changed, 42 insertions(+), 7 deletions(-)"
-        assert wave.flow_steps == ["review", "iterate", "ship", "gate"]
+        assert wave.flow_steps == ["review", "iterate", "build", "gate"]
 
     def test_round_trip(self):
         wave = Wave.model_validate(WAVE_FULL)

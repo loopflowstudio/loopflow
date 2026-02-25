@@ -27,7 +27,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         id: LfdId::new(),
         name: name.to_string(),
         repo: repo.to_string(),
-        flow: "ship".to_string(),
+        flow: "build".to_string(),
         direction: vec![],
         area: vec![],
         status: WaveStatus::Idle,

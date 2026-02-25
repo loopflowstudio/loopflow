@@ -305,10 +305,16 @@ struct StepRunner: View {
     let repoState = RepoState()
     repoState.configureMockWaves()
     repoState.flows = [
-        Flow(name: "ship", steps: [
+        Flow(name: "build", steps: [
             Step(prompt: "implement"),
             Step(prompt: "compress"),
-            Step(prompt: "gate")
+            Step(prompt: "gate"),
+            Step(prompt: "update-wave")
+        ], type: .flow),
+        Flow(name: "ship", steps: [
+            Step(prompt: "design"),
+            Step(prompt: "build"),
+            Step(prompt: "review")
         ], type: .flow),
         Flow(name: "design-and-ship", steps: [
             Step(prompt: "design"),
@@ -327,7 +333,7 @@ struct StepRunner: View {
             id: "test",
             name: "test-wave",
             repo: "/tmp/test-repo",
-            flow: "ship",
+            flow: "build",
             direction: ["clarity"],
             area: ["src/api"]
         ),
@@ -338,4 +344,3 @@ struct StepRunner: View {
         .environment(repoState)
         .frame(width: 500, height: 600)
 }
-

@@ -535,15 +535,7 @@ impl WaveExecutor {
             .clone()
             .unwrap_or_else(|| repo_config.agent_model.clone());
         let (harness, _) = parse_model(&model);
-        let session_config = SessionConfig {
-            step: step.step.name.clone(),
-            repo_root: run.worktree.clone(),
-            directions: run.snapshot.direction.clone(),
-            area: run.snapshot.area.first().cloned(),
-            wave: Some(wave.name().clone()),
-            model: Some(model),
-            ..Default::default()
-        };
+        let session_config = interactive_session_config(wave, run, step, model);
 
         let session = self
             .sessions
@@ -728,6 +720,24 @@ impl WaveExecutor {
         );
 
         Ok(outcome.exit_code)
+    }
+}
+
+fn interactive_session_config(
+    wave: &Wave,
+    run: &WaveRun,
+    step: &ConcreteStep,
+    model: String,
+) -> SessionConfig {
+    SessionConfig {
+        step: step.step.name.clone(),
+        repo_root: run.worktree.clone(),
+        directions: run.snapshot.direction.clone(),
+        area: run.snapshot.area.first().cloned(),
+        wave: Some(wave.name().clone()),
+        model: Some(model),
+        client_has_ui: Some(true),
+        ..Default::default()
     }
 }
 
@@ -1042,6 +1052,40 @@ mod tests {
             .expect("wave lookup should succeed")
             .expect("wave should exist");
         assert_eq!(updated_wave.status, WaveStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn interactive_session_config_sets_client_has_ui() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let (wave_id, run_id) = create_wave_and_run(&store, repo, "missing-flow").await;
+        let wave = store
+            .get_wave(&wave_id)
+            .await
+            .expect("wave lookup should succeed")
+            .expect("wave should exist");
+        let run = store
+            .get_wave_run(&run_id)
+            .await
+            .expect("run lookup should succeed")
+            .expect("run should exist");
+        let step = ConcreteStep {
+            step: crate::engine::flow::Step::named("design"),
+            flow_parents: Vec::new(),
+        };
+
+        let config = interactive_session_config(&wave, &run, &step, "claude".to_string());
+
+        assert_eq!(config.client_has_ui, Some(true));
+        assert_eq!(config.step, "design");
+        assert_eq!(config.repo_root, run.worktree);
     }
 
     #[tokio::test]

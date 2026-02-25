@@ -240,8 +240,8 @@ Directions shape judgment and intent—how the coding agent approaches work.
 | **Config** | `direction: clarity` or `direction: [ux, clarity]` |
 
 Direction files live in `.lf/directions/` as markdown. Built-in direction groups:
-`infra`, `ux`, `values`. Standalone direction: `ceo`. Group members are also
-available directly (for example `security`, `feedback`, `clarity`, `craft`).
+`infra`, `ux`, `craft`, `creativity`, `ceo`. Group members are also
+available directly (for example `security`, `feedback`, `clarity`, `alive`).
 
 ### Chrome
 

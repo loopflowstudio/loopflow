@@ -39,6 +39,14 @@ Smoke tests for SSE/WSS through Caddy TLS proxy happen during deployment (steps 
 - Keep orchestration ownership in loopflow while editors handle their native remote transport
 - Ship remote connectivity incrementally: secure auth first, then UX and API breadth
 
+## Risks
+
+- **TLS proxy latency for SSE/WSS.** Real-time event streaming through Caddy TLS proxy adds latency that hasn't been validated at scale. Mitigate: smoke test SSE/WSS through Caddy during deployment steps 1-2, not as a separate phase.
+- **Host-side git worktrees for prompt assembly.** Docker fork branches rely on host-side worktrees before container launch. Moving prompt assembly into containers would require container→host sync or a prompt build path that doesn't need host materialization. Acceptable for now.
+- **Stale PR state without GitHub token.** Queue UX must degrade gracefully when no token is configured — treat as degraded mode, not hard failure.
+- **Remote file access depends on editor SSH support.** Cursor/VSCode/Zed each have different Remote SSH implementations. If any breaks or changes behavior, the one-click workflow breaks for that editor. Mitigate: "Copy SSH Command" as universal fallback.
+- **Agent timeout configuration surface.** `executor.agent_timeout` is daemon-config only. If users need per-wave or per-session timeouts, the config model needs rethinking. Defer until dogfooding reveals whether this is a real need.
+
 ## Update after Phase 01E (Docker fork parity)
 
 Phases 01A–01E are fully shipped. What we now treat as non-negotiable for remote work:

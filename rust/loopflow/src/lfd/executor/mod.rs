@@ -17,7 +17,7 @@ use crate::lfd::types::Wave;
 pub use helpers::{create_wave_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
-fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
+pub(crate) fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
     let path = cwd.join(relative_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -26,7 +26,7 @@ fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Resu
     Ok(())
 }
 
-fn remove_workspace_file(cwd: &Path, relative_path: &str) -> Result<()> {
+pub(crate) fn remove_workspace_file(cwd: &Path, relative_path: &str) -> Result<()> {
     let path = cwd.join(relative_path);
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),

@@ -7,12 +7,13 @@ use crate::engine::worktree::create_worktree;
 use crate::engine::{expand_flow, next_action, ConcreteFork, ConcreteItem, Flow, FlowAction};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
-use crate::lfd::executor::{AgentExecutor, AgentRunContext};
+use crate::lfd::executor::{
+    cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
+};
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use tokio::runtime::Builder as TokioRuntimeBuilder;
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
@@ -88,11 +89,6 @@ struct ForkBranchTask {
 fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let planned =
         plan_fork_execution(&fork.branches, &cli.direction).map_err(|err| anyhow!(err))?;
-    let runtime = TokioRuntimeBuilder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("failed to initialize tokio runtime for fork workspace hooks")?;
-    let workspace_executor = CliWorkspaceExecutor;
 
     let base_branch = current_branch(repo)?
         .ok_or_else(|| anyhow!("fork execution requires an active branch (detached HEAD)"))?;
@@ -110,12 +106,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
                 branch_name
             )
         }) {
-            runtime.block_on(cleanup_fork_artifacts(
-                &workspace_executor,
-                repo,
-                &worktrees,
-                false,
-            ));
+            cleanup_fork_worktrees(&worktrees);
             return Err(err);
         }
 
@@ -184,27 +175,13 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     let manifest = ForkManifest { branches: outcomes };
     let manifest_json =
         serde_json::to_vec_pretty(&manifest).context("failed to encode fork manifest as JSON")?;
-    if let Err(err) = runtime.block_on(workspace_executor.write_to_workspace(
-        repo,
-        FORK_MANIFEST_RELATIVE_PATH,
-        &manifest_json,
-    )) {
-        runtime.block_on(cleanup_fork_artifacts(
-            &workspace_executor,
-            repo,
-            &worktrees,
-            false,
-        ));
+    if let Err(err) = write_workspace_file(repo, FORK_MANIFEST_RELATIVE_PATH, &manifest_json) {
+        cleanup_fork_worktrees(&worktrees);
         return Err(err);
     }
 
     let synthesize_result = crate::lf::commands::run::run(Some(FORK_SYNTHESIZE_STEP), message, cli);
-    runtime.block_on(cleanup_fork_artifacts(
-        &workspace_executor,
-        repo,
-        &worktrees,
-        true,
-    ));
+    cleanup_fork_artifacts(repo, &worktrees);
 
     synthesize_result?;
 
@@ -215,49 +192,21 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy)]
-struct CliWorkspaceExecutor;
-
-#[async_trait::async_trait]
-impl AgentExecutor for CliWorkspaceExecutor {
-    async fn run(
-        &self,
-        _cmd: Vec<String>,
-        _cwd: &Path,
-        _context: AgentRunContext<'_>,
-    ) -> Result<i32> {
-        Err(anyhow!(
-            "cli workspace executor does not support agent process execution"
-        ))
+fn cleanup_fork_artifacts(repo: &Path, worktrees: &[PathBuf]) {
+    if let Err(err) = remove_workspace_file(repo, FORK_MANIFEST_RELATIVE_PATH) {
+        eprintln!(
+            "failed to remove fork manifest {} in {}: {}",
+            FORK_MANIFEST_RELATIVE_PATH,
+            repo.display(),
+            err
+        );
     }
-
-    async fn terminate(&self, _agent_id: &str) -> Result<()> {
-        Ok(())
-    }
+    cleanup_fork_worktrees(worktrees);
 }
 
-async fn cleanup_fork_artifacts(
-    executor: &CliWorkspaceExecutor,
-    repo: &Path,
-    worktrees: &[PathBuf],
-    remove_manifest: bool,
-) {
-    if remove_manifest {
-        if let Err(err) = executor
-            .remove_from_workspace(repo, FORK_MANIFEST_RELATIVE_PATH)
-            .await
-        {
-            eprintln!(
-                "failed to remove fork manifest {} in {}: {}",
-                FORK_MANIFEST_RELATIVE_PATH,
-                repo.display(),
-                err
-            );
-        }
-    }
-
+fn cleanup_fork_worktrees(worktrees: &[PathBuf]) {
     for worktree in worktrees {
-        if let Err(err) = executor.cleanup_ephemeral_worktree(repo, worktree).await {
+        if let Err(err) = cleanup_workspace_worktree(worktree) {
             eprintln!(
                 "failed to clean up fork worktree {}: {}",
                 worktree.display(),

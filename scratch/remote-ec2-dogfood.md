@@ -1,135 +1,118 @@
-# EC2 Dogfood Lane
+# EC2 Dogfood Lane — Close-the-Gap Checklist
 
-## Problem
+_Last updated: February 25, 2026_
 
-The remote lfd stack (Docker Compose + Caddy + static token) has never been assembled and validated over a real WAN connection. All existing tests run against localhost. The Caddyfile is hardcoded to `localhost, 127.0.0.1` with self-signed TLS — it won't work on EC2 with a real domain. There's no smoke script that exercises lfd through a TLS reverse proxy, which means SSE and WebSocket behavior through Caddy is unvalidated.
+This checklist closes the gap between the current `lfd-dev` state (`44.227.252.151`) and the Step 1 target in `wave/remote`.
 
-We need one stable remote lane running end-to-end before expanding API surface or shipping studio auth. The team can't dogfood remote workflows until this works.
+## Current state snapshot (verified February 25, 2026)
 
-## Approach
+- `lfd-dev` host is reachable and serving `https://44.227.252.151/health`.
+- TLS is currently Caddy **internal CA** (not public ACME cert).
+- Remote host `/home/ubuntu/loopflow` is on `49914dd` and **15 commits behind** `origin/main` (`32cfda7`).
+- Remote `deploy/Caddyfile` is manually edited (hardcoded IP), creating drift.
+- `../studio` `main` includes `scripts/lfq_e2e.py` + `terraform/dev/deploy.py redeploy`.
+- `loopflow.remote` still lacks the planned Step 1 deliverables (param Caddyfile, prod compose env+80, remote smoke script, deploy README).
 
-Three deliverables in this repo. Provisioning (IaC, security groups, DNS) lives in `../studio`.
+---
 
-### 1. Production-ready Caddy configuration
+## Phase 1 — Stabilize `lfd-dev` deployment lane (`../studio`)
 
-Replace the localhost-only Caddyfile with a parameterized version that works for any domain:
+- [ ] **P1.1 Remove hidden host drift before redeploy**
+  - Repo: `../studio`
+  - Action: SSH to `lfd-dev`, capture and commit any intentional host-only config deltas (or delete them).
+  - Done when: `cd /home/ubuntu/loopflow && git status --short` is clean.
 
-```caddy
-{$LF_DOMAIN:localhost} {
-	tls {$LF_TLS_MODE:internal}
+- [ ] **P1.2 Redeploy remote host from known branch tip**
+  - Repo: `../studio`
+  - Command: `python3 terraform/dev/deploy.py redeploy main`
+  - Done when: remote `git rev-parse HEAD` equals `origin/main`, compose services healthy.
 
-	@websocket {
-		header Connection *Upgrade*
-		header Upgrade websocket
-	}
-	reverse_proxy @websocket lfd:2486
+- [ ] **P1.3 Keep stage verification runnable from studio**
+  - Repo: `../studio`
+  - Command: `python3 scripts/lfq_e2e.py all --stage4-url https://44.227.252.151 --stage4-token '<token>' --stage4-ca-cert <cert>`
+  - Done when: all 4 stages pass on first run.
 
-	reverse_proxy lfd:2486 {
-		flush_interval -1
-	}
-}
-```
+---
 
-Key changes:
-- `{$LF_DOMAIN}` — set to the EC2 hostname or domain. Caddy auto-provisions Let's Encrypt when this is a real domain.
-- `{$LF_TLS_MODE}` — defaults to `internal` (self-signed) for dev. Omit or set empty for production ACME.
-- `flush_interval -1` — disables response buffering so SSE events stream immediately instead of being batched by Caddy.
-- WebSocket matcher — explicit upgrade handling to ensure Caddy doesn't interfere with the WS handshake.
+## Phase 2 — Ship Step 1 code in `loopflow.remote`
 
-Update `docker-compose.prod.yml` to pass domain config and expose port 80 (ACME HTTP challenge):
+- [ ] **P2.1 Parameterize Caddy for dev/prod domain modes**
+  - Repo: `loopflow.remote`
+  - Files: `deploy/Caddyfile`
+  - Required changes:
+    - Use `{$LF_DOMAIN:localhost}` site label
+    - Use `tls {$LF_TLS_MODE:internal}`
+    - Add websocket matcher + dedicated reverse proxy
+    - Add `flush_interval -1` for SSE
+  - Done when: same file works for localhost/internal and domain/ACME.
 
-```yaml
-services:
-  caddy:
-    environment:
-      LF_DOMAIN: "${LF_DOMAIN:-localhost}"
-      LF_TLS_MODE: "${LF_TLS_MODE:-internal}"
-    ports:
-      - "443:443"
-      - "80:80"
-```
+- [ ] **P2.2 Expose ACME path + pass Caddy env in prod compose**
+  - Repo: `loopflow.remote`
+  - File: `deploy/docker-compose.prod.yml`
+  - Required changes:
+    - Add `LF_DOMAIN` + `LF_TLS_MODE` env to `caddy`
+    - Expose both `443:443` and `80:80`
+  - Done when: compose can run internal TLS and ACME modes without file edits.
 
-### 2. Remote smoke script
+- [ ] **P2.3 Add one-command remote smoke script**
+  - Repo: `loopflow.remote`
+  - File: `scripts/test_remote_smoke.py`
+  - Required scenarios:
+    1. `/health`
+    2. wave CRUD
+    3. auth rejection
+    4. SSE session events
+    5. WS `/ws` connected snapshot
+    6. wave run + logs stream
+    7. WS reconnect snapshot
+  - Done when: script exits 0 only when all scenarios pass.
 
-One runnable script: `scripts/test_remote_smoke.py`. Takes a remote host URL and token as arguments. Exercises the full test loop from the wave item:
+- [ ] **P2.4 Add deploy runbook for EC2 lane**
+  - Repo: `loopflow.remote`
+  - File: `deploy/README.md`
+  - Include: prerequisites, quick start, env config, verification, credential mounts, troubleshooting, manual Concerto checks.
+  - Done when: clean-room reprovision is possible without tribal knowledge.
 
-```
-uv run python scripts/test_remote_smoke.py --url https://lfd.example.com --token <token>
-```
+- [ ] **P2.5 Add required Python dev dependency**
+  - Repo: `loopflow.remote`
+  - File: `pyproject.toml`
+  - Required change: add `websockets` to dev dependency group if not already present.
+  - Done when: smoke script WS path runs from `uv run`.
 
-Scenarios (building on existing `api_harness.py` and `wave_scenarios.py`):
+---
 
-| # | Scenario | What it validates |
-|---|----------|-------------------|
-| 1 | `GET /health` | lfd reachable through Caddy TLS |
-| 2 | Wave CRUD | Create, list, get, update, delete via authenticated API |
-| 3 | Auth rejection | Unauthenticated request returns 401 |
-| 4 | SSE streaming | `GET /v0/sessions/{id}/events` delivers events through TLS proxy |
-| 5 | WebSocket | `GET /ws` upgrade succeeds, receives `connected` message with waves snapshot |
-| 6 | Wave run + logs | `POST /v0/waves/{id}/run`, then `GET /v0/waves/{id}/logs` streams output |
-| 7 | Reconnect | Close WS, reopen, verify new connection receives current state |
+## Phase 3 — Converge `lfd-dev` onto Step 1 target behavior
 
-The script reuses `ApiClient`, `ApiAssertions`, and `ScenarioRunner` from `scripts/lib/`. It adds a `WebSocketClient` wrapper for WS scenarios using the `websockets` library (already in the dev dependency tree via httpx).
+- [ ] **P3.1 Deploy updated `loopflow.remote` to `lfd-dev`**
+  - Repo: `../studio` + remote host
+  - Command: `python3 terraform/dev/deploy.py redeploy <branch-with-step1-changes>`
+  - Done when: host is running the new Caddy/compose configuration with no manual edits.
 
-What the script does NOT test:
-- Fork execution (requires agent image + API keys on host — separate validation)
-- Editor/terminal launch (requires SSH — manual verification)
-- Concerto UI (manual — connect, browse, run a wave)
+- [ ] **P3.2 Verify internal TLS mode on raw IP lane (current)**
+  - Command: run remote smoke against `https://44.227.252.151` with CA cert bundle.
+  - Done when: all 7 smoke scenarios pass over TLS proxy.
 
-These are manual steps documented in `deploy/README.md`.
+- [ ] **P3.3 Verify public-domain ACME lane (target)**
+  - Prereq: DNS A record points domain to `44.227.252.151`, SG permits 80/443.
+  - Command: run same remote smoke against `https://<domain>` with trusted cert.
+  - Done when: all 7 scenarios pass without custom CA cert.
 
-### 3. Deploy documentation
+---
 
-`deploy/README.md` captures the EC2 setup procedure end-to-end. Not IaC (that's studio), but the complete runbook for standing up the Docker Compose stack on a fresh EC2 instance.
+## Exit criteria (Step 1 complete)
 
-Sections:
-- **Prerequisites**: EC2 instance (Ubuntu 22.04+, t3.medium+), Docker + Compose, domain pointed at instance IP, ports 80/443 open
-- **Quick start**: Clone, set env vars, `docker compose up`
-- **Configuration**: LF_DOMAIN, LFD_AUTH_TOKEN, credential mounts, executor image
-- **Verification**: Run smoke script
-- **Credential mounts**: How to provide API keys for agent execution
-- **Troubleshooting**: Common failure modes (TLS provisioning, WS timeouts, auth failures)
-- **Manual test loop**: Concerto connection, editor launch, terminal access (the steps that can't be automated)
+- [ ] `loopflow.remote` has all four deliverables merged:
+  - parameterized Caddyfile
+  - prod compose domain+ACME wiring
+  - remote smoke script
+  - deploy README
+- [ ] `lfd-dev` is reproducible from docs + scripts only (no hand edits on host).
+- [ ] SSE and WS are validated through Caddy TLS by passing smoke scenarios 4/5/7.
+- [ ] Team can run remote dogfood loop from laptop with one smoke command.
 
-## Alternatives considered
+---
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Full IaC (Terraform) in this repo | Reproducible provisioning | Wrong repo — provisioning belongs in `../studio`. This repo owns protocol and smoke validation. |
-| Keep Caddyfile as-is, document workarounds | No code changes needed | Hardcoded localhost makes EC2 impossible. Self-signed certs break Concerto without trust dance. Real ACME is strictly better. |
-| Shell-based smoke script | Simpler, fewer deps | Can't reuse existing Python test harness (ApiClient, ScenarioRunner). WebSocket testing is painful in bash. |
-| Test SSE/WS separately from CRUD | Smaller, focused scripts | The whole point is validating the integrated path. One script, one run, one verdict. |
+## Open questions to resolve during execution
 
-## Key decisions
-
-**Caddy env vars over multiple Caddyfiles.** One Caddyfile with `{$LF_DOMAIN}` works for dev (localhost + internal TLS) and prod (real domain + ACME). No file switching, no template rendering.
-
-**Python smoke script, not pytest.** The remote smoke is a validation tool, not a test suite. It runs against arbitrary remote hosts, not a hermetic fixture. `ScenarioRunner` gives pass/fail output without pytest overhead. Can be run from any laptop with `uv`.
-
-**WebSocket scenario uses `websockets` library.** The `httpx` client doesn't support WebSocket. `websockets` is a lightweight, well-maintained library. Add as a dev dependency.
-
-**SSE validation creates a real session.** No way to test SSE without a session that emits events. The smoke script creates a session, sends a trivial input, and verifies at least one event arrives within a timeout. This validates the full SSE path through Caddy without requiring a real agent.
-
-**flush_interval -1 on Caddy reverse_proxy.** Without this, Caddy buffers SSE responses and events arrive in bursts instead of streaming. This is the most likely "it works locally but breaks remotely" issue.
-
-**Manual test loop stays manual.** Concerto connection, editor launch, terminal access — these involve UI interaction and SSH. Document them as a checklist in `deploy/README.md`, don't try to automate.
-
-## Scope
-
-- **In scope**: Caddyfile parameterization, remote smoke script, deploy README, `websockets` dev dependency
-- **Out of scope**: EC2 provisioning IaC (studio), JWT auth, new API endpoints, Concerto code changes, fork execution testing in smoke script
-
-## Done when
-
-```bash
-# From laptop, against EC2:
-uv run python scripts/test_remote_smoke.py --url https://lfd.example.com --token $TOKEN
-# All 7 scenarios pass.
-```
-
-- Caddyfile works with real domain + ACME TLS (no self-signed cert dance)
-- SSE events stream without buffering delay through Caddy
-- WebSocket connects and receives state through Caddy
-- `deploy/README.md` is sufficient to stand up a new EC2 instance without asking anyone
-- Wave goal: *"EC2 lane can be reprovisioned from docs without tribal knowledge"* — the README is that doc
-- Wave goal: *"SSE and WS survive Caddy TLS path under normal usage"* — the smoke script validates this on every run
+- [ ] When will `lfd.loopflow.dev` (or equivalent) DNS be created and pointed at `44.227.252.151`?
+- [ ] Should `terraform/dev/deploy.py redeploy` also enforce Caddy mode (`internal` vs ACME) to prevent config drift?

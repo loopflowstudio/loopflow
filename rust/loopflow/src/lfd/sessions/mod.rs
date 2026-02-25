@@ -13,7 +13,7 @@ use crate::engine::agent::AgentConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::{write_prompt_log, Surface};
-use crate::engine::synthetic::ClientContext;
+use crate::engine::structured_reply::ClientContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};

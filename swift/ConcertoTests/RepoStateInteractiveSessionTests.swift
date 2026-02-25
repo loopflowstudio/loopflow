@@ -13,16 +13,16 @@ struct RepoStateInteractiveSessionTests {
         let wave = makeWave(id: "wave-running", status: .running)
         state.waveStore.set(wave)
 
-        #expect(state.shouldShowInteractiveChat(for: wave) == false)
+        #expect(state.shouldShowInteractiveSession(for: wave) == false)
 
         state.setOptimisticInteractiveSessionStart(for: wave.id, isStarting: true)
         #expect(state.isOptimisticallyStartingInteractiveSession(for: wave.id))
-        #expect(state.shouldShowInteractiveChat(for: wave))
-        #expect(state.chatState(for: wave.id).awaitingSessionJoin)
+        #expect(state.shouldShowInteractiveSession(for: wave))
+        #expect(state.sessionState(for: wave.id).awaitingSessionJoin)
 
         state.setOptimisticInteractiveSessionStart(for: wave.id, isStarting: false)
-        #expect(state.shouldShowInteractiveChat(for: wave) == false)
-        #expect(state.chatState(for: wave.id).awaitingSessionJoin == false)
+        #expect(state.shouldShowInteractiveSession(for: wave) == false)
+        #expect(state.sessionState(for: wave.id).awaitingSessionJoin == false)
     }
 
     @Test("waiting wave routes to chat without optimistic state")
@@ -32,7 +32,7 @@ struct RepoStateInteractiveSessionTests {
         let wave = makeWave(id: "wave-waiting", status: .waiting)
         state.waveStore.set(wave)
 
-        #expect(state.shouldShowInteractiveChat(for: wave))
+        #expect(state.shouldShowInteractiveSession(for: wave))
     }
 
     private func makeWave(id: String, status: WaveStatus) -> WaveViewModel {

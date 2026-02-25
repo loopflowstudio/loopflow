@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::engine::agent::{
-    build_codex_thread_start_params, system_prompt_with_synthetic_tools, AgentConfig,
+    build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
 };
 use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
@@ -144,7 +144,7 @@ impl Harness for CodexHarness {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {
                 let mut parts = Vec::new();
-                let system_prompt = system_prompt_with_synthetic_tools(launch);
+                let system_prompt = system_prompt_with_structured_replies(launch);
                 if !system_prompt.trim().is_empty() {
                     parts.push(system_prompt.trim().to_string());
                 }

@@ -8,6 +8,8 @@ public struct ActionButtonsView: View {
     public let actions: [SuggestedAction]
     public let onTap: (SuggestedAction) -> Void
 
+    @State private var interactive = false
+
     public init(actions: [SuggestedAction], onTap: @escaping (SuggestedAction) -> Void) {
         self.actions = actions
         self.onTap = onTap
@@ -37,7 +39,15 @@ public struct ActionButtonsView: View {
                 }
             }
         }
+        .allowsHitTesting(interactive)
         .animation(DesignAnimation.standard(reduceMotion), value: actions)
+        .onChange(of: actions) { _, _ in
+            interactive = false
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                interactive = true
+            }
+        }
     }
 
     @ViewBuilder

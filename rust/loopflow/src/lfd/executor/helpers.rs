@@ -22,7 +22,7 @@ use crate::engine::worktrees::{
 };
 
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
-use crate::engine::synthetic::ClientContext;
+use crate::engine::structured_reply::ClientContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::security::{sanitize_fs_component, validate_safe_id};
 use crate::lfd::store::SharedStore;

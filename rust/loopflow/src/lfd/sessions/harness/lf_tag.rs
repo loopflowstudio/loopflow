@@ -3,7 +3,7 @@ use crate::lfd::sessions::types::{SessionEvent, SuggestedActionPayload};
 const SUGGEST_ACTIONS_OPEN: &str = "<lf:suggest_actions>";
 const SUGGEST_ACTIONS_CLOSE: &str = "</lf:suggest_actions>";
 
-/// Streaming parser for synthetic `<lf:...>` tag output embedded in text deltas.
+/// Streaming parser for `<lf:...>` tag output embedded in text deltas.
 #[derive(Debug, Default)]
 pub(super) struct LfTagParser {
     stream_buffer: String,

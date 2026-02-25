@@ -10,7 +10,7 @@ use crate::engine::prompt::{
     DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, Surface,
     DEFAULT_CONTEXT_BUDGET,
 };
-use crate::engine::synthetic::{synthetic_tools_for_context, ClientContext};
+use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
 /// Optional per-source overrides for context gathering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -138,7 +138,7 @@ pub fn prepare_launch_prompt(
         max_turns,
         cwd: Some(cwd.unwrap_or(repo_root)),
         skip_permissions: yolo_mode,
-        synthetic_tools: synthetic_tools_for_context(&client_context, action_style),
+        structured_replies: structured_replies_for_context(&client_context, action_style),
     };
 
     Ok(PreparedLaunchPrompt {
@@ -284,7 +284,7 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_injects_synthetic_tools_for_ui_context() {
+    fn prepare_launch_prompt_injects_structured_replies_for_ui_context() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
@@ -301,16 +301,19 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.synthetic_tools.len(), 1);
-        assert_eq!(prepared.config.synthetic_tools[0].name, "suggest_actions");
+        assert_eq!(prepared.config.structured_replies.len(), 1);
+        assert_eq!(
+            prepared.config.structured_replies[0].name,
+            "suggest_actions"
+        );
         assert!(
-            prepared.config.synthetic_tools[0]
+            prepared.config.structured_replies[0]
                 .guidance
-                .contains("up to 3 next actions"),
+                .contains("up to 3"),
             "compact UI should cap suggestions to 3"
         );
         assert!(
-            prepared.config.synthetic_tools[0]
+            prepared.config.structured_replies[0]
                 .guidance
                 .contains("workflow forward"),
             "step action_style should shape guidance"

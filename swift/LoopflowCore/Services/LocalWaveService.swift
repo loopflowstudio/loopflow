@@ -725,7 +725,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     public func getSession(_ id: String) async throws -> AgentSession {
         let request = try makeRequest(sessionURL(id))
-        let (data, response) = try await performRequest(request)
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
         return try parseSessionResponse(data: data, response: response)
     }
 

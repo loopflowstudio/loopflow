@@ -13,7 +13,7 @@ pub(super) struct ReaderState {
     tool_blocks: HashMap<usize, ToolUseState>,
     /// Map tool_use_id -> block index for direct completion lookup.
     tool_indexes: HashMap<String, usize>,
-    /// Streaming parser for synthetic `<lf:...>` tagged payloads.
+    /// Streaming parser for `<lf:...>` tagged payloads.
     tag_parser: LfTagParser,
 }
 
@@ -368,7 +368,7 @@ fn process_user_message(
         return;
     };
 
-    for (idx, block) in blocks.iter().enumerate() {
+    for block in blocks {
         let Some(block_type) = block.get("type").and_then(Value::as_str) else {
             continue;
         };
@@ -393,22 +393,9 @@ fn process_user_message(
                     item: completed_item,
                 });
             }
-            "text" => {
-                let Some(text) = block.get("text").and_then(Value::as_str) else {
-                    continue;
-                };
-                if text.is_empty() {
-                    continue;
-                }
-                let _ = events.send(SessionEvent::ItemCompleted {
-                    turn_id: turn_id.to_string(),
-                    item: SessionItem::Message {
-                        id: format!("msg_user_{turn_id}_{idx}"),
-                        text: text.to_string(),
-                        phase: Some("user".to_string()),
-                    },
-                });
-            }
+            // Text blocks in user messages are Claude echoing back input the
+            // client already displayed. Emitting them would duplicate messages.
+            "text" => {}
             _ => {}
         }
     }
@@ -723,26 +710,15 @@ mod tests {
     }
 
     #[test]
-    fn process_line_user_text_emits_user_message_item() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+    fn process_line_user_text_is_dropped() {
+        let (tx, rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
+        // Text blocks in user messages are Claude echoing back input the
+        // client already displayed — emitting them would duplicate messages.
         let line = r#"{"type":"user","message":{"content":[{"type":"text","text":"Design the architecture before coding."}]}}"#;
 
         process_line(line, "turn_1", &tx, &mut state);
 
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            SessionEvent::ItemCompleted { turn_id, item } => {
-                assert_eq!(turn_id, "turn_1");
-                match item {
-                    SessionItem::Message { text, phase, .. } => {
-                        assert_eq!(text, "Design the architecture before coding.");
-                        assert_eq!(phase.as_deref(), Some("user"));
-                    }
-                    other => panic!("expected Message item, got {other:?}"),
-                }
-            }
-            other => panic!("expected ItemCompleted event, got {other:?}"),
-        }
+        assert!(rx.is_empty(), "user text blocks should not emit events");
     }
 }

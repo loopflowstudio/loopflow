@@ -14,7 +14,7 @@ pub mod platform;
 pub mod prompt;
 pub mod skills;
 pub mod stream;
-pub mod synthetic;
+pub mod structured_reply;
 pub mod worktree;
 pub mod worktrees;
 
@@ -43,6 +43,7 @@ pub use prompt::{
 pub use stream::{
     format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,
 };
-pub use synthetic::{
-    render_synthetic_guidance, synthetic_tools_for_context, ClientContext, SyntheticTool,
+pub use structured_reply::{
+    render_structured_reply_guidance, structured_replies_for_context, ClientContext,
+    StructuredReply,
 };

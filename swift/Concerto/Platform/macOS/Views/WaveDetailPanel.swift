@@ -36,12 +36,12 @@ struct WaveDetailPanel: View {
     private var waveRuns: [WaveRun] { repoState.runStore.runs(for: wave.id) }
     private var isSelectedWave: Bool { repoState.selectedWave?.id == wave.id }
     private var waveContent: WaveContent? { wave.content }
-    private var activeChatState: ChatState? {
-        if repoState.shouldShowInteractiveChat(for: wave) {
+    private var activeSessionState: SessionState? {
+        if repoState.shouldShowInteractiveSession(for: wave) {
             if let sessionId = repoState.interactiveSessionId(for: wave.id) {
-                return repoState.chatState(for: wave.id, joinSessionId: sessionId)
+                return repoState.sessionState(for: wave.id, joinSessionId: sessionId)
             }
-            return repoState.chatState(for: wave.id)
+            return repoState.sessionState(for: wave.id)
         }
         return nil
     }
@@ -55,8 +55,8 @@ struct WaveDetailPanel: View {
 
     var body: some View {
         Group {
-            if let chatState = activeChatState {
-                interactiveChatView(state: chatState)
+            if let sessionState = activeSessionState {
+                interactiveSessionView(state: sessionState)
             } else if outputBuffer.hasActiveSession(for: wave.id),
                let session = outputBuffer.interactiveSession {
                 InteractiveSessionView(session: session)
@@ -136,11 +136,11 @@ struct WaveDetailPanel: View {
 
     // MARK: - Blended View (header + context + actions)
 
-    private func interactiveChatView(state: ChatState) -> some View {
+    private func interactiveSessionView(state: SessionState) -> some View {
         VStack(spacing: 0) {
             header
             Divider()
-            WaveChatView(state: state)
+            WaveSessionView(state: state)
         }
     }
 
@@ -151,7 +151,7 @@ struct WaveDetailPanel: View {
             Divider()
 
             if selectedTab == .chat {
-                WaveChatView(state: repoState.chatState(for: wave.id))
+                WaveSessionView(state: repoState.sessionState(for: wave.id))
             } else {
                 ScrollView {
                     VStack(spacing: Spacing.lg) {

@@ -246,7 +246,7 @@ mod tests {
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
             skip_permissions: false,
-            synthetic_tools: Vec::new(),
+            structured_replies: Vec::new(),
         });
 
         let first = harness

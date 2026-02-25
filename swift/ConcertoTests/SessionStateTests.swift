@@ -3,12 +3,12 @@ import Testing
 @testable import Concerto
 @testable import LoopflowCore
 
-@Suite("ChatState")
-struct ChatStateTests {
+@Suite("SessionState")
+struct SessionStateTests {
     @MainActor
     @Test("joining existing session streams without creating a new session")
     func joinExistingSessionSkipsCreate() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -18,7 +18,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: service,
@@ -35,8 +35,8 @@ struct ChatStateTests {
 
     @MainActor
     @Test("user message session items render as user chat bubbles")
-    func userMessageItemsRenderAsChatBubbles() async {
-        let service = MockChatService(
+    func userMessageItemsRenderAsMessageRows() async {
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -54,7 +54,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: service,
@@ -74,10 +74,10 @@ struct ChatStateTests {
     @MainActor
     @Test("seeded initial user message upserts without duplicates")
     func seededInitialUserMessageUpserts() {
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
-            waveService: MockChatService(),
+            waveService: MockSessionService(),
             userDefaults: makeUserDefaults("seeded-initial-message")
         )
 
@@ -92,7 +92,7 @@ struct ChatStateTests {
     @MainActor
     @Test("send consumes text deltas once when replay includes duplicate seq")
     func sendDedupesDuplicateSeq() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -103,7 +103,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: service,
@@ -120,7 +120,7 @@ struct ChatStateTests {
     @MainActor
     @Test("send surfaces session errors and failed turns")
     func sendFailedTurn() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -130,7 +130,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: service,
@@ -147,7 +147,7 @@ struct ChatStateTests {
     @MainActor
     @Test("session is created once and reused across sends")
     func sessionReusedAcrossTurns() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -162,7 +162,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: service,
@@ -179,7 +179,7 @@ struct ChatStateTests {
     @MainActor
     @Test("send waits for session to become active before posting input")
     func sendWaitsForActiveSession() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             createSessionResults: [.success(startingSession(id: "session_1"))],
             getSessionResults: [
                 .success(startingSession(id: "session_1")),
@@ -193,7 +193,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("wait-active"))
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("wait-active"))
         await state.send("hello")
         await waitUntil { state.turnState == .completed }
 
@@ -205,7 +205,7 @@ struct ChatStateTests {
     @MainActor
     @Test("item update before start is ignored")
     func ignoresOutOfOrderItemUpdate() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -223,7 +223,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("out-of-order"))
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("out-of-order"))
         await state.send("check")
         await waitUntil { state.turnState == .completed }
 
@@ -235,7 +235,7 @@ struct ChatStateTests {
     @MainActor
     @Test("multiple updates for one item keep one transcript row")
     func keepsStableIdentityForItemUpdates() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -267,7 +267,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("stable-item-id"))
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("stable-item-id"))
         await state.send("run")
         await waitUntil { state.turnState == .completed }
 
@@ -280,7 +280,7 @@ struct ChatStateTests {
     @MainActor
     @Test("item completion without start still creates one row")
     func completionWithoutStartCreatesRow() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -293,7 +293,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("complete-no-start"))
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("complete-no-start"))
         await state.send("run")
         await waitUntil { state.turnState == .completed }
 
@@ -307,7 +307,7 @@ struct ChatStateTests {
     @Test("command output detail is truncated to bounded size")
     func truncatesLargeDetail() async {
         let largeOutput = String(repeating: "x", count: 20_000)
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -325,7 +325,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("detail-cap"))
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: makeUserDefaults("detail-cap"))
         await state.send("run")
         await waitUntil { state.turnState == .completed }
 
@@ -339,9 +339,9 @@ struct ChatStateTests {
     @Test("replay sentinel promotes stream phase from replaying to live")
     func replaySentinelPromotesPhase() async {
         let defaults = makeUserDefaults("replay-sentinel")
-        defaults.set("session_1", forKey: "chatSession.wave-test")
+        defaults.set("session_1", forKey: "session.wave-test")
 
-        let service = MockChatService(
+        let service = MockSessionService(
             getSessionResults: [.success(activeSession(id: "session_1"))],
             streamPlans: [
                 .init(events: [
@@ -352,7 +352,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
         await state.reconnectIfNeeded()
         await waitUntil { state.streamPhase == .live }
 
@@ -368,9 +368,9 @@ struct ChatStateTests {
     @Test("missing replay sentinel keeps stream in replaying phase")
     func missingReplaySentinelKeepsReplaying() async {
         let defaults = makeUserDefaults("missing-sentinel")
-        defaults.set("session_1", forKey: "chatSession.wave-test")
+        defaults.set("session_1", forKey: "session.wave-test")
 
-        let service = MockChatService(
+        let service = MockSessionService(
             getSessionResults: [.success(activeSession(id: "session_1"))],
             streamPlans: [
                 .init(events: [
@@ -379,7 +379,7 @@ struct ChatStateTests {
             ]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
         await state.reconnectIfNeeded()
         try? await Task.sleep(for: .milliseconds(200))
 
@@ -391,14 +391,14 @@ struct ChatStateTests {
     @Test("send is rejected while replaying")
     func sendRejectedDuringReconnect() async {
         let defaults = makeUserDefaults("reconnect-race")
-        defaults.set("session_1", forKey: "chatSession.wave-test")
+        defaults.set("session_1", forKey: "session.wave-test")
 
-        let service = MockChatService(
+        let service = MockSessionService(
             getSessionResults: [.success(activeSession(id: "session_1"))],
             streamPlans: [.init(events: [], holdOpen: true)]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
         await state.reconnectIfNeeded()
         await state.send("hello")
 
@@ -412,16 +412,16 @@ struct ChatStateTests {
     @Test("stale persisted session is cleared")
     func stalePersistedSessionCleared() async {
         let defaults = makeUserDefaults("stale-session")
-        defaults.set("session_1", forKey: "chatSession.wave-test")
+        defaults.set("session_1", forKey: "session.wave-test")
 
-        let service = MockChatService(
+        let service = MockSessionService(
             getSessionResults: [.success(endedSession(id: "session_1"))]
         )
 
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
         await state.reconnectIfNeeded()
 
-        #expect(defaults.string(forKey: "chatSession.wave-test") == nil)
+        #expect(defaults.string(forKey: "session.wave-test") == nil)
         #expect(state.streamPhase == .idle)
     }
 
@@ -429,8 +429,8 @@ struct ChatStateTests {
     @Test("end session stops once, cancels stream, and appends lifecycle message")
     func endSessionStopsAndCancelsStream() async {
         let defaults = makeUserDefaults("end-session")
-        let service = MockChatService(streamPlans: [.init(events: [], holdOpen: true)])
-        let state = ChatState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
+        let service = MockSessionService(streamPlans: [.init(events: [], holdOpen: true)])
+        let state = SessionState(waveId: "wave-test", sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"), waveService: service, userDefaults: defaults)
 
         await state.send("hello")
         await waitUntil { service.sendInputCallCount == 1 }
@@ -444,7 +444,7 @@ struct ChatStateTests {
     @MainActor
     @Test("session creation uses configured harness and config")
     func sendUsesConfiguredSessionParameters() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -464,7 +464,7 @@ struct ChatStateTests {
             maxTurns: 2,
             yoloMode: true
         )
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionHarness: "codex",
             sessionWaveRunId: "run_123",
@@ -484,7 +484,7 @@ struct ChatStateTests {
     @MainActor
     @Test("suggested actions sanitize labels, cap at four, and replace prior set")
     func suggestedActionsSanitizeAndCap() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -503,7 +503,7 @@ struct ChatStateTests {
                 ])
             ]
         )
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: service,
@@ -520,10 +520,10 @@ struct ChatStateTests {
     @MainActor
     @Test("suggested actions clear on manual typing")
     func suggestedActionsClearOnTyping() async {
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
-            waveService: MockChatService(),
+            waveService: MockSessionService(),
             userDefaults: makeUserDefaults("suggested-actions-typing")
         )
         state.suggestedActions = [SuggestedAction(label: "Land PR")]
@@ -536,7 +536,7 @@ struct ChatStateTests {
     @MainActor
     @Test("latest suggested actions payload replaces prior actions, including empty payloads")
     func suggestedActionsLatestPayloadWins() async {
-        let service = MockChatService(
+        let service = MockSessionService(
             streamPlans: [
                 .init(events: [
                     .success(AgentSessionEventEnvelope(seq: 0, event: .turnStarted(turnId: "turn_1"))),
@@ -552,7 +552,7 @@ struct ChatStateTests {
                 ])
             ]
         )
-        let state = ChatState(
+        let state = SessionState(
             waveId: "wave-test",
             sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
             waveService: service,
@@ -576,8 +576,8 @@ private struct StreamPlan {
     }
 }
 
-private final class MockChatService: ChatService, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "MockChatService")
+private final class MockSessionService: SessionService, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "MockSessionService")
     private var createSessionResults: [Result<AgentSession, Error>]
     private var streamPlans: [StreamPlan]
     private var getSessionResults: [Result<AgentSession, Error>]
@@ -712,7 +712,7 @@ private func session(id: String, status: String, endedAt: Date? = nil) -> AgentS
 }
 
 private func makeUserDefaults(_ suffix: String) -> UserDefaults {
-    let suiteName = "ChatStateTests.\(suffix).\(UUID().uuidString)"
+    let suiteName = "SessionStateTests.\(suffix).\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
     return defaults
@@ -733,8 +733,8 @@ private func waitUntil(
 }
 
 @MainActor
-private func messages(in state: ChatState, role: ChatRole? = nil) -> [ChatMessage] {
-    let all = state.transcript.compactMap { entry -> ChatMessage? in
+private func messages(in state: SessionState, role: MessageRole? = nil) -> [SessionMessage] {
+    let all = state.transcript.compactMap { entry -> SessionMessage? in
         guard case .message(let message) = entry else { return nil }
         return message
     }
@@ -744,7 +744,7 @@ private func messages(in state: ChatState, role: ChatRole? = nil) -> [ChatMessag
 }
 
 @MainActor
-private func itemEntries(in state: ChatState) -> [TranscriptItem] {
+private func itemEntries(in state: SessionState) -> [TranscriptItem] {
     state.transcript.compactMap { entry -> TranscriptItem? in
         guard case .item(let item) = entry else { return nil }
         return item

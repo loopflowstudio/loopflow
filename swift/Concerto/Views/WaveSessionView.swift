@@ -1,23 +1,25 @@
 import SwiftUI
 import LoopflowCore
 
-struct WaveChatView: View {
+struct WaveSessionView: View {
     @Environment(\.palette) private var palette
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @Bindable var state: ChatState
+    @Bindable var state: SessionState
 
     @State private var composerText = ""
     @State private var expandedItemIds: Set<UUID> = []
+    @State private var expandedRunIds: Set<UUID> = []
+    @State private var isNearBottom = true
 
     var body: some View {
         VStack(spacing: Spacing.md) {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
-                        ForEach(state.transcript) { entry in
-                            transcriptRow(entry)
-                                .id(entry.id)
+                        ForEach(groupedTranscript) { group in
+                            transcriptGroupRow(group)
+                                .id(group.id)
                         }
 
                         if state.isLoading {
@@ -26,16 +28,21 @@ struct WaveChatView: View {
                                 .foregroundStyle(palette.textSecondary)
                                 .padding(.top, Spacing.sm)
                         }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("transcript-bottom")
+                            .onAppear { isNearBottom = true }
+                            .onDisappear { isNearBottom = false }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Spacing.lg)
                 }
                 .background(palette.background)
                 .onChange(of: state.transcript.count) { _, _ in
-                    if let last = state.transcript.last {
-                        withAnimation {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+                    guard isNearBottom, let last = state.transcript.last else { return }
+                    withAnimation {
+                        proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
@@ -54,7 +61,6 @@ struct WaveChatView: View {
                 TextField("Message", text: $composerText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...6)
-                    .disabled(!state.canSend)
 
                 Button("End") {
                     Task {
@@ -90,11 +96,57 @@ struct WaveChatView: View {
         }
     }
 
+    private var groupedTranscript: [TranscriptGroup] {
+        var groups: [TranscriptGroup] = []
+        var currentRun: [TranscriptItem] = []
+
+        func flushRun() {
+            guard !currentRun.isEmpty else { return }
+            if currentRun.count == 1 {
+                groups.append(.single(.item(currentRun[0])))
+            } else {
+                groups.append(.toolRun(currentRun))
+            }
+            currentRun = []
+        }
+
+        for entry in state.transcript {
+            switch entry {
+            case .item(let item) where item.card.type.isToolLike:
+                currentRun.append(item)
+            default:
+                flushRun()
+                groups.append(.single(entry))
+            }
+        }
+        flushRun()
+        return groups
+    }
+
+    @ViewBuilder
+    private func transcriptGroupRow(_ group: TranscriptGroup) -> some View {
+        switch group {
+        case .single(let entry):
+            transcriptRow(entry)
+        case .toolRun(let items):
+            ToolRunView(
+                items: items,
+                isExpanded: expandedRunIds.contains(group.id),
+                expandedItemIds: $expandedItemIds,
+                onToggleRun: {
+                    if !expandedRunIds.insert(group.id).inserted {
+                        expandedRunIds.remove(group.id)
+                    }
+                }
+            )
+        }
+    }
+
     @ViewBuilder
     private func transcriptRow(_ entry: TranscriptEntry) -> some View {
         switch entry {
         case .message(let message):
-            ChatBubble(message: message)
+            MessageRow(message: message)
 
         case .item(let item):
             TranscriptItemCardView(
@@ -118,9 +170,9 @@ struct WaveChatView: View {
     }
 }
 
-private struct ChatBubble: View {
+private struct MessageRow: View {
     @Environment(\.palette) private var palette
-    let message: ChatMessage
+    let message: SessionMessage
 
     var body: some View {
         if message.role == .system {
@@ -130,8 +182,8 @@ private struct ChatBubble: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, Spacing.xs)
         } else {
-            HStack {
-                if message.role == .user { Spacer(minLength: 48) }
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                accentBar
 
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     content
@@ -139,13 +191,8 @@ private struct ChatBubble: View {
                         .font(Typography.caption(11))
                         .foregroundStyle(palette.textSecondary)
                 }
-                .padding(Spacing.md)
-                .background(backgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                .frame(maxWidth: 620, alignment: .leading)
-
-                if message.role != .user { Spacer(minLength: 48) }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -166,16 +213,19 @@ private struct ChatBubble: View {
         }
     }
 
-    private var backgroundColor: Color {
+    private var accentBar: some View {
+        RoundedRectangle(cornerRadius: 1.5)
+            .fill(accentColor)
+            .frame(width: 3)
+            .frame(minHeight: Spacing.lg)
+    }
+
+    private var accentColor: Color {
         switch message.role {
-        case .user:
-            return palette.accent.opacity(0.12)
-        case .assistant:
-            return palette.surface
-        case .error:
-            return Color.statusError.opacity(0.12)
-        case .system:
-            return .clear
+        case .user: return palette.accent
+        case .assistant: return palette.textSecondary.opacity(0.4)
+        case .error: return .statusError
+        case .system: return .clear
         }
     }
 }
@@ -230,7 +280,75 @@ private struct TranscriptItemCardView: View {
         .padding(Spacing.md)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .frame(maxWidth: 700, alignment: .leading)
+    }
+}
+
+private enum TranscriptGroup: Identifiable {
+    case single(TranscriptEntry)
+    case toolRun([TranscriptItem])
+
+    var id: UUID {
+        switch self {
+        case .single(let entry): return entry.id
+        case .toolRun(let items): return items[0].id
+        }
+    }
+}
+
+private struct ToolRunView: View {
+    @Environment(\.palette) private var palette
+
+    let items: [TranscriptItem]
+    let isExpanded: Bool
+    @Binding var expandedItemIds: Set<UUID>
+    let onToggleRun: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                onToggleRun()
+            } label: {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+
+                    Text("\(items.count) tool calls")
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+
+                    Spacer()
+                }
+                .padding(.vertical, Spacing.xs)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Collapse tool calls" : "Expand \(items.count) tool calls")
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(items) { item in
+                        TranscriptItemCardView(
+                            item: item,
+                            isExpanded: expandedItemIds.contains(item.id),
+                            onToggleExpanded: {
+                                if !expandedItemIds.insert(item.id).inserted {
+                                    expandedItemIds.remove(item.id)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+extension SessionItemType {
+    var isToolLike: Bool {
+        switch self {
+        case .command, .tool, .file: return true
+        case .message, .thought, .unknown: return false
+        }
     }
 }
 

@@ -12,23 +12,23 @@ Reduce follow-up friction in chat by turning likely next steps into one-tap acti
 
 ## What shipped
 
-### 1) Engine-level synthetic tools
+### 1) Engine-level structured replies
 
-- Added `SyntheticTool` + `ClientContext` and injected tools through `AgentConfig`.
-- Added `synthetic_tools_for_context` so UI-aware sessions receive `suggest_actions` guidance.
+- Added `StructuredReply` + `ClientContext` and injected structured replies through `AgentConfig`.
+- Added `structured_replies_for_context` so UI-aware sessions receive `suggest_actions` guidance.
 - `ClientContext` is passed through launch/session setup (`client_has_ui`, `client_compact`).
 
 ### 2) Step-aware suggestion style
 
 - Added `action_style` parsing from step frontmatter.
-- Style is propagated into synthetic guidance:
+- Style is propagated into structured reply guidance:
   - `procedural`: workflow-forward choices
   - `exploratory`: branching/curiosity choices
   - default fallback: concrete generic actions
 
 ### 3) Provider-agnostic tool realization
 
-- Harnesses realize synthetic tools via prompt guidance (no MCP registration).
+- Harnesses realize structured replies via prompt guidance (no MCP registration).
 - Model emits tagged payloads:
 
 ```xml
@@ -45,12 +45,12 @@ Reduce follow-up friction in chat by turning likely next steps into one-tap acti
 
 ### 5) Swift state + UI integration
 
-- Added shared `SuggestedAction` model and `ChatState.suggestedActions`.
+- Added shared `SuggestedAction` model and `SessionState.suggestedActions`.
 - Added sanitization rules:
   - discard empty labels
   - cap list size
   - latest payload replaces previous actions (including empty-after-sanitize payloads)
-- Added `ActionButtonsView` in LoopflowCore and embedded it in `WaveChatView` above composer.
+- Added `ActionButtonsView` in LoopflowCore and embedded it in `WaveSessionView` above composer.
 - Tap behavior routes through normal send flow (`sendSuggestedAction`), then clears suggestions immediately.
 
 ## Runtime behavior
@@ -88,10 +88,10 @@ Suggested actions are cleared on:
 
 - Suggestion quality is still prompt-compliance-dependent; no strict provider tool contract.
 - Text-tag protocol is robust to stream splits but still a malformed-input surface.
-- Future synthetic tools (for example `memory`) should reuse this exact pipeline before adding new transport or protocol complexity.
+- Future structured replies (for example `memory`) should reuse this exact pipeline before adding new transport or protocol complexity.
 
 ## Out of scope (still)
 
-- Additional synthetic tools beyond `suggest_actions`.
+- Additional structured replies beyond `suggest_actions`.
 - Persistence/analytics/ranking of actions.
 - Transport redesign or MCP-style registration.

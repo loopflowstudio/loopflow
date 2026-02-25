@@ -15,6 +15,7 @@ swift/dist/
 
 # Loopflow (generated)
 .lf/log/
+.lf/logs/
 .lf/rlm/
 .lf/summaries/
 *.profraw

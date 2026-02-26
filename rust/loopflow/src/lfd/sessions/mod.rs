@@ -220,12 +220,11 @@ impl SessionManager {
         let surface = config
             .surface
             .as_deref()
-            .map(|value| {
+            .map_or(Surface::ConcertoMac, |value| {
                 value
                     .parse::<Surface>()
                     .expect("Surface parser is infallible")
-            })
-            .unwrap_or(Surface::ConcertoMac);
+            });
 
         let file_config = load_config_or_default(Some(&repo_root));
         let prepared = prepare_launch_prompt(

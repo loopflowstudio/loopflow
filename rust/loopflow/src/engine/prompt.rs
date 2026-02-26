@@ -206,6 +206,33 @@ impl Surface {
     pub fn is_interactive(self) -> bool {
         !matches!(self, Self::Headless)
     }
+
+    pub fn instructions(self) -> String {
+        let interactive = "Run mode is interactive. This is a conversation—ask questions, \
+             propose approaches, and wait for feedback before taking major actions.";
+        match self {
+            Self::Headless => {
+                "Run mode is auto (headless). Proceed without pausing for questions. \
+                 If you need clarification, make the best assumption you can and append \
+                 any open questions to `scratch/questions.md`.\n\n\
+                 No rendering environment. Output is logged, not displayed. \
+                 Optimize for structured, parseable output over human readability."
+                    .to_string()
+            }
+            Self::Cli => interactive.to_string(),
+            Self::ConcertoMac => format!(
+                "{interactive}\n\n\
+                 Surface: Concerto (macOS). Output renders in a desktop UI, streamed \
+                 in real time. Keep responses scannable—prefer lists and short paragraphs \
+                 over walls of text."
+            ),
+            Self::ConcertoIphone => format!(
+                "{interactive}\n\n\
+                 Surface: Concerto (iPhone). Screen real estate is limited. Be concise—bullets \
+                 over paragraphs, short snippets over full files. Minimize back-and-forth."
+            ),
+        }
+    }
 }
 
 impl std::str::FromStr for Surface {
@@ -216,7 +243,6 @@ impl std::str::FromStr for Surface {
             "cli" => Self::Cli,
             "concerto_mac" => Self::ConcertoMac,
             "concerto_iphone" => Self::ConcertoIphone,
-            "headless" => Self::Headless,
             _ => Self::Headless,
         };
         Ok(surface)
@@ -1367,33 +1393,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     }
 
     // Surface (interaction + rendering guidance)
-    let surface_instructions = match components.surface {
-        Surface::Headless => {
-            "Run mode is auto (headless). Proceed without pausing for questions. \
-             If you need clarification, make the best assumption you can and append \
-             any open questions to `scratch/questions.md`.\n\n\
-             No rendering environment. Output is logged, not displayed. \
-             Optimize for structured, parseable output over human readability."
-        }
-        Surface::Cli => {
-            "Run mode is interactive. This is a conversation—ask questions, \
-             propose approaches, and wait for feedback before taking major actions."
-        }
-        Surface::ConcertoMac => {
-            "Run mode is interactive. This is a conversation—ask questions, \
-             propose approaches, and wait for feedback before taking major actions.\n\n\
-             Surface: Concerto (macOS). Output renders in a desktop UI, streamed \
-             in real time. Keep responses scannable—prefer lists and short paragraphs \
-             over walls of text."
-        }
-        Surface::ConcertoIphone => {
-            "Run mode is interactive. This is a conversation—ask questions, \
-             propose approaches, and wait for feedback before taking major actions.\n\n\
-             Surface: Concerto (iPhone). Screen real estate is limited. Be concise—bullets \
-             over paragraphs, short snippets over full files. Minimize back-and-forth."
-        }
-    };
-    parts.push(surface_instructions.to_string());
+    parts.push(components.surface.instructions());
 
     // Wave context
     if let Some(ref wave) = components.wave {

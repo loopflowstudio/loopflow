@@ -1760,6 +1760,7 @@ mod tests {
                 model: None,
                 directions: vec![],
                 interactive: None,
+                action_style: None,
             }),
             wave_memory: Some(Document {
                 path: "wave/living/MEMORY.md".to_string(),

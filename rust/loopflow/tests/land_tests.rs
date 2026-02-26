@@ -34,6 +34,21 @@ fn remote_branch_exists(repo: &TestRepo, name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn gh_no_pr_script() -> &'static str {
+    r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+
+exit 0
+"#
+}
+
 #[test]
 fn land_local_squash_merges_to_main() {
     let repo = TestRepo::new();
@@ -160,4 +175,32 @@ fn land_with_lint_gate() {
     );
 
     assert!(matches!(result, Err(OpsError::LintFailed)));
+}
+
+#[test]
+fn land_missing_pr_error_includes_branch_name() {
+    let _env = EnvGuard::new(&[("gh", gh_no_pr_script())]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            worktree: None,
+            lint: false,
+        },
+        &NullProgress,
+    );
+
+    let Err(OpsError::Message(message)) = result else {
+        panic!("expected missing PR message");
+    };
+    assert!(message.contains("no open PR found for branch 'feature'"));
 }

@@ -39,7 +39,7 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
         return Ok(LandResult { merged: true });
     }
 
-    ensure_pr(&repo_root, options, progress)?;
+    ensure_pr(&repo_root, &feature_branch, options, progress)?;
     finalize_remote(&repo_root, progress)?;
     Ok(LandResult { merged: true })
 }
@@ -97,7 +97,12 @@ fn finalize_local(
     Ok(())
 }
 
-fn ensure_pr(repo_root: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<()> {
+fn ensure_pr(
+    repo_root: &Path,
+    feature_branch: &str,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<()> {
     if !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -113,9 +118,9 @@ fn ensure_pr(repo_root: &Path, options: &LandOptions, progress: &impl Progress) 
                 progress,
             )?;
         } else {
-            return Err(OpsError::Message(
-                "no open PR found; run lf ops pr or use --create-pr".to_string(),
-            ));
+            return Err(OpsError::Message(format!(
+                "no open PR found for branch '{feature_branch}'; run lf ops pr or use --create-pr"
+            )));
         }
     }
 

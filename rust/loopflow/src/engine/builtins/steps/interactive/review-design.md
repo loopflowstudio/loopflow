@@ -33,9 +33,7 @@ During the session:
   - **Minimal** — smallest safe ship-now set.
   - **One more big push** — one additional high-leverage improvement, then ship.
   - **Do it all** — full intended scope now, with longer cycle/risk.
-- Use this scope check to balance two forces:
-  - there is fixed overhead per PR, so too-small changes may under-deliver impact,
-  - larger changes reduce iteration speed and can exceed ~1000 LOC guidance.
+- Use this scope check to balance completeness against reviewability. Too-small changes under-deliver. Too-large changes (past ~2500 LOC) become unreviewable.
 - For each package, state what lands now, what defers to the wave roadmap, and what extra risk/validation it adds.
 - Confirm the user has ingested and validated the updated design with explicit feedback.
 

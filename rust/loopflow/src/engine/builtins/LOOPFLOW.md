@@ -71,3 +71,13 @@ If a required artifact is missing, check scratch/ first. If still missing, note 
 Ship working code. Tests pass. No regressions.
 
 When unsure between two approaches, pick the simpler one. You can always iterate.
+
+---
+
+## Ambition
+
+Build momentum through complete milestones. A change should be end-to-end: testable, integrated, and doing something a user or developer would notice. Rough edges are fine — partial stacks are not.
+
+Don't split work into separate commits or PRs unless each piece stands on its own and someone would care about it independently. Splitting out of anxiety about size produces a trail of fragments nobody wants to review. One working feature beats three inert layers.
+
+Target ~1000 LOC per PR. Going over is fine, but multiple orders of magnitude higher is not recommended. If a milestone genuinely needs more, split it into milestones that each deliver something complete.

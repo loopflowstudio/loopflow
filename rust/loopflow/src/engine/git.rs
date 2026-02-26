@@ -310,25 +310,52 @@ pub fn worktree_move(repo: &Path, old_path: &Path, new_path: &Path) -> Result<()
     Ok(())
 }
 
-/// Create a new worktree with a new branch.
+/// How to set up the branch when creating a worktree.
+#[derive(Debug)]
+pub enum WorktreeBranch<'a> {
+    /// `git worktree add -b <branch> <path> <start_point>`
+    New { start_point: &'a str },
+    /// `git worktree add --track -b <branch> <path> <remote>`
+    Track { remote: &'a str },
+    /// `git worktree add <path> <branch>`
+    Existing,
+}
+
+/// Create a worktree for a branch.
 pub fn worktree_add(
     repo: &Path,
     path: &Path,
     branch: &str,
-    start_point: &str,
+    mode: WorktreeBranch<'_>,
 ) -> Result<(), GitError> {
     let path_str = path.to_string_lossy();
-    let output = run_git(
-        repo,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            path_str.as_ref(),
-            start_point,
-        ],
-    )?;
+    let args: Vec<&str> = match mode {
+        WorktreeBranch::New { start_point } => {
+            vec![
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                path_str.as_ref(),
+                start_point,
+            ]
+        }
+        WorktreeBranch::Track { remote } => {
+            vec![
+                "worktree",
+                "add",
+                "--track",
+                "-b",
+                branch,
+                path_str.as_ref(),
+                remote,
+            ]
+        }
+        WorktreeBranch::Existing => {
+            vec!["worktree", "add", path_str.as_ref(), branch]
+        }
+    };
+    let output = run_git(repo, &args)?;
     if !output.status.success() {
         // A failing post-checkout hook causes git to exit non-zero even when
         // the worktree was created successfully. Verify before reporting failure.
@@ -336,10 +363,7 @@ pub fn worktree_add(
             return Ok(());
         }
         return Err(GitError::CommandFailed {
-            command: format!(
-                "git worktree add -b {} {} {}",
-                branch, path_str, start_point
-            ),
+            command: format!("git {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
@@ -772,7 +796,15 @@ mod tests {
         commit_file(repo.path(), "README.md", "hello");
 
         let wt_path = repo.path().parent().unwrap().join("new-worktree");
-        worktree_add(repo.path(), &wt_path, "new-feature", "HEAD").expect("worktree add");
+        worktree_add(
+            repo.path(),
+            &wt_path,
+            "new-feature",
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .expect("worktree add");
 
         // Verify worktree exists
         assert!(wt_path.exists());

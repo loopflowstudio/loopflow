@@ -2,9 +2,9 @@ use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_squash_merged, rev_parse, worktree_add,
-    worktree_move,
+    worktree_move, WorktreeBranch,
 };
-use crate::engine::naming::format_branch_name;
+use crate::engine::naming::{format_branch_name, wave_name};
 use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -56,8 +56,16 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
+    worktree_path_with_config(repo, name, None)
+}
+
+pub fn worktree_path_with_config(
+    repo: &Path,
+    name: &str,
+    branch_config: Option<&BranchNameConfig>,
+) -> PathBuf {
     let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let sanitized = sanitize_fs_component(name);
+    let dir_name = wave_name(name, branch_config).unwrap_or_else(|| sanitize_fs_component(name));
     let repo_name = repo_root
         .file_name()
         .and_then(|n| n.to_str())
@@ -65,7 +73,7 @@ pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
     repo_root
         .parent()
         .unwrap_or(repo_root.as_path())
-        .join(format!("{repo_name}.{sanitized}"))
+        .join(format!("{repo_name}.{dir_name}"))
 }
 
 /// Extract the short name (wave name) from a worktree directory.
@@ -315,8 +323,15 @@ pub fn create_with_schema(
     base: Option<&str>,
     branch_config: Option<&BranchNameConfig>,
 ) -> Result<CreateWorktreeResult, GitError> {
-    let branch_name = format_branch_name(short_name, branch_config, repo)?;
-    let worktree_path = worktree_path(repo, short_name);
+    let remote_branch = format!("origin/{short_name}");
+    let has_remote_branch = rev_parse(repo, &remote_branch).is_ok();
+    let branch_name = if has_remote_branch {
+        short_name.to_string()
+    } else {
+        format_branch_name(short_name, branch_config, repo)?
+    };
+
+    let worktree_path = worktree_path_with_config(repo, short_name, branch_config);
     if worktree_path.exists() {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
@@ -324,16 +339,33 @@ pub fn create_with_schema(
         });
     }
 
-    let existing_branches = list_worktrees(repo)?
+    if list_worktrees(repo)?
         .into_iter()
         .filter_map(|wt| wt.branch)
-        .collect::<Vec<_>>();
-    if existing_branches.iter().any(|b| b == &branch_name) {
+        .any(|branch| branch == branch_name)
+    {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
             stderr: format!("branch already exists: {branch_name}"),
         });
     }
+    if has_remote_branch {
+        let mode = if branch_exists(repo, &branch_name)? {
+            WorktreeBranch::Existing
+        } else {
+            WorktreeBranch::Track {
+                remote: &remote_branch,
+            }
+        };
+        worktree_add(repo, &worktree_path, &branch_name, mode)?;
+        return Ok(CreateWorktreeResult {
+            path: worktree_path,
+            branch: branch_name,
+            base_branch: None,
+            base_commit: None,
+        });
+    }
+
     if branch_exists(repo, &branch_name)? {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
@@ -356,7 +388,14 @@ pub fn create_with_schema(
         None
     };
 
-    worktree_add(repo, &worktree_path, &branch_name, base_ref)?;
+    worktree_add(
+        repo,
+        &worktree_path,
+        &branch_name,
+        WorktreeBranch::New {
+            start_point: base_ref,
+        },
+    )?;
     schedule_upstream_sync(worktree_path.clone(), branch_name.clone());
 
     Ok(CreateWorktreeResult {
@@ -420,7 +459,7 @@ pub fn preserve_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, GitErr
 
 #[cfg(test)]
 mod tests {
-    use super::worktree_path;
+    use super::{worktree_path, worktree_path_with_config};
     use std::path::Path;
 
     #[test]
@@ -433,5 +472,15 @@ mod tests {
     fn worktree_path_uses_wave_fallback_for_empty_sanitized_component() {
         let path = worktree_path(Path::new("/tmp/repo"), "../..");
         assert_eq!(path, Path::new("/tmp/repo.wave"));
+    }
+
+    #[test]
+    fn worktree_path_extracts_wave_name_from_branch_style_input() {
+        let path = worktree_path_with_config(
+            Path::new("/tmp/repo"),
+            "jack-heart.mobile.20260225_1122",
+            None,
+        );
+        assert_eq!(path, Path::new("/tmp/repo.mobile"));
     }
 }

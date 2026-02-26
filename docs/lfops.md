@@ -156,9 +156,10 @@ Worktree helper commands.
 Create worktree with schema-based branch name.
 
 ```bash
-lf ops wt create my-feature            # creates ../my-feature
+lf ops wt create my-feature            # creates ../loopflow.my-feature
 lf ops wt create my-feature -b develop # from develop instead of main
 lf ops wt create feature-B --stack     # stack on current branch
+lf ops wt create jack-heart.mobile.20260225_1122  # checks out origin branch in ../loopflow.mobile
 ```
 
 | Flag | Description |
@@ -168,12 +169,14 @@ lf ops wt create feature-B --stack     # stack on current branch
 
 When using `--stack`, the new worktree branches from the current branch instead of main.
 
+If the input matches an existing `origin/<branch>` name, `lf` checks out that branch instead of creating a new one. Worktree directory names always use the wave component (`{name}`), not the full branch metadata.
+
 ### lf ops wt switch
 
 Switch to a worktree by its short directory name.
 
 ```bash
-lf ops wt switch my-feature       # switches to ../my-feature
+lf ops wt switch my-feature       # switches to ../loopflow.my-feature
 ```
 
 ### lf ops wt list

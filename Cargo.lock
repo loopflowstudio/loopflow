@@ -1482,6 +1482,7 @@ dependencies = [
  "loopflow-test-support",
  "once_cell",
  "rand 0.10.0",
+ "regex",
  "reqwest",
  "rusqlite",
  "secrecy",

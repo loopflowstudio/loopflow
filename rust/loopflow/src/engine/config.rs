@@ -64,7 +64,7 @@ pub struct BranchNameConfig {
 }
 
 fn default_branch_schema() -> String {
-    "{user}.{name}.{timestamp}.{words}".to_string()
+    "{user}.{name}.{timestamp}".to_string()
 }
 
 impl Default for BranchNameConfig {

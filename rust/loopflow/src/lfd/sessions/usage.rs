@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, HashSet};
 
+use serde::Serialize;
+
 use crate::lfd::sessions::types::{
     ContextSnapshot, PersistedSessionEvent, Session, SessionEvent, TurnUsage,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct TokenTotals {
     pub input: u64,
     pub output: u64,
@@ -39,8 +41,9 @@ pub struct SessionUsageAggregate {
     pub models: BTreeMap<String, u64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct StepUsageAggregate {
+    #[serde(flatten)]
     pub tokens: TokenTotals,
     pub sessions: u64,
     pub turns: u64,
@@ -99,19 +102,12 @@ impl std::str::FromStr for GroupBy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UsageSummaryGroupAggregate {
     pub key: String,
     pub tokens: TokenTotals,
     pub sessions: u64,
     pub turns: u64,
-}
-
-pub fn aggregate_session_usage(
-    _session: &Session,
-    events: &[PersistedSessionEvent],
-) -> SessionUsageAggregate {
-    aggregate_session_events(events, None)
 }
 
 pub fn aggregate_wave_usage(
@@ -144,9 +140,18 @@ pub fn aggregate_summary(
     model_filter: Option<&str>,
 ) -> Vec<UsageSummaryGroupAggregate> {
     match group_by {
-        GroupBy::Wave => aggregate_summary_by_wave(sessions, model_filter),
-        GroupBy::Flow => aggregate_summary_by_flow(sessions, model_filter),
-        GroupBy::Step => aggregate_summary_by_step(sessions, model_filter),
+        GroupBy::Wave => aggregate_summary_by_key(sessions, model_filter, |data| {
+            data.wave_id
+                .clone()
+                .or_else(|| data.session.config.wave.clone())
+                .unwrap_or_else(|| "unknown".to_string())
+        }),
+        GroupBy::Flow => aggregate_summary_by_key(sessions, model_filter, |data| {
+            data.flow.clone().unwrap_or_else(|| "unknown".to_string())
+        }),
+        GroupBy::Step => {
+            aggregate_summary_by_key(sessions, model_filter, |data| step_key(&data.session))
+        }
         GroupBy::Model => aggregate_summary_by_model(sessions, model_filter),
         GroupBy::Source => aggregate_summary_by_source(sessions),
     }
@@ -185,9 +190,10 @@ pub fn aggregate_session_events(
     aggregate
 }
 
-fn aggregate_summary_by_wave(
+fn aggregate_summary_by_key(
     sessions: &[UsageSessionData],
     model_filter: Option<&str>,
+    key_fn: impl Fn(&UsageSessionData) -> String,
 ) -> Vec<UsageSummaryGroupAggregate> {
     let mut groups: BTreeMap<String, UsageSummaryGroupAggregate> = BTreeMap::new();
 
@@ -197,69 +203,7 @@ fn aggregate_summary_by_wave(
             continue;
         }
 
-        let key = data
-            .wave_id
-            .clone()
-            .or_else(|| data.session.config.wave.clone())
-            .unwrap_or_else(|| "unknown".to_string());
-        let group = groups
-            .entry(key.clone())
-            .or_insert(UsageSummaryGroupAggregate {
-                key,
-                tokens: TokenTotals::default(),
-                sessions: 0,
-                turns: 0,
-            });
-        group.tokens.merge(&usage.tokens);
-        group.sessions += 1;
-        group.turns += usage.turns;
-    }
-
-    groups.into_values().collect()
-}
-
-fn aggregate_summary_by_flow(
-    sessions: &[UsageSessionData],
-    model_filter: Option<&str>,
-) -> Vec<UsageSummaryGroupAggregate> {
-    let mut groups: BTreeMap<String, UsageSummaryGroupAggregate> = BTreeMap::new();
-
-    for data in sessions {
-        let usage = aggregate_session_events(&data.events, model_filter);
-        if model_filter.is_some() && usage.turns == 0 {
-            continue;
-        }
-
-        let key = data.flow.clone().unwrap_or_else(|| "unknown".to_string());
-        let group = groups
-            .entry(key.clone())
-            .or_insert(UsageSummaryGroupAggregate {
-                key,
-                tokens: TokenTotals::default(),
-                sessions: 0,
-                turns: 0,
-            });
-        group.tokens.merge(&usage.tokens);
-        group.sessions += 1;
-        group.turns += usage.turns;
-    }
-
-    groups.into_values().collect()
-}
-
-fn aggregate_summary_by_step(
-    sessions: &[UsageSessionData],
-    model_filter: Option<&str>,
-) -> Vec<UsageSummaryGroupAggregate> {
-    let mut groups: BTreeMap<String, UsageSummaryGroupAggregate> = BTreeMap::new();
-
-    for data in sessions {
-        let usage = aggregate_session_events(&data.events, model_filter);
-        if model_filter.is_some() && usage.turns == 0 {
-            continue;
-        }
-
-        let key = step_key(&data.session);
+        let key = key_fn(data);
         let group = groups
             .entry(key.clone())
             .or_insert(UsageSummaryGroupAggregate {
@@ -368,8 +312,7 @@ mod tests {
     use time::OffsetDateTime;
 
     #[test]
-    fn aggregate_session_usage_sums_turn_usage_and_context() {
-        let session = test_session("implement");
+    fn aggregate_session_events_sums_turn_usage_and_context() {
         let events = vec![
             context_event(HashMap::from([
                 ("step".to_string(), 100),
@@ -395,7 +338,7 @@ mod tests {
             }),
         ];
 
-        let usage = aggregate_session_usage(&session, &events);
+        let usage = aggregate_session_events(&events, None);
         assert_eq!(usage.tokens.input, 200);
         assert_eq!(usage.tokens.output, 45);
         assert_eq!(usage.tokens.reasoning, 10);

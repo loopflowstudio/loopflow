@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -8,16 +6,14 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::lfd::http::dto::{
-    format_datetime, ContextSnapshotDto, SessionUsageDto, SessionUsageSessionDto, TokenTotalsDto,
-    UsageSummaryDto, UsageSummaryGroupDto, WaveStepUsageDto, WaveUsageDto,
+    format_datetime, SessionUsageDto, SessionUsageSessionDto, UsageSummaryDto, WaveUsageDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
-use crate::lfd::sessions::types::{ContextSnapshot, Session};
+use crate::lfd::sessions::types::Session;
 use crate::lfd::sessions::usage::{
-    aggregate_session_usage, aggregate_summary, aggregate_wave_usage, GroupBy, TokenTotals,
-    UsageSessionData,
+    aggregate_session_events, aggregate_summary, aggregate_wave_usage, GroupBy, UsageSessionData,
 };
 use crate::lfd::store::SessionFilters;
 
@@ -48,16 +44,16 @@ pub async fn get_session_usage_handler(
         .list_session_events(&session_id, None)
         .await
         .map_err(map_store_error)?;
-    let usage = aggregate_session_usage(&session, &events);
+    let usage = aggregate_session_events(&events, None);
 
     let wave = resolve_session_wave(&state, &session).await?;
 
     Ok(Json(SessionUsageDto {
         object: "session_usage".to_string(),
         session_id: session_id.to_string(),
-        tokens: token_totals_dto(&usage.tokens),
+        tokens: usage.tokens,
         turns: usage.turns,
-        context: usage.context.as_ref().map(context_snapshot_dto),
+        context: usage.context,
         models: usage.models,
         session: SessionUsageSessionDto {
             step: session.config.step.clone(),
@@ -91,33 +87,15 @@ pub async fn get_wave_usage_handler(
     }
 
     let aggregate = aggregate_wave_usage(wave_id.as_str(), &session_events);
-    let by_step = aggregate
-        .by_step
-        .into_iter()
-        .map(|(step, usage)| {
-            (
-                step,
-                WaveStepUsageDto {
-                    input: usage.tokens.input,
-                    output: usage.tokens.output,
-                    reasoning: usage.tokens.reasoning,
-                    cache_read: usage.tokens.cache_read,
-                    cache_write: usage.tokens.cache_write,
-                    sessions: usage.sessions,
-                    turns: usage.turns,
-                },
-            )
-        })
-        .collect();
 
     Ok(Json(WaveUsageDto {
         object: "wave_usage".to_string(),
         wave_id: wave_id.to_string(),
-        tokens: token_totals_dto(&aggregate.tokens),
+        tokens: aggregate.tokens,
         sessions: aggregate.sessions,
         turns: aggregate.turns,
         models: aggregate.models,
-        by_step,
+        by_step: aggregate.by_step,
     }))
 }
 
@@ -174,15 +152,7 @@ pub async fn get_usage_summary_handler(
         .map_err(map_store_error)?;
 
     let usage_sessions = load_usage_session_data(&state, sessions).await?;
-    let groups = aggregate_summary(group_by, &usage_sessions, query.model.as_deref())
-        .into_iter()
-        .map(|group| UsageSummaryGroupDto {
-            key: group.key,
-            tokens: token_totals_dto(&group.tokens),
-            sessions: group.sessions,
-            turns: group.turns,
-        })
-        .collect();
+    let groups = aggregate_summary(group_by, &usage_sessions, query.model.as_deref());
 
     Ok(Json(UsageSummaryDto {
         object: "usage_summary".to_string(),
@@ -267,29 +237,6 @@ fn parse_datetime(value: Option<&str>, label: &str) -> Result<Option<OffsetDateT
         )
     })?;
     Ok(Some(datetime))
-}
-
-fn token_totals_dto(tokens: &TokenTotals) -> TokenTotalsDto {
-    TokenTotalsDto {
-        input: tokens.input,
-        output: tokens.output,
-        reasoning: tokens.reasoning,
-        cache_read: tokens.cache_read,
-        cache_write: tokens.cache_write,
-    }
-}
-
-fn context_snapshot_dto(snapshot: &ContextSnapshot) -> ContextSnapshotDto {
-    ContextSnapshotDto {
-        sources: snapshot
-            .sources
-            .iter()
-            .map(|(key, value)| (key.clone(), *value))
-            .collect::<BTreeMap<_, _>>(),
-        budget: snapshot.budget,
-        total: snapshot.total,
-        diff_tier: snapshot.diff_tier.clone(),
-    }
 }
 
 #[cfg(test)]

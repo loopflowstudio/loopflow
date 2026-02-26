@@ -20,7 +20,9 @@ use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
 use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
-use crate::lfd::types::{ActivationSource, Event, StimulusKind, Wave, WaveRun, WaveStatus};
+use crate::lfd::types::{
+    ActivationSource, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveStatus,
+};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -41,6 +43,21 @@ struct WaveCiTarget {
     repo_full_name: String,
     branch: String,
     pr_number: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum WatchRepoTarget<'a> {
+    LocalPath(&'a str),
+    GitHubRepo(&'a str),
+}
+
+impl WatchRepoTarget<'_> {
+    fn label(self) -> &'static str {
+        match self {
+            Self::LocalPath(_) => "git hook",
+            Self::GitHubRepo(_) => "github push",
+        }
+    }
 }
 
 pub async fn git_hook_handler(
@@ -99,53 +116,92 @@ async fn enqueue_watch_for_local_repo(
     from_sha: Option<&str>,
     to_sha: Option<&str>,
 ) -> u32 {
-    if !is_main_ref(branch) {
+    enqueue_watch_for_repo(
+        store,
+        event_hub,
+        WatchRepoTarget::LocalPath(repo_path),
+        branch,
+        from_sha,
+        to_sha,
+    )
+    .await
+}
+
+async fn enqueue_watch_for_github_repo(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    repo_full_name: &str,
+    git_ref: Option<&str>,
+    from_sha: Option<&str>,
+    to_sha: Option<&str>,
+) -> u32 {
+    enqueue_watch_for_repo(
+        store,
+        event_hub,
+        WatchRepoTarget::GitHubRepo(repo_full_name),
+        git_ref,
+        from_sha,
+        to_sha,
+    )
+    .await
+}
+
+async fn enqueue_watch_for_repo(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    repo_target: WatchRepoTarget<'_>,
+    git_ref: Option<&str>,
+    from_sha: Option<&str>,
+    to_sha: Option<&str>,
+) -> u32 {
+    if !is_main_ref(git_ref) {
         return 0;
     }
+
     let stimuli = match store
         .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
         .await
     {
         Ok(stimuli) => stimuli,
         Err(err) => {
-            tracing::warn!(error = %err, "failed to list watch stimuli for git hook");
+            tracing::warn!(
+                error = %err,
+                source = repo_target.label(),
+                "failed to list watch stimuli"
+            );
             return 0;
         }
     };
+
+    let reason = build_push_reason(git_ref, from_sha, to_sha);
+    let from_sha = from_sha.unwrap_or("");
+    let to_sha = to_sha.unwrap_or("");
 
     let mut matched = 0_u32;
     for mut stimulus in stimuli {
         if !stimulus.enabled {
             continue;
         }
+
         let wave = match store.get_wave(&stimulus.wave_id).await {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
-                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "failed loading wave for watch git hook");
+                tracing::warn!(
+                    stimulus_id = %stimulus.id,
+                    source = repo_target.label(),
+                    error = %err,
+                    "failed loading wave for watch trigger"
+                );
                 continue;
             }
         };
-        if wave.status() == WaveStatus::Paused {
+        if wave.status() == WaveStatus::Paused || !wave_matches_watch_repo(&wave, repo_target) {
             continue;
         }
 
-        let canonical_wave_repo = match canonicalize_existing_path(Path::new(wave.repo())) {
-            Ok(path) => path.to_string_lossy().to_string(),
-            Err(_) => continue,
-        };
-        if canonical_wave_repo != repo_path {
-            continue;
-        }
+        update_watch_main_sha(store, &mut stimulus, to_sha).await;
 
-        if let Some(to_sha) = to_sha {
-            if !to_sha.is_empty() {
-                stimulus.last_main_sha = Some(to_sha.to_string());
-                let _ = store.update_stimulus(&stimulus).await;
-            }
-        }
-
-        let reason = build_push_reason(branch, from_sha, to_sha);
         let outcome = enqueue_pending_activation(
             store,
             event_hub,
@@ -153,9 +209,9 @@ async fn enqueue_watch_for_local_repo(
                 &stimulus.wave_id,
                 &stimulus.id,
                 ActivationSource::Push,
-                reason,
-                from_sha.unwrap_or(""),
-                to_sha.unwrap_or(""),
+                reason.clone(),
+                from_sha,
+                to_sha,
             ),
         )
         .await;
@@ -167,77 +223,26 @@ async fn enqueue_watch_for_local_repo(
     matched
 }
 
-async fn enqueue_watch_for_github_repo(
-    store: &SharedStore,
-    event_hub: &EventHub,
-    repo_full_name: &str,
-    git_ref: Option<&str>,
-    from_sha: Option<&str>,
-    to_sha: Option<&str>,
-) -> u32 {
-    if !is_main_ref(git_ref) {
-        return 0;
-    }
-    let stimuli = match store
-        .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
-        .await
-    {
-        Ok(stimuli) => stimuli,
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to list watch stimuli for github push");
-            return 0;
-        }
-    };
-
-    let mut matched = 0_u32;
-    for mut stimulus in stimuli {
-        if !stimulus.enabled {
-            continue;
-        }
-        let wave = match store.get_wave(&stimulus.wave_id).await {
-            Ok(Some(wave)) => wave,
-            Ok(None) => continue,
-            Err(err) => {
-                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "failed loading wave for github push");
-                continue;
-            }
-        };
-        if wave.status() == WaveStatus::Paused {
-            continue;
-        }
-        let Some(wave_repo_full_name) = github_repo_from_local(Path::new(wave.repo())) else {
-            continue;
-        };
-        if wave_repo_full_name != repo_full_name {
-            continue;
-        }
-
-        if let Some(to_sha) = to_sha {
-            if !to_sha.is_empty() {
-                stimulus.last_main_sha = Some(to_sha.to_string());
-                let _ = store.update_stimulus(&stimulus).await;
-            }
-        }
-
-        let reason = build_push_reason(git_ref, from_sha, to_sha);
-        let outcome = enqueue_pending_activation(
-            store,
-            event_hub,
-            ActivationEnvelope::new(
-                &stimulus.wave_id,
-                &stimulus.id,
-                ActivationSource::Push,
-                reason,
-                from_sha.unwrap_or(""),
-                to_sha.unwrap_or(""),
-            ),
-        )
-        .await;
-        if outcome.is_some() {
-            matched += 1;
+fn wave_matches_watch_repo(wave: &Wave, repo_target: WatchRepoTarget<'_>) -> bool {
+    match repo_target {
+        WatchRepoTarget::LocalPath(repo_path) => canonicalize_existing_path(Path::new(wave.repo()))
+            .ok()
+            .is_some_and(|path| path.to_string_lossy() == repo_path),
+        WatchRepoTarget::GitHubRepo(repo_full_name) => {
+            github_repo_from_local(Path::new(wave.repo()))
+                .as_deref()
+                .is_some_and(|wave_repo_full_name| wave_repo_full_name == repo_full_name)
         }
     }
-    matched
+}
+
+async fn update_watch_main_sha(store: &SharedStore, stimulus: &mut Stimulus, to_sha: &str) {
+    if to_sha.is_empty() {
+        return;
+    }
+
+    stimulus.last_main_sha = Some(to_sha.to_string());
+    let _ = store.update_stimulus(stimulus).await;
 }
 
 fn is_main_ref(value: Option<&str>) -> bool {
@@ -284,128 +289,111 @@ pub async fn github_webhook_handler(
         .get("X-GitHub-Event")
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
-        .to_string();
+        .to_ascii_lowercase();
 
-    if event_kind.eq_ignore_ascii_case("push") {
-        let event = serde_json::from_slice::<GitHubPushEvent>(&body).map_err(|err| {
-            api_error(
-                StatusCode::BAD_REQUEST,
-                ApiMessage::Untrusted(err.to_string()),
-            )
-        })?;
-
-        let matched = enqueue_watch_for_github_repo(
-            &state.store,
-            &state.event_hub,
-            &event.repository.full_name,
-            Some(&event.git_ref),
-            Some(&event.before),
-            Some(&event.after),
-        )
-        .await;
-
-        return Ok(Json(serde_json::json!({ "ok": true, "matched": matched })));
-    }
-
-    if event_kind.eq_ignore_ascii_case("check_run") {
-        let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body).map_err(|err| {
-            api_error(
-                StatusCode::BAD_REQUEST,
-                ApiMessage::Untrusted(err.to_string()),
-            )
-        })?;
-
-        if event.action != "completed"
-            || !is_failed_check_run(
-                &event.check_run.status,
-                event.check_run.conclusion.as_deref(),
-            )
-        {
-            return Ok(Json(
-                serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
-            ));
-        }
-
-        let mut matched = 0_u32;
-        for pr in &event.check_run.pull_requests {
-            let targets = find_wave_ci_targets(
-                &state.store,
-                &event.repository.full_name,
-                &pr.head.branch,
-                Some(pr.number),
-            )
-            .await
-            .map_err(|err| {
+    match event_kind.as_str() {
+        "push" => {
+            let event = serde_json::from_slice::<GitHubPushEvent>(&body).map_err(|err| {
                 api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ApiMessage::Untrusted(err),
+                    StatusCode::BAD_REQUEST,
+                    ApiMessage::Untrusted(err.to_string()),
                 )
             })?;
 
-            for target in targets {
-                let emitted = emit_ci_failure(
-                    &state.event_hub,
-                    &state.ci_failure_cache,
-                    build_ci_failure_event(&target, &event.check_run),
+            let matched = enqueue_watch_for_github_repo(
+                &state.store,
+                &state.event_hub,
+                &event.repository.full_name,
+                Some(&event.git_ref),
+                Some(&event.before),
+                Some(&event.after),
+            )
+            .await;
+
+            Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
+        }
+        "check_run" => {
+            let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body).map_err(|err| {
+                api_error(
+                    StatusCode::BAD_REQUEST,
+                    ApiMessage::Untrusted(err.to_string()),
                 )
-                .await;
-                if emitted {
-                    matched += 1;
-                    tracing::info!(
-                        wave_id = %target.wave_id,
-                        wave_run_id = %target.wave_run_id,
-                        repo = %event.repository.full_name,
-                        branch = %target.branch,
-                        commit_sha = %event.check_run.head_sha,
-                        check_id = event.check_run.id,
-                        check_name = %event.check_run.name,
-                        "matched GitHub CI failure to wave"
-                    );
+            })?;
+
+            if event.action != "completed"
+                || !is_failed_check_run(
+                    &event.check_run.status,
+                    event.check_run.conclusion.as_deref(),
+                )
+            {
+                return Ok(Json(
+                    serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
+                ));
+            }
+
+            let mut matched = 0_u32;
+            for pr in &event.check_run.pull_requests {
+                let targets = find_wave_ci_targets(
+                    &state.store,
+                    &event.repository.full_name,
+                    &pr.head.branch,
+                    Some(pr.number),
+                )
+                .await
+                .map_err(|err| {
+                    api_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        ApiMessage::Untrusted(err),
+                    )
+                })?;
+
+                for target in targets {
+                    let emitted = emit_ci_failure(
+                        &state.event_hub,
+                        &state.ci_failure_cache,
+                        build_ci_failure_event(&target, &event.check_run),
+                    )
+                    .await;
+                    if emitted {
+                        matched += 1;
+                        tracing::info!(
+                            wave_id = %target.wave_id,
+                            wave_run_id = %target.wave_run_id,
+                            repo = %event.repository.full_name,
+                            branch = %target.branch,
+                            commit_sha = %event.check_run.head_sha,
+                            check_id = event.check_run.id,
+                            check_name = %event.check_run.name,
+                            "matched GitHub CI failure to wave"
+                        );
+                    }
                 }
             }
-        }
 
-        return Ok(Json(serde_json::json!({ "ok": true, "matched": matched })));
-    }
-
-    if event_kind.eq_ignore_ascii_case("pull_request") {
-        let event = serde_json::from_slice::<GitHubPullRequestEvent>(&body).map_err(|err| {
-            api_error(
-                StatusCode::BAD_REQUEST,
-                ApiMessage::Untrusted(err.to_string()),
-            )
-        })?;
-        if event.action != "closed" || !event.pull_request.merged {
-            return Ok(Json(
-                serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
-            ));
+            Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
-        let merged_at = event
-            .pull_request
-            .merged_at
-            .as_deref()
-            .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
-            .unwrap_or_else(OffsetDateTime::now_utc);
-        let wave_ids = find_waves_for_pr(
-            &state.store,
-            &event.repository.full_name,
-            event.pull_request.number,
-        )
-        .await
-        .map_err(|err| {
-            api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ApiMessage::Untrusted(err),
-            )
-        })?;
-        let mut processed = 0_u32;
-        for wave_id in wave_ids {
-            let handled = crate::lfd::queue::handle_pr_merged(
+        "pull_request" => {
+            let event = serde_json::from_slice::<GitHubPullRequestEvent>(&body).map_err(|err| {
+                api_error(
+                    StatusCode::BAD_REQUEST,
+                    ApiMessage::Untrusted(err.to_string()),
+                )
+            })?;
+            if event.action != "closed" || !event.pull_request.merged {
+                return Ok(Json(
+                    serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
+                ));
+            }
+            let merged_at = event
+                .pull_request
+                .merged_at
+                .as_deref()
+                .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
+                .unwrap_or_else(OffsetDateTime::now_utc);
+            let wave_ids = find_waves_for_pr(
                 &state.store,
-                &state.github,
-                &wave_id,
+                &event.repository.full_name,
                 event.pull_request.number,
-                merged_at,
             )
             .await
             .map_err(|err| {
@@ -414,18 +402,34 @@ pub async fn github_webhook_handler(
                     ApiMessage::Untrusted(err),
                 )
             })?;
-            if handled {
-                processed += 1;
+            let mut processed = 0_u32;
+            for wave_id in wave_ids {
+                let handled = crate::lfd::queue::handle_pr_merged(
+                    &state.store,
+                    &state.github,
+                    &wave_id,
+                    event.pull_request.number,
+                    merged_at,
+                )
+                .await
+                .map_err(|err| {
+                    api_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        ApiMessage::Untrusted(err),
+                    )
+                })?;
+                if handled {
+                    processed += 1;
+                }
             }
+            Ok(Json(
+                serde_json::json!({ "ok": true, "processed": processed }),
+            ))
         }
-        return Ok(Json(
-            serde_json::json!({ "ok": true, "processed": processed }),
-        ));
+        _ => Ok(Json(
+            serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
+        )),
     }
-
-    Ok(Json(
-        serde_json::json!({ "ok": true, "matched": 0, "skipped": true }),
-    ))
 }
 
 pub async fn poll_all_waves_ci(

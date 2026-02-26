@@ -29,11 +29,11 @@ use crate::lfd::sessions::types::{CreateSessionParams, Session, SessionConfig, S
 use crate::lfd::sessions::{SessionManager, SessionManagerError};
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::triggers::{
-    enqueue_pending_activation, spawn_run_task_with_slot, ActivationEnvelope,
+    enqueue_pending_activation, spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    ActivationSource, Event, LivePrState, LivePullRequestState, PendingActivation, Stimulus,
-    StimulusKind, Wave, WaveRun, WaveRunKind, WaveRunStatus, WaveStatus,
+    ActivationSource, Event, LivePrState, LivePullRequestState, Stimulus, StimulusKind, Wave,
+    WaveRun, WaveRunKind, WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
@@ -483,9 +483,6 @@ impl WaveExecutor {
                             warn!(wave_id = %wave.id(), error = %err, "queue reconcile failed after run completion");
                         }
                     }
-                    if let Err(err) = self.enqueue_listen_activations(wave.id(), &run.id).await {
-                        warn!(wave_id = %wave.id(), run_id = %run.id, error = %err, "failed to enqueue listen activations");
-                    }
                     // Wave goes back to Idle after a run completes — the run
                     // is done, but the wave is ready for its next iteration.
                     self.set_wave_status(wave.id(), WaveStatus::Idle).await;
@@ -556,9 +553,23 @@ impl WaveExecutor {
             .flatten()
             .is_some()
         {
-            return self
-                .queue_or_coalesce_pending_activation(wave.id(), &stimulus.id)
-                .await;
+            let reason = format!("listen stimulus {} deferred: wave already running", stimulus.id);
+            return matches!(
+                enqueue_pending_activation(
+                    &self.store,
+                    &self.event_hub,
+                    ActivationEnvelope::new(
+                        wave.id(),
+                        &stimulus.id,
+                        ActivationSource::Listen,
+                        reason,
+                        "",
+                        "",
+                    ),
+                )
+                .await,
+                Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+            );
         }
 
         let run_id = LfdId::new();
@@ -570,9 +581,23 @@ impl WaveExecutor {
                     reason = %reason,
                     "scheduler at capacity; queueing listen activation"
                 );
-                return self
-                    .queue_or_coalesce_pending_activation(wave.id(), &stimulus.id)
-                    .await;
+                let reason = format!("listen stimulus {} deferred: scheduler full", stimulus.id);
+                return matches!(
+                    enqueue_pending_activation(
+                        &self.store,
+                        &self.event_hub,
+                        ActivationEnvelope::new(
+                            wave.id(),
+                            &stimulus.id,
+                            ActivationSource::Listen,
+                            reason,
+                            "",
+                            "",
+                        ),
+                    )
+                    .await,
+                    Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+                );
             }
         };
 
@@ -594,49 +619,6 @@ impl WaveExecutor {
         true
     }
 
-    async fn queue_or_coalesce_pending_activation(
-        &self,
-        wave_id: &LfdId,
-        stimulus_id: &LfdId,
-    ) -> bool {
-        match self
-            .store
-            .get_pending_for_stimulus(wave_id, stimulus_id)
-            .await
-        {
-            Ok(Some(_existing)) => true,
-            Ok(None) => {
-                let activation = PendingActivation {
-                    id: LfdId::new(),
-                    wave_id: wave_id.clone(),
-                    stimulus_id: stimulus_id.clone(),
-                    from_sha: String::new(),
-                    to_sha: String::new(),
-                    queued_at: OffsetDateTime::now_utc().unix_timestamp(),
-                };
-                if let Err(err) = self.store.create_pending_activation(&activation).await {
-                    warn!(
-                        wave_id = %wave_id,
-                        stimulus_id = %stimulus_id,
-                        error = %err,
-                        "failed to queue pending activation"
-                    );
-                    return false;
-                }
-                true
-            }
-            Err(err) => {
-                warn!(
-                    wave_id = %wave_id,
-                    stimulus_id = %stimulus_id,
-                    error = %err,
-                    "failed checking pending activation"
-                );
-                false
-            }
-        }
-    }
-
     async fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
         if let Ok(Some(mut wave)) = self.store.get_wave(wave_id).await {
             wave.status = status;
@@ -644,40 +626,6 @@ impl WaveExecutor {
                 error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
             }
         }
-    }
-
-    async fn enqueue_listen_activations(
-        &self,
-        source_wave_id: &LfdId,
-        completed_run_id: &LfdId,
-    ) -> Result<()> {
-        let stimuli = self
-            .store
-            .list_stimuli_by_kind(StimulusKind::Listen.as_i32())
-            .await?;
-        for stimulus in stimuli {
-            if !stimulus.enabled {
-                continue;
-            }
-            if stimulus.source_wave_id.as_ref() != Some(source_wave_id) {
-                continue;
-            }
-            let reason = format!("wave {} completed run {}", source_wave_id, completed_run_id);
-            let _ = enqueue_pending_activation(
-                &self.store,
-                &self.event_hub,
-                ActivationEnvelope::new(
-                    &stimulus.wave_id,
-                    &stimulus.id,
-                    ActivationSource::Listen,
-                    reason,
-                    "",
-                    "",
-                ),
-            )
-            .await;
-        }
-        Ok(())
     }
 
     async fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
@@ -1140,6 +1088,7 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            activation_log_id: None,
             run_kind: WaveRunKind::Main,
             ci_fix_kind: None,
             parent_run_id: None,

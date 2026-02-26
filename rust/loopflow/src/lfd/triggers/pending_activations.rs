@@ -149,8 +149,8 @@ mod tests {
     use crate::lfd::output::OutputHub;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{
-        PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunKind, WaveRunStatus,
-        WaveStatus,
+        ActivationSource, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunKind,
+        WaveRunStatus, WaveStatus,
     };
 
     struct MockRunner;
@@ -230,6 +230,8 @@ mod tests {
             id: LfdId::new(),
             wave_id: listening_wave.id().clone(),
             stimulus_id: stimulus.id.clone(),
+            source: ActivationSource::Listen,
+            reason: "listen completion".to_string(),
             from_sha: String::new(),
             to_sha: String::new(),
             queued_at: Utc::now().timestamp(),

@@ -15,8 +15,8 @@ Mic button in the composer. Hold or toggle to record. WhisperKit transcribes on-
 
 ## Open follow-up work
 
-- Build `02-vad`: hands-free Voice Activity Detection with tunable sensitivity and turn-state-aware activation.
-- Build `03-auto-send`: optional confidence-aware auto-send loop with visible cancel window.
+- Build `03-vad`: hands-free Voice Activity Detection with tunable sensitivity and turn-state-aware activation.
+- Build `04-auto-send`: optional confidence-aware auto-send loop with visible cancel window.
 - Stabilize full macOS UI test bootstrapping (`ConcertoUITests-Runner` early-exit `signal kill`) so the unskipped `xcodebuild test -scheme Concerto` gate is reliable.
 
 ## What to build

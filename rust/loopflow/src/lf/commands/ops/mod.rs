@@ -1,6 +1,6 @@
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, is_clean};
 use crate::engine::worktrees::{
-    create_with_schema, list_worktrees, main_repo_root, worktree_path, worktree_short_name,
+    create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree, worktree_path,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::Colors;
@@ -350,7 +350,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
             let name = if is_main {
                 default_branch.clone()
             } else {
-                worktree_short_name(&wt.path).unwrap_or_else(|| {
+                wave_name_from_worktree(&wt.path).unwrap_or_else(|| {
                     wt.path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -429,7 +429,7 @@ fn wt_remove(name: &str, force: bool) -> Result<()> {
     // Find the worktree by short name or directory name
     let worktrees = list_worktrees(&main_repo)?;
     let target = worktrees.iter().find(|wt| {
-        worktree_short_name(&wt.path).as_deref() == Some(name)
+        wave_name_from_worktree(&wt.path).as_deref() == Some(name)
             || wt
                 .path
                 .file_name()

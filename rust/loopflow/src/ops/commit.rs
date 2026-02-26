@@ -17,7 +17,6 @@ pub struct CommitOptions {
     pub task: String,
     pub flow_parents: Vec<String>,
     pub message: Option<String>,
-    pub wave: Option<String>,
 }
 
 impl CommitOptions {
@@ -30,7 +29,6 @@ impl CommitOptions {
             task: task.into(),
             flow_parents: Vec::new(),
             message: None,
-            wave: None,
         }
     }
 }
@@ -69,7 +67,7 @@ pub fn commit_workflow(
         message.to_string()
     } else {
         progress.status("Generating commit message...");
-        let generated = generate_commit_message(repo, options.wave.as_deref())?;
+        let generated = generate_commit_message(repo)?;
         format_commit_message(
             &options.task,
             &options.flow_parents,

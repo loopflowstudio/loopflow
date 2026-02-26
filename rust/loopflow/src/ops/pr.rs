@@ -8,7 +8,7 @@ use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::{generate_pr_message, generate_pr_message_from_diff};
+use crate::ops::messages::{generate_pr_message, generate_pr_message_from_diff, resolve_wave_name};
 use crate::ops::progress::Progress;
 use crate::ops::util::{command_exists, stderr_from_output};
 
@@ -82,6 +82,7 @@ pub fn create_or_update_pr(
     }
 
     let has_changes = committed || rebased;
+    let wave = resolve_wave_name(repo, None);
 
     if let Some(pr) = find_open_pr(repo)? {
         if !options.refresh && !has_changes && !pr.is_draft {
@@ -95,9 +96,9 @@ pub fn create_or_update_pr(
 
         progress.status("Updating PR...");
         let message = if let Some(diff) = get_pr_diff(repo)? {
-            generate_pr_message_from_diff(repo, &diff)?
+            generate_pr_message_from_diff(repo, &diff, wave.as_deref())?
         } else {
-            generate_pr_message(repo)?
+            generate_pr_message(repo, wave.as_deref())?
         };
         update_pr(repo, pr.number, &message.title, &message.body)?;
         if pr.is_draft {
@@ -112,7 +113,7 @@ pub fn create_or_update_pr(
     }
 
     progress.status("Creating PR...");
-    let message = generate_pr_message(repo)?;
+    let message = generate_pr_message(repo, wave.as_deref())?;
     let base = pr_target(repo)?;
     let url = create_pr(repo, &message.title, &message.body, &base)?;
     if let Some(pr) = find_open_pr(repo)? {

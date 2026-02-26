@@ -392,7 +392,6 @@ pub(crate) fn auto_create_pr(
         add: true,
         push: true,
         create_draft_pr: true,
-        wave: wave_name,
         ..CommitOptions::for_task("commit")
     };
     if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {
@@ -405,8 +404,8 @@ pub(crate) fn auto_create_pr(
             let mut title = None;
 
             // Update the draft PR with an LLM-generated title and description,
-            // matching what `lf ops pr` produces.
-            match generate_pr_message(worktree) {
+            // matching what `lf ops pr` produces. Wave name becomes the PR title prefix.
+            match generate_pr_message(worktree, wave_name.as_deref()) {
                 Ok(message) => {
                     title = Some(message.title.clone());
                     if let Err(err) = update_pr(worktree, pr.number, &message.title, &message.body)

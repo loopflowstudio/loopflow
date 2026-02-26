@@ -292,7 +292,7 @@ fn run_command<const N: usize>(repo: &Path, program: &str, args: [&str; N]) -> O
 
 fn update_combined_pr_message(repo: &Path, progress: &impl Progress) {
     progress.status("Generating PR title...");
-    match crate::ops::generate_pr_message(repo) {
+    match crate::ops::generate_pr_message(repo, None) {
         Ok(message) => {
             if let Err(err) = run_gh(
                 repo,

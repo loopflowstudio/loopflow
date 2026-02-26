@@ -41,7 +41,14 @@ enum ReplyEntry: Identifiable, Equatable {
 
     var assembledBlock: String {
         guard let quotedText else { return responseText }
-        return "> \(quotedText)\n\n\(responseText)"
+        return "\(formattedQuote(quotedText))\n\n\(responseText)"
+    }
+
+    private func formattedQuote(_ text: String) -> String {
+        text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "> \($0)" }
+            .joined(separator: "\n")
     }
 }
 

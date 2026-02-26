@@ -67,6 +67,7 @@ struct WaveSessionView: View {
                 queue: replyQueue,
                 isExpanded: $isReplyTrayExpanded,
                 freeTextDraft: $replyTrayFreeText,
+                canSend: state.canSend,
                 onSend: sendMessage
             )
             .padding(.horizontal, Spacing.lg)
@@ -189,6 +190,7 @@ struct WaveSessionView: View {
     }
 
     private func sendMessage() {
+        guard state.canSend else { return }
         let text = replyQueue.assembleMessage(extraFreeText: composerText)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         composerText = ""

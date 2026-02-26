@@ -11,6 +11,7 @@ struct ReplyDraftTray: View {
     @Binding var isExpanded: Bool
     @Binding var freeTextDraft: String
 
+    var canSend = true
     let onSend: () -> Void
 
     var body: some View {
@@ -85,7 +86,7 @@ struct ReplyDraftTray: View {
                 onSend()
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(queue.isEmpty)
+            .disabled(queue.isEmpty || !canSend)
         }
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.sm)

@@ -44,4 +44,17 @@ struct ReplyQueueTests {
         #expect(queue.entries.isEmpty)
         #expect(queue.assembleMessage().isEmpty)
     }
+
+    @Test("multi-line quotes keep markdown quote markers on every line")
+    func multilineQuotesArePrefixedPerLine() {
+        let queue = ReplyQueue()
+        queue.addQuoteReply(
+            quoted: "first line\nsecond line",
+            reply: "Looks good."
+        )
+
+        let assembled = queue.assembleMessage()
+
+        #expect(assembled.contains("> first line\n> second line"))
+    }
 }

@@ -281,6 +281,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_chord_handler_rejects_empty_name() {
+        let state = test_http_state().await;
+
+        let result = create_chord_handler(
+            State(state),
+            Json(CreateChordRequest {
+                name: "   ".to_string(),
+            }),
+        )
+        .await;
+        assert!(matches!(result, Err((StatusCode::BAD_REQUEST, _))));
+    }
+
+    #[tokio::test]
     async fn chord_membership_handlers_return_not_found_for_unknown_resources() {
         let state = test_http_state().await;
         let wave_id = LfdId::new();
@@ -321,5 +335,31 @@ mod tests {
             remove_missing_wave,
             Err((StatusCode::NOT_FOUND, _))
         ));
+    }
+
+    #[tokio::test]
+    async fn chord_handlers_reject_invalid_ids() {
+        let state = test_http_state().await;
+
+        let get_result =
+            get_chord_handler(State(state.clone()), Path("not-an-id".to_string())).await;
+        assert!(matches!(get_result, Err((StatusCode::BAD_REQUEST, _))));
+
+        let add_result = add_chord_member_handler(
+            State(state.clone()),
+            Path("not-an-id".to_string()),
+            Json(AddChordMemberRequest {
+                wave_id: "still-not-an-id".to_string(),
+            }),
+        )
+        .await;
+        assert!(matches!(add_result, Err((StatusCode::BAD_REQUEST, _))));
+
+        let remove_result = remove_chord_member_handler(
+            State(state),
+            Path(("not-an-id".to_string(), "also-not-an-id".to_string())),
+        )
+        .await;
+        assert!(matches!(remove_result, Err((StatusCode::BAD_REQUEST, _))));
     }
 }

@@ -382,7 +382,13 @@ class Client:
 
     @staticmethod
     def _parse_model_list(payload: Any, model_type: type[ModelT]) -> list[ModelT]:
-        data = payload.get("data", []) if isinstance(payload, dict) else []
+        if not isinstance(payload, dict):
+            raise LoopflowError("invalid list response payload")
+
+        data = payload.get("data", [])
+        if not isinstance(data, list):
+            raise LoopflowError("invalid list response payload")
+
         return [model_type.model_validate(item) for item in data]
 
     def _request_optional_model(

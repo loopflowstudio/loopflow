@@ -79,6 +79,23 @@ loopflow.create_wave("engbot", repo=".")
 loopflow.run_wave("engbot")
 ```
 
+Manage chords (wave groups):
+
+```bash
+curl -s -X POST "http://127.0.0.1:2486/v0/chords" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"frontend"}'
+
+curl -s "http://127.0.0.1:2486/v0/chords"
+
+curl -s -X POST "http://127.0.0.1:2486/v0/chords/<chord_id>/members" \
+  -H "Content-Type: application/json" \
+  -d '{"wave_id":"<wave_id>"}' \
+  -i
+```
+
+Membership add/remove and chord delete return `204 No Content`.
+
 ## Agent sessions API
 
 Create a session:

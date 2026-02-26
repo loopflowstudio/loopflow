@@ -200,6 +200,15 @@ class TestClientResponses:
         assert runs[0].status == "completed"
         client.close()
 
+    def test_waves_invalid_list_payload_raises_error(self):
+        def handler(request):
+            return httpx.Response(200, json=[])
+
+        client = _mock_client(handler)
+        with pytest.raises(LoopflowError, match="invalid list response payload"):
+            client.waves()
+        client.close()
+
     def test_create_wave_sends_correct_body(self):
         received = {}
 

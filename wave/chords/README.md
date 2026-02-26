@@ -58,7 +58,7 @@ Waves are flat. Chords group them. Listening connects them.
 
 The original plan called for a recursive `Wave` enum (Voice | Chord) with join/leave composition, nested execution, and inherited triggers. Building it revealed that the recursive model was over-engineered for the OSS use case — users want named groups and inter-wave reactivity, not a tree-structured wave scheduler.
 
-The pivot: flatten `Wave` to a single struct, drop `wave_type`/`parent_id`/`position`/`join`/`leave`, add `chords`/`chord_members` tables for grouping, and add `StimulusKind::Listen` with `source_wave_id` for inter-wave coordination. Migration 012 handles the schema transition. Python client updated to match (removed `join()`/`leave()`, added `source_wave_id` to stimulus API).
+The pivot: flatten `Wave` to a single struct, drop `wave_type`/`parent_id`/`position`/`join`/`leave`, add `chords`/`chord_members` tables for grouping, and add `Signal::Listen` with `source_wave_id` for inter-wave coordination. Migration 012 handles the schema transition. Python client updated to match (removed `join()`/`leave()`, added `source_wave_id` to stimulus API).
 
 ### Phase 02 retrospective
 

@@ -15,7 +15,7 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::ensure_wave_worktree;
 use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
 use crate::lfd::http::dto::{
-    activation_log_dto, stimulus_dto, stimulus_kind_str, ActivationLogDto, CombineResponse,
+    activation_log_dto, stimulus_dto, signal_str, ActivationLogDto, CombineResponse,
     CombineResponseResult, ContinueWaveResponse, DeletedResourceResponse, ErrorResponse,
     LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse, RunWaveResponse,
     StopWaveResponse, WaveDto,
@@ -904,7 +904,7 @@ pub async fn add_stimulus_handler(
 
     Ok(Json(serde_json::json!({
         "id": stimulus.id.to_string(),
-        "kind": stimulus_kind_str(stimulus.signal),
+        "kind": signal_str(stimulus.signal),
         "flow": stimulus.flow,
         "source_wave_id": stimulus.source_wave_id.as_ref().map(ToString::to_string),
         "cron": stimulus.cron,

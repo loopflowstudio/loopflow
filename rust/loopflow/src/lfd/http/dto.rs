@@ -285,8 +285,8 @@ pub struct DeletedResourceResponse {
     pub deleted: bool,
 }
 
-pub fn stimulus_kind_str(kind: Signal) -> &'static str {
-    match kind {
+pub fn signal_str(signal: Signal) -> &'static str {
+    match signal {
         Signal::Loop => "loop",
         Signal::Watch => "watch",
         Signal::Cron => "cron",
@@ -361,7 +361,7 @@ pub fn wave_run_dto(
 pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     StimulusDto {
         id: s.id.to_string(),
-        kind: stimulus_kind_str(s.signal).to_string(),
+        kind: signal_str(s.signal).to_string(),
         enabled: s.enabled,
         flow: s.flow,
         source_wave_id: s.source_wave_id.map(|value| value.to_string()),

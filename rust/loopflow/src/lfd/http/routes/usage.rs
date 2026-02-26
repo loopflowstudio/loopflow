@@ -288,6 +288,7 @@ mod tests {
             )
             .expect("build executor"),
         );
+        let provider_auth = ProviderAuthService::new(store.clone());
         (
             HttpState {
                 store,
@@ -295,7 +296,7 @@ mod tests {
                 executor,
                 event_hub,
                 output_hub,
-                provider_auth: ProviderAuthService::new(),
+                provider_auth,
                 auth: AuthProvider::Local {
                     session_token: secrecy::SecretString::from("test-token".to_string()),
                 },

@@ -28,7 +28,7 @@ v0 = tokens, not dollars. Claude and Codex are subscription plans — there's no
 | # | Phase doc | Scope | Status |
 |---|---|---|---|
 | 01 | `01-metering-infra.md` | Persist `turn_usage` and `context_snapshot` runtime events from all harnesses | Shipped (2026-02-26) |
-| 02 | `02-usage-api.md` | Usage aggregation endpoints for session/wave/global summaries | In progress |
+| 02 | *(shipped)* | Usage aggregation endpoints for session/wave/global summaries | Shipped (2026-02-26) |
 | 03 | `03-provider-elevation.md` | Provider/model metadata and `/providers` endpoint | Later |
 | 04 | `04-inline-views.md` | Progressive inline token views in Concerto | Later |
 | 05 | `05-analytics-dashboard.md` | Dedicated analytics tab with work + prompt lenses | Later |
@@ -50,6 +50,23 @@ Carry-forward follow-ups:
 - Source `ContextSnapshot.budget` from session-level configuration if/when dynamic context budgeting lands.
 - Add regression coverage around OpenCode status transition semantics used for usage capture (`active -> idle` + usage block).
 
+### Phase 02 retrospective (shipped 2026-02-26)
+
+What shipped:
+
+- Three HTTP endpoints: `GET /v0/sessions/{id}/usage`, `GET /v0/waves/{id}/usage`, `GET /v0/usage/summary`.
+- Pure aggregation module (`sessions/usage.rs`) with no DB dependency — aggregates in Rust above the store layer.
+- Two new store methods (`list_sessions_for_wave`, `list_sessions_filtered`) in both SQLite and Postgres backends.
+- DTOs reuse aggregation types via `#[serde(flatten)]` — no duplicate structs.
+- Summary endpoint supports `group_by` (wave/flow/step/model/source) and filters (wave/flow/step/model/time range).
+- 8 tests: 4 unit (aggregation math) + 4 integration (full handler path).
+- No new tables or migrations — queries existing `sessions` and `session_events` tables.
+
+Carry-forward follow-ups:
+
+- N+1 event loading in wave/summary endpoints (loads events per-session in a loop). Batch the event query or add a materialized `session_usage` table if wave sessions grow to thousands.
+- No caching layer. Session events are immutable after session ends, so caching is safe. Add when measured latency exceeds 200ms.
+- E2E smoke test coverage for usage endpoints deferred — unit and integration tests cover the new code.
 
 ## Risks
 

@@ -75,7 +75,8 @@ struct MobileWaveDetailView: View {
             } else {
                 WaveSessionView(
                     state: sessionState,
-                    showsSuggestedActions: false
+                    showsSuggestedActions: false,
+                    managesLifecycle: false
                 )
             }
 
@@ -89,8 +90,7 @@ struct MobileWaveDetailView: View {
                     }
                 }
                 .padding(.horizontal, Spacing.lg)
-                .padding(.top, Spacing.sm)
-                .padding(.bottom, Spacing.sm)
+                .padding(.vertical, Spacing.sm)
                 .background(palette.background)
             }
         }
@@ -105,12 +105,6 @@ struct MobileWaveDetailView: View {
         }
         .onChange(of: horizontalSizeClass) { _, value in
             sessionState.configureClientContext(compact: value == .compact)
-        }
-        .onChange(of: tab) { _, value in
-            guard value == .output else { return }
-            Task {
-                await sessionState.onAppear()
-            }
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)

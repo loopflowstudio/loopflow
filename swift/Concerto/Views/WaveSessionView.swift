@@ -7,6 +7,7 @@ struct WaveSessionView: View {
 
     @Bindable var state: SessionState
     let showsSuggestedActions: Bool
+    let managesLifecycle: Bool
 
     @State private var composerText = ""
     @State private var expandedItemIds: Set<UUID> = []
@@ -83,20 +84,28 @@ struct WaveSessionView: View {
         }
         .background(palette.background)
         .task {
+            guard managesLifecycle else { return }
             state.configureClientContext(compact: horizontalSizeClass == .compact)
             await state.onAppear()
         }
         .onChange(of: horizontalSizeClass) { _, value in
+            guard managesLifecycle else { return }
             state.configureClientContext(compact: value == .compact)
         }
         .onDisappear {
+            guard managesLifecycle else { return }
             state.onDisappear()
         }
     }
 
-    init(state: SessionState, showsSuggestedActions: Bool = true) {
+    init(
+        state: SessionState,
+        showsSuggestedActions: Bool = true,
+        managesLifecycle: Bool = true
+    ) {
         self.state = state
         self.showsSuggestedActions = showsSuggestedActions
+        self.managesLifecycle = managesLifecycle
     }
 
     private var groupedTranscript: [TranscriptGroup] {

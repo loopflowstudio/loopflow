@@ -45,4 +45,6 @@ Status: **shipped** (branch `jack-heart.lfd-repos.20260225_2241`)
 ## Follow-ups
 
 - Proceed with step 4: wire provider auth state into repo onboarding (`POST /v0/repos`) so the primary workflow is repo-first inside Concerto.
+- Token refresh / expiry polling: the `expired` status exists in the model but no automatic re-auth is triggered. Users must manually reconnect.
+- Accessibility pass: iOS/macOS connection setup forms lack `.accessibilityLabel()` on text inputs.
 - Keep running full `Concerto` scheme tests in environments where `ConcertoUITests-Runner` can attach cleanly.

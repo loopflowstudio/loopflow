@@ -17,6 +17,7 @@ Connecting GitHub, Claude, and Codex should be browser-first and identical acros
 
 ## Risks
 
-- Provider CLI output changes can break URL/code parsing.
-- Filesystem heuristics (`~/.claude`, `~/.codex`) may drift from real credential layouts.
+- Provider CLI output changes can break URL/code parsing. Mitigated by regex with fallbacks and `scripts/test_auth_live_contract.py`.
 - Missing host binaries (`gh`, `claude`, `codex`) blocks interactive auth flows.
+- Browser launch may fail silently during OAuth device flow; URL fallback with copy button degrades UX.
+- `POST /v0/auth/{provider}` uses 30s/60s timeouts because the server spawns a CLI process — UI shows pending state for a while if the CLI is slow.

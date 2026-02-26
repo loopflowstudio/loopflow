@@ -172,7 +172,7 @@ private actor MockAuthProviderService: AuthProviderService {
 
         return AuthFlow(
             provider: provider,
-            verification_uri: "https://example.com/device"
+            verificationURI: "https://example.com/device"
         )
     }
 

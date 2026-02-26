@@ -51,23 +51,31 @@ public struct AuthProviderStatus: Codable, Sendable, Identifiable {
 
 public struct AuthFlow: Codable, Sendable {
     public let provider: AuthProvider
-    public let verification_uri: String
-    public let verification_uri_complete: String?
-    public let user_code: String?
-    public let expires_in: UInt64?
+    public let verificationURI: String
+    public let verificationURIComplete: String?
+    public let userCode: String?
+    public let expiresIn: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case verificationURI = "verification_uri"
+        case verificationURIComplete = "verification_uri_complete"
+        case userCode = "user_code"
+        case expiresIn = "expires_in"
+    }
 
     public init(
         provider: AuthProvider,
-        verification_uri: String,
-        verification_uri_complete: String? = nil,
-        user_code: String? = nil,
-        expires_in: UInt64? = nil
+        verificationURI: String,
+        verificationURIComplete: String? = nil,
+        userCode: String? = nil,
+        expiresIn: UInt64? = nil
     ) {
         self.provider = provider
-        self.verification_uri = verification_uri
-        self.verification_uri_complete = verification_uri_complete
-        self.user_code = user_code
-        self.expires_in = expires_in
+        self.verificationURI = verificationURI
+        self.verificationURIComplete = verificationURIComplete
+        self.userCode = userCode
+        self.expiresIn = expiresIn
     }
 }
 

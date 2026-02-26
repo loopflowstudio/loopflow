@@ -66,7 +66,7 @@ struct LocalWaveServiceAuthTests {
         let flow = try await service.startAuthFlow(provider: .github)
 
         #expect(flow.provider == .github)
-        #expect(flow.user_code == "ABCD-1234")
+        #expect(flow.userCode == "ABCD-1234")
         #expect(timeoutRecorder.lastRequestTimeout == 30)
         #expect(timeoutRecorder.lastResourceTimeout == 60)
     }

@@ -182,7 +182,7 @@ public final class AuthProviderStore {
     }
 
     private func enqueueBrowserLaunch(provider: AuthProvider, flow: AuthFlow) {
-        let preferredURL = flow.verification_uri_complete ?? flow.verification_uri
+        let preferredURL = flow.verificationURIComplete ?? flow.verificationURI
         if let url = URL(string: preferredURL) {
             browserLaunchRequest = BrowserLaunchRequest(provider: provider, url: url)
             return
@@ -212,10 +212,10 @@ public final class AuthProviderStore {
 
         return AuthFlow(
             provider: event.provider,
-            verification_uri: verificationURI,
-            verification_uri_complete: event.verificationURIComplete,
-            user_code: nil,
-            expires_in: nil
+            verificationURI: verificationURI,
+            verificationURIComplete: event.verificationURIComplete,
+            userCode: nil,
+            expiresIn: nil
         )
     }
 }

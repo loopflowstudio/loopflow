@@ -300,12 +300,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return decoded.providers
     }
 
-    public func getAuthProvider(provider: AuthProvider) async throws -> AuthProviderStatus {
-        let (data, response) = try await performGet(authURL(provider))
-        try requireOKStatus(response, data: data)
-        return try decodeResponse(AuthProviderStatus.self, from: data)
-    }
-
     public func startAuthFlow(provider: AuthProvider) async throws -> AuthFlow {
         let request = try makeRequest(authURL(provider), method: "POST")
         let (data, response) = try await performRequest(request, useLongTimeouts: true)

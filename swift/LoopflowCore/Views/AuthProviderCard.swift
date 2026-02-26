@@ -105,7 +105,7 @@ public struct AuthProviderCard: View {
     private var pendingBody: some View {
         if let flow = pendingFlow {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let userCode = flow.user_code {
+                if let userCode = flow.userCode {
                     HStack(spacing: Spacing.sm) {
                         Text(userCode)
                             .font(Typography.code())
@@ -137,7 +137,7 @@ public struct AuthProviderCard: View {
 
     @ViewBuilder
     private func fallbackURLView(_ flow: AuthFlow) -> some View {
-        let flowURL = flow.verification_uri_complete ?? flow.verification_uri
+        let flowURL = flow.verificationURIComplete ?? flow.verificationURI
 
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Browser did not open. Copy this URL:")

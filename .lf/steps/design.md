@@ -18,9 +18,8 @@ The design doc is scaffolding—a checkpoint for recovery, not documentation for
 ## Setup
 
 1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
-2. Check the branch/worktree name—it becomes the PR title prefix (e.g., `mobile: add offline sync`). If it's generic or doesn't describe the feature, suggest renaming: `git branch -m <new-name>` (the branch schema will format it)
-3. Check `wave/` for existing waves, architecture notes, or context that informs this design
-4. Create `scratch/<branch>.md` early—after the first exchange or two
+2. Check `wave/` for existing waves, architecture notes, or context that informs this design
+3. Create `scratch/<branch>.md` early—after the first exchange or two
 
 ## Workflow
 

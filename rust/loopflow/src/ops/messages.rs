@@ -4,7 +4,10 @@ use serde::Deserialize;
 
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
+use crate::engine::git::current_branch;
+use crate::engine::naming::wave_name_from_branch;
 use crate::engine::prompt::count_tokens;
+use crate::engine::worktrees::wave_name_from_worktree;
 
 use crate::ops::error::{OpsError, OpsResult};
 
@@ -135,32 +138,57 @@ struct MessagePayload {
     body: String,
 }
 
-pub fn generate_commit_message(repo: &Path, wave: Option<&str>) -> OpsResult<Message> {
+pub fn generate_commit_message(repo: &Path) -> OpsResult<Message> {
     let diff = get_staged_diff(repo)?;
-    let task = if let Some(wave_name) = wave {
-        format!(
-            "{COMMIT_MESSAGE_PROMPT}\n\n## Topic\n\nAlways use `{wave_name}` as the area prefix. Do not invent a different topic."
-        )
-    } else {
-        COMMIT_MESSAGE_PROMPT.to_string()
-    };
-    let prompt = build_message_prompt(diff.as_deref(), &task);
+    let prompt = build_message_prompt(diff.as_deref(), COMMIT_MESSAGE_PROMPT);
     generate_message(repo, &prompt, MessageKind::Commit)
 }
 
-pub fn generate_pr_message(repo: &Path) -> OpsResult<Message> {
+pub fn generate_pr_message(repo: &Path, wave: Option<&str>) -> OpsResult<Message> {
     let diff = get_branch_diff(repo)?;
-    generate_pr_message_with_diff(repo, diff.as_deref())
+    generate_pr_message_with_diff(repo, diff.as_deref(), wave)
 }
 
-pub fn generate_pr_message_from_diff(repo: &Path, diff: &str) -> OpsResult<Message> {
-    generate_pr_message_with_diff(repo, Some(diff))
+pub fn generate_pr_message_from_diff(
+    repo: &Path,
+    diff: &str,
+    wave: Option<&str>,
+) -> OpsResult<Message> {
+    generate_pr_message_with_diff(repo, Some(diff), wave)
 }
 
-fn generate_pr_message_with_diff(repo: &Path, diff: Option<&str>) -> OpsResult<Message> {
+fn generate_pr_message_with_diff(
+    repo: &Path,
+    diff: Option<&str>,
+    wave: Option<&str>,
+) -> OpsResult<Message> {
     let non_trivial_diff = diff.is_some_and(is_non_trivial_diff);
-    let prompt = build_message_prompt(diff, PR_MESSAGE_PROMPT);
+    let task = if let Some(wave_name) = wave {
+        format!(
+            "{PR_MESSAGE_PROMPT}\n\n## Topic\n\nAlways use `{wave_name}` as the area prefix in the title. Do not invent a different topic."
+        )
+    } else {
+        PR_MESSAGE_PROMPT.to_string()
+    };
+    let prompt = build_message_prompt(diff, &task);
     generate_message(repo, &prompt, MessageKind::PullRequest { non_trivial_diff })
+}
+
+/// Resolve the wave name for PR message generation.
+///
+/// Priority: explicit wave name > worktree directory name > branch name component.
+pub fn resolve_wave_name(repo: &Path, explicit: Option<&str>) -> Option<String> {
+    if let Some(name) = explicit {
+        return Some(name.to_string());
+    }
+    if let Some(name) = wave_name_from_worktree(repo) {
+        return Some(name);
+    }
+    if let Ok(Some(branch)) = current_branch(repo) {
+        let config = load_config_or_default(Some(repo));
+        return wave_name_from_branch(&branch, config.branch_names.as_ref());
+    }
+    None
 }
 
 fn generate_message(repo: &Path, prompt: &str, kind: MessageKind) -> OpsResult<Message> {

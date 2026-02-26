@@ -6,7 +6,7 @@ use crate::engine::git::{
     create_branch, current_branch, get_default_branch, push_with_upstream, sync_main,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
-use crate::engine::worktrees::{branch_exists, main_repo_root, worktree_short_name};
+use crate::engine::worktrees::{branch_exists, main_repo_root, wave_name_from_worktree};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
@@ -85,7 +85,7 @@ pub fn next_branch(
     let wave_name = options
         .wave_name
         .clone()
-        .or_else(|| worktree_short_name(repo))
+        .or_else(|| wave_name_from_worktree(repo))
         .unwrap_or(current.clone());
 
     // Generate new branch using schema

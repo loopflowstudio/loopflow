@@ -9,7 +9,7 @@ use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::generate_pr_message;
+use crate::ops::messages::{generate_pr_message, resolve_wave_name};
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
@@ -124,7 +124,8 @@ fn ensure_pr(repo_root: &Path, options: &LandOptions, progress: &impl Progress) 
 
 fn finalize_remote(repo_root: &Path, progress: &impl Progress) -> OpsResult<()> {
     progress.status("Updating PR...");
-    let message = generate_pr_message(repo_root)?;
+    let wave = resolve_wave_name(repo_root, None);
+    let message = generate_pr_message(repo_root, wave.as_deref())?;
     update_pr_message(repo_root, &message.title, &message.body)?;
     mark_ready(repo_root)?;
     enable_auto_merge(repo_root, &message.title, &message.body)?;

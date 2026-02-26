@@ -118,7 +118,7 @@ pub fn parse_branch_name(
 }
 
 /// Extract the wave name ({name} component) from a branch name.
-pub fn wave_name(branch: &str, config: Option<&BranchNameConfig>) -> Option<String> {
+pub fn wave_name_from_branch(branch: &str, config: Option<&BranchNameConfig>) -> Option<String> {
     parse_branch_name(branch, config).map(|parts| parts.name)
 }
 

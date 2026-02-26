@@ -12,11 +12,11 @@ Return a structured response with:
 
 ## Title style
 
-Titles are lowercase and concise. If you are working within a wave (indicated by `<lf:wave>`), always use the wave name as the area prefix. Otherwise, use an area prefix when changes are focused on a specific module or feature area.
+Titles are lowercase and concise. Use an area prefix when changes are focused on a specific module or feature area.
 
 Examples:
-- `wave-name: add structured output for pr messages`
 - `llm_http: add structured output for pr messages`
+- `pr workflow: add -a flag to commit and push`
 - `fix typo in readme`
 
 ## Body style

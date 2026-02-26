@@ -4,7 +4,7 @@ use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_squash_merged, rev_parse, worktree_add,
     worktree_move, WorktreeBranch,
 };
-use crate::engine::naming::{format_branch_name, wave_name};
+use crate::engine::naming::{format_branch_name, wave_name_from_branch};
 use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -65,7 +65,8 @@ pub fn worktree_path_with_config(
     branch_config: Option<&BranchNameConfig>,
 ) -> PathBuf {
     let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let dir_name = wave_name(name, branch_config).unwrap_or_else(|| sanitize_fs_component(name));
+    let dir_name =
+        wave_name_from_branch(name, branch_config).unwrap_or_else(|| sanitize_fs_component(name));
     let repo_name = repo_root
         .file_name()
         .and_then(|n| n.to_str())
@@ -76,19 +77,19 @@ pub fn worktree_path_with_config(
         .join(format!("{repo_name}.{dir_name}"))
 }
 
-/// Extract the short name (wave name) from a worktree directory.
+/// Extract the wave name from a worktree directory.
 ///
 /// Given a path like `../loopflow.my-feature`, returns `Some("my-feature")`.
 /// Returns `None` if not in a worktree (i.e., in the main repo).
-pub fn worktree_short_name(repo: &Path) -> Option<String> {
+pub fn wave_name_from_worktree(repo: &Path) -> Option<String> {
     let main_repo = main_repo_root(repo).ok()?;
-    worktree_short_name_for_main_repo(repo, &main_repo)
+    wave_name_from_worktree_and_main(repo, &main_repo)
 }
 
-/// Extract the short name using an already-resolved main repo path.
+/// Extract the wave name using an already-resolved main repo path.
 ///
 /// Use this to avoid repeatedly shelling out to git when iterating many worktrees.
-pub fn worktree_short_name_for_main_repo(repo: &Path, main_repo: &Path) -> Option<String> {
+pub fn wave_name_from_worktree_and_main(repo: &Path, main_repo: &Path) -> Option<String> {
     if repo == main_repo {
         return None;
     }

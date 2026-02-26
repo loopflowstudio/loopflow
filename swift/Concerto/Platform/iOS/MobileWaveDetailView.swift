@@ -60,7 +60,7 @@ struct MobileWaveDetailView: View {
                     LiveOutput(lines: outputBuffer.output(for: wave.id))
                         .padding(.horizontal, Spacing.lg)
                 } else {
-                    WaveChatView(state: repoState.chatState(for: wave.id))
+                    WaveSessionView(state: repoState.sessionState(for: wave.id))
                 }
 
                 Spacer(minLength: 0)

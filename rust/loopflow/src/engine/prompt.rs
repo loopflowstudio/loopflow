@@ -1760,6 +1760,7 @@ mod tests {
                 model: None,
                 directions: vec![],
                 interactive: None,
+                action_style: None,
             }),
             wave_memory: Some(Document {
                 path: "wave/living/MEMORY.md".to_string(),
@@ -1805,6 +1806,7 @@ mod tests {
                 content: Some("x".to_string()), // Minimal step content
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()
@@ -1828,6 +1830,7 @@ mod tests {
                 content: Some("x".to_string()), // Minimal step content
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()
@@ -1849,6 +1852,7 @@ mod tests {
                 content: Some("Implement the feature with tests".to_string()),
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             docs: vec![Document {
@@ -2064,6 +2068,7 @@ mod tests {
                 content: Some("Implement the feature described.".to_string()),
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()
@@ -2084,6 +2089,7 @@ mod tests {
                 content: None,
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()
@@ -2182,6 +2188,7 @@ mod tests {
                 content: Some("Implement it.".to_string()),
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             diff: Some("diff content".to_string()),
@@ -2631,6 +2638,7 @@ directions:
                 content: Some("Implement the feature.".to_string()),
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()
@@ -2664,6 +2672,7 @@ directions:
                 content: Some("Fix the error.".to_string()),
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()
@@ -2706,6 +2715,7 @@ directions:
                 content: Some("Implement the feature.".to_string()),
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()
@@ -2742,6 +2752,7 @@ directions:
                 content: Some("Debug the error.".to_string()),
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             message: Some("login page crashes".to_string()),
@@ -2760,6 +2771,7 @@ directions:
                 content: None,
                 model: None,
                 directions: vec![],
+                action_style: None,
                 interactive: None,
             }),
             ..Default::default()

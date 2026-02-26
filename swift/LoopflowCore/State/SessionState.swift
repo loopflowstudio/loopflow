@@ -1,19 +1,19 @@
 import Foundation
 
-public enum ChatRole {
+public enum MessageRole {
     case user
     case assistant
     case error
     case system
 }
 
-public struct ChatMessage: Identifiable, Equatable {
+public struct SessionMessage: Identifiable, Equatable {
     public let id: UUID
-    public let role: ChatRole
+    public let role: MessageRole
     public let content: String
     public let timestamp: Date
 
-    public init(id: UUID = UUID(), role: ChatRole, content: String, timestamp: Date = Date()) {
+    public init(id: UUID = UUID(), role: MessageRole, content: String, timestamp: Date = Date()) {
         self.id = id
         self.role = role
         self.content = content
@@ -67,7 +67,7 @@ public struct TranscriptItem: Identifiable, Equatable {
 }
 
 public enum TranscriptEntry: Identifiable, Equatable {
-    case message(ChatMessage)
+    case message(SessionMessage)
     case item(TranscriptItem)
 
     public var id: UUID {
@@ -89,7 +89,7 @@ public enum TranscriptEntry: Identifiable, Equatable {
     }
 }
 
-public protocol ChatService: Sendable {
+public protocol SessionService: Sendable {
     func createSession(
         harness: String,
         waveRunId: String?,
@@ -104,9 +104,9 @@ public protocol ChatService: Sendable {
     func stopSession(_ id: String) async throws -> AgentSession
 }
 
-extension LocalWaveService: ChatService {}
+extension LocalWaveService: SessionService {}
 
-public enum ChatTurnState {
+public enum TurnState {
     case idle
     case running
     case completed
@@ -122,20 +122,21 @@ public enum StreamPhase {
 
 @MainActor
 @Observable
-public final class ChatState {
+public final class SessionState {
     public let waveId: String
 
     public var transcript: [TranscriptEntry] = []
-    public var turnState: ChatTurnState = .idle
+    public var turnState: TurnState = .idle
     public var streamPhase: StreamPhase = .idle
     public var awaitingSessionJoin: Bool = false
+    public var suggestedActions: [SuggestedAction] = []
 
     public private(set) var itemsById: [String: SessionItem] = [:]
 
     private let sessionHarness: String
     private let sessionWaveRunId: String?
-    private let sessionConfig: AgentSessionConfig
-    private let waveService: any ChatService
+    private var sessionConfig: AgentSessionConfig
+    private let waveService: any SessionService
     private let userDefaults: UserDefaults
     private let detailLimit = 16_000
     private let truncationSuffix = "…truncated"
@@ -156,7 +157,7 @@ public final class ChatState {
         sessionHarness: String = "claude",
         sessionWaveRunId: String? = nil,
         sessionConfig: AgentSessionConfig,
-        waveService: any ChatService = LocalWaveService(),
+        waveService: any SessionService = LocalWaveService(),
         userDefaults: UserDefaults = .standard
     ) {
         self.waveId = waveId
@@ -241,6 +242,7 @@ public final class ChatState {
 
         guard turnState != .running && streamPhase != .ending else { return }
 
+        clearSuggestedActions()
         appendMessage(role: .user, content: text)
         turnState = .running
         awaitingSessionJoin = false
@@ -274,7 +276,19 @@ public final class ChatState {
         currentTurnId = nil
         turnState = .idle
         streamPhase = .idle
+        clearSuggestedActions()
         appendMessage(role: .system, content: "Session ended")
+    }
+
+    public func configureClientContext(compact: Bool) {
+        guard sessionId == nil else { return }
+        sessionConfig.clientHasUI = true
+        sessionConfig.clientCompact = compact
+    }
+
+    public func sendSuggestedAction(_ action: SuggestedAction) async {
+        clearSuggestedActions()
+        await send(action.label)
     }
 
     public func reconnectIfNeeded() async {
@@ -304,7 +318,7 @@ public final class ChatState {
     }
 
     private var sessionIdKey: String {
-        "chatSession.\(waveId)"
+        "session.\(waveId)"
     }
 
     private func persistSessionId(_ id: String?) {
@@ -349,7 +363,7 @@ public final class ChatState {
 
             if isSessionTerminalStatus(session.status) {
                 throw NSError(
-                    domain: "ChatState",
+                    domain: "SessionState",
                     code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Session ended before becoming active (\(session.status))"]
                 )
@@ -361,7 +375,7 @@ public final class ChatState {
         }
 
         throw NSError(
-            domain: "ChatState",
+            domain: "SessionState",
             code: 2,
             userInfo: [NSLocalizedDescriptionKey: "Session is still \(lastStatus). Please retry in a moment."]
         )
@@ -457,10 +471,11 @@ public final class ChatState {
         itemEntryIdByItemId.removeAll()
         assistantEntryIdByTurnId.removeAll()
         messageEntryIdByItemId.removeAll()
+        clearSuggestedActions()
     }
 
-    private func appendMessage(role: ChatRole, content: String) {
-        transcript.append(.message(ChatMessage(role: role, content: content)))
+    private func appendMessage(role: MessageRole, content: String) {
+        transcript.append(.message(SessionMessage(role: role, content: content)))
     }
 
     private func upsertMessageBubble(item: SessionItem, isCompletion: Bool) -> Bool {
@@ -474,7 +489,7 @@ public final class ChatState {
             if let entryId = messageEntryIdByItemId[itemId],
                let index = transcript.firstIndex(where: { $0.id == entryId }),
                case .message(let existing) = transcript[index] {
-                let updated = ChatMessage(
+                let updated = SessionMessage(
                     id: existing.id,
                     role: role,
                     content: text,
@@ -484,18 +499,18 @@ public final class ChatState {
                 return true
             }
 
-            let messageEntry = ChatMessage(role: role, content: text)
+            let messageEntry = SessionMessage(role: role, content: text)
             transcript.append(.message(messageEntry))
             messageEntryIdByItemId[itemId] = messageEntry.id
             return true
         }
 
         guard isCompletion else { return true }
-        transcript.append(.message(ChatMessage(role: role, content: text)))
+        transcript.append(.message(SessionMessage(role: role, content: text)))
         return true
     }
 
-    private func roleForMessagePhase(_ phase: String?) -> ChatRole? {
+    private func roleForMessagePhase(_ phase: String?) -> MessageRole? {
         guard let phase else { return nil }
         let normalized = phase.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalized == "user" || normalized == "input" || normalized == "prompt" {
@@ -559,9 +574,13 @@ public final class ChatState {
         case .diffUpdated(_, _):
             return
 
+        case .suggestedActions(_, let actions):
+            applySuggestedActions(actions)
+
         case .statusChanged(let status):
             if status == "ended" || status == "failed" {
                 streamPhase = .idle
+                clearSuggestedActions()
             }
 
         case .error(_, let message):
@@ -581,7 +600,7 @@ public final class ChatState {
            let index = transcript.firstIndex(where: { $0.id == entryId }),
            case .message(let message) = transcript[index],
            message.role == .assistant {
-            let updated = ChatMessage(
+            let updated = SessionMessage(
                 id: message.id,
                 role: .assistant,
                 content: message.content + delta,
@@ -591,9 +610,29 @@ public final class ChatState {
             return
         }
 
-        let message = ChatMessage(role: .assistant, content: delta)
+        let message = SessionMessage(role: .assistant, content: delta)
         transcript.append(.message(message))
         assistantEntryIdByTurnId[turnId] = message.id
+    }
+
+    private func applySuggestedActions(_ payloads: [SuggestedActionPayload]) {
+        let sanitized = payloads
+            .compactMap { payload -> SuggestedAction? in
+                let label = payload.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !label.isEmpty else { return nil }
+                let description = payload.description?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return SuggestedAction(
+                    label: label,
+                    description: (description?.isEmpty == false) ? description : nil
+                )
+            }
+            .prefix(4)
+
+        suggestedActions = Array(sanitized)
+    }
+
+    private func clearSuggestedActions() {
+        suggestedActions.removeAll()
     }
 
     private func upsertItem(turnId: String, item: SessionItem) {

@@ -90,6 +90,7 @@ impl WaveExecutor {
                 name: "_summarize".to_string(),
                 model: Some(model.clone()),
                 directions: Vec::new(),
+                action_style: None,
                 interactive: Some(false),
                 content: None,
             },

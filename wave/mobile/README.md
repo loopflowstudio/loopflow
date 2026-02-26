@@ -28,9 +28,9 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 
 ## Phase boundaries
 
-- **01-multiplatform**: ~~shared core extraction +~~ iOS shells + manual remote connection + design token extraction + boundary enforcement + macOS file migration to Platform/macOS/. No discovery. *Shipped. State extracted to LoopflowCore. iOS got purpose-built views. macOS files migrated. Mixed-platform files (LiveOutput, WaveChatView) left in place intentionally — they have partial guards, not whole-file gates.*
-- **02-action-buttons**: `suggest_actions` UX in platform-specific chat surfaces (MobileWaveDetailView on iOS, WaveChatView on macOS) backed by shared ActionButtonsView component. No discovery and no multi-client protocol work.
-- **03-multi-client**: reliability and correctness for concurrent clients on one lfd. Manual connection path remains primary.
+- **01-multiplatform**: ~~shared core extraction +~~ iOS shells + manual remote connection + design token extraction + boundary enforcement + macOS file migration to Platform/macOS/. No discovery. *Shipped. State extracted to LoopflowCore. iOS got purpose-built views. macOS files migrated. Mixed-platform files (LiveOutput, WaveSessionView) left in place intentionally — they have partial guards, not whole-file gates.*
+- **02-action-buttons**: `suggest_actions` UX backed by shared ActionButtonsView component. No discovery and no multi-client protocol work. *Shipped. Full engine pipeline (StructuredReply, ClientContext, LfTagParser, SessionEvent) + shared Swift model + ActionButtonsView in LoopflowCore + macOS WaveSessionView integration. Chat→Session rename across Swift (ChatState→SessionState, WaveChatView→WaveSessionView). iOS MobileWaveDetailView embedding pending — small follow-up early in Stage 03.*
+- **03-multi-client**: reliability and correctness for concurrent clients on one lfd. Manual connection path remains primary. iOS action button wiring is a pre-req.
 - **04-lfd-discovery**: optional zero-config discovery via studio + Tailscale, additive to manual host/port connection.
 
 ## Multiplatform guardrails
@@ -48,7 +48,9 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 - ~~Moving views into LoopflowCore requires careful dependency management (views can't depend on app-level state)~~ *Resolved differently: iOS got purpose-built views instead. Shared components (ActionButtonsView, DesignSystem) live in LoopflowCore; platform views stay in Concerto.*
 - iOS and macOS views diverging means feature work (like action buttons) touches both platforms — more surface area per feature. *Confirmed by Stage 01: this is real but manageable. Purpose-built views are simpler than forced sharing.*
 - ~~ConnectionProfile abstraction needed early for iOS connection management~~ *Dropped: tried in Stage 01, removed. Simple ConnectionMode (bundled/remote) + ConnectionStore suffices. Profiles may return in Stage 03 if saved connections become important.*
-- Action button quality depends on agent prompt engineering — bad suggestions = bad UX
+- Action button quality depends on agent prompt engineering — bad suggestions = bad UX. *Confirmed by Stage 02: prompt-compliance-dependent, no strict tool contract. Manageable but real — quality is only as good as the model's adherence to guidance. Pipeline is proven across both Claude and Codex harnesses, so provider portability is not a concern.*
+- Harness layer has subtle assumptions about message authorship — Stage 02 found an auto-send bug where claude_mapping.rs echoed user text as new messages. Fixed, but multi-client work (Stage 03) should audit message attribution paths carefully.
+- Suggested actions are client-side ephemeral state. Multi-client (Stage 03) needs to verify that session events propagate turns across clients so stale suggestions clear on all devices.
 - Multi-client session handoff may need lfd changes if sessions assume single-client
 - SwiftUI multiplatform has rough edges (NavigationSplitView behaves differently on iOS)
 - Tailscale as prerequisite narrows the audience — users must install it on both devices
@@ -58,6 +60,6 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 
 - ~~Concerto builds and runs on iOS Simulator~~ *Done (iPhone 17, iPad Pro 11-inch M5).*
 - Can see wave list, tap into a wave, see live output on iPhone *(builds confirmed; interactive validation against live lfd pending — blocked on headless simulator interaction primitives)*
-- Agent surfaces action buttons, tapping one sends the message
+- ~~Agent surfaces action buttons, tapping one sends the message~~ *Partially done. macOS WaveSessionView shows action buttons and tap-to-send works. iOS surface not yet wired — ActionButtonsView component is shared and available but MobileWaveDetailView embedding is pending.*
 - Same lfd instance serves both Mac and iOS Concerto simultaneously
 - Login on mobile → see running lfds → tap to connect (no manual IP/port entry)

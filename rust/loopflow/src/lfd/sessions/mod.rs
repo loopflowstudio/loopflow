@@ -13,6 +13,7 @@ use crate::engine::agent::AgentConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::{write_prompt_log, Surface};
+use crate::engine::structured_reply::ClientContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
@@ -239,6 +240,10 @@ impl SessionManager {
                 include_config_area: true,
                 source_overrides: Default::default(),
                 summary: None,
+                client_context: ClientContext {
+                    has_ui: config.client_has_ui.unwrap_or(false),
+                    compact: config.client_compact.unwrap_or(false),
+                },
             },
         )
         .map_err(|err| SessionManagerError::InvalidConfig(err.to_string()))?;

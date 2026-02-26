@@ -2,6 +2,7 @@
 interactive: true
 requires: none
 produces: understanding, scratch/notes.md (optional)
+action_style: exploratory
 ---
 Investigate the codebase. Answer questions. Let the human drive.
 

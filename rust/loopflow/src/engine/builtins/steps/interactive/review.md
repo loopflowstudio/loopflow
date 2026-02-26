@@ -2,6 +2,7 @@
 interactive: true
 requires: diff vs main
 produces: code changes | design doc | nothing
+action_style: procedural
 ---
 Walk the human through the current diff and help them decide the next right move.
 

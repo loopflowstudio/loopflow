@@ -2,6 +2,7 @@
 interactive: true
 requires: none
 produces: scratch/<branch>.md | wave/<name>/
+action_style: exploratory
 ---
 Help the user dream big, detail the idea fully, then decide whether to implement or plan as a wave.
 

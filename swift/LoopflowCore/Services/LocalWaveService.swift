@@ -725,7 +725,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
     public func getSession(_ id: String) async throws -> AgentSession {
         let request = try makeRequest(sessionURL(id))
-        let (data, response) = try await performRequest(request)
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
         return try parseSessionResponse(data: data, response: response)
     }
 
@@ -1103,7 +1103,9 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             model: configJSON["model"] as? String,
             cwd: configJSON["cwd"] as? String,
             maxTurns: normalizeOptionalInt(configJSON["max_turns"]),
-            yoloMode: configJSON["yolo_mode"] as? Bool ?? false
+            yoloMode: configJSON["yolo_mode"] as? Bool ?? false,
+            clientHasUI: configJSON["client_has_ui"] as? Bool,
+            clientCompact: configJSON["client_compact"] as? Bool
         )
 
         return AgentSession(
@@ -1131,6 +1133,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let model = config.model { json["model"] = model }
         if let cwd = config.cwd { json["cwd"] = cwd }
         if let maxTurns = config.maxTurns { json["max_turns"] = maxTurns }
+        if let clientHasUI = config.clientHasUI { json["client_has_ui"] = clientHasUI }
+        if let clientCompact = config.clientCompact { json["client_compact"] = clientCompact }
         return json
     }
 
@@ -1191,6 +1195,17 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                 turnId: json["turn_id"] as? String ?? "",
                 diff: json["diff"] as? String ?? ""
             )
+        case "suggested_actions":
+            let turnId = json["turn_id"] as? String ?? ""
+            let actionJSONList: [[String: Any]] = json["actions"] as? [[String: Any]] ?? []
+            let actions: [SuggestedActionPayload] = actionJSONList.compactMap { actionJSON in
+                guard let label = actionJSON["label"] as? String else { return nil }
+                return SuggestedActionPayload(
+                    label: label,
+                    description: actionJSON["description"] as? String
+                )
+            }
+            return .suggestedActions(turnId: turnId, actions: actions)
         case "status_changed":
             return .statusChanged(status: json["status"] as? String ?? "")
         case "error":

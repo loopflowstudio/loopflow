@@ -10,6 +10,7 @@ use crate::engine::prompt::{
     DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, Surface,
     DEFAULT_CONTEXT_BUDGET,
 };
+use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
 /// Optional per-source overrides for context gathering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -38,6 +39,7 @@ pub struct LaunchPromptInput {
     pub include_config_area: bool,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
+    pub client_context: ClientContext,
 }
 
 /// Canonical launch-prep output.
@@ -70,6 +72,7 @@ pub fn prepare_launch_prompt(
         include_config_area,
         source_overrides,
         summary,
+        client_context,
     } = input;
 
     let config_directions: &[String] = if include_config_directions {
@@ -124,6 +127,10 @@ pub fn prepare_launch_prompt(
         .or_else(|| budgeted.step.as_ref().and_then(|step| step.model.clone()))
         .unwrap_or_else(|| config.agent_model.clone());
     let (components, breakdown) = budgeted.into_parts();
+    let action_style = components
+        .step
+        .as_ref()
+        .and_then(|step| step.action_style.as_deref());
     let launch = AgentConfig {
         system_prompt,
         task_prompt,
@@ -131,6 +138,7 @@ pub fn prepare_launch_prompt(
         max_turns,
         cwd: Some(cwd.unwrap_or(repo_root)),
         skip_permissions: yolo_mode,
+        structured_replies: structured_replies_for_context(&client_context, action_style),
     };
 
     Ok(PreparedLaunchPrompt {
@@ -156,6 +164,7 @@ mod tests {
             r#"---
 model: codex:o3
 directions: [thorough]
+action_style: procedural
 ---
 Test step body.
 "#,
@@ -272,5 +281,42 @@ Test step body.
         .expect("prepare launch prompt");
 
         assert_eq!(prepared.components.area.as_deref(), Some("docs"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_injects_structured_replies_for_ui_context() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                step: Some("test".to_string()),
+                client_context: ClientContext {
+                    has_ui: true,
+                    compact: true,
+                },
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.structured_replies.len(), 1);
+        assert_eq!(
+            prepared.config.structured_replies[0].name,
+            "suggest_actions"
+        );
+        assert!(
+            prepared.config.structured_replies[0]
+                .guidance
+                .contains("up to 3"),
+            "compact UI should cap suggestions to 3"
+        );
+        assert!(
+            prepared.config.structured_replies[0]
+                .guidance
+                .contains("workflow forward"),
+            "step action_style should shape guidance"
+        );
     }
 }

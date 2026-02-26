@@ -89,7 +89,7 @@ public final class RepoState {
     public let waveStore = WaveStore()
     public let runStore = RunStore()
     public let worktreeStore = WorktreeStore()
-    private var chatStates: [String: ChatState] = [:]
+    private var sessionStates: [String: SessionState] = [:]
     private var waitingSessionIds: [String: String] = [:]
     private var optimisticInteractiveWaveIds: Set<String> = []
 
@@ -104,8 +104,8 @@ public final class RepoState {
         set { selectedWaveId = newValue?.id }
     }
 
-    public func chatState(for waveId: String, joinSessionId: String? = nil) -> ChatState {
-        if let state = chatStates[waveId] {
+    public func sessionState(for waveId: String, joinSessionId: String? = nil) -> SessionState {
+        if let state = sessionStates[waveId] {
             if let joinSessionId {
                 state.joinSession(joinSessionId)
             }
@@ -114,7 +114,7 @@ public final class RepoState {
         let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
         let wave = waveStore.wave(for: waveId)
         let sessionStep = wave?.activeRun?.currentStep ?? "design"
-        let state = ChatState(
+        let state = SessionState(
             waveId: waveId,
             sessionConfig: AgentSessionConfig(
                 step: sessionStep,
@@ -124,14 +124,15 @@ public final class RepoState {
                 wave: {
                     guard let name = wave?.name, !name.isEmpty else { return nil }
                     return name
-                }()
+                }(),
+                clientHasUI: true
             ),
             waveService: waveService
         )
         if let joinSessionId {
             state.joinSession(joinSessionId)
         }
-        chatStates[waveId] = state
+        sessionStates[waveId] = state
         return state
     }
 
@@ -142,14 +143,14 @@ public final class RepoState {
         guard waveStore.wave(for: waveId)?.status == .waiting else {
             return nil
         }
-        return UserDefaults.standard.string(forKey: "chatSession.\(waveId)")
+        return UserDefaults.standard.string(forKey: "session.\(waveId)")
     }
 
     public func isOptimisticallyStartingInteractiveSession(for waveId: String) -> Bool {
         optimisticInteractiveWaveIds.contains(waveId)
     }
 
-    public func shouldShowInteractiveChat(for wave: WaveViewModel) -> Bool {
+    public func shouldShowInteractiveSession(for wave: WaveViewModel) -> Bool {
         if isOptimisticallyStartingInteractiveSession(for: wave.id) {
             return true
         }
@@ -162,11 +163,11 @@ public final class RepoState {
     func setOptimisticInteractiveSessionStart(for waveId: String, isStarting: Bool) {
         if isStarting {
             optimisticInteractiveWaveIds.insert(waveId)
-            chatState(for: waveId).setAwaitingSession(true)
+            sessionState(for: waveId).setAwaitingSession(true)
             return
         }
         optimisticInteractiveWaveIds.remove(waveId)
-        chatStates[waveId]?.setAwaitingSession(false)
+        sessionStates[waveId]?.setAwaitingSession(false)
     }
 
     // In-flight actions (land) — buttons disable while pending
@@ -228,7 +229,7 @@ public final class RepoState {
         flows = []
         waveStore.removeAll()
         worktreeStore.removeAll()
-        chatStates.removeAll()
+        sessionStates.removeAll()
         waitingSessionIds.removeAll()
         optimisticInteractiveWaveIds.removeAll()
         selectedWaveId = nil
@@ -407,7 +408,7 @@ public final class RepoState {
         let startTime = CFAbsoluteTimeGetCurrent()
         let canonicalURL = canonicalRepoURL(url)
 
-        chatStates.removeAll()
+        sessionStates.removeAll()
         waitingSessionIds.removeAll()
         optimisticInteractiveWaveIds.removeAll()
         currentRepo = canonicalURL
@@ -502,13 +503,13 @@ public final class RepoState {
                 if let sessionId = event.sessionId {
                     waitingSessionIds[event.waveId] = sessionId
                     setOptimisticInteractiveSessionStart(for: event.waveId, isStarting: false)
-                    let state = chatState(for: event.waveId, joinSessionId: sessionId)
+                    let state = sessionState(for: event.waveId, joinSessionId: sessionId)
                     if let initialUserMessage = event.initialUserMessage {
                         state.seedInitialUserMessage(initialUserMessage)
                     }
                     state.setAwaitingSession(false)
                 } else if let initialUserMessage = event.initialUserMessage {
-                    let state = chatState(for: event.waveId)
+                    let state = sessionState(for: event.waveId)
                     state.seedInitialUserMessage(initialUserMessage)
                 }
             } else if refreshedWave?.status != .waiting {
@@ -869,7 +870,7 @@ public final class RepoState {
             availableRemoteRepos = repos
             repoTarget = nil
         }
-        chatStates.removeAll()
+        sessionStates.removeAll()
         waitingSessionIds.removeAll()
         optimisticInteractiveWaveIds.removeAll()
 
@@ -898,7 +899,7 @@ public final class RepoState {
     }
 
     public func selectRemoteRepo(path: String) {
-        chatStates.removeAll()
+        sessionStates.removeAll()
         waitingSessionIds.removeAll()
         optimisticInteractiveWaveIds.removeAll()
         let host = connectionStore.activeConnection.host

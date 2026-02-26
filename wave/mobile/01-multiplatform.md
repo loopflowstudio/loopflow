@@ -214,4 +214,4 @@ Boundary checks also pass:
 
 **Achieved:** builds, simulators, boundary checks, macOS regression pass all green, and shared state extracted to `LoopflowCore/State`.
 
-**Learned:** purpose-built mobile views are simpler than sharing desktop views through LoopflowCore. This means Stage 02 action buttons need to land in both MobileWaveDetailView (iOS) and WaveChatView (macOS), but the shared ActionButtonsView component can still live in LoopflowCore.
+**Learned:** purpose-built mobile views are simpler than sharing desktop views through LoopflowCore. This means Stage 02 action buttons need to land in both MobileWaveDetailView (iOS) and WaveSessionView (macOS, renamed from WaveChatView in Stage 02), but the shared ActionButtonsView component can still live in LoopflowCore.

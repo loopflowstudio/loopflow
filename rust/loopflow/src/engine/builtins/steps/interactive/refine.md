@@ -1,6 +1,7 @@
 ---
 interactive: true
 produces: refined text
+action_style: exploratory
 ---
 Iteratively refine text through structured feedback.
 

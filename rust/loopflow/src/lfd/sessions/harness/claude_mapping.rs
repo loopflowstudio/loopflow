@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use crate::lfd::sessions::harness::lf_tag::LfTagParser;
 use crate::lfd::sessions::types::{FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus};
 
 /// Reader-local state for tracking in-flight content blocks.
@@ -12,6 +13,8 @@ pub(super) struct ReaderState {
     tool_blocks: HashMap<usize, ToolUseState>,
     /// Map tool_use_id -> block index for direct completion lookup.
     tool_indexes: HashMap<String, usize>,
+    /// Streaming parser for `<lf:...>` tagged payloads.
+    tag_parser: LfTagParser,
 }
 
 #[derive(Debug, Default)]
@@ -170,10 +173,7 @@ pub(super) fn process_line(
             match delta_type {
                 "text_delta" => {
                     if let Some(text) = delta.get("text").and_then(Value::as_str) {
-                        let _ = events.send(SessionEvent::TextDelta {
-                            turn_id: turn_id.to_string(),
-                            content: text.to_string(),
-                        });
+                        emit_text_delta(events, state, turn_id, text);
                     }
                 }
                 "thinking_delta" | "summary_delta" => {
@@ -205,6 +205,7 @@ pub(super) fn process_line(
         }
 
         "result" => {
+            flush_text_delta_parser(events, state, turn_id);
             let status = if event
                 .get("is_error")
                 .and_then(Value::as_bool)
@@ -348,10 +349,7 @@ fn process_assistant_message(
             "text" => {
                 if let Some(text) = block.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
-                        let _ = events.send(SessionEvent::TextDelta {
-                            turn_id: turn_id.to_string(),
-                            content: text.to_string(),
-                        });
+                        emit_text_delta(events, state, turn_id, text);
                     }
                 }
             }
@@ -370,7 +368,7 @@ fn process_user_message(
         return;
     };
 
-    for (idx, block) in blocks.iter().enumerate() {
+    for block in blocks {
         let Some(block_type) = block.get("type").and_then(Value::as_str) else {
             continue;
         };
@@ -395,22 +393,9 @@ fn process_user_message(
                     item: completed_item,
                 });
             }
-            "text" => {
-                let Some(text) = block.get("text").and_then(Value::as_str) else {
-                    continue;
-                };
-                if text.is_empty() {
-                    continue;
-                }
-                let _ = events.send(SessionEvent::ItemCompleted {
-                    turn_id: turn_id.to_string(),
-                    item: SessionItem::Message {
-                        id: format!("msg_user_{turn_id}_{idx}"),
-                        text: text.to_string(),
-                        phase: Some("user".to_string()),
-                    },
-                });
-            }
+            // Text blocks in user messages are Claude echoing back input the
+            // client already displayed. Emitting them would duplicate messages.
+            "text" => {}
             _ => {}
         }
     }
@@ -446,6 +431,27 @@ fn extract_tool_result_text(block: &Value) -> Option<String> {
         .get("content")
         .and_then(Value::as_str)
         .map(String::from)
+}
+
+fn emit_text_delta(
+    events: &mpsc::UnboundedSender<SessionEvent>,
+    state: &mut ReaderState,
+    turn_id: &str,
+    content: &str,
+) {
+    for event in state.tag_parser.consume_text(turn_id, content) {
+        let _ = events.send(event);
+    }
+}
+
+fn flush_text_delta_parser(
+    events: &mpsc::UnboundedSender<SessionEvent>,
+    state: &mut ReaderState,
+    turn_id: &str,
+) {
+    for event in state.tag_parser.finish_turn(turn_id) {
+        let _ = events.send(event);
+    }
 }
 
 #[cfg(test)]
@@ -581,6 +587,25 @@ mod tests {
     }
 
     #[test]
+    fn process_line_text_delta_emits_suggested_actions_event() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut state = ReaderState::default();
+        let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"<lf:suggest_actions>[{\"label\":\"Land PR\"}]</lf:suggest_actions>"}}"#;
+
+        process_line(line, "turn_1", &tx, &mut state);
+
+        let event = rx.try_recv().expect("should have event");
+        match event {
+            SessionEvent::SuggestedActions { turn_id, actions } => {
+                assert_eq!(turn_id, "turn_1");
+                assert_eq!(actions.len(), 1);
+                assert_eq!(actions[0].label, "Land PR");
+            }
+            other => panic!("expected SuggestedActions, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn process_line_thinking_delta() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
@@ -685,26 +710,15 @@ mod tests {
     }
 
     #[test]
-    fn process_line_user_text_emits_user_message_item() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+    fn process_line_user_text_is_dropped() {
+        let (tx, rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
+        // Text blocks in user messages are Claude echoing back input the
+        // client already displayed — emitting them would duplicate messages.
         let line = r#"{"type":"user","message":{"content":[{"type":"text","text":"Design the architecture before coding."}]}}"#;
 
         process_line(line, "turn_1", &tx, &mut state);
 
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            SessionEvent::ItemCompleted { turn_id, item } => {
-                assert_eq!(turn_id, "turn_1");
-                match item {
-                    SessionItem::Message { text, phase, .. } => {
-                        assert_eq!(text, "Design the architecture before coding.");
-                        assert_eq!(phase.as_deref(), Some("user"));
-                    }
-                    other => panic!("expected Message item, got {other:?}"),
-                }
-            }
-            other => panic!("expected ItemCompleted event, got {other:?}"),
-        }
+        assert!(rx.is_empty(), "user text blocks should not emit events");
     }
 }

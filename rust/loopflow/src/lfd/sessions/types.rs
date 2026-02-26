@@ -139,6 +139,13 @@ pub enum ItemDelta {
     PlanText { content: String },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuggestedActionPayload {
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 // -- Event stream --
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +191,10 @@ pub enum SessionEvent {
         turn_id: String,
         diff: String,
     },
+    SuggestedActions {
+        turn_id: String,
+        actions: Vec<SuggestedActionPayload>,
+    },
 
     // Session-level
     StatusChanged {
@@ -211,6 +222,7 @@ impl SessionEvent {
             Self::TextDelta { .. } => "text_delta",
             Self::ReasoningDelta { .. } => "reasoning_delta",
             Self::DiffUpdated { .. } => "diff_updated",
+            Self::SuggestedActions { .. } => "suggested_actions",
             Self::StatusChanged { .. } => "status_changed",
             Self::Error { .. } => "error",
             Self::ProviderSessionId { .. } => "provider_session_id",
@@ -244,6 +256,10 @@ pub struct SessionConfig {
     pub max_turns: Option<u32>,
     #[serde(default)]
     pub yolo_mode: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_has_ui: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_compact: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

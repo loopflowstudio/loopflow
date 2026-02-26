@@ -331,7 +331,6 @@ def _expect_connected_message(payload: dict[str, Any]) -> list[Any]:
     return waves
 
 
-
 def _resolve_repo_path(api: ApiClient, repo_override: str | None) -> str:
     if repo_override:
         return repo_override

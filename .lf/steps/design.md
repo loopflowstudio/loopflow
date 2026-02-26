@@ -42,14 +42,14 @@ After the idea is fully detailed, evaluate two signals:
 1. **Design doc size** — is the spec exceeding ~1000 words? If the design itself is big, the implementation will be bigger.
 2. **Implementation size** — would this be ~1000+ LOC? That's generous for a single commit.
 
-Either signal suggests breaking into a wave plan. Bias toward "yes it fits" when it's close—single commits are preferable. But these are heuristics, not rules. The user can override.
+Either signal suggests breaking into a wave. Bias toward "yes it fits" when it's close—single commits are preferable. But these are heuristics, not rules. The user can override.
 
 ### Phase 4: Fork
 
-Present the size assessment to the user and ask explicitly: **implement or wave plan?**
+Present the size assessment to the user and ask explicitly: **implement or wave?**
 
 - "This looks like it fits in one commit—ready to implement?" or
-- "This is bigger than one commit—want me to break it into a wave plan?"
+- "This is bigger than one commit—want me to break it into a wave?"
 
 This is the natural session exit point. The user's answer determines what to run next.
 
@@ -59,7 +59,7 @@ This is the natural session exit point. The user's answer determines what to run
 2. Run `git add scratch/ && git commit -m "design: <branch>"`
 3. End session and tell the user to run `lf implement`
 
-**If wave plan:**
+**If wave:**
 
 1. Break the idea into staged wave items
 2. Choose a wave name and create `wave/<name>/`

@@ -20,7 +20,6 @@ Waves are flat. Chords group them. Listening connects them.
 - Chords are groups, not executors: no trigger ownership or child lifecycle management. Execution is per-wave via each wave's own stimuli.
 - Listening is a stimulus: `StimulusKind::Listen` with `source_wave_id` fires when the source completes. Just another stimulus type alongside loop/cron/watch/once.
 - Stimulus-based composition over tree structure: a wave can listen to any other wave regardless of chord membership. Chords provide organization; stimuli provide coordination. These are orthogonal.
-- Chords exist as named groups with membership CRUD
 - HTTP API and Python client support chord operations
 - Concerto shows chord grouping and listen relationships
 
@@ -28,55 +27,6 @@ Waves are flat. Chords group them. Listening connects them.
 
 - **Schema migration if chord model evolves.** The `chords`/`chord_members` tables are simple join tables now. If chords gain execution semantics later, the schema may need non-trivial migration. Mitigate: keep the Symphonia execution model separate; don't add execution fields to the chord tables.
 - **Listen stimulus fan-out.** If many waves listen to the same source, a single completion triggers N wave runs simultaneously. No concurrency limiting exists today. Mitigate: acceptable at current scale (single user, handful of waves); revisit if fan-out exceeds scheduler slot capacity.
-- **Duplicate-name conflict mapping is backend-detail sensitive.** Phase 02 maps duplicate chord names to `409`, but detection currently depends on backend-specific DB error details. If schema/constraint names change, this mapping can drift.
-- **Membership mutation paths do pre-check reads.** Membership add/remove validates chord and wave existence before mutation; this is correct but adds DB round-trips on hot paths.
-
-## Metrics
-
-- Chord CRUD works end-to-end: create chord, add/remove waves, list members, delete chord
-- Listen stimulus fires reliably when source wave completes (including edge cases: source fails, source is stopped)
-- Concerto UI shows chord grouping and listen wiring visually
-- A wave listening to another wave in a different chord works identically to same-chord listening
-
-## Phases
-
-| # | Phase | Focus | Status |
-|---|-------|-------|--------|
-| 01 | Flatten + Listen | Drop tree model, add listen stimulus, migration 012 | shipped |
-| 02 | Chord CRUD | Domain type, store ops, HTTP API, Python client | shipped |
-| 03 | Listen Authoring | Listen stimulus in wave schema files, deeper inter-wave communication | next |
-| 04 | Concerto UI | Chord groups and listen wiring in the macOS app | later |
-
-### Phase 01 retrospective
-
-The original plan called for a recursive `Wave` enum (Voice | Chord) with join/leave composition, nested execution, and inherited triggers. Building it revealed that the recursive model was over-engineered for the OSS use case — users want named groups and inter-wave reactivity, not a tree-structured wave scheduler.
-
-The pivot: flatten `Wave` to a single struct, drop `wave_type`/`parent_id`/`position`/`join`/`leave`, add `chords`/`chord_members` tables for grouping, and add `StimulusKind::Listen` with `source_wave_id` for inter-wave coordination. Migration 012 handles the schema transition. Python client updated to match (removed `join()`/`leave()`, added `source_wave_id` to stimulus API).
-
-### Phase 02 retrospective
-
-Phase 02 shipped end-to-end chord CRUD, membership management, and membership read APIs:
-
-- Rust `Chord` type plus `Store` support via dedicated `ChordStore` capability
-- SQLite + Postgres implementations for chord CRUD and membership operations
-- HTTP API routes for chord CRUD, add/remove member mutations, and membership listing (`GET /v0/chords/:id/members`, `GET /v0/waves/:id/chords`)
-- Unified `parse_lfd_id()` helper for consistent ID validation across routes
-- Python `Chord` model and client/API wrappers for chord operations including `list_chord_members()` and `list_wave_chords()`
-- Route/store/client tests covering happy paths, not-found/conflict behavior, and membership read paths
-
-Key decisions now locked:
-
-- Chords stay grouping metadata only (no execution semantics)
-- Membership mutations are idempotent for safe retries
-- Default chord auto-enrollment is deferred; grouping remains explicit/opt-in
-- Membership reads return full `WaveDto` (via `build_wave_dtos` with `include_active_run=false`)
-
-Carry-forward follow-ups:
-
-- Add dedicated Postgres integration coverage for chord membership paths
-- Consider replacing membership pre-check reads with single-statement, constraint-driven mutations if profiling shows pressure
-- Consider lightweight member payload for large chords (full WaveDto enrichment can be heavy)
-- Add pagination/filtering for membership list endpoints
 
 ## Data Model
 
@@ -109,15 +59,3 @@ CREATE TABLE chord_members (
     PRIMARY KEY (chord_id, wave_id)
 );
 ```
-
-## Future Directions
-
-### Listen Step (post-chord CRUD)
-
-Once chord CRUD is in place, a dedicated `listen` step could inject sibling PR content at iteration start — richer inter-wave communication than just "source completed, fire me." This builds on the stimulus wiring but adds content awareness.
-
-### Multi-user (lfd-hub)
-
-- lfd stays simple: one user, one machine, local chords
-- lfd-hub (private codebase) orchestrates across lfd instances
-- The listen stimulus protocol is the clean seam — lfd-hub can inject remote activations the same way lfd handles local ones

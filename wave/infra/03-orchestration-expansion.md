@@ -1,36 +1,10 @@
 # 03: Orchestration Expansion
 
-Expand trigger and flow capabilities after core boundaries and contracts are stable.
+Flow-language enrichment: conditional nodes, richer fork composition, deterministic persistence.
 
-## Why this phase exists
+Builds on unified activation ingress (shipped) — all trigger types now enqueue through `triggers/activation.rs` with explicit coalescing, audit logging, and observability.
 
-Push responsiveness and richer orchestration are high leverage, but they should land on stable seams.
-
-With boundary cleanup + contract hardening complete, this phase can expand behavior without compounding fragility.
-
-## Status snapshot (2026-02-25)
-
-### Milestone A (shipped)
-
-1. **Unified activation ingress**
-   - Added `triggers/activation.rs` as the shared trigger entrypoint.
-   - Watch/cron pollers, loop ticker, manual run, listen completion, and push hooks now enqueue through one activation path.
-2. **Push + listen activation paths**
-   - Added `POST /hooks/git` and `POST /v0/hooks/github` push ingestion.
-   - Listen stimuli now enqueue target-wave activations when source waves complete.
-3. **Queue semantics + observability**
-   - Activation queue now has explicit coalescing and drop records.
-   - Added activation audit log + run linkage (`wave_runs.activation_log_id`).
-   - Added WS activation events and `GET /v0/waves/{wave_id}/activations`.
-
-### Milestone B (not shipped yet)
-
-- Flow-language enrichment remains open:
-  - `when` predicates
-  - multi-step fork branch plans
-  - persisted flow-branch decisions for deterministic replay
-
-## Remaining scope (Milestone B)
+## Scope
 
 ### In scope
 
@@ -61,22 +35,12 @@ With boundary cleanup + contract hardening complete, this phase can expand behav
 - Push fast-paths remain additive; polling remains reconcile safety net.
 - Flow branch outcomes must be deterministic and replayable from persisted run context.
 
-## Follow-ups after Milestone A
+## Open questions
 
-- Consider making `activation_queue_limit` per-wave configurable (currently fixed default `20`).
-- Consider event-driven dispatch wakeups for lower latency under sustained load (current dispatcher interval: 1s).
-
-## Validation
-
-- `cargo fmt --all -- --check`
-- `cargo clippy -p loopflow --all-targets -- -D warnings`
-- `cargo test -p loopflow triggers`
-- `cargo test -p loopflow flow`
-- `tests/e2e/test_smoke.sh`
+- Should `activation_queue_limit` be per-wave configurable (currently fixed default `20`)?
+- Event-driven dispatch wakeups for lower latency under sustained load (current dispatcher interval: 1s)?
 
 ## Done when
 
-- Watch/listen waves can start from push events and polling still recovers missed events.
-- Operators can inspect activation source/reason/queue outcomes via API + logs.
 - `when` predicates and multi-step fork branches execute deterministically from persisted run context.
 - Replay does not reevaluate branch decisions.

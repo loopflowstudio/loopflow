@@ -38,7 +38,6 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `iterate` | Read research, write design to address it |
 | `ingest` | Pick wave item, move to scratch/ |
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
-| `wave-plan` | Synthesize analysis into a wave plan proposal |
 | `5whys` | Root cause analysis on a bug fix |
 
 ### Code steps (`code/`)
@@ -72,7 +71,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
 | Step | What it does |
 |------|--------------|
-| `update-wave` | Reconcile wave status and backlog after work |
+| `update-wave` | Create, update, or delete wave state |
 | `split-wave` | Split a wave into smaller independent waves |
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |

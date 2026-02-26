@@ -2,54 +2,9 @@
 
 Multiple devices connect to the same lfd. See the same waves, same sessions, same output.
 
-**Status: in progress** (updated February 26, 2026)
-
-## What to build
-
-Multiple Concerto clients connect to the same lfd and see consistent state. No client awareness — just a shared view. Both clients see the transcript, both can send messages. Like two browser tabs open to the same chat.
-
-Stage 03 assumes manual/direct connection is already working from Stage 01. Discovery UX is out of scope here (Stage 04).
-
-**From Stage 02:** ChatState → SessionState, WaveChatView → WaveSessionView across Swift. Suggested actions flow through `SessionEvent::SuggestedActions` (server-side stream) → `SessionState.suggestedActions` (client-side). References below use the new names.
-
-## What's already free
-
-lfd owns all state. Concerto is a thin client. Most multi-client already works:
-
-- Wave list: both clients poll/subscribe via the same HTTP + WebSocket APIs
-- Wave status: EventService pushes updates to all connected WebSocket clients
-- Output streaming: each client streams independently from `/v0/waves/{id}/output/stream`
-- Chat transcript: stored server-side, replayed on connect
-- Chat input: any client can send messages to the same session
-
-No session awareness or handoff needed. Multiple clients just connect and see the same thing.
+Builds on multiplatform (shipped) — LoopflowCore holds shared state, iOS has purpose-built views, manual remote connection works. iOS action button wiring and concurrent-client backend coverage (`tests/e2e/test_concurrent_clients.py`) are already shipped.
 
 ## What needs work
-
-### ~~iOS action button wiring (pre-req)~~ shipped (February 25, 2026)
-
-Done in `MobileWaveDetailView` with shared behavior parity:
-
-- Suggested actions now render in a persistent bottom `.safeAreaInset(edge: .bottom)` rail on iOS.
-- iOS chat tab disables duplicate action rendering/lifecycle by passing `showsSuggestedActions: false` and `managesLifecycle: false` into `WaveSessionView`.
-- Action taps use the existing shared path: `await sessionState.sendSuggestedAction(action)`.
-- Session lifecycle/context (`configureClientContext`, `onAppear`, `onDisappear`) is owned by the iOS detail container so actions stay live while users watch Output.
-
-### ~~Verify concurrent clients work~~ shipped (February 26, 2026)
-
-Added `tests/e2e/test_concurrent_clients.py` and CI coverage in the `e2e-smoke` job to verify:
-
-- dual WebSocket wave event fanout
-- dual wave log streaming
-- dual SSE session event fanout
-- chat input visibility across two subscribers
-- `suggested_actions` event parseability in the Python client
-
-Validation command:
-
-```bash
-uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
-```
 
 ### iOS foreground reconnect and stream restart
 

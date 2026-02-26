@@ -203,6 +203,101 @@ impl PostgresStore {
         super::migrations::latest_version_postgres_pool(&self.pool).await
     }
 
+    // -- Provider tokens -------------------------------------------------------
+
+    pub async fn get_provider_token(
+        &self,
+        provider: &str,
+    ) -> StoreResult<Option<super::ProviderToken>> {
+        let provider = provider.to_string();
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at
+                     FROM provider_tokens WHERE provider = $1",
+                    &[&provider],
+                )
+                .await?;
+            Ok(row.map(|r| super::ProviderToken {
+                provider: r.get(0),
+                access_token: r.get(1),
+                refresh_token: r.get(2),
+                expires_at: r.get(3),
+                login: r.get(4),
+                updated_at: r.get(5),
+            }))
+        })
+        .await
+    }
+
+    pub async fn upsert_provider_token(&self, token: &super::ProviderToken) -> StoreResult<()> {
+        let token = token.clone();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT(provider) DO UPDATE SET
+                        access_token = excluded.access_token,
+                        refresh_token = excluded.refresh_token,
+                        expires_at = excluded.expires_at,
+                        login = excluded.login,
+                        updated_at = excluded.updated_at",
+                    &[
+                        &token.provider,
+                        &token.access_token,
+                        &token.refresh_token,
+                        &token.expires_at,
+                        &token.login,
+                        &token.updated_at,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
+        let provider = provider.to_string();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "DELETE FROM provider_tokens WHERE provider = $1",
+                    &[&provider],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_provider_tokens(&self) -> StoreResult<Vec<super::ProviderToken>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at
+                     FROM provider_tokens ORDER BY provider",
+                    &[],
+                )
+                .await?;
+            Ok(rows
+                .iter()
+                .map(|r| super::ProviderToken {
+                    provider: r.get(0),
+                    access_token: r.get(1),
+                    refresh_token: r.get(2),
+                    expires_at: r.get(3),
+                    login: r.get(4),
+                    updated_at: r.get(5),
+                })
+                .collect())
+        })
+        .await
+    }
+
+    // -- Sessions ---------------------------------------------------------------
+
     pub async fn create_session(&self, session: &Session) -> StoreResult<()> {
         self.with_client(|client| async move {
             client

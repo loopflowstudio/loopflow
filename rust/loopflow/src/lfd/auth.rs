@@ -545,7 +545,7 @@ mod tests {
             executor,
             event_hub,
             output_hub,
-            provider_auth: ProviderAuthService::new(),
+            provider_auth: ProviderAuthService::new(store.clone()),
             auth,
             registration: None,
             started_at: OffsetDateTime::now_utc(),

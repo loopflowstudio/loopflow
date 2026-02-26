@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::engine::agent::AgentConfig;
+use crate::engine::config::parse_model;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::sessions::harness::{opencode_mapping, Harness, HarnessError};
 use crate::lfd::sessions::opencode_runtime;
@@ -502,7 +503,28 @@ fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> 
         payload["system"] = Value::String(config.system_prompt.trim().to_string());
     }
 
+    if let Some((provider_id, model_id)) = opencode_model(config) {
+        payload["model"] = json!({
+            "providerID": provider_id,
+            "modelID": model_id,
+        });
+    }
+
     payload
+}
+
+fn opencode_model(config: &AgentConfig) -> Option<(String, String)> {
+    let model = config.model.as_deref()?;
+    let (harness, variant) = parse_model(model);
+    if harness != "opencode" {
+        return None;
+    }
+    let variant = variant?;
+    let (provider_id, model_id) = variant.split_once('/')?;
+    if provider_id.is_empty() || model_id.is_empty() {
+        return None;
+    }
+    Some((provider_id.to_string(), model_id.to_string()))
 }
 
 #[derive(Debug, Default)]
@@ -587,5 +609,37 @@ mod tests {
             None
         );
         assert_eq!(parse_session_id(&json!({"sessionID": "session_3"})), None);
+    }
+
+    #[test]
+    fn build_turn_payload_includes_explicit_opencode_model() {
+        let payload = build_turn_payload(
+            "hello",
+            &AgentConfig {
+                model: Some("opencode:moonshotai/kimi-k2".to_string()),
+                ..Default::default()
+            },
+            false,
+        );
+        assert_eq!(
+            payload.get("model"),
+            Some(&json!({
+                "providerID": "moonshotai",
+                "modelID": "kimi-k2"
+            }))
+        );
+    }
+
+    #[test]
+    fn build_turn_payload_omits_model_for_non_opencode_agent_model() {
+        let payload = build_turn_payload(
+            "hello",
+            &AgentConfig {
+                model: Some("claude:sonnet".to_string()),
+                ..Default::default()
+            },
+            false,
+        );
+        assert!(payload.get("model").is_none());
     }
 }

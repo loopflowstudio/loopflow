@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::engine::agent::AgentConfig;
-use crate::engine::config::Config;
+use crate::engine::config::{parse_model, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
@@ -136,6 +136,7 @@ pub fn prepare_launch_prompt(
     let model = model
         .or_else(|| budgeted.step.as_ref().and_then(|step| step.model.clone()))
         .unwrap_or_else(|| config.agent_model.clone());
+    validate_model_policy(&model)?;
     let (components, breakdown) = budgeted.into_parts();
     let action_style = components
         .step
@@ -157,6 +158,44 @@ pub fn prepare_launch_prompt(
         breakdown,
         prompt,
     })
+}
+
+fn validate_model_policy(model: &str) -> Result<(), CoreError> {
+    let (harness, variant) = parse_model(model);
+    if harness != "opencode" {
+        return Ok(());
+    }
+
+    let Some(variant) = variant else {
+        return Err(CoreError::ExecutionFailed(
+            "unsupported OpenCode model selection: use 'opencode:<provider>/<model>' and choose either 'opencode/*' (non-claude/non-codex) or 'moonshotai/kimi*'".to_string(),
+        ));
+    };
+
+    if is_supported_opencode_model_variant(&variant) {
+        return Ok(());
+    }
+
+    Err(CoreError::ExecutionFailed(format!(
+        "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'",
+        variant
+    )))
+}
+
+fn is_supported_opencode_model_variant(variant: &str) -> bool {
+    let variant = variant.trim().to_ascii_lowercase();
+    let Some((provider, model_id)) = variant.split_once('/') else {
+        return false;
+    };
+    if model_id.is_empty() {
+        return false;
+    }
+
+    match provider {
+        "moonshotai" => model_id.starts_with("kimi"),
+        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -367,5 +406,66 @@ Test step body.
             .directions
             .iter()
             .any(|direction| direction.name == "thorough"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_rejects_unsupported_opencode_variants() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let err = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                model: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect_err("unsupported OpenCode model should fail");
+
+        assert!(err
+            .to_string()
+            .contains("unsupported OpenCode model 'anthropic/claude-sonnet-4-5'"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_accepts_supported_opencode_variants() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                model: Some("opencode:moonshotai/kimi-k2".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("supported OpenCode model should pass");
+
+        assert_eq!(
+            prepared.config.model.as_deref(),
+            Some("opencode:moonshotai/kimi-k2")
+        );
+    }
+
+    #[test]
+    fn prepare_launch_prompt_rejects_bare_opencode_model() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let err = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                model: Some("opencode".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect_err("bare OpenCode model should fail");
+
+        assert!(err
+            .to_string()
+            .contains("unsupported OpenCode model selection"));
     }
 }

@@ -114,6 +114,12 @@ struct ConnectionSettingsView: View {
                 Text("Concerto runs one bundled lfd. Runtime port and token are regenerated each launch.")
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
+
+                if BundledDaemonManager.prefersNativeMode {
+                    Text("Native mode fallback is enabled.")
+                        .font(Typography.caption(11))
+                        .foregroundStyle(Color.statusWarning)
+                }
             }
 
             cliToolsContent
@@ -298,7 +304,27 @@ struct ConnectionSettingsView: View {
                 .buttonStyle(GhostButtonStyle())
             }
 
+            if shouldShowDockerFallback {
+                Button("Use Native Mode") {
+                    BundledDaemonManager.setPreferNativeMode(true)
+                    connect()
+                }
+                .buttonStyle(GhostButtonStyle())
+            } else if mode == .bundled && BundledDaemonManager.prefersNativeMode {
+                Button("Use Docker Mode") {
+                    BundledDaemonManager.setPreferNativeMode(false)
+                }
+                .buttonStyle(GhostButtonStyle())
+            }
+
             Spacer()
+        }
+        .overlay(alignment: .bottomLeading) {
+            if shouldShowDockerFallback {
+                Link("Install Docker Desktop", destination: URL(string: "https://www.docker.com/products/docker-desktop/")!)
+                    .font(Typography.caption(11))
+                    .padding(.top, 36)
+            }
         }
     }
 
@@ -425,5 +451,12 @@ struct ConnectionSettingsView: View {
         } else {
             browserFallbackProviders.insert(launchRequest.provider)
         }
+    }
+
+    private var shouldShowDockerFallback: Bool {
+        guard mode == .bundled, let errorMessage else {
+            return false
+        }
+        return errorMessage.localizedCaseInsensitiveContains("docker is not running")
     }
 }

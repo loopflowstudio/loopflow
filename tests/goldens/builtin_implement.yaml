@@ -1,7 +1,7 @@
 name: builtin_implement
 repo: tests/parity/fixtures/basic
 step: implement
-run_mode: auto
+surface: headless
 directions: []
 lfdocs: false
 diff_files: false

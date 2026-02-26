@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
-use crate::engine::prompt::write_prompt_log;
+use crate::engine::prompt::{write_prompt_log, Surface};
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
@@ -217,6 +217,8 @@ impl SessionManager {
         config.step = step.clone();
         config.repo_root = repo_root.to_string_lossy().to_string();
         config.cwd = cwd.as_ref().map(|path| path.to_string_lossy().to_string());
+        // Sessions are primarily a Concerto feature; default to macOS surface.
+        let surface = config.surface.unwrap_or(Surface::ConcertoMac);
 
         let file_config = load_config_or_default(Some(&repo_root));
         let prepared = prepare_launch_prompt(
@@ -224,7 +226,7 @@ impl SessionManager {
             LaunchPromptInput {
                 repo_root: repo_root.to_path_buf(),
                 step: Some(step.clone()),
-                run_mode: Some("interactive".to_string()),
+                surface,
                 directions: config.directions.clone(),
                 area: config.area.clone(),
                 wave: config.wave.clone(),
@@ -1167,6 +1169,32 @@ mod tests {
             repo_root: repo_root.to_string_lossy().to_string(),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn prepare_session_prompt_uses_surface_from_config() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        std::fs::create_dir_all(tmp.path().join(".lf/steps")).expect("create .lf/steps");
+        std::fs::write(tmp.path().join(".lf/steps/design.md"), "Design it.").expect("write step");
+
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let (_, prompt) = manager
+            .prepare_session_prompt(SessionConfig {
+                step: "design".to_string(),
+                repo_root: tmp.path().to_string_lossy().to_string(),
+                surface: Some(Surface::ConcertoIphone),
+                ..Default::default()
+            })
+            .await
+            .expect("prepare session prompt");
+
+        assert!(prompt.system_prompt.contains("Surface: Concerto (iPhone)"));
     }
 
     #[tokio::test]

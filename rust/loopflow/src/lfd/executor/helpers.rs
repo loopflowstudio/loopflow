@@ -16,6 +16,7 @@ use crate::engine::git::{
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::write_prompt_log;
+use crate::engine::prompt::Surface;
 use crate::engine::worktrees::{
     branch_exists, create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
 };
@@ -287,12 +288,6 @@ pub(crate) async fn build_step_prompt(
     let repo_root = Path::new(worktree);
     let config = load_config_or_default(Some(repo_root));
 
-    let run_mode = if step.step.interactive.unwrap_or(false) {
-        "interactive"
-    } else {
-        "auto"
-    };
-
     let summary = if let Some((store, wave_id)) = summary_source {
         store
             .get_summary(wave_id)
@@ -309,7 +304,7 @@ pub(crate) async fn build_step_prompt(
         LaunchPromptInput {
             repo_root: repo_root.to_path_buf(),
             step: Some(step.step.name.clone()),
-            run_mode: Some(run_mode.to_string()),
+            surface: Surface::Headless,
             directions: directions.to_vec(),
             area: None,
             wave: wave.map(str::to_string),

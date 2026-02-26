@@ -13,6 +13,7 @@ use std::time::Instant;
 use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
 use tracing::debug;
 
@@ -157,7 +158,7 @@ pub struct GatherContextOpts {
     pub step: Option<String>,
     /// User message (positional args after step/flow name, or inline prompt)
     pub message: Option<String>,
-    pub run_mode: Option<String>,
+    pub surface: Surface,
     pub directions: Vec<String>,
     /// Specific files to include in context.
     pub files: Vec<String>,
@@ -189,10 +190,52 @@ pub enum PromptFormatMode {
     Task,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum Surface {
+    Cli,
+    ConcertoMac,
+    ConcertoIphone,
+    #[default]
+    #[serde(other)]
+    Headless,
+}
+
+impl Surface {
+    pub fn is_interactive(self) -> bool {
+        !matches!(self, Self::Headless)
+    }
+
+    pub fn instructions(self) -> &'static str {
+        use crate::engine::builtins;
+        match self {
+            Self::Headless => builtins::SURFACE_HEADLESS,
+            Self::Cli => builtins::SURFACE_CLI,
+            Self::ConcertoMac => builtins::SURFACE_CONCERTO_MAC,
+            Self::ConcertoIphone => builtins::SURFACE_CONCERTO_IPHONE,
+        }
+    }
+}
+
+impl std::str::FromStr for Surface {
+    type Err = std::convert::Infallible;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let surface = match value {
+            "cli" => Self::Cli,
+            "concerto_mac" => Self::ConcertoMac,
+            "concerto_iphone" => Self::ConcertoIphone,
+            _ => Self::Headless,
+        };
+        Ok(surface)
+    }
+}
+
 /// All components of a prompt before assembly.
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
-    pub run_mode: Option<String>,
+    pub surface: Surface,
     pub docs: Vec<Document>,
     pub diff: Option<String>,
     pub diff_files: Vec<Document>,
@@ -596,7 +639,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(GatheredContext(PromptComponents {
-        run_mode: opts.run_mode.clone(),
+        surface: opts.surface,
         docs,
         diff,
         diff_files,
@@ -1315,7 +1358,7 @@ fn format_direction_tags(directions: &[Direction]) -> String {
 /// These sections are common to both `format_prompt` (all-in-one) and
 /// `format_context_prompt` (system prompt file). Extracted to avoid duplication.
 ///
-/// Order: loopflow_doc, rlm_doc, run_mode, wave, docs, summaries, area_docs, diff+diff_files.
+/// Order: loopflow_doc, rlm_doc, surface, wave, docs, summaries, area_docs, diff+diff_files.
 fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1332,21 +1375,8 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Run mode
-    if components.run_mode.as_deref() == Some("auto") {
-        parts.push(
-            "Run mode is auto (headless). Proceed without pausing for questions. \
-             If you need clarification, make the best assumption you can and append \
-             any open questions to `scratch/questions.md`."
-                .to_string(),
-        );
-    } else if components.run_mode.as_deref() == Some("interactive") {
-        parts.push(
-            "Run mode is interactive. This is a conversation—ask questions, \
-             propose approaches, and wait for feedback before taking major actions."
-                .to_string(),
-        );
-    }
+    // Surface (interaction + rendering guidance)
+    parts.push(components.surface.instructions().to_string());
 
     // Wave context
     if let Some(ref wave) = components.wave {
@@ -1841,7 +1871,7 @@ mod tests {
     #[test]
     fn format_prompt_basic() {
         let components = PromptComponents {
-            run_mode: Some("auto".to_string()),
+            surface: Surface::Headless,
             ..Default::default()
         };
 
@@ -1849,17 +1879,44 @@ mod tests {
         assert!(prompt.contains("Run mode is auto"));
         assert!(prompt.contains("headless"));
         assert!(prompt.contains("scratch/questions.md"));
+        assert!(prompt.contains("Output is logged, not displayed"));
     }
 
     #[test]
-    fn format_prompt_interactive_mode_no_auto_message() {
+    fn format_prompt_cli_surface_no_auto_message() {
         let components = PromptComponents {
-            run_mode: Some("interactive".to_string()),
+            surface: Surface::Cli,
             ..Default::default()
         };
 
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("Run mode is auto"));
+        assert!(prompt.contains("Run mode is interactive"));
+    }
+
+    #[test]
+    fn format_prompt_concerto_mac_surface_message() {
+        let components = PromptComponents {
+            surface: Surface::ConcertoMac,
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(prompt.contains("Run mode is interactive"));
+        assert!(prompt.contains("Surface: Concerto (macOS)"));
+    }
+
+    #[test]
+    fn format_prompt_concerto_iphone_surface_message() {
+        let components = PromptComponents {
+            surface: Surface::ConcertoIphone,
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(prompt.contains("Run mode is interactive"));
+        assert!(prompt.contains("Surface: Concerto (iPhone)"));
+        assert!(prompt.contains("Minimize back-and-forth"));
     }
 
     #[test]
@@ -2107,7 +2164,7 @@ mod tests {
     fn format_prompt_full_assembly() {
         // Test a complete prompt with all sections
         let components = PromptComponents {
-            run_mode: Some("auto".to_string()),
+            surface: Surface::Headless,
             wave: Some("rust".to_string()),
             loopflow_doc: Some("Loopflow instructions".to_string()),
             docs: vec![Document {
@@ -2134,7 +2191,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
 
-        // Verify order: loopflow -> run_mode -> wave -> docs -> diff -> step -> direction -> clipboard
+        // Verify order: loopflow -> surface block -> wave -> docs -> diff -> step -> direction -> clipboard
         let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
         let auto_pos = prompt.find("Run mode is auto").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
@@ -2154,11 +2211,18 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_empty_components() {
+    fn format_prompt_default_components_has_headless_surface() {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
-        // Should not crash, just return empty or minimal content
-        assert!(prompt.is_empty() || prompt.len() < 100);
+        assert!(prompt.contains("Run mode is auto"));
+    }
+
+    #[test]
+    fn surface_parser_unknown_defaults_to_headless() {
+        let parsed = "unknown_surface"
+            .parse::<Surface>()
+            .expect("surface parsing is infallible");
+        assert_eq!(parsed, Surface::Headless);
     }
 
     // ==========================================================================
@@ -2413,13 +2477,13 @@ directions:
     }
 
     #[test]
-    fn gather_context_run_mode_preserved() {
+    fn gather_context_surface_preserved() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let repo = temp.path();
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            run_mode: Some("auto".to_string()),
+            surface: Surface::Cli,
             sources: vec![],
             ..Default::default()
         };
@@ -2427,7 +2491,7 @@ directions:
         let result = gather_context(&opts);
         assert!(result.is_ok());
         let components = result.unwrap();
-        assert_eq!(components.run_mode, Some("auto".to_string()));
+        assert_eq!(components.surface, Surface::Cli);
     }
 
     #[test]
@@ -2561,7 +2625,7 @@ directions:
     #[test]
     fn format_context_prompt_excludes_step() {
         let components = PromptComponents {
-            run_mode: Some("auto".to_string()),
+            surface: Surface::Headless,
             step: Some(Step {
                 name: "implement".to_string(),
                 content: Some("Implement the feature.".to_string()),
@@ -2576,14 +2640,14 @@ directions:
         // Should NOT include step content
         assert!(!context.contains("<lf:step:implement>"));
         assert!(!context.contains("Implement the feature."));
-        // Should include run mode
+        // Should include surface instructions
         assert!(context.contains("Run mode is auto"));
     }
 
     #[test]
     fn format_context_prompt_includes_all_context() {
         let components = PromptComponents {
-            run_mode: Some("interactive".to_string()),
+            surface: Surface::Cli,
             docs: vec![Document {
                 path: "README.md".to_string(),
                 content: "# Project".to_string(),
@@ -2618,9 +2682,9 @@ directions:
     }
 
     #[test]
-    fn format_context_prompt_interactive_mode_message() {
+    fn format_context_prompt_cli_surface_message() {
         let components = PromptComponents {
-            run_mode: Some("interactive".to_string()),
+            surface: Surface::Cli,
             ..Default::default()
         };
 

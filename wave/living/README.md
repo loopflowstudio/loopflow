@@ -25,7 +25,7 @@ A living wave:
 - Memory consolidates naturally through existing steps (update-wave, add-to-wave, review)
 - The system prompt is the only injection point — no new APIs for memory
 - Waves that split inherit relevant memory; waves that listen can share observations
-- Same wave step works across all surfaces (headless, session, TUI, mobile)
+- ~~Same wave step works across all surfaces (headless, session, TUI, mobile)~~ **Verified** — Phase 03 replaced `run_mode` string matching with `Surface` enum; each surface gets tailored instructions via `Surface::instructions()`
 
 ## Risks
 
@@ -34,6 +34,7 @@ A living wave:
 - **Cross-wave leakage.** Shared memory between listening waves could propagate bad observations. Mitigate: memory is wave-private by default; sharing is explicit.
 - **Orphaned skill files on crash.** If lfd crashes mid-session, injected `.claude/commands/` files linger. Harmless (overwritten on next injection) but messy. Tracked, not urgent.
 - **Skill injection gap.** Global `~/.lf/steps/` and external skills (superpowers, rams) are not injected yet — only builtins and repo-local. Acceptable for now; revisit when external skill sources mature.
+- **Prompt/storage model split.** Prompt assembly uses `Surface` enum; execution and storage still persist `run_mode` strings. Two mental models coexist. Acceptable while the prompt-side abstraction stabilizes, but should converge before adding surface-aware execution behavior.
 
 ## Metrics
 
@@ -48,7 +49,7 @@ A living wave:
 |---|-------|----------------|--------|
 | 01 | Skill injection | Agents see loopflow steps/directions as native commands | shipped |
 | 02 | Wave memory | Agents read/write durable observations scoped to their wave | shipped |
-| 03 | Surface-adaptive prompts | Same step adapts to headless, session, TUI, mobile | next |
+| 03 | Surface-adaptive prompts | Same step adapts to headless, CLI, desktop, mobile | shipped |
 | 04 | Memory lifecycle | Aging, inheritance on split-wave, read-failure logging | |
 
 ### Phase 01 retrospective
@@ -66,8 +67,18 @@ Memory distillation landed in `update-wave` and `add-to-wave` ops prompts rather
 Trimming order (memory drops before summaries/docs) is the right default. Task context matters more than accumulated observations — an agent that forgets past patterns but can see the current diff will do better than one that remembers everything but can't see what it's working on.
 
 Two known gaps remain:
-1. **Persistence across execution surfaces.** Unverified whether any headless/session path could lose `MEMORY.md` edits due to detached workspaces. Open question tracked in `scratch/questions.md`.
+1. **Persistence across execution surfaces.** Unverified whether any of the four defined surfaces (headless, CLI, Concerto macOS, Concerto iPhone) could lose `MEMORY.md` edits due to detached workspaces. Now that `Surface` is formalized, this can be verified per-surface in Phase 04.
 2. **Read-failure visibility.** `MEMORY.md` read errors soft-fail silently. Acceptable for now but should get logging before memory becomes load-bearing.
+
+### Phase 03 retrospective
+
+Shipped simpler than designed — the pattern holds. The `Surface` enum (`Headless`, `Cli`, `ConcertoMac`, `ConcertoIphone`) with a single `instructions()` method replaced scattered `run_mode == "auto"` / `run_mode == "interactive"` string checks across prompt assembly. One match arm per surface, one source of truth for behavioral text.
+
+Surface naming diverged from the original plan. The plan said "headless, session, TUI, mobile" but building revealed that "session" and "TUI" were the same concept (CLI terminal), and "mobile" needed to be specific to a platform. The actual surfaces — headless, CLI, Concerto macOS, Concerto iPhone — map to real rendering environments, not abstract interaction modes.
+
+`#[serde(other)]` on `Headless` gives safe degradation: unknown surface strings from session configs parse without error and default to headless (autonomous, log-oriented). This is the right default — if we don't know the surface, behave conservatively.
+
+One deliberate gap: prompt assembly now uses `surface`, but execution/storage still persists `run_mode`. This model split is acceptable for now — the two serve different purposes (behavioral instruction vs. execution metadata). Migrating storage is a separate decision, not a debt.
 
 ## Architecture
 

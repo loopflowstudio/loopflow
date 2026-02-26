@@ -9,6 +9,12 @@ pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 /// Bundled RLM.md — recursive language model instructions for agents.
 pub const RLM_DOC: &str = include_str!("builtins/RLM.md");
 
+/// Surface instruction prompts, one per surface variant.
+pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
+pub const SURFACE_CLI: &str = include_str!("builtins/surfaces/cli.md");
+pub const SURFACE_CONCERTO_MAC: &str = include_str!("builtins/surfaces/concerto_mac.md");
+pub const SURFACE_CONCERTO_IPHONE: &str = include_str!("builtins/surfaces/concerto_iphone.md");
+
 /// Returns the content of a built-in step, if it exists.
 ///
 /// Namespaced steps (e.g., "scan/scan-report") are registered with their prefix.

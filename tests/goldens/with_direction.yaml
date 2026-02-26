@@ -1,7 +1,7 @@
 name: with_direction
 repo: tests/parity/fixtures/with_direction
 step: test
-run_mode: auto
+surface: headless
 directions:
   - thorough
 lfdocs: false

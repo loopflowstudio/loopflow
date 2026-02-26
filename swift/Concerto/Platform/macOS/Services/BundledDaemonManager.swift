@@ -20,6 +20,8 @@ final class BundledDaemonManager {
         case failedToGenerateToken
         case healthCheckTimedOut(Int)
         case processExited(Int32)
+        case dockerNotAvailable
+        case containerStartFailed(Int32)
         case invalidRuntimeState
 
         var errorDescription: String? {
@@ -34,6 +36,10 @@ final class BundledDaemonManager {
                 return "Bundled lfd did not become healthy on port \(port)."
             case .processExited(let code):
                 return "Bundled lfd exited early with status \(code)."
+            case .dockerNotAvailable:
+                return "Docker is not running. Install Docker Desktop or start the Docker daemon."
+            case .containerStartFailed(let code):
+                return "Failed to start lfd container (exit code \(code))."
             case .invalidRuntimeState:
                 return "Bundled lfd started but runtime connection details are missing."
             }
@@ -42,12 +48,25 @@ final class BundledDaemonManager {
 
     private let executableProvider: @Sendable (String) -> URL?
     private let urlSession: URLSession
+
     private var process: Process?
+    private var containerName: String?
+    private var credentialServer: CredentialSocketServer?
     private var terminationObserver: NSObjectProtocol?
 
     private(set) var port: Int?
     private(set) var token: String?
     private(set) var state: DaemonState = .stopped
+
+    private static let preferNativeModeDefaultsKey = "concerto.bundledDaemon.preferNativeMode"
+
+    static var prefersNativeMode: Bool {
+        UserDefaults.standard.bool(forKey: preferNativeModeDefaultsKey)
+    }
+
+    static func setPreferNativeMode(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: preferNativeModeDefaultsKey)
+    }
 
     init(
         executableProvider: @escaping @Sendable (String) -> URL? = { name in
@@ -86,37 +105,13 @@ final class BundledDaemonManager {
         do {
             let token = try generateSessionToken()
             let port = try allocatePort()
-            let dbPath = try sqlitePath()
 
-            let process = Process()
-            guard let lfdPath = executableProvider("lfd") else {
-                throw ManagerError.missingBundledExecutable("lfd")
-            }
-            process.executableURL = lfdPath
-            process.arguments = ["serve"]
-
-            var env = ProcessInfo.processInfo.environment
-            env["LFD_HTTP_ADDR"] = "127.0.0.1:\(port)"
-            env["LFD_DB_PATH"] = dbPath.path
-            env["LFD_AUTH_PROVIDER"] = "static"
-            env["LFD_AUTH_TOKEN"] = token
-            process.environment = env
-
-            process.terminationHandler = { [weak self] process in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if case .stopped = self.state {
-                        self.resetRuntime()
-                        return
-                    }
-
-                    self.state = .failed(ManagerError.processExited(process.terminationStatus))
-                    self.resetRuntime()
-                }
+            if Self.prefersNativeMode {
+                try startNativeDaemon(token: token, port: port)
+            } else {
+                try await startContainerDaemon(token: token, port: port)
             }
 
-            try process.run()
-            self.process = process
             self.token = token
             self.port = port
 
@@ -134,25 +129,95 @@ final class BundledDaemonManager {
     func stop() {
         state = .stopped
 
-        guard let process else {
-            resetRuntime()
-            return
-        }
-
-        if process.isRunning {
-            process.terminate()
-            let deadline = Date().addingTimeInterval(3)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-
+        if let process {
             if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-                process.waitUntilExit()
+                process.terminate()
+                let deadline = Date().addingTimeInterval(3)
+                while process.isRunning && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+
+                if process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                    process.waitUntilExit()
+                }
             }
         }
 
+        if let name = containerName, let docker = try? dockerExecutableURL() {
+            _ = try? runProcess(docker, arguments: ["stop", "-t", "3", name])
+            _ = try? runProcess(docker, arguments: ["rm", "-f", name])
+        }
+
+        credentialServer?.stop()
         resetRuntime()
+    }
+
+    private func startNativeDaemon(token: String, port: Int) throws {
+        let dbPath = try sqlitePath()
+        let process = Process()
+        guard let lfdPath = executableProvider("lfd") else {
+            throw ManagerError.missingBundledExecutable("lfd")
+        }
+
+        process.executableURL = lfdPath
+        process.arguments = ["serve"]
+
+        var env = ProcessInfo.processInfo.environment
+        env["LFD_HTTP_ADDR"] = "127.0.0.1:\(port)"
+        env["LFD_DB_PATH"] = dbPath.path
+        env["LFD_AUTH_PROVIDER"] = "static"
+        env["LFD_AUTH_TOKEN"] = token
+        process.environment = env
+
+        process.terminationHandler = { [weak self] process in
+            Task { @MainActor in
+                guard let self else { return }
+                if case .stopped = self.state {
+                    self.resetRuntime()
+                    return
+                }
+                self.state = .failed(ManagerError.processExited(process.terminationStatus))
+                self.resetRuntime()
+            }
+        }
+
+        try process.run()
+        self.process = process
+    }
+
+    private func startContainerDaemon(token: String, port: Int) async throws {
+        guard try await dockerAvailable() else {
+            throw ManagerError.dockerNotAvailable
+        }
+
+        let credentialServer = CredentialSocketServer()
+        try credentialServer.start()
+        let containerName = "concerto-lfd-\(String(token.prefix(8)))"
+        let docker = try dockerExecutableURL()
+        let image = lfdContainerImage()
+
+        let pullResult = try runProcess(docker, arguments: ["pull", image])
+        guard pullResult.terminationStatus == 0 else {
+            credentialServer.stop()
+            throw ManagerError.containerStartFailed(pullResult.terminationStatus)
+        }
+
+        let args = buildDockerRunArgs(
+            containerName: containerName,
+            port: port,
+            token: token,
+            credentialSocketPath: credentialServer.socketPath,
+            srcPath: srcDirectory()
+        )
+        let runResult = try runProcess(docker, arguments: args)
+        guard runResult.terminationStatus == 0 else {
+            credentialServer.stop()
+            throw ManagerError.containerStartFailed(runResult.terminationStatus)
+        }
+
+        self.credentialServer = credentialServer
+        self.containerName = containerName
     }
 
     private var runtimeConnection: ServerConnection? {
@@ -199,6 +264,94 @@ final class BundledDaemonManager {
         }
 
         throw ManagerError.healthCheckTimedOut(port)
+    }
+
+    private func lfdContainerImage() -> String {
+        let configured = loadConcertoConfig()?.container?.image?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let configured, !configured.isEmpty {
+            return configured
+        }
+        return "loopflow/lfd:latest"
+    }
+
+    private func dockerExecutableURL() throws -> URL {
+        let candidates = [
+            "/usr/local/bin/docker",
+            "/opt/homebrew/bin/docker",
+            "/usr/bin/docker",
+        ]
+        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+        throw ManagerError.dockerNotAvailable
+    }
+
+    private func runProcess(_ executableURL: URL, arguments: [String]) throws -> ProcessResult {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return ProcessResult(terminationStatus: process.terminationStatus)
+    }
+
+    private func buildDockerRunArgs(
+        containerName: String,
+        port: Int,
+        token: String,
+        credentialSocketPath: URL,
+        srcPath: URL
+    ) -> [String] {
+        var args = [
+            "run", "-d",
+            "--name", containerName,
+            "-p", "127.0.0.1:\(port):2486",
+            "-v", "\(srcPath.path):/workspace/src:ro",
+            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            "-v", "concerto-lfd-data:/data",
+            "-v", "\(credentialSocketPath.path):/var/run/concerto-auth.sock:ro",
+            "-e", "LFD_HTTP_ADDR=0.0.0.0:2486",
+            "-e", "LFD_DB_PATH=/data/concerto.db",
+            "-e", "LFD_AUTH_PROVIDER=static",
+            "-e", "LFD_AUTH_TOKEN=\(token)",
+            "-e", "LFD_CREDENTIAL_SOCKET=/var/run/concerto-auth.sock",
+            "-e", "LFD_MODE=container",
+        ]
+
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let sshDir = home.appendingPathComponent(".ssh")
+        if FileManager.default.fileExists(atPath: sshDir.path) {
+            args += ["-v", "\(sshDir.path):/root/.ssh:ro"]
+        }
+        let gitconfig = home.appendingPathComponent(".gitconfig")
+        if FileManager.default.fileExists(atPath: gitconfig.path) {
+            args += ["-v", "\(gitconfig.path):/root/.gitconfig:ro"]
+        }
+
+        if let mounts = loadConcertoConfig()?.container?.mounts {
+            for mount in mounts {
+                let expandedPath = (mount.path as NSString).expandingTildeInPath
+                let mode = mount.readOnly ? "ro" : "rw"
+                let name = URL(fileURLWithPath: expandedPath).lastPathComponent
+                args += ["-v", "\(expandedPath):/workspace/extra/\(name):\(mode)"]
+            }
+        }
+
+        args += [lfdContainerImage(), "serve"]
+        return args
+    }
+
+    private func dockerAvailable() async throws -> Bool {
+        let docker = try dockerExecutableURL()
+        let result = try runProcess(docker, arguments: ["info", "--format", "{{.ServerVersion}}"])
+        return result.terminationStatus == 0
+    }
+
+    private func srcDirectory() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("src")
     }
 
     private func sqlitePath() throws -> URL {
@@ -265,8 +418,13 @@ final class BundledDaemonManager {
 
     private func resetRuntime() {
         process = nil
+        containerName = nil
+        credentialServer = nil
         port = nil
         token = nil
     }
 }
 
+private struct ProcessResult {
+    let terminationStatus: Int32
+}

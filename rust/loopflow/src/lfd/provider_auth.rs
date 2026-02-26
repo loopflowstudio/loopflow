@@ -16,6 +16,9 @@ use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
+use crate::lfd::credential_socket::{
+    AuthStartResponse, CredentialSocketClient, CredentialSocketError,
+};
 use crate::lfd::events::EventHub;
 use crate::lfd::types::Event;
 
@@ -172,6 +175,8 @@ pub enum AuthError {
     },
     #[error("filesystem error: {0}")]
     Filesystem(String),
+    #[error("credential socket request failed for {provider}: {message}")]
+    CredentialSocket { provider: Provider, message: String },
 }
 
 #[async_trait]
@@ -180,6 +185,65 @@ pub trait AuthBroker: Send + Sync {
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError>;
     async fn check_status(&self) -> Result<AuthStatus, AuthError>;
     async fn disconnect(&self) -> Result<(), AuthError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct SocketAuthBroker {
+    provider_name: Provider,
+    client: Arc<CredentialSocketClient>,
+}
+
+impl SocketAuthBroker {
+    pub fn new(provider: Provider, client: Arc<CredentialSocketClient>) -> Self {
+        Self {
+            provider_name: provider,
+            client,
+        }
+    }
+
+    fn map_socket_error(&self, err: CredentialSocketError) -> AuthError {
+        AuthError::CredentialSocket {
+            provider: self.provider_name,
+            message: err.to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl AuthBroker for SocketAuthBroker {
+    fn provider(&self) -> Provider {
+        self.provider_name
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        let response = self
+            .client
+            .start_auth(self.provider_name.as_str())
+            .await
+            .map_err(|err| self.map_socket_error(err))?;
+        Ok(socket_auth_flow_handle(self.provider_name, response))
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        match self
+            .client
+            .get_credential(self.provider_name.as_str())
+            .await
+        {
+            Ok(credential) => Ok(AuthStatus::Active {
+                login: credential.login,
+            }),
+            Err(CredentialSocketError::NotFound { .. }) => Ok(AuthStatus::None),
+            Err(err) => Err(self.map_socket_error(err)),
+        }
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        self.client
+            .disconnect(self.provider_name.as_str())
+            .await
+            .map_err(|err| self.map_socket_error(err))
+    }
 }
 
 #[derive(Clone)]
@@ -205,6 +269,21 @@ impl Default for ProviderAuthService {
 
 impl ProviderAuthService {
     pub fn new() -> Self {
+        if let Ok(socket_path) = std::env::var("LFD_CREDENTIAL_SOCKET") {
+            let trimmed = socket_path.trim();
+            if !trimmed.is_empty() {
+                let client = Arc::new(CredentialSocketClient::new(PathBuf::from(trimmed)));
+                return Self::with_brokers(vec![
+                    Arc::new(SocketAuthBroker::new(Provider::GitHub, client.clone()))
+                        as Arc<dyn AuthBroker>,
+                    Arc::new(SocketAuthBroker::new(Provider::Claude, client.clone()))
+                        as Arc<dyn AuthBroker>,
+                    Arc::new(SocketAuthBroker::new(Provider::Codex, client.clone()))
+                        as Arc<dyn AuthBroker>,
+                ]);
+            }
+        }
+
         Self::with_brokers(vec![
             Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
             Arc::new(ClaudeAuthBroker) as Arc<dyn AuthBroker>,
@@ -353,6 +432,18 @@ impl ProviderAuthService {
             .cloned()
             .ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))
     }
+}
+
+fn socket_auth_flow_handle(provider: Provider, response: AuthStartResponse) -> AuthFlowHandle {
+    let flow_response = AuthFlowResponse {
+        provider,
+        verification_uri: response.verification_uri,
+        verification_uri_complete: response.verification_uri_complete,
+        user_code: response.user_code,
+        expires_in: response.expires_in,
+    };
+    let monitor = tokio::spawn(async { Ok(()) });
+    AuthFlowHandle::new(flow_response, monitor)
 }
 
 #[derive(Debug, Clone)]

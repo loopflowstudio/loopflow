@@ -15,6 +15,9 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig};
+use crate::lfd::credential_socket::{
+    CredentialResponse, CredentialSocketClient, CredentialSocketError,
+};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::SharedStore;
@@ -36,6 +39,8 @@ pub struct DockerExecutor {
     limits: ExecutorLimitsConfig,
     credential_env: Vec<String>,
     credential_mounts: Vec<DockerCredentialMount>,
+    credential_socket_client: Option<CredentialSocketClient>,
+    cached_credentials: HashMap<String, CredentialResponse>,
     active: Arc<Mutex<HashMap<String, String>>>,
     mutation_locks: RepoMutationLocks,
     image_build_locks: RepoMutationLocks,
@@ -382,10 +387,35 @@ impl DockerExecutor {
             })
             .collect();
 
+        let credential_socket_client = std::env::var("LFD_CREDENTIAL_SOCKET")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(|value| CredentialSocketClient::new(PathBuf::from(value)));
+        let mut cached_credentials = HashMap::new();
+        if let Some(client) = &credential_socket_client {
+            for provider in ["github", "claude", "codex"] {
+                match client.get_credential_blocking(provider) {
+                    Ok(credential) => {
+                        cached_credentials.insert(provider.to_string(), credential);
+                    }
+                    Err(CredentialSocketError::NotFound { .. }) => {}
+                    Err(err) => {
+                        warn!(
+                            provider,
+                            error = %err,
+                            "failed to read provider credential from credential socket"
+                        );
+                    }
+                }
+            }
+        }
+
         info!(
             image = %config.image,
             credential_env = ?config.credentials.env,
             credential_mounts = credential_mounts.len(),
+            socket_credentials = cached_credentials.len(),
             "docker executor initialized"
         );
 
@@ -397,6 +427,8 @@ impl DockerExecutor {
             limits: config.limits.clone(),
             credential_env: config.credentials.env.clone(),
             credential_mounts,
+            credential_socket_client,
+            cached_credentials,
             active: Arc::new(Mutex::new(HashMap::new())),
             mutation_locks: RepoMutationLocks::default(),
             image_build_locks: RepoMutationLocks::default(),

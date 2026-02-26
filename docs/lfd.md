@@ -92,6 +92,10 @@ curl -s -X POST "http://127.0.0.1:2486/v0/chords/<chord_id>/members" \
   -H "Content-Type: application/json" \
   -d '{"wave_id":"<wave_id>"}' \
   -i
+
+curl -s "http://127.0.0.1:2486/v0/chords/<chord_id>/members"
+
+curl -s "http://127.0.0.1:2486/v0/waves/<wave_id>/chords"
 ```
 
 Membership add/remove and chord delete return `204 No Content`.

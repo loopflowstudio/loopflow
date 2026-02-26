@@ -206,6 +206,8 @@ import loopflow.api as loopflow
 chord = loopflow.create_chord("frontend")
 waves = loopflow.waves()
 loopflow.add_chord_member(chord.id, waves[0].id)
+loopflow.list_chord_members(chord.id)
+loopflow.list_wave_chords(waves[0].id)
 loopflow.remove_chord_member(chord.id, waves[0].id)
 ```
 

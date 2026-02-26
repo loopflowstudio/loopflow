@@ -179,6 +179,14 @@ class Client:
             f"/v0/chords/{chord_id}/members/{wave_id}",
         )
 
+    def list_chord_members(self, chord_id: str) -> list[Wave]:
+        payload = self._request_json("GET", f"/v0/chords/{chord_id}/members")
+        return self._parse_model_list(payload, Wave)
+
+    def list_wave_chords(self, wave_id: str) -> list[Chord]:
+        payload = self._request_json("GET", f"/v0/waves/{wave_id}/chords")
+        return self._parse_model_list(payload, Chord)
+
     def run_wave(
         self,
         name_or_id: str,

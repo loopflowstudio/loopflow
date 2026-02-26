@@ -60,7 +60,7 @@ pub fn router(state: HttpState) -> Router {
         )
         .route(
             "/chords/{id}/members",
-            post(chords::add_chord_member_handler),
+            get(chords::list_chord_members_handler).post(chords::add_chord_member_handler),
         )
         .route(
             "/chords/{id}/members/{wave_id}",
@@ -99,6 +99,10 @@ pub fn router(state: HttpState) -> Router {
             delete(waves::remove_stimulus_handler),
         )
         .route("/waves/{wave_id}/stimuli", get(waves::list_stimuli_handler))
+        .route(
+            "/waves/{wave_id}/chords",
+            get(chords::list_wave_chords_handler),
+        )
         .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
         .route(
             "/waves/{wave_id}/restart-step",

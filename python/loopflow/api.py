@@ -110,6 +110,14 @@ def remove_chord_member(chord_id: str, wave_id: str) -> None:
     _client().remove_chord_member(chord_id, wave_id)
 
 
+def list_chord_members(chord_id: str) -> list[Wave]:
+    return _client().list_chord_members(chord_id)
+
+
+def list_wave_chords(wave_id: str) -> list[Chord]:
+    return _client().list_wave_chords(wave_id)
+
+
 def run_wave(
     name_or_id: str,
     flow: Optional[str] = None,
@@ -241,6 +249,8 @@ __all__ = [
     "delete_chord",
     "add_chord_member",
     "remove_chord_member",
+    "list_chord_members",
+    "list_wave_chords",
     "run_wave",
     "add_stimulus",
     "remove_stimulus",

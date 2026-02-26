@@ -4,11 +4,10 @@ use axum::Json;
 use serde::Deserialize;
 use tokio_postgres::error::SqlState;
 
-use crate::lfd::http::dto::{chord_dto, ChordDto, ListResponse};
-use crate::lfd::http::routes::ApiError;
+use crate::lfd::http::dto::{chord_dto, ChordDto, ListResponse, WaveDto};
+use crate::lfd::http::routes::{build_wave_dtos, parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
-use crate::lfd::id::LfdId;
 use crate::lfd::store::StoreError;
 
 #[derive(Debug, Deserialize)]
@@ -103,10 +102,34 @@ pub async fn remove_chord_member_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn parse_lfd_id(value: &str, error_message: &'static str) -> Result<LfdId, ApiError> {
-    value
-        .parse::<LfdId>()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, error_message))
+pub async fn list_chord_members_handler(
+    State(state): State<HttpState>,
+    Path(chord_id): Path<String>,
+) -> ApiResult<ListResponse<WaveDto>> {
+    let chord_id = parse_lfd_id(&chord_id, "invalid chord id")?;
+    let waves = state
+        .store
+        .list_chord_members(&chord_id)
+        .await
+        .map_err(map_store_error)?;
+    let data = build_wave_dtos(&state.store, &state.github, waves, false)
+        .await
+        .map_err(map_store_error)?;
+    Ok(Json(ListResponse::new(data, false)))
+}
+
+pub async fn list_wave_chords_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<ListResponse<ChordDto>> {
+    let wave_id = parse_lfd_id(&wave_id, "invalid wave id")?;
+    let chords = state
+        .store
+        .list_chords_for_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?;
+    let data = chords.into_iter().map(chord_dto).collect();
+    Ok(Json(ListResponse::new(data, false)))
 }
 
 fn is_duplicate_chord_name_error(error: &StoreError) -> bool {
@@ -132,6 +155,7 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::http::state::HttpState;
+    use crate::lfd::id::LfdId;
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
@@ -243,6 +267,20 @@ mod tests {
         .expect("add chord member");
         assert_eq!(add_status, StatusCode::NO_CONTENT);
 
+        let Json(members) =
+            list_chord_members_handler(State(state.clone()), Path(chord.id.clone()))
+                .await
+                .expect("list chord members");
+        assert_eq!(members.data.len(), 1);
+        assert_eq!(members.data[0].id, wave.id().to_string());
+
+        let Json(wave_chords) =
+            list_wave_chords_handler(State(state.clone()), Path(wave.id().to_string()))
+                .await
+                .expect("list wave chords");
+        assert_eq!(wave_chords.data.len(), 1);
+        assert_eq!(wave_chords.data[0].id, chord.id);
+
         let remove_status = remove_chord_member_handler(
             State(state.clone()),
             Path((chord.id.clone(), wave.id().to_string())),
@@ -331,10 +369,24 @@ mod tests {
         .await;
         assert!(matches!(add_missing_wave, Err((StatusCode::NOT_FOUND, _))));
 
-        let remove_missing_wave =
-            remove_chord_member_handler(State(state), Path((chord.id, wave_id.to_string()))).await;
+        let remove_missing_wave = remove_chord_member_handler(
+            State(state.clone()),
+            Path((chord.id, wave_id.to_string())),
+        )
+        .await;
         assert!(matches!(
             remove_missing_wave,
+            Err((StatusCode::NOT_FOUND, _))
+        ));
+
+        let missing_members =
+            list_chord_members_handler(State(state.clone()), Path(chord_id.to_string())).await;
+        assert!(matches!(missing_members, Err((StatusCode::NOT_FOUND, _))));
+
+        let missing_wave_chords =
+            list_wave_chords_handler(State(state), Path(wave_id.to_string())).await;
+        assert!(matches!(
+            missing_wave_chords,
             Err((StatusCode::NOT_FOUND, _))
         ));
     }
@@ -358,10 +410,21 @@ mod tests {
         assert!(matches!(add_result, Err((StatusCode::BAD_REQUEST, _))));
 
         let remove_result = remove_chord_member_handler(
-            State(state),
+            State(state.clone()),
             Path(("not-an-id".to_string(), "also-not-an-id".to_string())),
         )
         .await;
         assert!(matches!(remove_result, Err((StatusCode::BAD_REQUEST, _))));
+
+        let list_members =
+            list_chord_members_handler(State(state.clone()), Path("bad-id".to_string())).await;
+        assert!(matches!(list_members, Err((StatusCode::BAD_REQUEST, _))));
+
+        let list_wave_chords =
+            list_wave_chords_handler(State(state), Path("bad-id".to_string())).await;
+        assert!(matches!(
+            list_wave_chords,
+            Err((StatusCode::BAD_REQUEST, _))
+        ));
     }
 }

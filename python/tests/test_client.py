@@ -296,6 +296,28 @@ class TestClientResponses:
         ]
         client.close()
 
+    def test_list_chord_members_parses_waves(self):
+        def handler(request):
+            assert request.url.path == "/v0/chords/chord-1/members"
+            return httpx.Response(200, json={"object": "list", "data": [WAVE_MINIMAL]})
+
+        client = _mock_client(handler)
+        members = client.list_chord_members("chord-1")
+        assert len(members) == 1
+        assert members[0].name == WAVE_MINIMAL["name"]
+        client.close()
+
+    def test_list_wave_chords_parses_chords(self):
+        def handler(request):
+            assert request.url.path == "/v0/waves/wave-1/chords"
+            return httpx.Response(200, json={"object": "list", "data": [CHORD_MINIMAL]})
+
+        client = _mock_client(handler)
+        chords = client.list_wave_chords("wave-1")
+        assert len(chords) == 1
+        assert chords[0].name == "ensemble-a"
+        client.close()
+
     def test_create_session_sends_correct_body(self):
         received = {}
 

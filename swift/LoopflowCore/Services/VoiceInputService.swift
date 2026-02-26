@@ -633,14 +633,14 @@ public final class VoiceInputService {
         modelDownloadProgress = nil
 
         guard let engine else {
-            let fallback = partialTranscript.cleanedVoiceTranscript()
+            let fallback = partialTranscript
             if operationID == currentOperationID {
                 resetPresentationState()
             }
             return fallback
         }
 
-        let fallbackTranscript = partialTranscript.cleanedVoiceTranscript()
+        let fallbackTranscript = partialTranscript
         var preservedErrorMessage: String?
         let transcript: String?
         do {
@@ -833,22 +833,7 @@ private extension String {
             options: [.regularExpression, .caseInsensitive]
         )
         .replacingOccurrences(
-            of: #"\[(?:\s*(?:music|applause|laughter|noise|silence|inaudible)\s*)\]"#,
-            with: " ",
-            options: [.regularExpression, .caseInsensitive]
-        )
-        .replacingOccurrences(
-            of: #"\[(?:[^\]]*(?:music|applause|laughter|noise|silence|inaudible|chirping|crickets|cheering|clapping|humming|singing)[^\]]*)\]"#,
-            with: " ",
-            options: [.regularExpression, .caseInsensitive]
-        )
-        .replacingOccurrences(
-            of: #"\((?:\s*(?:music|applause|laughter|noise|silence|inaudible)\s*)\)"#,
-            with: " ",
-            options: [.regularExpression, .caseInsensitive]
-        )
-        .replacingOccurrences(
-            of: #"\((?:[^)]*(?:music|applause|laughter|noise|silence|inaudible|chirping|crickets|cheering|clapping|humming|singing)[^)]*)\)"#,
+            of: #"(?:\[[^\]]*(?:music|applause|laughter|noise|silence|inaudible|chirping|crickets|cheering|clapping|humming|singing)[^\]]*\]|\([^)]*(?:music|applause|laughter|noise|silence|inaudible|chirping|crickets|cheering|clapping|humming|singing)[^)]*\))"#,
             with: " ",
             options: [.regularExpression, .caseInsensitive]
         )

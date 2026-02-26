@@ -197,48 +197,7 @@ struct WaveSessionView: View {
     }
 
     private var timestampLabelByMessageId: [UUID: String] {
-        var labels: [UUID: String] = [:]
-        var previousTimestamp: Date?
-
-        for entry in state.transcript {
-            guard case .message(let message) = entry,
-                  message.role != .system else {
-                continue
-            }
-
-            let timestamp = message.timestamp
-
-            guard let previous = previousTimestamp else {
-                labels[message.id] = formatTime(timestamp)
-                previousTimestamp = timestamp
-                continue
-            }
-
-            if let label = timestampLabel(
-                forGapSincePreviousMessage: timestamp.timeIntervalSince(previous),
-                timestamp: timestamp
-            ) {
-                labels[message.id] = label
-            }
-            previousTimestamp = timestamp
-        }
-
-        return labels
-    }
-
-    private func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
-        if gap <= 60 {
-            return nil
-        }
-        if gap > 3600 {
-            return formatTime(timestamp)
-        }
-        let minutes = max(1, Int(gap / 60))
-        return "\(minutes)m ago"
-    }
-
-    private func formatTime(_ timestamp: Date) -> String {
-        timestamp.formatted(date: .omitted, time: .shortened)
+        messageTimestampLabels(for: state.transcript)
     }
 
     @ViewBuilder
@@ -658,6 +617,54 @@ private struct ToolRunView: View {
 enum MessageSegment: Equatable {
     case text(String)
     case code(language: String?, content: String)
+}
+
+func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: String] {
+    var labels: [UUID: String] = [:]
+    var previousTimestamp: Date?
+
+    for entry in transcript {
+        guard case .message(let message) = entry,
+              message.role != .system else {
+            continue
+        }
+
+        let timestamp = message.timestamp
+
+        guard let previous = previousTimestamp else {
+            labels[message.id] = formatMessageTimestamp(timestamp)
+            previousTimestamp = timestamp
+            continue
+        }
+
+        if message.role == .user {
+            labels[message.id] = formatMessageTimestamp(timestamp)
+        } else if let label = timestampLabel(
+            forGapSincePreviousMessage: timestamp.timeIntervalSince(previous),
+            timestamp: timestamp
+        ) {
+            labels[message.id] = label
+        }
+
+        previousTimestamp = timestamp
+    }
+
+    return labels
+}
+
+func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
+    if gap <= 60 {
+        return nil
+    }
+    if gap > 3600 {
+        return formatMessageTimestamp(timestamp)
+    }
+    let minutes = max(1, Int(gap / 60))
+    return "\(minutes)m ago"
+}
+
+func formatMessageTimestamp(_ timestamp: Date) -> String {
+    timestamp.formatted(date: .omitted, time: .shortened)
 }
 
 func parseMessageSegments(_ content: String) -> [MessageSegment] {

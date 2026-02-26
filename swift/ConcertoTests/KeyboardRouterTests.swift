@@ -26,7 +26,23 @@ struct KeyboardRouterTests {
 
         #expect(slashHandled)
         #expect(questionHandled)
-        #expect(actions == [.openCommandPalette, .showHelp])
+        #expect(actions == [.focusSessionComposer, .showHelp])
+    }
+
+    @Test("Command-K still opens command palette")
+    func commandKOpensPalette() {
+        let router = KeyboardRouter()
+        var actions: [ShortcutAction] = []
+
+        let handled = router.routeEvent(
+            key: .character("k"),
+            modifiers: [.command],
+            isRepeat: false,
+            mode: .global
+        ) { actions.append($0) }
+
+        #expect(handled)
+        #expect(actions == [.openCommandPalette])
     }
 
     @Test("Normalize modifiers keeps only supported shortcut modifiers")

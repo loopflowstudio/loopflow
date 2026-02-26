@@ -109,6 +109,7 @@ enum ShortcutAction: Hashable {
     case switchToRunsTab
 
     // Global
+    case focusSessionComposer
     case openCommandPalette
     case showHelp
 }
@@ -245,8 +246,8 @@ enum ShortcutCatalog {
         // Global
         ShortcutBinding(
             gesture: ShortcutGesture(key: .character("/"), modifiers: [], allowsRepeat: false),
-            action: .openCommandPalette,
-            label: "Command palette",
+            action: .focusSessionComposer,
+            label: "Focus composer",
             category: .global,
             requiresWave: false
         ),
@@ -298,4 +299,3 @@ extension Notification.Name {
     static let switchToCurrentTab = Notification.Name("switchToCurrentTab")
     static let switchToRunsTab = Notification.Name("switchToRunsTab")
 }
-

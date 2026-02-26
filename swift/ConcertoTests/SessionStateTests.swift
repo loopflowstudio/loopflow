@@ -435,6 +435,7 @@ struct SessionStateTests {
         await state.send("hello")
         await waitUntil { service.sendInputCallCount == 1 }
         await state.endSession()
+        await waitUntil { service.streamCancellationCount >= 1 }
 
         #expect(service.stopSessionCallCount == 1)
         #expect(service.streamCancellationCount >= 1)

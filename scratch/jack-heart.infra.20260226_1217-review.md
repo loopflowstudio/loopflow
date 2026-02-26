@@ -42,7 +42,7 @@ The parse layer is largely unchanged — `FlowItem::Step` still represents both 
 
 - **Manifest schema change is breaking.** Any existing `fork-manifest.json` files with the old `step: String` field won't deserialize. This is fine — manifests are ephemeral (written per-run, consumed by synthesize, then deleted). No migration needed.
 - **Long-running branches.** A 5-step branch blocks its worktree for the full duration. The scheduler slot is held for all steps. This is acceptable — branches are supposed to be coherent units of work.
-- **Error attribution.** If step 3 of 5 fails, the manifest records which step failed and its exit code. The synthesize step can inspect this. But the user-facing error message in `lf flow` just says "fork branch N failed" without naming the step. The daemon executor logs step-level detail via tracing.
+- **Error attribution.** If step 3 of 5 fails, the manifest records which step failed and its exit code. The synthesize step can inspect this. Both executors now surface the specific failed step name: the CLI prints `fork branch N failed (branch) at step 'name': exited with code`, and the daemon executor logs step-level detail via tracing.
 
 ## What's not included
 
@@ -56,9 +56,14 @@ The parse layer is largely unchanged — `FlowItem::Step` still represents both 
 ```
 cargo fmt --all -- --check         ✓
 cargo clippy -p loopflow -- -D warnings  ✓
-cargo test -p loopflow flow        ✓ (38 tests, 0 failures)
+cargo test -p loopflow flow        ✓ (39 tests, 0 failures)
 cargo test -p loopflow fork        ✓ (23 tests, 0 failures)
 tests/e2e/test_smoke.sh           ✓
 ```
 
 All existing tests pass unchanged. 4 new unit tests in `flow.rs` (parse + expansion), 3 new unit tests in `fork.rs` (planning + manifest serde), and 1 updated integration test in `flow_tests.rs`.
+
+## Gate notes
+
+- CLI fork error messages now name the specific failed step (gate polish commit).
+- `ConcreteForkBranch.flow_parents` is set during expansion but not consumed by downstream code. Harmless metadata — useful for future introspection but could be removed if it causes confusion.

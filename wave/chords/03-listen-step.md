@@ -44,6 +44,7 @@ stimulus:
   - `sidecar_kind` → `ci_fix_kind`
   - `executor/wave/sidecar.rs` → `executor/wave/ci_fix.rs`
 - Added migration `016_rename_sidecar_kind_to_ci_fix_kind.sql`
+- CI webhook target updates now apply to main runs only (CI-fix runs are excluded)
 
 ### Validation
 

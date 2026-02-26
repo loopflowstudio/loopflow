@@ -89,6 +89,7 @@ Phase 03 shipped schema authoring for `stimulus.kind: listen` and made listen ex
 - Added executor-side listener triggering on successful source completion
 - Added pending activation queue/coalescing + drain loop for deferred starts
 - Renamed sidecar terminology to CI fix terminology, including DB migration 016
+- Scoped CI webhook target updates to main runs only (exclude CI-fix runs)
 
 Key decisions now locked:
 

@@ -25,7 +25,7 @@ Recovery does two things:
 
 2. **Reap orphaned OpenCode servers**
    - Uses `~/.lf/runtime/opencode-servers.json` runtime metadata.
-   - Registers `{opencode_pid, owner_lfd_pid, created_at}` on OpenCode start.
+   - Registers `{opencode_pid, owner_lfd_pid}` on OpenCode start.
    - Unregisters on normal harness stop.
    - On startup, reaps only entries whose owner `lfd` PID is dead **and** whose PID still looks like `opencode serve`.
    - Removes reaped/stale entries and keeps failures non-fatal.

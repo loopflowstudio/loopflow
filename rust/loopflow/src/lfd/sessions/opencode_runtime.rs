@@ -231,12 +231,7 @@ mod tests {
         let path = registry_path(tmp.path());
         write_registry_entries(
             &path,
-            &[
-                entry(10, 1),
-                entry(11, 2),
-                entry(12, 2),
-                entry(13, 2),
-            ],
+            &[entry(10, 1), entry(11, 2), entry(12, 2), entry(13, 2)],
         )
         .expect("write registry");
 

@@ -30,6 +30,9 @@ Waves are flat. Chords group them. Listening connects them.
 - **Listen trigger scan cost.** Completion-triggered listener lookup currently scans listen stimuli and filters in memory. Fine at current scale; add source-indexed lookup if cardinality grows.
 - **Deferred-activation latency.** Pending activations drain on a fixed interval, so deferred listener starts are eventually consistent, not instant.
 - **Creation-order coupling for listeners.** Listen source resolution is eager and FK-backed; source waves must exist before listener waves are created.
+- **Flow-name guard coupling for CI recursion.** CI failure webhook recursion prevention currently keys off `snapshot.flow == "ci-fix"`. Renaming the flow without updating this guard can reintroduce recursion.
+- **Signal migration assumptions.** Migration 017 backfills `stimuli.signal` from `stimuli.kind` and drops wave-run kind columns. Unexpected legacy rows could make migration behavior drift from intent.
+- **Concurrent CI stimulus creation.** CI failure trigger currently resolves-then-creates `Signal::CiFailure` stimuli. Today it is serialized by one event loop; future parallelism needs uniqueness guarantees.
 - **Duplicate-name conflict mapping is backend-detail sensitive.** Phase 02 maps duplicate chord names to `409`, but detection currently depends on backend-specific DB error details. If schema/constraint names change, this mapping can drift.
 - **Membership mutation paths do pre-check reads.** Membership add/remove validates chord and wave existence before mutation; this is correct but adds DB round-trips on hot paths.
 
@@ -47,7 +50,8 @@ Waves are flat. Chords group them. Listening connects them.
 | 01 | Flatten + Listen | Drop tree model, add listen stimulus, migration 012 | shipped |
 | 02 | Chord CRUD | Domain type, store ops, HTTP API, Python client | shipped |
 | 03 | Listen Authoring | Listen stimulus in wave schema files, listener triggering, CI fix rename | shipped |
-| 03.5 | Signal + Git Sync | Drop WaveRunKind/CiFixKind, rename StimulusKind→Signal, flow override on Stimulus, push-always/rebase-aggressively git model | next |
+| 03.5 | Signal Simplification | Drop WaveRunKind/CiFixKind, rename StimulusKind→Signal, add stimulus flow override, route CI failures through pending activations | shipped |
+| 03.6 | Git Sync Hardening | Make wave branches multi-writer safe via pre-step rebase + post-step push with recovery | next |
 | 04 | Concerto UI | Chord groups and listen wiring in the macOS app | planned |
 
 ### Phase 01 retrospective
@@ -140,15 +144,17 @@ CREATE TABLE chord_members (
 );
 ```
 
-### Phase 03.5: Signal Simplification
+### Phase 03.5 retrospective
 
-See `scratch/signal-simplification.md` for the full design.
+Phase 03.5 shipped the signal simplification and CI activation unification. CI fix is now represented as a normal stimulus activation (`Signal::CiFailure` + `flow: ci-fix`) instead of a dedicated run kind and executor path.
 
-Two connected changes:
+See `wave/chords/035-signal-simplification.md` for implementation details, risks, and validation results.
 
-1. **Signal simplification.** CI fix is not a special run type — it's a stimulus activation with `signal: CiFailure` and `flow: "ci-fix"`. `StimulusKind` → `Signal`, stimulus gains a `flow` override, `WaveRunKind`/`CiFixKind` are deleted, ci_fix.rs folds into the normal activation path.
+### Phase 03.6 target
 
-2. **Git sync hardening.** Auxiliary runs (ci-fix, lint-fix, etc.) push to `origin/{wave-branch}`. The main wave incorporates via fetch+rebase before each step. Origin is the source of truth. Push after every commit, rebase aggressively.
+Phase 03.6 carries the deferred half of the original 03.5 scope: git sync hardening for multi-writer wave branches.
+
+See `wave/chords/036-git-sync-hardening.md` for the concrete plan.
 
 ## Future Directions
 

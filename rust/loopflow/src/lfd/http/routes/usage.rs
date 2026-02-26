@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -11,6 +13,7 @@ use crate::lfd::http::dto::{
 use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
+use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::Session;
 use crate::lfd::sessions::usage::{
     aggregate_session_events, aggregate_summary, aggregate_wave_usage, GroupBy, UsageSessionData,
@@ -76,17 +79,21 @@ pub async fn get_wave_usage_handler(
         .await
         .map_err(map_store_error)?;
 
-    let mut session_events = Vec::with_capacity(sessions.len());
-    for session in sessions {
-        let events = state
-            .store
-            .list_session_events(&session.id, None)
-            .await
-            .map_err(map_store_error)?;
-        session_events.push((session, events));
-    }
+    let session_ids: Vec<_> = sessions.iter().map(|s| s.id.clone()).collect();
+    let mut events_map = state
+        .store
+        .list_events_for_sessions(&session_ids)
+        .await
+        .map_err(map_store_error)?;
+    let session_events: Vec<_> = sessions
+        .into_iter()
+        .map(|s| {
+            let events = events_map.remove(&s.id).unwrap_or_default();
+            (s, events)
+        })
+        .collect();
 
-    let aggregate = aggregate_wave_usage(wave_id.as_str(), &session_events);
+    let aggregate = aggregate_wave_usage(&session_events);
 
     Ok(Json(WaveUsageDto {
         object: "wave_usage".to_string(),
@@ -167,15 +174,25 @@ async fn load_usage_session_data(
     state: &HttpState,
     sessions: Vec<Session>,
 ) -> Result<Vec<UsageSessionData>, ApiError> {
-    let mut usage_sessions = Vec::with_capacity(sessions.len());
+    let session_ids: Vec<_> = sessions.iter().map(|s| s.id.clone()).collect();
+    let mut events_map = state
+        .store
+        .list_events_for_sessions(&session_ids)
+        .await
+        .map_err(map_store_error)?;
 
+    let wave_run_meta = load_wave_run_metadata(state, &sessions).await?;
+
+    let mut usage_sessions = Vec::with_capacity(sessions.len());
     for session in sessions {
-        let events = state
-            .store
-            .list_session_events(&session.id, None)
-            .await
-            .map_err(map_store_error)?;
-        let (wave_id, flow) = resolve_session_wave_run_metadata(state, &session).await?;
+        let events = events_map.remove(&session.id).unwrap_or_default();
+        let (wave_id, flow) = session
+            .wave_run_id
+            .as_deref()
+            .and_then(|id| id.parse::<LfdId>().ok())
+            .and_then(|id| wave_run_meta.get(&id))
+            .cloned()
+            .unwrap_or((None, None));
         usage_sessions.push(UsageSessionData {
             session,
             events,
@@ -185,6 +202,34 @@ async fn load_usage_session_data(
     }
 
     Ok(usage_sessions)
+}
+
+/// Batch-fetch wave_run metadata (wave_id, flow) for all sessions that have a wave_run_id.
+/// Deduplicates IDs so each wave_run is fetched at most once.
+async fn load_wave_run_metadata(
+    state: &HttpState,
+    sessions: &[Session],
+) -> Result<HashMap<LfdId, (Option<String>, Option<String>)>, ApiError> {
+    let unique_ids: std::collections::HashSet<LfdId> = sessions
+        .iter()
+        .filter_map(|s| s.wave_run_id.as_deref()?.parse::<LfdId>().ok())
+        .collect();
+
+    let mut meta = HashMap::with_capacity(unique_ids.len());
+    for wave_run_id in unique_ids {
+        let wave_run = state
+            .store
+            .get_wave_run(&wave_run_id)
+            .await
+            .map_err(map_store_error)?;
+        if let Some(run) = wave_run {
+            meta.insert(
+                wave_run_id,
+                (Some(run.wave_id.to_string()), Some(run.snapshot.flow)),
+            );
+        }
+    }
+    Ok(meta)
 }
 
 async fn resolve_session_wave_run_metadata(

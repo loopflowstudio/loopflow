@@ -114,7 +114,6 @@ pub struct UsageSummaryGroupAggregate {
 }
 
 pub fn aggregate_wave_usage(
-    _wave_id: &str,
     sessions: &[(Session, Vec<PersistedSessionEvent>)],
 ) -> WaveUsageAggregate {
     let mut aggregate = WaveUsageAggregate::default();
@@ -284,7 +283,6 @@ fn aggregate_summary_by_source(sessions: &[UsageSessionData]) -> Vec<UsageSummar
                 });
             group.tokens.input += source_tokens;
             group.sessions += 1;
-            group.turns += session_usage.turns;
         }
     }
 
@@ -363,35 +361,32 @@ mod tests {
     fn aggregate_wave_usage_rolls_up_step_breakdown() {
         let session_a = test_session("implement");
         let session_b = test_session("gate");
-        let wave_usage = aggregate_wave_usage(
-            "wave-1",
-            &[
-                (
-                    session_a,
-                    vec![turn_usage_event(TurnUsage {
-                        input_tokens: 150,
-                        output_tokens: 30,
-                        reasoning_tokens: Some(5),
-                        cache_read_tokens: None,
-                        cache_write_tokens: None,
-                        model: Some("claude-sonnet-4".to_string()),
-                        cost_usd: None,
-                    })],
-                ),
-                (
-                    session_b,
-                    vec![turn_usage_event(TurnUsage {
-                        input_tokens: 90,
-                        output_tokens: 12,
-                        reasoning_tokens: None,
-                        cache_read_tokens: Some(8),
-                        cache_write_tokens: Some(4),
-                        model: Some("claude-haiku-4-5".to_string()),
-                        cost_usd: None,
-                    })],
-                ),
-            ],
-        );
+        let wave_usage = aggregate_wave_usage(&[
+            (
+                session_a,
+                vec![turn_usage_event(TurnUsage {
+                    input_tokens: 150,
+                    output_tokens: 30,
+                    reasoning_tokens: Some(5),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    model: Some("claude-sonnet-4".to_string()),
+                    cost_usd: None,
+                })],
+            ),
+            (
+                session_b,
+                vec![turn_usage_event(TurnUsage {
+                    input_tokens: 90,
+                    output_tokens: 12,
+                    reasoning_tokens: None,
+                    cache_read_tokens: Some(8),
+                    cache_write_tokens: Some(4),
+                    model: Some("claude-haiku-4-5".to_string()),
+                    cost_usd: None,
+                })],
+            ),
+        ]);
 
         assert_eq!(wave_usage.sessions, 2);
         assert_eq!(wave_usage.turns, 2);
@@ -474,7 +469,7 @@ mod tests {
             .expect("diff");
         assert_eq!(diff.tokens.input, 340);
         assert_eq!(diff.sessions, 1);
-        assert_eq!(diff.turns, 1);
+        assert_eq!(diff.turns, 0);
     }
 
     fn test_session(step: &str) -> Session {

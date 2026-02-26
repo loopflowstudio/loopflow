@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -505,6 +506,13 @@ impl Store {
         SessionStore::list_session_events(self, session_id, after_seq).await
     }
 
+    pub async fn list_events_for_sessions(
+        &self,
+        session_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>> {
+        SessionStore::list_events_for_sessions(self, session_ids).await
+    }
+
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
         TokenStore::get_provider_token(self, provider).await
     }
@@ -702,6 +710,10 @@ pub trait SessionStore: Send + Sync {
         session_id: &LfdId,
         after_seq: Option<i64>,
     ) -> StoreResult<Vec<PersistedSessionEvent>>;
+    async fn list_events_for_sessions(
+        &self,
+        session_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>>;
     async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>>;
     async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>>;
 }
@@ -1663,6 +1675,22 @@ impl SessionStore for Store {
                 .await
             }
             StoreBackend::Postgres(store) => store.list_session_events(session_id, after_seq).await,
+        }
+    }
+
+    async fn list_events_for_sessions(
+        &self,
+        session_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_ids = session_ids.to_vec();
+                run_sqlite(store, move |store| {
+                    store.list_events_for_sessions(&session_ids)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_events_for_sessions(session_ids).await,
         }
     }
 

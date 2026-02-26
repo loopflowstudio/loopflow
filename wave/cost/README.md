@@ -64,9 +64,9 @@ What shipped:
 
 Carry-forward follow-ups:
 
-- N+1 event loading in wave/summary endpoints (loads events per-session in a loop). Batch the event query or add a materialized `session_usage` table if wave sessions grow to thousands.
 - No caching layer. Session events are immutable after session ends, so caching is safe. Add when measured latency exceeds 200ms.
 - E2E smoke test coverage for usage endpoints deferred — unit and integration tests cover the new code.
+- Unify `AgentRun` and `Session`. Today they're two parallel types for the same thing (one agent invocation) with no cross-references — `AgentRun` tracks the process lifecycle, `Session` tracks the conversation/usage. Unify into one concept or make the relationship explicit, and add an interactive vs wave-driven distinction so usage queries can filter by source.
 
 ## Risks
 

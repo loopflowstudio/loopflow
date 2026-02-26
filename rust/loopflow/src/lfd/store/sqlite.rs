@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -441,6 +442,43 @@ impl SqliteStore {
             sessions.push(Self::map_session_row(row)?);
         }
         Ok(sessions)
+    }
+
+    pub fn list_events_for_sessions(
+        &self,
+        session_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>> {
+        if session_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let placeholders: Vec<String> = (1..=session_ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT session_id, seq, data, created_at
+             FROM session_events
+             WHERE session_id IN ({})
+             ORDER BY session_id, seq ASC",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn ToSql> = session_ids.iter().map(|id| id as &dyn ToSql).collect();
+        let mut rows = stmt.query(params.as_slice())?;
+        let mut result: HashMap<LfdId, Vec<PersistedSessionEvent>> = HashMap::new();
+        while let Some(row) = rows.next()? {
+            let session_id: LfdId = row.get(0)?;
+            let data: String = row.get(2)?;
+            let event: SessionEvent = serde_json::from_str(&data)?;
+            result
+                .entry(session_id.clone())
+                .or_default()
+                .push(PersistedSessionEvent {
+                    session_id,
+                    seq: row.get(1)?,
+                    event,
+                    created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)?),
+                });
+        }
+        Ok(result)
     }
 
     pub fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use deadpool_postgres::{Manager, Pool};
@@ -494,6 +495,43 @@ impl PostgresStore {
                 )
                 .await?;
             rows.iter().map(Self::map_session_row).collect()
+        })
+        .await
+    }
+
+    pub async fn list_events_for_sessions(
+        &self,
+        session_ids: &[LfdId],
+    ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>> {
+        if session_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let session_id_strings: Vec<String> = session_ids.iter().map(|id| id.to_string()).collect();
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT session_id, seq, data, created_at
+                     FROM session_events
+                     WHERE session_id = ANY($1)
+                     ORDER BY session_id, seq ASC",
+                    &[&session_id_strings],
+                )
+                .await?;
+            let mut result: HashMap<LfdId, Vec<PersistedSessionEvent>> = HashMap::new();
+            for row in &rows {
+                let session_id: LfdId = row.get(0);
+                let event: SessionEvent = serde_json::from_str(row.get::<_, &str>(2))?;
+                result
+                    .entry(session_id.clone())
+                    .or_default()
+                    .push(PersistedSessionEvent {
+                        session_id,
+                        seq: row.get(1),
+                        event,
+                        created_at: crate::lfd::store::rows::unix_to_datetime(row.get(3)),
+                    });
+            }
+            Ok(result)
         })
         .await
     }

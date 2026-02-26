@@ -332,28 +332,19 @@ fn parse_stimulus(
         }
     };
 
+    let cron_value = trimmed_non_empty(stimulus.cron.as_deref());
+    let source = trimmed_non_empty(stimulus.source.as_deref());
+    let source_repo = trimmed_non_empty(stimulus.source_repo.as_deref());
+
     let cron = match kind {
-        StimulusKind::Cron => Some(
-            stimulus
-                .cron
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| {
-                    api_error(
-                        StatusCode::BAD_REQUEST,
-                        "wave config stimulus kind 'cron' requires a cron expression",
-                    )
-                })?,
-        ),
+        StimulusKind::Cron => Some(cron_value.ok_or_else(|| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "wave config stimulus kind 'cron' requires a cron expression",
+            )
+        })?),
         StimulusKind::Listen => {
-            if stimulus
-                .cron
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|value| !value.is_empty())
-            {
+            if cron_value.is_some() {
                 return Err(api_error(
                     StatusCode::BAD_REQUEST,
                     "wave config listen stimulus does not accept cron",
@@ -362,23 +353,13 @@ fn parse_stimulus(
             None
         }
         _ => {
-            if stimulus
-                .source
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|value| !value.is_empty())
-            {
+            if source.is_some() {
                 return Err(api_error(
                     StatusCode::BAD_REQUEST,
                     "wave config source is only valid for listen stimulus",
                 ));
             }
-            if stimulus
-                .source_repo
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|value| !value.is_empty())
-            {
+            if source_repo.is_some() {
                 return Err(api_error(
                     StatusCode::BAD_REQUEST,
                     "wave config source_repo is only valid for listen stimulus",
@@ -389,30 +370,17 @@ fn parse_stimulus(
     };
 
     let source = if kind == StimulusKind::Listen {
-        Some(
-            stimulus
-                .source
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| {
-                    api_error(
-                        StatusCode::BAD_REQUEST,
-                        "wave config listen stimulus requires source",
-                    )
-                })?,
-        )
+        Some(source.ok_or_else(|| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "wave config listen stimulus requires source",
+            )
+        })?)
     } else {
         None
     };
     let source_repo = if kind == StimulusKind::Listen {
-        stimulus
-            .source_repo
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
+        source_repo
     } else {
         None
     };
@@ -423,6 +391,13 @@ fn parse_stimulus(
         source,
         source_repo,
     })
+}
+
+fn trimmed_non_empty(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 async fn resolve_listen_source_wave_id(

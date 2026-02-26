@@ -553,26 +553,16 @@ impl WaveExecutor {
             .flatten()
             .is_some()
         {
-            let reason = format!(
-                "listen stimulus {} deferred: wave already running",
-                stimulus.id
-            );
-            return matches!(
-                enqueue_pending_activation(
-                    &self.store,
-                    &self.event_hub,
-                    ActivationEnvelope::new(
-                        wave.id(),
-                        &stimulus.id,
-                        ActivationSource::Listen,
-                        reason,
-                        "",
-                        "",
+            return self
+                .queue_listen_activation(
+                    wave,
+                    stimulus,
+                    format!(
+                        "listen stimulus {} deferred: wave already running",
+                        stimulus.id
                     ),
                 )
-                .await,
-                Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
-            );
+                .await;
         }
 
         let run_id = LfdId::new();
@@ -584,23 +574,13 @@ impl WaveExecutor {
                     reason = %reason,
                     "scheduler at capacity; queueing listen activation"
                 );
-                let reason = format!("listen stimulus {} deferred: scheduler full", stimulus.id);
-                return matches!(
-                    enqueue_pending_activation(
-                        &self.store,
-                        &self.event_hub,
-                        ActivationEnvelope::new(
-                            wave.id(),
-                            &stimulus.id,
-                            ActivationSource::Listen,
-                            reason,
-                            "",
-                            "",
-                        ),
+                return self
+                    .queue_listen_activation(
+                        wave,
+                        stimulus,
+                        format!("listen stimulus {} deferred: scheduler full", stimulus.id),
                     )
-                    .await,
-                    Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
-                );
+                    .await;
             }
         };
 
@@ -620,6 +600,30 @@ impl WaveExecutor {
             slot_guard,
         );
         true
+    }
+
+    async fn queue_listen_activation(
+        &self,
+        wave: &Wave,
+        stimulus: &Stimulus,
+        reason: String,
+    ) -> bool {
+        matches!(
+            enqueue_pending_activation(
+                &self.store,
+                &self.event_hub,
+                ActivationEnvelope::new(
+                    wave.id(),
+                    &stimulus.id,
+                    ActivationSource::Listen,
+                    reason,
+                    "",
+                    "",
+                ),
+            )
+            .await,
+            Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+        )
     }
 
     async fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
@@ -1108,6 +1112,20 @@ mod tests {
         run
     }
 
+    fn make_listen_stimulus(listener_wave_id: &LfdId, source_wave_id: &LfdId) -> Stimulus {
+        Stimulus {
+            id: LfdId::new(),
+            wave_id: listener_wave_id.clone(),
+            source_wave_id: Some(source_wave_id.clone()),
+            kind: StimulusKind::Listen,
+            cron: None,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        }
+    }
+
     #[tokio::test]
     async fn execute_emits_wave_updated_on_step_advance() {
         let tmp = tempdir().expect("tempdir");
@@ -1202,17 +1220,7 @@ mod tests {
             .create_wave(&target_wave)
             .await
             .expect("create target wave");
-        let listen_stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: target_wave.id.clone(),
-            source_wave_id: Some(source_wave_id.clone()),
-            kind: StimulusKind::Listen,
-            cron: None,
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
+        let listen_stimulus = make_listen_stimulus(&target_wave.id, &source_wave_id);
         store
             .create_stimulus(&listen_stimulus)
             .await
@@ -1293,17 +1301,7 @@ mod tests {
         let _listener_active_run =
             create_main_run(&store, &listener_wave, WaveRunStatus::Running).await;
 
-        let stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: listener_wave.id().clone(),
-            source_wave_id: Some(source_wave.id().clone()),
-            kind: StimulusKind::Listen,
-            cron: None,
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
+        let stimulus = make_listen_stimulus(listener_wave.id(), source_wave.id());
         store
             .create_stimulus(&stimulus)
             .await
@@ -1373,17 +1371,7 @@ mod tests {
             .expect("create listener wave");
         let source_run = create_main_run(&store, &source_wave, WaveRunStatus::Running).await;
 
-        let stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: listener_wave.id().clone(),
-            source_wave_id: Some(source_wave.id().clone()),
-            kind: StimulusKind::Listen,
-            cron: None,
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
+        let stimulus = make_listen_stimulus(listener_wave.id(), source_wave.id());
         store
             .create_stimulus(&stimulus)
             .await

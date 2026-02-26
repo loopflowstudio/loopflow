@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -160,8 +160,6 @@ pub enum AuthError {
         #[source]
         source: std::io::Error,
     },
-    #[error("home directory not available")]
-    MissingHomeDir,
     #[error("filesystem error: {0}")]
     Filesystem(String),
 }
@@ -217,11 +215,11 @@ impl ProviderAuthService {
 
     pub async fn list_statuses(&self) -> Result<Vec<ProviderAuthSnapshot>, AuthError> {
         self.prune_finished_pending().await;
-        let pending = self.pending.lock().await;
+        let pending_providers = self.pending_providers().await;
         let mut snapshots = Vec::with_capacity(Provider::all().len());
 
         for provider in Provider::all() {
-            if pending.contains_key(&provider) {
+            if pending_providers.contains(&provider) {
                 snapshots.push(ProviderAuthSnapshot {
                     provider,
                     status: AuthStatus::Pending,
@@ -237,7 +235,7 @@ impl ProviderAuthService {
 
     pub async fn status(&self, provider: Provider) -> Result<ProviderAuthSnapshot, AuthError> {
         self.prune_finished_pending().await;
-        if self.pending.lock().await.contains_key(&provider) {
+        if self.is_pending(provider).await {
             return Ok(ProviderAuthSnapshot {
                 provider,
                 status: AuthStatus::Pending,
@@ -254,7 +252,7 @@ impl ProviderAuthService {
         event_hub: EventHub,
     ) -> Result<AuthFlowResponse, AuthError> {
         self.prune_finished_pending().await;
-        if self.pending.lock().await.contains_key(&provider) {
+        if self.is_pending(provider).await {
             return Err(AuthError::FlowAlreadyPending(provider));
         }
 
@@ -329,6 +327,14 @@ impl ProviderAuthService {
     async fn prune_finished_pending(&self) {
         let mut pending = self.pending.lock().await;
         pending.retain(|_, handle| !handle.is_finished());
+    }
+
+    async fn is_pending(&self, provider: Provider) -> bool {
+        self.pending.lock().await.contains_key(&provider)
+    }
+
+    async fn pending_providers(&self) -> HashSet<Provider> {
+        self.pending.lock().await.keys().copied().collect()
     }
 
     fn broker(&self, provider: Provider) -> Result<Arc<dyn AuthBroker>, AuthError> {
@@ -478,13 +484,12 @@ impl AuthBroker for ClaudeAuthBroker {
             AuthError::Filesystem(format!("read {}: {err}", claude_dir.display()))
         })?;
 
-        for entry in entries.flatten() {
+        for entry in entries {
+            let entry = entry.map_err(|err| {
+                AuthError::Filesystem(format!("read {} entry: {err}", claude_dir.display()))
+            })?;
             let path = entry.path();
-            let file_name = entry
-                .file_name()
-                .to_string_lossy()
-                .to_string()
-                .to_ascii_lowercase();
+            let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             if !is_auth_like_name(&file_name) {
                 continue;
             }
@@ -638,8 +643,7 @@ async fn start_auth_command(
 
         if let Ok(Some(line)) = tokio::time::timeout(AUTH_URL_POLL_INTERVAL, line_rx.recv()).await {
             parse_line(&line, &mut builder);
-            if build_flow_response(provider, &builder).is_some() {
-                let response = build_flow_response(provider, &builder).expect("response exists");
+            if let Some(response) = build_flow_response(provider, &builder) {
                 let monitor = tokio::spawn(async move {
                     let status = child.wait().await.map_err(|err| AuthError::CommandIo {
                         provider,

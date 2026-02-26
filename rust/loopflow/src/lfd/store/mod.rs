@@ -1765,8 +1765,8 @@ mod tests {
     use super::{ExecutionStore, ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
-        QueueBlock, QueueBlockReason, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind,
+        AgentRun, AgentStatus, ChatMemoryBlock, CiFixKind, LivePrState, LivePullRequestState,
+        PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, StimulusKind,
         Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
         WaveStatus,
     };
@@ -1810,8 +1810,8 @@ mod tests {
             flow_parents: Vec::new(),
             activation_log_id: None,
             run_kind: kind,
-            sidecar_kind: if kind == WaveRunKind::Sidecar {
-                Some(SidecarKind::CiFix)
+            ci_fix_kind: if kind == WaveRunKind::CiFix {
+                Some(CiFixKind::CiFix)
             } else {
                 None
             },
@@ -2215,7 +2215,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_run_excludes_failed_and_sidecar() {
+    async fn active_run_excludes_failed_and_ci_fix() {
         let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
@@ -2253,15 +2253,15 @@ mod tests {
             WaveRunStatus::Failed
         );
 
-        let sidecar = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Sidecar);
+        let ci_fix = make_run(&wave, WaveRunStatus::Running, WaveRunKind::CiFix);
         store
-            .create_wave_run(&sidecar)
+            .create_wave_run(&ci_fix)
             .await
-            .expect("create sidecar run");
+            .expect("create ci-fix run");
         assert!(store
             .get_active_wave_run(wave.id())
             .await
-            .expect("active with sidecar")
+            .expect("active with ci-fix")
             .is_none());
 
         store.delete_wave(wave.id()).await.expect("delete wave");
@@ -2306,7 +2306,7 @@ mod tests {
                     flow_parents: Vec::new(),
                     activation_log_id: None,
                     run_kind: WaveRunKind::Main,
-                    sidecar_kind: None,
+                    ci_fix_kind: None,
                     parent_run_id,
                     parent_pr_number,
                     stack_position: iteration.saturating_sub(1),

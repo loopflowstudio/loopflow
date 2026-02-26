@@ -7,7 +7,7 @@ use tracing::warn;
 use crate::engine::agent::build_agent_command;
 use crate::engine::flow::{ConcreteStep, Step};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{SidecarKind, Wave, WaveRun, WaveRunKind, WaveRunStatus};
+use crate::lfd::types::{CiFixKind, Wave, WaveRun, WaveRunKind, WaveRunStatus};
 
 use super::launch::AgentLaunchRequest;
 use super::WaveExecutor;
@@ -19,23 +19,23 @@ use crate::lfd::executor::CiFailure;
 
 impl WaveExecutor {
     pub async fn spawn_ci_fix_agent(&self, failure: &CiFailure) -> Result<()> {
-        let sidecar_run_id = LfdId::new();
+        let ci_fix_run_id = LfdId::new();
         let _slot_guard = self
             .scheduler
-            .acquire_guard(sidecar_run_id.as_str())
+            .acquire_guard(ci_fix_run_id.as_str())
             .await
             .map_err(|reason| {
                 anyhow!("scheduler at capacity, cannot start CI fix agent: {reason}")
             })?;
 
-        self.run_ci_fix_agent_with_slot(failure, &sidecar_run_id)
+        self.run_ci_fix_agent_with_slot(failure, &ci_fix_run_id)
             .await
     }
 
     async fn run_ci_fix_agent_with_slot(
         &self,
         failure: &CiFailure,
-        sidecar_run_id: &LfdId,
+        ci_fix_run_id: &LfdId,
     ) -> Result<()> {
         let wave = self
             .store
@@ -49,9 +49,9 @@ impl WaveExecutor {
             .ok_or_else(|| anyhow!("wave run not found for CI fix"))?;
 
         let worktree_path =
-            ci_fix_worktree_path(Path::new(wave.repo()), wave.name(), sidecar_run_id);
+            ci_fix_worktree_path(Path::new(wave.repo()), wave.name(), ci_fix_run_id);
         let worktree = worktree_path.to_string_lossy().to_string();
-        let temp_branch = format!("ci-fix-{}", short_hash(sidecar_run_id.as_str(), 8));
+        let temp_branch = format!("ci-fix-{}", short_hash(ci_fix_run_id.as_str(), 8));
 
         create_ci_fix_worktree(
             Path::new(wave.repo()),
@@ -64,7 +64,7 @@ impl WaveExecutor {
         snapshot.flow = "ci-fix".to_string();
         snapshot.pr = None;
         let mut run = WaveRun {
-            id: sidecar_run_id.clone(),
+            id: ci_fix_run_id.clone(),
             wave_id: wave.id().clone(),
             snapshot,
             iteration: source_run.iteration,
@@ -77,8 +77,8 @@ impl WaveExecutor {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Sidecar,
-            sidecar_kind: Some(SidecarKind::CiFix),
+            run_kind: WaveRunKind::CiFix,
+            ci_fix_kind: Some(CiFixKind::CiFix),
             parent_run_id: Some(source_run.id.clone()),
             parent_pr_number: source_run.snapshot.pr.as_ref().and_then(|pr| pr.number),
             stack_position: source_run.stack_position,

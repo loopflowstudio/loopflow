@@ -1,6 +1,6 @@
+mod ci_fix;
 mod fork;
 mod launch;
-mod sidecar;
 mod summary;
 
 use std::collections::{HashMap, HashSet};
@@ -32,14 +32,14 @@ use crate::lfd::triggers::{
     enqueue_pending_activation, spawn_run_task_with_slot, ActivationEnvelope,
 };
 use crate::lfd::types::{
-    ActivationSource, Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun,
-    WaveRunKind, WaveRunStatus, WaveStatus,
+    ActivationSource, Event, LivePrState, LivePullRequestState, PendingActivation, Stimulus,
+    StimulusKind, Wave, WaveRun, WaveRunKind, WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
 use super::helpers::{
     advance_branch, auto_commit_if_dirty, auto_create_pr, build_agent_capabilities,
-    build_step_prompt, flow_parents_for_index, is_active_wave_run_status,
+    build_step_prompt, create_wave_run_with_id, flow_parents_for_index, is_active_wave_run_status,
     is_ephemeral_worktree_path,
 };
 use super::local::LocalProcessExecutor;
@@ -199,10 +199,10 @@ impl WaveExecutor {
 
         for run in runs {
             let run_is_active = is_active_wave_run_status(run.status);
-            if run_is_active && run.run_kind == WaveRunKind::Sidecar {
+            if run_is_active && run.run_kind == WaveRunKind::CiFix {
                 active.push(EphemeralWorktree {
                     path: run.worktree.clone(),
-                    owner_kind: EphemeralOwnerKind::Sidecar,
+                    owner_kind: EphemeralOwnerKind::CiFix,
                     owner_id: run.id.to_string(),
                 });
             }
@@ -470,6 +470,7 @@ impl WaveExecutor {
                     }
 
                     self.store.update_wave_run(&run).await?;
+                    self.trigger_listeners_on_completion(wave.id()).await;
                     if run.snapshot.pr.is_some() {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
                             &self.store,
@@ -491,6 +492,147 @@ impl WaveExecutor {
                     self.event_hub.send(Event::wave_updated(wave.id().clone()));
                     return Ok(());
                 }
+            }
+        }
+    }
+
+    async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId) {
+        let stimuli = match self
+            .store
+            .list_stimuli_by_kind(StimulusKind::Listen.as_i32())
+            .await
+        {
+            Ok(stimuli) => stimuli,
+            Err(err) => {
+                warn!(
+                    wave_id = %source_wave_id,
+                    error = %err,
+                    "failed to list listen stimuli"
+                );
+                return;
+            }
+        };
+
+        for mut stimulus in stimuli {
+            if !stimulus.enabled || stimulus.source_wave_id.as_ref() != Some(source_wave_id) {
+                continue;
+            }
+
+            let listener_wave = match self.store.get_wave(&stimulus.wave_id).await {
+                Ok(Some(wave)) => wave,
+                Ok(None) => continue,
+                Err(err) => {
+                    warn!(stimulus_id = %stimulus.id, error = %err, "failed to load listening wave");
+                    continue;
+                }
+            };
+
+            if listener_wave.status() == WaveStatus::Paused {
+                continue;
+            }
+
+            if self
+                .start_or_queue_listen_activation(&listener_wave, &stimulus)
+                .await
+            {
+                stimulus.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
+                if let Err(err) = self.store.update_stimulus(&stimulus).await {
+                    warn!(
+                        stimulus_id = %stimulus.id,
+                        error = %err,
+                        "failed to update listen stimulus last_triggered_at"
+                    );
+                }
+            }
+        }
+    }
+
+    async fn start_or_queue_listen_activation(&self, wave: &Wave, stimulus: &Stimulus) -> bool {
+        if self
+            .store
+            .get_active_wave_run(wave.id())
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            return self
+                .queue_or_coalesce_pending_activation(wave.id(), &stimulus.id)
+                .await;
+        }
+
+        let run_id = LfdId::new();
+        let slot_guard = match self.scheduler.acquire_guard(run_id.as_str()).await {
+            Ok(guard) => guard,
+            Err(reason) => {
+                debug!(
+                    wave_id = %wave.id(),
+                    reason = %reason,
+                    "scheduler at capacity; queueing listen activation"
+                );
+                return self
+                    .queue_or_coalesce_pending_activation(wave.id(), &stimulus.id)
+                    .await;
+            }
+        };
+
+        let run = match create_wave_run_with_id(&self.store, wave, &run_id).await {
+            Ok(run) => run,
+            Err(err) => {
+                warn!(wave_id = %wave.id(), error = %err, "failed creating listening wave run");
+                return false;
+            }
+        };
+
+        spawn_run_task_with_slot(
+            self.store.clone(),
+            self.clone(),
+            self.event_hub.clone(),
+            run,
+            slot_guard,
+        );
+        true
+    }
+
+    async fn queue_or_coalesce_pending_activation(
+        &self,
+        wave_id: &LfdId,
+        stimulus_id: &LfdId,
+    ) -> bool {
+        match self
+            .store
+            .get_pending_for_stimulus(wave_id, stimulus_id)
+            .await
+        {
+            Ok(Some(_existing)) => true,
+            Ok(None) => {
+                let activation = PendingActivation {
+                    id: LfdId::new(),
+                    wave_id: wave_id.clone(),
+                    stimulus_id: stimulus_id.clone(),
+                    from_sha: String::new(),
+                    to_sha: String::new(),
+                    queued_at: OffsetDateTime::now_utc().unix_timestamp(),
+                };
+                if let Err(err) = self.store.create_pending_activation(&activation).await {
+                    warn!(
+                        wave_id = %wave_id,
+                        stimulus_id = %stimulus_id,
+                        error = %err,
+                        "failed to queue pending activation"
+                    );
+                    return false;
+                }
+                true
+            }
+            Err(err) => {
+                warn!(
+                    wave_id = %wave_id,
+                    stimulus_id = %stimulus_id,
+                    error = %err,
+                    "failed checking pending activation"
+                );
+                false
             }
         }
     }
@@ -949,7 +1091,7 @@ mod tests {
             flow_parents: vec![],
             activation_log_id: None,
             run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
+            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -962,6 +1104,56 @@ mod tests {
             .await
             .expect("wave run should be created");
         (wave_id, run_id)
+    }
+
+    fn make_wave(name: &str, repo: &Path, flow: &str, status: WaveStatus) -> Wave {
+        Wave {
+            id: LfdId::new(),
+            name: name.to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: flow.to_string(),
+            direction: vec![],
+            area: vec![],
+            status,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        }
+    }
+
+    async fn create_main_run(store: &SharedStore, wave: &Wave, status: WaveRunStatus) -> WaveRun {
+        let run = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo().clone(),
+                flow: wave.flow().clone(),
+                direction: wave.direction().clone(),
+                area: wave.area().clone(),
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status,
+            worktree: wave.repo().clone(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            run_kind: WaveRunKind::Main,
+            ci_fix_kind: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave.id().to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
+        };
+        store
+            .create_wave_run(&run)
+            .await
+            .expect("wave run should be created");
+        run
     }
 
     #[tokio::test]
@@ -1101,6 +1293,167 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].stimulus_id, listen_stimulus.id);
         assert_eq!(pending[0].source, ActivationSource::Listen);
+    }
+
+    #[tokio::test]
+    async fn listen_trigger_queues_when_listener_running() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
+        repo.create_file(".lf/steps/step-a.md", "do step");
+        repo.stage_all();
+        repo.commit("add test flow");
+
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let source_wave = make_wave("source", repo.path(), "test-flow", WaveStatus::Running);
+        let listener_wave = make_wave("listener", repo.path(), "test-flow", WaveStatus::Running);
+        store
+            .create_wave(&source_wave)
+            .await
+            .expect("create source wave");
+        store
+            .create_wave(&listener_wave)
+            .await
+            .expect("create listener wave");
+        let source_run = create_main_run(&store, &source_wave, WaveRunStatus::Running).await;
+        let _listener_active_run =
+            create_main_run(&store, &listener_wave, WaveRunStatus::Running).await;
+
+        let stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: listener_wave.id().clone(),
+            source_wave_id: Some(source_wave.id().clone()),
+            kind: StimulusKind::Listen,
+            cron: None,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        store
+            .create_stimulus(&stimulus)
+            .await
+            .expect("create listen stimulus");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&source_run.id)
+            .await
+            .expect("source run should complete");
+
+        let pending = store
+            .get_pending_for_stimulus(listener_wave.id(), &stimulus.id)
+            .await
+            .expect("pending activation lookup should succeed");
+        assert!(
+            pending.is_some(),
+            "listen activation should queue while listener is running"
+        );
+
+        let updated = store
+            .get_stimulus(&stimulus.id)
+            .await
+            .expect("stimulus lookup should succeed")
+            .expect("stimulus should exist");
+        assert!(
+            updated.last_triggered_at.is_some(),
+            "queued listen activation should update last_triggered_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn listen_trigger_queues_when_scheduler_full() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
+        repo.create_file(".lf/steps/step-a.md", "do step");
+        repo.stage_all();
+        repo.commit("add test flow");
+
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let source_wave = make_wave("source", repo.path(), "test-flow", WaveStatus::Running);
+        let listener_wave = make_wave("listener", repo.path(), "test-flow", WaveStatus::Idle);
+        store
+            .create_wave(&source_wave)
+            .await
+            .expect("create source wave");
+        store
+            .create_wave(&listener_wave)
+            .await
+            .expect("create listener wave");
+        let source_run = create_main_run(&store, &source_wave, WaveRunStatus::Running).await;
+
+        let stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: listener_wave.id().clone(),
+            source_wave_id: Some(source_wave.id().clone()),
+            kind: StimulusKind::Listen,
+            cron: None,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        store
+            .create_stimulus(&stimulus)
+            .await
+            .expect("create listen stimulus");
+
+        let scheduler = Arc::new(Scheduler::new(0));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&source_run.id)
+            .await
+            .expect("source run should complete");
+
+        let pending = store
+            .get_pending_for_stimulus(listener_wave.id(), &stimulus.id)
+            .await
+            .expect("pending activation lookup should succeed");
+        assert!(
+            pending.is_some(),
+            "listen activation should queue when scheduler is full"
+        );
+
+        let listener_runs = store
+            .list_wave_runs(Some(listener_wave.id()), None)
+            .await
+            .expect("list listener runs");
+        assert!(
+            listener_runs.is_empty(),
+            "listener should not start immediately when scheduler is full"
+        );
     }
 
     #[tokio::test]

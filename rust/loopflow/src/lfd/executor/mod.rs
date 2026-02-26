@@ -122,7 +122,7 @@ pub struct StartupRecovery {
 #[non_exhaustive]
 pub enum EphemeralOwnerKind {
     Fork,
-    Sidecar,
+    CiFix,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

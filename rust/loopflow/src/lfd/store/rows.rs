@@ -3,7 +3,7 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ActivationSource, AgentRun, AgentStatus, ChatMemoryBlock,
     ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-    SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot,
+    CiFixKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot,
     WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 
@@ -138,7 +138,7 @@ pub fn map_chord_row(row: &impl StoreRow) -> StoreResult<Chord> {
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
 ///        snapshot_direction, snapshot_area, snapshot_pr, flow_parents,
-///        activation_log_id, run_kind, sidecar_kind, parent_run_id,
+///        activation_log_id, run_kind, ci_fix_kind, parent_run_id,
 ///        parent_pr_number, stack_position, stack_group_id, stack_status,
 ///        lineage_inferred
 pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
@@ -150,7 +150,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let flow_parents = parse_json_vec(&row.text(15)?)?;
     let activation_log_id = row.opt_text(16)?.map(LfdId::from_raw);
     let run_kind = WaveRunKind::from_i32(row.int(17)?);
-    let sidecar_kind = row.opt_int(18)?.and_then(SidecarKind::from_i32);
+    let ci_fix_kind = row.opt_int(18)?.and_then(CiFixKind::from_i32);
     let parent_run_id = row.opt_text(19)?.map(LfdId::from_raw);
     let parent_pr_number = row.opt_bigint(20)?.map(|value| value as u32);
     let stack_position = row.int(21)? as u32;
@@ -181,7 +181,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         flow_parents,
         activation_log_id,
         run_kind,
-        sidecar_kind,
+        ci_fix_kind,
         parent_run_id,
         parent_pr_number,
         stack_position,

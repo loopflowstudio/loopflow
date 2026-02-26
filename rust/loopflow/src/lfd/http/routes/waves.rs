@@ -133,6 +133,14 @@ pub struct AddStimulusRequest {
     source_wave_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ParsedStimulus {
+    kind: StimulusKind,
+    cron: Option<String>,
+    source: Option<String>,
+    source_repo: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct LandWaveRequest {
     strict: Option<bool>,
@@ -233,13 +241,40 @@ pub async fn create_wave_handler(
         return Err(err);
     }
 
-    if let Some((kind, cron)) = config_stimulus {
+    if let Some(parsed) = config_stimulus {
+        let source_wave_id = if parsed.kind == StimulusKind::Listen {
+            let source = parsed
+                .source
+                .as_deref()
+                .expect("listen stimulus parsing requires source");
+            let source_repo = parsed.source_repo.as_deref().unwrap_or_else(|| wave.repo());
+            let resolved = match resolve_wave_id_in_repo(&state.store, source_repo, source).await {
+                Ok(resolved) => resolved,
+                Err(err) => {
+                    let wave_id = wave.id().clone();
+                    let _ = state.store.delete_wave(&wave_id).await;
+                    return Err(err);
+                }
+            };
+            if resolved == *wave.id() {
+                let wave_id = wave.id().clone();
+                let _ = state.store.delete_wave(&wave_id).await;
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "listen stimulus cannot target the same wave",
+                ));
+            }
+            Some(resolved)
+        } else {
+            None
+        };
+
         let stimulus = Stimulus {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            source_wave_id: None,
-            kind,
-            cron,
+            source_wave_id,
+            kind: parsed.kind,
+            cron: parsed.cron,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -307,12 +342,13 @@ async fn ensure_wave_workspace(
 
 fn parse_stimulus(
     stimulus: &StimulusDef,
-) -> Result<(StimulusKind, Option<String>), (StatusCode, Json<ErrorResponse>)> {
+) -> Result<ParsedStimulus, (StatusCode, Json<ErrorResponse>)> {
     let kind = match stimulus.kind.as_str() {
         "cron" => StimulusKind::Cron,
         "watch" => StimulusKind::Watch,
         "loop" => StimulusKind::Loop,
         "once" => StimulusKind::Once,
+        "listen" => StimulusKind::Listen,
         value => {
             return Err(api_error(
                 StatusCode::BAD_REQUEST,
@@ -336,10 +372,115 @@ fn parse_stimulus(
                     )
                 })?,
         ),
-        _ => None,
+        StimulusKind::Listen => {
+            if stimulus
+                .cron
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty())
+            {
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "wave config listen stimulus does not accept cron",
+                ));
+            }
+            None
+        }
+        _ => {
+            if stimulus
+                .source
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty())
+            {
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "wave config source is only valid for listen stimulus",
+                ));
+            }
+            if stimulus
+                .source_repo
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty())
+            {
+                return Err(api_error(
+                    StatusCode::BAD_REQUEST,
+                    "wave config source_repo is only valid for listen stimulus",
+                ));
+            }
+            None
+        }
     };
 
-    Ok((kind, cron))
+    let source = if kind == StimulusKind::Listen {
+        Some(
+            stimulus
+                .source
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| {
+                    api_error(
+                        StatusCode::BAD_REQUEST,
+                        "wave config listen stimulus requires source",
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
+    let source_repo = if kind == StimulusKind::Listen {
+        stimulus
+            .source_repo
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    } else {
+        None
+    };
+
+    Ok(ParsedStimulus {
+        kind,
+        cron,
+        source,
+        source_repo,
+    })
+}
+
+async fn resolve_wave_id_in_repo(
+    store: &crate::lfd::store::SharedStore,
+    repo: &str,
+    name: &str,
+) -> Result<LfdId, (StatusCode, Json<ErrorResponse>)> {
+    if let Ok(id) = name.parse::<LfdId>() {
+        let wave = store
+            .get_wave(&id)
+            .await
+            .map_err(map_store_error)?
+            .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+        if wave.repo() != repo {
+            return Err(api_error(StatusCode::NOT_FOUND, "wave not found"));
+        }
+        return Ok(id);
+    }
+
+    let waves = store
+        .list_waves(Some(repo))
+        .await
+        .map_err(map_store_error)?;
+    waves
+        .into_iter()
+        .find(|wave| wave.name() == name)
+        .map(|wave| wave.id().clone())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::NOT_FOUND,
+                ApiMessage::Safe(format!("source wave '{name}' not found in repo '{repo}'")),
+            )
+        })
 }
 
 async fn wave_name_exists(
@@ -1338,12 +1479,18 @@ fn rename_wave_worktree(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::store::{open_store, StorageConfig};
+    use crate::lfd::types::{Wave, WaveStatus};
+    use tempfile::tempdir;
+    use time::OffsetDateTime;
 
     #[test]
     fn parse_stimulus_requires_cron_expression_for_cron_kind() {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
             cron: None,
+            source: None,
+            source_repo: None,
         };
 
         let result = parse_stimulus(&stimulus);
@@ -1355,15 +1502,107 @@ mod tests {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
             cron: Some("0 8 * * *".to_string()),
+            source: None,
+            source_repo: None,
         };
 
         let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
-        assert_eq!(parsed.0, StimulusKind::Cron);
-        assert_eq!(parsed.1.as_deref(), Some("0 8 * * *"));
+        assert_eq!(parsed.kind, StimulusKind::Cron);
+        assert_eq!(parsed.cron.as_deref(), Some("0 8 * * *"));
+        assert!(parsed.source.is_none());
+    }
+
+    #[test]
+    fn listen_stimulus_schema_requires_source() {
+        let stimulus = StimulusDef {
+            kind: "listen".to_string(),
+            cron: None,
+            source: None,
+            source_repo: None,
+        };
+
+        let result = parse_stimulus(&stimulus);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn listen_stimulus_schema_parses_source_and_source_repo() {
+        let stimulus = StimulusDef {
+            kind: "listen".to_string(),
+            cron: None,
+            source: Some("infra".to_string()),
+            source_repo: Some("/tmp/source".to_string()),
+        };
+
+        let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
+        assert_eq!(parsed.kind, StimulusKind::Listen);
+        assert_eq!(parsed.source.as_deref(), Some("infra"));
+        assert_eq!(parsed.source_repo.as_deref(), Some("/tmp/source"));
+        assert!(parsed.cron.is_none());
     }
 
     #[test]
     fn listen_stimulus_is_auto_stimulus() {
         assert!(is_auto_stimulus(StimulusKind::Listen));
+    }
+
+    #[tokio::test]
+    async fn resolve_wave_id_in_repo_matches_repo_scope() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let repo_a = "/tmp/repo-a";
+        let repo_b = "/tmp/repo-b";
+        let wave_a = Wave {
+            id: LfdId::new(),
+            name: "infra".to_string(),
+            repo: repo_a.to_string(),
+            flow: "build".to_string(),
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        let wave_b = Wave {
+            id: LfdId::new(),
+            name: "infra".to_string(),
+            repo: repo_b.to_string(),
+            flow: "build".to_string(),
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+
+        store.create_wave(&wave_a).await.expect("create wave_a");
+        store.create_wave(&wave_b).await.expect("create wave_b");
+
+        let resolved = resolve_wave_id_in_repo(&store, repo_b, "infra")
+            .await
+            .expect("wave should resolve");
+        assert_eq!(resolved, *wave_b.id());
+    }
+
+    #[tokio::test]
+    async fn resolve_wave_id_in_repo_errors_when_missing() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let err = resolve_wave_id_in_repo(&store, "/tmp/repo-missing", "infra")
+            .await
+            .expect_err("missing source wave should error");
+        assert_eq!(err.0, StatusCode::NOT_FOUND);
     }
 }

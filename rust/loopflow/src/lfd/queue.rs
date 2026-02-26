@@ -626,7 +626,7 @@ mod tests {
             flow_parents: Vec::new(),
             activation_log_id: None,
             run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
+            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position,

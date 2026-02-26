@@ -875,7 +875,7 @@ mod tests {
             flow_parents: Vec::new(),
             activation_log_id: None,
             run_kind,
-            sidecar_kind: None,
+            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -900,8 +900,8 @@ mod tests {
             Some(1)
         ));
 
-        let sidecar = wave_run_with_pr(WaveRunKind::Sidecar, Some("open"), Some("feature"));
-        assert!(!run_matches_ci_target(&sidecar, Some("feature"), Some(1)));
+        let ci_fix = wave_run_with_pr(WaveRunKind::CiFix, Some("open"), Some("feature"));
+        assert!(!run_matches_ci_target(&ci_fix, Some("feature"), Some(1)));
     }
 
     #[tokio::test]

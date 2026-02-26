@@ -80,7 +80,7 @@ pub async fn create_wave_run_with_id(
         flow_parents: Vec::new(),
         activation_log_id: None,
         run_kind: WaveRunKind::Main,
-        sidecar_kind: None,
+        ci_fix_kind: None,
         parent_run_id,
         parent_pr_number,
         stack_position,

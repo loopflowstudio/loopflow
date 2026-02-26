@@ -92,13 +92,13 @@ impl WaveRunStatus {
 pub enum WaveRunKind {
     #[default]
     Main = 1,
-    Sidecar = 2,
+    CiFix = 2,
 }
 
 impl WaveRunKind {
     pub fn from_i32(value: i32) -> Self {
         match value {
-            2 => Self::Sidecar,
+            2 => Self::CiFix,
             _ => Self::Main,
         }
     }
@@ -204,11 +204,11 @@ impl std::str::FromStr for QueueBlockReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SidecarKind {
+pub enum CiFixKind {
     CiFix = 1,
 }
 
-impl SidecarKind {
+impl CiFixKind {
     pub fn from_i32(value: i32) -> Option<Self> {
         match value {
             1 => Some(Self::CiFix),
@@ -325,7 +325,7 @@ pub struct WaveRun {
     pub activation_log_id: Option<LfdId>,
     #[serde(default)]
     pub run_kind: WaveRunKind,
-    pub sidecar_kind: Option<SidecarKind>,
+    pub ci_fix_kind: Option<CiFixKind>,
     pub parent_run_id: Option<LfdId>,
     pub parent_pr_number: Option<u32>,
     pub stack_position: u32,
@@ -393,7 +393,7 @@ impl WaveRun {
             flow_parents: Vec::new(),
             activation_log_id: None,
             run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
+            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,

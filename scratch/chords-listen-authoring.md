@@ -14,7 +14,7 @@ Three deliverables, in order:
 
 ### 1. Schema YAML support for listen stimuli
 
-Add `source` field to `StimulusDef`. Extend `parse_stimulus` to handle `kind: listen`. Resolve the source wave name to an ID during `create_wave_handler`.
+Add `source` and optional `source_repo` fields to `StimulusDef`. Extend `parse_stimulus` to handle `kind: listen`. Resolve the source wave name to an ID during `create_wave_handler`, scoped by repo.
 
 ```yaml
 # wave/designer/designer.yaml
@@ -24,14 +24,16 @@ direction: [ux]
 stimulus:
   kind: listen
   source: infra    # wave name — resolved to ID at creation time
+  # optional; defaults to current wave repo
+  source_repo: /Users/jack/src/other-repo
 ```
 
 **Changes:**
 
-- `wave_config.rs`: Add `source: Option<String>` to `StimulusDef`
-- `waves.rs`: Change `parse_stimulus` to return a `ParsedStimulus` struct (kind, cron, source) instead of a tuple. Handle `"listen"` in the match, requiring `source` and rejecting `cron`. In `create_wave_handler`, resolve `source` name → `source_wave_id` via `resolve_wave_id`, validate it's not a self-reference, and wire it into the `Stimulus`.
+- `wave_config.rs`: Add `source: Option<String>` and `source_repo: Option<String>` to `StimulusDef`
+- `waves.rs`: Change `parse_stimulus` to return a `ParsedStimulus` struct (kind, cron, source, source_repo) instead of a tuple. Handle `"listen"` in the match, requiring `source` and rejecting `cron`. In `create_wave_handler`, resolve `source` name → `source_wave_id` via a repo-scoped resolver (`source_repo` if set, else current wave repo), validate it's not a self-reference, and wire it into the `Stimulus`.
 
-**Constraint:** Source wave must exist at creation time. Create waves in dependency order (source first, listener second). This matches the HTTP API's existing behavior and avoids deferred resolution complexity.
+**Constraint:** Source wave must exist at creation time in the selected source repo. Create waves in dependency order (source first, listener second). This matches the HTTP API's existing behavior and avoids deferred resolution complexity.
 
 ### 2. Listen trigger on wave completion
 
@@ -39,14 +41,18 @@ When a wave run completes (`FlowAction::Complete` in `executor/wave/mod.rs`), fi
 
 **Changes:**
 
-- `executor/wave/mod.rs` in the `FlowAction::Complete` arm, after `update_wave_run` and before `return Ok(())`: query `list_stimuli_by_kind(Listen)`, filter to `source_wave_id == completing_wave_id`, and for each listening wave call `start_wave_run`.
+- `executor/wave/mod.rs` in the `FlowAction::Complete` arm, after `update_wave_run` and before `return Ok(())`: query `list_stimuli_by_kind(Listen)`, filter to `source_wave_id == completing_wave_id`, and for each listening wave:
+  - start immediately via internal trigger/executor path (`create_wave_run_with_id` + scheduler slot + `spawn_run_task_with_slot`) when possible, or
+  - queue/coalesce a pending activation when the listener is already running or scheduler capacity is full.
 - Use existing `list_stimuli_by_kind(5)` + in-memory filter rather than adding a new store query. Listen stimuli will be few (single digits per deployment).
+- Add a pending-activation drain loop (ticker) that retries queued activations across all stimulus kinds when waves become runnable. This prevents dropped triggers when scheduler capacity is temporarily saturated.
 
 **Trigger semantics:**
 - Only fires on `Completed`, not `Failed` — a failing source shouldn't cascade.
 - The listening wave starts a normal run with no special context (context injection is designed separately).
-- If the listening wave is already running, skip it (don't queue duplicate runs).
-- Update `last_triggered_at` on the listen stimulus after firing.
+- If the listening wave is already running, queue/coalesce one pending activation per `(wave_id, stimulus_id)`.
+- If listener wave is `Paused`, skip it.
+- Update `last_triggered_at` when the listen trigger is accepted (run started or activation queued).
 
 ### 3. Sidecar → CI fix terminology rename
 
@@ -58,26 +64,30 @@ The `sidecar.rs` module and `SidecarKind` type predate the listen stimulus. They
 | `sidecar_kind` field on `WaveRun` | `ci_fix_kind` |
 | `executor/wave/sidecar.rs` | `executor/wave/ci_fix.rs` |
 | `WaveRunKind::Sidecar` | `WaveRunKind::CiFix` |
-| `sidecar_kind` SQL column | `ci_fix_kind` (migration 014) |
+| `sidecar_kind` SQL column | `ci_fix_kind` (new migration, not 014) |
 | `docs/lfd.md` "CI sidecar agents" | "CI fix agents" |
 
-SQL migration 014 renames the column. The `sidecar_kind` column already stores `CiFix = 1` — the migration is a column rename, no data change.
+`014_rename_provider_to_harness.sql` already exists. Add a new migration (next number, e.g. 015) to rename `sidecar_kind` → `ci_fix_kind`. The column already stores `CiFix = 1` — this is a column rename, no data change.
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
 | Lazy source resolution (store name, resolve at trigger time) | Tolerates out-of-order wave creation | Adds complexity. `source_wave_id` is an FK — storing a name would require a second field or dropping the FK. Create waves in the right order instead. |
+| Disallow cross-repo listen | Simpler resolver | Too restrictive. Chords often coordinate work across repos. Allow cross-repo by explicit `source_repo`, defaulting to current repo for easy UX. |
 | Dedicated `list_stimuli_by_source` query | Cleaner than filtering in memory | Over-engineering for single-digit listen stimuli counts. Add it later if needed. |
+| Queue only for listen, keep other kinds lossy at scheduler saturation | Smaller patch | Inconsistent reliability model. If queueing is the goal, apply it uniformly via shared pending-activation drain behavior. |
 | Context injection in this phase | Listening wave knows what its source did | Doubles the scope. Schema support + triggering is already a complete milestone. Design context injection, implement in Phase 04. |
 | Rename sidecar → listening | Original plan from wave item | Wrong mapping. Sidecars are CI fix agents, not listeners. Renaming to "listening" would be misleading. Rename to what it is: ci_fix. |
 | Trigger on Failed too | Listener can react to failures | Cascading failures are painful. Start with success-only triggers. Users can add failure triggering later. |
 
 ## Key decisions
 
-**Source resolution is eager, not lazy.** The source wave must exist when the listener is created. This matches the HTTP API, keeps the FK constraint, and avoids a class of "source not found at trigger time" errors. Tradeoff: you must create waves in dependency order.
+**Source resolution is eager and repo-scoped.** The source wave must exist when the listener is created, in `source_repo` if specified, otherwise in the listener's repo. This keeps the FK constraint and avoids "source not found at trigger time" errors. Tradeoff: waves must still be created in dependency order.
 
-**Trigger fires from the executor, not from events.** The completion path in `execute()` directly queries for listen stimuli and starts listening waves. No event bus indirection. The executor already has store access and the wave ID. Adding an event handler would split the completion logic across two files for no benefit.
+**Trigger fires from the executor, not from events or HTTP helpers.** The completion path in `execute()` directly queries for listen stimuli and starts listening waves through internal run-creation helpers. No event bus or route indirection.
+
+**Queued activations are first-class, not best-effort drops.** If a trigger cannot start immediately (listener running or scheduler full), persist/coalesce it in `pending_activations` and let a drain loop retry until it starts.
 
 **SidecarKind stays as an enum (renamed to CiFixKind), not collapsed to a bool.** There's only one variant today, but the enum is extensible and the SQL column already stores an integer. Collapsing to bool would require changing the persistence layer for no functional gain.
 
@@ -85,7 +95,7 @@ SQL migration 014 renames the column. The `sidecar_kind` column already stores `
 
 ## Context injection design (Phase 04)
 
-When a listen stimulus fires, the executor could assemble context from the source wave's completed run:
+When a listen stimulus fires, the executor could assemble context from the source wave's completed run metadata:
 
 ```rust
 struct SourceContext {
@@ -99,6 +109,8 @@ struct SourceContext {
 ```
 
 This context would be injected as a clipboard message into the listening wave's first step, similar to how `lf debug -c` passes error context. The prompt would see: "Source wave `infra` completed. PR: 'Upgrade TLS library' (#142). Changed: `rust/loopflow/src/lfd/http/tls.rs`, `Cargo.toml`."
+
+For cross-repo listening, context assembly should use persisted run/PR metadata APIs; do not grant the listening executor arbitrary filesystem access to source repos.
 
 **Open question:** Should context depth be configurable per-stimulus? Three levels seem natural:
 - `summary` (default): PR title + changed file list
@@ -117,7 +129,9 @@ stimulus:
 
 **In scope:**
 - `listen` kind in wave schema YAML files with source name resolution
+- Optional `source_repo` on listen stimuli (defaulting to current repo)
 - Listen trigger on source wave completion (start listening wave)
+- Pending activation queueing/coalescing for listen triggers and scheduler-capacity retries
 - Sidecar → ci_fix rename across Rust code, SQL, docs
 - Tests for schema parsing, trigger firing, and name resolution
 
@@ -135,6 +149,9 @@ cargo test -p loopflow -- listen_stimulus_schema
 
 # Listen trigger fires on source completion
 cargo test -p loopflow -- listen_trigger
+
+# Listen queueing/coalescing drains pending activation
+cargo test -p loopflow -- listen_queue
 
 # Sidecar renamed to ci_fix
 cargo test -p loopflow --all   # no sidecar references in code

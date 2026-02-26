@@ -79,6 +79,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "016_provider_tokens",
         sql: include_str!("migrations/016_provider_tokens.sql"),
     },
+    Migration {
+        version: "016_rename_sidecar_kind_to_ci_fix_kind",
+        sql: include_str!("migrations/016_rename_sidecar_kind_to_ci_fix_kind.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

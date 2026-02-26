@@ -22,7 +22,7 @@ pub use stimulus::{
 };
 pub use summary::Summary;
 pub use wave::{
-    LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,
-    SidecarKind, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-    WaveStatus,
+    CiFixKind, LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason,
+    QueueMergeEvent, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus,
+    WaveRunStatus, WaveStatus,
 };

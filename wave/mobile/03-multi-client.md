@@ -24,7 +24,21 @@ No session awareness or handoff needed. Multiple clients just connect and see th
 
 ## What needs work
 
-### ~~iOS action button wiring (pre-req)~~ → `scratch/mobile-ios-action-buttons.md`
+### ~~iOS action button wiring (pre-req)~~ shipped (February 25, 2026)
+
+Done in `MobileWaveDetailView` with shared behavior parity:
+
+- Suggested actions now render in a persistent bottom `.safeAreaInset(edge: .bottom)` rail on iOS.
+- iOS chat tab disables duplicate action rendering/lifecycle by passing `showsSuggestedActions: false` and `managesLifecycle: false` into `WaveSessionView`.
+- Action taps use the existing shared path: `await sessionState.sendSuggestedAction(action)`.
+- Session lifecycle/context (`configureClientContext`, `onAppear`, `onDisappear`) is owned by the iOS detail container so actions stay live while users watch Output.
+
+### Manual iOS visual verification for action rail
+
+Headless builds passed, but we still need an on-screen simulator check for:
+
+- iPhone 17 Pro: bottom rail thumb-zone spacing and keyboard overlap behavior
+- iPad Pro 13-inch (M5): adaptive action layout and tap ergonomics
 
 ### Suggested action consistency across clients
 
@@ -82,4 +96,5 @@ If lfd has single-client assumptions (e.g. one WebSocket per repo), fix those.
 - Starting a wave on Mac shows output on iPhone
 - Chat transcript visible on both devices, messages from either device appear on both
 - Action buttons appear on both devices; tapping on one clears stale suggestions on the other
+- iOS action rail is manually verified on iPhone 17 Pro and iPad Pro 13-inch (M5)
 - iPhone reconnects gracefully after backgrounding

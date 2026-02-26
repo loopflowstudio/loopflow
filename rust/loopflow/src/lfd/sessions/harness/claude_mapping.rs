@@ -326,23 +326,48 @@ fn command_from_input(input: Option<&Value>) -> Vec<String> {
 }
 
 fn file_changes_from_input(tool_name: &str, input: Option<&Value>) -> Vec<FileEdit> {
+    let Some(input) = input else {
+        return Vec::new();
+    };
     let path = input
-        .and_then(|value| {
-            value
-                .get("file_path")
-                .or_else(|| value.get("notebook_path"))
-        })
+        .get("file_path")
+        .or_else(|| input.get("notebook_path"))
         .and_then(Value::as_str)
         .unwrap_or_default();
     if path.is_empty() {
-        Vec::new()
-    } else {
-        vec![FileEdit {
-            path: path.to_string(),
-            kind: Some(tool_name.to_lowercase()),
-            diff: None,
-        }]
+        return Vec::new();
     }
+
+    let diff = if tool_name == "Edit" {
+        synthesize_edit_diff(path, input)
+    } else {
+        None
+    };
+
+    vec![FileEdit {
+        path: path.to_string(),
+        kind: Some(tool_name.to_lowercase()),
+        diff,
+    }]
+}
+
+fn synthesize_edit_diff(path: &str, input: &Value) -> Option<String> {
+    let old = input.get("old_string").and_then(Value::as_str)?;
+    let new = input.get("new_string").and_then(Value::as_str)?;
+    if old == new {
+        return None;
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!("--- a/{path}"));
+    lines.push(format!("+++ b/{path}"));
+    for line in old.lines() {
+        lines.push(format!("-{line}"));
+    }
+    for line in new.lines() {
+        lines.push(format!("+{line}"));
+    }
+    Some(lines.join("\n"))
 }
 
 fn process_assistant_message(
@@ -794,5 +819,115 @@ mod tests {
         process_line(line, "turn_1", &tx, &mut state);
 
         assert!(rx.is_empty(), "user text blocks should not emit events");
+    }
+
+    #[test]
+    fn synthesize_edit_diff_formats_unified_lines() {
+        let input = json!({
+            "old_string": "fn old() {}",
+            "new_string": "fn new() {}"
+        });
+
+        let diff = synthesize_edit_diff("src/main.rs", &input).expect("expected diff");
+
+        assert_eq!(
+            diff,
+            "--- a/src/main.rs\n+++ b/src/main.rs\n-fn old() {}\n+fn new() {}"
+        );
+    }
+
+    #[test]
+    fn synthesize_edit_diff_returns_none_for_empty_or_equal_input() {
+        let equal_input = json!({
+            "old_string": "same",
+            "new_string": "same"
+        });
+        assert!(synthesize_edit_diff("src/main.rs", &equal_input).is_none());
+
+        let empty_input = json!({
+            "old_string": "",
+            "new_string": ""
+        });
+        assert!(synthesize_edit_diff("src/main.rs", &empty_input).is_none());
+    }
+
+    #[test]
+    fn edit_tool_synthesizes_diff() {
+        let item = infer_item(
+            "Edit",
+            "tu_10",
+            Some(json!({
+                "file_path": "src/main.rs",
+                "old_string": "fn old() {}",
+                "new_string": "fn new() {}"
+            })),
+        );
+        match item {
+            SessionItem::File { changes, .. } => {
+                let diff = changes[0].diff.as_deref().unwrap();
+                assert!(diff.contains("--- a/src/main.rs"));
+                assert!(diff.contains("+++ b/src/main.rs"));
+                assert!(diff.contains("-fn old() {}"));
+                assert!(diff.contains("+fn new() {}"));
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn write_tool_no_diff() {
+        let item = infer_item(
+            "Write",
+            "tu_13",
+            Some(json!({
+                "file_path": "new.txt",
+                "content": "hello world"
+            })),
+        );
+        match item {
+            SessionItem::File { changes, .. } => {
+                assert!(changes[0].diff.is_none());
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synthesize_edit_diff_multiline() {
+        let input = json!({
+            "old_string": "fn old() {\n    println!(\"hi\");\n}",
+            "new_string": "fn new() {\n    println!(\"hello\");\n    println!(\"world\");\n}"
+        });
+
+        let diff = synthesize_edit_diff("src/lib.rs", &input).expect("expected diff");
+        let lines: Vec<&str> = diff.lines().collect();
+
+        assert_eq!(lines[0], "--- a/src/lib.rs");
+        assert_eq!(lines[1], "+++ b/src/lib.rs");
+        assert_eq!(lines[2], "-fn old() {");
+        assert_eq!(lines[3], "-    println!(\"hi\");");
+        assert_eq!(lines[4], "-}");
+        assert_eq!(lines[5], "+fn new() {");
+        assert_eq!(lines[6], "+    println!(\"hello\");");
+        assert_eq!(lines[7], "+    println!(\"world\");");
+        assert_eq!(lines[8], "+}");
+    }
+
+    #[test]
+    fn edit_without_old_string_no_diff() {
+        let item = infer_item(
+            "Edit",
+            "tu_14",
+            Some(json!({
+                "file_path": "src/main.rs",
+                "new_string": "fn new() {}"
+            })),
+        );
+        match item {
+            SessionItem::File { changes, .. } => {
+                assert!(changes[0].diff.is_none());
+            }
+            other => panic!("expected File, got {other:?}"),
+        }
     }
 }

@@ -509,31 +509,36 @@ private struct TranscriptItemCardView: View {
             }
 
             if isExpanded, let detail = card.detail {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    HStack {
-                        Spacer(minLength: 0)
-                        CopyButton(content: detail, isVisible: showCopyButton)
-                    }
+                if card.type == .file {
+                    DiffLinesView(diff: detail)
+                        .hoverTracking { hovering in isHoveringDetail = hovering }
+                } else {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        HStack {
+                            Spacer(minLength: 0)
+                            CopyButton(content: detail, isVisible: showCopyButton)
+                        }
 
-                    if usesMonospaceDetail {
-                        ScrollView(.horizontal) {
+                        if usesMonospaceDetail {
+                            ScrollView(.horizontal) {
+                                Text(detail)
+                                    .font(Typography.code(12))
+                                    .foregroundStyle(palette.textSecondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                        } else {
                             Text(detail)
-                                .font(Typography.code(12))
+                                .font(Typography.caption())
                                 .foregroundStyle(palette.textSecondary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .fixedSize(horizontal: true, vertical: false)
                         }
-                    } else {
-                        Text(detail)
-                            .font(Typography.caption())
-                            .foregroundStyle(palette.textSecondary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                .hoverTracking { hovering in
-                    isHoveringDetail = hovering
+                    .hoverTracking { hovering in
+                        isHoveringDetail = hovering
+                    }
                 }
             }
         }

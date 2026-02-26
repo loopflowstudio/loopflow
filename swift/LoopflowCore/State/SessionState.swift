@@ -785,11 +785,13 @@ public final class SessionState {
 
         case .file(let file):
             let paths = file.changes.map(\.path).filter { !$0.isEmpty }
+            let diffs = file.changes.compactMap(\.diff).filter { !$0.isEmpty }
+            let combinedDiff = diffs.joined(separator: "\n")
             return TranscriptItemCard(
                 type: .file,
                 label: paths.isEmpty ? "File change" : paths.joined(separator: ", "),
                 status: file.status,
-                detail: nil
+                detail: combinedDiff.isEmpty ? nil : combinedDiff
             )
 
         case .message(let message):

@@ -2,17 +2,15 @@
 
 Inline the glance, link to the deep dive. Eliminate context-switches to GitHub/Cursor for the "check in" workflow.
 
-Builds on session polish (shipped) — `CodeBlockView`, `CopyButton`, streaming cursor, and `Typography.code(12)` are established patterns. Reuse them here.
+**Status: in progress**
 
 ## What to build
 
-Five features that make diffs and wave content visible inside Concerto.
+Four features that make diffs and wave content visible inside Concerto. G1 is done — the remaining three build on it.
 
-### File items show diffs (G1)
+### ~~File items show diffs (G1)~~ — done
 
-`FileEdit` already has `path`, `kind`, and `diff` fields. `SessionState.projectCard()` drops the diff — it only renders paths as a label. Change file items to expand with colored diff lines.
-
-New `DiffLinesView`: parse unified diff, green for `+`, red for `-`, muted for context and `@@` headers. `Typography.code(12)`, horizontal scroll, copy button.
+`DiffLinesView` renders colored inline diffs. `synthesize_edit_diff()` in the Claude harness populates `FileEdit.diff` from Edit tool inputs. Write/NotebookEdit leave diff nil (no before-state). Limitations: no context lines, no hunk headers, `replace_all` shows one instance. G2's `git diff` approach addresses these.
 
 ### Wave diff stat per-file expand (G2)
 

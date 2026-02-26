@@ -276,54 +276,56 @@ def _list_worktree_paths(repo_root: Path) -> list[Path]:
     return worktrees
 
 
-def _seed_waves_from_worktrees() -> None:
-    """Create idle waves in lfd for checked-out worktrees that have wave/ definitions."""
-    worktrees = _list_worktree_paths(REPO_ROOT)
-    if not worktrees:
-        return
-
-    main_repo = worktrees[0]
-    wave_dir = main_repo / "wave"
+def _seed_waves_from_wave_dir() -> None:
+    """Create idle waves in lfd for each subdirectory in wave/."""
+    wave_dir = REPO_ROOT / "wave"
     if not wave_dir.is_dir():
         return
 
-    repo_prefix = main_repo.name + "."
-    worktree_wave_names: list[str] = []
-    for wt in worktrees[1:]:
-        name = wt.name
-        if "-fork-" in name or ".ci-fix." in name or ".claude" in str(wt):
-            continue
-        if not name.startswith(repo_prefix):
-            continue
-        wave_name = name[len(repo_prefix):]
-        if (wave_dir / wave_name).is_dir():
-            worktree_wave_names.append(wave_name)
-
-    if not worktree_wave_names:
+    wave_names = sorted(
+        d.name for d in wave_dir.iterdir()
+        if d.is_dir() and not d.name.startswith(".")
+    )
+    if not wave_names:
         return
 
-    # Lazy-import to avoid pulling in httpx for non-lfd commands.
     import loopflow.api as loopflow
 
     try:
-        existing = {w.name for w in loopflow.waves(repo=str(main_repo))}
+        existing = {w.name for w in loopflow.waves(repo=str(REPO_ROOT))}
     except Exception:
         print("Warning: could not list waves from lfd, skipping wave seed")
         return
 
     seeded = 0
-    for wave_name in worktree_wave_names:
+    for wave_name in wave_names:
         if wave_name in existing:
             continue
         try:
-            loopflow.create_wave(wave_name, repo=str(main_repo))
+            loopflow.create_wave(wave_name, repo=str(REPO_ROOT))
             print(f"  Seeded wave: {wave_name}")
             seeded += 1
         except Exception as exc:
             print(f"  Wave {wave_name}: {exc}")
 
     if seeded:
-        print(f"Seeded {seeded} wave(s) from worktrees")
+        print(f"Seeded {seeded} wave(s) from wave/")
+
+
+def _seed_worktrees_background() -> None:
+    """Wait for bundled lfd to start, then seed worktree waves."""
+    import threading
+
+    def _seed():
+        if not _wait_for_lfd_ready(timeout_seconds=30.0):
+            return
+        try:
+            _seed_waves_from_wave_dir()
+        except Exception as exc:
+            print(f"Warning: worktree seeding failed: {exc}")
+
+    thread = threading.Thread(target=_seed, daemon=True)
+    thread.start()
 
 
 def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
@@ -355,7 +357,7 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
             return 1
 
     if with_lfd:
-        _seed_waves_from_worktrees()
+        _seed_waves_from_wave_dir()
 
     print("Building and running Concerto (debug mode with logs)...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
@@ -367,6 +369,9 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
         return result.returncode
 
     _install_dev_app()
+    # Seed worktree waves after bundled lfd starts (background thread waits for ready)
+    if not with_lfd:
+        _seed_worktrees_background()
     print("Logs: ~/Library/Logs/Concerto/")
     print(f"Stream log: {CONCERTO_STREAM_LOG}")
     print("Press Ctrl+C to quit")

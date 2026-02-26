@@ -30,42 +30,6 @@ pub struct BranchNameParts {
     pub words: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum BranchSchemaToken {
-    Literal(String),
-    Placeholder(String),
-}
-
-fn parse_schema_tokens(schema: &str) -> Option<Vec<BranchSchemaToken>> {
-    let mut tokens = Vec::new();
-    let mut remaining = schema;
-
-    while let Some(open_index) = remaining.find('{') {
-        let (literal, after_literal) = remaining.split_at(open_index);
-        if !literal.is_empty() {
-            tokens.push(BranchSchemaToken::Literal(literal.to_string()));
-        }
-
-        let after_open = &after_literal[1..];
-        let close_index = after_open.find('}')?;
-        let (placeholder, after_placeholder) = after_open.split_at(close_index);
-        if placeholder.is_empty() {
-            return None;
-        }
-        tokens.push(BranchSchemaToken::Placeholder(placeholder.to_string()));
-        remaining = &after_placeholder[1..];
-    }
-
-    if !remaining.is_empty() {
-        tokens.push(BranchSchemaToken::Literal(remaining.to_string()));
-    }
-
-    tokens
-        .iter()
-        .any(|token| matches!(token, BranchSchemaToken::Placeholder(_)))
-        .then_some(tokens)
-}
-
 fn placeholder_pattern(name: &str) -> &'static str {
     match name {
         "user" => "[a-z0-9_-]+",
@@ -77,108 +41,73 @@ fn placeholder_pattern(name: &str) -> &'static str {
     }
 }
 
-fn build_schema_regex(tokens: &[BranchSchemaToken]) -> Option<(Regex, Vec<String>)> {
-    let mut pattern = String::from("^");
-    let mut placeholders = Vec::new();
-
-    for token in tokens {
-        match token {
-            BranchSchemaToken::Literal(literal) => pattern.push_str(&regex::escape(literal)),
-            BranchSchemaToken::Placeholder(name) => {
-                pattern.push('(');
-                pattern.push_str(placeholder_pattern(name));
-                pattern.push(')');
-                placeholders.push(name.clone());
-            }
-        }
-    }
-    pattern.push('$');
-
-    let regex = Regex::new(&pattern).ok()?;
-    Some((regex, placeholders))
-}
-
-fn strip_trailing_optional_segment(tokens: &[BranchSchemaToken]) -> Option<Vec<BranchSchemaToken>> {
-    let mut trimmed = tokens.to_vec();
-    let trailing = match trimmed.last() {
-        Some(BranchSchemaToken::Placeholder(name)) => name.as_str(),
-        _ => return None,
-    };
-
-    // Stacked branches commonly omit only `{words}`. Keep timestamp/date
-    // required so we don't misparse arbitrary dotted names as branch metadata.
-    if trailing != "words" {
-        return None;
-    }
-
-    trimmed.pop();
-    if matches!(trimmed.last(), Some(BranchSchemaToken::Literal(_))) {
-        trimmed.pop();
-    }
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    Some(trimmed)
-}
-
-fn schema_variants(tokens: &[BranchSchemaToken]) -> Vec<Vec<BranchSchemaToken>> {
-    let mut variants = vec![tokens.to_vec()];
-    let mut current = tokens.to_vec();
-
-    while let Some(next) = strip_trailing_optional_segment(&current) {
-        variants.push(next.clone());
-        current = next;
-    }
-
-    variants
-}
-
-fn captures_to_branch_parts(
-    captures: &regex::Captures<'_>,
-    placeholders: &[String],
-) -> Option<BranchNameParts> {
-    let mut user = None;
-    let mut name = None;
-    let mut timestamp = None;
-    let mut words = None;
-
-    for (index, placeholder) in placeholders.iter().enumerate() {
-        let value = captures.get(index + 1)?.as_str().to_string();
-        match placeholder.as_str() {
-            "user" => user = Some(value),
-            "name" => name = Some(value),
-            "timestamp" | "ts" | "date" => timestamp = Some(value),
-            "words" => words = Some(value),
-            _ => {}
-        }
-    }
-
-    Some(BranchNameParts {
-        user,
-        name: name?,
-        timestamp,
-        words,
-    })
-}
-
 type CompiledVariants = Vec<(Regex, Vec<String>)>;
 type SchemaCache = Option<(String, CompiledVariants)>;
 
 static SCHEMA_REGEX_CACHE: Mutex<SchemaCache> = Mutex::new(None);
 
-fn compiled_schema_variants(schema: &str) -> Option<Vec<(Regex, Vec<String>)>> {
+/// Compile a schema string into cached regex variants.
+///
+/// Produces a full-match regex plus a shortened variant without trailing
+/// `{words}` (the only optional segment). Results are cached per schema string.
+fn compile_schema(schema: &str) -> Option<CompiledVariants> {
     let mut cache = SCHEMA_REGEX_CACHE.lock().ok()?;
-    if let Some((ref cached_schema, ref variants)) = *cache {
-        if cached_schema == schema {
+    if let Some((ref cached, ref variants)) = *cache {
+        if cached == schema {
             return Some(variants.clone());
         }
     }
-    let tokens = parse_schema_tokens(schema)?;
-    let variants: Vec<_> = schema_variants(&tokens)
-        .into_iter()
-        .filter_map(|variant| build_schema_regex(&variant))
-        .collect();
+
+    // Parse schema into (regex_fragment, placeholder_name) segments
+    let mut segments: Vec<(String, Option<String>)> = Vec::new();
+    let mut remaining = schema;
+    while let Some(open) = remaining.find('{') {
+        if open > 0 {
+            segments.push((regex::escape(&remaining[..open]), None));
+        }
+        let after = &remaining[open + 1..];
+        let close = after.find('}')?;
+        let name = &after[..close];
+        if name.is_empty() {
+            return None;
+        }
+        segments.push((
+            format!("({})", placeholder_pattern(name)),
+            Some(name.to_string()),
+        ));
+        remaining = &after[close + 1..];
+    }
+    if !remaining.is_empty() {
+        segments.push((regex::escape(remaining), None));
+    }
+    if !segments.iter().any(|(_, n)| n.is_some()) {
+        return None;
+    }
+
+    let build = |segs: &[(String, Option<String>)]| -> Option<(Regex, Vec<String>)> {
+        let pattern: String = segs.iter().map(|(p, _)| p.as_str()).collect();
+        let names: Vec<String> = segs.iter().filter_map(|(_, n)| n.clone()).collect();
+        Regex::new(&format!("^{pattern}$")).ok().map(|r| (r, names))
+    };
+
+    let mut variants = Vec::new();
+    if let Some(v) = build(&segments) {
+        variants.push(v);
+    }
+
+    // If trailing placeholder is {words}, add a variant without it and its separator.
+    if segments.last().and_then(|(_, n)| n.as_deref()) == Some("words") {
+        let mut short = segments[..segments.len() - 1].to_vec();
+        if short.last().map(|(_, n)| n.is_none()).unwrap_or(false) {
+            short.pop();
+        }
+        if short.iter().any(|(_, n)| n.is_some()) {
+            if let Some(v) = build(&short) {
+                variants.push(v);
+            }
+        }
+    }
+
     if variants.is_empty() {
         return None;
     }
@@ -196,11 +125,30 @@ pub fn parse_branch_name(
     let default = BranchNameConfig::default();
     let config = config.unwrap_or(&default);
 
-    compiled_schema_variants(config.schema_.as_str())?
+    compile_schema(config.schema_.as_str())?
         .into_iter()
         .find_map(|(regex, placeholders)| {
             let captures = regex.captures(branch)?;
-            captures_to_branch_parts(&captures, &placeholders)
+            let mut user = None;
+            let mut name = None;
+            let mut timestamp = None;
+            let mut words = None;
+            for (i, ph) in placeholders.iter().enumerate() {
+                let value = captures.get(i + 1)?.as_str().to_string();
+                match ph.as_str() {
+                    "user" => user = Some(value),
+                    "name" => name = Some(value),
+                    "timestamp" | "ts" | "date" => timestamp = Some(value),
+                    "words" => words = Some(value),
+                    _ => {}
+                }
+            }
+            Some(BranchNameParts {
+                user,
+                name: name?,
+                timestamp,
+                words,
+            })
         })
 }
 

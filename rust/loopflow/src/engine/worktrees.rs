@@ -2,7 +2,7 @@ use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_squash_merged, rev_parse, worktree_add,
-    worktree_move,
+    worktree_move, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, wave_name};
 use crate::lfd::security::sanitize_fs_component;
@@ -350,9 +350,14 @@ pub fn create_with_schema(
         });
     }
     if has_remote_branch {
-        let remote_to_track =
-            (!branch_exists(repo, &branch_name)?).then_some(remote_branch.as_str());
-        worktree_add_branch(repo, &worktree_path, &branch_name, remote_to_track)?;
+        let mode = if branch_exists(repo, &branch_name)? {
+            WorktreeBranch::Existing
+        } else {
+            WorktreeBranch::Track {
+                remote: &remote_branch,
+            }
+        };
+        worktree_add(repo, &worktree_path, &branch_name, mode)?;
         return Ok(CreateWorktreeResult {
             path: worktree_path,
             branch: branch_name,
@@ -383,7 +388,14 @@ pub fn create_with_schema(
         None
     };
 
-    worktree_add(repo, &worktree_path, &branch_name, base_ref)?;
+    worktree_add(
+        repo,
+        &worktree_path,
+        &branch_name,
+        WorktreeBranch::New {
+            start_point: base_ref,
+        },
+    )?;
     schedule_upstream_sync(worktree_path.clone(), branch_name.clone());
 
     Ok(CreateWorktreeResult {
@@ -392,38 +404,6 @@ pub fn create_with_schema(
         base_branch,
         base_commit,
     })
-}
-
-fn worktree_add_branch(
-    repo: &Path,
-    path: &Path,
-    branch: &str,
-    remote_branch: Option<&str>,
-) -> Result<(), GitError> {
-    let path_str = path.to_string_lossy();
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repo).args(["worktree", "add"]);
-    let command_str = if let Some(remote_branch) = remote_branch {
-        command.args(["--track", "-b", branch, path_str.as_ref(), remote_branch]);
-        format!(
-            "git worktree add --track -b {} {} {}",
-            branch, path_str, remote_branch
-        )
-    } else {
-        command.args([path_str.as_ref(), branch]);
-        format!("git worktree add {} {}", path_str, branch)
-    };
-    let output = command.output()?;
-    if !output.status.success() {
-        if path.join(".git").exists() {
-            return Ok(());
-        }
-        return Err(GitError::CommandFailed {
-            command: command_str,
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(())
 }
 
 pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {

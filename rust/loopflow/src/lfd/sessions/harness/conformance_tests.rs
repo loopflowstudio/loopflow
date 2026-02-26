@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 
 use super::claude_mapping::{self, ReaderState};
 use super::codex_mapping::{self, ItemPhase};
+use super::opencode_mapping;
 use crate::lfd::sessions::types::{SessionEvent, SessionItem, TurnStatus};
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
@@ -166,6 +167,46 @@ fn replay_codex_trace(file_name: &str) -> Vec<SessionEvent> {
     events
 }
 
+fn infer_opencode_session_id(lines: &[String]) -> String {
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if let Some(session_id) = value.get("id").and_then(Value::as_str) {
+            return session_id.to_string();
+        }
+        if let Some(session_id) = value
+            .get("properties")
+            .and_then(|properties| properties.get("sessionID"))
+            .and_then(Value::as_str)
+        {
+            return session_id.to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
+fn replay_opencode_trace(file_name: &str) -> Vec<SessionEvent> {
+    let lines = read_trace_lines(file_name);
+    let session_id = infer_opencode_session_id(&lines);
+    let mut state = opencode_mapping::ReaderState::new(session_id);
+    let mut events = Vec::new();
+
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: Value = serde_json::from_str(&line).expect("trace line should be valid json");
+        let mapped = opencode_mapping::map_event(&value, &mut state);
+        events.extend(mapped.events);
+    }
+
+    events
+}
+
 #[test]
 fn claude_trace_normal_turn() {
     let events = replay_claude_trace("claude_normal_turn.ndjson");
@@ -275,5 +316,62 @@ fn codex_trace_error_turn() {
             status: TurnStatus::Failed,
             ..
         })
+    ));
+}
+
+#[test]
+fn opencode_trace_normal_turn() {
+    let events = replay_opencode_trace("opencode_normal_turn.ndjson");
+    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    assert_eq!(
+        event_types,
+        vec!["turn_started", "text_delta", "turn_completed"]
+    );
+    assert!(matches!(
+        events.last(),
+        Some(SessionEvent::TurnCompleted {
+            status: TurnStatus::Completed,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn opencode_trace_tool_lifecycle() {
+    let events = replay_opencode_trace("opencode_tool_lifecycle.ndjson");
+    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    assert_eq!(
+        event_types,
+        vec![
+            "turn_started",
+            "item_started",
+            "item_completed",
+            "turn_completed"
+        ]
+    );
+    assert!(matches!(
+        events.last(),
+        Some(SessionEvent::TurnCompleted {
+            status: TurnStatus::Completed,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn opencode_trace_error_turn() {
+    let events = replay_opencode_trace("opencode_error_turn.ndjson");
+    let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
+    assert_eq!(event_types, vec!["turn_started", "turn_completed", "error"]);
+    assert!(matches!(
+        events[1],
+        SessionEvent::TurnCompleted {
+            status: TurnStatus::Failed,
+            ..
+        }
+    ));
+    assert!(matches!(
+        events[2],
+        SessionEvent::Error { ref code, .. } if code == "command_failed"
     ));
 }

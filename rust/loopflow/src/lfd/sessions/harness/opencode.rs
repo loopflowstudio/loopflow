@@ -463,9 +463,6 @@ async fn approve_permission(
 fn parse_session_id(value: &Value) -> Option<String> {
     value
         .get("id")
-        .or_else(|| value.get("sessionID"))
-        .or_else(|| value.get("sessionId"))
-        .or_else(|| value.get("session").and_then(|session| session.get("id")))
         .and_then(Value::as_str)
         .map(ToString::to_string)
 }
@@ -580,14 +577,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_session_id_supports_top_level_and_nested_shapes() {
+    fn parse_session_id_requires_canonical_top_level_id() {
         assert_eq!(
             parse_session_id(&json!({"id": "session_1"})),
             Some("session_1".to_string())
         );
         assert_eq!(
             parse_session_id(&json!({"session": {"id": "session_2"}})),
-            Some("session_2".to_string())
+            None
         );
+        assert_eq!(parse_session_id(&json!({"sessionID": "session_3"})), None);
     }
 }

@@ -19,6 +19,7 @@ pub use chord::Chord;
 pub use event::Event;
 pub use stimulus::{
     ActivationLog, ActivationOutcome, ActivationSource, PendingActivation, Signal, Stimulus,
+    CI_FIX_FLOW,
 };
 pub use summary::Summary;
 pub use wave::{

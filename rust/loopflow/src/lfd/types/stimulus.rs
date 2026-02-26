@@ -5,8 +5,12 @@ use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 
+/// Flow name used for CI failure remediation runs.
+pub const CI_FIX_FLOW: &str = "ci-fix";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Signal {
     #[default]
     Unspecified = 0,

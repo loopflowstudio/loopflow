@@ -33,7 +33,7 @@ use crate::lfd::triggers::{
 };
 use crate::lfd::types::{
     ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Stimulus, Wave, WaveRun,
-    WaveRunStatus, WaveStatus,
+    WaveRunStatus, WaveStatus, CI_FIX_FLOW,
 };
 
 use super::docker::DockerExecutor;
@@ -374,7 +374,7 @@ impl WaveExecutor {
                         .unwrap_or(false);
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
-                    let should_manage_pr = run.snapshot.flow != "ci-fix";
+                    let should_manage_pr = run.snapshot.flow != CI_FIX_FLOW;
                     if should_manage_pr {
                         let worktree = run.worktree.clone();
                         let wave_name = wave.name().clone();

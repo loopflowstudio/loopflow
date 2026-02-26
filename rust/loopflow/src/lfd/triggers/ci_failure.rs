@@ -5,7 +5,7 @@ use super::activation::{enqueue_pending_activation, ActivationEnvelope, EnqueueO
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{ActivationSource, Event, Signal, Stimulus};
+use crate::lfd::types::{ActivationSource, Event, Signal, Stimulus, CI_FIX_FLOW};
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -125,7 +125,7 @@ async fn resolve_ci_failure_stimulus(
         wave_id: wave_id.clone(),
         source_wave_id: None,
         signal: Signal::CiFailure,
-        flow: Some("ci-fix".to_string()),
+        flow: Some(CI_FIX_FLOW.to_string()),
         cron: None,
         last_main_sha: None,
         last_triggered_at: Some(OffsetDateTime::now_utc().unix_timestamp()),
@@ -176,7 +176,7 @@ mod tests {
             wave_id: wave.id.clone(),
             source_wave_id: None,
             signal: Signal::CiFailure,
-            flow: Some("ci-fix".to_string()),
+            flow: Some(CI_FIX_FLOW.to_string()),
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,

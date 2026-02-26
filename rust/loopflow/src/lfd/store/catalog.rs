@@ -226,6 +226,7 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         sqlite_override: None,
         postgres_override: None,
     },
+    // NOTE: 'ci-fix' literal must match types::CI_FIX_FLOW constant.
     QueryDef {
         template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             WHERE wave_id = {p1} AND snapshot_flow <> 'ci-fix'\n             ORDER BY stack_position ASC, started_at ASC, id ASC",
         sqlite_override: None,

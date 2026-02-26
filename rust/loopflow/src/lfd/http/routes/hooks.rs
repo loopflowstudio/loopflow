@@ -20,7 +20,9 @@ use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
 use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
-use crate::lfd::types::{ActivationSource, Event, Signal, Stimulus, Wave, WaveRun, WaveStatus};
+use crate::lfd::types::{
+    ActivationSource, Event, Signal, Stimulus, Wave, WaveRun, WaveStatus, CI_FIX_FLOW,
+};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -583,7 +585,7 @@ async fn find_wave_ci_target(
 }
 
 fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<u32>) -> bool {
-    if run.snapshot.flow == "ci-fix" {
+    if run.snapshot.flow == CI_FIX_FLOW {
         return false;
     }
 

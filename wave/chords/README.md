@@ -55,24 +55,28 @@ The pivot: flatten `Wave` to a single struct, drop `wave_type`/`parent_id`/`posi
 
 ### Phase 02 retrospective
 
-Phase 02 shipped end-to-end chord CRUD and membership management:
+Phase 02 shipped end-to-end chord CRUD, membership management, and membership read APIs:
 
 - Rust `Chord` type plus `Store` support via dedicated `ChordStore` capability
 - SQLite + Postgres implementations for chord CRUD and membership operations
-- HTTP API routes for chord CRUD + add/remove member mutations
-- Python `Chord` model and client/API wrappers for chord operations
-- Route/store/client tests covering happy paths and not-found/conflict behavior
+- HTTP API routes for chord CRUD, add/remove member mutations, and membership listing (`GET /v0/chords/:id/members`, `GET /v0/waves/:id/chords`)
+- Unified `parse_lfd_id()` helper for consistent ID validation across routes
+- Python `Chord` model and client/API wrappers for chord operations including `list_chord_members()` and `list_wave_chords()`
+- Route/store/client tests covering happy paths, not-found/conflict behavior, and membership read paths
 
 Key decisions now locked:
 
 - Chords stay grouping metadata only (no execution semantics)
 - Membership mutations are idempotent for safe retries
 - Default chord auto-enrollment is deferred; grouping remains explicit/opt-in
+- Membership reads return full `WaveDto` (via `build_wave_dtos` with `include_active_run=false`)
 
 Carry-forward follow-ups:
 
 - Add dedicated Postgres integration coverage for chord membership paths
 - Consider replacing membership pre-check reads with single-statement, constraint-driven mutations if profiling shows pressure
+- Consider lightweight member payload for large chords (full WaveDto enrichment can be heavy)
+- Add pagination/filtering for membership list endpoints
 
 ## Data Model
 

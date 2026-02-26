@@ -28,23 +28,31 @@ Shipped on this branch.
 | DELETE | `/v0/chords/:id` | Delete chord, `204` |
 | POST | `/v0/chords/:id/members` | Add member, `204`, idempotent |
 | DELETE | `/v0/chords/:id/members/:wave_id` | Remove member, `204`, idempotent |
+| GET | `/v0/chords/:id/members` | List chord members (returns `WaveDto[]`) |
+| GET | `/v0/waves/:wave_id/chords` | List chords a wave belongs to |
 
-Unknown chord/wave operations return `404`.
+Unknown chord/wave operations return `404`. Unified `parse_lfd_id()` helper handles ID validation across all chord and session routes.
 
 ### Python client/API
 
 - Added `Chord` model in `python/loopflow/models.py`
-- Added client methods for chord CRUD + membership mutation
+- Added client methods for chord CRUD + membership mutation + membership reads
+- Added `list_chord_members()` and `list_wave_chords()` to client and top-level API
 - Added top-level wrappers in `python/loopflow/api.py`
+
+### Docs
+
+- README and `docs/lfd.md` updated with membership listing examples
 
 ### Validation
 
-- `cargo fmt`
+- `cargo fmt --all`
 - `cargo clippy --all-targets -- -D warnings`
-- `cargo test -p loopflow`
-- `cargo test -p loopflow store::tests::sqlite_store_basic_suite`
-- `cargo test -p loopflow chord`
+- `cargo test --all`
 - `uv run pytest python/tests/`
+- `swift test --package-path swift`
+- `tests/e2e/test_smoke.sh`
+- `uv run pytest tests/e2e/test_api_smoke.py -v`
 
 ## Decisions locked in
 
@@ -57,3 +65,5 @@ Unknown chord/wave operations return `404`.
 - Add dedicated Postgres integration tests for chord membership paths
 - Revisit membership mutation pre-check reads if profiling shows DB pressure
 - Keep duplicate-name conflict mapping aligned with backend constraint naming
+- Consider lightweight member payload option (wave ID + name only) for large chords where full WaveDto enrichment is expensive
+- Add pagination/filtering for chord member and wave-chord list endpoints

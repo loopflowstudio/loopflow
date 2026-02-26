@@ -10,6 +10,7 @@ struct WaveSessionView: View {
     let managesLifecycle: Bool
 
     @State private var composerText = ""
+    @State private var voiceService = VoiceInputService()
     @State private var expandedItemIds: Set<UUID> = []
     @State private var expandedRunIds: Set<UUID> = []
     @State private var isNearBottom = true
@@ -85,29 +86,51 @@ struct WaveSessionView: View {
                 .padding(.horizontal, Spacing.lg)
             }
 
-            HStack(alignment: .bottom, spacing: Spacing.sm) {
-                TextField("Message", text: $composerText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...6)
-                    .focused($focusedField, equals: .composer)
-                    .macOSOnExitCommand {
-                        focusedField = .transcript
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(alignment: .bottom, spacing: Spacing.sm) {
+                    VoiceInputButton(voiceService: voiceService) { transcript in
+                        insertTranscriptIntoComposer(transcript)
                     }
 
-                Button("End") {
-                    Task {
-                        await state.endSession()
-                    }
-                }
-                .buttonStyle(DarkButtonStyle())
-                .disabled(!state.canEndSession)
+                    TextField("Message", text: $composerText, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...6)
+                        .focused($focusedField, equals: .composer)
+                        .macOSOnExitCommand {
+                            focusedField = .transcript
+                        }
 
-                Button("Send") {
-                    sendMessage()
+                    Button("End") {
+                        Task {
+                            await state.endSession()
+                        }
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(!state.canEndSession)
+
+                    Button("Send") {
+                        sendMessage()
+                    }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(!canSendMessage || !state.canSend)
                 }
-                .keyboardShortcut(.return, modifiers: .command)
-                .buttonStyle(DarkButtonStyle())
-                .disabled(!canSendMessage || !state.canSend)
+
+                if voiceService.permissionStatus == .denied {
+                    VoicePermissionNotice()
+                } else if voiceService.state == .recording, !voiceService.partialTranscript.isEmpty {
+                    Text(voiceService.partialTranscript)
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(2)
+                        .accessibilityLabel("Partial transcript")
+                } else if voiceService.state == .transcribing,
+                          let statusText = voiceService.modelStatusText {
+                    VoiceStatusRow(
+                        statusText: statusText,
+                        progress: voiceService.modelDownloadProgress
+                    )
+                }
             }
             .padding(.horizontal, Spacing.lg)
             .padding(.bottom, Spacing.lg)
@@ -132,6 +155,7 @@ struct WaveSessionView: View {
             state.configureClientContext(compact: value == .compact)
         }
         .onDisappear {
+            voiceService.cancel()
             guard managesLifecycle else { return }
             state.onDisappear()
         }
@@ -248,6 +272,69 @@ struct WaveSessionView: View {
         replyQueue.clear()
         if collapseTray {
             isReplyTrayExpanded = false
+        }
+    }
+
+    private func insertTranscriptIntoComposer(_ rawTranscript: String) {
+        let transcript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcript.isEmpty else { return }
+
+        if composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            composerText = transcript
+        } else {
+            let needsSpacer = composerText.last?.isWhitespace == false
+            composerText += needsSpacer ? " \(transcript)" : transcript
+        }
+
+        focusedField = .composer
+    }
+}
+
+private struct VoiceStatusRow: View {
+    @Environment(\.palette) private var palette
+
+    let statusText: String
+    let progress: Double?
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            if let progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(width: 120)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Text(statusText)
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct VoicePermissionNotice: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "mic.slash")
+                .font(Typography.caption())
+                .foregroundStyle(Color.statusError)
+            Text("Microphone access needed.")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+
+            Button("Open Settings") {
+                openMicrophoneSettings()
+            }
+            .font(Typography.caption())
+            .buttonStyle(.plain)
+            .foregroundStyle(palette.accent)
+            .minHitTarget()
+            .accessibilityLabel("Open microphone settings")
         }
     }
 }

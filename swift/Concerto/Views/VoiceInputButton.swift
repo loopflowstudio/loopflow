@@ -3,7 +3,6 @@ import LoopflowCore
 
 struct VoiceInputButton: View {
     @Environment(\.palette) private var palette
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Bindable var voiceService: VoiceInputService
@@ -18,7 +17,7 @@ struct VoiceInputButton: View {
         #if os(iOS)
         return HitTarget.touch
         #else
-        horizontalSizeClass == .compact ? HitTarget.touch : HitTarget.minimum
+        HitTarget.minimum
         #endif
     }
 
@@ -85,10 +84,7 @@ struct VoiceInputButton: View {
         .accessibilityLabel("Voice input")
         .accessibilityHint(accessibilityHint)
         .accessibilityAddTraits(.isButton)
-        .onAppear {
-            updatePulseAnimation()
-        }
-        .onChange(of: voiceService.state) { _, _ in
+        .onChange(of: voiceService.state, initial: true) { _, _ in
             updatePulseAnimation()
         }
     }

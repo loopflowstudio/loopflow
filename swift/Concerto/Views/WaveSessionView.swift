@@ -116,21 +116,7 @@ struct WaveSessionView: View {
                     .disabled(!canSendMessage || !state.canSend)
                 }
 
-                if voiceService.permissionStatus == .denied {
-                    VoicePermissionNotice()
-                } else if voiceService.state == .recording, !voiceService.partialTranscript.isEmpty {
-                    Text(voiceService.partialTranscript)
-                        .font(Typography.caption())
-                        .foregroundStyle(palette.textSecondary)
-                        .lineLimit(2)
-                        .accessibilityLabel("Partial transcript")
-                } else if voiceService.state == .transcribing,
-                          let statusText = voiceService.modelStatusText {
-                    VoiceStatusRow(
-                        statusText: statusText,
-                        progress: voiceService.modelDownloadProgress
-                    )
-                }
+                voiceFeedback
             }
             .padding(.horizontal, Spacing.lg)
             .padding(.bottom, Spacing.lg)
@@ -287,6 +273,25 @@ struct WaveSessionView: View {
         }
 
         focusedField = .composer
+    }
+
+    @ViewBuilder
+    private var voiceFeedback: some View {
+        if voiceService.permissionStatus == .denied {
+            VoicePermissionNotice()
+        } else if voiceService.state == .recording, !voiceService.partialTranscript.isEmpty {
+            Text(voiceService.partialTranscript)
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .lineLimit(2)
+                .accessibilityLabel("Partial transcript")
+        } else if voiceService.state == .transcribing,
+                  let statusText = voiceService.modelStatusText {
+            VoiceStatusRow(
+                statusText: statusText,
+                progress: voiceService.modelDownloadProgress
+            )
+        }
     }
 }
 

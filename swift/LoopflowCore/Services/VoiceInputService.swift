@@ -62,7 +62,6 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     private var whisperKit: WhisperKit?
     private var streamTranscriber: AudioStreamTranscriber?
     private var streamTask: Task<Void, Error>?
-    private var latestPartialTranscript = ""
     private var cachedModelFolder: URL?
 
     init(modelDownloadBase: URL = WhisperKitVoiceInputEngine.defaultModelDownloadBase()) {
@@ -93,17 +92,6 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
             throw VoiceInputServiceError.transcriptionUnavailable
         }
 
-        let decodingOptions = DecodingOptions(
-            verbose: false,
-            task: .transcribe,
-            withoutTimestamps: true
-        )
-
-        let stateCallback: @Sendable (AudioStreamTranscriber.State, AudioStreamTranscriber.State) -> Void = { _, newState in
-            let partial = WhisperKitVoiceInputEngine.partialText(from: newState)
-            onPartial(partial)
-        }
-
         let transcriber = AudioStreamTranscriber(
             audioEncoder: whisperKit.audioEncoder,
             featureExtractor: whisperKit.featureExtractor,
@@ -111,10 +99,10 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
             textDecoder: whisperKit.textDecoder,
             tokenizer: tokenizer,
             audioProcessor: whisperKit.audioProcessor,
-            decodingOptions: decodingOptions,
+            decodingOptions: Self.decodingOptions,
             useVAD: false
-        ) { oldState, newState in
-            stateCallback(oldState, newState)
+        ) { _, newState in
+            onPartial(Self.partialText(from: newState))
         }
 
         streamTranscriber = transcriber
@@ -124,34 +112,13 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     }
 
     func stopStreamingAndFinalizeTranscript() async throws -> String {
-        if let streamTranscriber {
-            await streamTranscriber.stopStreamTranscription()
-        }
-
-        if let streamTask {
-            _ = try? await streamTask.value
-        }
-
-        streamTask = nil
-        streamTranscriber = nil
-
+        await stopStreaming(cancelTask: false)
         return try await finalizeTranscript()
     }
 
     func cancelStreaming() async {
-        if let streamTranscriber {
-            await streamTranscriber.stopStreamTranscription()
-        }
-
-        if let streamTask {
-            streamTask.cancel()
-            _ = try? await streamTask.value
-        }
-
-        streamTask = nil
-        streamTranscriber = nil
+        await stopStreaming(cancelTask: true)
         whisperKit?.audioProcessor.stopRecording()
-        latestPartialTranscript = ""
     }
 
     private func resolveModelFolder(onProgress: @escaping @Sendable (Double?) -> Void) async throws -> URL {
@@ -204,28 +171,34 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
 
         let audioSamples = Array(whisperKit.audioProcessor.audioSamples)
         guard !audioSamples.isEmpty else {
-            return latestPartialTranscript.normalizedWhitespace()
+            return ""
         }
 
         let results = try await whisperKit.transcribe(
             audioArray: audioSamples,
-            decodeOptions: DecodingOptions(
-                verbose: false,
-                task: .transcribe,
-                withoutTimestamps: true
-            )
+            decodeOptions: Self.decodingOptions
         )
 
-        let transcript = results
+        return results
             .map(\.text)
             .joined(separator: " ")
             .normalizedWhitespace()
+    }
 
-        if !transcript.isEmpty {
-            latestPartialTranscript = transcript
+    private func stopStreaming(cancelTask: Bool) async {
+        if let streamTranscriber {
+            await streamTranscriber.stopStreamTranscription()
         }
 
-        return latestPartialTranscript.normalizedWhitespace()
+        if let streamTask {
+            if cancelTask {
+                streamTask.cancel()
+            }
+            _ = try? await streamTask.value
+        }
+
+        streamTask = nil
+        streamTranscriber = nil
     }
 
     private static func partialText(from state: AudioStreamTranscriber.State) -> String {
@@ -255,6 +228,14 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
         return requiredPaths.allSatisfy { path in
             FileManager.default.fileExists(atPath: url.appendingPathComponent(path).path)
         }
+    }
+
+    private static var decodingOptions: DecodingOptions {
+        DecodingOptions(
+            verbose: false,
+            task: .transcribe,
+            withoutTimestamps: true
+        )
     }
 
     private static func defaultModelDownloadBase() -> URL {
@@ -337,7 +318,6 @@ public final class VoiceInputService {
 
             modelStatusText = nil
             modelDownloadProgress = nil
-            partialTranscript = ""
 
             try await engine.startStreaming { [weak self] partial in
                 Task { @MainActor [weak self] in
@@ -380,10 +360,14 @@ public final class VoiceInputService {
             return partialTranscript.normalizedWhitespace()
         }
 
-        let transcript = (try? await engine.stopStreamingAndFinalizeTranscript())
-            ?? partialTranscript
+        let transcript = (try? await engine.stopStreamingAndFinalizeTranscript())?
+            .normalizedWhitespace()
 
-        return transcript.normalizedWhitespace()
+        if let transcript, !transcript.isEmpty {
+            return transcript
+        }
+
+        return partialTranscript.normalizedWhitespace()
     }
 
     public func cancel() {

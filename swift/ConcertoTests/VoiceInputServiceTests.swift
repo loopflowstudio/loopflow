@@ -76,6 +76,28 @@ struct VoiceInputServiceTests {
         #expect(service.state == .idle)
         #expect(service.partialTranscript.isEmpty)
     }
+
+    @MainActor
+    @Test("stop falls back to partial transcript when final transcript is empty")
+    func stopFallsBackToPartialTranscript() async {
+        let engine = MockVoiceInputEngine(partials: ["hello world"], finalTranscript: "")
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted),
+            engineFactory: { engine }
+        )
+
+        do {
+            try await service.startRecording()
+        } catch {
+            Issue.record("Expected startRecording to succeed: \(error)")
+            return
+        }
+
+        await waitUntil { service.partialTranscript == "hello world" }
+        let transcript = await service.stopRecording()
+
+        #expect(transcript == "hello world")
+    }
 }
 
 private struct MockVoicePermissionClient: VoiceInputPermissionClient {

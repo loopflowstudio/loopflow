@@ -893,6 +893,27 @@ mod tests {
     }
 
     #[test]
+    fn synthesize_edit_diff_multiline() {
+        let input = json!({
+            "old_string": "fn old() {\n    println!(\"hi\");\n}",
+            "new_string": "fn new() {\n    println!(\"hello\");\n    println!(\"world\");\n}"
+        });
+
+        let diff = synthesize_edit_diff("src/lib.rs", &input).expect("expected diff");
+        let lines: Vec<&str> = diff.lines().collect();
+
+        assert_eq!(lines[0], "--- a/src/lib.rs");
+        assert_eq!(lines[1], "+++ b/src/lib.rs");
+        assert_eq!(lines[2], "-fn old() {");
+        assert_eq!(lines[3], "-    println!(\"hi\");");
+        assert_eq!(lines[4], "-}");
+        assert_eq!(lines[5], "+fn new() {");
+        assert_eq!(lines[6], "+    println!(\"hello\");");
+        assert_eq!(lines[7], "+    println!(\"world\");");
+        assert_eq!(lines[8], "+}");
+    }
+
+    #[test]
     fn edit_without_old_string_no_diff() {
         let item = infer_item(
             "Edit",

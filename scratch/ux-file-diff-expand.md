@@ -6,143 +6,161 @@ Expand file items inline to show colored diff lines. Foundation for all inline d
 
 ## Problem
 
-`FileEdit` has `path`, `kind`, and `diff` fields, but `SessionState.projectCard()` sets `detail: nil` for file items — no expand chevron, no diff content. Users see "src/foo.swift, src/bar.swift" and nothing else. To check what an agent actually changed, they context-switch to GitHub or Cursor.
+The original design assumed `FileEdit.diff` was already populated by agent harnesses. It's not. The Claude harness maps Edit/Write/NotebookEdit tool uses to `FileEdit` items but sets `diff: None` — the tool input has `file_path`, `old_string`, and `new_string`, but nobody synthesizes a diff from them. Codex and OpenCode harnesses do populate `diff` from their native event formats.
 
-This blocks the "check in" workflow that wave 02 is about: "You can check 'what changed?' without leaving Concerto."
+Without diff data flowing from the most common harness (Claude), the view layer has nothing to show.
 
-## Approach
+## What's already done (this branch)
 
-Three changes, one new file:
+The view layer is complete and tested:
 
-### 1. New component: `DiffLinesView` (`swift/Concerto/Views/DiffLinesView.swift`)
+| File | Status | What |
+|------|--------|------|
+| `swift/Concerto/Views/DiffLinesView.swift` | Done | Standalone component: `parseDiffLines()`, colored lines, copy button, accessibility |
+| `swift/LoopflowCore/State/SessionState.swift` | Done | `projectCard()` wires `FileEdit.diff` → `TranscriptItemCard.detail` |
+| `swift/Concerto/Views/WaveSessionView.swift` | Done | Routes `.file` detail through `DiffLinesView` |
+| `swift/ConcertoTests/DiffLinesViewTests.swift` | Done | 8 tests: all line kinds, empty input, multi-file, sequential IDs |
+| `scripts/concerto-dev.py` | Done | Seeds from `wave/` dirs, background seeding, DB cleanup |
 
-A standalone SwiftUI view that takes a unified diff string and renders colored lines.
+All 195 Swift tests pass. The expand chevron will appear as soon as `FileEdit.diff` is non-nil.
 
-**Parsing model (`DiffLine`):**
+## What's left: populate `diff` in the Claude harness
 
-```swift
-struct DiffLine: Identifiable {
-    let id: Int          // line index
-    let text: String
-    let kind: DiffLineKind
-}
+### Approach: synthesize unified diff from Edit tool inputs
 
-enum DiffLineKind {
-    case addition    // line starts with "+" (not "+++")
-    case deletion    // line starts with "-" (not "---")
-    case hunk        // line starts with "@@"
-    case header      // "---" or "+++" file header
-    case context     // everything else
+Claude's Edit tool provides `file_path`, `old_string`, and `new_string`. The Write tool provides `file_path` and `content`. We can synthesize a diff at the mapping layer without subprocess calls.
+
+**For Edit tool uses:**
+
+The input JSON looks like:
+```json
+{
+  "file_path": "src/main.rs",
+  "old_string": "fn old() {\n    ...\n}",
+  "new_string": "fn new() {\n    ...\n}"
 }
 ```
 
-**Parsing:** Pure function `parseDiffLines(_ diff: String) -> [DiffLine]`. Line-by-line prefix matching — no regex, no dependency. Exposed as `internal` for testing.
-
-**Rendering:**
-- `Typography.code(12)` for all lines
-- `Color.statusSuccess` for additions (green, `#2D6A4F`) — matches existing `coloredDiffStatLine` in WaveDetailPanel
-- `Color.statusError` for deletions (orange, `#B45309`) — matches existing convention
-- `palette.textSecondary` for context, hunk headers, and file headers
-- `ScrollView(.horizontal)` with `.fixedSize(horizontal: true, vertical: false)` for wide lines
-- `.textSelection(.enabled)` on the whole block
-- Copy button using `copyToClipboard()` from PlatformHelpers, visible on hover (macOS) or always (compact). Same pattern as `CopyButton` in WaveSessionView but self-contained — DiffLinesView is reusable outside the transcript.
-- `@Environment(\.accessibilityReduceMotion)` respected for any animations
-- `accessibilityLabel("Diff: N additions, M deletions")` on the container
-
-**Why self-contained copy button:** G2 will embed DiffLinesView inside WaveDetailPanel where there's no parent CopyButton. DiffLinesView must work standalone.
-
-### 2. Wire diffs through `projectCard()` (`swift/LoopflowCore/State/SessionState.swift`)
-
-```swift
-case .file(let file):
-    let paths = file.changes.map(\.path).filter { !$0.isEmpty }
-    let diffs = file.changes.compactMap(\.diff).filter { !$0.isEmpty }
-    let combinedDiff = diffs.joined(separator: "\n")
-    return TranscriptItemCard(
-        type: .file,
-        label: paths.isEmpty ? "File change" : paths.joined(separator: ", "),
-        status: file.status,
-        detail: combinedDiff.isEmpty ? nil : combinedDiff
-    )
+Synthesize a unified diff:
+```
+--- a/src/main.rs
++++ b/src/main.rs
+-fn old() {
+-    ...
+-}
++fn new() {
++    ...
++}
 ```
 
-Multiple FileEdits in one FileItem concatenate naturally — unified diff format already contains `--- a/path` / `+++ b/path` headers that visually separate files.
+This is a simplified diff (no line numbers, no context lines, no hunk headers) — but `DiffLinesView` handles all of these gracefully. Missing hunk headers just means no `@@` lines. The coloring still works: `-` lines are orange, `+` lines are green.
 
-When no diffs are available (all `diff` fields nil), `detail` stays nil — no expand button, behaves exactly as today.
+**For Write tool uses:**
 
-### 3. Route file detail through `DiffLinesView` (`swift/Concerto/Views/WaveSessionView.swift`)
+The input has `file_path` and `content` but no before-state. Two options:
+1. Show nothing (diff stays nil) — a new file write isn't meaningfully a "diff"
+2. Show all lines as additions — technically correct but noisy
 
-In `TranscriptItemCardView`, when `card.type == .file` and expanded, render with `DiffLinesView` instead of plain monospace text:
+Recommend option 1: Write creates files, Edit changes them. Only Edit produces meaningful diffs.
 
-```swift
-if isExpanded, let detail = card.detail {
-    if card.type == .file {
-        DiffLinesView(diff: detail)
-            .hoverTracking { hovering in isHoveringDetail = hovering }
-    } else {
-        // existing detail rendering (CopyButton + monospace/caption text)
+**For NotebookEdit:**
+
+Similar to Edit — has `new_source` but the old source isn't in the input. Show nothing.
+
+### Where to change
+
+One file: `rust/loopflow/src/lfd/sessions/harness/claude_mapping.rs`
+
+Modify `file_changes_from_input()` (line 328) to extract `old_string`/`new_string` from Edit inputs and format as a unified diff string:
+
+```rust
+fn file_changes_from_input(tool_name: &str, input: Option<&Value>) -> Vec<FileEdit> {
+    let Some(input) = input else { return Vec::new() };
+    let path = input
+        .get("file_path")
+        .or_else(|| input.get("notebook_path"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if path.is_empty() {
+        return Vec::new();
     }
+
+    let diff = if tool_name == "Edit" {
+        synthesize_edit_diff(path, input)
+    } else {
+        None
+    };
+
+    vec![FileEdit {
+        path: path.to_string(),
+        kind: Some(tool_name.to_lowercase()),
+        diff,
+    }]
+}
+
+fn synthesize_edit_diff(path: &str, input: &Value) -> Option<String> {
+    let old = input.get("old_string").and_then(Value::as_str)?;
+    let new = input.get("new_string").and_then(Value::as_str)?;
+    if old == new { return None; }
+
+    let mut lines = Vec::new();
+    lines.push(format!("--- a/{path}"));
+    lines.push(format!("+++ b/{path}"));
+    for line in old.lines() {
+        lines.push(format!("-{line}"));
+    }
+    for line in new.lines() {
+        lines.push(format!("+{line}"));
+    }
+    Some(lines.join("\n"))
 }
 ```
 
-DiffLinesView handles its own copy button, so the parent's CopyButton is skipped for file items.
+### Tests to add
 
-## Alternatives considered
+In `claude_mapping.rs` tests:
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Structured `changes: [FileEdit]?` on `TranscriptItemCard` | Preserves per-file boundaries without re-parsing | Adds file-specific coupling to a generic card type. Type-specific rendering belongs in the view layer, not the card model. Unified diff format already separates files with headers. |
-| WebView with diff2html | Syntax highlighting, familiar GitHub look | Heavyweight. Violates "no new dependencies." Overkill for colored +/- lines. |
-| Per-file separate transcript cards | Each FileEdit gets its own expandable card | Requires restructuring transcript grouping. Agents send grouped file items — splitting loses context. More disruptive for one feature. |
-| Reuse existing monospace detail path | Zero view changes — just pass diff as detail | No colored lines. Everything renders as flat `palette.textSecondary`. The whole point is green/red coloring. |
+- `synthesize_edit_diff` produces `---`/`+++` headers and `-`/`+` lines
+- Edit tool use populates `FileEdit.diff` with synthesized diff
+- Write tool use leaves `FileEdit.diff` as `None`
+- Empty or equal `old_string`/`new_string` produces `None`
+- Multi-line old/new strings produce correct line-by-line diff
 
-## Key decisions
+### What this doesn't give you
 
-**Concatenate, don't restructure.** Multiple file diffs join as one string rather than adding structured data to TranscriptItemCard. The unified diff format already contains file path headers (`---`/`+++`) that serve as visual separators. This keeps the generic card model clean and avoids coupling.
+- **No context lines.** The synthesized diff shows only deletions and additions — no surrounding unchanged lines. Real `git diff` output includes 3 context lines. For "what changed?", this is fine. For "where in the file?", you'd want line numbers (out of scope for G1).
+- **No hunk headers.** No `@@ -1,5 +1,7 @@` — we don't know line numbers from the tool input. `DiffLinesView` handles this gracefully (no hunk header = no hunk line rendered).
+- **Multiple edits to the same file appear as separate items.** Claude sends each Edit as its own tool use. The view layer already handles this — `projectCard()` concatenates diffs from all `FileEdit` items in a `FileItem`.
 
-**Self-contained DiffLinesView.** Includes its own copy button rather than relying on the parent. G2 will embed this in WaveDetailPanel where there's no parent copy infrastructure. Reusability > deduplication.
+### Alternative: run `git diff` on the lfd side
 
-**statusSuccess/statusError for diff colors.** Follows the existing convention in `WaveDetailPanel.coloredDiffStatLine()` where `+` is green (`statusSuccess`) and `-` is orange (`statusError`). Consistent within the app, even though traditional diffs use pure red. User muscle memory adapts to the app's palette.
+Instead of synthesizing from tool inputs, run `git diff -- <path>` after each file tool use completes. This gives real unified diffs with context, hunk headers, and correct line numbers.
 
-**No truncation.** Show full diff content. "Inline views are for glancing" is about the interaction model (tap to expand, not forced on you), not about hiding content. If a diff is long, the user scrolls. Truncation adds complexity for questionable value — a user who expanded *wants* to see the diff. If this proves unwieldy with real sessions, truncation is a simple follow-up.
+**Pros:** Real diffs, not synthetic. Handles Write and NotebookEdit too (shows full file as additions on create).
+**Cons:** Subprocess on every file tool completion. Needs working directory context. Race condition if multiple edits land between diff calls. More complex.
 
-**Line-by-line prefix matching, not full unified diff parsing.** Checking if a line starts with `+`, `-`, `@@`, `---`, `+++` covers 100% of unified diff output. No regex, no hunk range parsing, no multi-line awareness needed. Simple, fast, correct.
+This is the right long-term approach for G2 (wave-level per-file diffs already need `git diff`). For G1 (session transcript inline), the synthetic approach is sufficient and zero-latency.
 
-## Scope
+## Dev tooling (also on this branch)
 
-- **In scope:**
-  - `DiffLinesView` as a standalone, reusable component
-  - File item expand/collapse in session transcript
-  - Colored diff lines (green additions, orange deletions, muted context)
-  - Copy button on DiffLinesView
-  - Tests for diff line parsing
-  - Accessibility (labels, reduce motion)
+`scripts/concerto-dev.py` changes:
+- `run-debug` seeds waves from `wave/` subdirectories (not worktrees)
+- Waves created idle — no auto-run
+- Background thread waits for bundled lfd, then seeds
+- DB already cleared on each `run-debug`
 
-- **Out of scope:**
-  - Syntax highlighting within diff lines
-  - Line numbers
-  - Inline diff (word-level highlighting within changed lines)
-  - G2 integration (wave diff stat expand) — separate item
-  - Truncation / "show more" for long diffs
-  - FileEdit `kind` badge (create/edit/delete indicator)
-
-## File map
+## File map (remaining work)
 
 | File | Action | What |
 |------|--------|------|
-| `swift/Concerto/Views/DiffLinesView.swift` | Create | DiffLinesView component, DiffLine model, parseDiffLines() |
-| `swift/LoopflowCore/State/SessionState.swift` | Modify | projectCard() passes concatenated diffs as detail |
-| `swift/Concerto/Views/WaveSessionView.swift` | Modify | TranscriptItemCardView routes .file to DiffLinesView |
-| `swift/ConcertoTests/DiffLinesViewTests.swift` | Create | Test parseDiffLines with additions, deletions, hunks, multi-file |
+| `rust/loopflow/src/lfd/sessions/harness/claude_mapping.rs` | Modify | `synthesize_edit_diff()`, populate `FileEdit.diff` for Edit tool uses |
 
 ## Done when
 
-- File items in session transcripts show an expand chevron when diff data exists
-- Tapping the chevron reveals colored diff lines (green `+`, orange `-`, muted context/headers)
-- Copy button on the diff copies raw unified diff text
-- DiffLinesView is importable and usable standalone (ready for G2)
-- `parseDiffLines` has tests covering: additions, deletions, context, hunk headers, file headers, empty input, multi-file diffs
-- `swift test --package-path swift` passes
-- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` passes
+- Everything from the previous "done when" (already passing)
+- Claude Edit tool uses in session transcripts show expand chevron with colored diff
+- Write/NotebookEdit tool uses show no expand chevron (no diff data — expected)
+- `cargo test --all` passes (new tests for `synthesize_edit_diff`)
+- Visible in Concerto: start a design session, agent edits a file, expand the file item to see green/orange diff lines
 
 **Wave goal advanced:** "You can check 'what changed?' without leaving Concerto." (02-inline-glance)

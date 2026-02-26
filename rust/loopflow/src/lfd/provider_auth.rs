@@ -23,12 +23,14 @@ const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 static USER_CODE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\b([A-Z0-9]{4}(?:-[A-Z0-9]{4})+)\b").expect("user code regex"));
+    Lazy::new(|| Regex::new(r"(?i)\b([A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+)\b").expect("user code regex"));
 static EXPIRES_IN_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)expires(?:_in| in)?[^0-9]*(\d{2,6})").expect("expires regex"));
 static GH_LOGIN_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)logged in to\s+\S+\s+as\s+([a-z0-9-]+)").expect("github login regex")
 });
+static ANSI_ESCAPE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").expect("ansi escape regex"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -401,19 +403,9 @@ impl AuthBroker for GhAuthBroker {
                     parse_github_login(&combined).or_else(|| read_github_login(&self.home_dir));
                 Ok(AuthStatus::Active { login })
             }
-            Ok(_) => {
-                if let Some(login) = read_github_login(&self.home_dir) {
-                    Ok(AuthStatus::Active { login: Some(login) })
-                } else {
-                    Ok(AuthStatus::None)
-                }
-            }
+            Ok(_) => Ok(github_status_from_home_dir(&self.home_dir)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(login) = read_github_login(&self.home_dir) {
-                    Ok(AuthStatus::Active { login: Some(login) })
-                } else {
-                    Ok(AuthStatus::None)
-                }
+                Ok(github_status_from_home_dir(&self.home_dir))
             }
             Err(err) => Err(AuthError::CommandIo {
                 provider: Provider::GitHub,
@@ -424,13 +416,23 @@ impl AuthBroker for GhAuthBroker {
 
     async fn disconnect(&self) -> Result<(), AuthError> {
         let mut command = Command::new("gh");
-        command.args(["auth", "logout", "--hostname", "github.com", "--yes"]);
+        command.args(["auth", "logout", "--hostname", "github.com"]);
         match command.output().await {
             Ok(output) if output.status.success() => Ok(()),
-            Ok(output) => Err(AuthError::CommandFailed {
-                provider: Provider::GitHub,
-                message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            }),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let combined_output = format!("{stdout}\n{stderr}");
+                if gh_logout_is_already_disconnected(&combined_output) {
+                    Ok(())
+                } else {
+                    let message = if stderr.is_empty() { stdout } else { stderr };
+                    Err(AuthError::CommandFailed {
+                        provider: Provider::GitHub,
+                        message,
+                    })
+                }
+            }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 Err(AuthError::CommandUnavailable {
                     provider: Provider::GitHub,
@@ -466,7 +468,7 @@ impl AuthBroker for ClaudeAuthBroker {
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
         let mut command = Command::new("claude");
-        command.arg("login");
+        command.args(["auth", "login"]);
         command.env("BROWSER", "echo");
         command.env("CLAUDE_BROWSER", "echo");
 
@@ -650,7 +652,8 @@ async fn start_auth_command(
         }
 
         if let Ok(Some(line)) = tokio::time::timeout(AUTH_URL_POLL_INTERVAL, line_rx.recv()).await {
-            parse_line(&line, &mut builder);
+            let normalized_line = strip_ansi_escape_codes(&line);
+            parse_line(&normalized_line, &mut builder);
             if let Some(response) = build_flow_response(provider, &builder) {
                 let monitor = tokio::spawn(async move {
                     let status = child.wait().await.map_err(|err| AuthError::CommandIo {
@@ -782,6 +785,10 @@ fn extract_url(line: &str) -> Option<String> {
     })
 }
 
+fn strip_ansi_escape_codes(line: &str) -> String {
+    ANSI_ESCAPE_RE.replace_all(line, "").to_string()
+}
+
 fn strip_query(url: &str) -> &str {
     url.split_once('?').map_or(url, |(base, _)| base)
 }
@@ -805,6 +812,18 @@ fn parse_github_login(output: &str) -> Option<String> {
         .captures(output)
         .and_then(|capture| capture.get(1))
         .map(|value| value.as_str().to_string())
+}
+
+fn github_status_from_home_dir(home_dir: &Path) -> AuthStatus {
+    if let Some(login) = read_github_login(home_dir) {
+        AuthStatus::Active { login: Some(login) }
+    } else {
+        AuthStatus::None
+    }
+}
+
+fn gh_logout_is_already_disconnected(output: &str) -> bool {
+    output.to_ascii_lowercase().contains("not logged in")
 }
 
 fn read_github_login(home_dir: &Path) -> Option<String> {
@@ -920,6 +939,38 @@ mod tests {
     }
 
     #[test]
+    fn generic_parser_handles_ansi_wrapped_url_and_variable_user_code() {
+        let mut builder = AuthFlowBuilder::default();
+        let code_line = "Enter this one-time code \u{1b}[90m(expires in 15 minutes)\u{1b}[0m\n\u{1b}[94m1XH6-DG19Y\u{1b}[0m";
+        parse_generic_auth_line(&strip_ansi_escape_codes(code_line), &mut builder);
+        parse_generic_auth_line(
+            &strip_ansi_escape_codes("\u{1b}[94mhttps://auth.openai.com/codex/device\u{1b}[0m"),
+            &mut builder,
+        );
+
+        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        assert_eq!(
+            response.verification_uri,
+            "https://auth.openai.com/codex/device"
+        );
+        assert_eq!(response.user_code, Some("1XH6-DG19Y".to_string()));
+    }
+
+    #[test]
+    fn github_parser_handles_code_and_url_on_separate_lines() {
+        let mut builder = AuthFlowBuilder::default();
+        parse_github_auth_line("! First copy your one-time code: 09FB-AAD5", &mut builder);
+        parse_github_auth_line(
+            "Open this URL to continue in your web browser: https://github.com/login/device",
+            &mut builder,
+        );
+
+        let response = build_flow_response(Provider::GitHub, &builder).expect("response");
+        assert_eq!(response.user_code, Some("09FB-AAD5".to_string()));
+        assert_eq!(response.verification_uri, "https://github.com/login/device");
+    }
+
+    #[test]
     fn read_github_login_parses_hosts_yml() {
         let temp = tempdir().expect("tempdir");
         let hosts = temp.path().join(".config/gh");
@@ -944,6 +995,34 @@ mod tests {
         fs::write(claude.join("credentials.json"), "{}").expect("credentials file");
 
         assert!(has_auth_like_entries(&claude).expect("status"));
+    }
+
+    #[test]
+    fn gh_logout_detects_already_disconnected_message() {
+        assert!(gh_logout_is_already_disconnected(
+            "not logged in to any hosts"
+        ));
+        assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
+    }
+
+    #[tokio::test]
+    async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
+        let temp = tempdir().expect("tempdir");
+        let claude_dir = temp.path().join(".claude");
+        fs::create_dir_all(&claude_dir).expect("claude dir");
+        fs::write(claude_dir.join("settings.json"), "{\"theme\":\"dark\"}").expect("settings");
+        fs::write(claude_dir.join("auth.json"), "{\"token\":\"abc\"}").expect("auth file");
+        fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
+        fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
+
+        let broker = ClaudeAuthBroker {
+            home_dir: temp.path().to_path_buf(),
+        };
+        broker.disconnect().await.expect("disconnect");
+
+        assert!(claude_dir.join("settings.json").exists());
+        assert!(!claude_dir.join("auth.json").exists());
+        assert!(!claude_dir.join("session-cache").exists());
     }
 
     #[tokio::test]

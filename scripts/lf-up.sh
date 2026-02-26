@@ -8,7 +8,6 @@
 # Works outside tmux too (skips layout, just starts daemon).
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOOPFLOW_DIR="$(cd "$CURRENT_DIR/.." && pwd)"
 source "$CURRENT_DIR/helpers.sh"
 
 # ---------------------------------------------------------------------------

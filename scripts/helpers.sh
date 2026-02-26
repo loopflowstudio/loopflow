@@ -271,6 +271,15 @@ loopflow_open_layout() {
 # Command dispatch
 # ---------------------------------------------------------------------------
 
+# Pick a wave and send an lfq command to the active pane.
+# loopflow_pick_wave already checks for lfq in container mode.
+_loopflow_container_wave_cmd() {
+    local cmd="$1"
+    local wave
+    wave="$(loopflow_pick_wave)" || return 1
+    tmux send-keys "lfq $cmd '$wave'" Enter
+}
+
 loopflow_dispatch() {
     local action="$1"
     local mode
@@ -279,13 +288,7 @@ loopflow_dispatch() {
     case "$action" in
         run)
             if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq run '$wave'" Enter
+                _loopflow_container_wave_cmd run
             else
                 if ! loopflow_has_cmd lf; then
                     loopflow_display "lf not found — install loopflow first"
@@ -296,27 +299,14 @@ loopflow_dispatch() {
             ;;
         stop)
             if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq stop '$wave'" Enter
+                _loopflow_container_wave_cmd stop
             else
-                # In lf mode, send C-c to current pane
                 tmux send-keys C-c
             fi
             ;;
         logs)
             if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq logs '$wave'" Enter
+                _loopflow_container_wave_cmd logs
             else
                 loopflow_display "logs: use lf output in terminal"
             fi
@@ -328,35 +318,12 @@ loopflow_dispatch() {
                 loopflow_display "gh CLI not found"
             fi
             ;;
-        next)
+        next|land)
             if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq land '$wave'" Enter
+                _loopflow_container_wave_cmd land
             else
                 if loopflow_has_cmd lf; then
-                    tmux send-keys "lf ops next" Enter
-                else
-                    loopflow_display "lf not found"
-                fi
-            fi
-            ;;
-        land)
-            if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq land '$wave'" Enter
-            else
-                if loopflow_has_cmd lf; then
-                    tmux send-keys "lf ops land" Enter
+                    tmux send-keys "lf ops $action" Enter
                 else
                     loopflow_display "lf not found"
                 fi

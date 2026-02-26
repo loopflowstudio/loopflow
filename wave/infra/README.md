@@ -28,4 +28,68 @@ loopflow is a "smart router" — 91k lines orchestrating coding agents, not reim
 
 ## Reference
 
-- `00-architecture-report.md` — unified architecture + fragility + four-angle analysis
+Deep-review findings shifted priority toward deconcentrating hotspot files before adding more feature surface.
+
+| Pass | Phase doc | Scope | What it unlocks | Status |
+|---|---|---|---|---|
+| 1 | *(shipped)* | Core boundary cleanup (`store` + `docker` + harness commands) | Lower blast radius in hotspot files; deconcentrate docker lifecycle | Done |
+| 2 | *(shipped)* | Contract hardening (prompt stage newtypes + Docker metadata constants + SQL catalog invariants + golden prompts) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Done |
+| 3 | `03-orchestration-expansion.md` | Orchestration expansion (activation ingress + push/listen + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | In progress (Milestone A shipped) |
+| 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |
+
+### Shipped side milestones
+
+- `05-release-general.md` — generalized `lf ops release` for bootstrap-from-zero repos, target-scoped monorepo releases, inline manifest version bumps, and post-tag workflow/release status visibility.
+- `05-supported-harnesses-models.md` — standardized `harness:model` naming and added shared model-override controls across engine, lfd, and Concerto.
+
+### Pass 1 retrospective
+
+Shipped docker lifecycle decomposition (`docker/{image,workspace,recovery,io}`) and store capability accessors. `AgentExecutor` surface unchanged.
+
+What went as planned: docker lifecycle split landed cleanly — modules absorb their own imports and the orchestration surface in `mod.rs` shrank. Store capability accessors (`wave_state()`, `execution()`, `sessions()`, `admin()`) reduced forwarding boilerplate.
+
+What was revised: harness `HarnessCommandBuilder` trait was over-engineered for 4 model types. Simplified back to a match block with an `apply_harness_env` helper — same behavior, less indirection. A trait earns its keep when there are many implementations or when callers need polymorphism; neither applied here.
+
+What was partial: store backend `match` dispatch still exists inside trait impls. Capability accessors didn't eliminate the backend-port adapter surface. This remaining work feeds into Pass 2.
+
+What we learned: docker recovery logic is still high-risk even after decomposition — the problem is metadata convention drift, not file size. Recovery invariant tests (already planned for Pass 2) are higher priority than originally estimated.
+
+### Pass 2 retrospective
+
+Shipped prompt stage newtypes, Docker metadata constants + invariant tests, SQL catalog completeness checks, and golden prompt conformance fixtures.
+
+What went as planned: Docker invariant tests landed cleanly and directly address the metadata convention drift risk identified in Pass 1. SQL catalog checks cover both SQLite and Postgres dialects with placeholder validation. Golden prompt fixtures for implement/review/debug establish regression baselines.
+
+What was revised: prompt pipeline used newtypes (`GatheredContext`, `BudgetedContext`, `RenderedPrompt`) rather than a full structural split of `prompt.rs`. Lower refactor cost, same ordering guarantees. The “prompt pipeline split” in the roadmap was really “prompt pipeline contracts” — the file stays large but the ordering is enforced. Store backend `match` dispatch (flagged as partial work in Pass 1) was deliberately retained and documented as intentional — one greppable dispatch point beats macro indirection for the current number of backends.
+
+What remains: `prompt.rs` concentration risk is documented but not blocking. Docker recovery would benefit from daemon-restart e2e tests beyond the unit invariant tests shipped here. Store dispatch verbosity is a conscious tradeoff, not debt — revisit only if backend count grows.
+
+What we learned: contract hardening via invariant tests (catalog completeness, metadata constants, stage newtypes) is high-ROI relative to structural decomposition. The contracts catch drift at compile/test time without the indirection cost of splitting files further. Pass 3 moved from “unblocked” to active implementation with Milestone A shipped.
+
+### Pass 3 retrospective (Milestone A)
+
+Shipped unified activation ingress and queue policy across watch/cron/loop/manual/listen, plus push hook ingestion and activation observability.
+
+What shipped: `triggers/activation.rs` now owns enqueue/coalesce/drop/dispatch policy; watch and cron pollers use it as a shared ingress; loop/manual/listen activations route through the same path. Added `/hooks/git` and `/v0/hooks/github` push ingestion, activation audit storage, run linkage, websocket activation events, and `GET /v0/waves/{wave_id}/activations`.
+
+What was revised: activation queue semantics are now explicit (stimulus-level dedupe, per-wave queue cap defaults, immutable activation outcome log) instead of ad-hoc trigger-specific behavior.
+
+What remains: Milestone B flow-language enrichment is still open (`when` predicates, multi-step fork branch plans, persisted flow decision snapshots, and replay coverage). See `03-orchestration-expansion.md` for remaining contract.
+
+## Reference report
+
+- `00-architecture-report.md` — unified architecture + fragility + four-angle analysis (canonical)
+
+### Findings rolled into roadmap
+
+- Session harness trait work is already shipped (`lfd/sessions/harness/mod.rs`); remove it from future infra debt lists.
+- Quality directions are now shipped via direction taxonomy restructuring. Role-style directions (`infra-engineer`, `designer`, `product-engineer`) replaced with composable quality-focused groups (`infra/`, `ux/`, `craft/`, `creativity/`, `ceo/`). Gate and review steps updated with quality-language. Architecture report recommendations #2 (quality-tagged frontmatter) and #4 (API-boundary prompts) remain open.
+- `build.rs` codegen pattern is proven for compile-time discovery and validation. BFS expansion with dedup, compile-time directory scanning, `LazyLock<HashMap>` generation — all battle-tested. The same approach applies to Pass 2's SQL catalog validation.
+- Direction work was additive to `flow.rs`/`fork.rs`/`prompt.rs` — hotspot files from Pass 1 (`docker.rs`, `store/mod.rs`) were not disturbed. Confirms Pass 1 sequencing.
+- Stale references were the biggest friction source. Gate caught stale direction names in docs, Swift preview data, and wave configs across three iterations. Pass 1 renames had narrower blast radius than direction renames — `AgentExecutor` trait surface insulated callers from the docker module split.
+- Core risk moved from “too many features” to “too much responsibility in a few files.” Pass 1 addressed the worst hotspots; Pass 2 hardened contracts in the remaining concentrations (`prompt.rs` via stage newtypes, store via catalog invariants). `prompt.rs` concentration remains but is now contractually constrained.
+- Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all four passes.
+- **Pass 1 shipped.** Docker lifecycle decomposition and store capability accessors landed. Harness command trait was tried and simplified back to match dispatch — over-decomposition for 4 model types.
+- **Pass 2 shipped.** Prompt stage newtypes, Docker metadata constants + invariant tests, SQL catalog completeness checks, golden prompt fixtures. Store backend `match` dispatch deliberately retained — documented as intentional single dispatch point, not accidental boilerplate. Known flaky test: `wave_worktree_tests::wave_rename_renames_branch` (unrelated, intermittent).
+- **Pass 3 Milestone A shipped.** Activation ingress is centralized with push/listen/manual coverage, queue/audit observability, and explicit drop/coalesce semantics. Flow-language Milestone B remains.
+- **Model/governance side track shipped.** `05-supported-harnesses-models.md` unified `harness:model` terminology, added optional user model preference + step `default_model`, and wired wave/Concerto model overrides. Carry-forward items: tri-state PATCH semantics, per-step override editing UI, and local macOS UI-test runner stability.

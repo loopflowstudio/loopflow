@@ -6,9 +6,11 @@ Inline the glance, link to the deep dive. Eliminate context-switches to GitHub/C
 
 ## What to build
 
-Four remaining features that make diffs and wave content visible inside Concerto.
+Four features that make diffs and wave content visible inside Concerto. G1 is done — the remaining three build on it.
 
-### ~~File items show diffs (G1)~~ → picked, see `scratch/ux-file-diff-expand.md`
+### ~~File items show diffs (G1)~~ — done
+
+`DiffLinesView` renders colored inline diffs. `synthesize_edit_diff()` in the Claude harness populates `FileEdit.diff` from Edit tool inputs. Write/NotebookEdit leave diff nil (no before-state). Limitations: no context lines, no hunk headers, `replace_all` shows one instance. G2's `git diff` approach addresses these.
 
 ### Wave diff stat per-file expand (G2)
 

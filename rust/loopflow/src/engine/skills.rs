@@ -63,7 +63,8 @@ pub fn inject_skills(repo: &Path, target_dir: &Path) -> Vec<PathBuf> {
         &skills_dir,
         &mut injected,
         false,
-        |stem| stem.to_string(),
+        true,
+        flatten_step_name,
     );
 
     // Inject repo-local .lf/directions/ as direction-<name>/SKILL.md.
@@ -72,6 +73,7 @@ pub fn inject_skills(repo: &Path, target_dir: &Path) -> Vec<PathBuf> {
         &skills_dir,
         &mut injected,
         true,
+        false,
         |stem| format!("direction-{stem}"),
     );
 
@@ -188,6 +190,7 @@ fn inject_md_dir<F>(
     skills_dir: &Path,
     injected: &mut Vec<PathBuf>,
     is_direction: bool,
+    recurse_subdirs: bool,
     name_for_stem: F,
 ) where
     F: Fn(&str) -> String,
@@ -195,24 +198,57 @@ fn inject_md_dir<F>(
     if !src_dir.is_dir() {
         return;
     }
-    let Ok(entries) = fs::read_dir(src_dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let src = entry.path();
-        if src.extension().map(|e| e == "md").unwrap_or(false) {
-            if let Some(stem) = src.file_stem() {
-                if let Ok(content) = fs::read_to_string(&src) {
-                    let skill_name = name_for_stem(stem.to_string_lossy().as_ref());
-                    let projected = project_to_skill_md(&skill_name, &content, is_direction);
-                    if let Some(path) = write_skill_if_absent(skills_dir, &skill_name, &projected) {
-                        debug!(src = %src.display(), dest = %path.display(), "injected repo-local skill");
-                        injected.push(path);
-                    }
-                }
-            }
+    for src in markdown_files(src_dir, recurse_subdirs) {
+        let Some(name) = markdown_name(src_dir, &src) else {
+            continue;
+        };
+        let Ok(content) = fs::read_to_string(&src) else {
+            continue;
+        };
+        let skill_name = name_for_stem(&name);
+        let projected = project_to_skill_md(&skill_name, &content, is_direction);
+        if let Some(path) = write_skill_if_absent(skills_dir, &skill_name, &projected) {
+            debug!(src = %src.display(), dest = %path.display(), "injected repo-local skill");
+            injected.push(path);
         }
     }
+}
+
+fn markdown_files(src_dir: &Path, recurse_subdirs: bool) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(src_dir) else {
+        return Vec::new();
+    };
+
+    let mut markdown_paths = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if recurse_subdirs {
+                markdown_paths.extend(markdown_files(&path, true));
+            }
+            continue;
+        }
+        if path.extension().map(|ext| ext == "md").unwrap_or(false) {
+            markdown_paths.push(path);
+        }
+    }
+    markdown_paths.sort();
+    markdown_paths
+}
+
+fn markdown_name(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let mut components: Vec<String> = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect();
+    if components.is_empty() {
+        return None;
+    }
+
+    let last = components.last_mut()?;
+    *last = last.strip_suffix(".md")?.to_string();
+    Some(components.join("/"))
 }
 
 /// Remove previously injected skill files.
@@ -376,6 +412,29 @@ mod tests {
         assert!(
             injected.iter().any(|p| p.ends_with("my-custom")),
             "repo-local step should be in injected list"
+        );
+    }
+
+    #[test]
+    fn inject_skills_includes_namespaced_repo_local_steps() {
+        let tmp = TempDir::new().unwrap();
+        let namespaced_dir = tmp.path().join(".lf/steps/scan");
+        fs::create_dir_all(&namespaced_dir).unwrap();
+        fs::write(namespaced_dir.join("scan-report.md"), "# Scan report").unwrap();
+
+        let injected = inject_skills(tmp.path(), tmp.path());
+
+        let skills_dir = tmp.path().join(".agents/skills");
+        assert!(
+            skills_dir
+                .join("scan-scan-report")
+                .join(SKILL_FILE_NAME)
+                .exists(),
+            "namespaced repo-local step should be flattened and injected"
+        );
+        assert!(
+            injected.iter().any(|p| p.ends_with("scan-scan-report")),
+            "flattened namespaced step should be in injected list"
         );
     }
 

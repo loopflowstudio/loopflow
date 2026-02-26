@@ -16,12 +16,10 @@ pub(crate) struct OpenCodeReapReport {
 struct OpenCodeServerEntry {
     opencode_pid: u32,
     owner_lfd_pid: u32,
-    created_at: i64,
 }
 
 pub(crate) fn register_opencode_server(opencode_pid: u32) -> Result<()> {
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    register_opencode_server_at_path(&registry_path(), opencode_pid, std::process::id(), now)
+    register_opencode_server_at_path(&registry_path(), opencode_pid, std::process::id())
 }
 
 pub(crate) fn unregister_opencode_server(opencode_pid: u32) -> Result<()> {
@@ -45,14 +43,12 @@ fn register_opencode_server_at_path(
     path: &Path,
     opencode_pid: u32,
     owner_lfd_pid: u32,
-    created_at: i64,
 ) -> Result<()> {
     let mut entries = read_registry_entries(path)?;
     entries.retain(|entry| entry.opencode_pid != opencode_pid);
     entries.push(OpenCodeServerEntry {
         opencode_pid,
         owner_lfd_pid,
-        created_at,
     });
     write_registry_entries(path, &entries)
 }
@@ -204,11 +200,10 @@ mod tests {
         root.join("runtime").join("opencode-servers.json")
     }
 
-    fn entry(opencode_pid: u32, owner_lfd_pid: u32, created_at: i64) -> OpenCodeServerEntry {
+    fn entry(opencode_pid: u32, owner_lfd_pid: u32) -> OpenCodeServerEntry {
         OpenCodeServerEntry {
             opencode_pid,
             owner_lfd_pid,
-            created_at,
         }
     }
 
@@ -217,13 +212,13 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let path = registry_path(tmp.path());
 
-        register_opencode_server_at_path(&path, 111, 222, 333).expect("register pid");
+        register_opencode_server_at_path(&path, 111, 222).expect("register pid");
         let entries = read_registry_entries(&path).expect("read entries");
-        assert_eq!(entries, vec![entry(111, 222, 333)]);
+        assert_eq!(entries, vec![entry(111, 222)]);
 
-        register_opencode_server_at_path(&path, 111, 444, 555).expect("overwrite existing pid");
+        register_opencode_server_at_path(&path, 111, 444).expect("overwrite existing pid");
         let entries = read_registry_entries(&path).expect("read entries");
-        assert_eq!(entries, vec![entry(111, 444, 555)]);
+        assert_eq!(entries, vec![entry(111, 444)]);
 
         unregister_opencode_server_at_path(&path, 111).expect("unregister pid");
         let entries = read_registry_entries(&path).expect("read entries");
@@ -237,10 +232,10 @@ mod tests {
         write_registry_entries(
             &path,
             &[
-                entry(10, 1, 1),
-                entry(11, 2, 1),
-                entry(12, 2, 1),
-                entry(13, 2, 1),
+                entry(10, 1),
+                entry(11, 2),
+                entry(12, 2),
+                entry(13, 2),
             ],
         )
         .expect("write registry");
@@ -269,7 +264,7 @@ mod tests {
         assert_eq!(*killed.lock().expect("lock killed list"), vec![11]);
         assert_eq!(
             read_registry_entries(&path).expect("read entries"),
-            vec![entry(10, 1, 1)]
+            vec![entry(10, 1)]
         );
     }
 
@@ -277,7 +272,7 @@ mod tests {
     fn reap_orphaned_opencode_servers_is_idempotent() {
         let tmp = tempdir().expect("tempdir");
         let path = registry_path(tmp.path());
-        write_registry_entries(&path, &[entry(20, 2, 1)]).expect("write registry");
+        write_registry_entries(&path, &[entry(20, 2)]).expect("write registry");
 
         let first =
             reap_orphaned_opencode_servers_at_path(&path, |_| false, |pid| pid == 20, |_| true);

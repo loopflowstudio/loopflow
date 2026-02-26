@@ -720,15 +720,10 @@ impl WaveExecutor {
         .await?;
         let capabilities = build_agent_capabilities(&worktree);
         let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
-        let (backend, _) = crate::engine::config::parse_model(&model);
 
-        // Inject steps and directions as .claude/commands/ for Claude agents.
-        let injected_skills = if backend == "claude" {
-            let worktree_path = std::path::Path::new(&worktree);
-            crate::engine::skills::inject_skills(worktree_path, worktree_path)
-        } else {
-            Vec::new()
-        };
+        // Inject steps and directions as .agents/skills/ for agent auto-discovery.
+        let worktree_path = std::path::Path::new(&worktree);
+        let injected_skills = crate::engine::skills::inject_skills(worktree_path, worktree_path);
 
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 

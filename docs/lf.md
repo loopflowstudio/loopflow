@@ -22,6 +22,7 @@ lf --list                    # show all available steps
 ```bash
 lf review                    # run .claude/commands/review.md
 lf implement: add auth       # pass arguments after colon
+lf npx:explain-code          # fetch from npx skills and run
 lf sp:brainstorm             # run superpowers brainstorm skill
 lf sr:gog                    # run SkillRegistry skill
 lf : "fix the typo"          # inline prompt
@@ -32,7 +33,7 @@ lf debug -c                  # paste clipboard, fix the bug
 
 Steps are markdown files in these locations (searched in order):
 
-1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`, `sr:gog`)
+1. External skills — `<prefix>:<skill>` format (e.g., `npx:explain-code`, `sr:gog`)
 2. `.lf/steps/<step>.md` — repo steps
 3. `.claude/commands/<step>.md` — Claude Code compatible
 4. Built-in steps — run `lf --list` for the current built-in catalog (e.g., `debug`, `review`, `implement`)
@@ -173,11 +174,12 @@ lf : "fix the bug" --web -m codex    # opens chatgpt.com
 ### External skills
 
 ```bash
+lf npx:explain-code # fetch + run from npx skills ecosystem
 lf sp:brainstorm    # run skill from superpowers
 lf sr:gog           # run SkillRegistry skill
 ```
 
-If `~/.superpowers` exists, it's auto-detected with prefix `sp`. SkillRegistry is opt-in via config. See [Configuration](config.md) for setup.
+`npx:` uses `.agents/skills/` as a cache. If `~/.superpowers` exists, it's auto-detected with prefix `sp`. SkillRegistry is opt-in via config. See [Configuration](config.md) for setup.
 
 ## See Also
 

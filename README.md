@@ -22,6 +22,7 @@ Waves are objects with 4 primary fields.
 ```bash
 lf debug -c    # paste an error, watch it fix
 lf design      # interactive design session
+lf npx:explain-code   # fetch from npx skills ecosystem and run
 ```
 
 Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
@@ -222,6 +223,7 @@ loopflow.remove_chord_member(chord.id, waves[0].id)
 - [OpenCode](https://github.com/anomalyco/opencode) — Open source coding agent
 
 **Skill Libraries**
+- [npx skills](https://github.com/vercel-labs/skills) — install/search skills (`lf npx:<skill>`)
 - [superpowers](https://github.com/obra/superpowers) — prompt library (`lf sp:<skill>`)
 - [SkillRegistry](https://skillregistry.io/) — remote skill directory (`lf sr:<skill>`)
 - [rams](https://rams.ai) — accessibility and visual design review

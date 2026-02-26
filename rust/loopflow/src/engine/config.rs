@@ -271,7 +271,7 @@ pub struct Config {
     #[serde(default)]
     pub budgets: BudgetConfig,
 
-    /// Inject built-in steps and directions as agent-native commands (e.g. .claude/commands/).
+    /// Inject built-in steps and directions as agent skills (e.g. .agents/skills/).
     /// Always on for lfd; opt-in for lf CLI.
     #[serde(default)]
     pub inject_skills: bool,

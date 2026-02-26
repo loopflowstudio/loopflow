@@ -231,9 +231,9 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     seed_rlm_env(&built.config);
 
-    // Inject steps and directions as .claude/commands/ for Claude agents.
+    // Inject steps and directions as .agents/skills/ for agent auto-discovery.
     // Default off for CLI; always on for lfd. Enable with `inject_skills: true` in .lf/config.yaml.
-    let injected_skills = if built.config.inject_skills && built.backend == "claude" {
+    let injected_skills = if built.config.inject_skills {
         crate::engine::skills::inject_skills(&built.repo_root, &built.repo_root)
     } else {
         Vec::new()

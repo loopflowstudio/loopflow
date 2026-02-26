@@ -1,9 +1,12 @@
 use std::env;
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::lf::discovery::{
-    builtin_steps, discover_target, list_all_steps, list_directions, list_user_flows, Target,
-    BUILTIN_CATEGORIES,
+    builtin_steps, discover_step, discover_target, list_all_steps, list_directions,
+    list_user_flows, Target, BUILTIN_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -38,6 +41,32 @@ impl Drop for HomeGuard {
             env::set_var("HOME", prev);
         } else {
             env::remove_var("HOME");
+        }
+    }
+}
+
+struct EnvVarGuard {
+    key: String,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &str, value: impl Into<String>) -> Self {
+        let previous = env::var(key).ok();
+        env::set_var(key, value.into());
+        Self {
+            key: key.to_string(),
+            previous,
+        }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            env::set_var(&self.key, previous);
+        } else {
+            env::remove_var(&self.key);
         }
     }
 }
@@ -146,4 +175,132 @@ fn categorized_listing_includes_known_steps() {
             assert!(builtins.contains(*step));
         }
     }
+}
+
+#[test]
+fn npx_skills_are_listed_from_cache_and_loopflow_skipped() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let skills_dir = repo.path().join(".agents/skills");
+    fs::create_dir_all(skills_dir.join("explain-code")).expect("create explain-code dir");
+    fs::create_dir_all(skills_dir.join("design")).expect("create design dir");
+
+    fs::write(
+        skills_dir.join("explain-code/SKILL.md"),
+        "---\nname: explain-code\ndescription: Explain code.\n---\nExplain code.",
+    )
+    .expect("write cached skill");
+    fs::write(
+        skills_dir.join("design/SKILL.md"),
+        "---\nname: design\ndescription: built-in\nloopflow: true\n---\nInjected",
+    )
+    .expect("write loopflow marker skill");
+
+    let (_user, _global, _builtin, external) = list_all_steps(Some(repo.path()));
+    assert!(external.contains(&("npx:explain-code".to_string(), "npx skills".to_string())));
+    assert!(
+        !external.iter().any(|(name, _)| name == "npx:design"),
+        "loopflow marker skills should be excluded from npx listing"
+    );
+}
+
+#[test]
+fn npx_cache_miss_runs_add_and_loads_skill() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let trace_file = repo.path().join("npx.log");
+    let npx_script = repo.path().join("fake-npx-add.sh");
+
+    let script = format!(
+        r#"#!/bin/sh
+set -e
+echo "$@" >> "{trace}"
+if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "explain-code" ]; then
+  mkdir -p ".agents/skills/explain-code"
+  cat > ".agents/skills/explain-code/SKILL.md" <<'EOF'
+---
+name: explain-code
+description: Explain code
+---
+Loaded from add
+EOF
+  exit 0
+fi
+exit 1
+"#,
+        trace = trace_file.display()
+    );
+    fs::write(&npx_script, script).expect("write fake npx");
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&npx_script).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&npx_script, perms).expect("chmod");
+    }
+
+    let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
+
+    let step = discover_step(repo.path(), "npx:explain-code").expect("load npx skill");
+    assert!(step
+        .content
+        .as_deref()
+        .is_some_and(|content| content.contains("Loaded from add")));
+
+    let trace = fs::read_to_string(&trace_file).expect("read trace file");
+    assert!(trace.contains("skills add explain-code"));
+}
+
+#[test]
+fn npx_find_fallback_runs_when_add_fails() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let trace_file = repo.path().join("npx-find.log");
+    let npx_script = repo.path().join("fake-npx-find.sh");
+
+    let script = format!(
+        r#"#!/bin/sh
+set -e
+echo "$@" >> "{trace}"
+if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "deep-research" ]; then
+  exit 1
+fi
+if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "find" ] && [ "$4" = "deep-research" ]; then
+  echo "vercel-labs/deep-research"
+  exit 0
+fi
+if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "vercel-labs/deep-research" ]; then
+  mkdir -p ".agents/skills/deep-research"
+  cat > ".agents/skills/deep-research/SKILL.md" <<'EOF'
+---
+name: deep-research
+description: Deep research
+---
+Loaded from find fallback
+EOF
+  exit 0
+fi
+exit 1
+"#,
+        trace = trace_file.display()
+    );
+    fs::write(&npx_script, script).expect("write fake npx");
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&npx_script).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&npx_script, perms).expect("chmod");
+    }
+
+    let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
+
+    let step = discover_step(repo.path(), "npx:deep-research").expect("load npx skill");
+    assert!(step
+        .content
+        .as_deref()
+        .is_some_and(|content| content.contains("Loaded from find fallback")));
+
+    let trace = fs::read_to_string(&trace_file).expect("read trace file");
+    assert!(trace.contains("skills add deep-research"));
+    assert!(trace.contains("skills find deep-research"));
+    assert!(trace.contains("skills add vercel-labs/deep-research"));
 }

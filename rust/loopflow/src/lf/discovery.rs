@@ -2,6 +2,10 @@ use crate::engine::{Flow, LoadError, Step};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use serde_yaml_ng::Value;
+use tracing::debug;
 
 // =============================================================================
 // Auto-dispatch: step or flow
@@ -146,9 +150,11 @@ pub enum SkillSourceKind {
     Directory,
     /// Single file skill (e.g., rams)
     SingleFile,
+    /// Agent Skills cache sourced by `npx skills`
+    Npx,
 }
 
-/// Discover external skill sources (config, superpowers, rams).
+/// Discover external skill sources (config, npx cache, superpowers, rams).
 pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
     let mut sources = Vec::new();
     let mut seen_prefixes = HashSet::new();
@@ -176,7 +182,22 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
-    // 2. Auto-detect superpowers
+    // 2. npx skill cache in repo-local .agents/skills
+    if !seen_prefixes.contains("npx") {
+        if let Some(repo_root) = repo {
+            let cache_dir = repo_root.join(".agents/skills");
+            sources.push(SkillSource {
+                name: "npx skills".to_string(),
+                prefix: "npx".to_string(),
+                path: Some(cache_dir.clone()),
+                skills: discover_npx_cache_skills(&cache_dir),
+                kind: SkillSourceKind::Npx,
+            });
+            seen_prefixes.insert("npx".to_string());
+        }
+    }
+
+    // 3. Auto-detect superpowers
     let sp_paths = [
         repo.map(|r| r.join("superpowers")),
         dirs::home_dir().map(|h| h.join(".superpowers")),
@@ -202,6 +223,7 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
         }
     }
 
+    // 4. Auto-detect rams
     // Check for rams at ~/.claude/commands/rams.md
     if !seen_prefixes.contains("rams") {
         if let Some(home) = dirs::home_dir() {
@@ -219,6 +241,34 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
     }
 
     sources
+}
+
+fn discover_npx_cache_skills(cache_dir: &Path) -> Vec<String> {
+    if !cache_dir.exists() {
+        return Vec::new();
+    }
+
+    let mut skills = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(cache_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let skill_file = path.join("SKILL.md");
+            if !skill_file.is_file() || has_loopflow_marker(&skill_file) {
+                continue;
+            }
+
+            if let Some(name) = path.file_name() {
+                skills.push(name.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    skills.sort();
+    skills
 }
 
 fn discover_superpowers_skills(source_path: &Path) -> Vec<String> {
@@ -305,24 +355,239 @@ fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
         if source.prefix != prefix {
             continue;
         }
+
+        if source.kind == SkillSourceKind::Npx {
+            return find_npx_skill(name, skill_name, repo, source.path.as_deref());
+        }
+
         if !source.skills.contains(&skill_name.to_string()) {
             continue;
         }
 
         let prompt_path = find_skill_prompt_path(source, skill_name)?;
-        let content = std::fs::read_to_string(&prompt_path).ok()?;
-
-        return Some(Step {
-            name: name.to_string(),
-            content: Some(content),
-            model: None,
-            directions: Vec::new(),
-            action_style: None,
-            interactive: Some(true),
-        });
+        return load_skill_from_path(name, &prompt_path);
     }
 
     None
+}
+
+fn find_npx_skill(
+    qualified_name: &str,
+    skill_name: &str,
+    repo: Option<&Path>,
+    cache_path: Option<&Path>,
+) -> Option<Step> {
+    let repo_root = repo?;
+    let cache_dir = cache_path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| repo_root.join(".agents/skills"));
+
+    if let Some(path) = find_cached_npx_skill(&cache_dir, skill_name) {
+        return load_skill_from_path(qualified_name, &path);
+    }
+
+    if run_npx_add(skill_name, repo_root) {
+        if let Some(path) = find_cached_npx_skill(&cache_dir, skill_name) {
+            return load_skill_from_path(qualified_name, &path);
+        }
+    }
+
+    let found = run_npx_find(skill_name, repo_root)?;
+    if !run_npx_add(&found, repo_root) {
+        return None;
+    }
+
+    find_cached_npx_skill(&cache_dir, skill_name)
+        .or_else(|| find_cached_npx_skill(&cache_dir, &found))
+        .and_then(|path| load_skill_from_path(qualified_name, &path))
+}
+
+fn find_cached_npx_skill(cache_dir: &Path, skill_name: &str) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    candidates.push(cache_dir.join(skill_name).join("SKILL.md"));
+    candidates.push(
+        cache_dir
+            .join(skill_name.replace('/', "-"))
+            .join("SKILL.md"),
+    );
+    if let Some(last_component) = skill_name.split('/').next_back() {
+        candidates.push(cache_dir.join(last_component).join("SKILL.md"));
+    }
+
+    for candidate in candidates {
+        if candidate.is_file() && !has_loopflow_marker(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    let normalized = normalize_skill_name(skill_name);
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return None;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let skill_file = path.join("SKILL.md");
+        if !skill_file.is_file() || has_loopflow_marker(&skill_file) {
+            continue;
+        }
+
+        let Some(dir_name) = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+        else {
+            continue;
+        };
+        if dir_name == skill_name || normalize_skill_name(&dir_name) == normalized {
+            return Some(skill_file);
+        }
+    }
+
+    None
+}
+
+fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
+    let content = std::fs::read_to_string(prompt_path).ok()?;
+
+    Some(Step {
+        name: name.to_string(),
+        content: Some(content),
+        model: None,
+        directions: Vec::new(),
+        action_style: None,
+        interactive: Some(true),
+    })
+}
+
+fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
+    let output = Command::new(npx_binary())
+        .args(["--yes", "skills", "add", skill_name])
+        .current_dir(repo_root)
+        .output();
+
+    match output {
+        Ok(output) => {
+            if output.status.success() {
+                return true;
+            }
+            debug!(
+                skill = skill_name,
+                code = ?output.status.code(),
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "npx skills add failed"
+            );
+            false
+        }
+        Err(err) => {
+            debug!(skill = skill_name, error = %err, "failed to run npx skills add");
+            false
+        }
+    }
+}
+
+fn run_npx_find(skill_name: &str, repo_root: &Path) -> Option<String> {
+    let output = Command::new(npx_binary())
+        .args(["--yes", "skills", "find", skill_name])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        debug!(
+            skill = skill_name,
+            code = ?output.status.code(),
+            stderr = %String::from_utf8_lossy(&output.stderr),
+            "npx skills find failed"
+        );
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_npx_find_output(&stdout)
+}
+
+fn parse_npx_find_output(stdout: &str) -> Option<String> {
+    for token in stdout.split_whitespace() {
+        let cleaned = token.trim_matches(|c: char| {
+            c.is_ascii_punctuation() && c != '/' && c != '-' && c != '_' && c != '.'
+        });
+        if cleaned.is_empty() {
+            continue;
+        }
+        if let Some(rest) = cleaned.strip_prefix("https://github.com/") {
+            return normalize_repo_hint(rest);
+        }
+        if let Some(rest) = cleaned.strip_prefix("github.com/") {
+            return normalize_repo_hint(rest);
+        }
+        if is_repo_hint(cleaned) {
+            return normalize_repo_hint(cleaned);
+        }
+    }
+    None
+}
+
+fn normalize_repo_hint(value: &str) -> Option<String> {
+    let trimmed = value.trim_end_matches(".git").trim_matches('/');
+    is_repo_hint(trimmed).then(|| trimmed.to_string())
+}
+
+fn is_repo_hint(token: &str) -> bool {
+    let mut parts = token.split('/');
+    let Some(owner) = parts.next() else {
+        return false;
+    };
+    let Some(repo) = parts.next() else {
+        return false;
+    };
+    if parts.next().is_some() {
+        return false;
+    }
+    !owner.is_empty()
+        && !repo.is_empty()
+        && owner.chars().all(is_skill_char)
+        && repo.chars().all(is_skill_char)
+}
+
+fn is_skill_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
+}
+
+fn npx_binary() -> String {
+    std::env::var("LF_NPX_BIN").unwrap_or_else(|_| "npx".to_string())
+}
+
+fn has_loopflow_marker(skill_path: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(skill_path) else {
+        return false;
+    };
+    let Some((frontmatter, _body)) = split_frontmatter(&content) else {
+        return false;
+    };
+    let Ok(value) = serde_yaml_ng::from_str::<Value>(&frontmatter) else {
+        return false;
+    };
+    let Some(map) = value.as_mapping() else {
+        return false;
+    };
+    map.get(Value::String("loopflow".to_string()))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn split_frontmatter(content: &str) -> Option<(String, String)> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let mut parts = content.splitn(3, "---");
+    let _ = parts.next();
+    let frontmatter = parts.next()?;
+    let rest = parts.next()?;
+    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
+    Some((frontmatter.to_string(), body))
 }
 
 /// Find the prompt file for a skill within a source.
@@ -355,6 +620,7 @@ fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<Path
             }
             None
         }
+        SkillSourceKind::Npx => None,
     }
 }
 

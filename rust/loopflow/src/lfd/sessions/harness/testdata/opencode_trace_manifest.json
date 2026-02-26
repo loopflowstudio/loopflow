@@ -1,0 +1,31 @@
+{
+  "provider": "opencode",
+  "captured_at": "2026-02-26T00:00:00Z",
+  "opencode_version": "unknown",
+  "scenarios": [
+    {
+      "name": "normal_turn",
+      "fixture": "opencode_normal_turn.ndjson",
+      "session_id": "sess_opencode_normal",
+      "session_create_response": {
+        "id": "sess_opencode_normal"
+      }
+    },
+    {
+      "name": "tool_lifecycle",
+      "fixture": "opencode_tool_lifecycle.ndjson",
+      "session_id": "sess_opencode_tool",
+      "session_create_response": {
+        "id": "sess_opencode_tool"
+      }
+    },
+    {
+      "name": "error_turn",
+      "fixture": "opencode_error_turn.ndjson",
+      "session_id": "sess_opencode_error",
+      "session_create_response": {
+        "id": "sess_opencode_error"
+      }
+    }
+  ]
+}

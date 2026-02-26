@@ -29,7 +29,13 @@ impl ReaderState {
     fn accepts(&self, properties: &Value) -> bool {
         match session_id(properties) {
             Some(event_session_id) => event_session_id == self.session_id,
-            None => true,
+            None => {
+                tracing::debug!(
+                    properties = ?properties,
+                    "opencode event missing canonical properties.sessionID"
+                );
+                false
+            }
         }
     }
 }
@@ -118,12 +124,9 @@ fn complete_turn(state: &mut ReaderState, status: TurnStatus, mapped: &mut Mappe
 }
 
 fn parse_session_state(properties: &Value) -> SessionState {
-    let value = string_by_keys(properties, &["status", "value"])
-        .or_else(|| {
-            properties
-                .get("session")
-                .and_then(|session| string_by_keys(session, &["status", "value"]))
-        })
+    let value = properties
+        .get("status")
+        .and_then(Value::as_str)
         .unwrap_or_default()
         .to_ascii_lowercase();
 
@@ -174,8 +177,14 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
     };
     let turn_id = turn_id.to_string();
 
-    let tool_id = tool_id(part);
-    let status = tool_status(part);
+    let Some(tool_id) = tool_id(part) else {
+        tracing::debug!(part = ?part, "opencode tool part missing canonical id");
+        return;
+    };
+    let Some(status) = tool_status(part) else {
+        tracing::debug!(part = ?part, "opencode tool part missing canonical state");
+        return;
+    };
     let lifecycle = state.tools.entry(tool_id.clone()).or_default();
 
     if !lifecycle.started {
@@ -200,8 +209,13 @@ fn map_tool_part(part: &Value, state: &mut ReaderState, mapped: &mut MappedEvent
 }
 
 fn map_permission(properties: &Value, mapped: &mut MappedEvent) {
-    if let Some(request_id) = string_by_keys(properties, &["requestID", "requestId", "id"]) {
-        mapped.permission_requests.push(request_id);
+    if let Some(request_id) = properties.get("requestID").and_then(Value::as_str) {
+        mapped.permission_requests.push(request_id.to_string());
+    } else {
+        tracing::debug!(
+            properties = ?properties,
+            "opencode permission event missing canonical requestID"
+        );
     }
 }
 
@@ -223,9 +237,15 @@ fn map_diff(properties: &Value, state: &ReaderState, mapped: &mut MappedEvent) {
 }
 
 fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
-    let code =
-        string_by_keys(properties, &["code"]).unwrap_or_else(|| "opencode_error".to_string());
-    let message = string_by_keys(properties, &["message", "error"])
+    let code = properties
+        .get("code")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "opencode_error".to_string());
+    let message = properties
+        .get("message")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
         .unwrap_or_else(|| "opencode error".to_string());
 
     if state.status == SessionState::Active {
@@ -268,20 +288,26 @@ fn delta_text(part: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn tool_id(part: &Value) -> String {
-    string_by_keys(part, &["id", "toolCallID", "toolUseID"])
-        .unwrap_or_else(|| "tool_unknown".to_string())
+fn tool_id(part: &Value) -> Option<String> {
+    part.get("id")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
-fn tool_status(part: &Value) -> ItemStatus {
-    let raw = string_by_keys(part, &["state", "status"])
-        .unwrap_or_else(|| "running".to_string())
+fn tool_status(part: &Value) -> Option<ItemStatus> {
+    let raw = part
+        .get("state")
+        .and_then(Value::as_str)?
         .to_ascii_lowercase();
     match raw.as_str() {
-        "completed" | "complete" | "done" | "success" => ItemStatus::Completed,
-        "failed" | "error" => ItemStatus::Failed,
-        "declined" | "rejected" => ItemStatus::Declined,
-        _ => ItemStatus::InProgress,
+        "running" => Some(ItemStatus::InProgress),
+        "completed" => Some(ItemStatus::Completed),
+        "failed" => Some(ItemStatus::Failed),
+        "declined" => Some(ItemStatus::Declined),
+        _ => {
+            tracing::debug!(state = %raw, "opencode tool part had unknown canonical state");
+            None
+        }
     }
 }
 
@@ -337,19 +363,13 @@ fn build_tool_item(
 }
 
 fn tool_name(part: &Value) -> String {
-    if let Some(name) = string_by_keys(part, &["name", "toolName", "tool"]) {
-        return name;
-    }
-
-    if let Some(name) = part
-        .get("tool")
-        .and_then(|value| value_by_keys(value, &["name"]))
+    part.get("name")
         .and_then(Value::as_str)
-    {
-        return name.to_string();
-    }
-
-    "tool".to_string()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            tracing::debug!(part = ?part, "opencode tool part missing canonical name");
+            "tool".to_string()
+        })
 }
 
 fn tool_input(part: &Value) -> Option<Value> {
@@ -394,14 +414,7 @@ fn unsigned_field(value: &Value, key: &str) -> Option<u64> {
 }
 
 fn session_id(properties: &Value) -> Option<&str> {
-    value_by_keys(properties, &["sessionID", "sessionId", "session_id"])
-        .and_then(Value::as_str)
-        .or_else(|| {
-            properties
-                .get("session")
-                .and_then(|session| value_by_keys(session, &["id", "sessionID", "sessionId"]))
-                .and_then(Value::as_str)
-        })
+    properties.get("sessionID").and_then(Value::as_str)
 }
 
 #[cfg(test)]
@@ -632,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_nested_session_id_shape() {
+    fn ignores_noncanonical_session_id_shape() {
         let mut state = ReaderState::new("session_1".to_string());
         let mapped = map_event(
             &json!({
@@ -644,9 +657,6 @@ mod tests {
             &mut state,
         );
 
-        assert!(matches!(
-            mapped.events.first(),
-            Some(SessionEvent::TurnStarted { .. })
-        ));
+        assert!(mapped.events.is_empty());
     }
 }

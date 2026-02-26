@@ -1,0 +1,5 @@
+{"id":"sess_opencode_tool"}
+{"type":"session.status","properties":{"sessionID":"sess_opencode_tool","status":"active"}}
+{"type":"message.part.updated","properties":{"sessionID":"sess_opencode_tool","part":{"id":"tool_1","type":"ToolPart","state":"running","name":"Bash","command":["echo","ok"]}}}
+{"type":"message.part.updated","properties":{"sessionID":"sess_opencode_tool","part":{"id":"tool_1","type":"ToolPart","state":"completed","name":"Bash","command":["echo","ok"],"output":"ok"}}}
+{"type":"session.status","properties":{"sessionID":"sess_opencode_tool","status":"idle"}}

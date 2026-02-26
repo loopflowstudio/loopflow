@@ -1,0 +1,3 @@
+{"id":"sess_opencode_error"}
+{"type":"session.status","properties":{"sessionID":"sess_opencode_error","status":"active"}}
+{"type":"session.error","properties":{"sessionID":"sess_opencode_error","code":"command_failed","message":"Bash exited 1"}}

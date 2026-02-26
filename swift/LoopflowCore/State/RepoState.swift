@@ -942,6 +942,17 @@ public final class RepoState {
         repoTarget?.isRemote ?? false
     }
 
+    public func checkConnectionHealth() async {
+        await eventService?.resumeFromBackground()
+        if connectionState == .connected {
+            do {
+                try await waveService.checkConnection()
+            } catch {
+                updateConnectionState(.disconnected(.networkUnavailable))
+            }
+        }
+    }
+
     public var isConnected: Bool {
         connectionState.isConnected
     }

@@ -542,6 +542,7 @@ public final class SessionState {
         case .turnStarted(let turnId):
             currentTurnId = turnId
             turnState = .running
+            clearSuggestedActions()
 
         case .turnCompleted(let turnId, let status):
             guard currentTurnId == nil || currentTurnId == turnId else { return }

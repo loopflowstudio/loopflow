@@ -372,6 +372,13 @@ public actor EventService {
         pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
     }
 
+    public func resumeFromBackground() async {
+        guard !_isConnected else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        await retryNow()
+    }
+
     private func handleNetworkRestored() async {
         guard !_isConnected else { return }
         reconnectTask?.cancel()

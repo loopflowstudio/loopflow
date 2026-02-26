@@ -329,8 +329,8 @@ pub fn worktree_add(
     mode: WorktreeBranch<'_>,
 ) -> Result<(), GitError> {
     let path_str = path.to_string_lossy();
-    let (args, command_str): (Vec<&str>, String) = match mode {
-        WorktreeBranch::New { start_point } => (
+    let args: Vec<&str> = match mode {
+        WorktreeBranch::New { start_point } => {
             vec![
                 "worktree",
                 "add",
@@ -338,10 +338,9 @@ pub fn worktree_add(
                 branch,
                 path_str.as_ref(),
                 start_point,
-            ],
-            format!("git worktree add -b {branch} {path_str} {start_point}"),
-        ),
-        WorktreeBranch::Track { remote } => (
+            ]
+        }
+        WorktreeBranch::Track { remote } => {
             vec![
                 "worktree",
                 "add",
@@ -350,13 +349,11 @@ pub fn worktree_add(
                 branch,
                 path_str.as_ref(),
                 remote,
-            ],
-            format!("git worktree add --track -b {branch} {path_str} {remote}"),
-        ),
-        WorktreeBranch::Existing => (
-            vec!["worktree", "add", path_str.as_ref(), branch],
-            format!("git worktree add {path_str} {branch}"),
-        ),
+            ]
+        }
+        WorktreeBranch::Existing => {
+            vec!["worktree", "add", path_str.as_ref(), branch]
+        }
     };
     let output = run_git(repo, &args)?;
     if !output.status.success() {
@@ -366,7 +363,7 @@ pub fn worktree_add(
             return Ok(());
         }
         return Err(GitError::CommandFailed {
-            command: command_str,
+            command: format!("git {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }

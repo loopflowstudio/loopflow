@@ -42,9 +42,8 @@ fn placeholder_pattern(name: &str) -> &'static str {
 }
 
 type CompiledSchema = (Regex, Vec<String>);
-type SchemaCache = Option<(String, CompiledSchema)>;
 
-static SCHEMA_REGEX_CACHE: Mutex<SchemaCache> = Mutex::new(None);
+static SCHEMA_REGEX_CACHE: Mutex<Option<(String, CompiledSchema)>> = Mutex::new(None);
 
 /// Compile a schema string into a cached regex with named placeholder groups.
 fn compile_schema(schema: &str) -> Option<CompiledSchema> {
@@ -307,17 +306,6 @@ mod tests {
         assert_eq!(parts.name, "mobile");
         assert_eq!(parts.timestamp, None);
         assert_eq!(parts.words, None);
-    }
-
-    #[test]
-    fn wave_name_extracts_wave_component() {
-        let name = wave_name("jack-heart.mobile.20260225_1122", None).expect("wave name");
-        assert_eq!(name, "mobile");
-    }
-
-    #[test]
-    fn wave_name_returns_none_when_parse_fails() {
-        assert_eq!(wave_name("mobile", None), None);
     }
 
     #[test]

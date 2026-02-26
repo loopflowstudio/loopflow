@@ -2,6 +2,31 @@
 
 Make the interactive session feel alive. Pure Concerto UI — no lfd changes.
 
+**Status: shipped** (branch `jack-heart.ux.20260225_2145`)
+
+## What shipped
+
+- Replaced static thinking UI with a phase-aware indicator and reduce-motion-safe animation behavior.
+- Added fenced-code segmentation/rendering for assistant messages with reusable code block and copy affordances.
+- Added reusable copy buttons to code blocks and expanded transcript command/tool details.
+- Switched command/tool detail text to monospace for readability.
+- Tightened action-button hit-testing delays (150ms compact / 100ms regular).
+- Removed assistant accent bar while preserving user/error bars for hierarchy clarity.
+- Added a streaming cursor on the newest assistant message while a turn is running.
+- Collapsed timestamps using turn boundaries + gap-aware labeling.
+- Added a polished empty-session prompt.
+- Added `/` composer-focus routing + Escape focus return for transcript/composer workflow.
+- Added regression coverage for code-block parsing, slash/cmd-k routing, and timestamp label behavior.
+
+## Validation run
+
+- `swift test --package-path swift` passed.
+- `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` passed.
+
+## Follow-up
+
+- Decide whether `/` focus should stay interactive-session-only or also apply in non-interactive Chat states.
+
 ## What to build
 
 Ten targeted improvements to `WaveSessionView` and supporting components.

@@ -2,6 +2,8 @@
 
 Inline the glance, link to the deep dive. Eliminate context-switches to GitHub/Cursor for the "check in" workflow.
 
+**Status: planned (next)**
+
 ## What to build
 
 Five features that make diffs and wave content visible inside Concerto.

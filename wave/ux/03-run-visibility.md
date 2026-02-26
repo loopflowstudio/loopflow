@@ -2,6 +2,8 @@
 
 Improve what you see while the agent is working autonomously. Design sketch — not yet scoped for implementation.
 
+**Status: backlog sketch**
+
 ## Ideas
 
 ### Turn-by-turn file change summary

@@ -6,7 +6,8 @@ on:
       - "v*"
 
 jobs:
-  # Build native binaries (GitHub Releases, shell installer)
+  # --- Stage 1: Build (failable work) ---
+
   build-native:
     strategy:
       matrix:
@@ -36,39 +37,8 @@ jobs:
           name: native-${{ matrix.target }}
           path: lf-*.tar.gz
 
-  # Publish to crates.io (irreversible — gates on GitHub Release)
-  publish-crates:
-    needs: [release]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Publish to crates.io
-        run: cargo publish -p loopflow --allow-dirty
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  # Publish pure Python package to PyPI (irreversible — gates on GitHub Release)
-  publish-pypi:
-    needs: [release]
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v4
-      - name: Build package
-        run: uv build
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
-
-  # Build Concerto DMG and upload to R2
   build-dmg:
+    needs: [build-native]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,9 +80,10 @@ jobs:
           name: dmg
           path: swift/dist/LoopflowConcerto.dmg
 
-  # Create GitHub Release with native binaries
+  # --- Stage 2: Publish (all gated on builds) ---
+
   release:
-    needs: [build-native, build-dmg]
+    needs: [build-dmg]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -225,3 +196,32 @@ jobs:
             dist/native/*.tar.gz
             dist/dmg/*.dmg
             dist/install.sh
+
+  publish-crates:
+    needs: [build-dmg]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish to crates.io
+        run: cargo publish -p loopflow --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-pypi:
+    needs: [build-dmg]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
+      - name: Build package
+        run: uv build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

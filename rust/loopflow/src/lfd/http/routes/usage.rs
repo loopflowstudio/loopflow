@@ -301,7 +301,7 @@ mod tests {
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
-        Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -584,6 +584,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 1,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
         state.store.create_wave(&wave).await.expect("create wave");
         wave
@@ -610,14 +611,13 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: "stack-0".to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         };
         state
             .store

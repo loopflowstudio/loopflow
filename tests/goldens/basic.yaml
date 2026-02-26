@@ -1,7 +1,7 @@
 name: basic
 repo: tests/parity/fixtures/basic
 step: test
-run_mode: auto
+surface: headless
 directions: []
 lfdocs: false
 diff_files: false

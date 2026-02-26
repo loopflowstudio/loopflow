@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::engine::config::load_config_or_default;
 use crate::engine::prompt::{
     default_gather_sources, format_prompt, gather_context, trim_context_with_breakdown,
-    GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
+    GatherContextOpts, PromptFormatMode, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 
@@ -51,7 +51,7 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
         repo_root: repo.to_path_buf(),
         step: Some("lint".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: config.direction.unwrap_or_default(),
         files: Vec::new(),
         sources: default_gather_sources(

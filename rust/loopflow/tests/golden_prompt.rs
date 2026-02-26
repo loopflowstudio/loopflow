@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use loopflow::engine::{
     default_gather_sources, format_prompt, gather_context, trim_context_with_breakdown,
-    GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
+    GatherContextOpts, PromptFormatMode, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use serde::Deserialize;
 
@@ -12,7 +12,7 @@ struct GoldenCase {
     name: String,
     repo: String,
     step: Option<String>,
-    run_mode: Option<String>,
+    surface: Option<Surface>,
     directions: Vec<String>,
     lfdocs: bool,
     diff_files: bool,
@@ -61,7 +61,7 @@ fn golden_prompts_match_python() {
             repo_root: repo.clone(),
             step: case.step.clone(),
             message: None,
-            run_mode: case.run_mode.clone(),
+            surface: case.surface.unwrap_or_default(),
             directions: case.directions.clone(),
             files: Vec::new(),
             sources: default_gather_sources(

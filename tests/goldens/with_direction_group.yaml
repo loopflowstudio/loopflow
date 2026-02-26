@@ -1,7 +1,7 @@
 name: with_direction_group
 repo: tests/parity/fixtures/with_direction_group
 step: test
-run_mode: auto
+surface: headless
 directions:
   - craft
 lfdocs: false

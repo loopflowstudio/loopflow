@@ -4,7 +4,7 @@ use crate::engine::builtins::get_builtin_step;
 use crate::engine::git::{fetch, rebase};
 use crate::engine::prompt::{
     default_gather_sources, format_prompt, gather_context, trim_context_with_breakdown,
-    GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
+    GatherContextOpts, PromptFormatMode, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::{
     launch_agent, load_config_or_default, AgentCapabilities, AgentConfig, ProcessConfig,
@@ -65,7 +65,7 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
         repo_root: repo.to_path_buf(),
         step: None,
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: config.direction.unwrap_or_default(),
         files: Vec::new(),
         sources: default_gather_sources(

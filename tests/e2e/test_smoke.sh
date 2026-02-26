@@ -33,7 +33,7 @@
   cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf-prompt -- \
     --repo "$repo_dir" \
     --step debug \
-    --run-mode auto \
+    --surface headless \
     --lfdocs false \
     --diff-files false \
     --diff false \

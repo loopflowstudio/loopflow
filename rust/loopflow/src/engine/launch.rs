@@ -7,7 +7,8 @@ use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     default_gather_sources, drop_native_instruction_docs, format_context_prompt, format_prompt,
     format_task_prompt, gather_context, trim_context_with_breakdown, ContextBreakdown, Document,
-    DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
+    DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, Surface,
+    DEFAULT_CONTEXT_BUDGET,
 };
 
 /// Optional per-source overrides for context gathering.
@@ -24,7 +25,7 @@ pub struct ContextSourceOverrides {
 pub struct LaunchPromptInput {
     pub repo_root: PathBuf,
     pub step: Option<String>,
-    pub run_mode: Option<String>,
+    pub surface: Surface,
     pub directions: Vec<String>,
     pub area: Option<String>,
     pub wave: Option<String>,
@@ -56,7 +57,7 @@ pub fn prepare_launch_prompt(
     let LaunchPromptInput {
         repo_root,
         step,
-        run_mode,
+        surface,
         directions: requested_directions,
         area,
         wave,
@@ -95,7 +96,7 @@ pub fn prepare_launch_prompt(
         repo_root: repo_root.clone(),
         step,
         message,
-        run_mode,
+        surface,
         directions,
         files: Vec::new(),
         sources: default_gather_sources(lfdocs, diff_files || diff, clipboard),
@@ -193,7 +194,7 @@ Test step body.
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 step: Some("test".to_string()),
-                run_mode: Some("auto".to_string()),
+                surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
         )
@@ -212,7 +213,7 @@ Test step body.
                 repo_root: tmp.path().to_path_buf(),
                 step: Some("test".to_string()),
                 model: Some("claude:sonnet".to_string()),
-                run_mode: Some("auto".to_string()),
+                surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
         )
@@ -233,7 +234,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                run_mode: Some("auto".to_string()),
+                surface: Surface::Headless,
                 directions: vec!["thorough".to_string()],
                 include_config_directions: true,
                 ..LaunchPromptInput::default()

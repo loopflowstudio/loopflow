@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use loopflow::engine::{
     default_gather_sources, format_prompt, gather_context, trim_context_with_breakdown,
-    GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
+    GatherContextOpts, PromptFormatMode, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 
 #[derive(Parser, Debug)]
@@ -19,9 +19,9 @@ struct Args {
     #[arg(long)]
     step: Option<String>,
 
-    /// Run mode (auto/interactive)
-    #[arg(long = "run-mode")]
-    run_mode: Option<String>,
+    /// Prompt surface (headless/cli/concerto_mac/concerto_iphone)
+    #[arg(long)]
+    surface: Option<Surface>,
 
     /// Directions to apply (repeatable)
     #[arg(long = "direction")]
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         repo_root: args.repo,
         step: args.step,
         message: None,
-        run_mode: args.run_mode,
+        surface: args.surface.unwrap_or_default(),
         directions: args.directions,
         files: Vec::new(),
         sources: default_gather_sources(args.lfdocs, args.diff_files || args.diff, args.clipboard),

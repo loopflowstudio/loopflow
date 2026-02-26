@@ -3,7 +3,7 @@ use std::path::Path;
 
 use loopflow::engine::{
     format_prompt, gather_context, trim_context_with_breakdown, DocumentSource, GatherContextOpts,
-    GatheredContext, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
+    GatheredContext, PromptFormatMode, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use tempfile::TempDir;
 
@@ -78,7 +78,7 @@ fn gather_context_with_step() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![],
@@ -102,7 +102,7 @@ fn gather_context_with_inline_prompt() {
         repo_root: repo.to_path_buf(),
         step: None,
         message: Some("Fix the bug in main.rs".to_string()),
-        run_mode: Some("interactive".to_string()),
+        surface: Surface::Cli,
         directions: vec![],
         files: vec![],
         sources: vec![],
@@ -130,7 +130,7 @@ fn gather_context_with_directions() {
         repo_root: repo.to_path_buf(),
         step: Some("review".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec!["concise".to_string(), "security".to_string()],
         files: vec![],
         sources: vec![],
@@ -154,7 +154,7 @@ fn gather_context_expands_builtin_direction_group() {
         repo_root: repo.to_path_buf(),
         step: Some("review".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec!["infra".to_string()],
         files: vec![],
         sources: vec![],
@@ -188,7 +188,7 @@ fn gather_context_expands_user_direction_group() {
         repo_root: repo.to_path_buf(),
         step: Some("review".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec!["mygroup".to_string()],
         files: vec![],
         sources: vec![],
@@ -226,7 +226,7 @@ fn gather_context_includes_readme() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -263,7 +263,7 @@ fn gather_context_includes_scratch_docs() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -300,7 +300,7 @@ fn gather_context_with_wave() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -313,11 +313,11 @@ fn gather_context_with_wave() {
 }
 
 // =============================================================================
-// Run mode
+// Surface
 // =============================================================================
 
 #[test]
-fn gather_context_preserves_run_mode() {
+fn gather_context_preserves_surface() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -328,7 +328,7 @@ fn gather_context_preserves_run_mode() {
         repo_root: repo.to_path_buf(),
         step: Some("debug".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![],
@@ -341,7 +341,7 @@ fn gather_context_preserves_run_mode() {
         repo_root: repo.to_path_buf(),
         step: Some("debug".to_string()),
         message: None,
-        run_mode: Some("interactive".to_string()),
+        surface: Surface::Cli,
         directions: vec![],
         files: vec![],
         sources: vec![],
@@ -350,8 +350,8 @@ fn gather_context_preserves_run_mode() {
     })
     .unwrap();
 
-    assert_eq!(auto.run_mode.as_deref(), Some("auto"));
-    assert_eq!(interactive.run_mode.as_deref(), Some("interactive"));
+    assert_eq!(auto.surface, Surface::Headless);
+    assert_eq!(interactive.surface, Surface::Cli);
 }
 
 // =============================================================================
@@ -371,7 +371,7 @@ fn format_prompt_includes_step_content() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![],
@@ -397,7 +397,7 @@ fn format_prompt_includes_auto_mode_header() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![],
@@ -424,7 +424,7 @@ fn format_prompt_includes_directions() {
         repo_root: repo.to_path_buf(),
         step: Some("review".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec!["concise".to_string()],
         files: vec![],
         sources: vec![],
@@ -456,7 +456,7 @@ fn format_prompt_includes_wave_context() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -523,7 +523,7 @@ fn wave_filtering_includes_only_specified_wave() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -577,7 +577,7 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -622,7 +622,7 @@ fn wave_filtering_handles_nonexistent_wave() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -685,7 +685,7 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
@@ -735,7 +735,7 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![DocumentSource::RepoDoc],
@@ -784,7 +784,7 @@ fn loopflow_doc_always_included() {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
         message: None,
-        run_mode: Some("auto".to_string()),
+        surface: Surface::Headless,
         directions: vec![],
         files: vec![],
         sources: vec![], // Even with lfdocs=false

@@ -23,13 +23,23 @@ Your working scope. Everything here is relevant.
 
 ---
 
-## Run Modes
+## Surfaces
 
-Check the run mode at the top of the prompt.
+Check the surface at the top of the prompt. It determines your interaction
+pattern and output style.
 
-**If auto mode**: Run to completion. Don't pause for questions. Make best-effort assumptions. Write open questions to `scratch/questions.md` and keep moving.
+**cli** (default): Interactive terminal session. Ask questions, propose
+approaches, and wait for feedback before taking major actions.
 
-**If interactive mode**: Ask clarifying questions when needed. The user will guide you.
+**headless**: Autonomous, no user. Proceed without pausing for questions.
+Make best-effort assumptions and append open questions to
+`scratch/questions.md`. Output is logged, not displayed.
+
+**concerto_mac**: Interactive desktop UI. Ask questions and wait for
+feedback. Keep responses scannable—lists and short paragraphs.
+
+**concerto_iphone**: Interactive, small screen. Ask questions and wait
+for feedback. Be concise—bullets, short snippets, minimal back-and-forth.
 
 ---
 
@@ -47,9 +57,9 @@ Don't modify `wave/` unless the step explicitly says to. It persists across PRs.
 
 ## Commits
 
-In auto mode, commit when a step completes. Small, atomic commits. Don't leave the branch broken.
+In headless mode, commit when a step completes. Small, atomic commits. Don't leave the branch broken.
 
-In interactive mode, commit at natural breakpoints when the user signals readiness.
+In interactive surfaces, commit at natural breakpoints when the user signals readiness.
 
 ---
 
@@ -187,6 +197,8 @@ Recursion depth is tracked automatically via `RLM_DEPTH`. Each nested `lf` invoc
 </lf:rlm>
 
 Run mode is auto (headless). Proceed without pausing for questions. If you need clarification, make the best assumption you can and append any open questions to `scratch/questions.md`.
+
+No rendering environment. Output is logged, not displayed. Optimize for structured, parseable output over human readability.
 
 The step.
 

@@ -1,0 +1,1 @@
+- Assumption: `run_mode` remains on lfd agent execution/storage structs (`AgentRun`, DB columns, migrations) because this phase targets prompt assembly/session surface adaptation. If Phase 03 requires DB/API renaming to `surface`, that should be a follow-up migration.

@@ -1674,6 +1674,26 @@ mod tests {
             .expect("create session");
         let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
 
+        // Wait for the Active StatusChanged event to be persisted (set_status
+        // updates the DB status before appending the event, so wait_for_status
+        // can return before the event is written).
+        for _ in 0..50 {
+            let events = manager
+                .list_events(&created.id, None)
+                .await
+                .expect("list events");
+            let has_active_event = events.iter().any(|e| {
+                matches!(
+                    &e.event,
+                    SessionEvent::StatusChanged { status } if *status == SessionStatus::Active
+                )
+            });
+            if has_active_event {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
         // Simulate a new SessionManager on restart (no runtimes, orphaned session in DB).
         let fresh_manager = SessionManager::with_create_harness(store, fake_create_harness);
         let recovered = fresh_manager

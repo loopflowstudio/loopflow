@@ -1,6 +1,9 @@
 #if os(macOS)
 import SwiftUI
 import AppKit
+import LoopflowCore
+
+let platformVoiceButtonSize: CGFloat = HitTarget.comfortable
 
 func copyToClipboard(_ content: String) {
     NSPasteboard.general.clearContents()
@@ -35,6 +38,9 @@ extension View {
 #elseif canImport(UIKit)
 import SwiftUI
 import UIKit
+import LoopflowCore
+
+let platformVoiceButtonSize: CGFloat = HitTarget.touch
 
 func copyToClipboard(_ content: String) {
     UIPasteboard.general.string = content

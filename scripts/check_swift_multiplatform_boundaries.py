@@ -119,7 +119,9 @@ def _check_new_if_boundaries() -> list[str]:
             continue
 
         if file_path.startswith("swift/LoopflowCore/"):
-            violations.append(f"{file_path}: new `#if` in LoopflowCore shared code")
+            # canImport is a capability check, not a platform split — allow it.
+            if not re.match(r"\s*#if\s+canImport\(", line):
+                violations.append(f"{file_path}: new `#if` in LoopflowCore shared code")
             continue
         if file_path in APP_WIRING_FILES:
             continue

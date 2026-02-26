@@ -13,13 +13,7 @@ struct VoiceInputButton: View {
     @State private var isHoldRecording = false
     @State private var isPulsing = false
 
-    private var buttonSize: CGFloat {
-        #if os(iOS)
-        return HitTarget.touch
-        #else
-        return HitTarget.comfortable
-        #endif
-    }
+    private var buttonSize: CGFloat { platformVoiceButtonSize }
 
     private var iconName: String {
         switch voiceService.state {

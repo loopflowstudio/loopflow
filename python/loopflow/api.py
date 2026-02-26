@@ -10,6 +10,7 @@ from .models import (
     Chord,
     CommitEntry,
     PullRequest,
+    Repo,
     Session,
     SessionConfig,
     SessionEventEnvelope,
@@ -84,6 +85,18 @@ def update_wave(
 
 def delete_wave(name_or_id: str) -> None:
     _client().delete_wave(name_or_id)
+
+
+def list_repos() -> list[Repo]:
+    return _client().list_repos()
+
+
+def add_repo(path: str) -> Repo:
+    return _client().add_repo(path)
+
+
+def remove_repo(path: str) -> None:
+    _client().remove_repo(path)
 
 
 def create_chord(name: str) -> Chord:
@@ -227,6 +240,7 @@ __all__ = [
     "Chord",
     "CommitEntry",
     "PullRequest",
+    "Repo",
     "Session",
     "SessionConfig",
     "SessionEventEnvelope",
@@ -243,6 +257,9 @@ __all__ = [
     "create_wave",
     "update_wave",
     "delete_wave",
+    "list_repos",
+    "add_repo",
+    "remove_repo",
     "create_chord",
     "list_chords",
     "get_chord",

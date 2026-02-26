@@ -49,7 +49,12 @@ pub fn router(state: HttpState) -> Router {
                 .delete(auth_routes::disconnect_auth_handler),
         )
         .route("/flows", get(flows::list_flows_handler))
-        .route("/repos", get(repos::list_repos_handler))
+        .route(
+            "/repos",
+            get(repos::list_repos_handler)
+                .post(repos::add_repo_handler)
+                .delete(repos::remove_repo_handler),
+        )
         .route(
             "/chords",
             get(chords::list_chords_handler).post(chords::create_chord_handler),

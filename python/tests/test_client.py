@@ -12,6 +12,7 @@ from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_NONE,
     CHORD_MINIMAL,
+    REPO_MINIMAL,
     SESSION_MINIMAL,
     WAVE_MINIMAL,
     WAVE_RUN_MINIMAL,
@@ -258,6 +259,31 @@ class TestClientResponses:
         chord = client.create_chord("ensemble-a")
         assert received["name"] == "ensemble-a"
         assert chord.name == "ensemble-a"
+        client.close()
+
+    def test_repos_mutations_and_list(self):
+        requests = []
+
+        def handler(request):
+            requests.append((request.method, request.url.path, request.content))
+            if request.method == "GET":
+                return httpx.Response(200, json={"object": "list", "data": [REPO_MINIMAL]})
+            if request.method == "POST":
+                return httpx.Response(201, json=REPO_MINIMAL)
+            return httpx.Response(204)
+
+        client = _mock_client(handler)
+        repos = client.list_repos()
+        created = client.add_repo("/tmp/repo")
+        client.remove_repo("/tmp/repo")
+
+        assert len(repos) == 1
+        assert repos[0].registered is True
+        assert created.path == "/tmp/repo"
+        assert requests[0][0:2] == ("GET", "/v0/repos")
+        assert requests[1][0:2] == ("POST", "/v0/repos")
+        assert json.loads(requests[1][2])["path"] == "/tmp/repo"
+        assert requests[2][0:2] == ("DELETE", "/v0/repos")
         client.close()
 
     def test_list_chords_parses_list(self):

@@ -95,6 +95,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "019_activation_target_branch",
         sql: include_str!("migrations/019_activation_target_branch.sql"),
     },
+    Migration {
+        version: "020_repos",
+        sql: include_str!("migrations/020_repos.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

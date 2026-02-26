@@ -43,5 +43,7 @@ public protocol WaveServiceProtocol: Sendable {
     func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult
     func listWorktrees(repo: RepoTarget) async throws -> [WorktreeInfo]
     func listRepos() async throws -> [RemoteRepo]
+    func addRepo(path: String) async throws -> RemoteRepo
+    func removeRepo(path: String) async throws
     func checkConnection() async throws
 }

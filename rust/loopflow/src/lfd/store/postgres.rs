@@ -15,12 +15,13 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_repo_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix,
+    serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
-    LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent,
+    LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
     Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
@@ -294,6 +295,62 @@ impl PostgresStore {
                     updated_at: r.get(5),
                 })
                 .collect())
+        })
+        .await
+    }
+
+    // -- Repos -----------------------------------------------------------------
+
+    pub async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT path, name, added_at FROM repos ORDER BY path ASC",
+                    &[],
+                )
+                .await?;
+            rows.iter().map(map_repo_row).collect()
+        })
+        .await
+    }
+
+    pub async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
+        let path = path.to_string();
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "SELECT path, name, added_at FROM repos WHERE path = $1 LIMIT 1",
+                    &[&path],
+                )
+                .await?;
+            row.as_ref().map(map_repo_row).transpose()
+        })
+        .await
+    }
+
+    pub async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
+        let repo = repo.clone();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "INSERT INTO repos (path, name, added_at)
+                     VALUES ($1, $2, $3)
+                     ON CONFLICT(path) DO UPDATE SET name = EXCLUDED.name, added_at = EXCLUDED.added_at",
+                    &[&repo.path, &repo.name, &repo.added_at.unix_timestamp()],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn delete_repo(&self, path: &str) -> StoreResult<()> {
+        let path = path.to_string();
+        self.with_client(|client| async move {
+            client
+                .execute("DELETE FROM repos WHERE path = $1", &[&path])
+                .await?;
+            Ok(())
         })
         .await
     }

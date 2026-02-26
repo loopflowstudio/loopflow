@@ -85,6 +85,14 @@ class Chord(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class Repo(BaseModel):
+    path: str
+    name: str
+    wave_count: int
+    registered: bool
+    added_at: Optional[datetime] = None
+
+
 class SessionConfig(BaseModel):
     agent: Optional[str] = None
     cwd: Optional[str] = None

@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from conftest import AUTH_PROVIDER_ACTIVE, AUTH_PROVIDER_NONE, WAVE_FULL, WAVE_MINIMAL
+from conftest import (
+    AUTH_PROVIDER_ACTIVE,
+    AUTH_PROVIDER_NONE,
+    REPO_MINIMAL,
+    WAVE_FULL,
+    WAVE_MINIMAL,
+)
 
-from loopflow.cli import _auth_status_table, _wave_table
-from loopflow.models import AuthProviderStatus, Wave
+from loopflow.cli import _auth_status_table, _repo_table, _wave_table
+from loopflow.models import AuthProviderStatus, Repo, Wave
 
 
 def _render_table(wave: Wave) -> str:
@@ -56,3 +62,14 @@ def test_auth_status_table_shows_active_and_none_states() -> None:
     assert "@jackdanger" in rendered
     assert "Codex" in rendered
     assert "not connected" in rendered
+
+
+def test_repo_table_shows_registration_columns() -> None:
+    repo = Repo.model_validate(REPO_MINIMAL)
+    console = Console(record=True, width=220)
+    console.print(_repo_table([repo]))
+    rendered = console.export_text()
+
+    assert "registered" in rendered
+    assert "added_at" in rendered
+    assert "yes" in rendered

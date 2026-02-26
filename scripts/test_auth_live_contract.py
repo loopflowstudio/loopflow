@@ -592,14 +592,15 @@ async def recv_json(socket: Any, timeout_seconds: float) -> dict[str, Any]:
 
 
 def websocket_connect_kwargs(token: str, timeout_seconds: float) -> dict[str, Any]:
-    connect = websockets.connect
-    signature = inspect.signature(connect)
-    header_field = "additional_headers" if "additional_headers" in signature.parameters else "extra_headers"
-    return {
-        header_field: {"Authorization": f"Bearer {token}"},
-        "open_timeout": timeout_seconds,
-        "close_timeout": timeout_seconds,
-    }
+    headers = {"Authorization": f"Bearer {token}"}
+    timeouts = {"open_timeout": timeout_seconds, "close_timeout": timeout_seconds}
+    # websockets >=14 uses `additional_headers`; older versions use `extra_headers`.
+    for header_field in ("additional_headers", "extra_headers"):
+        params = inspect.signature(websockets.connect).parameters
+        if header_field in params:
+            return {header_field: headers, **timeouts}
+    # Fall back to the current API name if introspection fails entirely.
+    return {"additional_headers": headers, **timeouts}
 
 
 def ws_url_for(base_url: str, path: str) -> str:

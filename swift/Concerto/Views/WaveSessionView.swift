@@ -1,10 +1,5 @@
 import SwiftUI
 import LoopflowCore
-#if os(macOS)
-import AppKit
-#elseif canImport(UIKit)
-import UIKit
-#endif
 
 struct WaveSessionView: View {
     @Environment(\.palette) private var palette
@@ -61,10 +56,8 @@ struct WaveSessionView: View {
                         SessionEmptyStateView()
                     }
                 }
-                #if os(macOS)
-                .focusable()
+                .macOSFocusable()
                 .focused($focusedField, equals: .transcript)
-                #endif
                 .onChange(of: state.transcript.count) { _, _ in
                     guard isNearBottom, let last = state.transcript.last else { return }
                     withAnimation {
@@ -97,11 +90,9 @@ struct WaveSessionView: View {
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...6)
                     .focused($focusedField, equals: .composer)
-                    #if os(macOS)
-                    .onExitCommand {
+                    .macOSOnExitCommand {
                         focusedField = .transcript
                     }
-                    #endif
 
                 Button("End") {
                     Task {
@@ -126,19 +117,15 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: horizontalSizeClass == .compact)
             await state.onAppear()
-            #if os(macOS)
             if focusedField == nil {
                 focusedField = .transcript
             }
-            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusSessionComposer)) { notification in
-            #if os(macOS)
             if let waveId = notification.userInfo?["waveId"] as? String, waveId != state.waveId {
                 return
             }
             focusedField = .composer
-            #endif
         }
         .onChange(of: horizontalSizeClass) { _, value in
             guard managesLifecycle else { return }
@@ -732,25 +719,6 @@ private func toggleMembership(_ id: UUID, in set: inout Set<UUID>) {
     }
 }
 
-private func copyToClipboard(_ content: String) {
-    #if os(macOS)
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(content, forType: .string)
-    #elseif canImport(UIKit)
-    UIPasteboard.general.string = content
-    #endif
-}
-
-private extension View {
-    @ViewBuilder
-    func hoverTracking(_ onChange: @escaping (Bool) -> Void) -> some View {
-        #if os(macOS)
-        self.onHover(perform: onChange)
-        #else
-        self
-        #endif
-    }
-}
 
 extension SessionItemType {
     var isToolLike: Bool {

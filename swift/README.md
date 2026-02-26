@@ -181,6 +181,16 @@ Connection settings support two modes:
 - **Bundled** (default): Concerto starts one bundled `lfd` process automatically.
 - **Remote**: Concerto connects to an externally managed `lfd`.
 
+On first launch (before any saved connection settings), Concerto also checks `~/.lf/concerto.yaml`:
+
+```yaml
+connection:
+  host: lfd-dev.loopflow.studio
+  port: 443
+```
+
+If present, it seeds remote mode from that host/port (TLS + static-token auth) and reads the token from Keychain via the existing `<host>:<port>` account mapping.
+
 In bundled mode, Settings also supports optional CLI symlink install for `lf` + `lfd` (for `~/.local/bin` or `/usr/local/bin`).
 
 ## UI Tests

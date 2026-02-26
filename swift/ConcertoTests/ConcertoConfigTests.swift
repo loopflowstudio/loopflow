@@ -58,6 +58,22 @@ struct ConcertoConfigTests {
         #expect(config.connection == nil)
     }
 
+    @Test("ignores nested connection key")
+    func ignoresNestedConnectionKey() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        profile:
+          connection:
+            host: lfd-dev.loopflow.studio
+            port: 443
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadConcertoConfig(configURL: configURL))
+        #expect(config.connection == nil)
+    }
+
     private func makeConfigURL() -> (URL, () -> Void) {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

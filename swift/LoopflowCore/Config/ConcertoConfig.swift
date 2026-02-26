@@ -17,7 +17,7 @@ struct RemoteConnectionConfig: Codable {
         )
     }
 
-    var isLocalhost: Bool {
+    var isLoopbackHost: Bool {
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
     }
@@ -25,7 +25,7 @@ struct RemoteConnectionConfig: Codable {
 
 extension ConcertoConfig {
     var seededConnection: ServerConnection? {
-        guard let connection, !connection.isLocalhost else {
+        guard let connection, !connection.isLoopbackHost else {
             return nil
         }
         return connection.toServerConnection()
@@ -54,8 +54,14 @@ private extension ConcertoConfig {
 private func parseConcertoConfig(_ raw: String) -> ConcertoConfig {
     let lines = raw.components(separatedBy: .newlines)
     guard let connectionIndex = lines.firstIndex(where: {
+        indentation(of: $0) == 0 &&
         $0.trimmingCharacters(in: .whitespaces) == "connection:"
     }) else {
+        return ConcertoConfig(connection: nil)
+    }
+
+    let connectionStart = lines.index(after: connectionIndex)
+    guard connectionStart < lines.endIndex else {
         return ConcertoConfig(connection: nil)
     }
 
@@ -63,7 +69,7 @@ private func parseConcertoConfig(_ raw: String) -> ConcertoConfig {
     var host: String?
     var port: Int?
 
-    for line in lines[(connectionIndex + 1)...] {
+    for line in lines[connectionStart...] {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty || trimmed.hasPrefix("#") {
             continue

@@ -108,15 +108,16 @@ struct ConnectionStoreTests {
         #expect(reloaded.activeConnection.host == "lfd-dev.loopflow.studio")
     }
 
-    @Test("localhost concerto config is ignored")
-    func ignoresLocalhostConcertoConfig() {
-        let defaults = makeDefaults()
-        let config = remoteConfig(host: "localhost")
+    @Test("loopback concerto config is ignored")
+    func ignoresLoopbackConcertoConfig() {
+        for host in ["localhost", "127.0.0.1", "::1", " LOCALHOST "] {
+            let defaults = makeDefaults()
+            let config = remoteConfig(host: host)
+            let store = makeStore(defaults: defaults, config: config)
 
-        let store = makeStore(defaults: defaults, config: config)
-
-        #expect(store.mode == .bundled)
-        #expect(store.activeConnection == .local)
+            #expect(store.mode == .bundled)
+            #expect(store.activeConnection == .local)
+        }
     }
 
     private func makeDefaults() -> UserDefaults {

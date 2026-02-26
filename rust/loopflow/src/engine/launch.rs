@@ -447,7 +447,8 @@ Test step body.
                 step: Some("npx:skill-creator".to_string()),
                 resolved_step: Some(Step {
                     name: "npx:skill-creator".to_string(),
-                    model: Some("codex:o3".to_string()),
+                    agent: Some("codex:o3".to_string()),
+                    default_agent: None,
                     directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
                     interactive: Some(true),
@@ -467,7 +468,7 @@ Test step body.
                 .map(|step| step.name.as_str()),
             Some("npx:skill-creator")
         );
-        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
         assert!(prepared
             .components
             .directions

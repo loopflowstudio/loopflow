@@ -51,7 +51,6 @@ final class BundledDaemonManager {
 
     private var process: Process?
     private var containerName: String?
-    private var credentialServer: CredentialSocketServer?
     private var terminationObserver: NSObjectProtocol?
 
     private(set) var port: Int?
@@ -149,7 +148,6 @@ final class BundledDaemonManager {
             _ = try? runProcess(docker, arguments: ["rm", "-f", name])
         }
 
-        credentialServer?.stop()
         resetRuntime()
     }
 
@@ -191,15 +189,12 @@ final class BundledDaemonManager {
             throw ManagerError.dockerNotAvailable
         }
 
-        let credentialServer = CredentialSocketServer()
-        try credentialServer.start()
         let containerName = "concerto-lfd-\(String(token.prefix(8)))"
         let docker = try dockerExecutableURL()
         let image = lfdContainerImage()
 
         let pullResult = try runProcess(docker, arguments: ["pull", image])
         guard pullResult.terminationStatus == 0 else {
-            credentialServer.stop()
             throw ManagerError.containerStartFailed(pullResult.terminationStatus)
         }
 
@@ -207,16 +202,13 @@ final class BundledDaemonManager {
             containerName: containerName,
             port: port,
             token: token,
-            credentialSocketPath: credentialServer.socketPath,
             srcPath: srcDirectory()
         )
         let runResult = try runProcess(docker, arguments: args)
         guard runResult.terminationStatus == 0 else {
-            credentialServer.stop()
             throw ManagerError.containerStartFailed(runResult.terminationStatus)
         }
 
-        self.credentialServer = credentialServer
         self.containerName = containerName
     }
 
@@ -302,7 +294,6 @@ final class BundledDaemonManager {
         containerName: String,
         port: Int,
         token: String,
-        credentialSocketPath: URL,
         srcPath: URL
     ) -> [String] {
         var args = [
@@ -312,12 +303,10 @@ final class BundledDaemonManager {
             "-v", "\(srcPath.path):/workspace/src:ro",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
             "-v", "concerto-lfd-data:/data",
-            "-v", "\(credentialSocketPath.path):/var/run/concerto-auth.sock:ro",
             "-e", "LFD_HTTP_ADDR=0.0.0.0:2486",
             "-e", "LFD_DB_PATH=/data/concerto.db",
             "-e", "LFD_AUTH_PROVIDER=static",
             "-e", "LFD_AUTH_TOKEN=\(token)",
-            "-e", "LFD_CREDENTIAL_SOCKET=/var/run/concerto-auth.sock",
             "-e", "LFD_MODE=container",
         ]
 
@@ -419,7 +408,6 @@ final class BundledDaemonManager {
     private func resetRuntime() {
         process = nil
         containerName = nil
-        credentialServer = nil
         port = nil
         token = nil
     }

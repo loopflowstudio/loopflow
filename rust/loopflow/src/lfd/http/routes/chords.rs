@@ -208,12 +208,12 @@ mod tests {
         );
 
         HttpState {
-            store,
+            store: store.clone(),
             scheduler,
             executor,
             event_hub,
             output_hub,
-            provider_auth: ProviderAuthService::new(),
+            provider_auth: ProviderAuthService::new(store),
             auth: AuthProvider::Local {
                 session_token: secrecy::SecretString::from("test-token".to_string()),
             },

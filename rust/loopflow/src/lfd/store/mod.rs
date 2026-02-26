@@ -121,6 +121,10 @@ impl Store {
         self
     }
 
+    pub fn tokens(&self) -> &dyn TokenStore {
+        self
+    }
+
     pub fn admin(&self) -> &dyn StoreAdmin {
         self
     }
@@ -496,6 +500,22 @@ impl Store {
         SessionStore::list_session_events(self, session_id, after_seq).await
     }
 
+    pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
+        TokenStore::get_provider_token(self, provider).await
+    }
+
+    pub async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()> {
+        TokenStore::upsert_provider_token(self, token).await
+    }
+
+    pub async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
+        TokenStore::delete_provider_token(self, provider).await
+    }
+
+    pub async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>> {
+        TokenStore::list_provider_tokens(self).await
+    }
+
     pub async fn health_check(&self) -> StoreResult<()> {
         StoreAdmin::health_check(self).await
     }
@@ -667,6 +687,24 @@ pub trait SessionStore: Send + Sync {
         session_id: &LfdId,
         after_seq: Option<i64>,
     ) -> StoreResult<Vec<PersistedSessionEvent>>;
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderToken {
+    pub provider: String,
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<i64>,
+    pub login: Option<String>,
+    pub updated_at: i64,
+}
+
+#[async_trait::async_trait]
+pub trait TokenStore: Send + Sync {
+    async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>>;
+    async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()>;
+    async fn delete_provider_token(&self, provider: &str) -> StoreResult<()>;
+    async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>>;
 }
 
 #[async_trait::async_trait]
@@ -1626,6 +1664,48 @@ impl SessionStore for Store {
 }
 
 #[async_trait::async_trait]
+impl TokenStore for Store {
+    async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let provider = provider.to_string();
+                run_sqlite(store, move |store| store.get_provider_token(&provider)).await
+            }
+            StoreBackend::Postgres(store) => store.get_provider_token(provider).await,
+        }
+    }
+
+    async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let token = token.clone();
+                run_sqlite(store, move |store| store.upsert_provider_token(&token)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_provider_token(token).await,
+        }
+    }
+
+    async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let provider = provider.to_string();
+                run_sqlite(store, move |store| store.delete_provider_token(&provider)).await
+            }
+            StoreBackend::Postgres(store) => store.delete_provider_token(provider).await,
+        }
+    }
+
+    async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, |store| store.list_provider_tokens()).await
+            }
+            StoreBackend::Postgres(store) => store.list_provider_tokens().await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
 impl StoreAdmin for Store {
     async fn health_check(&self) -> StoreResult<()> {
         match &self.backend {
@@ -2031,6 +2111,107 @@ mod tests {
             .await
             .expect("get deleted wave")
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn provider_token_round_trip() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+
+        // Initially empty
+        assert!(store
+            .list_provider_tokens()
+            .await
+            .expect("list empty")
+            .is_empty());
+        assert!(store
+            .get_provider_token("github")
+            .await
+            .expect("get missing")
+            .is_none());
+
+        // Upsert a token
+        let token = super::ProviderToken {
+            provider: "github".to_string(),
+            access_token: "gho_abc123".to_string(),
+            refresh_token: Some("ghr_refresh".to_string()),
+            expires_at: Some(1700000000),
+            login: Some("octocat".to_string()),
+            updated_at: 1699000000,
+        };
+        store
+            .upsert_provider_token(&token)
+            .await
+            .expect("upsert token");
+
+        // Read it back
+        let loaded = store
+            .get_provider_token("github")
+            .await
+            .expect("get token")
+            .expect("token should exist");
+        assert_eq!(loaded.provider, "github");
+        assert_eq!(loaded.access_token, "gho_abc123");
+        assert_eq!(loaded.refresh_token.as_deref(), Some("ghr_refresh"));
+        assert_eq!(loaded.expires_at, Some(1700000000));
+        assert_eq!(loaded.login.as_deref(), Some("octocat"));
+
+        // Upsert overwrites
+        let updated = super::ProviderToken {
+            access_token: "gho_new456".to_string(),
+            refresh_token: None,
+            updated_at: 1699500000,
+            ..token.clone()
+        };
+        store
+            .upsert_provider_token(&updated)
+            .await
+            .expect("upsert update");
+        let reloaded = store
+            .get_provider_token("github")
+            .await
+            .expect("get updated")
+            .expect("exists");
+        assert_eq!(reloaded.access_token, "gho_new456");
+        assert!(reloaded.refresh_token.is_none());
+
+        // Add a second provider and list
+        let claude_token = super::ProviderToken {
+            provider: "claude".to_string(),
+            access_token: "sk-ant-key".to_string(),
+            refresh_token: None,
+            expires_at: None,
+            login: None,
+            updated_at: 1699000000,
+        };
+        store
+            .upsert_provider_token(&claude_token)
+            .await
+            .expect("upsert claude");
+        let all = store.list_provider_tokens().await.expect("list all");
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].provider, "claude");
+        assert_eq!(all[1].provider, "github");
+
+        // Delete one
+        store
+            .delete_provider_token("github")
+            .await
+            .expect("delete github");
+        assert!(store
+            .get_provider_token("github")
+            .await
+            .expect("get deleted")
+            .is_none());
+        assert_eq!(
+            store
+                .list_provider_tokens()
+                .await
+                .expect("list after delete")
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]

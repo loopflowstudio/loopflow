@@ -77,7 +77,7 @@ impl DockerExecutor {
         }
     }
 
-    pub(super) fn collect_env(&self) -> Vec<String> {
+    pub(super) async fn collect_env(&self) -> Vec<String> {
         let mut env: Vec<String> = self
             .credential_env
             .iter()
@@ -89,8 +89,6 @@ impl DockerExecutor {
             .collect();
 
         // Auto-forward well-known agent API keys when present in host env.
-        // OAuth tokens live in the macOS keychain and can't be mounted into containers,
-        // so API keys are the primary auth mechanism for containerized agents.
         for key in AGENT_API_KEYS {
             if self.credential_env.iter().any(|e| e == key) {
                 continue; // Already included via explicit config
@@ -100,21 +98,15 @@ impl DockerExecutor {
             }
         }
 
-        // Inject provider tokens cached during executor initialization.
-        for (provider, env_var) in [
-            ("github", "GH_TOKEN"),
-            ("claude", "ANTHROPIC_API_KEY"),
-            ("codex", "OPENAI_API_KEY"),
-        ] {
+        // Inject provider tokens from the DB.
+        for (env_var, value) in crate::lfd::provider_auth::provider_env_vars(&self.store).await {
             if env
                 .iter()
                 .any(|entry| entry.starts_with(&format!("{env_var}=")))
             {
                 continue;
             }
-            if let Some(credential) = self.cached_credentials.get(provider) {
-                env.push(format!("{env_var}={}", credential.token));
-            }
+            env.push(format!("{env_var}={value}"));
         }
 
         // When SSH credentials are mounted, build a GIT_SSH_COMMAND that:
@@ -375,7 +367,7 @@ impl DockerExecutor {
                     image: Some(self.image.clone()),
                     cmd: Some(cmd),
                     working_dir,
-                    env: Some(self.collect_env()),
+                    env: Some(self.collect_env().await),
                     user: Some(AGENT_USER.to_string()),
                     host_config: Some(container_host_config(mounts, &self.limits)),
                     labels: Some(HashMap::from([(

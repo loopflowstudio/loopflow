@@ -227,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         executor: Arc::new(executor),
         event_hub,
         output_hub: output,
-        provider_auth: ProviderAuthService::new(),
+        provider_auth: ProviderAuthService::new(store.clone()),
         auth: auth_provider,
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),

@@ -53,6 +53,11 @@ impl AgentExecutor for LocalProcessExecutor {
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
 
+        // Inject DB-backed provider tokens as env vars.
+        for (key, value) in crate::lfd::provider_auth::provider_env_vars(&self.store).await {
+            command.env(&key, &value);
+        }
+
         let mut child = command.spawn()?;
 
         // Record the PID so the process can be killed on stop.

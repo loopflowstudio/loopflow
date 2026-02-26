@@ -1,0 +1,9 @@
+flow: ship-wave
+area:
+  - rust/loopflow/src/lfd/provider_auth.rs
+  - rust/loopflow/src/lfd/store/
+  - rust/loopflow/src/lfd/executor/
+  - rust/loopflow/src/lfd/triggers/
+direction:
+  - security
+  - reliability

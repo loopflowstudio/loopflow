@@ -1,6 +1,5 @@
 pub mod auth;
 pub mod config;
-pub mod credential_socket;
 pub mod credentials;
 pub mod events;
 pub mod executor;

@@ -177,6 +177,85 @@ impl SqliteStore {
         super::migrations::latest_version_sqlite(&conn)
     }
 
+    // -- Provider tokens -------------------------------------------------------
+
+    pub fn get_provider_token(&self, provider: &str) -> StoreResult<Option<super::ProviderToken>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at
+             FROM provider_tokens WHERE provider = ?1",
+        )?;
+        stmt.query_row(params![provider], |row| {
+            Ok(super::ProviderToken {
+                provider: row.get(0)?,
+                access_token: row.get(1)?,
+                refresh_token: row.get(2)?,
+                expires_at: row.get(3)?,
+                login: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub fn upsert_provider_token(&self, token: &super::ProviderToken) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(provider) DO UPDATE SET
+                access_token = excluded.access_token,
+                refresh_token = excluded.refresh_token,
+                expires_at = excluded.expires_at,
+                login = excluded.login,
+                updated_at = excluded.updated_at",
+            params![
+                token.provider,
+                token.access_token,
+                token.refresh_token,
+                token.expires_at,
+                token.login,
+                token.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM provider_tokens WHERE provider = ?1",
+            params![provider],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_provider_tokens(&self) -> StoreResult<Vec<super::ProviderToken>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at
+             FROM provider_tokens ORDER BY provider",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(super::ProviderToken {
+                provider: row.get(0)?,
+                access_token: row.get(1)?,
+                refresh_token: row.get(2)?,
+                expires_at: row.get(3)?,
+                login: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?;
+        let mut tokens = Vec::new();
+        for row in rows {
+            tokens.push(row?);
+        }
+        Ok(tokens)
+    }
+
+    // -- Sessions ---------------------------------------------------------------
+
     pub fn create_session(&self, session: &Session) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

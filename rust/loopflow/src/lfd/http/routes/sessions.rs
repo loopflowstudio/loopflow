@@ -254,9 +254,7 @@ async fn backfill_lagged_events(
 }
 
 fn parse_session_id(value: &str) -> Result<LfdId, ApiError> {
-    value
-        .parse::<LfdId>()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid session id"))
+    super::parse_lfd_id(value, "invalid session id")
 }
 
 fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorResponse>) {

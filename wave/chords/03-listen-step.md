@@ -8,7 +8,7 @@ Users can declare `listen` stimuli in wave schema files (`.yaml`), not just via 
 
 ## What Phase 01–02 established
 
-Phase 01 added `StimulusKind::Listen` and `source_wave_id` to the stimulus model, persisted in both SQLite and Postgres. The Python client supports `add_stimulus(..., kind="listen", source_wave_id="infra")`. Phase 02 (when shipped) adds chord CRUD so waves have named groups.
+Phase 01 added `StimulusKind::Listen` and `source_wave_id` to the stimulus model, persisted in both SQLite and Postgres. The Python client supports `add_stimulus(..., kind="listen", source_wave_id="infra")`. Phase 02 shipped chord CRUD so waves now have first-class named groups.
 
 The listen stimulus currently fires when the source wave completes. The listening wave starts a normal run — it doesn't know *what* the source did, only that it ran.
 

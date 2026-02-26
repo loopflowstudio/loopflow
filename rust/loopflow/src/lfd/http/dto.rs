@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
 use crate::lfd::types::{
-    ChatMemoryBlock, ChatMessage, LivePullRequestState, Stimulus, StimulusKind, WaveRun,
+    ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Stimulus, StimulusKind, WaveRun,
     WaveRunStatus,
 };
 
@@ -103,6 +103,15 @@ pub struct WaveDto {
     pub stimuli: Vec<StimulusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChordDto {
+    pub id: String,
+    pub object: String,
+    pub name: String,
+    pub is_default: bool,
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -264,6 +273,16 @@ pub fn stimulus_kind_str(kind: StimulusKind) -> &'static str {
         StimulusKind::Once => "once",
         StimulusKind::Listen => "listen",
         StimulusKind::Unspecified => "unspecified",
+    }
+}
+
+pub fn chord_dto(chord: Chord) -> ChordDto {
+    ChordDto {
+        id: chord.id.to_string(),
+        object: "chord".to_string(),
+        name: chord.name,
+        is_default: chord.is_default,
+        created_at: format_datetime(chord.created_at),
     }
 }
 

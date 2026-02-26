@@ -5,6 +5,7 @@ from __future__ import annotations
 from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
+    CHORD_MINIMAL,
     SESSION_FULL,
     SESSION_MINIMAL,
     WAVE_FULL,
@@ -15,6 +16,7 @@ from conftest import (
 from loopflow.models import (
     AuthFlow,
     AuthProviderStatus,
+    Chord,
     CommitEntry,
     Session,
     SessionEventEnvelope,
@@ -120,3 +122,17 @@ class TestAuthModels:
         assert flow.provider == "github"
         assert flow.verification_uri.startswith("https://")
         assert flow.user_code == "ABCD-1234"
+
+
+class TestChordModel:
+    def test_minimal_payload(self):
+        chord = Chord.model_validate(CHORD_MINIMAL)
+        assert chord.name == "ensemble-a"
+        assert chord.is_default is False
+        assert chord.created_at is None
+
+    def test_full_payload(self):
+        chord = Chord.model_validate(
+            {**CHORD_MINIMAL, "created_at": "2026-02-24T12:00:00Z"}
+        )
+        assert chord.created_at is not None

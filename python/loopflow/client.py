@@ -5,20 +5,24 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 import httpx
+from pydantic import BaseModel
 
 from .errors import LoopflowError, WaveAlreadyRunning
 from .models import (
     AuthFlow,
     AuthProviderStatus,
+    Chord,
     Session,
     SessionConfig,
     SessionEventEnvelope,
     Wave,
     WaveRun,
 )
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 def _resolve_base_url() -> str:
@@ -102,18 +106,10 @@ class Client:
         if repo:
             params["repo"] = repo
         payload = self._request_json("GET", "/v0/waves", params=params)
-        data = payload.get("data", [])
-        return [Wave.model_validate(item) for item in data]
+        return self._parse_model_list(payload, Wave)
 
     def wave(self, name_or_id: str) -> Optional[Wave]:
-        payload = self._request_json(
-            "GET",
-            f"/v0/waves/{name_or_id}",
-            allow_not_found=True,
-        )
-        if payload is None:
-            return None
-        return Wave.model_validate(payload)
+        return self._request_optional_model(f"/v0/waves/{name_or_id}", Wave)
 
     def create_wave(
         self,
@@ -155,6 +151,41 @@ class Client:
 
     def delete_wave(self, name_or_id: str) -> None:
         self._request_json("DELETE", f"/v0/waves/{name_or_id}")
+
+    def create_chord(self, name: str) -> Chord:
+        payload = self._request_json("POST", "/v0/chords", json={"name": name})
+        return Chord.model_validate(payload)
+
+    def list_chords(self) -> list[Chord]:
+        payload = self._request_json("GET", "/v0/chords")
+        return self._parse_model_list(payload, Chord)
+
+    def get_chord(self, chord_id: str) -> Optional[Chord]:
+        return self._request_optional_model(f"/v0/chords/{chord_id}", Chord)
+
+    def delete_chord(self, chord_id: str) -> None:
+        self._request_json("DELETE", f"/v0/chords/{chord_id}")
+
+    def add_chord_member(self, chord_id: str, wave_id: str) -> None:
+        self._request_json(
+            "POST",
+            f"/v0/chords/{chord_id}/members",
+            json={"wave_id": wave_id},
+        )
+
+    def remove_chord_member(self, chord_id: str, wave_id: str) -> None:
+        self._request_json(
+            "DELETE",
+            f"/v0/chords/{chord_id}/members/{wave_id}",
+        )
+
+    def list_chord_members(self, chord_id: str) -> list[Wave]:
+        payload = self._request_json("GET", f"/v0/chords/{chord_id}/members")
+        return self._parse_model_list(payload, Wave)
+
+    def list_wave_chords(self, wave_id: str) -> list[Chord]:
+        payload = self._request_json("GET", f"/v0/waves/{wave_id}/chords")
+        return self._parse_model_list(payload, Chord)
 
     def run_wave(
         self,
@@ -233,8 +264,7 @@ class Client:
         if limit is not None:
             params["limit"] = str(limit)
         payload = self._request_json("GET", "/v0/wave_runs", params=params)
-        data = payload.get("data", [])
-        return [WaveRun.model_validate(item) for item in data]
+        return self._parse_model_list(payload, WaveRun)
 
     def wave_logs(self, name_or_id: str) -> Iterator[str]:
         try:
@@ -268,14 +298,7 @@ class Client:
         return Session.model_validate(payload)
 
     def session(self, session_id: str) -> Optional[Session]:
-        payload = self._request_json(
-            "GET",
-            f"/v0/sessions/{session_id}",
-            allow_not_found=True,
-        )
-        if payload is None:
-            return None
-        return Session.model_validate(payload)
+        return self._request_optional_model(f"/v0/sessions/{session_id}", Session)
 
     def send_session_input(self, session_id: str, content: str) -> Session:
         payload = self._request_json(
@@ -360,7 +383,29 @@ class Client:
         if response.status_code >= 400:
             self._raise_for_error(response)
 
+        if response.status_code == 204 or not response.content:
+            return None
+
         return response.json()
+
+    @staticmethod
+    def _parse_model_list(payload: Any, model_type: type[ModelT]) -> list[ModelT]:
+        if not isinstance(payload, dict):
+            raise LoopflowError("invalid list response payload")
+
+        data = payload.get("data", [])
+        if not isinstance(data, list):
+            raise LoopflowError("invalid list response payload")
+
+        return [model_type.model_validate(item) for item in data]
+
+    def _request_optional_model(
+        self, path: str, model_type: type[ModelT]
+    ) -> Optional[ModelT]:
+        payload = self._request_json("GET", path, allow_not_found=True)
+        if payload is None:
+            return None
+        return model_type.model_validate(payload)
 
     @staticmethod
     def _raise_for_error(response: httpx.Response) -> None:

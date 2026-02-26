@@ -2,68 +2,68 @@
 
 Domain type, store operations, HTTP API, and Python client for chord management.
 
-## What exists after this
+## Status
 
-Users can create named chords, add/remove waves as members, list chords, and delete them. The `chords` and `chord_members` tables (from migration 012) are populated through a full CRUD API.
+Shipped on this branch.
 
-## What Phase 01 established
+## What shipped
 
-Migration 012 created the `chords` and `chord_members` tables with proper foreign keys and indexes. The schema supports a default chord (`is_default` flag with unique partial index). No Rust domain type or store operations exist yet — the tables are empty scaffolding.
+### Rust domain + store
 
-## What to build
-
-### Rust domain type
-
-- `Chord` struct: `id`, `name`, `is_default`, `created_at`
-- Derive `Debug`, `Clone`, `Serialize`, `Deserialize`
-- Place in `lfd/types/` alongside `Wave` and `Stimulus`
-
-### Store operations
-
-On the `WaveStore` trait (or a new `ChordStore` trait — decide based on how the existing trait is structured):
-
-- `create_chord(name) -> Chord`
-- `get_chord(id) -> Option<Chord>`
-- `list_chords() -> Vec<Chord>`
-- `delete_chord(id)`
-- `add_chord_member(chord_id, wave_id)`
-- `remove_chord_member(chord_id, wave_id)`
-- `list_chord_members(chord_id) -> Vec<Wave>`
-- `list_chords_for_wave(wave_id) -> Vec<Chord>`
-
-Implement for both SQLite and Postgres backends.
+- Added `lfd::types::Chord` with `id`, `name`, `is_default`, `created_at`
+- Added dedicated `ChordStore` capability on `Store` with:
+  - `create/get/list/delete_chord`
+  - `add/remove_chord_member`
+  - `list_chord_members`, `list_chords_for_wave`
+- Implemented parity in both SQLite and Postgres backends
+- Membership add/remove operations are idempotent
 
 ### HTTP API
 
-| Method | Route | Body | Returns |
-|--------|-------|------|---------|
-| POST | `/v0/chords` | `{ "name": "..." }` | Chord |
-| GET | `/v0/chords` | — | `Vec<Chord>` |
-| GET | `/v0/chords/:id` | — | Chord |
-| DELETE | `/v0/chords/:id` | — | 204 |
-| POST | `/v0/chords/:id/members` | `{ "wave_id": "..." }` | 204 |
-| DELETE | `/v0/chords/:id/members/:wave_id` | — | 204 |
+| Method | Route | Behavior |
+|--------|-------|----------|
+| POST | `/v0/chords` | Create chord; duplicate name returns `409` |
+| GET | `/v0/chords` | List chords |
+| GET | `/v0/chords/:id` | Get single chord |
+| DELETE | `/v0/chords/:id` | Delete chord, `204` |
+| POST | `/v0/chords/:id/members` | Add member, `204`, idempotent |
+| DELETE | `/v0/chords/:id/members/:wave_id` | Remove member, `204`, idempotent |
+| GET | `/v0/chords/:id/members` | List chord members (returns `WaveDto[]`) |
+| GET | `/v0/waves/:wave_id/chords` | List chords a wave belongs to |
 
-### Python client
+Unknown chord/wave operations return `404`. Unified `parse_lfd_id()` helper handles ID validation across all chord and session routes.
 
-- `Chord` model in `models.py`
-- Client methods: `create_chord`, `list_chords`, `get_chord`, `delete_chord`, `add_chord_member`, `remove_chord_member`
-- API convenience wrappers in `api.py`
+### Python client/API
 
-### Default chord behavior
+- Added `Chord` model in `python/loopflow/models.py`
+- Added client methods for chord CRUD + membership mutation + membership reads
+- Added `list_chord_members()` and `list_wave_chords()` to client and top-level API
+- Added top-level wrappers in `python/loopflow/api.py`
 
-Decide: should newly created waves auto-enroll in a default chord? The schema supports `is_default` but the behavior isn't wired yet. Could be deferred if it adds complexity without clear user value.
+### Docs
 
-## Open questions
+- README and `docs/lfd.md` updated with membership listing examples
 
-- Separate `ChordStore` trait or extend `WaveStore`?
-- Default chord auto-enrollment: now or later?
-- Should chord deletion cascade to member waves' listen stimuli that reference chord members?
+### Validation
 
-## Done when
+- `cargo fmt --all`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test --all`
+- `uv run pytest python/tests/`
+- `swift test --package-path swift`
+- `tests/e2e/test_smoke.sh`
+- `uv run pytest tests/e2e/test_api_smoke.py -v`
 
-- `Chord` type exists in Rust with full CRUD in both store backends
-- HTTP routes return proper responses for all six endpoints
-- Python client can create chords, manage membership, and list
-- Existing wave operations are unaffected
-- Tests cover create/list/delete and membership mutations
+## Decisions locked in
+
+- Keep chord operations in a dedicated `ChordStore` trait (not `WaveStateStore`)
+- Keep chords orthogonal to execution/stimulus semantics
+- Defer default chord auto-enrollment
+
+## Follow-ups
+
+- Add dedicated Postgres integration tests for chord membership paths
+- Revisit membership mutation pre-check reads if profiling shows DB pressure
+- Keep duplicate-name conflict mapping aligned with backend constraint naming
+- Consider lightweight member payload option (wave ID + name only) for large chords where full WaveDto enrichment is expensive
+- Add pagination/filtering for chord member and wave-chord list endpoints

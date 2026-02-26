@@ -28,8 +28,8 @@ Waves are flat. Chords group them. Listening connects them.
 
 - **Schema migration if chord model evolves.** The `chords`/`chord_members` tables are simple join tables now. If chords gain execution semantics later, the schema may need non-trivial migration. Mitigate: keep the Symphonia execution model separate; don't add execution fields to the chord tables.
 - **Listen stimulus fan-out.** If many waves listen to the same source, a single completion triggers N wave runs simultaneously. No concurrency limiting exists today. Mitigate: acceptable at current scale (single user, handful of waves); revisit if fan-out exceeds scheduler slot capacity.
-- **Default chord enrollment ambiguity.** Open question whether new waves should auto-enroll in a default chord. If yes, the concept of "ungrouped waves" disappears, which may confuse users who don't use chords. If no, chords are opt-in and may go unused.
-- **Listen authoring before chord CRUD.** Accepting `listen` stimuli in wave schema files before chord CRUD lands means users can wire listening without seeing the grouping context. May lead to confusion about which waves are related.
+- **Duplicate-name conflict mapping is backend-detail sensitive.** Phase 02 maps duplicate chord names to `409`, but detection currently depends on backend-specific DB error details. If schema/constraint names change, this mapping can drift.
+- **Membership mutation paths do pre-check reads.** Membership add/remove validates chord and wave existence before mutation; this is correct but adds DB round-trips on hot paths.
 
 ## Metrics
 
@@ -43,15 +43,40 @@ Waves are flat. Chords group them. Listening connects them.
 | # | Phase | Focus | Status |
 |---|-------|-------|--------|
 | 01 | Flatten + Listen | Drop tree model, add listen stimulus, migration 012 | shipped |
-| 02 | Chord CRUD | Domain type, store ops, HTTP API, Python client | |
-| 03 | Listen Authoring | Listen stimulus in wave schema files, deeper inter-wave communication | |
-| 04 | Concerto UI | Chord groups and listen wiring in the macOS app | |
+| 02 | Chord CRUD | Domain type, store ops, HTTP API, Python client | shipped |
+| 03 | Listen Authoring | Listen stimulus in wave schema files, deeper inter-wave communication | next |
+| 04 | Concerto UI | Chord groups and listen wiring in the macOS app | later |
 
 ### Phase 01 retrospective
 
 The original plan called for a recursive `Wave` enum (Voice | Chord) with join/leave composition, nested execution, and inherited triggers. Building it revealed that the recursive model was over-engineered for the OSS use case — users want named groups and inter-wave reactivity, not a tree-structured wave scheduler.
 
 The pivot: flatten `Wave` to a single struct, drop `wave_type`/`parent_id`/`position`/`join`/`leave`, add `chords`/`chord_members` tables for grouping, and add `StimulusKind::Listen` with `source_wave_id` for inter-wave coordination. Migration 012 handles the schema transition. Python client updated to match (removed `join()`/`leave()`, added `source_wave_id` to stimulus API).
+
+### Phase 02 retrospective
+
+Phase 02 shipped end-to-end chord CRUD, membership management, and membership read APIs:
+
+- Rust `Chord` type plus `Store` support via dedicated `ChordStore` capability
+- SQLite + Postgres implementations for chord CRUD and membership operations
+- HTTP API routes for chord CRUD, add/remove member mutations, and membership listing (`GET /v0/chords/:id/members`, `GET /v0/waves/:id/chords`)
+- Unified `parse_lfd_id()` helper for consistent ID validation across routes
+- Python `Chord` model and client/API wrappers for chord operations including `list_chord_members()` and `list_wave_chords()`
+- Route/store/client tests covering happy paths, not-found/conflict behavior, and membership read paths
+
+Key decisions now locked:
+
+- Chords stay grouping metadata only (no execution semantics)
+- Membership mutations are idempotent for safe retries
+- Default chord auto-enrollment is deferred; grouping remains explicit/opt-in
+- Membership reads return full `WaveDto` (via `build_wave_dtos` with `include_active_run=false`)
+
+Carry-forward follow-ups:
+
+- Add dedicated Postgres integration coverage for chord membership paths
+- Consider replacing membership pre-check reads with single-statement, constraint-driven mutations if profiling shows pressure
+- Consider lightweight member payload for large chords (full WaveDto enrichment can be heavy)
+- Add pagination/filtering for membership list endpoints
 
 ## Data Model
 

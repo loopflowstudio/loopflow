@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod chords;
 pub mod flows;
 pub mod hooks;
 pub mod repos;
@@ -24,6 +25,12 @@ use axum::Json;
 use std::collections::HashMap;
 
 pub type ApiError = (StatusCode, Json<ErrorResponse>);
+
+pub fn parse_lfd_id(value: &str, error_message: &'static str) -> Result<LfdId, ApiError> {
+    value
+        .parse::<LfdId>()
+        .map_err(|_| crate::lfd::http::api_error(StatusCode::BAD_REQUEST, error_message))
+}
 
 pub async fn resolve_wave_id(
     state: &crate::lfd::http::HttpState,

@@ -1152,8 +1152,10 @@ fn monitor_release_workflow_inner(
         ));
 
         if view.status == "completed" {
+            let release_exists = github_release_exists(repo, tag)?;
+
             if view.conclusion.as_deref() == Some("success") {
-                if github_release_exists(repo, tag)? {
+                if release_exists {
                     progress.status("GitHub Release is published.");
                 } else {
                     progress.error("Workflow succeeded but GitHub Release not found yet.");
@@ -1161,12 +1163,24 @@ fn monitor_release_workflow_inner(
                 return Ok(());
             }
 
+            // Workflow failed, but the release job may have succeeded
+            // (e.g. publish-crates failed after GitHub Release was created).
+            // Don't offer retag if the release already exists.
+            let conclusion = view.conclusion.unwrap_or_else(|| "unknown".to_string());
+            if release_exists {
+                progress.error(&format!(
+                    "Release workflow failed ({conclusion}), but GitHub Release is published. \
+                     Check failed jobs: gh run view {}",
+                    run.id
+                ));
+                return Err(OpsError::Message(
+                    "release workflow partially failed; GitHub Release exists".to_string(),
+                ));
+            }
+
             let logs = workflow_logs(repo, run.id)
                 .unwrap_or_else(|err| format!("failed to fetch workflow logs: {err}"));
-            progress.error(&format!(
-                "Release workflow failed: {}",
-                view.conclusion.unwrap_or_else(|| "unknown".to_string())
-            ));
+            progress.error(&format!("Release workflow failed: {conclusion}"));
             if !logs.trim().is_empty() {
                 progress.error(&logs);
             }

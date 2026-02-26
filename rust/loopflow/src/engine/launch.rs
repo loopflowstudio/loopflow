@@ -135,7 +135,14 @@ pub fn prepare_launch_prompt(
 
     let model = model
         .or_else(|| budgeted.step.as_ref().and_then(|step| step.model.clone()))
-        .unwrap_or_else(|| config.agent_model.clone());
+        .or_else(|| config.agent_model.clone())
+        .or_else(|| {
+            budgeted
+                .step
+                .as_ref()
+                .and_then(|step| step.default_model.clone())
+        })
+        .unwrap_or_else(|| "claude:opus".to_string());
     validate_model_policy(&model)?;
     let (components, breakdown) = budgeted.into_parts();
     let action_style = components
@@ -234,7 +241,7 @@ Test step body.
 
     fn default_test_config() -> Config {
         Config {
-            agent_model: "claude:opus".to_string(),
+            agent_model: Some("claude:opus".to_string()),
             lfdocs: false,
             diff_files: false,
             diff: false,
@@ -278,6 +285,66 @@ Test step body.
         .expect("prepare launch prompt");
 
         assert_eq!(prepared.config.model.as_deref(), Some("claude:sonnet"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_uses_default_model_when_no_user_config() {
+        let tmp = tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
+        fs::write(
+            tmp.path().join(".lf/steps/test.md"),
+            r#"---
+default_model: gemini:2.5-pro
+---
+Test step body.
+"#,
+        )
+        .expect("write step");
+
+        let mut config = default_test_config();
+        config.agent_model = None;
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                step: Some("test".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.model.as_deref(), Some("gemini:2.5-pro"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_user_config_overrides_default_model() {
+        let tmp = tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
+        fs::write(
+            tmp.path().join(".lf/steps/test.md"),
+            r#"---
+default_model: gemini:2.5-pro
+---
+Test step body.
+"#,
+        )
+        .expect("write step");
+
+        let mut config = default_test_config();
+        config.agent_model = Some("codex:o3".to_string());
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                step: Some("test".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
     }
 
     #[test]

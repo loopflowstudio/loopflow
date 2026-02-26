@@ -6,17 +6,34 @@ import Foundation
 /// Per-step configuration overrides.
 public struct StepConfig: Sendable, Codable, Equatable {
     public var model: String?
+    public var defaultModel: String?
     public var direction: String?
     public var context: [String]?
 
-    public init(model: String? = nil, direction: String? = nil, context: [String]? = nil) {
+    public init(
+        model: String? = nil,
+        defaultModel: String? = nil,
+        direction: String? = nil,
+        context: [String]? = nil
+    ) {
         self.model = model
+        self.defaultModel = defaultModel
         self.direction = direction
         self.context = context
     }
 
     public var isEmpty: Bool {
-        model == nil && direction == nil && (context == nil || context!.isEmpty)
+        model == nil &&
+            defaultModel == nil &&
+            direction == nil &&
+            (context == nil || context!.isEmpty)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case defaultModel = "default_model"
+        case direction
+        case context
     }
 }
 

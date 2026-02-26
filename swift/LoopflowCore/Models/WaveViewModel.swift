@@ -101,6 +101,16 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         set { api.area = newValue }
     }
 
+    public var model: String? {
+        get { api.model }
+        set { api.model = newValue }
+    }
+
+    public var stepModels: [String: String]? {
+        get { api.stepModels }
+        set { api.stepModels = newValue }
+    }
+
     public var stimuli: [Stimulus] {
         get { api.stimuli }
         set { api.stimuli = newValue }

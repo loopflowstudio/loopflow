@@ -10,6 +10,8 @@ struct StepRunner: View {
     @Environment(\.palette) private var palette
 
     @State private var selectedFlow: String = ""
+    @State private var selectedModel: String = ""
+    @State private var customModel: String = ""
     @State private var autoMode: Stimulus.Kind = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
@@ -23,6 +25,7 @@ struct StepRunner: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 areaHeader
                 directionHeader
+                modelHeader
             }
 
             Divider()
@@ -54,6 +57,8 @@ struct StepRunner: View {
         }
         .onAppear {
             selectedFlow = wave.flow
+            selectedModel = wave.model ?? ""
+            customModel = wave.model ?? ""
             if let s = wave.stimulus {
                 autoMode = s.kind
                 if let cron = s.cron {
@@ -90,6 +95,47 @@ struct StepRunner: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var modelHeader: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Model")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+
+            if repoState.supportedHarnesses.isEmpty {
+                TextField("Default (claude:opus)", text: $customModel)
+                    .textFieldStyle(.plain)
+                    .font(Typography.code(12))
+                    .padding(Spacing.sm)
+                    .background(palette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                    .onSubmit {
+                        persistModel(customModel)
+                    }
+            } else {
+                Picker("Model", selection: $selectedModel) {
+                    Text("Default").tag("")
+                    ForEach(modelPickerOptions, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+                .labelsHidden()
+                .onChange(of: selectedModel) { _, newValue in
+                    customModel = newValue
+                    persistModel(newValue)
+                }
+            }
+        }
+    }
+
+    private var modelPickerOptions: [String] {
+        var options = repoState.supportedHarnesses
+        if let activeModel = wave.model, !activeModel.isEmpty, !options.contains(activeModel) {
+            options.append(activeModel)
+        }
+        return options.sorted()
     }
 
     // MARK: - Fields
@@ -288,6 +334,17 @@ struct StepRunner: View {
         Task {
             do {
                 try await repoState.removeStimulus(wave: wave, stimulusId: stimulusId)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    private func persistModel(_ model: String) {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            do {
+                try await repoState.updateWave(wave, model: trimmed)
             } catch {
                 showError(error)
             }

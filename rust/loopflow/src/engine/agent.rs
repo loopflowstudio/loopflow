@@ -10,7 +10,7 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::Instant;
 
-use crate::engine::config::parse_model;
+use crate::engine::config::parse_harness_model;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
@@ -137,9 +137,9 @@ impl ClaudeArgs {
     /// Strips the `claude:` prefix if present, applies defaults (bare `"claude"` → `"opus"`),
     /// and passes through non-claude model strings unchanged.
     pub fn resolve_model(model: &str) -> Option<String> {
-        let (backend, variant) = parse_model(model);
-        if backend == "claude" {
-            variant
+        let (harness, model_variant) = parse_harness_model(model);
+        if harness == "claude" {
+            model_variant
         } else {
             Some(model.to_string())
         }
@@ -221,9 +221,9 @@ pub fn build_claude_session_turn_args(
 /// For `codex:<variant>`, returns `<variant>`. For bare `codex`, returns `None`
 /// so Codex can pick its own default. Non-codex model strings pass through.
 pub fn resolve_codex_model(model: &str) -> Option<String> {
-    let (backend, variant) = parse_model(model);
-    if backend == "codex" {
-        variant
+    let (harness, model_variant) = parse_harness_model(model);
+    if harness == "codex" {
+        model_variant
     } else {
         Some(model.to_string())
     }
@@ -430,13 +430,13 @@ pub fn build_model_command(
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
     let model = launch.model.as_deref().unwrap_or("claude");
-    let (harness, variant) = parse_model(model);
-    let variant = variant.as_deref();
+    let (harness, model_variant) = parse_harness_model(model);
+    let model_variant = model_variant.as_deref();
     match harness.as_str() {
-        "codex" => build_codex_command(launch, process, variant),
-        "gemini" => build_gemini_command(launch, process, variant),
-        "opencode" => build_opencode_command(process, variant),
-        "claude" => build_claude_command(launch, process, capabilities, variant),
+        "codex" => build_codex_command(launch, process, model_variant),
+        "gemini" => build_gemini_command(launch, process, model_variant),
+        "opencode" => build_opencode_command(process, model_variant),
+        "claude" => build_claude_command(launch, process, capabilities, model_variant),
         // Unknown harness: fall back to Claude with the full model string as variant.
         _ => build_claude_command(launch, process, capabilities, Some(model)),
     }
@@ -500,7 +500,7 @@ pub fn launch_agent(
 
     // Harness-specific environment setup.
     let model = launch.model.as_deref().unwrap_or("claude");
-    let (harness, _) = parse_model(model);
+    let (harness, _) = parse_harness_model(model);
     apply_harness_env(&harness, &mut cmd, process);
 
     propagate_rlm_env(&mut cmd);

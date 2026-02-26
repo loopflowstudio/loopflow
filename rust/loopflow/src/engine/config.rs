@@ -12,7 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::engine::error::LoadError;
 
 /// Keys that combine lists from global + repo config.
-const ADDITIVE_KEYS: &[&str] = &["context", "exclude", "skill_sources", "summaries"];
+const ADDITIVE_KEYS: &[&str] = &[
+    "context",
+    "exclude",
+    "skill_sources",
+    "summaries",
+    "supported_harnesses",
+];
 
 /// Token budgets for prompt sections.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -171,9 +177,13 @@ pub struct ReleaseTargetConfig {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Model in format backend:variant (e.g., claude:opus, codex)
-    #[serde(default = "default_agent_model")]
-    pub agent_model: String,
+    /// Model in format harness:model (e.g., claude:opus, codex)
+    #[serde(default)]
+    pub agent_model: Option<String>,
+
+    /// Supported harnesses for model selection UI.
+    #[serde(default)]
+    pub supported_harnesses: Vec<String>,
 
     /// Skip permissions; Codex also disables sandboxing
     #[serde(default)]
@@ -293,10 +303,6 @@ pub struct Config {
     pub rlm_max_depth: usize,
 }
 
-fn default_agent_model() -> String {
-    "claude:opus".to_string()
-}
-
 fn default_land() -> String {
     "gh".to_string()
 }
@@ -316,7 +322,8 @@ fn default_rlm_max_depth() -> usize {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            agent_model: default_agent_model(),
+            agent_model: None,
+            supported_harnesses: Vec::new(),
             yolo: false,
             chrome: false,
             push: false,
@@ -350,26 +357,26 @@ impl Default for Config {
     }
 }
 
-/// Parse model string like 'claude:opus' into (backend, variant).
+/// Parse model string like 'claude:opus' into (harness, model).
 ///
-/// Applies smart defaults when no variant is specified:
+/// Applies smart defaults when no model is specified:
 /// - claude -> opus (Claude Opus 4.5)
 /// - gemini -> 2.5-pro (Gemini 2.5 Pro)
 /// - codex -> None (let Codex CLI pick its default)
 /// - opencode -> None (let OpenCode use its own config)
-pub fn parse_model(model: &str) -> (String, Option<String>) {
+pub fn parse_harness_model(model: &str) -> (String, Option<String>) {
     let parts: Vec<&str> = model.splitn(2, ':').collect();
-    let backend = parts[0].to_string();
-    let variant = if parts.len() > 1 {
+    let harness = parts[0].to_string();
+    let model = if parts.len() > 1 {
         Some(parts[1].to_string())
     } else {
-        match backend.as_str() {
+        match harness.as_str() {
             "claude" => Some("opus".to_string()),
             "gemini" => Some("2.5-pro".to_string()),
             _ => None,
         }
     };
-    (backend, variant)
+    (harness, model)
 }
 
 /// Load YAML file, returning None if not present or empty.
@@ -464,70 +471,70 @@ mod tests {
     use super::*;
 
     // ==========================================================================
-    // parse_model tests
+    // parse_harness_model tests
     // ==========================================================================
 
     #[test]
-    fn parse_model_with_variant() {
-        let (backend, variant) = parse_model("claude:opus");
-        assert_eq!(backend, "claude");
-        assert_eq!(variant, Some("opus".to_string()));
+    fn parse_harness_model_with_model() {
+        let (harness, model) = parse_harness_model("claude:opus");
+        assert_eq!(harness, "claude");
+        assert_eq!(model, Some("opus".to_string()));
     }
 
     #[test]
-    fn parse_model_with_complex_variant() {
-        let (backend, variant) = parse_model("gemini:2.5-pro");
-        assert_eq!(backend, "gemini");
-        assert_eq!(variant, Some("2.5-pro".to_string()));
+    fn parse_harness_model_with_complex_model() {
+        let (harness, model) = parse_harness_model("gemini:2.5-pro");
+        assert_eq!(harness, "gemini");
+        assert_eq!(model, Some("2.5-pro".to_string()));
     }
 
     #[test]
-    fn parse_model_claude_default() {
-        let (backend, variant) = parse_model("claude");
-        assert_eq!(backend, "claude");
-        assert_eq!(variant, Some("opus".to_string()));
+    fn parse_harness_model_claude_default() {
+        let (harness, model) = parse_harness_model("claude");
+        assert_eq!(harness, "claude");
+        assert_eq!(model, Some("opus".to_string()));
     }
 
     #[test]
-    fn parse_model_codex_no_default() {
-        let (backend, variant) = parse_model("codex");
-        assert_eq!(backend, "codex");
-        assert_eq!(variant, None);
+    fn parse_harness_model_codex_no_default() {
+        let (harness, model) = parse_harness_model("codex");
+        assert_eq!(harness, "codex");
+        assert_eq!(model, None);
     }
 
     #[test]
-    fn parse_model_gemini_default() {
-        let (backend, variant) = parse_model("gemini");
-        assert_eq!(backend, "gemini");
-        assert_eq!(variant, Some("2.5-pro".to_string()));
+    fn parse_harness_model_gemini_default() {
+        let (harness, model) = parse_harness_model("gemini");
+        assert_eq!(harness, "gemini");
+        assert_eq!(model, Some("2.5-pro".to_string()));
     }
 
     #[test]
-    fn parse_model_opencode_no_default() {
-        let (backend, variant) = parse_model("opencode");
-        assert_eq!(backend, "opencode");
-        assert_eq!(variant, None);
+    fn parse_harness_model_opencode_no_default() {
+        let (harness, model) = parse_harness_model("opencode");
+        assert_eq!(harness, "opencode");
+        assert_eq!(model, None);
     }
 
     #[test]
-    fn parse_model_opencode_with_variant() {
-        let (backend, variant) = parse_model("opencode:anthropic/claude-sonnet");
-        assert_eq!(backend, "opencode");
-        assert_eq!(variant, Some("anthropic/claude-sonnet".to_string()));
+    fn parse_harness_model_opencode_with_model() {
+        let (harness, model) = parse_harness_model("opencode:anthropic/claude-sonnet");
+        assert_eq!(harness, "opencode");
+        assert_eq!(model, Some("anthropic/claude-sonnet".to_string()));
     }
 
     #[test]
-    fn parse_model_unknown_backend() {
-        let (backend, variant) = parse_model("unknown");
-        assert_eq!(backend, "unknown");
-        assert_eq!(variant, None);
+    fn parse_harness_model_unknown_harness() {
+        let (harness, model) = parse_harness_model("unknown");
+        assert_eq!(harness, "unknown");
+        assert_eq!(model, None);
     }
 
     #[test]
-    fn parse_model_unknown_with_variant() {
-        let (backend, variant) = parse_model("custom:model-v2");
-        assert_eq!(backend, "custom");
-        assert_eq!(variant, Some("model-v2".to_string()));
+    fn parse_harness_model_unknown_with_model() {
+        let (harness, model) = parse_harness_model("custom:model-v2");
+        assert_eq!(harness, "custom");
+        assert_eq!(model, Some("model-v2".to_string()));
     }
 
     // ==========================================================================
@@ -537,7 +544,8 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = Config::default();
-        assert_eq!(config.agent_model, "claude:opus");
+        assert!(config.agent_model.is_none());
+        assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
         assert!(config.lfdocs);
         assert!(config.diff_files);
@@ -612,9 +620,20 @@ yolo: true
 chrome: true
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.agent_model, "codex:o3");
+        assert_eq!(config.agent_model.as_deref(), Some("codex:o3"));
         assert!(config.yolo);
         assert!(config.chrome);
+    }
+
+    #[test]
+    fn config_from_yaml_supported_harnesses() {
+        let yaml = r#"
+supported_harnesses:
+  - claude
+  - codex
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+        assert_eq!(config.supported_harnesses, vec!["claude", "codex"]);
     }
 
     #[test]
@@ -884,7 +903,7 @@ agent_model: codex
         let merged = merge_config_values(Some(global), Some(repo));
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent_model.as_deref(), Some("codex"));
         assert!(!config.yolo); // preserved from global
     }
 
@@ -918,6 +937,29 @@ exclude:
     }
 
     #[test]
+    fn merge_config_values_supported_harnesses_combine() {
+        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            r#"
+supported_harnesses:
+  - claude
+"#,
+        )
+        .unwrap();
+
+        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            r#"
+supported_harnesses:
+  - codex
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_config_values(Some(global), Some(repo));
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
+        assert_eq!(config.supported_harnesses, vec!["claude", "codex"]);
+    }
+
+    #[test]
     fn merge_config_values_global_only() {
         let global: serde_yaml_ng::Value =
             serde_yaml_ng::from_str("agent_model: claude:opus\n").unwrap();
@@ -925,7 +967,7 @@ exclude:
         let merged = merge_config_values(Some(global), None);
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
-        assert_eq!(config.agent_model, "claude:opus");
+        assert_eq!(config.agent_model.as_deref(), Some("claude:opus"));
     }
 
     #[test]
@@ -935,7 +977,7 @@ exclude:
         let merged = merge_config_values(None, Some(repo));
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent_model.as_deref(), Some("codex"));
     }
 
     #[test]
@@ -944,7 +986,7 @@ exclude:
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         // Should get defaults
-        assert_eq!(config.agent_model, "claude:opus");
+        assert!(config.agent_model.is_none());
     }
 
     // ==========================================================================
@@ -1010,7 +1052,7 @@ exclude:
         let result = load_config(Some(temp.path()));
         assert!(result.is_ok());
         let config = result.unwrap().expect("config should exist");
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent_model.as_deref(), Some("codex"));
         assert!(config.yolo);
     }
 
@@ -1023,6 +1065,6 @@ exclude:
             .expect("write config");
 
         let config = load_config_or_default(Some(temp.path()));
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent_model.as_deref(), Some("codex"));
     }
 }

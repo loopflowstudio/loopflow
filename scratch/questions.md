@@ -1,0 +1,2 @@
+- Assumption: clearing a wave-level model override is represented by sending `model: ""` in PATCH `/v0/waves/:id`, and backend treats empty string as unset when writing wave YAML.
+- Follow-up: `/v0/waves/:id` PATCH currently cannot distinguish omitted `model` from explicit `null`; if explicit null semantics are needed, request payload should move to a tri-state field.

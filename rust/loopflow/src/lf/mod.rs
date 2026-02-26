@@ -34,7 +34,7 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard", short_alias = 'C')]
     pub clipboard: bool,
 
-    /// Model to use (backend or backend:variant)
+    /// Model to use (harness or harness:model)
     #[arg(short = 'm', long = "model", short_alias = 'M')]
     pub model: Option<String>,
 

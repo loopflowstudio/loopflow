@@ -137,6 +137,7 @@ impl WaveExecutor {
                     None,
                     Some((&executor.store, &fork_wave_id)),
                     None,
+                    None,
                 )
                 .await;
                 let (launch, process) = match prompt {

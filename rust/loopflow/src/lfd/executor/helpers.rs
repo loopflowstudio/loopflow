@@ -285,6 +285,7 @@ pub(crate) async fn build_step_prompt(
     directions: &[String],
     wave: Option<&str>,
     summary_source: Option<(&SharedStore, &LfdId)>,
+    model: Option<String>,
     message: Option<String>,
 ) -> Result<(AgentConfig, ProcessConfig)> {
     let repo_root = Path::new(worktree);
@@ -312,7 +313,7 @@ pub(crate) async fn build_step_prompt(
             area: None,
             wave: wave.map(str::to_string),
             message,
-            model: None,
+            model,
             cwd: None,
             max_turns: None,
             yolo_mode: false,

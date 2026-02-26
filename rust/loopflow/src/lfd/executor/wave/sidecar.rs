@@ -133,6 +133,7 @@ impl WaveExecutor {
             &run.snapshot.direction,
             Some(wave.name()),
             Some((&self.store, wave.id())),
+            None,
             Some(message),
         )
         .await?;

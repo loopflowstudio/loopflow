@@ -20,7 +20,9 @@ use crate::lfd::http::dto::{
     LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse, RunWaveResponse,
     StopWaveResponse, WaveDto,
 };
-use crate::lfd::http::routes::wave_config::{read_wave_config, StimulusDef};
+use crate::lfd::http::routes::wave_config::{
+    read_wave_config, update_wave_model_config, StimulusDef,
+};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
@@ -113,6 +115,8 @@ pub struct UpdateWaveRequest {
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
     status: Option<String>,
+    model: Option<String>,
+    step_models: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -189,13 +193,13 @@ pub async fn create_wave_handler(
         .map(parse_stimulus)
         .transpose()?;
     let flow = flow
-        .or_else(|| wave_config.as_ref().map(|c| c.flow.clone()))
+        .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "build".to_string());
     let direction = direction
         .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();
     let area = area
-        .or_else(|| wave_config.as_ref().map(|c| c.area.clone()))
+        .or_else(|| wave_config.as_ref().and_then(|c| c.area.clone()))
         .unwrap_or_default();
 
     // Check for duplicate wave name in the same repo.
@@ -435,6 +439,18 @@ pub async fn update_wave_handler(
     if let Some(status) = payload.status {
         wave.status = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+    }
+
+    if payload.model.is_some() || payload.step_models.is_some() {
+        let repo = wave.repo().clone();
+        let wave_name = wave.name().clone();
+        let model = payload.model.clone();
+        let step_models = payload.step_models.clone();
+        run_blocking_result(
+            move || update_wave_model_config(FsPath::new(&repo), &wave_name, model, step_models),
+            StatusCode::BAD_REQUEST,
+        )
+        .await?;
     }
 
     state

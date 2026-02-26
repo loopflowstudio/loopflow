@@ -509,6 +509,7 @@ struct WaveDetailPanel: View {
                         steps: wave.flowSteps.isEmpty ? [wave.flow] : wave.flowSteps,
                         currentIndex: wave.stepIndex,
                         startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt,
+                        stepModels: wave.stepModels,
                         onRestartStep: { restartStep() }
                     )
                     .font(Typography.body())
@@ -864,4 +865,3 @@ struct WaveDetailPanel: View {
         .environment(OutputBuffer())
         .frame(width: 600, height: 700)
 }
-

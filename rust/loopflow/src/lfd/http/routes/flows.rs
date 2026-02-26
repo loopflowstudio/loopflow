@@ -14,6 +14,10 @@ pub struct ListFlowsQuery {
 #[derive(Debug, Serialize)]
 struct StepSummary {
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_model: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -27,6 +31,7 @@ struct FlowsResult {
     flows: Vec<FlowSummary>,
     steps: Vec<StepSummary>,
     directions: Vec<String>,
+    supported_harnesses: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,6 +47,8 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
     let flows = list_flows(&repo_path);
     let steps = list_steps(&repo_path);
     let directions = crate::lf::discovery::list_directions(Some(&repo_path));
+    let supported_harnesses =
+        crate::engine::config::load_config_or_default(Some(&repo_path)).supported_harnesses;
 
     Ok(Json(FlowsResponse {
         ok: true,
@@ -49,6 +56,7 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
             flows,
             steps,
             directions,
+            supported_harnesses,
         },
     }))
 }
@@ -146,7 +154,24 @@ fn list_steps(repo: &Path) -> Vec<StepSummary> {
         }
     }
 
-    let mut list: Vec<StepSummary> = names.into_iter().map(|name| StepSummary { name }).collect();
+    let mut list: Vec<StepSummary> = names
+        .into_iter()
+        .map(|name| {
+            if let Ok(step) = crate::engine::flow::load_step(&name, repo) {
+                StepSummary {
+                    name,
+                    model: step.model,
+                    default_model: step.default_model,
+                }
+            } else {
+                StepSummary {
+                    name,
+                    model: None,
+                    default_model: None,
+                }
+            }
+        })
+        .collect();
     list.sort_by(|a, b| a.name.cmp(&b.name));
     list
 }

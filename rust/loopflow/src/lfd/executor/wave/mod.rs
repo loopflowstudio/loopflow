@@ -14,13 +14,14 @@ use tracing::{debug, error, info, warn};
 use time::OffsetDateTime;
 
 use crate::engine::agent::build_agent_command;
-use crate::engine::config::{load_config_or_default, parse_model};
+use crate::engine::config::{load_config_or_default, parse_harness_model};
 use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
 };
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
+use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
@@ -568,12 +569,14 @@ impl WaveExecutor {
         step: &ConcreteStep,
     ) -> std::result::Result<(Session, Option<String>), SessionManagerError> {
         let repo_config = load_config_or_default(Some(Path::new(&run.worktree)));
-        let model = step
-            .step
-            .model
-            .clone()
-            .unwrap_or_else(|| repo_config.agent_model.clone());
-        let (harness, _) = parse_model(&model);
+        let model_override =
+            wave_model_override(Path::new(wave.repo()), wave.name(), &step.step.name);
+        let model = model_override
+            .or_else(|| step.step.model.clone())
+            .or_else(|| repo_config.agent_model.clone())
+            .or_else(|| step.step.default_model.clone())
+            .unwrap_or_else(|| "claude:opus".to_string());
+        let (harness, _) = parse_harness_model(&model);
         let session_config = interactive_session_config(wave, run, step, model);
 
         let session = self
@@ -709,21 +712,29 @@ impl WaveExecutor {
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
         let worktree = run.worktree.clone();
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
+        let model_override =
+            wave_model_override(Path::new(wave.repo()), wave.name(), &step.step.name);
         let (launch, process) = build_step_prompt(
             &worktree,
             step,
             &run.snapshot.direction,
             Some(wave.name()),
             Some((&self.store, wave.id())),
+            model_override,
             None,
         )
         .await?;
         let capabilities = build_agent_capabilities(&worktree);
         let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
+        let (harness, _) = parse_harness_model(&model);
 
-        // Inject steps and directions as .agents/skills/ for agent auto-discovery.
-        let worktree_path = std::path::Path::new(&worktree);
-        let injected_skills = crate::engine::skills::inject_skills(worktree_path, worktree_path);
+        // Inject steps and directions as .agents/skills/ for Claude agents.
+        let injected_skills = if harness == "claude" {
+            let worktree_path = std::path::Path::new(&worktree);
+            crate::engine::skills::inject_skills(worktree_path, worktree_path)
+        } else {
+            Vec::new()
+        };
 
         info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 
@@ -755,6 +766,15 @@ impl WaveExecutor {
 
         Ok(outcome.exit_code)
     }
+}
+
+fn wave_model_override(repo: &Path, wave_name: &str, step_name: &str) -> Option<String> {
+    let wave_config = read_wave_config(repo, wave_name)?;
+    wave_config
+        .step_models
+        .as_ref()
+        .and_then(|step_models| step_models.get(step_name).cloned())
+        .or(wave_config.model)
 }
 
 fn interactive_session_config(

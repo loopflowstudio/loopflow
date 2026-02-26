@@ -8,19 +8,25 @@ public struct WaveConfigUpdate: Sendable {
     public var direction: [String]?
     public var flow: String?
     public var status: WaveStatus?
+    public var model: String?
+    public var stepModels: [String: String]?
 
     public init(
         name: String? = nil,
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
-        status: WaveStatus? = nil
+        status: WaveStatus? = nil,
+        model: String? = nil,
+        stepModels: [String: String]? = nil
     ) {
         self.name = name
         self.area = area
         self.direction = direction
         self.flow = flow
         self.status = status
+        self.model = model
+        self.stepModels = stepModels
     }
 }
 
@@ -383,7 +389,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let url = components.url else {
             LoggingService.lfd("listFlows: invalid URL")
-            return WaveFlowsResult(flows: [], directions: [])
+            return WaveFlowsResult(flows: [], directions: [], supportedHarnesses: [])
         }
 
         LoggingService.lfd("listFlows: GET \(url)")
@@ -394,7 +400,18 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = json["result"] as? [String: Any] else {
-            return WaveFlowsResult(flows: [], directions: [])
+            return WaveFlowsResult(flows: [], directions: [], supportedHarnesses: [])
+        }
+
+        var stepConfigs: [String: StepConfig] = [:]
+        if let stepsData = result["steps"] as? [[String: Any]] {
+            for stepDict in stepsData {
+                guard let name = stepDict["name"] as? String else { continue }
+                stepConfigs[name] = StepConfig(
+                    model: stepDict["model"] as? String,
+                    defaultModel: stepDict["default_model"] as? String
+                )
+            }
         }
 
         var allFlows: [Flow] = []
@@ -402,7 +419,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             for flowDict in flowsData {
                 guard let name = flowDict["name"] as? String else { continue }
                 let stepNames = flowDict["steps"] as? [String] ?? []
-                let steps = stepNames.map { Step(prompt: $0) }
+                let steps = stepNames.map { stepName in
+                    let config = stepConfigs[stepName]
+                    return Step(prompt: stepName, config: config?.isEmpty == true ? nil : config)
+                }
                 allFlows.append(Flow(name: name, steps: steps, type: .flow))
             }
         }
@@ -410,15 +430,27 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let stepsData = result["steps"] as? [[String: Any]] {
             for stepDict in stepsData {
                 guard let name = stepDict["name"] as? String else { continue }
-                allFlows.append(Flow(name: name, steps: [Step(prompt: name)], type: .step))
+                let config = stepConfigs[name]
+                allFlows.append(
+                    Flow(
+                        name: name,
+                        steps: [Step(prompt: name, config: config?.isEmpty == true ? nil : config)],
+                        type: .step
+                    )
+                )
             }
         }
 
         let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
         let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
         let directions = (result["directions"] as? [String]) ?? []
+        let supportedHarnesses = (result["supported_harnesses"] as? [String]) ?? []
 
-        return WaveFlowsResult(flows: flows + steps, directions: directions)
+        return WaveFlowsResult(
+            flows: flows + steps,
+            directions: directions,
+            supportedHarnesses: supportedHarnesses
+        )
     }
 
     // MARK: - WaveRuns
@@ -621,6 +653,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
 
         let flowSteps = json["flow_steps"] as? [String] ?? []
+        let stepModels = (json["step_models"] as? [String: Any])?.reduce(into: [String: String]()) { partial, entry in
+            if let value = entry.value as? String {
+                partial[entry.key] = value
+            }
+        }
 
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
@@ -629,6 +666,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             flow: json["flow"] as? String ?? "",
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
+            model: json["model"] as? String,
+            stepModels: stepModels,
             stimuli: stimuli,
             status: status,
             iteration: json["iteration"] as? Int ?? 0,
@@ -643,7 +682,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    /// Update wave configuration (name, area, direction, flow, status).
+    /// Update wave configuration (name, area, direction, flow, status, model).
     public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
         var body: [String: Any] = [:]
         if let name = config.name { body["name"] = name }
@@ -651,6 +690,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let direction = config.direction { body["direction"] = direction }
         if let flow = config.flow { body["flow"] = flow }
         if let status = config.status { body["status"] = status.rawValue }
+        if let model = config.model { body["model"] = model }
+        if let stepModels = config.stepModels { body["step_models"] = stepModels }
 
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves/\(id)"),

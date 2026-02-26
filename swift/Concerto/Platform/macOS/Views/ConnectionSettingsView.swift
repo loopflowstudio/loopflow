@@ -34,6 +34,7 @@ struct ConnectionSettingsView: View {
 
                 statusContent
                 providerConnectionsContent
+                supportedHarnessesContent
 
                 if let cliMessage, mode == .bundled {
                     Text(cliMessage)
@@ -265,6 +266,24 @@ struct ConnectionSettingsView: View {
                     onCancel: disconnectProvider,
                     onCopy: copyToClipboard
                 )
+            }
+        }
+    }
+
+    private var supportedHarnessesContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Supported harnesses")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+
+            if repoState.supportedHarnesses.isEmpty {
+                Text("None configured — using system default (claude)")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            } else {
+                Text(repoState.supportedHarnesses.joined(separator: ", "))
+                    .font(Typography.code(11))
+                    .foregroundStyle(palette.text)
             }
         }
     }

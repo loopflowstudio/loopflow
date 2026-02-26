@@ -65,7 +65,10 @@ impl WaveExecutor {
                 &format!("Read and summarize these paths: {area_list}"),
             );
 
-        let model = config.agent_model.clone();
+        let model = config
+            .agent_model
+            .clone()
+            .unwrap_or_else(|| "claude:opus".to_string());
         let launch = AgentConfig {
             task_prompt: prompt,
             model: Some(model.clone()),
@@ -89,6 +92,7 @@ impl WaveExecutor {
             step: Step {
                 name: "_summarize".to_string(),
                 model: Some(model.clone()),
+                default_model: None,
                 directions: Vec::new(),
                 action_style: None,
                 interactive: Some(false),
@@ -125,7 +129,7 @@ impl WaveExecutor {
                     content,
                     source_hash: source_hash.to_string(),
                     token_budget: token_budget as u32,
-                    model: config.agent_model,
+                    model,
                     created_at: Some(OffsetDateTime::now_utc()),
                 };
                 self.store.upsert_summary(&summary).await?;

@@ -1,8 +1,8 @@
 use crate::engine::{
-    check_cli_available, launch_agent, load_config_or_default, parse_model, prepare_launch_prompt,
-    seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextBreakdown,
-    ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents, StreamFormat,
-    Surface, DEFAULT_CONTEXT_BUDGET,
+    check_cli_available, launch_agent, load_config_or_default, parse_harness_model,
+    prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
+    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents,
+    StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -37,7 +37,7 @@ struct PromptBuild {
     components: PromptComponents,
     breakdown: ContextBreakdown,
     prompt: String,
-    backend: String,
+    harness: String,
     step_name: Option<String>,
     log_name: String,
 }
@@ -53,7 +53,11 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
     );
-    trace!(?config.agent_model, ?config.yolo, "loaded config");
+    trace!(
+        agent_model = config.agent_model.as_deref().unwrap_or("claude:opus"),
+        ?config.yolo,
+        "loaded config"
+    );
 
     let discover_start = Instant::now();
     let discovered_step = if let Some(step_name) = step {
@@ -122,7 +126,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .model
         .clone()
         .expect("prepare_launch_prompt always sets launch model");
-    let (backend, _variant) = parse_model(&model);
+    let (harness, _model) = parse_harness_model(&model);
 
     let step_name = step.map(|value| value.to_string());
     let log_name = step_name
@@ -147,7 +151,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         components: prepared.components,
         breakdown: prepared.breakdown,
         prompt: prepared.prompt,
-        backend,
+        harness,
         step_name,
         log_name,
     })
@@ -188,16 +192,16 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     if cli.web {
         info!("copying to clipboard and opening web client");
         copy_to_clipboard(&built.prompt)?;
-        open_web_client(&built.backend)?;
+        open_web_client(&built.harness)?;
         println!("Copied to clipboard.");
         return Ok(());
     }
 
     let cli_check_start = Instant::now();
-    if !check_cli_available(&built.backend) {
+    if !check_cli_available(&built.harness) {
         return Err(anyhow!(
             "'{}' CLI not found. Run `lf ops doctor` to check dependencies.",
-            built.backend
+            built.harness
         ));
     }
     debug!(
@@ -234,13 +238,13 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     // Inject steps and directions as .agents/skills/ for agent auto-discovery.
     // Default off for CLI; always on for lfd. Enable with `inject_skills: true` in .lf/config.yaml.
-    let injected_skills = if built.config.inject_skills {
+    let injected_skills = if built.config.inject_skills && built.harness == "claude" {
         crate::engine::skills::inject_skills(&built.repo_root, &built.repo_root)
     } else {
         Vec::new()
     };
 
-    info!(backend = built.backend, "launching agent");
+    info!(harness = built.harness, "launching agent");
     let launch_start = Instant::now();
     let result = launch_agent(&built.agent_config, &process, &built.capabilities);
 

@@ -172,6 +172,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var flow: String
     public var direction: [String]
     public var area: [String]
+    public var model: String?
+    public var stepModels: [String: String]?
     public var stimuli: [Stimulus]
     public var status: WaveStatus
     public var iteration: Int
@@ -191,6 +193,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         flow: String = "",
         direction: [String] = [],
         area: [String] = [],
+        model: String? = nil,
+        stepModels: [String: String]? = nil,
         stimuli: [Stimulus] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
@@ -209,6 +213,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.flow = flow
         self.direction = direction
         self.area = area
+        self.model = model
+        self.stepModels = stepModels
         self.stimuli = stimuli
         self.status = status
         self.iteration = iteration

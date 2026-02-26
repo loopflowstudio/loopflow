@@ -570,17 +570,7 @@ fn extract_placeholder_numbers(template: &str) -> Vec<usize> {
 
 #[cfg(test)]
 fn placeholders_are_contiguous(template: &str) -> bool {
-    let mut numbers = extract_placeholder_numbers(template);
-    if numbers.is_empty() {
-        return true;
-    }
-
-    numbers.sort_unstable();
-    numbers.dedup();
-    numbers
-        .iter()
-        .enumerate()
-        .all(|(idx, number)| *number == idx + 1)
+    placeholder_numbers_are_contiguous(extract_placeholder_numbers(template))
 }
 
 #[cfg(test)]
@@ -613,10 +603,15 @@ fn extract_rendered_placeholder_numbers(sql: &str, marker: u8) -> Vec<usize> {
 
 #[cfg(test)]
 fn rendered_placeholders_are_contiguous(sql: &str, marker: u8) -> bool {
-    let mut numbers = extract_rendered_placeholder_numbers(sql, marker);
+    placeholder_numbers_are_contiguous(extract_rendered_placeholder_numbers(sql, marker))
+}
+
+#[cfg(test)]
+fn placeholder_numbers_are_contiguous(mut numbers: Vec<usize>) -> bool {
     if numbers.is_empty() {
         return true;
     }
+
     numbers.sort_unstable();
     numbers.dedup();
     numbers

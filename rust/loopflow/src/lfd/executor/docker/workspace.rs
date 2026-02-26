@@ -13,6 +13,16 @@ use super::{
 };
 
 impl DockerExecutor {
+    fn git_at<I, S>(repo_path: &str, args: I) -> Vec<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut cmd = vec!["git".to_string(), "-C".to_string(), repo_path.to_string()];
+        cmd.extend(args.into_iter().map(Into::into));
+        cmd
+    }
+
     pub(super) fn worktree_slug_from_host_path(host_worktree: &Path) -> String {
         let fallback = host_worktree.to_string_lossy().to_string();
         let slug = host_worktree
@@ -214,13 +224,7 @@ impl DockerExecutor {
         self.git_command(
             workspace,
             "git-probe",
-            vec![
-                "git".to_string(),
-                "-C".to_string(),
-                repo_path.to_string(),
-                "rev-parse".to_string(),
-                "--is-inside-work-tree".to_string(),
-            ],
+            Self::git_at(repo_path, ["rev-parse", "--is-inside-work-tree"]),
             false,
         )
         .await
@@ -284,14 +288,10 @@ impl DockerExecutor {
         self.git_command(
             workspace,
             "git-fetch",
-            vec![
-                "git".to_string(),
-                "-C".to_string(),
-                workspace.container_shared_clone.clone(),
-                "fetch".to_string(),
-                "--prune".to_string(),
-                "origin".to_string(),
-            ],
+            Self::git_at(
+                &workspace.container_shared_clone,
+                ["fetch", "--prune", "origin"],
+            ),
             !workspace.has_remote,
         )
         .await?;
@@ -318,44 +318,39 @@ impl DockerExecutor {
             .git_command(
                 workspace,
                 "git-show-ref-local",
-                vec![
-                    "git".to_string(),
-                    "-C".to_string(),
-                    workspace.container_shared_clone.clone(),
-                    "show-ref".to_string(),
-                    "--verify".to_string(),
-                    "--quiet".to_string(),
-                    local_branch_ref,
-                ],
+                Self::git_at(
+                    &workspace.container_shared_clone,
+                    ["show-ref", "--verify", "--quiet", local_branch_ref.as_str()],
+                ),
                 false,
             )
             .await
             .is_ok();
 
         let command = if has_local_branch {
-            vec![
-                "git".to_string(),
-                "-C".to_string(),
-                workspace.container_shared_clone.clone(),
-                "worktree".to_string(),
-                "add".to_string(),
-                "--force".to_string(),
-                workspace.container_worktree.clone(),
-                workspace.branch.clone(),
-            ]
+            Self::git_at(
+                &workspace.container_shared_clone,
+                [
+                    "worktree",
+                    "add",
+                    "--force",
+                    workspace.container_worktree.as_str(),
+                    workspace.branch.as_str(),
+                ],
+            )
         } else {
-            vec![
-                "git".to_string(),
-                "-C".to_string(),
-                workspace.container_shared_clone.clone(),
-                "worktree".to_string(),
-                "add".to_string(),
-                "--force".to_string(),
-                "-B".to_string(),
-                workspace.branch.clone(),
-                workspace.container_worktree.clone(),
-                "HEAD".to_string(),
-            ]
+            Self::git_at(
+                &workspace.container_shared_clone,
+                [
+                    "worktree",
+                    "add",
+                    "--force",
+                    "-B",
+                    workspace.branch.as_str(),
+                    workspace.container_worktree.as_str(),
+                    "HEAD",
+                ],
+            )
         };
 
         self.git_command(workspace, "git-worktree-add", command, false)
@@ -369,14 +364,10 @@ impl DockerExecutor {
             .git_command(
                 workspace,
                 "git-rev-parse",
-                vec![
-                    "git".to_string(),
-                    "-C".to_string(),
-                    workspace.container_worktree.clone(),
-                    "rev-parse".to_string(),
-                    "--verify".to_string(),
-                    target_ref.clone(),
-                ],
+                Self::git_at(
+                    &workspace.container_worktree,
+                    ["rev-parse", "--verify", target_ref.as_str()],
+                ),
                 false,
             )
             .await
@@ -390,14 +381,10 @@ impl DockerExecutor {
         self.git_command(
             workspace,
             "git-reset",
-            vec![
-                "git".to_string(),
-                "-C".to_string(),
-                workspace.container_worktree.clone(),
-                "reset".to_string(),
-                "--hard".to_string(),
-                target,
-            ],
+            Self::git_at(
+                &workspace.container_worktree,
+                ["reset", "--hard", target.as_str()],
+            ),
             false,
         )
         .await?;
@@ -405,13 +392,7 @@ impl DockerExecutor {
         self.git_command(
             workspace,
             "git-clean",
-            vec![
-                "git".to_string(),
-                "-C".to_string(),
-                workspace.container_worktree.clone(),
-                "clean".to_string(),
-                "-fdx".to_string(),
-            ],
+            Self::git_at(&workspace.container_worktree, ["clean", "-fdx"]),
             false,
         )
         .await?;
@@ -631,15 +612,15 @@ impl DockerExecutor {
             .git_command(
                 workspace,
                 "git-worktree-remove",
-                vec![
-                    "git".to_string(),
-                    "-C".to_string(),
-                    workspace.container_shared_clone.clone(),
-                    "worktree".to_string(),
-                    "remove".to_string(),
-                    "--force".to_string(),
-                    workspace.container_worktree.clone(),
-                ],
+                Self::git_at(
+                    &workspace.container_shared_clone,
+                    [
+                        "worktree",
+                        "remove",
+                        "--force",
+                        workspace.container_worktree.as_str(),
+                    ],
+                ),
                 false,
             )
             .await

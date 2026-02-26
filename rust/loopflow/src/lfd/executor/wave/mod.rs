@@ -28,7 +28,8 @@ use crate::lfd::sessions::types::{CreateSessionParams, Session, SessionConfig, S
 use crate::lfd::sessions::{SessionManager, SessionManagerError};
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::triggers::{
-    enqueue_pending_activation, spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
+    dispatch_wave_if_ready, enqueue_pending_activation, spawn_run_task_with_slot,
+    ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
     ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Stimulus, Wave, WaveRun,
@@ -38,11 +39,11 @@ use crate::lfd::types::{
 use super::docker::DockerExecutor;
 use super::helpers::{
     advance_branch, auto_commit_if_dirty, auto_create_pr, build_agent_capabilities,
-    build_step_prompt, create_wave_run_with_id, flow_parents_for_index, is_active_wave_run_status,
+    build_step_prompt, flow_parents_for_index, is_active_wave_run_status,
     is_ephemeral_worktree_path,
 };
 use super::local::LocalProcessExecutor;
-use super::{AgentExecutor, EphemeralOwnerKind, EphemeralWorktree, JanitorReport, StartupRecovery};
+use super::{AgentExecutor, JanitorReport, StartupRecovery};
 use launch::AgentLaunchRequest;
 
 #[derive(Clone)]
@@ -141,9 +142,7 @@ impl WaveExecutor {
     }
 
     pub async fn run_worktree_janitor(&self, repo_roots: &[PathBuf]) -> Result<JanitorReport> {
-        let active = self.collect_active_ephemeral_worktrees().await?;
-        let active_paths: HashSet<String> =
-            active.into_iter().map(|worktree| worktree.path).collect();
+        let active_paths = self.collect_active_ephemeral_worktrees().await?;
 
         let mut roots = HashSet::new();
         for repo_root in repo_roots {
@@ -192,8 +191,8 @@ impl WaveExecutor {
         Ok(report)
     }
 
-    async fn collect_active_ephemeral_worktrees(&self) -> Result<Vec<EphemeralWorktree>> {
-        let mut active = Vec::new();
+    async fn collect_active_ephemeral_worktrees(&self) -> Result<HashSet<String>> {
+        let mut active = HashSet::new();
         let runs = self.store.list_wave_runs(None, None).await?;
 
         for run in runs {
@@ -207,11 +206,7 @@ impl WaveExecutor {
                 if !matches!(fork.status, ForkRunStatus::Pending | ForkRunStatus::Running) {
                     continue;
                 }
-                active.push(EphemeralWorktree {
-                    path: fork.worktree,
-                    owner_kind: EphemeralOwnerKind::Fork,
-                    owner_id: fork.id.to_string(),
-                });
+                active.insert(fork.worktree);
             }
         }
 
@@ -520,9 +515,24 @@ impl WaveExecutor {
             }
 
             if self
-                .start_or_queue_listen_activation(&listener_wave, &stimulus)
+                .enqueue_listen_activation(
+                    &listener_wave,
+                    &stimulus,
+                    format!(
+                        "listen stimulus {} triggered by source wave {}",
+                        stimulus.id, source_wave_id
+                    ),
+                )
                 .await
             {
+                let _ = dispatch_wave_if_ready(
+                    &self.store,
+                    self,
+                    &self.scheduler,
+                    &self.event_hub,
+                    &listener_wave,
+                )
+                .await;
                 stimulus.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
                 if let Err(err) = self.store.update_stimulus(&stimulus).await {
                     warn!(
@@ -535,65 +545,7 @@ impl WaveExecutor {
         }
     }
 
-    async fn start_or_queue_listen_activation(&self, wave: &Wave, stimulus: &Stimulus) -> bool {
-        if self
-            .store
-            .get_active_wave_run(wave.id())
-            .await
-            .ok()
-            .flatten()
-            .is_some()
-        {
-            return self
-                .queue_listen_activation(
-                    wave,
-                    stimulus,
-                    format!(
-                        "listen stimulus {} deferred: wave already running",
-                        stimulus.id
-                    ),
-                )
-                .await;
-        }
-
-        let run_id = LfdId::new();
-        let slot_guard = match self.scheduler.acquire_guard(run_id.as_str()).await {
-            Ok(guard) => guard,
-            Err(reason) => {
-                debug!(
-                    wave_id = %wave.id(),
-                    reason = %reason,
-                    "scheduler at capacity; queueing listen activation"
-                );
-                return self
-                    .queue_listen_activation(
-                        wave,
-                        stimulus,
-                        format!("listen stimulus {} deferred: scheduler full", stimulus.id),
-                    )
-                    .await;
-            }
-        };
-
-        let run = match create_wave_run_with_id(&self.store, wave, &run_id).await {
-            Ok(run) => run,
-            Err(err) => {
-                warn!(wave_id = %wave.id(), error = %err, "failed creating listening wave run");
-                return false;
-            }
-        };
-
-        spawn_run_task_with_slot(
-            self.store.clone(),
-            self.clone(),
-            self.event_hub.clone(),
-            run,
-            slot_guard,
-        );
-        true
-    }
-
-    async fn queue_listen_activation(
+    async fn enqueue_listen_activation(
         &self,
         wave: &Wave,
         stimulus: &Stimulus,

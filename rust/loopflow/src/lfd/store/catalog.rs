@@ -39,7 +39,6 @@ pub(crate) enum Query {
     ListPendingActivationsByWave,
     InsertPendingActivation,
     UpdatePendingActivation,
-    DeletePendingActivationsByWave,
     DeletePendingActivationById,
     GetPendingActivationForStimulus,
     InsertActivationLog,
@@ -103,7 +102,6 @@ impl Query {
         Self::ListPendingActivationsByWave,
         Self::InsertPendingActivation,
         Self::UpdatePendingActivation,
-        Self::DeletePendingActivationsByWave,
         Self::DeletePendingActivationById,
         Self::GetPendingActivationForStimulus,
         Self::InsertActivationLog,
@@ -297,11 +295,6 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     QueryDef {
         template: "UPDATE pending_activations SET source = {p1}, reason = {p2}, from_sha = {p3}, to_sha = {p4} WHERE id = {p5}",
-        sqlite_override: None,
-        postgres_override: None,
-    },
-    QueryDef {
-        template: "DELETE FROM pending_activations WHERE wave_id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },

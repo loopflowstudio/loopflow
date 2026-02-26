@@ -266,10 +266,6 @@ impl Store {
         WaveStateStore::update_pending_activation(self, activation).await
     }
 
-    pub async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::delete_pending_activations(self, wave_id).await
-    }
-
     pub async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
         WaveStateStore::delete_pending_activation_by_id(self, activation_id).await
     }
@@ -570,7 +566,6 @@ pub trait WaveStateStore: Send + Sync {
     ) -> StoreResult<Vec<PendingActivation>>;
     async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
     async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
-    async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32>;
     async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32>;
     async fn get_pending_for_stimulus(
         &self,
@@ -1063,19 +1058,6 @@ impl WaveStateStore for Store {
                 .await
             }
             StoreBackend::Postgres(store) => store.update_pending_activation(activation).await,
-        }
-    }
-
-    async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.delete_pending_activations(&wave_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.delete_pending_activations(wave_id).await,
         }
     }
 

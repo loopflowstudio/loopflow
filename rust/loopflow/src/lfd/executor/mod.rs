@@ -117,20 +117,6 @@ pub struct StartupRecovery {
     pub orphaned_fork_worktrees_removed: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum EphemeralOwnerKind {
-    Fork,
-    CiFix,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EphemeralWorktree {
-    pub path: String,
-    pub owner_kind: EphemeralOwnerKind,
-    pub owner_id: String,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JanitorReport {
     pub removed: u32,

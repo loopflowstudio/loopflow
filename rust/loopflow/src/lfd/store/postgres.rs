@@ -1165,19 +1165,6 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        self.with_client(|client| async move {
-            let deleted = client
-                .execute(
-                    Self::sql(Query::DeletePendingActivationsByWave),
-                    &[&wave_id],
-                )
-                .await?;
-            Ok(deleted as u32)
-        })
-        .await
-    }
-
     pub async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,

@@ -1031,15 +1031,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let deleted = conn.execute(
-            Self::sql(Query::DeletePendingActivationsByWave),
-            params![wave_id],
-        )?;
-        Ok(deleted as u32)
-    }
-
     pub fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,

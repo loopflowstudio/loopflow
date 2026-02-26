@@ -14,12 +14,7 @@ use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::types::{Repo, Wave};
 
 #[derive(Debug, Deserialize)]
-pub struct AddRepoRequest {
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RemoveRepoRequest {
+pub struct RepoPathRequest {
     pub path: String,
 }
 
@@ -39,7 +34,7 @@ pub async fn list_repos_handler(
 
 pub async fn add_repo_handler(
     State(state): State<HttpState>,
-    Json(payload): Json<AddRepoRequest>,
+    Json(payload): Json<RepoPathRequest>,
 ) -> Result<(StatusCode, Json<RepoDto>), ApiError> {
     let path = validate_and_canonicalize_repo_path(&payload.path)?;
 
@@ -68,13 +63,13 @@ pub async fn add_repo_handler(
 
     Ok((
         StatusCode::CREATED,
-        Json(repo_to_dto(repo, wave_count, true)),
+        Json(repo_to_dto(repo, wave_count)),
     ))
 }
 
 pub async fn remove_repo_handler(
     State(state): State<HttpState>,
-    Json(payload): Json<RemoveRepoRequest>,
+    Json(payload): Json<RepoPathRequest>,
 ) -> Result<StatusCode, ApiError> {
     let path = validate_absolute_repo_path(&payload.path)?;
     let normalized = if path.exists() {
@@ -102,7 +97,7 @@ fn build_repo_dtos(registered: Vec<Repo>, waves: Vec<Wave>) -> Vec<RepoDto> {
     let mut repos: BTreeMap<String, RepoDto> = BTreeMap::new();
     for repo in registered {
         let wave_count = wave_counts.remove(&repo.path).unwrap_or(0);
-        repos.insert(repo.path.clone(), repo_to_dto(repo, wave_count, true));
+        repos.insert(repo.path.clone(), repo_to_dto(repo, wave_count));
     }
 
     for (path, wave_count) in wave_counts {
@@ -123,13 +118,13 @@ fn build_repo_dtos(registered: Vec<Repo>, waves: Vec<Wave>) -> Vec<RepoDto> {
     repos.into_values().collect()
 }
 
-fn repo_to_dto(repo: Repo, wave_count: u32, registered: bool) -> RepoDto {
+fn repo_to_dto(repo: Repo, wave_count: u32) -> RepoDto {
     RepoDto {
         object: "repo".to_string(),
         path: repo.path,
         name: repo.name,
         wave_count,
-        registered,
+        registered: true,
         added_at: format_datetime(Some(repo.added_at)),
     }
 }
@@ -312,7 +307,7 @@ mod tests {
 
         let (status, Json(dto)) = add_repo_handler(
             State(state.clone()),
-            Json(AddRepoRequest {
+            Json(RepoPathRequest {
                 path: repo_path.to_string_lossy().to_string(),
             }),
         )
@@ -335,7 +330,7 @@ mod tests {
 
         let error = add_repo_handler(
             State(state.clone()),
-            Json(AddRepoRequest {
+            Json(RepoPathRequest {
                 path: repo_path.to_string_lossy().to_string(),
             }),
         )
@@ -369,7 +364,7 @@ mod tests {
 
         let status = remove_repo_handler(
             State(state.clone()),
-            Json(RemoveRepoRequest {
+            Json(RepoPathRequest {
                 path: canonical.clone(),
             }),
         )

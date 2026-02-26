@@ -115,6 +115,11 @@ Deliver lifecycle commands, repo discovery, and `lf up` entrypoint.
 3. Ship 04 and enable `auto` container detection.
 4. Harden with failure telemetry and operator docs.
 
+## Known follow-ups (from 01–03 review)
+
+- **`@loopflow_status_format` customization:** option is documented but not implemented. Status format is hardcoded. Wire up the tmux option or remove it from the spec.
+- **fzf picker in `run-shell` context:** fzf needs a TTY. `run-shell` may not provide one. Interactive picker paths (`w`, `L`, container `r`/`s`) may need `display-popup` wrapping. Biggest UX risk from phases 01–03.
+
 ## Risks and mitigations
 
 - **Status jitter:** cache with TTL + stale marker.

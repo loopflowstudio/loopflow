@@ -136,3 +136,55 @@ fn flow_dto(response: AuthFlowResponse) -> AuthFlowResponseDto {
         expires_in: response.expires_in,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_provider_supports_aliases() {
+        assert_eq!(parse_provider("github").expect("github"), Provider::GitHub);
+        assert_eq!(parse_provider("gh").expect("gh"), Provider::GitHub);
+        assert_eq!(parse_provider("claude").expect("claude"), Provider::Claude);
+        assert_eq!(parse_provider("codex").expect("codex"), Provider::Codex);
+    }
+
+    #[test]
+    fn parse_provider_rejects_unknown_values() {
+        let (status, body) = parse_provider("gemini").expect_err("unknown provider");
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body.error.message, "provider not found");
+    }
+
+    #[test]
+    fn map_auth_error_returns_expected_status_codes() {
+        let (pending_status, _) = map_auth_error(AuthError::FlowAlreadyPending(Provider::Claude));
+        assert_eq!(pending_status, StatusCode::CONFLICT);
+
+        let (missing_cli_status, _) = map_auth_error(AuthError::CommandUnavailable {
+            provider: Provider::Codex,
+            command: "codex".to_string(),
+        });
+        assert_eq!(missing_cli_status, StatusCode::BAD_REQUEST);
+
+        let (command_failed_status, _) = map_auth_error(AuthError::CommandFailed {
+            provider: Provider::GitHub,
+            message: "boom".to_string(),
+        });
+        assert_eq!(command_failed_status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn status_dto_preserves_provider_and_login() {
+        let dto = status_dto(ProviderAuthSnapshot {
+            provider: Provider::GitHub,
+            status: crate::lfd::provider_auth::AuthStatus::Active {
+                login: Some("jackdanger".to_string()),
+            },
+        });
+
+        assert_eq!(dto.provider, "github");
+        assert_eq!(dto.status, "active");
+        assert_eq!(dto.login, Some("jackdanger".to_string()));
+    }
+}

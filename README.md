@@ -175,6 +175,9 @@ lfq list             # list waves
 lfq logs engbot      # tail agent output
 lfq auth status      # provider auth status (GitHub / Claude / Codex)
 lfq auth github      # connect GitHub in your browser
+lfq auth claude      # connect Claude in your browser
+lfq auth codex       # connect Codex in your browser
+lfq auth disconnect github
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

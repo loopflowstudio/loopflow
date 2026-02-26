@@ -60,7 +60,7 @@ impl std::fmt::Display for Provider {
 }
 
 impl FromStr for Provider {
-    type Err = ();
+    type Err = ParseProviderError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let normalized = value.trim().to_ascii_lowercase();
@@ -68,9 +68,17 @@ impl FromStr for Provider {
             "github" | "gh" => Ok(Self::GitHub),
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
-            _ => Err(()),
+            _ => Err(ParseProviderError {
+                input: value.trim().to_string(),
+            }),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("unsupported provider: {input}")]
+pub struct ParseProviderError {
+    input: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

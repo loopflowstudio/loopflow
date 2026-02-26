@@ -16,14 +16,27 @@ struct RemoteConnectionConfig: Codable {
             authMode: .staticToken
         )
     }
+
+    var isLocalhost: Bool {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
+    }
+}
+
+extension ConcertoConfig {
+    var seededConnection: ServerConnection? {
+        guard let connection, !connection.isLocalhost else {
+            return nil
+        }
+        return connection.toServerConnection()
+    }
 }
 
 func loadConcertoConfig(configURL: URL = ConcertoConfig.defaultURL) -> ConcertoConfig? {
-    guard let raw = try? String(contentsOf: configURL, encoding: .utf8) else {
-        return nil
-    }
-
-    if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    guard
+        let raw = try? String(contentsOf: configURL, encoding: .utf8),
+        !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
         return nil
     }
 
@@ -39,54 +52,61 @@ private extension ConcertoConfig {
 }
 
 private func parseConcertoConfig(_ raw: String) -> ConcertoConfig {
+    let lines = raw.components(separatedBy: .newlines)
+    guard let connectionIndex = lines.firstIndex(where: {
+        $0.trimmingCharacters(in: .whitespaces) == "connection:"
+    }) else {
+        return ConcertoConfig(connection: nil)
+    }
+
+    let connectionIndent = indentation(of: lines[connectionIndex])
     var host: String?
     var port: Int?
-    var inConnection = false
-    var connectionIndent = 0
 
-    for line in raw.components(separatedBy: .newlines) {
+    for line in lines[(connectionIndex + 1)...] {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty || trimmed.hasPrefix("#") {
             continue
         }
 
-        let indentation = line.prefix { $0 == " " || $0 == "\t" }.count
-
-        if !inConnection {
-            if trimmed == "connection:" {
-                inConnection = true
-                connectionIndent = indentation
-            }
-            continue
-        }
-
-        if indentation <= connectionIndent {
+        if indentation(of: line) <= connectionIndent {
             break
         }
 
-        guard let separatorIndex = trimmed.firstIndex(of: ":") else {
+        guard let (key, value) = keyValuePair(from: trimmed) else {
             continue
         }
-
-        let key = String(trimmed[..<separatorIndex]).trimmingCharacters(in: .whitespaces)
-        let valueStart = trimmed.index(after: separatorIndex)
-        let value = String(trimmed[valueStart...]).trimmingCharacters(in: .whitespaces)
-        let normalizedValue = unquote(value)
 
         switch key {
         case "host":
-            host = normalizedValue
+            host = unquote(value)
         case "port":
-            port = Int(normalizedValue)
+            port = Int(unquote(value))
         default:
-            continue
+            break
         }
     }
 
-    if let host, let port {
-        return ConcertoConfig(connection: RemoteConnectionConfig(host: host, port: port))
+    guard let host, let port else {
+        return ConcertoConfig(connection: nil)
     }
-    return ConcertoConfig(connection: nil)
+
+    return ConcertoConfig(connection: RemoteConnectionConfig(host: host, port: port))
+}
+
+private func indentation(of line: String) -> Int {
+    line.prefix { $0 == " " || $0 == "\t" }.count
+}
+
+private func keyValuePair(from line: String) -> (String, String)? {
+    guard let separatorIndex = line.firstIndex(of: ":") else {
+        return nil
+    }
+
+    let key = line[..<separatorIndex].trimmingCharacters(in: .whitespaces)
+    let valueStart = line.index(after: separatorIndex)
+    let value = line[valueStart...].trimmingCharacters(in: .whitespaces)
+    return (String(key), String(value))
 }
 
 private func unquote(_ value: String) -> String {

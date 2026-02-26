@@ -283,9 +283,9 @@ public final class ConnectionStore {
             )
         }
 
-        if let connection = configLoader()?.connection, !connection.isLocalhost {
+        if let connection = configLoader()?.seededConnection {
             return remoteState(
-                from: connection.toServerConnection(),
+                from: connection,
                 secretStore: secretStore,
                 shouldPersist: true
             )
@@ -296,12 +296,5 @@ public final class ConnectionStore {
             secretStore: secretStore,
             shouldPersist: false
         )
-    }
-}
-
-private extension RemoteConnectionConfig {
-    var isLocalhost: Bool {
-        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
     }
 }

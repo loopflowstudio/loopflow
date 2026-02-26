@@ -9,7 +9,7 @@ struct ConnectionStoreTests {
     @Test("defaults to bundled mode")
     func defaultsToBundled() {
         let defaults = makeDefaults()
-        let store = ConnectionStore(defaults: defaults, configLoader: { nil })
+        let store = makeStore(defaults: defaults)
 
         #expect(store.mode == .bundled)
         #expect(store.activeConnection == .local)
@@ -18,7 +18,7 @@ struct ConnectionStoreTests {
     @Test("persists remote connection mode")
     func persistsRemoteMode() {
         let defaults = makeDefaults()
-        let store = ConnectionStore(defaults: defaults, configLoader: { nil })
+        let store = makeStore(defaults: defaults)
         let remote = ServerConnection(
             host: "lfd.example.com",
             port: 443,
@@ -28,7 +28,7 @@ struct ConnectionStoreTests {
 
         store.setRemoteConnection(remote)
 
-        let reloaded = ConnectionStore(defaults: defaults, configLoader: { nil })
+        let reloaded = makeStore(defaults: defaults)
         #expect(reloaded.mode == .remote)
         #expect(reloaded.activeConnection.host == "lfd.example.com")
         #expect(reloaded.activeConnection.port == 443)
@@ -38,7 +38,7 @@ struct ConnectionStoreTests {
     @Test("bundled runtime connection is not persisted")
     func bundledRuntimeNotPersisted() {
         let defaults = makeDefaults()
-        let store = ConnectionStore(defaults: defaults, configLoader: { nil })
+        let store = makeStore(defaults: defaults)
         let remote = ServerConnection(
             host: "lfd.example.com",
             port: 443,
@@ -57,7 +57,7 @@ struct ConnectionStoreTests {
             )
         )
 
-        let reloaded = ConnectionStore(defaults: defaults, configLoader: { nil })
+        let reloaded = makeStore(defaults: defaults)
         #expect(reloaded.mode == .bundled)
         #expect(reloaded.activeConnection == .local)
         #expect(reloaded.configuredRemoteConnection?.host == "lfd.example.com")
@@ -66,11 +66,9 @@ struct ConnectionStoreTests {
     @Test("seeds remote mode from concerto config when defaults are empty")
     func seedsFromConcertoConfig() {
         let defaults = makeDefaults()
-        let config = ConcertoConfig(
-            connection: RemoteConnectionConfig(host: "lfd-dev.loopflow.studio", port: 443)
-        )
+        let config = remoteConfig(host: "lfd-dev.loopflow.studio")
 
-        let store = ConnectionStore(defaults: defaults, configLoader: { config })
+        let store = makeStore(defaults: defaults, config: config)
 
         #expect(store.mode == .remote)
         #expect(store.activeConnection.host == "lfd-dev.loopflow.studio")
@@ -88,13 +86,11 @@ struct ConnectionStoreTests {
             useTLS: true,
             authMode: .none
         )
-        let seeded = ConnectionStore(defaults: defaults, configLoader: { nil })
+        let seeded = makeStore(defaults: defaults)
         seeded.setRemoteConnection(persisted)
 
-        let config = ConcertoConfig(
-            connection: RemoteConnectionConfig(host: "lfd-dev.loopflow.studio", port: 443)
-        )
-        let reloaded = ConnectionStore(defaults: defaults, configLoader: { config })
+        let config = remoteConfig(host: "lfd-dev.loopflow.studio")
+        let reloaded = makeStore(defaults: defaults, config: config)
 
         #expect(reloaded.mode == .remote)
         #expect(reloaded.activeConnection.host == "saved.loopflow.studio")
@@ -104,15 +100,9 @@ struct ConnectionStoreTests {
     @Test("concerto config seeds user defaults on first launch")
     func concertoConfigPersistsAfterFirstLaunch() {
         let defaults = makeDefaults()
-        let firstConfig = ConcertoConfig(
-            connection: RemoteConnectionConfig(host: "lfd-dev.loopflow.studio", port: 443)
-        )
-        _ = ConnectionStore(defaults: defaults, configLoader: { firstConfig })
+        _ = makeStore(defaults: defaults, config: remoteConfig(host: "lfd-dev.loopflow.studio"))
 
-        let secondConfig = ConcertoConfig(
-            connection: RemoteConnectionConfig(host: "changed.loopflow.studio", port: 443)
-        )
-        let reloaded = ConnectionStore(defaults: defaults, configLoader: { secondConfig })
+        let reloaded = makeStore(defaults: defaults, config: remoteConfig(host: "changed.loopflow.studio"))
 
         #expect(reloaded.mode == .remote)
         #expect(reloaded.activeConnection.host == "lfd-dev.loopflow.studio")
@@ -121,11 +111,9 @@ struct ConnectionStoreTests {
     @Test("localhost concerto config is ignored")
     func ignoresLocalhostConcertoConfig() {
         let defaults = makeDefaults()
-        let config = ConcertoConfig(
-            connection: RemoteConnectionConfig(host: "localhost", port: 443)
-        )
+        let config = remoteConfig(host: "localhost")
 
-        let store = ConnectionStore(defaults: defaults, configLoader: { config })
+        let store = makeStore(defaults: defaults, config: config)
 
         #expect(store.mode == .bundled)
         #expect(store.activeConnection == .local)
@@ -136,5 +124,13 @@ struct ConnectionStoreTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         return defaults
+    }
+
+    private func makeStore(defaults: UserDefaults, config: ConcertoConfig? = nil) -> ConnectionStore {
+        ConnectionStore(defaults: defaults, configLoader: { config })
+    }
+
+    private func remoteConfig(host: String) -> ConcertoConfig {
+        ConcertoConfig(connection: RemoteConnectionConfig(host: host, port: 443))
     }
 }

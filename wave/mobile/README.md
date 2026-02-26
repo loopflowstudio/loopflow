@@ -32,6 +32,7 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 - **02-action-buttons**: `suggest_actions` UX backed by shared ActionButtonsView component. No discovery and no multi-client protocol work. *Shipped. Full engine pipeline (StructuredReply, ClientContext, LfTagParser, SessionEvent) + shared Swift model + ActionButtonsView in LoopflowCore + macOS WaveSessionView integration. Chat→Session rename across Swift (ChatState→SessionState, WaveChatView→WaveSessionView).*
 - **03-multi-client**: reliability and correctness for concurrent clients on one lfd. Manual connection path remains primary. *Pre-req shipped: iOS now renders suggested actions in `MobileWaveDetailView` via a bottom safe-area rail, using the shared `SessionState.sendSuggestedAction` path.*
 - **04-lfd-discovery**: optional zero-config discovery via studio + Tailscale, additive to manual host/port connection.
+- **05-quote-replies**: inline quote-reply UX for long session responses (highlight, react/reply, queue, send as one structured message). *macOS-first milestone shipped (demo panel + live WaveSessionView wiring + assembly tests). iOS selection gesture support, queue reorder/edit, and rich markdown selectable rendering remain follow-up work.*
 
 ## Multiplatform guardrails
 
@@ -61,5 +62,6 @@ Role models: ChatGPT and Claude iOS apps for navigation patterns (tab bar, conve
 - ~~Concerto builds and runs on iOS Simulator~~ *Done (iPhone 17, iPad Pro 11-inch M5).*
 - Can see wave list, tap into a wave, see live output on iPhone *(builds confirmed; interactive validation against live lfd pending — blocked on headless simulator interaction primitives)*
 - ~~Agent surfaces action buttons, tapping one sends the message~~ *Done on both macOS and iOS. iOS now exposes a persistent bottom action rail in MobileWaveDetailView and uses the same `SessionState.sendSuggestedAction` send path as macOS. Remaining check: manual on-screen simulator validation for iPhone/iPad thumb-zone spacing and tap ergonomics.*
+- ~~Session feedback can be attached to exact assistant spans via quote-replies~~ *Partially done. macOS supports selectable assistant quotes, emoji/text replies, queue tray, and structured send assembly. iOS quote selection and queued-entry editing/reordering are not shipped yet.*
 - Same lfd instance serves both Mac and iOS Concerto simultaneously
 - Login on mobile → see running lfds → tap to connect (no manual IP/port entry)

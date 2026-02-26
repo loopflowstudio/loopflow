@@ -116,6 +116,13 @@ struct ConcertoApp: App {
         }
         .defaultSize(width: 800, height: 600)
 
+        Window("Reply Demo", id: "reply-demo") {
+            ReplyDemoView()
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+        }
+        .defaultSize(width: 1200, height: 760)
+
         .commands {
             CommandGroup(after: .appSettings) {
                 Toggle("Beta Features", isOn: Binding(
@@ -146,13 +153,18 @@ struct ConcertoApp: App {
                     NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: .command)
+            }
 
-                Divider()
-
+            CommandMenu("Debug") {
                 Button("Terminal Test") {
                     openWindow(id: "terminal-test")
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+
+                Button("Reply Demo") {
+                    openWindow(id: "reply-demo")
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }
     }

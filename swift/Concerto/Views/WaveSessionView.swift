@@ -13,6 +13,8 @@ struct WaveSessionView: View {
     @State private var expandedItemIds: Set<UUID> = []
     @State private var expandedRunIds: Set<UUID> = []
     @State private var isNearBottom = true
+    @State private var replyQueue = ReplyQueue()
+    @State private var isReplyTrayExpanded = false
 
     var body: some View {
         VStack(spacing: Spacing.md) {
@@ -52,10 +54,19 @@ struct WaveSessionView: View {
             if showsSuggestedActions, !state.suggestedActions.isEmpty {
                 ActionButtonsView(actions: state.suggestedActions) { action in
                     composerText = ""
+                    clearReplyInputs()
                     Task {
                         await state.sendSuggestedAction(action)
                     }
                 }
+                .padding(.horizontal, Spacing.lg)
+            }
+
+            if !replyQueue.isEmpty {
+                ReplyDraftTray(
+                    queue: replyQueue,
+                    isExpanded: $isReplyTrayExpanded
+                )
                 .padding(.horizontal, Spacing.lg)
             }
 
@@ -77,7 +88,7 @@ struct WaveSessionView: View {
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(DarkButtonStyle())
-                .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !state.canSend)
+                .disabled(!canSendMessage || !state.canSend)
             }
             .padding(.horizontal, Spacing.lg)
             .padding(.bottom, Spacing.lg)
@@ -158,7 +169,10 @@ struct WaveSessionView: View {
     private func transcriptRow(_ entry: TranscriptEntry) -> some View {
         switch entry {
         case .message(let message):
-            MessageRow(message: message)
+            MessageRow(message: message) { newEntry in
+                replyQueue.add(newEntry)
+                isReplyTrayExpanded = true
+            }
 
         case .item(let item):
             TranscriptItemCardView(
@@ -174,70 +188,24 @@ struct WaveSessionView: View {
     }
 
     private func sendMessage() {
-        let text = composerText
+        guard state.canSend else { return }
+        let text = replyQueue.assembleMessage(extraFreeText: composerText)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         composerText = ""
+        clearReplyInputs(collapseTray: true)
         Task {
             await state.send(text)
         }
     }
-}
 
-private struct MessageRow: View {
-    @Environment(\.palette) private var palette
-    let message: SessionMessage
-
-    var body: some View {
-        if message.role == .system {
-            Text(message.content)
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, Spacing.xs)
-        } else {
-            HStack(alignment: .top, spacing: Spacing.sm) {
-                accentBar
-
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    content
-                    Text(message.timestamp, style: .time)
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
+    private var canSendMessage: Bool {
+        !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !replyQueue.isEmpty
     }
 
-    @ViewBuilder
-    private var content: some View {
-        if message.role == .assistant,
-           let markdown = try? AttributedString(
-               markdown: message.content,
-               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-           ) {
-            Text(markdown)
-                .font(Typography.body())
-                .foregroundStyle(palette.text)
-        } else {
-            Text(message.content)
-                .font(Typography.body())
-                .foregroundStyle(message.role == .error ? .statusError : palette.text)
-        }
-    }
-
-    private var accentBar: some View {
-        RoundedRectangle(cornerRadius: 1.5)
-            .fill(accentColor)
-            .frame(width: 3)
-            .frame(minHeight: Spacing.lg)
-    }
-
-    private var accentColor: Color {
-        switch message.role {
-        case .user: return palette.accent
-        case .assistant: return palette.textSecondary.opacity(0.4)
-        case .error: return .statusError
-        case .system: return .clear
+    private func clearReplyInputs(collapseTray: Bool = false) {
+        replyQueue.clear()
+        if collapseTray {
+            isReplyTrayExpanded = false
         }
     }
 }

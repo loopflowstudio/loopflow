@@ -146,6 +146,14 @@ Wave detail now has two tabs:
 - **Runs** — historical run list with PR state, plus:
   - **Combine**: merge multiple open PRs into one
 
+## Session quote replies (macOS)
+
+- Select text in an assistant bubble to open the reply popover
+- Queue text replies, emoji reacts, and free-text notes in the draft tray
+- Send once to assemble queued replies and composer text into one structured message
+
+Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).
+
 ## Keyboard Shortcuts
 
 ```text

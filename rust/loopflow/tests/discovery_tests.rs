@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::lf::discovery::{
@@ -68,6 +69,16 @@ impl Drop for EnvVarGuard {
         } else {
             env::remove_var(&self.key);
         }
+    }
+}
+
+fn write_executable(path: &Path, content: &str) {
+    fs::write(path, content).expect("write script");
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).expect("chmod");
     }
 }
 
@@ -230,13 +241,7 @@ exit 1
 "#,
         trace = trace_file.display()
     );
-    fs::write(&npx_script, script).expect("write fake npx");
-    #[cfg(unix)]
-    {
-        let mut perms = fs::metadata(&npx_script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&npx_script, perms).expect("chmod");
-    }
+    write_executable(&npx_script, &script);
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 
@@ -283,13 +288,7 @@ exit 1
 "#,
         trace = trace_file.display()
     );
-    fs::write(&npx_script, script).expect("write fake npx");
-    #[cfg(unix)]
-    {
-        let mut perms = fs::metadata(&npx_script).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&npx_script, perms).expect("chmod");
-    }
+    write_executable(&npx_script, &script);
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 

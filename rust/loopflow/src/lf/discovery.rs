@@ -7,6 +7,8 @@ use std::process::Command;
 use serde_yaml_ng::Value;
 use tracing::debug;
 
+const SKILL_FILE_NAME: &str = "SKILL.md";
+
 // =============================================================================
 // Auto-dispatch: step or flow
 // =============================================================================
@@ -256,7 +258,7 @@ fn discover_npx_cache_skills(cache_dir: &Path) -> Vec<String> {
                 continue;
             }
 
-            let skill_file = path.join("SKILL.md");
+            let skill_file = path.join(SKILL_FILE_NAME);
             if !skill_file.is_file() || has_loopflow_marker(&skill_file) {
                 continue;
             }
@@ -282,7 +284,7 @@ fn discover_superpowers_skills(source_path: &Path) -> Vec<String> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let skill_file = path.join("SKILL.md");
+                let skill_file = path.join(SKILL_FILE_NAME);
                 if skill_file.exists() {
                     if let Some(name) = path.file_name() {
                         let name = normalize_skill_name(&name.to_string_lossy());
@@ -360,7 +362,11 @@ fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
             return find_npx_skill(name, skill_name, repo, source.path.as_deref());
         }
 
-        if !source.skills.contains(&skill_name.to_string()) {
+        if !source
+            .skills
+            .iter()
+            .any(|candidate| candidate == skill_name)
+        {
             continue;
         }
 
@@ -403,18 +409,21 @@ fn find_npx_skill(
 }
 
 fn find_cached_npx_skill(cache_dir: &Path, skill_name: &str) -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    candidates.push(cache_dir.join(skill_name).join("SKILL.md"));
-    candidates.push(
-        cache_dir
-            .join(skill_name.replace('/', "-"))
-            .join("SKILL.md"),
-    );
-    if let Some(last_component) = skill_name.split('/').next_back() {
-        candidates.push(cache_dir.join(last_component).join("SKILL.md"));
-    }
-
-    for candidate in candidates {
+    for candidate in [
+        Some(cache_dir.join(skill_name).join(SKILL_FILE_NAME)),
+        Some(
+            cache_dir
+                .join(skill_name.replace('/', "-"))
+                .join(SKILL_FILE_NAME),
+        ),
+        skill_name
+            .split('/')
+            .next_back()
+            .map(|last_component| cache_dir.join(last_component).join(SKILL_FILE_NAME)),
+    ]
+    .into_iter()
+    .flatten()
+    {
         if candidate.is_file() && !has_loopflow_marker(&candidate) {
             return Some(candidate);
         }
@@ -430,7 +439,7 @@ fn find_cached_npx_skill(cache_dir: &Path, skill_name: &str) -> Option<PathBuf> 
             continue;
         }
 
-        let skill_file = path.join("SKILL.md");
+        let skill_file = path.join(SKILL_FILE_NAME);
         if !skill_file.is_file() || has_loopflow_marker(&skill_file) {
             continue;
         }
@@ -463,12 +472,7 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
 }
 
 fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
-    let output = Command::new(npx_binary())
-        .args(["--yes", "skills", "add", skill_name])
-        .current_dir(repo_root)
-        .output();
-
-    match output {
+    match run_npx(repo_root, &["--yes", "skills", "add", skill_name]) {
         Ok(output) => {
             if output.status.success() {
                 return true;
@@ -481,19 +485,21 @@ fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
             );
             false
         }
-        Err(err) => {
-            debug!(skill = skill_name, error = %err, "failed to run npx skills add");
+        Err(error) => {
+            debug!(skill = skill_name, error = %error, "failed to run npx skills add");
             false
         }
     }
 }
 
 fn run_npx_find(skill_name: &str, repo_root: &Path) -> Option<String> {
-    let output = Command::new(npx_binary())
-        .args(["--yes", "skills", "find", skill_name])
-        .current_dir(repo_root)
-        .output()
-        .ok()?;
+    let output = match run_npx(repo_root, &["--yes", "skills", "find", skill_name]) {
+        Ok(output) => output,
+        Err(error) => {
+            debug!(skill = skill_name, error = %error, "failed to run npx skills find");
+            return None;
+        }
+    };
 
     if !output.status.success() {
         debug!(
@@ -507,6 +513,13 @@ fn run_npx_find(skill_name: &str, repo_root: &Path) -> Option<String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     parse_npx_find_output(&stdout)
+}
+
+fn run_npx(repo_root: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
+    Command::new(npx_binary())
+        .args(args)
+        .current_dir(repo_root)
+        .output()
 }
 
 fn parse_npx_find_output(stdout: &str) -> Option<String> {
@@ -611,7 +624,7 @@ fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<Path
                 if path.is_dir() {
                     let normalized = normalize_skill_name(&path.file_name()?.to_string_lossy());
                     if normalized == skill_name {
-                        let skill_file = path.join("SKILL.md");
+                        let skill_file = path.join(SKILL_FILE_NAME);
                         if skill_file.is_file() {
                             return Some(skill_file);
                         }

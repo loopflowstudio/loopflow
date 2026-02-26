@@ -58,31 +58,22 @@ pub fn inject_skills(repo: &Path, target_dir: &Path) -> Vec<PathBuf> {
     }
 
     // Inject repo-local .lf/steps/ that aren't already in .agents/skills/.
-    inject_md_dir(&repo.join(".lf/steps"), &skills_dir, &mut injected);
+    inject_md_dir(
+        &repo.join(".lf/steps"),
+        &skills_dir,
+        &mut injected,
+        false,
+        |stem| stem.to_string(),
+    );
 
     // Inject repo-local .lf/directions/ as direction-<name>/SKILL.md.
-    let directions_dir = repo.join(".lf/directions");
-    if directions_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&directions_dir) {
-            for entry in entries.flatten() {
-                let src = entry.path();
-                if src.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Some(stem) = src.file_stem() {
-                        let skill_name = format!("direction-{}", stem.to_string_lossy());
-                        if let Ok(content) = fs::read_to_string(&src) {
-                            let projected = project_to_skill_md(&skill_name, &content, true);
-                            if let Some(path) =
-                                write_skill_if_absent(&skills_dir, &skill_name, &projected)
-                            {
-                                debug!(src = %src.display(), dest = %path.display(), "injected repo-local direction");
-                                injected.push(path);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    inject_md_dir(
+        &repo.join(".lf/directions"),
+        &skills_dir,
+        &mut injected,
+        true,
+        |stem| format!("direction-{stem}"),
+    );
 
     injected
 }
@@ -192,7 +183,15 @@ fn write_skill_if_absent(skills_dir: &Path, name: &str, content: &str) -> Option
 }
 
 /// Inject all top-level `.md` files from a directory into `.agents/skills`.
-fn inject_md_dir(src_dir: &Path, skills_dir: &Path, injected: &mut Vec<PathBuf>) {
+fn inject_md_dir<F>(
+    src_dir: &Path,
+    skills_dir: &Path,
+    injected: &mut Vec<PathBuf>,
+    is_direction: bool,
+    name_for_stem: F,
+) where
+    F: Fn(&str) -> String,
+{
     if !src_dir.is_dir() {
         return;
     }
@@ -204,10 +203,10 @@ fn inject_md_dir(src_dir: &Path, skills_dir: &Path, injected: &mut Vec<PathBuf>)
         if src.extension().map(|e| e == "md").unwrap_or(false) {
             if let Some(stem) = src.file_stem() {
                 if let Ok(content) = fs::read_to_string(&src) {
-                    let name = stem.to_string_lossy();
-                    let projected = project_to_skill_md(&name, &content, false);
-                    if let Some(path) = write_skill_if_absent(skills_dir, &name, &projected) {
-                        debug!(src = %src.display(), dest = %path.display(), "injected repo-local step");
+                    let skill_name = name_for_stem(stem.to_string_lossy().as_ref());
+                    let projected = project_to_skill_md(&skill_name, &content, is_direction);
+                    if let Some(path) = write_skill_if_absent(skills_dir, &skill_name, &projected) {
+                        debug!(src = %src.display(), dest = %path.display(), "injected repo-local skill");
                         injected.push(path);
                     }
                 }

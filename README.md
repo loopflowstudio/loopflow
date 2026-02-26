@@ -229,6 +229,8 @@ Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Keybindin
 | `s` | Stop |
 | `o` | Open logs |
 | `p` | Open PR |
+| `n` | Next iteration |
+| `d` | Land PR |
 | `w` | Pick wave/worktree |
 | `L` | Pick layout |
 | `?` | Help |

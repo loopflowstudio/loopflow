@@ -306,8 +306,10 @@ loopflow_show_help() {
     prefix="$(loopflow_get_option "@loopflow_key_prefix" "l")"
     local mode
     mode="$(loopflow_mode)"
-    local help_text
-    help_text="loopflow keybindings (mode: $mode)
+
+    local help_file="/tmp/loopflow-help-${USER}.txt"
+    cat > "$help_file" <<EOF
+loopflow keybindings (mode: $mode)
 ─────────────────────────────
 prefix+$prefix+r  run step/wave
 prefix+$prefix+s  stop
@@ -317,7 +319,8 @@ prefix+$prefix+n  next iteration
 prefix+$prefix+d  land PR
 prefix+$prefix+w  pick wave
 prefix+$prefix+L  pick layout
-prefix+$prefix+?  this help"
+prefix+$prefix+?  this help
+EOF
 
     # Try display-popup (tmux 3.2+), fallback to display-message
     local tmux_version
@@ -328,8 +331,8 @@ prefix+$prefix+?  this help"
     minor="${minor%%.*}"
 
     if [[ -n "$major" ]] && (( major > 3 || (major == 3 && minor >= 2) )); then
-        tmux display-popup -w 40 -h 14 -E "printf '%s\n' \"$help_text\"; read -n 1"
+        tmux display-popup -w 40 -h 14 -E "cat '$help_file'; read -n 1"
     else
-        tmux display-message "$help_text"
+        loopflow_display "prefix+$prefix+{r,s,o,p,n,d,w,L,?} — use ? in popup-capable tmux 3.2+"
     fi
 }

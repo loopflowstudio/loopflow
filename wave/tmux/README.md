@@ -72,8 +72,9 @@ Deliver lifecycle commands, repo discovery, and `lf up` entrypoint.
 - `scripts/layouts/lf-dev.sh`
 - `scripts/layouts/lf-swarm.sh`
 - `scripts/layouts/lf-flow.sh`
-- `scripts/lfd` (or equivalent lifecycle CLI)
-- `scripts/lf-up.sh` (or `lf up` integration point)
+- `scripts/tmux-review.py`
+- `scripts/lfd` (phase 04)
+- `scripts/lf-up.sh` (phase 04)
 - README install + troubleshooting section
 
 ## Quality bars

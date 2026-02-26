@@ -2,6 +2,8 @@
 
 Close the loop: speak → transcribe → send with zero hand interaction. Silence after speech triggers an automatic send, with a brief cancel window.
 
+**Status: planned (later)**
+
 ## What to build
 
 ### Auto-send timer

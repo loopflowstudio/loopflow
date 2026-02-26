@@ -2,6 +2,23 @@
 
 Mic button in the composer. Hold or toggle to record. WhisperKit transcribes on-device. Text streams into the composer field. Manual send.
 
+**Status: shipped** (branch `jack-heart.voicecontrol.20260226_0925`)
+
+## What shipped
+
+- Added `VoiceInputService` in `LoopflowCore` for mic permission, WhisperKit tiny-model prep/download, streaming partial transcripts, final transcript assembly, and cancellation.
+- Added `VoiceInputButton` and integrated it into `WaveSessionView` with tap-to-toggle plus press-and-hold record behavior.
+- Added inline voice feedback in the composer: partial transcript preview, model-download/transcribing status row, and denied-permission notice with an Open Settings shortcut.
+- Added microphone wiring (`NSMicrophoneUsageDescription` + `com.apple.security.device.audio-input`) and WhisperKit dependencies in both SwiftPM and XcodeGen.
+- Added `VoiceInputServiceTests` for start/stop flow, denied permission handling, cancel behavior, partial-fallback behavior, and cancel→restart behavior.
+- Kept send semantics unchanged: transcription inserts into composer for manual edit/send.
+
+## Open follow-up work
+
+- Build `02-vad`: hands-free Voice Activity Detection with tunable sensitivity and turn-state-aware activation.
+- Build `03-auto-send`: optional confidence-aware auto-send loop with visible cancel window.
+- Stabilize full macOS UI test bootstrapping (`ConcertoUITests-Runner` early-exit `signal kill`) so the unskipped `xcodebuild test -scheme Concerto` gate is reliable.
+
 ## What to build
 
 ### WhisperKit dependency

@@ -1901,7 +1901,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is interactive"));
         assert!(prompt.contains("Surface: Concerto (macOS)"));
     }
@@ -1913,7 +1913,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is interactive"));
         assert!(prompt.contains("Surface: Concerto (iPhone)"));
         assert!(prompt.contains("Minimize back-and-forth"));

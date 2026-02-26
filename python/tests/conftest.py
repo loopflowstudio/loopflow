@@ -57,6 +57,14 @@ CHORD_MINIMAL = {
     "is_default": False,
 }
 
+REPO_MINIMAL = {
+    "path": "/tmp/repo",
+    "name": "repo",
+    "wave_count": 3,
+    "registered": True,
+    "added_at": "2026-02-24T12:00:00Z",
+}
+
 SESSION_MINIMAL = {
     "id": "session-1",
     "object": "session",

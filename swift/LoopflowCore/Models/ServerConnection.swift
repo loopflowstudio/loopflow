@@ -151,13 +151,23 @@ public struct RemoteRepo: Hashable, Codable, Sendable, Identifiable {
     public let path: String
     public let name: String
     public let waveCount: Int
+    public let registered: Bool
+    public let addedAt: Date?
 
     public var id: String { path }
 
-    public init(path: String, name: String, waveCount: Int) {
+    public init(
+        path: String,
+        name: String,
+        waveCount: Int,
+        registered: Bool = false,
+        addedAt: Date? = nil
+    ) {
         self.path = path
         self.name = name
         self.waveCount = waveCount
+        self.registered = registered
+        self.addedAt = addedAt
     }
 }
 

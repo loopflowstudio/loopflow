@@ -425,6 +425,9 @@ pub struct RepoDto {
     pub path: String,
     pub name: String,
     pub wave_count: u32,
+    pub registered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<String>,
 }
 
 pub fn wave_run_status_str(status: WaveRunStatus) -> String {

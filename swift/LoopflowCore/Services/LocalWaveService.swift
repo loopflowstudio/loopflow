@@ -502,16 +502,41 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             throw WaveServiceError.commandFailed("Invalid response")
         }
 
-        return repos.compactMap { repo in
-            guard let path = repo["path"] as? String,
-                  let name = repo["name"] as? String else {
-                return nil
-            }
-            return RemoteRepo(
-                path: path,
-                name: name,
-                waveCount: Self.normalizeInt(repo["wave_count"])
-            )
+        return repos.compactMap(Self.parseRemoteRepo)
+    }
+
+    public func addRepo(path: String) async throws -> RemoteRepo {
+        let body: [String: Any] = ["path": path]
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("repos"),
+            method: "POST",
+            body: body,
+            contentType: "application/json"
+        )
+
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 201 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let repo = Self.parseRemoteRepo(json) else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+        return repo
+    }
+
+    public func removeRepo(path: String) async throws {
+        let body: [String: Any] = ["path": path]
+        let request = try makeRequest(
+            apiBaseURL.appendingPathComponent("repos"),
+            method: "DELETE",
+            body: body,
+            contentType: "application/json"
+        )
+        let (data, response) = try await performRequest(request)
+        guard response.statusCode == 204 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
         }
     }
 
@@ -1503,6 +1528,23 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    private static func parseRemoteRepo(_ json: [String: Any]) -> RemoteRepo? {
+        guard let path = json["path"] as? String else {
+            return nil
+        }
+        let name = (json["name"] as? String).flatMap { value in
+            value.isEmpty ? nil : value
+        } ?? URL(fileURLWithPath: path).lastPathComponent
+        let registered = json["registered"] as? Bool ?? false
+        return RemoteRepo(
+            path: path,
+            name: name,
+            waveCount: normalizeInt(json["wave_count"]),
+            registered: registered,
+            addedAt: parseDate(json["added_at"])
+        )
     }
 
     private static func parseDate(_ value: Any?) -> Date? {

@@ -2,8 +2,8 @@ use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ActivationSource, AgentRun, AgentStatus, ChatMemoryBlock,
-    ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest, Signal,
-    Stimulus, Summary, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
+    ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo,
+    Signal, Stimulus, Summary, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
     WaveStatus,
 };
 
@@ -134,6 +134,15 @@ pub fn map_chord_row(row: &impl StoreRow) -> StoreResult<Chord> {
         name: row.text(1)?,
         is_default: row.int(2)? != 0,
         created_at: Some(unix_to_datetime(row.bigint(3)?)),
+    })
+}
+
+/// SELECT path, name, added_at
+pub fn map_repo_row(row: &impl StoreRow) -> StoreResult<Repo> {
+    Ok(Repo {
+        path: row.text(0)?,
+        name: row.text(1)?,
+        added_at: unix_to_datetime(row.bigint(2)?),
     })
 }
 

@@ -15,6 +15,7 @@ from .models import (
     AuthFlow,
     AuthProviderStatus,
     Chord,
+    Repo,
     Session,
     SessionConfig,
     SessionEventEnvelope,
@@ -162,6 +163,17 @@ class Client:
 
     def get_chord(self, chord_id: str) -> Optional[Chord]:
         return self._request_optional_model(f"/v0/chords/{chord_id}", Chord)
+
+    def list_repos(self) -> list[Repo]:
+        payload = self._request_json("GET", "/v0/repos")
+        return self._parse_model_list(payload, Repo)
+
+    def add_repo(self, path: str) -> Repo:
+        payload = self._request_json("POST", "/v0/repos", json={"path": path})
+        return Repo.model_validate(payload)
+
+    def remove_repo(self, path: str) -> None:
+        self._request_json("DELETE", "/v0/repos", json={"path": path})
 
     def delete_chord(self, chord_id: str) -> None:
         self._request_json("DELETE", f"/v0/chords/{chord_id}")

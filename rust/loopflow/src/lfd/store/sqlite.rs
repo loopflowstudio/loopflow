@@ -14,12 +14,13 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_repo_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix,
+    serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
-    LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent,
+    LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
     Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
@@ -253,6 +254,47 @@ impl SqliteStore {
             tokens.push(row?);
         }
         Ok(tokens)
+    }
+
+    // -- Repos -----------------------------------------------------------------
+
+    pub fn list_repos(&self) -> StoreResult<Vec<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare("SELECT path, name, added_at FROM repos ORDER BY path ASC")?;
+        let rows = stmt.query_map([], |row| Ok(map_repo_row(row)))?;
+
+        let mut repos = Vec::new();
+        for row in rows {
+            repos.push(row??);
+        }
+        Ok(repos)
+    }
+
+    pub fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt =
+            conn.prepare("SELECT path, name, added_at FROM repos WHERE path = ?1 LIMIT 1")?;
+        let row = stmt
+            .query_row(params![path], |row| Ok(map_repo_row(row)))
+            .optional()?;
+        row.transpose()
+    }
+
+    pub fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO repos (path, name, added_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(path) DO UPDATE SET name = excluded.name, added_at = excluded.added_at",
+            params![repo.path, repo.name, repo.added_at.unix_timestamp()],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_repo(&self, path: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute("DELETE FROM repos WHERE path = ?1", params![path])?;
+        Ok(())
     }
 
     // -- Sessions ---------------------------------------------------------------

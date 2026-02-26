@@ -8,6 +8,7 @@ mod chat_memory;
 mod chat_message;
 mod chord;
 mod event;
+mod repo;
 mod stimulus;
 mod summary;
 mod wave;
@@ -17,6 +18,7 @@ pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
 pub use chord::Chord;
 pub use event::Event;
+pub use repo::Repo;
 pub use stimulus::{
     ActivationLog, ActivationOutcome, ActivationSource, PendingActivation, Signal, Stimulus,
     CI_FIX_FLOW,

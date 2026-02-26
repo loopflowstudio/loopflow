@@ -11,12 +11,14 @@ from rich.table import Table
 
 from loopflow import api
 from loopflow.errors import LoopflowError
-from loopflow.models import AuthProviderStatus, Wave
+from loopflow.models import AuthProviderStatus, Repo, Wave
 
 
 app = typer.Typer(help="Query lfd and manage waves.")
 auth_app = typer.Typer(help="Manage provider authentication.")
+repos_app = typer.Typer(help="Manage registered repositories.")
 app.add_typer(auth_app, name="auth")
+app.add_typer(repos_app, name="repos")
 console = Console()
 
 
@@ -52,6 +54,24 @@ def _provider_label(provider: str) -> str:
         "codex": "Codex",
     }
     return labels.get(provider.lower(), provider)
+
+
+def _repo_table(repos: list[Repo]) -> Table:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("name")
+    table.add_column("path")
+    table.add_column("waves", justify="right")
+    table.add_column("registered")
+    table.add_column("added_at")
+    for repo in repos:
+        table.add_row(
+            repo.name,
+            repo.path,
+            str(repo.wave_count),
+            "yes" if repo.registered else "no",
+            repo.added_at.isoformat() if repo.added_at else "-",
+        )
+    return table
 
 
 def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
@@ -254,3 +274,31 @@ def auth_disconnect(provider: str) -> None:
         typer.echo(f"Disconnected {_provider_label(status.provider)}")
     else:
         typer.echo(f"Updated {_provider_label(status.provider)} status to {status.status}")
+
+
+@repos_app.callback(invoke_without_command=True)
+def repos_main(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    repos = api.list_repos()
+    if json_output:
+        typer.echo(json.dumps([repo.model_dump(mode="json") for repo in repos], indent=2))
+        return
+    if repos:
+        console.print(_repo_table(repos))
+    else:
+        console.print("no repos")
+
+
+@repos_app.command("add", help="Register an existing git repository path.")
+def repos_add(path: str) -> None:
+    repo = api.add_repo(path)
+    typer.echo(json.dumps(repo.model_dump(mode="json"), indent=2))
+
+
+@repos_app.command("rm", help="Unregister a repository path.")
+def repos_rm(path: str) -> None:
+    api.remove_repo(path)

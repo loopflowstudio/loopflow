@@ -6,6 +6,7 @@ from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
     CHORD_MINIMAL,
+    REPO_MINIMAL,
     SESSION_FULL,
     SESSION_MINIMAL,
     WAVE_FULL,
@@ -18,6 +19,7 @@ from loopflow.models import (
     AuthProviderStatus,
     Chord,
     CommitEntry,
+    Repo,
     Session,
     SessionEventEnvelope,
     Wave,
@@ -136,3 +138,11 @@ class TestChordModel:
             {**CHORD_MINIMAL, "created_at": "2026-02-24T12:00:00Z"}
         )
         assert chord.created_at is not None
+
+
+class TestRepoModel:
+    def test_minimal_payload(self):
+        repo = Repo.model_validate(REPO_MINIMAL)
+        assert repo.path == "/tmp/repo"
+        assert repo.registered is True
+        assert repo.added_at is not None

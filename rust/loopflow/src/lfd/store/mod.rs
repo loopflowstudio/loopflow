@@ -5,8 +5,8 @@ use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
     ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState,
-    LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave,
-    WaveRun, WaveRunStackStatus,
+    LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent, Repo, Stimulus, Summary,
+    Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -122,6 +122,10 @@ impl Store {
     }
 
     pub fn tokens(&self) -> &dyn TokenStore {
+        self
+    }
+
+    pub fn repos(&self) -> &dyn RepoStore {
         self
     }
 
@@ -330,6 +334,22 @@ impl Store {
 
     pub async fn create_chord(&self, name: &str) -> StoreResult<Chord> {
         ChordStore::create_chord(self, name).await
+    }
+
+    pub async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
+        RepoStore::list_repos(self).await
+    }
+
+    pub async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
+        RepoStore::get_repo(self, path).await
+    }
+
+    pub async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
+        RepoStore::upsert_repo(self, repo).await
+    }
+
+    pub async fn delete_repo(&self, path: &str) -> StoreResult<()> {
+        RepoStore::delete_repo(self, path).await
     }
 
     pub async fn get_chord(&self, chord_id: &LfdId) -> StoreResult<Option<Chord>> {
@@ -592,6 +612,14 @@ pub trait WaveStateStore: Send + Sync {
 
     async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>>;
     async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()>;
+}
+
+#[async_trait::async_trait]
+pub trait RepoStore: Send + Sync {
+    async fn list_repos(&self) -> StoreResult<Vec<Repo>>;
+    async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>>;
+    async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()>;
+    async fn delete_repo(&self, path: &str) -> StoreResult<()>;
 }
 
 #[async_trait::async_trait]
@@ -1215,6 +1243,46 @@ impl WaveStateStore for Store {
 }
 
 #[async_trait::async_trait]
+impl RepoStore for Store {
+    async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_repos()).await,
+            StoreBackend::Postgres(store) => store.list_repos().await,
+        }
+    }
+
+    async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let path = path.to_string();
+                run_sqlite(store, move |store| store.get_repo(&path)).await
+            }
+            StoreBackend::Postgres(store) => store.get_repo(path).await,
+        }
+    }
+
+    async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let repo = repo.clone();
+                run_sqlite(store, move |store| store.upsert_repo(&repo)).await
+            }
+            StoreBackend::Postgres(store) => store.upsert_repo(repo).await,
+        }
+    }
+
+    async fn delete_repo(&self, path: &str) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let path = path.to_string();
+                run_sqlite(store, move |store| store.delete_repo(&path)).await
+            }
+            StoreBackend::Postgres(store) => store.delete_repo(path).await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
 impl ChordStore for Store {
     async fn create_chord(&self, name: &str) -> StoreResult<Chord> {
         match &self.backend {
@@ -1748,8 +1816,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
-        QueueBlock, QueueBlockReason, QueueMergeEvent, Signal, Stimulus, Summary, Wave, WaveRun,
-        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, Signal, Stimulus, Summary, Wave,
+        WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1819,6 +1887,36 @@ mod tests {
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(loaded.status(), WaveStatus::Paused);
+
+        let repo = Repo {
+            path: "/tmp/repo".to_string(),
+            name: "repo".to_string(),
+            added_at: OffsetDateTime::now_utc(),
+        };
+        store.upsert_repo(&repo).await.expect("upsert repo");
+        assert_eq!(
+            store
+                .list_repos()
+                .await
+                .expect("list repos")
+                .first()
+                .map(|entry| entry.path.clone()),
+            Some(repo.path.clone())
+        );
+        assert!(store
+            .get_repo(&repo.path)
+            .await
+            .expect("get repo")
+            .is_some());
+        store
+            .delete_repo(&repo.path)
+            .await
+            .expect("delete repo registration");
+        assert!(store
+            .get_repo(&repo.path)
+            .await
+            .expect("repo removed")
+            .is_none());
 
         let source_wave = make_wave("/repo");
         store

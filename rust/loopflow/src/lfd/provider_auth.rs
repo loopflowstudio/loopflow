@@ -207,7 +207,7 @@ impl ProviderAuthService {
     pub fn new() -> Self {
         Self::with_brokers(vec![
             Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
-            Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
+            Arc::new(ClaudeAuthBroker) as Arc<dyn AuthBroker>,
             Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
         ])
     }
@@ -447,18 +447,8 @@ impl AuthBroker for GhAuthBroker {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ClaudeAuthBroker {
-    home_dir: PathBuf,
-}
-
-impl Default for ClaudeAuthBroker {
-    fn default() -> Self {
-        Self {
-            home_dir: home_dir_or_cwd(),
-        }
-    }
-}
+#[derive(Debug, Clone, Default)]
+pub struct ClaudeAuthBroker;
 
 #[async_trait]
 impl AuthBroker for ClaudeAuthBroker {
@@ -476,37 +466,50 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let claude_dir = self.home_dir.join(".claude");
-        if has_auth_like_entries(&claude_dir)? {
-            Ok(AuthStatus::Active { login: None })
-        } else {
-            Ok(AuthStatus::None)
+        let mut command = Command::new("claude");
+        command.args(["auth", "status"]);
+
+        match command.output().await {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let login = parse_claude_status_login(&stdout);
+                Ok(AuthStatus::Active { login })
+            }
+            Ok(_) => Ok(AuthStatus::None),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(AuthStatus::None),
+            Err(err) => Err(AuthError::CommandIo {
+                provider: Provider::Claude,
+                source: err,
+            }),
         }
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let claude_dir = self.home_dir.join(".claude");
-        if !claude_dir.exists() {
-            return Ok(());
-        }
+        let mut command = Command::new("claude");
+        command.args(["auth", "logout"]);
 
-        let entries = fs::read_dir(&claude_dir).map_err(|err| {
-            AuthError::Filesystem(format!("read {}: {err}", claude_dir.display()))
-        })?;
-
-        for entry in entries {
-            let entry = entry.map_err(|err| {
-                AuthError::Filesystem(format!("read {} entry: {err}", claude_dir.display()))
-            })?;
-            let path = entry.path();
-            let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-            if !is_auth_like_name(&file_name) {
-                continue;
+        match command.output().await {
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let message = if stderr.is_empty() { stdout } else { stderr };
+                Err(AuthError::CommandFailed {
+                    provider: Provider::Claude,
+                    message,
+                })
             }
-            remove_path(&path)?;
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                Err(AuthError::CommandUnavailable {
+                    provider: Provider::Claude,
+                    command: "claude".to_string(),
+                })
+            }
+            Err(err) => Err(AuthError::CommandIo {
+                provider: Provider::Claude,
+                source: err,
+            }),
         }
-
-        Ok(())
     }
 }
 
@@ -807,6 +810,17 @@ fn extract_expires_in(line: &str) -> Option<u64> {
         .and_then(|value| value.as_str().parse::<u64>().ok())
 }
 
+fn parse_claude_status_login(output: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(output).ok()?;
+    if json.get("loggedIn")?.as_bool()? {
+        json.get("email")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    } else {
+        None
+    }
+}
+
 fn parse_github_login(output: &str) -> Option<String> {
     GH_LOGIN_RE
         .captures(output)
@@ -847,33 +861,6 @@ fn directory_has_entries(path: &Path) -> Result<bool, AuthError> {
     let mut entries = fs::read_dir(path)
         .map_err(|err| AuthError::Filesystem(format!("read {}: {err}", path.display())))?;
     Ok(entries.next().is_some())
-}
-
-fn has_auth_like_entries(path: &Path) -> Result<bool, AuthError> {
-    if !path.exists() {
-        return Ok(false);
-    }
-
-    for entry in fs::read_dir(path)
-        .map_err(|err| AuthError::Filesystem(format!("read {}: {err}", path.display())))?
-    {
-        let entry = entry.map_err(|err| {
-            AuthError::Filesystem(format!("read {} entry: {err}", path.display()))
-        })?;
-        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-
-        if is_auth_like_name(&name) {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-fn is_auth_like_name(name: &str) -> bool {
-    ["auth", "token", "credential", "oauth", "session"]
-        .iter()
-        .any(|needle| name.contains(needle))
 }
 
 fn remove_path(path: &Path) -> Result<(), AuthError> {
@@ -988,13 +975,17 @@ mod tests {
     }
 
     #[test]
-    fn claude_status_detects_auth_like_entries() {
-        let temp = tempdir().expect("tempdir");
-        let claude = temp.path().join(".claude");
-        fs::create_dir_all(&claude).expect("claude dir");
-        fs::write(claude.join("credentials.json"), "{}").expect("credentials file");
+    fn claude_status_parses_login_from_json() {
+        let output = r#"{"loggedIn":true,"authMethod":"claude.ai","email":"user@example.com"}"#;
+        assert_eq!(
+            parse_claude_status_login(output),
+            Some("user@example.com".to_string())
+        );
 
-        assert!(has_auth_like_entries(&claude).expect("status"));
+        let not_logged_in = r#"{"loggedIn":false}"#;
+        assert_eq!(parse_claude_status_login(not_logged_in), None);
+
+        assert_eq!(parse_claude_status_login("not json"), None);
     }
 
     #[test]
@@ -1003,26 +994,6 @@ mod tests {
             "not logged in to any hosts"
         ));
         assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
-    }
-
-    #[tokio::test]
-    async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
-        let temp = tempdir().expect("tempdir");
-        let claude_dir = temp.path().join(".claude");
-        fs::create_dir_all(&claude_dir).expect("claude dir");
-        fs::write(claude_dir.join("settings.json"), "{\"theme\":\"dark\"}").expect("settings");
-        fs::write(claude_dir.join("auth.json"), "{\"token\":\"abc\"}").expect("auth file");
-        fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
-        fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
-
-        let broker = ClaudeAuthBroker {
-            home_dir: temp.path().to_path_buf(),
-        };
-        broker.disconnect().await.expect("disconnect");
-
-        assert!(claude_dir.join("settings.json").exists());
-        assert!(!claude_dir.join("auth.json").exists());
-        assert!(!claude_dir.join("session-cache").exists());
     }
 
     #[tokio::test]

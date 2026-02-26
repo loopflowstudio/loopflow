@@ -89,6 +89,7 @@ public final class RepoState {
     public let waveStore = WaveStore()
     public let runStore = RunStore()
     public let worktreeStore = WorktreeStore()
+    public let authProviderStore = AuthProviderStore()
     private var sessionStates: [String: SessionState] = [:]
     private var waitingSessionIds: [String: String] = [:]
     private var optimisticInteractiveWaveIds: Set<String> = []
@@ -206,6 +207,7 @@ public final class RepoState {
             token: connectionStore.token(for: connection),
             shellCommandRunner: shellCommandRunner
         )
+        authProviderStore.bindService(waveService)
 
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
             self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
@@ -472,6 +474,8 @@ public final class RepoState {
                                 text: outputEvent.text,
                                 timestamp: outputEvent.timestamp
                             )
+                        case .auth(let authEvent):
+                            self.authProviderStore.handleEvent(authEvent)
                         case .agentStarted, .agentEnded, .worktree:
                             break
                         }
@@ -975,6 +979,7 @@ public final class RepoState {
             token: token,
             shellCommandRunner: shellCommandRunner
         )
+        authProviderStore.bindService(waveService)
         outputBuffer?.configureConnection(connection, tokenProvider: { token })
 
         Task {
@@ -1035,6 +1040,9 @@ public final class RepoState {
     private func updateConnectionState(_ state: ConnectionState) {
         connectionState = state
         lfdConnected = state.isConnected
+        Task {
+            await authProviderStore.handleConnectionState(state)
+        }
     }
 
     private func runConnectionPhase<T: Sendable>(

@@ -12,11 +12,12 @@ Connecting GitHub, Claude, and Codex should be browser-first and identical acros
 |------|------|--------|
 | 1 | Provider auth broker in `lfd` + `lfq auth` commands | Shipped |
 | 2 | Live CLI contract validation + auth-flow hardening (`gh`/`claude`) | Shipped |
-| 3 | Concerto Connections panel wired to `/v0/auth` + auth events | Next |
-| 4 | Repo onboarding (`POST /v0/repos`) and repo-first workflow | Later |
+| 3 | Concerto Connections panel wired to `/v0/auth` + auth events | Shipped |
+| 4 | Repo onboarding (`POST /v0/repos`) and repo-first workflow | Next |
 
 ## Risks
 
-- Provider CLI output changes can break URL/code parsing.
-- Filesystem heuristics (`~/.claude`, `~/.codex`) may drift from real credential layouts.
+- Provider CLI output changes can break URL/code parsing. Mitigated by regex with fallbacks and `scripts/test_auth_live_contract.py`.
 - Missing host binaries (`gh`, `claude`, `codex`) blocks interactive auth flows.
+- Browser launch may fail silently during OAuth device flow; URL fallback with copy button degrades UX.
+- `POST /v0/auth/{provider}` uses 30s/60s timeouts because the server spawns a CLI process — UI shows pending state for a while if the CLI is slow.

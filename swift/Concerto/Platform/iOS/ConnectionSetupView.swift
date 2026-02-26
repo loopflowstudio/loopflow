@@ -5,6 +5,7 @@ import LoopflowCore
 struct ConnectionSetupView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
+    @Environment(\.openURL) private var openURL
 
     @State private var host = ""
     @State private var port = "2486"
@@ -13,6 +14,7 @@ struct ConnectionSetupView: View {
     @State private var selectedRepoPath = ""
     @State private var isConnecting = false
     @State private var errorMessage: String?
+    @State private var browserFallbackProviders: Set<AuthProvider> = []
 
     var body: some View {
         NavigationStack {
@@ -54,6 +56,8 @@ struct ConnectionSetupView: View {
                             .foregroundStyle(Color.statusError)
                     }
                 }
+
+                providerConnectionsSection
             }
             .navigationTitle("Connect")
             .toolbar {
@@ -72,9 +76,42 @@ struct ConnectionSetupView: View {
             }
             .onAppear {
                 loadFromCurrentConnection()
+                guard repoState.isConnected else { return }
+                Task { await repoState.authProviderStore.refresh() }
+            }
+            .onChange(of: repoState.authProviderStore.browserLaunchRequest) { _, _ in
+                handleBrowserLaunchRequest()
             }
         }
         .tint(.loopflowBurgundy)
+    }
+
+    @ViewBuilder
+    private var providerConnectionsSection: some View {
+        Section("Provider Connections") {
+            if !repoState.isConnected {
+                Text("Connect to server first.")
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(repoState.authProviderStore.ordered) { status in
+                AuthProviderCard(
+                    status: status,
+                    pendingFlow: repoState.authProviderStore.pendingFlows[status.provider],
+                    isEnabled: repoState.isConnected,
+                    error: repoState.authProviderStore.errorProvider == status.provider
+                        ? repoState.authProviderStore.error
+                        : nil,
+                    showURLFallback: browserFallbackProviders.contains(status.provider),
+                    onConnect: connectProvider,
+                    onDisconnect: disconnectProvider,
+                    onCancel: disconnectProvider,
+                    onCopy: copyToClipboard
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+            }
+        }
     }
 
     private func loadFromCurrentConnection() {
@@ -134,6 +171,28 @@ struct ConnectionSetupView: View {
             authMode: .staticToken,
             staticToken: trimmedToken
         )
+    }
+
+    private func connectProvider(_ provider: AuthProvider) {
+        Task { await repoState.authProviderStore.connect(provider) }
+    }
+
+    private func disconnectProvider(_ provider: AuthProvider) {
+        Task { await repoState.authProviderStore.disconnect(provider) }
+    }
+
+    private func handleBrowserLaunchRequest() {
+        guard let launchRequest = repoState.authProviderStore.consumeBrowserLaunchRequest() else {
+            return
+        }
+
+        openURL(launchRequest.url) { accepted in
+            if accepted {
+                browserFallbackProviders.remove(launchRequest.provider)
+            } else {
+                browserFallbackProviders.insert(launchRequest.provider)
+            }
+        }
     }
 }
 

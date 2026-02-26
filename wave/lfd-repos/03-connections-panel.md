@@ -1,56 +1,50 @@
 # 03: Concerto Connections Panel
 
-Status: **next**
+Status: **shipped** (branch `jack-heart.lfd-repos.20260225_2241`)
 
-Users can connect GitHub, Claude, and Codex through `lfq auth` in the terminal, but not from Concerto. This phase adds provider auth cards in Concerto so auth is browser-first and identical across clients.
+## What shipped
 
-## API contract already available
+- Added shared provider-auth models in `LoopflowCore`:
+  - `AuthProvider`
+  - `ProviderAuthStatus`
+  - `AuthProviderStatus`
+  - `AuthFlow`
+  - `AuthProviderListResponse`
+- Added `/v0/auth` service methods to `LocalWaveService`:
+  - `listAuthProviders()`
+  - `getAuthProvider(provider:)`
+  - `startAuthFlow(provider:)`
+  - `disconnectProvider(provider:)`
+- Extended websocket parsing in `LocalEventService` for:
+  - `auth.flow_started`
+  - `auth.connected`
+  - `auth.failed`
+  - `auth.disconnected`
+- Added `AuthProviderStore` for provider state, pending flows, browser-launch requests, auth-event reconciliation, `409` continuity handling, and refresh-on-reconnect.
+- Wired `RepoState` to rebind auth services and forward both auth events and connection-state transitions into `AuthProviderStore`.
+- Added shared `AuthProviderCard` UI and integrated provider connection controls into:
+  - macOS `ConnectionSettingsView`
+  - iOS `ConnectionSetupView`
+- Added Swift test coverage for:
+  - auth model decoding,
+  - auth event parsing,
+  - auth HTTP methods,
+  - auth store transitions.
 
-No server-side auth API work is required.
+## Validation
 
-- `GET /v0/auth` → `{ providers: [{ provider, status, login? }] }`
-- `GET /v0/auth/{provider}` → `{ provider, status, login? }`
-- `POST /v0/auth/{provider}` → `{ provider, verification_uri, verification_uri_complete?, user_code?, expires_in? }`
-- `DELETE /v0/auth/{provider}` → `{ provider, status, login? }`
-- Events: `auth.flow_started`, `auth.connected`, `auth.failed`, `auth.disconnected`
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test --all`
+- `uv run pytest python/tests/`
+- `swift test --package-path swift`
+- `cd swift && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -only-testing:ConcertoTests CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
+- `tests/e2e/test_smoke.sh`
+- `uv run pytest tests/e2e/test_api_smoke.py -v`
 
-## What to build
+## Follow-ups
 
-1. Add shared Swift auth models in `LoopflowCore` (`AuthProviderStatus`, `AuthFlow`).
-2. Extend `LocalEventService` to parse `auth.*` events into `LFDEvent` cases.
-3. Extend `LocalWaveService` with `/v0/auth` HTTP methods:
-   - list statuses,
-   - start auth flow,
-   - disconnect provider.
-4. Add `AuthProviderStore` state container:
-   - refresh from `GET /v0/auth`,
-   - connect/disconnect actions,
-   - websocket event reconciliation.
-5. Extend connection UIs:
-   - macOS: `ConnectionSettingsView`
-   - iOS: `ConnectionSetupView`
-   - three provider cards (GitHub/Claude/Codex) with status, login, connect/disconnect, and pending user code.
-
-## UX flow
-
-- Connect:
-  1. Call `POST /v0/auth/{provider}`.
-  2. Open `verification_uri_complete` (fallback `verification_uri`) in browser.
-  3. Show pending state + `user_code` if present.
-  4. Reconcile to active/failed from websocket events.
-- Disconnect:
-  1. Call `DELETE /v0/auth/{provider}`.
-  2. Update card state from response.
-
-## Failure modes to handle
-
-- Provider binary missing on host (`command not available`).
-- Flow already pending (`409`).
-- Browser launch failure (show copyable URL fallback).
-- lfd reconnect mid-flow (refresh `/v0/auth` on reconnect).
-
-## Done when
-
-- Users can connect/disconnect GitHub, Claude, and Codex from Concerto with no terminal steps.
-- Card state tracks `active` / `pending` / `none` from HTTP + websocket events.
-- `cargo test --all` and `swift test --package-path swift` pass.
+- Proceed with step 4: wire provider auth state into repo onboarding (`POST /v0/repos`) so the primary workflow is repo-first inside Concerto.
+- Token refresh / expiry polling: the `expired` status exists in the model but no automatic re-auth is triggered. Users must manually reconnect.
+- Accessibility pass: iOS/macOS connection setup forms lack `.accessibilityLabel()` on text inputs.
+- Keep running full `Concerto` scheme tests in environments where `ConcertoUITests-Runner` can attach cleanly.

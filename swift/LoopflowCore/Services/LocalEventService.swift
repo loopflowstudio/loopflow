@@ -59,6 +59,23 @@ public struct OutputEvent: Sendable {
     public let timestamp: Date
 }
 
+public struct AuthEvent: Sendable {
+    public enum EventType: String, Sendable {
+        case flowStarted = "auth.flow_started"
+        case connected = "auth.connected"
+        case failed = "auth.failed"
+        case disconnected = "auth.disconnected"
+    }
+
+    public let type: EventType
+    public let provider: AuthProvider
+    public let verificationURI: String?
+    public let verificationURIComplete: String?
+    public let login: String?
+    public let error: String?
+    public let timestamp: Date
+}
+
 public enum LFDEvent: Sendable {
     case connected(ConnectedEvent)
     case wave(WaveEvent)
@@ -66,6 +83,7 @@ public enum LFDEvent: Sendable {
     case agentStarted(AgentStartedEvent)
     case agentEnded(AgentEndedEvent)
     case output(OutputEvent)
+    case auth(AuthEvent)
 }
 
 public actor EventService {
@@ -420,7 +438,7 @@ public actor EventService {
         }
     }
 
-    private nonisolated static func parseEvent(text: String) -> LFDEvent? {
+    nonisolated static func parseEvent(text: String) -> LFDEvent? {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else {
@@ -488,9 +506,42 @@ public actor EventService {
                 text: text,
                 timestamp: parseTimestamp(json["timestamp"])
             ))
+        case "auth.flow_started", "auth.connected", "auth.failed", "auth.disconnected":
+            guard let authEvent = parseAuthEvent(type: type, json: json) else {
+                return nil
+            }
+            return .auth(authEvent)
         default:
             return nil
         }
+    }
+
+    private nonisolated static func parseAuthEvent(type: String, json: [String: Any]) -> AuthEvent? {
+        guard let eventType = AuthEvent.EventType(rawValue: type),
+              let providerRaw = json["provider"] as? String,
+              let provider = AuthProvider(rawValue: providerRaw) else {
+            return nil
+        }
+
+        return AuthEvent(
+            type: eventType,
+            provider: provider,
+            verificationURI: json["verification_uri"] as? String,
+            verificationURIComplete: json["verification_uri_complete"] as? String,
+            login: json["login"] as? String,
+            error: parseErrorMessage(json["error"]),
+            timestamp: parseTimestamp(json["timestamp"])
+        )
+    }
+
+    private nonisolated static func parseErrorMessage(_ value: Any?) -> String? {
+        if let error = value as? String {
+            return error
+        }
+        if let errorJSON = value as? [String: Any] {
+            return errorJSON["message"] as? String
+        }
+        return nil
     }
 
     private nonisolated static func parseTimestamp(_ value: Any?) -> Date {

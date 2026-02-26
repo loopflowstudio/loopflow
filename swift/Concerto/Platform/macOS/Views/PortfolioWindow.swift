@@ -146,7 +146,7 @@ struct PortfolioWindow: View {
             }
             repoStates[wave.repo.normalizedFilePath]?.applyWaveEvent(waveEvent)
 
-        case .worktree, .agentStarted, .agentEnded, .output:
+        case .worktree, .agentStarted, .agentEnded, .output, .auth:
             break
         }
     }
@@ -453,4 +453,3 @@ struct RepoTypeahead: View {
         return "No matching repositories"
     }
 }
-

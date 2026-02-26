@@ -269,6 +269,51 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    private func authURL(_ provider: AuthProvider? = nil) -> URL {
+        var url = apiBaseURL.appendingPathComponent("auth")
+        if let provider {
+            url = url.appendingPathComponent(provider.rawValue)
+        }
+        return url
+    }
+
+    private func requireOKStatus(_ response: HTTPURLResponse, data: Data) throws {
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+    }
+
+    private func decodeResponse<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+    }
+
+    // MARK: - Provider auth
+
+    public func listAuthProviders() async throws -> [AuthProviderStatus] {
+        let (data, response) = try await performGet(authURL())
+        try requireOKStatus(response, data: data)
+        let decoded = try decodeResponse(AuthProviderListResponse.self, from: data)
+        return decoded.providers
+    }
+
+    public func startAuthFlow(provider: AuthProvider) async throws -> AuthFlow {
+        let request = try makeRequest(authURL(provider), method: "POST")
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(AuthFlow.self, from: data)
+    }
+
+    public func disconnectProvider(provider: AuthProvider) async throws -> AuthProviderStatus {
+        let request = try makeRequest(authURL(provider), method: "DELETE")
+        let (data, response) = try await performRequest(request)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(AuthProviderStatus.self, from: data)
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.

@@ -7,7 +7,7 @@ use crate::lfd::id::LfdId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum StimulusKind {
+pub enum Signal {
     #[default]
     Unspecified = 0,
     Once = 1,
@@ -15,9 +15,10 @@ pub enum StimulusKind {
     Watch = 3,
     Cron = 4,
     Listen = 5,
+    CiFailure = 6,
 }
 
-impl StimulusKind {
+impl Signal {
     pub fn from_i32(value: i32) -> Self {
         match value {
             1 => Self::Once,
@@ -25,6 +26,7 @@ impl StimulusKind {
             3 => Self::Watch,
             4 => Self::Cron,
             5 => Self::Listen,
+            6 => Self::CiFailure,
             _ => Self::Unspecified,
         }
     }
@@ -105,7 +107,8 @@ pub struct Stimulus {
     pub id: LfdId,
     pub wave_id: LfdId,
     pub source_wave_id: Option<LfdId>,
-    pub kind: StimulusKind,
+    pub signal: Signal,
+    pub flow: Option<String>,
     pub cron: Option<String>,
     pub last_main_sha: Option<String>,
     pub last_triggered_at: Option<i64>,
@@ -121,12 +124,13 @@ fn default_enabled() -> bool {
 
 impl Stimulus {
     #[allow(dead_code)] // Convenience constructor for tests and future use.
-    pub fn new(id: LfdId, wave_id: LfdId, kind: StimulusKind) -> Self {
+    pub fn new(id: LfdId, wave_id: LfdId, signal: Signal) -> Self {
         Self {
             id,
             wave_id,
             source_wave_id: None,
-            kind,
+            signal,
+            flow: None,
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,
@@ -198,12 +202,18 @@ impl ActivationLog {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActivationSource, StimulusKind};
+    use super::{ActivationSource, Signal};
 
     #[test]
-    fn listen_stimulus_kind_storage_value_is_stable() {
-        assert_eq!(StimulusKind::Listen.as_i32(), 5);
-        assert_eq!(StimulusKind::from_i32(5), StimulusKind::Listen);
+    fn listen_signal_storage_value_is_stable() {
+        assert_eq!(Signal::Listen.as_i32(), 5);
+        assert_eq!(Signal::from_i32(5), Signal::Listen);
+    }
+
+    #[test]
+    fn ci_failure_signal_storage_value_is_stable() {
+        assert_eq!(Signal::CiFailure.as_i32(), 6);
+        assert_eq!(Signal::from_i32(6), Signal::CiFailure);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use super::{enqueue_pending_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{ActivationSource, StimulusKind, WaveStatus};
+use crate::lfd::types::{ActivationSource, Signal, WaveStatus};
 
 pub fn spawn_cron_poller(
     store: SharedStore,
@@ -33,10 +33,7 @@ pub fn spawn_cron_poller(
 }
 
 async fn check_cron_stimuli(store: &SharedStore, event_hub: &EventHub) {
-    let stimuli = match store
-        .list_stimuli_by_kind(StimulusKind::Cron.as_i32())
-        .await
-    {
+    let stimuli = match store.list_stimuli_by_signal(Signal::Cron.as_i32()).await {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list cron stimuli");

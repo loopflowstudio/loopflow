@@ -16,7 +16,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::{open_store, SharedStore, StorageConfig};
 use crate::lfd::types::{
-    AgentRun, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    AgentRun, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 use super::{
@@ -371,8 +371,6 @@ async fn create_running_wave_and_run(
         error: None,
         flow_parents: vec![],
         activation_log_id: None,
-        run_kind: WaveRunKind::Main,
-        ci_fix_kind: None,
         parent_run_id: None,
         parent_pr_number: None,
         stack_position: 0,
@@ -611,8 +609,6 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         error: None,
         flow_parents: vec![],
         activation_log_id: None,
-        run_kind: WaveRunKind::Main,
-        ci_fix_kind: None,
         parent_run_id: None,
         parent_pr_number: None,
         stack_position: 0,

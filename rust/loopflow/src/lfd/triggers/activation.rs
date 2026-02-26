@@ -265,6 +265,13 @@ pub async fn dispatch_wave_if_ready(
         return None;
     }
 
+    let stimulus_flow_override = store
+        .get_stimulus(&activation.stimulus_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|stimulus| stimulus.flow);
+
     let mut run = match create_wave_run_with_id(store, wave, &run_id).await {
         Ok(run) => run,
         Err(err) => {
@@ -272,6 +279,9 @@ pub async fn dispatch_wave_if_ready(
             return None;
         }
     };
+    if let Some(flow_override) = stimulus_flow_override {
+        run.snapshot.flow = flow_override;
+    }
     run.activation_log_id = Some(dispatch_log.id.clone());
     if let Err(err) = store.update_wave_run(&run).await {
         tracing::error!(wave_id = %wave.id(), run_id = %run.id, error = %err, "failed to attach activation log to run");
@@ -360,7 +370,7 @@ async fn record_activation_log(
 mod tests {
     use super::*;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Stimulus, StimulusKind, Wave};
+    use crate::lfd::types::{Signal, Stimulus, Wave};
     use time::OffsetDateTime;
 
     async fn create_store() -> SharedStore {
@@ -392,7 +402,8 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave_id.clone(),
             source_wave_id: None,
-            kind: StimulusKind::Watch,
+            signal: Signal::Watch,
+            flow: None,
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,

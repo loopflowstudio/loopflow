@@ -367,8 +367,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunKind,
-        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunSnapshot,
+        WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
@@ -401,8 +401,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -463,8 +461,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: pr_number,

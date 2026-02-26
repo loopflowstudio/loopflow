@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use super::{enqueue_pending_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{ActivationSource, Stimulus, StimulusKind, Wave, WaveStatus};
+use crate::lfd::types::{ActivationSource, Signal, Stimulus, Wave, WaveStatus};
 
 pub fn spawn_watch_poller(
     store: SharedStore,
@@ -32,10 +32,7 @@ pub fn spawn_watch_poller(
 }
 
 async fn check_watch_stimuli(store: &SharedStore, event_hub: &EventHub) {
-    let stimuli = match store
-        .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
-        .await
-    {
+    let stimuli = match store.list_stimuli_by_signal(Signal::Watch.as_i32()).await {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list watch stimuli");

@@ -89,27 +89,6 @@ impl WaveRunStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum WaveRunKind {
-    #[default]
-    Main = 1,
-    CiFix = 2,
-}
-
-impl WaveRunKind {
-    pub fn from_i32(value: i32) -> Self {
-        match value {
-            2 => Self::CiFix,
-            _ => Self::Main,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum WaveRunStackStatus {
     #[default]
     Active = 1,
@@ -199,25 +178,6 @@ impl std::str::FromStr for QueueBlockReason {
             "promotion_failed" => Ok(Self::PromotionFailed),
             _ => Err(format!("unknown queue block reason: {value}")),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CiFixKind {
-    CiFix = 1,
-}
-
-impl CiFixKind {
-    pub fn from_i32(value: i32) -> Option<Self> {
-        match value {
-            1 => Some(Self::CiFix),
-            _ => None,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
     }
 }
 
@@ -323,9 +283,6 @@ pub struct WaveRun {
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
     pub activation_log_id: Option<LfdId>,
-    #[serde(default)]
-    pub run_kind: WaveRunKind,
-    pub ci_fix_kind: Option<CiFixKind>,
     pub parent_run_id: Option<LfdId>,
     pub parent_pr_number: Option<u32>,
     pub stack_position: u32,
@@ -392,8 +349,6 @@ impl WaveRun {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -401,20 +356,5 @@ impl WaveRun {
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
         }
-    }
-
-    pub fn is_main(&self) -> bool {
-        self.run_kind == WaveRunKind::Main
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::WaveRunKind;
-
-    #[test]
-    fn wave_run_kind_main_storage_value_is_stable() {
-        assert_eq!(WaveRunKind::Main.as_i32(), 1);
-        assert_eq!(WaveRunKind::from_i32(1), WaveRunKind::Main);
     }
 }

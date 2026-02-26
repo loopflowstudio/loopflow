@@ -112,7 +112,7 @@ impl Scheduler {
         cancel: CancellationToken,
     ) -> Vec<JoinHandle<()>> {
         vec![
-            triggers::spawn_ci_failure_handler(executor.clone(), event_hub.clone(), cancel.clone()),
+            triggers::spawn_ci_failure_handler(store.clone(), event_hub.clone(), cancel.clone()),
             triggers::spawn_activation_dispatcher(
                 store.clone(),
                 executor.clone(),

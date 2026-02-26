@@ -6,6 +6,7 @@ use tracing::warn;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct StimulusDef {
     pub kind: String,
+    pub flow: Option<String>,
     pub cron: Option<String>,
     pub source: Option<String>,
     pub source_repo: Option<String>,

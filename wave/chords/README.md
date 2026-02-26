@@ -18,7 +18,7 @@ Waves are flat. Chords group them. Listening connects them.
 
 - Waves are flat: a `Wave` is a single struct, no enum/tree/parent. A wave can belong to multiple chords or none.
 - Chords are groups, not executors: no trigger ownership or child lifecycle management. Execution is per-wave via each wave's own stimuli.
-- Listening is a stimulus: `StimulusKind::Listen` with `source_wave_id` fires when the source completes. Just another stimulus type alongside loop/cron/watch/once.
+- Listening is a stimulus: `Signal::Listen` with `source_wave_id` fires when the source completes. Just another signal alongside loop/cron/watch/once/ci_failure.
 - Stimulus-based composition over tree structure: a wave can listen to any other wave regardless of chord membership. Chords provide organization; stimuli provide coordination. These are orthogonal.
 - HTTP API and Python client support chord operations
 - Concerto shows chord grouping and listen relationships
@@ -47,7 +47,8 @@ Waves are flat. Chords group them. Listening connects them.
 | 01 | Flatten + Listen | Drop tree model, add listen stimulus, migration 012 | shipped |
 | 02 | Chord CRUD | Domain type, store ops, HTTP API, Python client | shipped |
 | 03 | Listen Authoring | Listen stimulus in wave schema files, listener triggering, CI fix rename | shipped |
-| 04 | Concerto UI | Chord groups and listen wiring in the macOS app | next |
+| 03.5 | Signal + Git Sync | Drop WaveRunKind/CiFixKind, rename StimulusKind→Signal, flow override on Stimulus, push-always/rebase-aggressively git model | next |
+| 04 | Concerto UI | Chord groups and listen wiring in the macOS app | planned |
 
 ### Phase 01 retrospective
 
@@ -117,7 +118,8 @@ struct Wave {
 }
 
 struct Stimulus {
-    kind: StimulusKind,  // Once | Loop | Watch | Cron | Listen
+    signal: Signal,  // Once | Loop | Watch | Cron | Listen | CiFailure
+    flow: Option<String>,  // override wave.flow for this activation
     source_wave_id: Option<LfdId>,  // for Listen stimuli
     // ...
 }
@@ -137,6 +139,16 @@ CREATE TABLE chord_members (
     PRIMARY KEY (chord_id, wave_id)
 );
 ```
+
+### Phase 03.5: Signal Simplification
+
+See `scratch/signal-simplification.md` for the full design.
+
+Two connected changes:
+
+1. **Signal simplification.** CI fix is not a special run type — it's a stimulus activation with `signal: CiFailure` and `flow: "ci-fix"`. `StimulusKind` → `Signal`, stimulus gains a `flow` override, `WaveRunKind`/`CiFixKind` are deleted, ci_fix.rs folds into the normal activation path.
+
+2. **Git sync hardening.** Auxiliary runs (ci-fix, lint-fix, etc.) push to `origin/{wave-branch}`. The main wave incorporates via fetch+rebase before each step. Origin is the source of truth. Push after every commit, rebase aggressively.
 
 ## Future Directions
 

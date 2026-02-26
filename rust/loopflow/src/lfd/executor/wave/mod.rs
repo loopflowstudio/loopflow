@@ -1,4 +1,3 @@
-mod ci_fix;
 mod fork;
 mod launch;
 mod summary;
@@ -32,8 +31,8 @@ use crate::lfd::triggers::{
     enqueue_pending_activation, spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    ActivationSource, Event, LivePrState, LivePullRequestState, Stimulus, StimulusKind, Wave,
-    WaveRun, WaveRunKind, WaveRunStatus, WaveStatus,
+    ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Stimulus, Wave, WaveRun,
+    WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
@@ -199,14 +198,6 @@ impl WaveExecutor {
 
         for run in runs {
             let run_is_active = is_active_wave_run_status(run.status);
-            if run_is_active && run.run_kind == WaveRunKind::CiFix {
-                active.push(EphemeralWorktree {
-                    path: run.worktree.clone(),
-                    owner_kind: EphemeralOwnerKind::CiFix,
-                    owner_id: run.id.to_string(),
-                });
-            }
-
             if !run_is_active {
                 continue;
             }
@@ -382,29 +373,29 @@ impl WaveExecutor {
                         .await
                         .map(|stimuli| {
                             stimuli.iter().any(|s| {
-                                matches!(
-                                    s.kind,
-                                    StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
-                                )
+                                matches!(s.signal, Signal::Loop | Signal::Watch | Signal::Cron)
                             })
                         })
                         .unwrap_or(false);
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
-                    let worktree = run.worktree.clone();
-                    let wave_name = wave.name().clone();
-                    match tokio::task::spawn_blocking(move || {
-                        auto_create_pr(Path::new(&worktree), Some(wave_name))
-                    })
-                    .await
-                    {
-                        Ok(Some(pr)) => {
-                            info!(run_id = %run.id, url = %pr.url, "auto-created PR");
-                            run.snapshot.pr = Some(pr);
-                        }
-                        Ok(None) => {}
-                        Err(err) => {
-                            warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                    let should_manage_pr = run.snapshot.flow != "ci-fix";
+                    if should_manage_pr {
+                        let worktree = run.worktree.clone();
+                        let wave_name = wave.name().clone();
+                        match tokio::task::spawn_blocking(move || {
+                            auto_create_pr(Path::new(&worktree), Some(wave_name))
+                        })
+                        .await
+                        {
+                            Ok(Some(pr)) => {
+                                info!(run_id = %run.id, url = %pr.url, "auto-created PR");
+                                run.snapshot.pr = Some(pr);
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                            }
                         }
                     }
 
@@ -437,7 +428,7 @@ impl WaveExecutor {
 
                     // For recurring waves, advance to a new branch so the
                     // next iteration gets its own PR.
-                    if run.snapshot.pr.is_some() && is_recurring {
+                    if should_manage_pr && run.snapshot.pr.is_some() && is_recurring {
                         let wt = run.worktree.clone();
                         let name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -471,7 +462,7 @@ impl WaveExecutor {
 
                     self.store.update_wave_run(&run).await?;
                     self.trigger_listeners_on_completion(wave.id()).await;
-                    if run.snapshot.pr.is_some() {
+                    if should_manage_pr && run.snapshot.pr.is_some() {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
                             &self.store,
                             &self.github_config,
@@ -496,7 +487,7 @@ impl WaveExecutor {
     async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId) {
         let stimuli = match self
             .store
-            .list_stimuli_by_kind(StimulusKind::Listen.as_i32())
+            .list_stimuli_by_signal(Signal::Listen.as_i32())
             .await
         {
             Ok(stimuli) => stimuli,
@@ -905,7 +896,7 @@ mod tests {
     use crate::lfd::sessions::types::{Session, SessionConfig};
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Stimulus, StimulusKind, WaveRunSnapshot};
+    use crate::lfd::types::{Signal, Stimulus, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -1045,8 +1036,6 @@ mod tests {
             error: None,
             flow_parents: vec![],
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -1096,8 +1085,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -1117,7 +1104,8 @@ mod tests {
             id: LfdId::new(),
             wave_id: listener_wave_id.clone(),
             source_wave_id: Some(source_wave_id.clone()),
-            kind: StimulusKind::Listen,
+            signal: Signal::Listen,
+            flow: None,
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,

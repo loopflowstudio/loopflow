@@ -10,7 +10,7 @@ use crate::lfd::events::EventHub;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::ActivationSource;
-use crate::lfd::types::{StimulusKind, WaveStatus};
+use crate::lfd::types::{Signal, WaveStatus};
 
 pub fn spawn_loop_ticker(
     scheduler: std::sync::Arc<Scheduler>,
@@ -39,10 +39,7 @@ async fn tick_loop_waves(
     store: &SharedStore,
     event_hub: &EventHub,
 ) {
-    let stimuli = match store
-        .list_stimuli_by_kind(StimulusKind::Loop.as_i32())
-        .await
-    {
+    let stimuli = match store.list_stimuli_by_signal(Signal::Loop.as_i32()).await {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list loop stimuli");

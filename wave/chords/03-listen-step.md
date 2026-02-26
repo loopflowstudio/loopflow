@@ -56,7 +56,7 @@ stimulus:
 - Keep eager source resolution with FK-backed `source_wave_id`
 - Keep success-only listen triggering
 - Queue/coalesce deferred activations instead of dropping them
-- Keep `CiFixKind` as an enum (extensible)
+- ~~Keep `CiFixKind` as an enum (extensible)~~ — revisited in signal simplification (scratch/signal-simplification.md)
 
 ## Carry-forward follow-ups
 

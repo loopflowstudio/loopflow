@@ -32,7 +32,7 @@ use crate::lfd::triggers::{
     ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    ActivationSource, AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
+    ActivationSource, AgentStatus, Event, Signal, Stimulus, Wave, WaveRun, WaveRunStatus,
     WaveStatus,
 };
 
@@ -128,14 +128,17 @@ pub struct RunWaveRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct AddStimulusRequest {
-    kind: StimulusKind,
+    #[serde(alias = "kind")]
+    signal: Signal,
+    flow: Option<String>,
     cron: Option<String>,
     source_wave_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 struct ParsedStimulus {
-    kind: StimulusKind,
+    signal: Signal,
+    flow: Option<String>,
     cron: Option<String>,
     source: Option<String>,
     source_repo: Option<String>,
@@ -248,7 +251,8 @@ pub async fn create_wave_handler(
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             source_wave_id: listen_source_wave_id.clone(),
-            kind: parsed.kind,
+            signal: parsed.signal,
+            flow: parsed.flow,
             cron: parsed.cron,
             last_main_sha: None,
             last_triggered_at: None,
@@ -318,12 +322,13 @@ async fn ensure_wave_workspace(
 fn parse_stimulus(
     stimulus: &StimulusDef,
 ) -> Result<ParsedStimulus, (StatusCode, Json<ErrorResponse>)> {
-    let kind = match stimulus.kind.as_str() {
-        "cron" => StimulusKind::Cron,
-        "watch" => StimulusKind::Watch,
-        "loop" => StimulusKind::Loop,
-        "once" => StimulusKind::Once,
-        "listen" => StimulusKind::Listen,
+    let signal = match stimulus.kind.as_str() {
+        "cron" => Signal::Cron,
+        "watch" => Signal::Watch,
+        "loop" => Signal::Loop,
+        "once" => Signal::Once,
+        "listen" => Signal::Listen,
+        "ci_failure" => Signal::CiFailure,
         value => {
             return Err(api_error(
                 StatusCode::BAD_REQUEST,
@@ -333,17 +338,18 @@ fn parse_stimulus(
     };
 
     let cron_value = trimmed_non_empty(stimulus.cron.as_deref());
+    let flow = trimmed_non_empty(stimulus.flow.as_deref());
     let source = trimmed_non_empty(stimulus.source.as_deref());
     let source_repo = trimmed_non_empty(stimulus.source_repo.as_deref());
 
-    let cron = match kind {
-        StimulusKind::Cron => Some(cron_value.ok_or_else(|| {
+    let cron = match signal {
+        Signal::Cron => Some(cron_value.ok_or_else(|| {
             api_error(
                 StatusCode::BAD_REQUEST,
                 "wave config stimulus kind 'cron' requires a cron expression",
             )
         })?),
-        StimulusKind::Listen => {
+        Signal::Listen => {
             if cron_value.is_some() {
                 return Err(api_error(
                     StatusCode::BAD_REQUEST,
@@ -369,7 +375,7 @@ fn parse_stimulus(
         }
     };
 
-    let source = if kind == StimulusKind::Listen {
+    let source = if signal == Signal::Listen {
         Some(source.ok_or_else(|| {
             api_error(
                 StatusCode::BAD_REQUEST,
@@ -379,14 +385,15 @@ fn parse_stimulus(
     } else {
         None
     };
-    let source_repo = if kind == StimulusKind::Listen {
+    let source_repo = if signal == Signal::Listen {
         source_repo
     } else {
         None
     };
 
     Ok(ParsedStimulus {
-        kind,
+        signal,
+        flow,
         cron,
         source,
         source_repo,
@@ -409,7 +416,7 @@ async fn resolve_listen_source_wave_id(
     let Some(parsed) = parsed else {
         return Ok(None);
     };
-    if parsed.kind != StimulusKind::Listen {
+    if parsed.signal != Signal::Listen {
         return Ok(None);
     }
     let source = parsed
@@ -754,7 +761,7 @@ async fn ensure_manual_stimulus(state: &HttpState, wave_id: &LfdId) -> Result<Lf
         .map_err(map_store_error)?;
     if let Some(existing) = stimuli
         .into_iter()
-        .find(|stimulus| stimulus.kind == StimulusKind::Once)
+        .find(|stimulus| stimulus.signal == Signal::Once)
     {
         return Ok(existing.id);
     }
@@ -763,7 +770,8 @@ async fn ensure_manual_stimulus(state: &HttpState, wave_id: &LfdId) -> Result<Lf
         id: LfdId::new(),
         wave_id: wave_id.clone(),
         source_wave_id: None,
-        kind: StimulusKind::Once,
+        signal: Signal::Once,
+        flow: None,
         cron: None,
         last_main_sha: None,
         last_triggered_at: None,
@@ -828,8 +836,8 @@ pub async fn add_stimulus_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    let source_wave_id = match payload.kind {
-        StimulusKind::Listen => {
+    let source_wave_id = match payload.signal {
+        Signal::Listen => {
             let source = payload.source_wave_id.as_deref().ok_or_else(|| {
                 api_error(
                     StatusCode::BAD_REQUEST,
@@ -860,7 +868,8 @@ pub async fn add_stimulus_handler(
         id: LfdId::new(),
         wave_id,
         source_wave_id,
-        kind: payload.kind,
+        signal: payload.signal,
+        flow: payload.flow,
         cron: payload.cron,
         last_main_sha: None,
         last_triggered_at: None,
@@ -876,7 +885,8 @@ pub async fn add_stimulus_handler(
 
     Ok(Json(serde_json::json!({
         "id": stimulus.id.to_string(),
-        "kind": stimulus_kind_str(stimulus.kind),
+        "kind": stimulus_kind_str(stimulus.signal),
+        "flow": stimulus.flow,
         "source_wave_id": stimulus.source_wave_id.as_ref().map(ToString::to_string),
         "cron": stimulus.cron,
     })))
@@ -1370,10 +1380,10 @@ fn resolve_wave_work_dir(
     Ok(worktree)
 }
 
-fn is_auto_stimulus(kind: StimulusKind) -> bool {
+fn is_auto_stimulus(signal: Signal) -> bool {
     matches!(
-        kind,
-        StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron | StimulusKind::Listen
+        signal,
+        Signal::Loop | Signal::Watch | Signal::Cron | Signal::Listen | Signal::CiFailure
     )
 }
 
@@ -1389,7 +1399,7 @@ async fn set_wave_stimuli_enabled(
     };
     let mut matched = false;
     for mut stimulus in stimuli {
-        if auto_only && !is_auto_stimulus(stimulus.kind) {
+        if auto_only && !is_auto_stimulus(stimulus.signal) {
             continue;
         }
         matched = true;
@@ -1466,6 +1476,7 @@ mod tests {
     fn parse_stimulus_requires_cron_expression_for_cron_kind() {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
+            flow: None,
             cron: None,
             source: None,
             source_repo: None,
@@ -1479,13 +1490,14 @@ mod tests {
     fn parse_stimulus_accepts_valid_cron_expression() {
         let stimulus = StimulusDef {
             kind: "cron".to_string(),
+            flow: None,
             cron: Some("0 8 * * *".to_string()),
             source: None,
             source_repo: None,
         };
 
         let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
-        assert_eq!(parsed.kind, StimulusKind::Cron);
+        assert_eq!(parsed.signal, Signal::Cron);
         assert_eq!(parsed.cron.as_deref(), Some("0 8 * * *"));
         assert!(parsed.source.is_none());
     }
@@ -1494,6 +1506,7 @@ mod tests {
     fn listen_stimulus_schema_requires_source() {
         let stimulus = StimulusDef {
             kind: "listen".to_string(),
+            flow: None,
             cron: None,
             source: None,
             source_repo: None,
@@ -1507,13 +1520,14 @@ mod tests {
     fn listen_stimulus_schema_parses_source_and_source_repo() {
         let stimulus = StimulusDef {
             kind: "listen".to_string(),
+            flow: None,
             cron: None,
             source: Some("infra".to_string()),
             source_repo: Some("/tmp/source".to_string()),
         };
 
         let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
-        assert_eq!(parsed.kind, StimulusKind::Listen);
+        assert_eq!(parsed.signal, Signal::Listen);
         assert_eq!(parsed.source.as_deref(), Some("infra"));
         assert_eq!(parsed.source_repo.as_deref(), Some("/tmp/source"));
         assert!(parsed.cron.is_none());
@@ -1521,7 +1535,7 @@ mod tests {
 
     #[test]
     fn listen_stimulus_is_auto_stimulus() {
-        assert!(is_auto_stimulus(StimulusKind::Listen));
+        assert!(is_auto_stimulus(Signal::Listen));
     }
 
     #[tokio::test]
@@ -1595,7 +1609,8 @@ mod tests {
         );
 
         let parsed = ParsedStimulus {
-            kind: StimulusKind::Listen,
+            signal: Signal::Listen,
+            flow: None,
             cron: None,
             source: Some("designer".to_string()),
             source_repo: None,
@@ -1633,7 +1648,8 @@ mod tests {
             .expect("create source wave");
 
         let parsed = ParsedStimulus {
-            kind: StimulusKind::Listen,
+            signal: Signal::Listen,
+            flow: None,
             cron: None,
             source: Some("infra".to_string()),
             source_repo: Some("/tmp/source-repo".to_string()),

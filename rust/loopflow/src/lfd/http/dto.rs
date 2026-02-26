@@ -5,8 +5,8 @@ use time::OffsetDateTime;
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
 use crate::lfd::types::{
-    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Stimulus,
-    StimulusKind, WaveRun, WaveRunStatus,
+    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Signal, Stimulus,
+    WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -186,6 +186,8 @@ pub struct StimulusDto {
     pub kind: String,
     pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_wave_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron: Option<String>,
@@ -282,14 +284,15 @@ pub struct DeletedResourceResponse {
     pub deleted: bool,
 }
 
-pub fn stimulus_kind_str(kind: StimulusKind) -> &'static str {
+pub fn stimulus_kind_str(kind: Signal) -> &'static str {
     match kind {
-        StimulusKind::Loop => "loop",
-        StimulusKind::Watch => "watch",
-        StimulusKind::Cron => "cron",
-        StimulusKind::Once => "once",
-        StimulusKind::Listen => "listen",
-        StimulusKind::Unspecified => "unspecified",
+        Signal::Loop => "loop",
+        Signal::Watch => "watch",
+        Signal::Cron => "cron",
+        Signal::Once => "once",
+        Signal::Listen => "listen",
+        Signal::CiFailure => "ci_failure",
+        Signal::Unspecified => "unspecified",
     }
 }
 
@@ -357,8 +360,9 @@ pub fn wave_run_dto(
 pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     StimulusDto {
         id: s.id.to_string(),
-        kind: stimulus_kind_str(s.kind).to_string(),
+        kind: stimulus_kind_str(s.signal).to_string(),
         enabled: s.enabled,
+        flow: s.flow,
         source_wave_id: s.source_wave_id.map(|value| value.to_string()),
         cron: s.cron,
         last_main_sha: s.last_main_sha,

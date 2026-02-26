@@ -1,12 +1,25 @@
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::activation::{enqueue_pending_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
-use crate::lfd::executor::{CiFailure, WaveExecutor};
-use crate::lfd::types::Event;
+use crate::lfd::id::LfdId;
+use crate::lfd::store::SharedStore;
+use crate::lfd::types::{ActivationSource, Event, Signal, Stimulus};
+use time::OffsetDateTime;
+
+#[derive(Debug)]
+struct CiFailureActivation {
+    wave_id: LfdId,
+    pr_number: u32,
+    branch: String,
+    commit_sha: String,
+    check_name: String,
+    logs_url: String,
+}
 
 pub fn spawn_ci_failure_handler(
-    executor: WaveExecutor,
+    store: SharedStore,
     event_hub: EventHub,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
@@ -23,7 +36,6 @@ pub fn spawn_ci_failure_handler(
                     match event {
                         Ok(Event::CiFailure {
                             wave_id,
-                            wave_run_id,
                             pr_number,
                             branch,
                             commit_sha,
@@ -31,27 +43,19 @@ pub fn spawn_ci_failure_handler(
                             logs_url,
                             ..
                         }) => {
-                            let executor = executor.clone();
-                            let failure = CiFailure {
+                            let activation = CiFailureActivation {
                                 wave_id,
-                                wave_run_id,
                                 pr_number,
                                 branch,
                                 commit_sha,
                                 check_name,
                                 logs_url,
                             };
-                            tokio::spawn(async move {
-                                if let Err(err) = executor.spawn_ci_fix_agent(&failure).await {
-                                    tracing::warn!(
-                                        wave_id = %failure.wave_id,
-                                        branch = %failure.branch,
-                                        commit_sha = %failure.commit_sha,
-                                        error = %err,
-                                        "CI fix agent failed"
-                                    );
-                                }
-                            });
+                            if let Err(err) =
+                                handle_ci_failure_event(&store, &event_hub, activation).await
+                            {
+                                tracing::warn!(error = %err, "failed handling CI failure activation");
+                            }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         _ => {}
@@ -60,4 +64,64 @@ pub fn spawn_ci_failure_handler(
             }
         }
     })
+}
+
+async fn handle_ci_failure_event(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    activation: CiFailureActivation,
+) -> Result<(), String> {
+    let stimulus_id = resolve_ci_failure_stimulus(store, &activation.wave_id).await?;
+    let reason = format!(
+        "CI failure for PR #{} on {} ({}): {}",
+        activation.pr_number, activation.branch, activation.check_name, activation.logs_url
+    );
+    let _ = enqueue_pending_activation(
+        store,
+        event_hub,
+        ActivationEnvelope::new(
+            &activation.wave_id,
+            &stimulus_id,
+            ActivationSource::Push,
+            reason,
+            &activation.commit_sha,
+            &activation.commit_sha,
+        ),
+    )
+    .await;
+    Ok(())
+}
+
+async fn resolve_ci_failure_stimulus(
+    store: &SharedStore,
+    wave_id: &LfdId,
+) -> Result<LfdId, String> {
+    let stimuli = store
+        .list_stimuli(Some(wave_id))
+        .await
+        .map_err(|err| err.to_string())?;
+    if let Some(existing) = stimuli
+        .into_iter()
+        .find(|stimulus| stimulus.signal == Signal::CiFailure)
+    {
+        return Ok(existing.id);
+    }
+
+    let stimulus = Stimulus {
+        id: LfdId::new(),
+        wave_id: wave_id.clone(),
+        source_wave_id: None,
+        signal: Signal::CiFailure,
+        flow: Some("ci-fix".to_string()),
+        cron: None,
+        last_main_sha: None,
+        last_triggered_at: Some(OffsetDateTime::now_utc().unix_timestamp()),
+        created_at: Some(OffsetDateTime::now_utc()),
+        enabled: true,
+    };
+    store
+        .create_stimulus(&stimulus)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(stimulus.id)
 }

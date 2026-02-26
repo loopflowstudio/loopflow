@@ -105,13 +105,23 @@ pub(super) async fn drain_pending_activations_once(
             Err(_) => continue,
         };
 
-        let run = match create_wave_run_with_id(store, &wave, &run_id).await {
+        let mut run = match create_wave_run_with_id(store, &wave, &run_id).await {
             Ok(run) => run,
             Err(err) => {
                 tracing::warn!(wave_id = %wave.id(), error = %err, "failed to create run while draining pending activations");
                 continue;
             }
         };
+        if let Some(flow_override) = stimulus.flow.clone() {
+            run.snapshot.flow = flow_override;
+            if let Err(err) = store.update_wave_run(&run).await {
+                tracing::warn!(
+                    run_id = %run.id,
+                    error = %err,
+                    "failed applying stimulus flow override to drained run"
+                );
+            }
+        }
 
         if let Err(err) = store.delete_pending_activations(wave.id()).await {
             tracing::warn!(
@@ -149,8 +159,7 @@ mod tests {
     use crate::lfd::output::OutputHub;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{
-        ActivationSource, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunKind,
-        WaveRunStatus, WaveStatus,
+        ActivationSource, PendingActivation, Signal, Stimulus, Wave, WaveRunStatus, WaveStatus,
     };
 
     struct MockRunner;
@@ -215,7 +224,8 @@ mod tests {
             id: LfdId::new(),
             wave_id: listening_wave.id().clone(),
             source_wave_id: Some(source_wave.id().clone()),
-            kind: StimulusKind::Listen,
+            signal: Signal::Listen,
+            flow: None,
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,
@@ -265,11 +275,7 @@ mod tests {
             .list_wave_runs(Some(listening_wave.id()), None)
             .await
             .expect("list listener runs");
-        assert!(
-            runs.iter()
-                .any(|run: &WaveRun| run.run_kind == WaveRunKind::Main),
-            "listener run should be created"
-        );
+        assert!(!runs.is_empty(), "listener run should be created");
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         let latest = store

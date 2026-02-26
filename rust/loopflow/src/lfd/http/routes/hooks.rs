@@ -20,9 +20,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
 use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
-use crate::lfd::types::{
-    ActivationSource, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveStatus,
-};
+use crate::lfd::types::{ActivationSource, Event, Signal, Stimulus, Wave, WaveRun, WaveStatus};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -158,10 +156,7 @@ async fn enqueue_watch_for_repo(
         return 0;
     }
 
-    let stimuli = match store
-        .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
-        .await
-    {
+    let stimuli = match store.list_stimuli_by_signal(Signal::Watch.as_i32()).await {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::warn!(
@@ -588,7 +583,7 @@ async fn find_wave_ci_target(
 }
 
 fn run_matches_ci_target(run: &WaveRun, branch: Option<&str>, pr_number: Option<u32>) -> bool {
-    if !run.is_main() {
+    if run.snapshot.flow == "ci-fix" {
         return false;
     }
 
@@ -664,8 +659,8 @@ mod tests {
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
-        ActivationSource, PullRequest, Stimulus, StimulusKind, Wave, WaveRunKind, WaveRunSnapshot,
-        WaveRunStatus, WaveStatus,
+        ActivationSource, PullRequest, Signal, Stimulus, Wave, WaveRunSnapshot, WaveRunStatus,
+        WaveStatus,
     };
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -809,7 +804,8 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
             source_wave_id: None,
-            kind: StimulusKind::Watch,
+            signal: Signal::Watch,
+            flow: None,
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,
@@ -843,17 +839,13 @@ mod tests {
         assert_eq!(pending[0].to_sha, "def");
     }
 
-    fn wave_run_with_pr(
-        run_kind: WaveRunKind,
-        pr_state: Option<&str>,
-        branch: Option<&str>,
-    ) -> WaveRun {
+    fn wave_run_with_pr(flow: &str, pr_state: Option<&str>, branch: Option<&str>) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
             wave_id: LfdId::new(),
             snapshot: WaveRunSnapshot {
                 repo: ".".to_string(),
-                flow: "build".to_string(),
+                flow: flow.to_string(),
                 direction: Vec::new(),
                 area: Vec::new(),
                 pr: Some(PullRequest {
@@ -874,8 +866,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind,
-            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -887,20 +877,20 @@ mod tests {
 
     #[test]
     fn run_matches_ci_target_only_matches_open_main_prs() {
-        let run = wave_run_with_pr(WaveRunKind::Main, Some("open"), Some("feature"));
+        let run = wave_run_with_pr("build", Some("open"), Some("feature"));
         assert!(run_matches_ci_target(&run, Some("feature"), Some(1)));
 
-        let closed = wave_run_with_pr(WaveRunKind::Main, Some("closed"), Some("feature"));
+        let closed = wave_run_with_pr("build", Some("closed"), Some("feature"));
         assert!(!run_matches_ci_target(&closed, Some("feature"), Some(1)));
 
-        let unknown_state = wave_run_with_pr(WaveRunKind::Main, None, Some("feature"));
+        let unknown_state = wave_run_with_pr("build", None, Some("feature"));
         assert!(!run_matches_ci_target(
             &unknown_state,
             Some("feature"),
             Some(1)
         ));
 
-        let ci_fix = wave_run_with_pr(WaveRunKind::CiFix, Some("open"), Some("feature"));
+        let ci_fix = wave_run_with_pr("ci-fix", Some("open"), Some("feature"));
         assert!(!run_matches_ci_target(&ci_fix, Some("feature"), Some(1)));
     }
 

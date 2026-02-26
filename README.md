@@ -99,7 +99,7 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `build` | implement → compress → gate → update-wave |
+| `build` | implement → compress → lint → gate → update-wave |
 | `design-and-ship` | design → implement → reduce → polish |
 | `ship` | design → build → review |
 | `pair` | design → build |

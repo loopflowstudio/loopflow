@@ -225,8 +225,8 @@ impl Store {
         WaveStateStore::list_stimuli(self, wave_id).await
     }
 
-    pub async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
-        WaveStateStore::list_stimuli_by_kind(self, kind).await
+    pub async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+        WaveStateStore::list_stimuli_by_signal(self, kind).await
     }
 
     pub async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
@@ -559,7 +559,7 @@ pub trait WaveStateStore: Send + Sync {
     async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool>;
 
     async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
-    async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
+    async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
     async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>>;
     async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
     async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
@@ -978,12 +978,12 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_stimuli_by_kind(kind)).await
+                run_sqlite(store, move |store| store.list_stimuli_by_signal(kind)).await
             }
-            StoreBackend::Postgres(store) => store.list_stimuli_by_kind(kind).await,
+            StoreBackend::Postgres(store) => store.list_stimuli_by_signal(kind).await,
         }
     }
 
@@ -1765,10 +1765,9 @@ mod tests {
     use super::{ExecutionStore, ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        AgentRun, AgentStatus, ChatMemoryBlock, CiFixKind, LivePrState, LivePullRequestState,
-        PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, StimulusKind,
-        Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-        WaveStatus,
+        AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
+        QueueBlock, QueueBlockReason, QueueMergeEvent, Signal, Stimulus, Summary, Wave, WaveRun,
+        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1788,7 +1787,7 @@ mod tests {
         }
     }
 
-    fn make_run(wave: &Wave, status: WaveRunStatus, kind: WaveRunKind) -> WaveRun {
+    fn make_run(wave: &Wave, status: WaveRunStatus) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
@@ -1809,12 +1808,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: kind,
-            ci_fix_kind: if kind == WaveRunKind::CiFix {
-                Some(CiFixKind::CiFix)
-            } else {
-                None
-            },
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -1853,7 +1846,8 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             source_wave_id: Some(source_wave.id().clone()),
-            kind: StimulusKind::Listen,
+            signal: Signal::Listen,
+            flow: None,
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,
@@ -1932,7 +1926,7 @@ mod tests {
             .expect("get deleted chord")
             .is_none());
 
-        let run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
+        let run = make_run(&wave, WaveRunStatus::Running);
         store.create_wave_run(&run).await.expect("create wave run");
         assert!(store
             .get_active_wave_run(wave.id())
@@ -2215,7 +2209,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_run_excludes_failed_and_ci_fix() {
+    async fn active_run_excludes_failed_runs() {
         let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
@@ -2223,7 +2217,7 @@ mod tests {
         let wave = make_wave("/repo-active");
         store.create_wave(&wave).await.expect("create wave");
 
-        let mut run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
+        let mut run = make_run(&wave, WaveRunStatus::Running);
         store
             .create_wave_run(&run)
             .await
@@ -2253,7 +2247,8 @@ mod tests {
             WaveRunStatus::Failed
         );
 
-        let ci_fix = make_run(&wave, WaveRunStatus::Running, WaveRunKind::CiFix);
+        let mut ci_fix = make_run(&wave, WaveRunStatus::Running);
+        ci_fix.snapshot.flow = "ci-fix".to_string();
         store
             .create_wave_run(&ci_fix)
             .await
@@ -2262,7 +2257,7 @@ mod tests {
             .get_active_wave_run(wave.id())
             .await
             .expect("active with ci-fix")
-            .is_none());
+            .is_some());
 
         store.delete_wave(wave.id()).await.expect("delete wave");
     }
@@ -2305,8 +2300,6 @@ mod tests {
                     error: None,
                     flow_parents: Vec::new(),
                     activation_log_id: None,
-                    run_kind: WaveRunKind::Main,
-                    ci_fix_kind: None,
                     parent_run_id,
                     parent_pr_number,
                     stack_position: iteration.saturating_sub(1),
@@ -2380,7 +2373,7 @@ mod tests {
         let wave = make_wave("/repo-queue");
         store.create_wave(&wave).await.expect("create wave");
 
-        let mut run = make_run(&wave, WaveRunStatus::Completed, WaveRunKind::Main);
+        let mut run = make_run(&wave, WaveRunStatus::Completed);
         run.snapshot.pr = Some(PullRequest {
             url: "https://example.test/pr/42".to_string(),
             number: Some(42),

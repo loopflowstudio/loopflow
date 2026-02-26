@@ -10,7 +10,6 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::engine::stream::{render_event, ParseResult, StreamParser};
-use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::types::Wave;
 
@@ -137,17 +136,6 @@ pub struct JanitorReport {
     pub removed: u32,
     pub active: u32,
     pub errors: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CiFailure {
-    pub wave_id: LfdId,
-    pub wave_run_id: LfdId,
-    pub pr_number: u32,
-    pub branch: String,
-    pub commit_sha: String,
-    pub check_name: String,
-    pub logs_url: String,
 }
 
 // -- Stream helpers ----------------------------------------------------------

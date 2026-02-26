@@ -723,11 +723,7 @@ impl PostgresStore {
             let row = client
                 .query_opt(
                     Self::sql(Query::GetActiveWaveRun),
-                    &[
-                        &wave_id,
-                        &&statuses[..],
-                        &crate::lfd::types::WaveRunKind::Main.as_i32(),
-                    ],
+                    &[&wave_id, &&statuses[..]],
                 )
                 .await?;
             row.as_ref().map(map_wave_run_row).transpose()
@@ -738,10 +734,7 @@ impl PostgresStore {
     pub async fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(
-                    Self::sql(Query::GetLatestWaveRun),
-                    &[&wave_id, &crate::lfd::types::WaveRunKind::Main.as_i32()],
-                )
+                .query_opt(Self::sql(Query::GetLatestWaveRun), &[&wave_id])
                 .await?;
             row.as_ref().map(map_wave_run_row).transpose()
         })
@@ -777,8 +770,6 @@ impl PostgresStore {
                         &serialize_pr(&run.snapshot.pr)?,
                         &flow_parents_json,
                         &run.activation_log_id,
-                        &run.run_kind.as_i32(),
-                        &run.ci_fix_kind.map(|kind| kind.as_i32()),
                         &run.parent_run_id,
                         &run.parent_pr_number.map(|value| value as i64),
                         &(run.stack_position as i32),
@@ -815,8 +806,6 @@ impl PostgresStore {
                         &serialize_pr(&run.snapshot.pr)?,
                         &flow_parents_json,
                         &run.activation_log_id,
-                        &run.run_kind.as_i32(),
-                        &run.ci_fix_kind.map(|kind| kind.as_i32()),
                         &run.parent_run_id,
                         &run.parent_pr_number.map(|value| value as i64),
                         &(run.stack_position as i32),
@@ -838,10 +827,7 @@ impl PostgresStore {
     pub async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
         self.with_client(|client| async move {
             let rows = client
-                .query(
-                    Self::sql(Query::ListStackRuns),
-                    &[&wave_id, &crate::lfd::types::WaveRunKind::Main.as_i32()],
-                )
+                .query(Self::sql(Query::ListStackRuns), &[&wave_id])
                 .await?;
             rows.iter().map(map_wave_run_row).collect()
         })
@@ -1030,7 +1016,7 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    pub async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(Self::sql(Query::ListStimuliByKind), &[&kind])
@@ -1064,7 +1050,8 @@ impl PostgresStore {
                     &[
                         &stimulus.id,
                         &stimulus.wave_id,
-                        &stimulus.kind.as_i32(),
+                        &stimulus.signal.as_i32(),
+                        &stimulus.flow,
                         &stimulus.cron,
                         &stimulus.last_main_sha,
                         &stimulus.last_triggered_at,
@@ -1086,7 +1073,8 @@ impl PostgresStore {
                 .execute(
                     Self::sql(Query::UpdateStimulus),
                     &[
-                        &stimulus.kind.as_i32(),
+                        &stimulus.signal.as_i32(),
+                        &stimulus.flow,
                         &stimulus.cron,
                         &stimulus.last_main_sha,
                         &stimulus.last_triggered_at,

@@ -524,8 +524,7 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus,
-        WaveStatus,
+        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -625,8 +624,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            ci_fix_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position,

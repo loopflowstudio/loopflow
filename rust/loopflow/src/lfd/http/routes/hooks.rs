@@ -12,14 +12,15 @@ use tokio::sync::Mutex;
 use crate::lfd::events::EventHub;
 use crate::lfd::github::{
     github_repo_from_local, poll_check_runs, verify_webhook_signature, CheckRun,
-    GitHubCheckRunEvent, GitHubPullRequestEvent,
+    GitHubCheckRunEvent, GitHubPullRequestEvent, GitHubPushEvent,
 };
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{Event, Wave, WaveRun};
+use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
+use crate::lfd::types::{ActivationSource, Event, StimulusKind, Wave, WaveRun, WaveStatus};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -29,6 +30,8 @@ pub struct GitHookRequest {
     hook: String,
     repo: String,
     branch: Option<String>,
+    from_sha: Option<String>,
+    to_sha: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,11 +48,20 @@ pub async fn git_hook_handler(
     Json(payload): Json<GitHookRequest>,
 ) -> ApiResult<serde_json::Value> {
     let repo = canonical_git_hook_repo(&payload.repo)?;
+    let matched = enqueue_watch_for_local_repo(
+        &state.store,
+        &state.event_hub,
+        &repo,
+        payload.branch.as_deref(),
+        payload.from_sha.as_deref(),
+        payload.to_sha.as_deref(),
+    )
+    .await;
     state
         .event_hub
         .send(Event::worktree_updated(repo.clone(), repo, payload.branch));
 
-    Ok(Json(serde_json::json!({ "ok": true })))
+    Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
 }
 
 fn canonical_git_hook_repo(
@@ -77,6 +89,171 @@ fn canonical_git_hook_repo(
     }
 
     Ok(canonical.to_string_lossy().to_string())
+}
+
+async fn enqueue_watch_for_local_repo(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    repo_path: &str,
+    branch: Option<&str>,
+    from_sha: Option<&str>,
+    to_sha: Option<&str>,
+) -> u32 {
+    if !is_main_ref(branch) {
+        return 0;
+    }
+    let stimuli = match store
+        .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
+        .await
+    {
+        Ok(stimuli) => stimuli,
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to list watch stimuli for git hook");
+            return 0;
+        }
+    };
+
+    let mut matched = 0_u32;
+    for mut stimulus in stimuli {
+        if !stimulus.enabled {
+            continue;
+        }
+        let wave = match store.get_wave(&stimulus.wave_id).await {
+            Ok(Some(wave)) => wave,
+            Ok(None) => continue,
+            Err(err) => {
+                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "failed loading wave for watch git hook");
+                continue;
+            }
+        };
+        if wave.status() == WaveStatus::Paused {
+            continue;
+        }
+
+        let canonical_wave_repo = match canonicalize_existing_path(Path::new(wave.repo())) {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => continue,
+        };
+        if canonical_wave_repo != repo_path {
+            continue;
+        }
+
+        if let Some(to_sha) = to_sha {
+            if !to_sha.is_empty() {
+                stimulus.last_main_sha = Some(to_sha.to_string());
+                let _ = store.update_stimulus(&stimulus).await;
+            }
+        }
+
+        let reason = build_push_reason(branch, from_sha, to_sha);
+        let outcome = enqueue_pending_activation(
+            store,
+            event_hub,
+            ActivationEnvelope::new(
+                &stimulus.wave_id,
+                &stimulus.id,
+                ActivationSource::Push,
+                reason,
+                from_sha.unwrap_or(""),
+                to_sha.unwrap_or(""),
+            ),
+        )
+        .await;
+        if outcome.is_some() {
+            matched += 1;
+        }
+    }
+
+    matched
+}
+
+async fn enqueue_watch_for_github_repo(
+    store: &SharedStore,
+    event_hub: &EventHub,
+    repo_full_name: &str,
+    git_ref: Option<&str>,
+    from_sha: Option<&str>,
+    to_sha: Option<&str>,
+) -> u32 {
+    if !is_main_ref(git_ref) {
+        return 0;
+    }
+    let stimuli = match store
+        .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
+        .await
+    {
+        Ok(stimuli) => stimuli,
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to list watch stimuli for github push");
+            return 0;
+        }
+    };
+
+    let mut matched = 0_u32;
+    for mut stimulus in stimuli {
+        if !stimulus.enabled {
+            continue;
+        }
+        let wave = match store.get_wave(&stimulus.wave_id).await {
+            Ok(Some(wave)) => wave,
+            Ok(None) => continue,
+            Err(err) => {
+                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "failed loading wave for github push");
+                continue;
+            }
+        };
+        if wave.status() == WaveStatus::Paused {
+            continue;
+        }
+        let Some(wave_repo_full_name) = github_repo_from_local(Path::new(wave.repo())) else {
+            continue;
+        };
+        if wave_repo_full_name != repo_full_name {
+            continue;
+        }
+
+        if let Some(to_sha) = to_sha {
+            if !to_sha.is_empty() {
+                stimulus.last_main_sha = Some(to_sha.to_string());
+                let _ = store.update_stimulus(&stimulus).await;
+            }
+        }
+
+        let reason = build_push_reason(git_ref, from_sha, to_sha);
+        let outcome = enqueue_pending_activation(
+            store,
+            event_hub,
+            ActivationEnvelope::new(
+                &stimulus.wave_id,
+                &stimulus.id,
+                ActivationSource::Push,
+                reason,
+                from_sha.unwrap_or(""),
+                to_sha.unwrap_or(""),
+            ),
+        )
+        .await;
+        if outcome.is_some() {
+            matched += 1;
+        }
+    }
+    matched
+}
+
+fn is_main_ref(value: Option<&str>) -> bool {
+    value.is_none_or(|ref_name| {
+        ref_name == "main" || ref_name == "refs/heads/main" || ref_name.ends_with("/main")
+    })
+}
+
+fn build_push_reason(branch: Option<&str>, from_sha: Option<&str>, to_sha: Option<&str>) -> String {
+    let branch = branch.unwrap_or("main");
+    let from_sha = from_sha.unwrap_or("");
+    let to_sha = to_sha.unwrap_or("");
+    if from_sha.is_empty() || to_sha.is_empty() {
+        return format!("{branch} updated");
+    }
+    format!("{branch} advanced {from_sha}..{to_sha}")
 }
 
 pub async fn github_webhook_handler(
@@ -108,6 +285,27 @@ pub async fn github_webhook_handler(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string();
+
+    if event_kind.eq_ignore_ascii_case("push") {
+        let event = serde_json::from_slice::<GitHubPushEvent>(&body).map_err(|err| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                ApiMessage::Untrusted(err.to_string()),
+            )
+        })?;
+
+        let matched = enqueue_watch_for_github_repo(
+            &state.store,
+            &state.event_hub,
+            &event.repository.full_name,
+            Some(&event.git_ref),
+            Some(&event.before),
+            Some(&event.after),
+        )
+        .await;
+
+        return Ok(Json(serde_json::json!({ "ok": true, "matched": matched })));
+    }
 
     if event_kind.eq_ignore_ascii_case("check_run") {
         let event = serde_json::from_slice::<GitHubCheckRunEvent>(&body).map_err(|err| {
@@ -461,7 +659,10 @@ mod tests {
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{PullRequest, WaveRunKind, WaveRunSnapshot, WaveRunStatus};
+    use crate::lfd::types::{
+        ActivationSource, PullRequest, Stimulus, StimulusKind, Wave, WaveRunKind, WaveRunSnapshot,
+        WaveRunStatus, WaveStatus,
+    };
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -520,6 +721,8 @@ mod tests {
                 hook: "post-commit".to_string(),
                 repo: "../repo".to_string(),
                 branch: None,
+                from_sha: None,
+                to_sha: None,
             }),
         )
         .await;
@@ -543,6 +746,8 @@ mod tests {
                 hook: "post-commit".to_string(),
                 repo: alias_path.to_string_lossy().to_string(),
                 branch: Some("main".to_string()),
+                from_sha: None,
+                to_sha: None,
             }),
         )
         .await;
@@ -562,6 +767,76 @@ mod tests {
             }
             _ => panic!("expected worktree updated event"),
         }
+    }
+
+    #[tokio::test]
+    async fn github_push_enqueues_watch_activation() {
+        let state = test_http_state().await;
+        let repo_dir = tempdir().expect("repo tempdir");
+        std::process::Command::new("git")
+            .args(["-C", repo_dir.path().to_string_lossy().as_ref(), "init"])
+            .status()
+            .expect("git init should run");
+        std::process::Command::new("git")
+            .args([
+                "-C",
+                repo_dir.path().to_string_lossy().as_ref(),
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:loopflowstudio/loopflow.git",
+            ])
+            .status()
+            .expect("git remote add should run");
+
+        let wave = Wave {
+            id: LfdId::new(),
+            name: "watch-wave".to_string(),
+            repo: repo_dir.path().to_string_lossy().to_string(),
+            flow: "build".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Idle,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        state.store.create_wave(&wave).await.expect("create wave");
+        let stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            source_wave_id: None,
+            kind: StimulusKind::Watch,
+            cron: None,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        state
+            .store
+            .create_stimulus(&stimulus)
+            .await
+            .expect("create watch stimulus");
+
+        let matched = enqueue_watch_for_github_repo(
+            &state.store,
+            &state.event_hub,
+            "loopflowstudio/loopflow",
+            Some("refs/heads/main"),
+            Some("abc"),
+            Some("def"),
+        )
+        .await;
+        assert_eq!(matched, 1);
+
+        let pending = state
+            .store
+            .list_pending_activations(&wave.id)
+            .await
+            .expect("pending activations");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].source, ActivationSource::Push);
+        assert_eq!(pending[0].to_sha, "def");
     }
 
     fn wave_run_with_pr(
@@ -594,6 +869,7 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            activation_log_id: None,
             run_kind,
             sidecar_kind: None,
             parent_run_id: None,

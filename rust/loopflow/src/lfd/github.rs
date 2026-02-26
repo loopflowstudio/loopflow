@@ -29,6 +29,15 @@ pub struct GitHubPullRequestEvent {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct GitHubPushEvent {
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    pub before: String,
+    pub after: String,
+    pub repository: GitHubRepository,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct GitHubWebhookPullRequest {
     pub number: u32,
     #[serde(default)]

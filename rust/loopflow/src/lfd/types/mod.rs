@@ -17,7 +17,9 @@ pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
 pub use chord::Chord;
 pub use event::Event;
-pub use stimulus::{PendingActivation, Stimulus, StimulusKind};
+pub use stimulus::{
+    ActivationLog, ActivationOutcome, ActivationSource, PendingActivation, Stimulus, StimulusKind,
+};
 pub use summary::Summary;
 pub use wave::{
     LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,

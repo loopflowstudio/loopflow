@@ -1,24 +1,17 @@
-use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
-use chrono::Utc;
 use git2::Repository;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
+use super::{enqueue_pending_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
-use crate::lfd::executor::WaveExecutor;
-use crate::lfd::id::LfdId;
-use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{PendingActivation, Stimulus, StimulusKind, Wave, WaveStatus};
+use crate::lfd::types::{ActivationSource, Stimulus, StimulusKind, Wave, WaveStatus};
 
 pub fn spawn_watch_poller(
     store: SharedStore,
-    executor: WaveExecutor,
-    scheduler: std::sync::Arc<Scheduler>,
     event_hub: EventHub,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
@@ -31,19 +24,14 @@ pub fn spawn_watch_poller(
                     break;
                 }
                 _ = interval.tick() => {
-                    check_watch_stimuli(&store, &executor, &scheduler, &event_hub).await;
+                    check_watch_stimuli(&store, &event_hub).await;
                 }
             }
         }
     })
 }
 
-async fn check_watch_stimuli(
-    store: &SharedStore,
-    executor: &WaveExecutor,
-    scheduler: &std::sync::Arc<Scheduler>,
-    event_hub: &EventHub,
-) {
+async fn check_watch_stimuli(store: &SharedStore, event_hub: &EventHub) {
     let stimuli = match store
         .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
         .await
@@ -54,8 +42,6 @@ async fn check_watch_stimuli(
             return;
         }
     };
-
-    let mut started = HashSet::new();
 
     for stimulus in stimuli {
         if !stimulus.enabled {
@@ -75,50 +61,6 @@ async fn check_watch_stimuli(
             continue;
         }
 
-        if started.contains(wave.id()) {
-            continue;
-        }
-
-        if store
-            .get_active_wave_run(&stimulus.wave_id)
-            .await
-            .ok()
-            .flatten()
-            .is_none()
-        {
-            if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id).await {
-                if !pending.is_empty() {
-                    let run_id = LfdId::new();
-                    let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
-                        Ok(guard) => guard,
-                        Err(reason) => {
-                            tracing::warn!(
-                                wave_id = %wave.id(),
-                                reason = %reason,
-                                "scheduler at capacity; watch activation deferred"
-                            );
-                            continue;
-                        }
-                    };
-
-                    if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id).await {
-                        let _ = store.delete_pending_activations(&stimulus.wave_id).await;
-                        started.insert(wave.id().clone());
-                        spawn_run_task_with_slot(
-                            store.clone(),
-                            executor.clone(),
-                            event_hub.clone(),
-                            run,
-                            slot_guard,
-                        );
-                        continue;
-                    }
-
-                    drop(slot_guard);
-                }
-            }
-        }
-
         match check_watch_stimulus(&wave, &stimulus) {
             Ok(result) => {
                 if result.update_sha {
@@ -130,46 +72,23 @@ async fn check_watch_stimuli(
                 if !result.trigger {
                     continue;
                 }
-
-                if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
-                    queue_or_coalesce_activation(
-                        store,
+                let reason = format!(
+                    "origin/main advanced {}..{}",
+                    result.from_sha, result.current_sha
+                );
+                let _ = enqueue_pending_activation(
+                    store,
+                    event_hub,
+                    ActivationEnvelope::new(
                         &stimulus.wave_id,
                         &stimulus.id,
+                        ActivationSource::Poll,
+                        reason,
                         &result.from_sha,
                         &result.current_sha,
-                    )
-                    .await;
-                    continue;
-                }
-
-                let run_id = LfdId::new();
-                let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
-                    Ok(guard) => guard,
-                    Err(reason) => {
-                        tracing::warn!(
-                            wave_id = %wave.id(),
-                            reason = %reason,
-                            "scheduler at capacity; watch activation deferred"
-                        );
-                        continue;
-                    }
-                };
-
-                let run = match create_wave_run_with_id(store, &wave, &run_id).await {
-                    Ok(run) => run,
-                    Err(err) => {
-                        tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run");
-                        continue;
-                    }
-                };
-                spawn_run_task_with_slot(
-                    store.clone(),
-                    executor.clone(),
-                    event_hub.clone(),
-                    run,
-                    slot_guard,
-                );
+                    ),
+                )
+                .await;
             }
             Err(err) => {
                 tracing::warn!(wave_id = %wave.id(), stimulus_id = %stimulus.id, error = %err, "watch check failed");
@@ -250,33 +169,4 @@ fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, 
         trigger: area_match,
         update_sha: true,
     })
-}
-
-async fn queue_or_coalesce_activation(
-    store: &SharedStore,
-    wave_id: &LfdId,
-    stimulus_id: &LfdId,
-    from_sha: &str,
-    to_sha: &str,
-) {
-    match store.get_pending_for_stimulus(wave_id, stimulus_id).await {
-        Ok(Some(mut existing)) => {
-            existing.to_sha = to_sha.to_string();
-            let _ = store.update_pending_activation(&existing).await;
-        }
-        Ok(None) => {
-            let activation = PendingActivation {
-                id: LfdId::new(),
-                wave_id: wave_id.clone(),
-                stimulus_id: stimulus_id.clone(),
-                from_sha: from_sha.to_string(),
-                to_sha: to_sha.to_string(),
-                queued_at: Utc::now().timestamp(),
-            };
-            let _ = store.create_pending_activation(&activation).await;
-        }
-        Err(err) => {
-            tracing::error!(wave_id = %wave_id, error = %err, "failed to check pending activation");
-        }
-    }
 }

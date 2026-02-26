@@ -78,6 +78,7 @@ pub async fn create_wave_run_with_id(
         ended_at: None,
         error: None,
         flow_parents: Vec::new(),
+        activation_log_id: None,
         run_kind: WaveRunKind::Main,
         sidecar_kind: None,
         parent_run_id,

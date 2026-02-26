@@ -12,13 +12,14 @@ use crate::lfd::store::catalog::{
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
-    map_agent_row, map_chat_memory_block_row, map_chat_message_row, map_chord_row,
+    map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
+    map_chord_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_stimulus_row,
     map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState,
+    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState,
     PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave,
     WaveRun, WaveRunStatus, WaveStatus,
 };
@@ -609,6 +610,7 @@ impl SqliteStore {
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.snapshot.pr)?,
                 flow_parents_json,
+                run.activation_log_id.as_ref(),
                 run.run_kind.as_i32() as i64,
                 run.sidecar_kind.map(|kind| kind.as_i32() as i64),
                 run.parent_run_id.as_ref(),
@@ -642,6 +644,7 @@ impl SqliteStore {
                 serde_json::to_string(&run.snapshot.area)?,
                 serialize_pr(&run.snapshot.pr)?,
                 flow_parents_json,
+                run.activation_log_id.as_ref(),
                 run.run_kind.as_i32() as i64,
                 run.sidecar_kind.map(|kind| kind.as_i32() as i64),
                 run.parent_run_id.as_ref(),
@@ -937,6 +940,8 @@ impl SqliteStore {
                 activation.id,
                 activation.wave_id,
                 activation.stimulus_id,
+                activation.source.as_i32() as i64,
+                activation.reason,
                 activation.from_sha,
                 activation.to_sha,
                 activation.queued_at,
@@ -949,7 +954,13 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             Self::sql(Query::UpdatePendingActivation),
-            params![activation.from_sha, activation.to_sha, activation.id],
+            params![
+                activation.source.as_i32() as i64,
+                activation.reason,
+                activation.from_sha,
+                activation.to_sha,
+                activation.id
+            ],
         )?;
         if updated == 0 {
             return Err(StoreError::NotFound);
@@ -979,6 +990,63 @@ impl SqliteStore {
             })
             .optional()?;
         activation.transpose()
+    }
+
+    pub fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let deleted = conn.execute(
+            Self::sql(Query::DeletePendingActivationById),
+            params![activation_id],
+        )?;
+        Ok(deleted as u32)
+    }
+
+    pub fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::InsertActivationLog),
+            params![
+                log.id,
+                log.wave_id,
+                log.stimulus_id,
+                log.source.as_i32() as i64,
+                log.reason,
+                log.outcome.as_str(),
+                log.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_activation_log(
+        &self,
+        wave_id: &LfdId,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationLog>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListActivationLogByWave))?;
+        let rows = stmt.query_map(params![wave_id, limit as i64], |row| {
+            Ok(map_activation_log_row(row))
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row??);
+        }
+        Ok(entries)
+    }
+
+    pub fn get_activation_log(
+        &self,
+        activation_log_id: &LfdId,
+    ) -> StoreResult<Option<ActivationLog>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetActivationLogById))?;
+        let entry = stmt
+            .query_row(params![activation_log_id], |row| {
+                Ok(map_activation_log_row(row))
+            })
+            .optional()?;
+        entry.transpose()
     }
 
     pub fn list_fork_runs(

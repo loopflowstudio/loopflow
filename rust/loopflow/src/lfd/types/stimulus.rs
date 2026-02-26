@@ -34,6 +34,72 @@ impl StimulusKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ActivationSource {
+    #[default]
+    Poll = 0,
+    Push = 1,
+    Listen = 2,
+    Manual = 3,
+}
+
+impl ActivationSource {
+    pub fn from_i32(value: i32) -> Self {
+        match value {
+            1 => Self::Push,
+            2 => Self::Listen,
+            3 => Self::Manual,
+            _ => Self::Poll,
+        }
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        *self as i32
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Poll => "poll",
+            Self::Push => "push",
+            Self::Listen => "listen",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ActivationOutcome {
+    Queued,
+    Coalesced,
+    Dropped,
+    Dispatched,
+}
+
+impl ActivationOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Coalesced => "coalesced",
+            Self::Dropped => "dropped",
+            Self::Dispatched => "dispatched",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "queued" => Some(Self::Queued),
+            "coalesced" => Some(Self::Coalesced),
+            "dropped" => Some(Self::Dropped),
+            "dispatched" => Some(Self::Dispatched),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stimulus {
     pub id: LfdId,
@@ -75,6 +141,8 @@ pub struct PendingActivation {
     pub id: LfdId,
     pub wave_id: LfdId,
     pub stimulus_id: LfdId,
+    pub source: ActivationSource,
+    pub reason: String,
     pub from_sha: String,
     pub to_sha: String,
     pub queued_at: i64,
@@ -87,6 +155,8 @@ impl PendingActivation {
             id,
             wave_id,
             stimulus_id,
+            source: ActivationSource::Poll,
+            reason: String::new(),
             from_sha: String::new(),
             to_sha: String::new(),
             queued_at: OffsetDateTime::now_utc().unix_timestamp(),
@@ -94,13 +164,54 @@ impl PendingActivation {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivationLog {
+    pub id: LfdId,
+    pub wave_id: LfdId,
+    pub stimulus_id: LfdId,
+    pub source: ActivationSource,
+    pub reason: String,
+    pub outcome: ActivationOutcome,
+    pub created_at: i64,
+}
+
+impl ActivationLog {
+    #[allow(dead_code)] // Convenience constructor for tests and future use.
+    pub fn new(
+        wave_id: LfdId,
+        stimulus_id: LfdId,
+        source: ActivationSource,
+        reason: String,
+        outcome: ActivationOutcome,
+    ) -> Self {
+        Self {
+            id: LfdId::new(),
+            wave_id,
+            stimulus_id,
+            source,
+            reason,
+            outcome,
+            created_at: OffsetDateTime::now_utc().unix_timestamp(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::StimulusKind;
+    use super::{ActivationSource, StimulusKind};
 
     #[test]
     fn listen_stimulus_kind_storage_value_is_stable() {
         assert_eq!(StimulusKind::Listen.as_i32(), 5);
         assert_eq!(StimulusKind::from_i32(5), StimulusKind::Listen);
+    }
+
+    #[test]
+    fn activation_source_storage_value_is_stable() {
+        assert_eq!(ActivationSource::Poll.as_i32(), 0);
+        assert_eq!(ActivationSource::Push.as_i32(), 1);
+        assert_eq!(ActivationSource::Listen.as_i32(), 2);
+        assert_eq!(ActivationSource::Manual.as_i32(), 3);
+        assert_eq!(ActivationSource::from_i32(3), ActivationSource::Manual);
     }
 }

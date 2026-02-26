@@ -12,21 +12,26 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
+use crate::lfd::executor::ensure_wave_worktree;
 use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
-use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use crate::lfd::http::dto::{
-    stimulus_dto, stimulus_kind_str, CombineResponse, CombineResponseResult, ContinueWaveResponse,
-    DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse,
-    RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
+    activation_log_dto, stimulus_dto, stimulus_kind_str, ActivationLogDto, CombineResponse,
+    CombineResponseResult, ContinueWaveResponse, DeletedResourceResponse, ErrorResponse,
+    LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse, RunWaveResponse,
+    StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_config::{read_wave_config, StimulusDef};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::triggers::spawn_run_task_with_slot;
+use crate::lfd::triggers::{
+    dispatch_wave_if_ready, enqueue_pending_activation, spawn_run_task_with_slot,
+    ActivationEnvelope, EnqueueOutcome,
+};
 use crate::lfd::types::{
-    AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    ActivationSource, AgentStatus, Event, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +48,11 @@ pub struct ListWavesQuery {
 pub struct ExpandQuery {
     #[serde(default, rename = "expand[]")]
     expand: ExpandParam,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ListActivationsQuery {
+    limit: Option<u32>,
 }
 
 /// Accept `expand[]=value` as either a single string or repeated params.
@@ -560,30 +570,64 @@ async fn start_wave_run(
     // Re-enable all stimuli (they may have been disabled by a previous stop).
     let _ = set_wave_stimuli_enabled(state, wave.id(), true, false).await;
 
-    let run_id = LfdId::new();
-    let slot_guard = match state.scheduler.acquire_guard(run_id.as_str()).await {
-        Ok(guard) => guard,
-        Err(_) => return Ok(None),
-    };
+    let stimulus_id = ensure_manual_stimulus(state, wave.id()).await?;
+    let outcome = enqueue_pending_activation(
+        &state.store,
+        &state.event_hub,
+        ActivationEnvelope::new(
+            wave.id(),
+            &stimulus_id,
+            ActivationSource::Manual,
+            "manual run requested via API",
+            "",
+            "",
+        ),
+    )
+    .await;
+    if matches!(outcome, Some(EnqueueOutcome::Dropped)) {
+        return Ok(None);
+    }
 
-    let run = create_wave_run_with_id(&state.store, wave, &run_id)
+    Ok(dispatch_wave_if_ready(
+        &state.store,
+        &state.executor,
+        &state.scheduler,
+        &state.event_hub,
+        wave,
+    )
+    .await)
+}
+
+async fn ensure_manual_stimulus(state: &HttpState, wave_id: &LfdId) -> Result<LfdId, ApiError> {
+    let stimuli = state
+        .store
+        .list_stimuli(Some(wave_id))
         .await
-        .map_err(|err| {
-            api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ApiMessage::Untrusted(err.to_string()),
-            )
-        })?;
+        .map_err(map_store_error)?;
+    if let Some(existing) = stimuli
+        .into_iter()
+        .find(|stimulus| stimulus.kind == StimulusKind::Once)
+    {
+        return Ok(existing.id);
+    }
 
-    spawn_run_task_with_slot(
-        state.store.clone(),
-        (*state.executor).clone(),
-        state.event_hub.clone(),
-        run.clone(),
-        slot_guard,
-    );
-
-    Ok(Some(run))
+    let stimulus = Stimulus {
+        id: LfdId::new(),
+        wave_id: wave_id.clone(),
+        source_wave_id: None,
+        kind: StimulusKind::Once,
+        cron: None,
+        last_main_sha: None,
+        last_triggered_at: None,
+        created_at: Some(OffsetDateTime::now_utc()),
+        enabled: true,
+    };
+    state
+        .store
+        .create_stimulus(&stimulus)
+        .await
+        .map_err(map_store_error)?;
+    Ok(stimulus.id)
 }
 
 pub async fn check_wave_ci_handler(
@@ -722,6 +766,22 @@ pub async fn list_stimuli_handler(
     let dtos: Vec<_> = stimuli.into_iter().map(stimulus_dto).collect();
 
     Ok(Json(serde_json::json!({ "data": dtos })))
+}
+
+pub async fn list_activations_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+    Query(query): Query<ListActivationsQuery>,
+) -> ApiResult<ListResponse<ActivationLogDto>> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let limit = query.limit.unwrap_or(50).min(200);
+    let logs = state
+        .store
+        .list_activation_log(&wave_id, limit)
+        .await
+        .map_err(map_store_error)?;
+    let data = logs.into_iter().map(activation_log_dto).collect();
+    Ok(Json(ListResponse::new(data, false)))
 }
 
 pub async fn stop_wave_handler(

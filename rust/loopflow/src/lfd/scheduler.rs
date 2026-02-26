@@ -113,27 +113,21 @@ impl Scheduler {
     ) -> Vec<JoinHandle<()>> {
         vec![
             triggers::spawn_ci_failure_handler(executor.clone(), event_hub.clone(), cancel.clone()),
+            triggers::spawn_activation_dispatcher(
+                store.clone(),
+                executor.clone(),
+                self.clone(),
+                event_hub.clone(),
+                cancel.clone(),
+            ),
             triggers::spawn_loop_ticker(
                 self.clone(),
                 store.clone(),
-                executor.clone(),
                 event_hub.clone(),
                 cancel.clone(),
             ),
-            triggers::spawn_watch_poller(
-                store.clone(),
-                executor.clone(),
-                self.clone(),
-                event_hub.clone(),
-                cancel.clone(),
-            ),
-            triggers::spawn_cron_poller(
-                store.clone(),
-                executor.clone(),
-                self.clone(),
-                event_hub.clone(),
-                cancel.clone(),
-            ),
+            triggers::spawn_watch_poller(store.clone(), event_hub.clone(), cancel.clone()),
+            triggers::spawn_cron_poller(store.clone(), event_hub.clone(), cancel.clone()),
             triggers::spawn_queue_reconciler(store.clone(), github, cancel.clone()),
             triggers::spawn_recovery_loop(store.clone(), executor.clone(), cancel.clone()),
             triggers::spawn_summary_refresh(store, executor, event_hub, cancel),

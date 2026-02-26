@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
-    AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState, LivePullRequestState,
+    ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState, LivePullRequestState,
     PendingActivation, QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun,
     WaveRunStackStatus,
 };
@@ -266,12 +266,35 @@ impl Store {
         WaveStateStore::delete_pending_activations(self, wave_id).await
     }
 
+    pub async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
+        WaveStateStore::delete_pending_activation_by_id(self, activation_id).await
+    }
+
     pub async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
         stimulus_id: &LfdId,
     ) -> StoreResult<Option<PendingActivation>> {
         WaveStateStore::get_pending_for_stimulus(self, wave_id, stimulus_id).await
+    }
+
+    pub async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
+        WaveStateStore::create_activation_log(self, log).await
+    }
+
+    pub async fn list_activation_log(
+        &self,
+        wave_id: &LfdId,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationLog>> {
+        WaveStateStore::list_activation_log(self, wave_id, limit).await
+    }
+
+    pub async fn get_activation_log(
+        &self,
+        activation_log_id: &LfdId,
+    ) -> StoreResult<Option<ActivationLog>> {
+        WaveStateStore::get_activation_log(self, activation_log_id).await
     }
 
     pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
@@ -528,11 +551,22 @@ pub trait WaveStateStore: Send + Sync {
     async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
     async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
     async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32>;
+    async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32>;
     async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
         stimulus_id: &LfdId,
     ) -> StoreResult<Option<PendingActivation>>;
+    async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()>;
+    async fn list_activation_log(
+        &self,
+        wave_id: &LfdId,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationLog>>;
+    async fn get_activation_log(
+        &self,
+        activation_log_id: &LfdId,
+    ) -> StoreResult<Option<ActivationLog>>;
 
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
@@ -1007,6 +1041,21 @@ impl WaveStateStore for Store {
         }
     }
 
+    async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let activation_id = activation_id.clone();
+                run_sqlite(store, move |store| {
+                    store.delete_pending_activation_by_id(&activation_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store.delete_pending_activation_by_id(activation_id).await
+            }
+        }
+    }
+
     async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
@@ -1024,6 +1073,49 @@ impl WaveStateStore for Store {
             StoreBackend::Postgres(store) => {
                 store.get_pending_for_stimulus(wave_id, stimulus_id).await
             }
+        }
+    }
+
+    async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let log = log.clone();
+                run_sqlite(store, move |store| store.create_activation_log(&log)).await
+            }
+            StoreBackend::Postgres(store) => store.create_activation_log(log).await,
+        }
+    }
+
+    async fn list_activation_log(
+        &self,
+        wave_id: &LfdId,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationLog>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| {
+                    store.list_activation_log(&wave_id, limit)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_activation_log(wave_id, limit).await,
+        }
+    }
+
+    async fn get_activation_log(
+        &self,
+        activation_log_id: &LfdId,
+    ) -> StoreResult<Option<ActivationLog>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let activation_log_id = activation_log_id.clone();
+                run_sqlite(store, move |store| {
+                    store.get_activation_log(&activation_log_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.get_activation_log(activation_log_id).await,
         }
     }
 
@@ -1636,6 +1728,7 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            activation_log_id: None,
             run_kind: kind,
             sidecar_kind: if kind == WaveRunKind::Sidecar {
                 Some(SidecarKind::CiFix)
@@ -2030,6 +2123,7 @@ mod tests {
                     ended_at: Some(OffsetDateTime::now_utc()),
                     error: None,
                     flow_parents: Vec::new(),
+                    activation_log_id: None,
                     run_kind: WaveRunKind::Main,
                     sidecar_kind: None,
                     parent_run_id,

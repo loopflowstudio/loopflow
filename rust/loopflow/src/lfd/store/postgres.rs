@@ -13,13 +13,14 @@ use crate::lfd::store::catalog::{
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
-    map_agent_row, map_chat_memory_block_row, map_chat_message_row, map_chord_row,
+    map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
+    map_chord_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_stimulus_row,
     map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState,
+    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState,
     PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave,
     WaveRun, WaveRunStatus, WaveStatus,
 };
@@ -681,6 +682,7 @@ impl PostgresStore {
                         &serde_json::to_string(&run.snapshot.area)?,
                         &serialize_pr(&run.snapshot.pr)?,
                         &flow_parents_json,
+                        &run.activation_log_id,
                         &run.run_kind.as_i32(),
                         &run.sidecar_kind.map(|kind| kind.as_i32()),
                         &run.parent_run_id,
@@ -718,6 +720,7 @@ impl PostgresStore {
                         &serde_json::to_string(&run.snapshot.area)?,
                         &serialize_pr(&run.snapshot.pr)?,
                         &flow_parents_json,
+                        &run.activation_log_id,
                         &run.run_kind.as_i32(),
                         &run.sidecar_kind.map(|kind| kind.as_i32()),
                         &run.parent_run_id,
@@ -1042,6 +1045,8 @@ impl PostgresStore {
                         &activation.id,
                         &activation.wave_id,
                         &activation.stimulus_id,
+                        &activation.source.as_i32(),
+                        &activation.reason,
                         &activation.from_sha,
                         &activation.to_sha,
                         &activation.queued_at,
@@ -1061,7 +1066,13 @@ impl PostgresStore {
             let updated = client
                 .execute(
                     Self::sql(Query::UpdatePendingActivation),
-                    &[&activation.from_sha, &activation.to_sha, &activation.id],
+                    &[
+                        &activation.source.as_i32(),
+                        &activation.reason,
+                        &activation.from_sha,
+                        &activation.to_sha,
+                        &activation.id,
+                    ],
                 )
                 .await?;
             if updated == 0 {
@@ -1098,6 +1109,73 @@ impl PostgresStore {
                 )
                 .await?;
             row.as_ref().map(map_pending_activation_row).transpose()
+        })
+        .await
+    }
+
+    pub async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
+        self.with_client(|client| async move {
+            let deleted = client
+                .execute(
+                    Self::sql(Query::DeletePendingActivationById),
+                    &[&activation_id],
+                )
+                .await?;
+            Ok(deleted as u32)
+        })
+        .await
+    }
+
+    pub async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    Self::sql(Query::InsertActivationLog),
+                    &[
+                        &log.id,
+                        &log.wave_id,
+                        &log.stimulus_id,
+                        &log.source.as_i32(),
+                        &log.reason,
+                        &log.outcome.as_str(),
+                        &log.created_at,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_activation_log(
+        &self,
+        wave_id: &LfdId,
+        limit: u32,
+    ) -> StoreResult<Vec<ActivationLog>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    Self::sql(Query::ListActivationLogByWave),
+                    &[&wave_id, &(limit as i32)],
+                )
+                .await?;
+            rows.iter().map(map_activation_log_row).collect()
+        })
+        .await
+    }
+
+    pub async fn get_activation_log(
+        &self,
+        activation_log_id: &LfdId,
+    ) -> StoreResult<Option<ActivationLog>> {
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    Self::sql(Query::GetActivationLogById),
+                    &[&activation_log_id],
+                )
+                .await?;
+            row.as_ref().map(map_activation_log_row).transpose()
         })
         .await
     }

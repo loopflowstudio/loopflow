@@ -27,10 +27,12 @@ use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::types::{CreateSessionParams, Session, SessionConfig, SessionStatus};
 use crate::lfd::sessions::{SessionManager, SessionManagerError};
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
-use crate::lfd::triggers::spawn_run_task_with_slot;
+use crate::lfd::triggers::{
+    enqueue_pending_activation, spawn_run_task_with_slot, ActivationEnvelope,
+};
 use crate::lfd::types::{
-    Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun, WaveRunKind,
-    WaveRunStatus, WaveStatus,
+    ActivationSource, Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun,
+    WaveRunKind, WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
@@ -479,6 +481,9 @@ impl WaveExecutor {
                             warn!(wave_id = %wave.id(), error = %err, "queue reconcile failed after run completion");
                         }
                     }
+                    if let Err(err) = self.enqueue_listen_activations(wave.id(), &run.id).await {
+                        warn!(wave_id = %wave.id(), run_id = %run.id, error = %err, "failed to enqueue listen activations");
+                    }
                     // Wave goes back to Idle after a run completes — the run
                     // is done, but the wave is ready for its next iteration.
                     self.set_wave_status(wave.id(), WaveStatus::Idle).await;
@@ -496,6 +501,40 @@ impl WaveExecutor {
                 error!(wave_id = %wave_id, ?status, error = %err, "failed to update wave status");
             }
         }
+    }
+
+    async fn enqueue_listen_activations(
+        &self,
+        source_wave_id: &LfdId,
+        completed_run_id: &LfdId,
+    ) -> Result<()> {
+        let stimuli = self
+            .store
+            .list_stimuli_by_kind(StimulusKind::Listen.as_i32())
+            .await?;
+        for stimulus in stimuli {
+            if !stimulus.enabled {
+                continue;
+            }
+            if stimulus.source_wave_id.as_ref() != Some(source_wave_id) {
+                continue;
+            }
+            let reason = format!("wave {} completed run {}", source_wave_id, completed_run_id);
+            let _ = enqueue_pending_activation(
+                &self.store,
+                &self.event_hub,
+                ActivationEnvelope::new(
+                    &stimulus.wave_id,
+                    &stimulus.id,
+                    ActivationSource::Listen,
+                    reason,
+                    "",
+                    "",
+                ),
+            )
+            .await;
+        }
+        Ok(())
     }
 
     async fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
@@ -754,7 +793,7 @@ mod tests {
     use crate::lfd::sessions::types::{Session, SessionConfig};
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::WaveRunSnapshot;
+    use crate::lfd::types::{ActivationSource, Stimulus, StimulusKind, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -893,6 +932,7 @@ mod tests {
             ended_at: None,
             error: None,
             flow_parents: vec![],
+            activation_log_id: None,
             run_kind: WaveRunKind::Main,
             sidecar_kind: None,
             parent_run_id: None,
@@ -969,6 +1009,83 @@ mod tests {
             wave_updated_count, 3,
             "expected wave_updated after each step advance and on completion"
         );
+    }
+
+    #[tokio::test]
+    async fn execute_enqueues_listen_activation_on_completion() {
+        let tmp = tempdir().expect("tempdir");
+        let repo = tmp.path();
+
+        let flow_dir = repo.join(".lf/flows");
+        std::fs::create_dir_all(&flow_dir).unwrap();
+        std::fs::write(flow_dir.join("test-flow.yaml"), "- step-a\n").unwrap();
+        let step_dir = repo.join(".lf/steps");
+        std::fs::create_dir_all(&step_dir).unwrap();
+        std::fs::write(step_dir.join("step-a.md"), "do step a").unwrap();
+
+        let db_path = tmp.path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let (source_wave_id, source_run_id) = create_wave_and_run(&store, repo, "test-flow").await;
+        let target_wave = Wave {
+            id: LfdId::new(),
+            name: "target-wave".to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: "test-flow".to_string(),
+            direction: vec![],
+            area: vec![],
+            status: WaveStatus::Idle,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store
+            .create_wave(&target_wave)
+            .await
+            .expect("create target wave");
+        let listen_stimulus = Stimulus {
+            id: LfdId::new(),
+            wave_id: target_wave.id.clone(),
+            source_wave_id: Some(source_wave_id.clone()),
+            kind: StimulusKind::Listen,
+            cron: None,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        };
+        store
+            .create_stimulus(&listen_stimulus)
+            .await
+            .expect("create listen stimulus");
+
+        let scheduler = Arc::new(Scheduler::new(4));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&source_run_id)
+            .await
+            .expect("execute source run");
+
+        let pending = store
+            .list_pending_activations(&target_wave.id)
+            .await
+            .expect("pending activations");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].stimulus_id, listen_stimulus.id);
+        assert_eq!(pending[0].source, ActivationSource::Listen);
     }
 
     #[tokio::test]

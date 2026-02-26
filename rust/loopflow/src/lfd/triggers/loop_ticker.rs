@@ -4,19 +4,17 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
+use super::{enqueue_pending_activation, ActivationEnvelope};
 use crate::engine::worktrees::worktree_path;
 use crate::lfd::events::EventHub;
-use crate::lfd::executor::WaveExecutor;
-use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
+use crate::lfd::types::ActivationSource;
 use crate::lfd::types::{StimulusKind, WaveStatus};
 
 pub fn spawn_loop_ticker(
     scheduler: std::sync::Arc<Scheduler>,
     store: SharedStore,
-    executor: WaveExecutor,
     event_hub: EventHub,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
@@ -29,7 +27,7 @@ pub fn spawn_loop_ticker(
                     break;
                 }
                 _ = interval.tick() => {
-                    tick_loop_waves(&scheduler, &store, &executor, &event_hub).await;
+                    tick_loop_waves(&scheduler, &store, &event_hub).await;
                 }
             }
         }
@@ -39,7 +37,6 @@ pub fn spawn_loop_ticker(
 async fn tick_loop_waves(
     scheduler: &std::sync::Arc<Scheduler>,
     store: &SharedStore,
-    executor: &WaveExecutor,
     event_hub: &EventHub,
 ) {
     let stimuli = match store
@@ -78,6 +75,11 @@ async fn tick_loop_waves(
         if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
             continue;
         }
+        if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id).await {
+            if !pending.is_empty() {
+                continue;
+            }
+        }
 
         let worktree = worktree_path(Path::new(wave.repo()), wave.name());
         let wave_dir = worktree.join("wave").join(wave.name());
@@ -86,29 +88,18 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let run_id = LfdId::new();
-        let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
-            Ok(guard) => guard,
-            Err(reason) => {
-                tracing::warn!(wave_id = %wave.id(), %reason, "scheduler at capacity; loop tick deferred");
-                continue;
-            }
-        };
-
-        let run = match create_wave_run_with_id(store, &wave, &run_id).await {
-            Ok(run) => run,
-            Err(err) => {
-                tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run");
-                continue;
-            }
-        };
-
-        spawn_run_task_with_slot(
-            store.clone(),
-            executor.clone(),
-            event_hub.clone(),
-            run,
-            slot_guard,
-        );
+        let _ = enqueue_pending_activation(
+            store,
+            event_hub,
+            ActivationEnvelope::new(
+                wave.id(),
+                &stimulus.id,
+                ActivationSource::Poll,
+                "loop ticker observed idle wave",
+                "",
+                "",
+            ),
+        )
+        .await;
     }
 }

@@ -322,6 +322,7 @@ pub struct WaveRun {
     pub ended_at: Option<OffsetDateTime>,
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
+    pub activation_log_id: Option<LfdId>,
     #[serde(default)]
     pub run_kind: WaveRunKind,
     pub sidecar_kind: Option<SidecarKind>,
@@ -390,6 +391,7 @@ impl WaveRun {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            activation_log_id: None,
             run_kind: WaveRunKind::Main,
             sidecar_kind: None,
             parent_run_id: None,

@@ -4,8 +4,8 @@ use time::OffsetDateTime;
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
 use crate::lfd::types::{
-    ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Stimulus, StimulusKind, WaveRun,
-    WaveRunStatus,
+    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Stimulus,
+    StimulusKind, WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -192,6 +192,18 @@ pub struct StimulusDto {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ActivationLogDto {
+    pub id: String,
+    pub object: String,
+    pub wave_id: String,
+    pub stimulus_id: String,
+    pub source: String,
+    pub reason: String,
+    pub outcome: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ChatMemoryBlockDto {
     pub object: String,
     pub name: String,
@@ -347,6 +359,19 @@ pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
         last_main_sha: s.last_main_sha,
         last_triggered_at: s.last_triggered_at,
         created_at: format_datetime(s.created_at),
+    }
+}
+
+pub fn activation_log_dto(log: ActivationLog) -> ActivationLogDto {
+    ActivationLogDto {
+        id: log.id.to_string(),
+        object: "activation_log".to_string(),
+        wave_id: log.wave_id.to_string(),
+        stimulus_id: log.stimulus_id.to_string(),
+        source: log.source.as_str().to_string(),
+        reason: log.reason,
+        outcome: log.outcome.as_str().to_string(),
+        created_at: format_datetime(time::OffsetDateTime::from_unix_timestamp(log.created_at).ok()),
     }
 }
 

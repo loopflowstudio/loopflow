@@ -105,7 +105,8 @@ struct ConnectionSetupView: View {
                     showURLFallback: browserFallbackProviders.contains(status.provider),
                     onConnect: connectProvider,
                     onDisconnect: disconnectProvider,
-                    onCancel: disconnectProvider
+                    onCancel: disconnectProvider,
+                    onCopy: copyToClipboard
                 )
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)

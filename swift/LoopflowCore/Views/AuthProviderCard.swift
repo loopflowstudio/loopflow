@@ -1,11 +1,5 @@
 import SwiftUI
 
-#if os(macOS)
-import AppKit
-#elseif os(iOS)
-import UIKit
-#endif
-
 public struct AuthProviderCard: View {
     @Environment(\.palette) private var palette
 
@@ -17,6 +11,7 @@ public struct AuthProviderCard: View {
     public let onConnect: (AuthProvider) -> Void
     public let onDisconnect: (AuthProvider) -> Void
     public let onCancel: (AuthProvider) -> Void
+    public let onCopy: (String) -> Void
 
     public init(
         status: AuthProviderStatus,
@@ -26,7 +21,8 @@ public struct AuthProviderCard: View {
         showURLFallback: Bool = false,
         onConnect: @escaping (AuthProvider) -> Void,
         onDisconnect: @escaping (AuthProvider) -> Void,
-        onCancel: @escaping (AuthProvider) -> Void
+        onCancel: @escaping (AuthProvider) -> Void,
+        onCopy: @escaping (String) -> Void
     ) {
         self.status = status
         self.pendingFlow = pendingFlow
@@ -36,6 +32,7 @@ public struct AuthProviderCard: View {
         self.onConnect = onConnect
         self.onDisconnect = onDisconnect
         self.onCancel = onCancel
+        self.onCopy = onCopy
     }
 
     public var body: some View {
@@ -230,11 +227,6 @@ public struct AuthProviderCard: View {
     }
 
     private func copyToClipboard(_ value: String) {
-        #if os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-        #elseif os(iOS)
-        UIPasteboard.general.string = value
-        #endif
+        onCopy(value)
     }
 }

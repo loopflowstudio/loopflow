@@ -22,8 +22,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set version from tag
-        run: sed -i.bak 's/^version = "0.0.0"/version = "'"${GITHUB_REF_NAME#v}"'"/' Cargo.toml && rm Cargo.toml.bak
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -44,8 +42,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set version from tag
-        run: sed -i.bak 's/^version = "0.0.0"/version = "'"${GITHUB_REF_NAME#v}"'"/' Cargo.toml && rm Cargo.toml.bak
       - uses: dtolnay/rust-toolchain@stable
       - name: Publish to crates.io
         run: cargo publish -p loopflow --allow-dirty

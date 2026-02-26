@@ -1,4 +1,4 @@
-Generate user-focused release notes for version {version}.
+Generate user-focused release notes for {target_name} version {version}.
 
 You're writing for someone scanning GitHub releases or PyPI to decide if they should upgrade.
 
@@ -26,6 +26,8 @@ Group changes by what users care about, not by codebase area. Use themes like:
 - Infrastructure / reliability
 
 Use only sections that are relevant for this release.
+
+When target context is provided (target name, tag prefix, area scope), include only changes relevant to that scope.
 
 ## Style
 

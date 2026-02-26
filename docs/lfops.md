@@ -106,14 +106,20 @@ lf ops release              # bump patch, publish
 lf ops release minor        # bump minor
 lf ops release 1.0.0        # explicit version
 lf ops release -n           # dry run — show what would happen
+lf ops release --target cli # release a named target from .lf/config.yaml
+lf ops release --status     # latest tag + workflow + release status
 ```
 
-Creates a worktree from `origin/main`, generates release notes via agent, commits, creates and lands a PR, then tags and pushes. CI picks up the tag and builds the release.
+Creates a worktree from `origin/main`, bumps manifest versions, generates release notes via agent, commits, creates and lands a PR, tags and pushes, then reports workflow/release status.
+
+If release infrastructure is missing (no matching tag and no matching workflow), `lf ops release` starts an interactive bootstrap session to set it up.
 
 | Flag | Description |
 |------|-------------|
 | `version` | Bump type (`patch`, `minor`, `major`) or explicit version (default: `patch`) |
 | `-n, --dry-run` | Preview the release without making changes |
+| `-t, --target` | Release a named target from `.lf/config.yaml` |
+| `--status` | Print latest scoped tag, workflow run state, and GitHub Release presence |
 
 ---
 

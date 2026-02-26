@@ -67,7 +67,7 @@ Memory distillation landed in `update-wave` and `add-to-wave` ops prompts rather
 Trimming order (memory drops before summaries/docs) is the right default. Task context matters more than accumulated observations — an agent that forgets past patterns but can see the current diff will do better than one that remembers everything but can't see what it's working on.
 
 Two known gaps remain:
-1. **Persistence across execution surfaces.** Unverified whether any headless/session path could lose `MEMORY.md` edits due to detached workspaces. Open question tracked in `scratch/questions.md`.
+1. **Persistence across execution surfaces.** Unverified whether any of the four defined surfaces (headless, CLI, Concerto macOS, Concerto iPhone) could lose `MEMORY.md` edits due to detached workspaces. Now that `Surface` is formalized, this can be verified per-surface in Phase 04.
 2. **Read-failure visibility.** `MEMORY.md` read errors soft-fail silently. Acceptable for now but should get logging before memory becomes load-bearing.
 
 ### Phase 03 retrospective

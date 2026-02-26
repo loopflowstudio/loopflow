@@ -134,6 +134,11 @@ Stream events (replay + live tail):
 curl -N "http://127.0.0.1:2486/v0/sessions/<session_id>/events"
 ```
 
+Session streams now include metering events:
+
+- `context_snapshot` — emitted once at session start with prompt token composition (`sources`, `total`, `budget`, `diff_tier`)
+- `turn_usage` — emitted after each `turn_completed` with per-turn token usage (`input_tokens`, `output_tokens`, optional provider-specific fields)
+
 Supported harnesses: `codex`, `claude`, `opencode`. Session item payloads use normalized item types:
 `command`, `file`, `message`, `thought`, and generic `tool`.
 

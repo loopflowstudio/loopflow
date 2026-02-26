@@ -43,38 +43,10 @@ The plugin must feel reliable in two environments:
 - tmux plugin load must **not** auto-start a container.
 - keybindings and status must fail soft with clear `tmux display-message`.
 
-## Phase plan
+## Remaining artifacts
 
-### 01 — TPM skeleton ✓
-Plugin load, options, status plumbing, baseline helper functions.
-
-### 02 — Named layouts ✓
-Window/pane creation scripts (`lf-dev`, `lf-swarm`).
-
-### 03 — Keybindings ✓
-Mode-aware action dispatch, picker flows, and help overlay.
-
-### 04 — Container mode
-Deliver lifecycle commands, repo discovery, and `lf up` entrypoint.
-
-## Dependency graph
-
-- 01 is prerequisite for 02 and 03.
-- 04 is independent at runtime, but 03 references container actions.
-- 03 can ship before 04 if container actions degrade gracefully.
-
-## Required artifacts
-
-- `loopflow.tmux`
-- `scripts/helpers.sh`
-- `scripts/loopflow-status.sh`
-- `scripts/keybindings.sh`
-- `scripts/layouts/lf-dev.sh`
-- `scripts/layouts/lf-swarm.sh`
-- `scripts/tmux-review.py`
 - `scripts/lfd` (phase 04)
 - `scripts/lf-up.sh` (phase 04)
-- README install + troubleshooting section
 
 ## Quality bars
 
@@ -107,19 +79,13 @@ Deliver lifecycle commands, repo discovery, and `lf up` entrypoint.
 7. slow `lfq` / daemon unavailable
 8. repos with and without git remotes
 
-## Rollout sequence
+## Rollout
 
-1. Ship 01 + 02 + 03 in lf mode first.
-2. Dogfood plugin with container mode disabled by default.
-3. Ship 04 and enable `auto` container detection.
-4. Harden with failure telemetry and operator docs.
+Phases 01–03 (plugin skeleton, layouts, keybindings) shipped. Next:
 
-## Known follow-ups (from 01–03 review)
-
-- **`@loopflow_status_format` customization:** option is documented in phase 01 spec but not implemented. Status format is hardcoded. Wire up the tmux option or remove it from the spec.
-- ~~**fzf picker in `run-shell` context:** resolved — `_loopflow_fzf_pick` detects TTY availability and routes through `display-popup` when needed, with rc=2 fallback for tmux-native pickers.~~
-- ~~**tmux version parsing:** resolved — `loopflow_has_popup` uses defensive major/minor parsing.~~
-- **Interactive test coverage:** `tmux-review.py` verifies structure (bindings exist, scripts load) but doesn't exercise interactive flows (pickers, layout creation, mode switching). Add automated interactive tests when tmux is available in CI.
+1. Dogfood plugin with container mode disabled by default.
+2. Ship 04 and enable `auto` container detection.
+3. Harden with failure telemetry and operator docs.
 
 ## Risks and mitigations
 

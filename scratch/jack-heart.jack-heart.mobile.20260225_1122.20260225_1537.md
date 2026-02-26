@@ -1,60 +1,50 @@
 # wave_name: reverse branch naming for worktrees
 
-## Scope
+## What it does
 
-Normalize worktree naming around the wave identity (`{name}`) instead of full branch metadata, and treat absolute branch input as an existing branch when it already exists on `origin`.
+Normalizes worktree naming around the wave identity (`{name}`) instead of full branch metadata. When given a full schema branch as input, `create_with_schema` checks `origin/<input>` first — if present, it checks out that branch with tracking instead of minting a new one.
 
-## Current behavior
+```
+lf ops wt create jack-heart.mobile.20260225_1122
+  → rev_parse("origin/jack-heart.mobile.20260225_1122") → found
+  → wave_name() → "mobile"
+  → worktree at ../loopflow.mobile, tracking origin
 
-For default schema `{user}.{name}.{timestamp}`:
+lf ops wt create mobile
+  → rev_parse fails → format_branch_name generates schema branch
+  → worktree at ../loopflow.mobile, new branch
+```
 
-- `lf ops wt create jack-heart.mobile.20260225_1122`
-  - resolves `wave_name = mobile`
-  - creates worktree at `../loopflow.mobile`
-  - checks out `jack-heart.mobile.20260225_1122` tracking `origin/jack-heart.mobile.20260225_1122` when local branch is missing
+## Key decisions
 
-- `lf ops wt create mobile`
-  - creates a schema branch as before
-  - still places worktree at `../loopflow.mobile`
+- **Regex from schema, not hardcoded patterns.** `compile_schema` turns any schema string into a regex by mapping each placeholder to a character-class pattern. Custom schemas with `{words}` or `{date}` work without special-casing. Single-entry Mutex cache avoids recompilation.
 
-## Design decisions
+- **Greedy `{name}` with dot support.** `{name}` matches `[a-z0-9._-]+`. The unambiguous timestamp pattern (`\d{8}_\d{4}`) anchors the end via backtracking. Names like `mobile.feature` parse correctly.
 
-- `parse_branch_name(branch, config)` reverse-parses schema strings using regex patterns per placeholder.
-- `wave_name(branch, config)` is a pure string-level wrapper around `parse_branch_name`.
-- `compile_schema` produces one regex per schema. All placeholders are required. Custom schemas can still include `{words}` if desired.
-- Worktree path resolution is schema-aware through `worktree_path_with_config(...)` and falls back to filesystem sanitization when reverse parsing fails.
-- `create_with_schema(...)` checks `origin/<input>` first; if present, it adds a worktree for that branch instead of minting a new branch.
-- `generate_word_pair()` is kept for initial wave name generation in Concerto. No longer used in default branch naming.
+- **`WorktreeBranch` enum over boolean flags.** The old `worktree_add` always created a new branch. New signature takes `WorktreeBranch::New`, `::Track`, or `::Existing` — three git invocation modes explicit at the type level.
+
+- **`rev_parse` for remote detection.** Cheaper than `git ls-remote`, works offline against local ref cache. Depends on a recent `git fetch`, which is the common case.
+
+## Known risks
+
+- **Regex cache is global single-entry.** Parallel tests with different schemas thrash the cache. No correctness issue, just redundant recompilation.
+
+- **Greedy name matching with unusual schemas.** If a custom schema puts `{name}` before another dot-separated text placeholder (not timestamp), the greedy `{name}` consumes too much. Mitigated by keeping Concerto wave-name validation strict (`[a-z][a-z0-9-]*`).
 
 ## Validation
 
-- `cargo fmt --all -- --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test -p loopflow parse_branch_name`
-- `cargo test -p loopflow wave_name`
-- `cargo test -p loopflow create_with_schema_uses_existing_remote_branch_and_wave_worktree_name`
-
-Note: `cargo test --all` in this environment still reports unrelated docker-socket failures (`/var/run/docker.sock`).
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test -p loopflow parse_branch_name
+cargo test -p loopflow wave_name
+cargo test -p loopflow create_with_schema_uses_existing_remote_branch_and_wave_worktree_name
+```
 
 ## Follow-ups
 
-- Keep Concerto wave-name input validation strict (`[a-z][a-z0-9-]*`) so branch parsing stays unambiguous.
+- **"Design a Wave" NUX** — Replace wave creation in Concerto with a single button that generates a random word-pair name (e.g. `aurora-fugue`), launches the `design` step, then renames the wave once intent is clear. Random name gets you into flow immediately; design earns the real name.
 
-## Next: "Design a Wave" NUX
+- **Wave rename flow** — Wire `wave_name()` parsing through automatic branch rename + worktree move when a wave is renamed. The primitives (`branch_rename`, `worktree_move`) already work; the wiring is what's missing.
 
-Replace the current wave creation flow in Concerto with a single "Design a Wave" button.
-
-**Flow:**
-
-1. User hits "Design a Wave"
-2. Concerto generates a random word-pair name (e.g. `aurora-fugue`) using the existing `MAGICAL × MUSICAL` lists
-3. Wave is created with that placeholder name, branch becomes `jack-heart.aurora-fugue.20260225_1122`
-4. `design` step runs — interactive session to figure out what you're actually building
-5. `design` renames the wave to something meaningful (e.g. `mobile`), branch becomes `jack-heart.mobile.20260225_1122`
-
-The random name gets you into flow immediately — no upfront naming ceremony. Design earns the real name.
-
-### Changes needed
-
-- **Concerto NUX**: "Design a Wave" button → random name → launches `design` step
-- **`design` step**: add responsibility for renaming the wave once intent is clear (wave rename + branch rename + worktree move)
+- **Concerto validation** — Keep wave-name input validation strict (`[a-z][a-z0-9-]*`) so branch parsing stays unambiguous.

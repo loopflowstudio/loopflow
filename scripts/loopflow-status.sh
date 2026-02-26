@@ -118,7 +118,6 @@ main() {
     fi
 
     # Write cache for next invocation
-    # Strip brackets and prefix for storage, keep display format
     loopflow_cache_write "$status_text" "$mode" "$source"
 
     echo "$status_text"

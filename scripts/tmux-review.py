@@ -179,7 +179,7 @@ def print_checklist():
     print()
     print("Run these in a normal tmux session after sourcing the plugin:")
     print()
-    print("  tmux source-file loopflow.tmux")
+    print("  tmux run-shell \"$PWD/loopflow.tmux\"")
     print()
     print("1. [ ] Status bar shows [lf: <branch>] or [lf: --]")
     print("2. [ ] Press prefix+l+? — help overlay appears")

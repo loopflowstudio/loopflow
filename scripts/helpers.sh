@@ -144,6 +144,39 @@ loopflow_cache_text() {
 # Picker helpers
 # ---------------------------------------------------------------------------
 
+# Run fzf, routing through display-popup when no TTY is available (run-shell).
+# Args: prompt label, items (newline-separated), result file path
+# Returns: 0 if selection made, 1 otherwise. Selection written to result file.
+_loopflow_fzf_pick() {
+    local prompt="$1" items="$2" result_file="$3"
+
+    if [[ -t 0 ]]; then
+        # Direct TTY available — run fzf inline
+        local sel
+        sel="$(echo "$items" | fzf --prompt="$prompt> " --height=10 --reverse 2>/dev/null)"
+        if [[ -n "$sel" ]]; then
+            echo "$sel" > "$result_file"
+            return 0
+        fi
+        return 1
+    fi
+
+    # No TTY (run-shell context) — use display-popup
+    if loopflow_has_popup; then
+        local items_file="/tmp/loopflow-pick-items-${USER}.txt"
+        echo "$items" > "$items_file"
+        tmux display-popup -w 50 -h 12 -E \
+            "fzf --prompt='$prompt> ' --height=10 --reverse < '$items_file' > '$result_file'"
+        if [[ -s "$result_file" ]]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    # No TTY, no popup — caller should use tmux-native fallback
+    return 2
+}
+
 loopflow_pick_wave() {
     local mode items selection
     mode="$(loopflow_mode)"
@@ -166,14 +199,32 @@ loopflow_pick_wave() {
         return 1
     fi
 
+    local result_file="/tmp/loopflow-pick-${USER}.txt"
+    rm -f "$result_file"
+
     if loopflow_has_cmd fzf; then
-        selection="$(echo "$items" | fzf --prompt="wave> " --height=10 --reverse 2>/dev/null)"
+        _loopflow_fzf_pick "wave" "$items" "$result_file"
+        local rc=$?
+        if [[ $rc -eq 0 ]]; then
+            selection="$(cat "$result_file")"
+            rm -f "$result_file"
+            echo "$selection"
+            return 0
+        elif [[ $rc -eq 2 ]]; then
+            # No TTY, no popup — use first item as fallback
+            selection="$(echo "$items" | head -1)"
+            loopflow_display "selected: $selection (fzf needs tmux 3.2+ for popup picker)"
+        else
+            loopflow_display "nothing selected"
+            rm -f "$result_file"
+            return 1
+        fi
     else
-        # Fallback: tmux choose-tree or display first item
         selection="$(echo "$items" | head -1)"
         loopflow_display "selected: $selection (install fzf for picker)"
     fi
 
+    rm -f "$result_file"
     if [[ -z "$selection" ]]; then
         loopflow_display "nothing selected"
         return 1
@@ -183,12 +234,29 @@ loopflow_pick_wave() {
 
 loopflow_open_layout() {
     local layouts=("dev" "swarm" "flow")
-    local selection
+    local selection result_file="/tmp/loopflow-pick-${USER}.txt"
+    rm -f "$result_file"
 
     if loopflow_has_cmd fzf; then
-        selection="$(printf '%s\n' "${layouts[@]}" | fzf --prompt="layout> " --height=6 --reverse 2>/dev/null)"
-    else
-        # Fallback: tmux display-menu (runs layout directly on selection)
+        local items
+        items="$(printf '%s\n' "${layouts[@]}")"
+        _loopflow_fzf_pick "layout" "$items" "$result_file"
+        local rc=$?
+        if [[ $rc -eq 0 ]]; then
+            selection="$(cat "$result_file")"
+            rm -f "$result_file"
+        elif [[ $rc -eq 2 ]]; then
+            # No TTY, no popup — fall through to display-menu
+            selection=""
+        else
+            loopflow_display "nothing selected"
+            rm -f "$result_file"
+            return 1
+        fi
+    fi
+
+    if [[ -z "$selection" ]]; then
+        # tmux-native fallback
         tmux display-menu -T "Layout" \
             "dev"   "d" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-dev.sh'" \
             "swarm" "s" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-swarm.sh'" \
@@ -197,10 +265,6 @@ loopflow_open_layout() {
         return 0
     fi
 
-    if [[ -z "$selection" ]]; then
-        loopflow_display "nothing selected"
-        return 1
-    fi
     "$LOOPFLOW_DIR/scripts/layouts/lf-${selection}.sh"
 }
 
@@ -336,14 +400,7 @@ prefix+$prefix+?  this help
 EOF
 
     # Try display-popup (tmux 3.2+), fallback to display-message
-    local tmux_version
-    tmux_version="$(tmux -V 2>/dev/null | sed 's/[^0-9.]//g')"
-    local major minor
-    major="${tmux_version%%.*}"
-    minor="${tmux_version#*.}"
-    minor="${minor%%.*}"
-
-    if [[ -n "$major" ]] && (( major > 3 || (major == 3 && minor >= 2) )); then
+    if loopflow_has_popup; then
         tmux display-popup -w 40 -h 14 -E "cat '$help_file'; read -n 1"
     else
         loopflow_display "prefix+$prefix+{r,s,o,p,n,d,w,L,?} — use ? in popup-capable tmux 3.2+"

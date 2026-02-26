@@ -99,6 +99,7 @@ impl SqliteStore {
                 wave.status().as_i32() as i64,
                 wave.iteration() as i64,
                 created_at,
+                if wave.serialized { 1i64 } else { 0i64 },
             ],
         )?;
         Ok(())
@@ -560,7 +561,7 @@ impl SqliteStore {
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.created_at
+            "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.created_at, w.serialized
              FROM waves w
              INNER JOIN chord_members cm ON cm.wave_id = w.id
              WHERE cm.chord_id = ?1
@@ -639,7 +640,6 @@ impl SqliteStore {
                     WaveRunStatus::Pending.as_i32() as i64,
                     WaveRunStatus::Running.as_i32() as i64,
                     WaveRunStatus::Waiting.as_i32() as i64,
-                    crate::lfd::types::WaveRunKind::Main.as_i32() as i64,
                 ],
                 |row| Ok(map_wave_run_row(row)),
             )
@@ -651,13 +651,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetLatestWaveRun))?;
         let run = stmt
-            .query_row(
-                params![
-                    wave_id,
-                    crate::lfd::types::WaveRunKind::Main.as_i32() as i64
-                ],
-                |row| Ok(map_wave_run_row(row)),
-            )
+            .query_row(params![wave_id], |row| Ok(map_wave_run_row(row)))
             .optional()?;
         run.transpose()
     }
@@ -689,14 +683,13 @@ impl SqliteStore {
                 serialize_pr(&run.snapshot.pr)?,
                 flow_parents_json,
                 run.activation_log_id.as_ref(),
-                run.run_kind.as_i32() as i64,
-                run.sidecar_kind.map(|kind| kind.as_i32() as i64),
                 run.parent_run_id.as_ref(),
                 run.parent_pr_number.map(|value| value as i64),
                 run.stack_position as i64,
                 run.stack_group_id,
                 run.stack_status.as_i32() as i64,
                 if run.lineage_inferred { 1i64 } else { 0i64 },
+                run.target_branch,
             ],
         )?;
         Ok(())
@@ -723,14 +716,13 @@ impl SqliteStore {
                 serialize_pr(&run.snapshot.pr)?,
                 flow_parents_json,
                 run.activation_log_id.as_ref(),
-                run.run_kind.as_i32() as i64,
-                run.sidecar_kind.map(|kind| kind.as_i32() as i64),
                 run.parent_run_id.as_ref(),
                 run.parent_pr_number.map(|value| value as i64),
                 run.stack_position as i64,
                 run.stack_group_id,
                 run.stack_status.as_i32() as i64,
                 if run.lineage_inferred { 1i64 } else { 0i64 },
+                run.target_branch,
                 run.id,
             ],
         )?;
@@ -743,13 +735,7 @@ impl SqliteStore {
     pub fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::ListStackRuns))?;
-        let rows = stmt.query_map(
-            params![
-                wave_id,
-                crate::lfd::types::WaveRunKind::Main.as_i32() as i64
-            ],
-            |row| Ok(map_wave_run_row(row)),
-        )?;
+        let rows = stmt.query_map(params![wave_id], |row| Ok(map_wave_run_row(row)))?;
 
         let mut runs = Vec::new();
         for run in rows {
@@ -929,10 +915,10 @@ impl SqliteStore {
         Ok(stimuli)
     }
 
-    pub fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    pub fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListStimuliByKind))?;
-        let rows = stmt.query_map(params![kind as i64], |row| Ok(map_stimulus_row(row)))?;
+        let mut stmt = conn.prepare(Self::sql(Query::ListStimuliBySignal))?;
+        let rows = stmt.query_map(params![signal as i64], |row| Ok(map_stimulus_row(row)))?;
         let mut stimuli = Vec::new();
         for stimulus in rows {
             stimuli.push(stimulus??);
@@ -961,7 +947,8 @@ impl SqliteStore {
             params![
                 stimulus.id,
                 stimulus.wave_id,
-                stimulus.kind.as_i32() as i64,
+                stimulus.signal.as_i32() as i64,
+                stimulus.flow,
                 stimulus.cron,
                 stimulus.last_main_sha,
                 stimulus.last_triggered_at,
@@ -978,7 +965,8 @@ impl SqliteStore {
         let updated = conn.execute(
             Self::sql(Query::UpdateStimulus),
             params![
-                stimulus.kind.as_i32() as i64,
+                stimulus.signal.as_i32() as i64,
+                stimulus.flow,
                 stimulus.cron,
                 stimulus.last_main_sha,
                 stimulus.last_triggered_at,
@@ -1023,6 +1011,7 @@ impl SqliteStore {
                 activation.from_sha,
                 activation.to_sha,
                 activation.queued_at,
+                activation.target_branch,
             ],
         )?;
         Ok(())
@@ -1037,6 +1026,7 @@ impl SqliteStore {
                 activation.reason,
                 activation.from_sha,
                 activation.to_sha,
+                activation.target_branch,
                 activation.id
             ],
         )?;
@@ -1044,15 +1034,6 @@ impl SqliteStore {
             return Err(StoreError::NotFound);
         }
         Ok(())
-    }
-
-    pub fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let deleted = conn.execute(
-            Self::sql(Query::DeletePendingActivationsByWave),
-            params![wave_id],
-        )?;
-        Ok(deleted as u32)
     }
 
     pub fn get_pending_for_stimulus(

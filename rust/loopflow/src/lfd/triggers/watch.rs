@@ -1,17 +1,22 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use git2::Repository;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::{enqueue_pending_activation, ActivationEnvelope};
+use super::{enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::WaveExecutor;
+use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{ActivationSource, Stimulus, StimulusKind, Wave, WaveStatus};
+use crate::lfd::types::{ActivationSource, Signal, Stimulus, Wave, WaveStatus};
 
 pub fn spawn_watch_poller(
     store: SharedStore,
+    executor: WaveExecutor,
+    scheduler: Arc<Scheduler>,
     event_hub: EventHub,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
@@ -24,18 +29,20 @@ pub fn spawn_watch_poller(
                     break;
                 }
                 _ = interval.tick() => {
-                    check_watch_stimuli(&store, &event_hub).await;
+                    check_watch_stimuli(&store, &executor, &scheduler, &event_hub).await;
                 }
             }
         }
     })
 }
 
-async fn check_watch_stimuli(store: &SharedStore, event_hub: &EventHub) {
-    let stimuli = match store
-        .list_stimuli_by_kind(StimulusKind::Watch.as_i32())
-        .await
-    {
+async fn check_watch_stimuli(
+    store: &SharedStore,
+    executor: &WaveExecutor,
+    scheduler: &Arc<Scheduler>,
+    event_hub: &EventHub,
+) {
+    let stimuli = match store.list_stimuli_by_signal(Signal::Watch.as_i32()).await {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list watch stimuli");
@@ -76,19 +83,29 @@ async fn check_watch_stimuli(store: &SharedStore, event_hub: &EventHub) {
                     "origin/main advanced {}..{}",
                     result.from_sha, result.current_sha
                 );
-                let _ = enqueue_pending_activation(
-                    store,
-                    event_hub,
-                    ActivationEnvelope::new(
-                        &stimulus.wave_id,
-                        &stimulus.id,
-                        ActivationSource::Poll,
-                        reason,
-                        &result.from_sha,
-                        &result.current_sha,
-                    ),
-                )
-                .await;
+                let envelope = ActivationEnvelope::new(
+                    &stimulus.wave_id,
+                    &stimulus.id,
+                    ActivationSource::Poll,
+                    reason,
+                    &result.from_sha,
+                    &result.current_sha,
+                    "main",
+                );
+                if wave.serialized {
+                    let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+                } else {
+                    let _ = spawn_immediate_activation(
+                        store,
+                        executor,
+                        scheduler,
+                        event_hub,
+                        &wave,
+                        stimulus.flow.clone(),
+                        envelope,
+                    )
+                    .await;
+                }
             }
             Err(err) => {
                 tracing::warn!(wave_id = %wave.id(), stimulus_id = %stimulus.id, error = %err, "watch check failed");

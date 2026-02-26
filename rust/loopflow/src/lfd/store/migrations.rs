@@ -79,6 +79,22 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "016_provider_tokens",
         sql: include_str!("migrations/016_provider_tokens.sql"),
     },
+    Migration {
+        version: "016_rename_sidecar_kind_to_ci_fix_kind",
+        sql: include_str!("migrations/016_rename_sidecar_kind_to_ci_fix_kind.sql"),
+    },
+    Migration {
+        version: "017_signal_simplification",
+        sql: include_str!("migrations/017_signal_simplification.sql"),
+    },
+    Migration {
+        version: "018_wave_serialized",
+        sql: include_str!("migrations/018_wave_serialized.sql"),
+    },
+    Migration {
+        version: "019_activation_target_branch",
+        sql: include_str!("migrations/019_activation_target_branch.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

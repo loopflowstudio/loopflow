@@ -15,7 +15,16 @@ Waves are objects with 4 primary fields.
 | **Area** | Scope and context | pathset |
 | **Flow** | Process followed / steps taken | sequence of prompts |
 | **Direction** | Defines success, quality, and aesthetics | prompt |
-| **Stimulus** | Watch, loop, or cron | mode |
+| **Stimulus** | Watch, loop, cron, or listen | mode |
+
+```yaml
+# wave/designer/designer.yaml
+flow: build
+stimulus:
+  kind: listen
+  source: infra
+  source_repo: /Users/jack/src/other-repo # optional
+```
 
 ## Steps
 
@@ -90,7 +99,7 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `build` | implement → compress → gate → update-wave |
+| `build` | implement → compress → lint → gate → update-wave |
 | `design-and-ship` | design → implement → reduce → polish |
 | `ship` | design → build → review |
 | `pair` | design → build |

@@ -6,7 +6,10 @@ use tracing::warn;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct StimulusDef {
     pub kind: String,
+    pub flow: Option<String>,
     pub cron: Option<String>,
+    pub source: Option<String>,
+    pub source_repo: Option<String>,
 }
 
 /// Config read from `wave/<name>/<name>.yaml` during wave creation.
@@ -111,6 +114,24 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.flow.as_deref(), Some("build"));
         assert_eq!(config.area, Some(vec![".".to_string()]));
+    }
+
+    #[test]
+    fn read_wave_config_parses_listen_stimulus_source_repo() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("scan.yaml"),
+            "flow: build\narea: ['.']\nstimulus:\n  kind: listen\n  source: infra\n  source_repo: /tmp/source\n",
+        )
+        .expect("write");
+
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        let stimulus = config.stimulus.expect("stimulus should exist");
+        assert_eq!(stimulus.kind, "listen");
+        assert_eq!(stimulus.source.as_deref(), Some("infra"));
+        assert_eq!(stimulus.source_repo.as_deref(), Some("/tmp/source"));
     }
 
     #[test]

@@ -225,8 +225,8 @@ impl Store {
         WaveStateStore::list_stimuli(self, wave_id).await
     }
 
-    pub async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
-        WaveStateStore::list_stimuli_by_kind(self, kind).await
+    pub async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
+        WaveStateStore::list_stimuli_by_signal(self, signal).await
     }
 
     pub async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
@@ -264,10 +264,6 @@ impl Store {
         activation: &PendingActivation,
     ) -> StoreResult<()> {
         WaveStateStore::update_pending_activation(self, activation).await
-    }
-
-    pub async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::delete_pending_activations(self, wave_id).await
     }
 
     pub async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
@@ -559,7 +555,7 @@ pub trait WaveStateStore: Send + Sync {
     async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool>;
 
     async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
-    async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
+    async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>>;
     async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>>;
     async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
     async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
@@ -570,7 +566,6 @@ pub trait WaveStateStore: Send + Sync {
     ) -> StoreResult<Vec<PendingActivation>>;
     async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
     async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
-    async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32>;
     async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32>;
     async fn get_pending_for_stimulus(
         &self,
@@ -978,12 +973,12 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_stimuli_by_kind(kind)).await
+                run_sqlite(store, move |store| store.list_stimuli_by_signal(signal)).await
             }
-            StoreBackend::Postgres(store) => store.list_stimuli_by_kind(kind).await,
+            StoreBackend::Postgres(store) => store.list_stimuli_by_signal(signal).await,
         }
     }
 
@@ -1063,19 +1058,6 @@ impl WaveStateStore for Store {
                 .await
             }
             StoreBackend::Postgres(store) => store.update_pending_activation(activation).await,
-        }
-    }
-
-    async fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.delete_pending_activations(&wave_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.delete_pending_activations(wave_id).await,
         }
     }
 
@@ -1766,9 +1748,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
-        QueueBlock, QueueBlockReason, QueueMergeEvent, SidecarKind, Stimulus, StimulusKind,
-        Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-        WaveStatus,
+        QueueBlock, QueueBlockReason, QueueMergeEvent, Signal, Stimulus, Summary, Wave, WaveRun,
+        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1785,10 +1766,11 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         }
     }
 
-    fn make_run(wave: &Wave, status: WaveRunStatus, kind: WaveRunKind) -> WaveRun {
+    fn make_run(wave: &Wave, status: WaveRunStatus) -> WaveRun {
         WaveRun {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
@@ -1809,18 +1791,13 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: kind,
-            sidecar_kind: if kind == WaveRunKind::Sidecar {
-                Some(SidecarKind::CiFix)
-            } else {
-                None
-            },
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: wave.id().to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
     }
 
@@ -1853,7 +1830,8 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             source_wave_id: Some(source_wave.id().clone()),
-            kind: StimulusKind::Listen,
+            signal: Signal::Listen,
+            flow: None,
             cron: None,
             last_main_sha: None,
             last_triggered_at: None,
@@ -1932,7 +1910,7 @@ mod tests {
             .expect("get deleted chord")
             .is_none());
 
-        let run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
+        let run = make_run(&wave, WaveRunStatus::Running);
         store.create_wave_run(&run).await.expect("create wave run");
         assert!(store
             .get_active_wave_run(wave.id())
@@ -2215,7 +2193,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_run_excludes_failed_and_sidecar() {
+    async fn active_run_excludes_failed_runs() {
         let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
@@ -2223,7 +2201,7 @@ mod tests {
         let wave = make_wave("/repo-active");
         store.create_wave(&wave).await.expect("create wave");
 
-        let mut run = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Main);
+        let mut run = make_run(&wave, WaveRunStatus::Running);
         store
             .create_wave_run(&run)
             .await
@@ -2253,16 +2231,17 @@ mod tests {
             WaveRunStatus::Failed
         );
 
-        let sidecar = make_run(&wave, WaveRunStatus::Running, WaveRunKind::Sidecar);
+        let mut ci_fix = make_run(&wave, WaveRunStatus::Running);
+        ci_fix.snapshot.flow = "ci-fix".to_string();
         store
-            .create_wave_run(&sidecar)
+            .create_wave_run(&ci_fix)
             .await
-            .expect("create sidecar run");
+            .expect("create ci-fix run");
         assert!(store
             .get_active_wave_run(wave.id())
             .await
-            .expect("active with sidecar")
-            .is_none());
+            .expect("active with ci-fix")
+            .is_some());
 
         store.delete_wave(wave.id()).await.expect("delete wave");
     }
@@ -2305,14 +2284,13 @@ mod tests {
                     error: None,
                     flow_parents: Vec::new(),
                     activation_log_id: None,
-                    run_kind: WaveRunKind::Main,
-                    sidecar_kind: None,
                     parent_run_id,
                     parent_pr_number,
                     stack_position: iteration.saturating_sub(1),
                     stack_group_id: wave.id().to_string(),
                     stack_status: WaveRunStackStatus::Active,
                     lineage_inferred: false,
+                    target_branch: "main".to_string(),
                 }
             };
 
@@ -2380,7 +2358,7 @@ mod tests {
         let wave = make_wave("/repo-queue");
         store.create_wave(&wave).await.expect("create wave");
 
-        let mut run = make_run(&wave, WaveRunStatus::Completed, WaveRunKind::Main);
+        let mut run = make_run(&wave, WaveRunStatus::Completed);
         run.snapshot.pr = Some(PullRequest {
             url: "https://example.test/pr/42".to_string(),
             number: Some(42),

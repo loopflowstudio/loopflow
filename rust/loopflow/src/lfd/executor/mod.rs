@@ -10,11 +10,10 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::engine::stream::{render_event, ParseResult, StreamParser};
-use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::types::Wave;
 
-pub use helpers::{create_wave_run_with_id, ensure_wave_worktree};
+pub use helpers::{create_parallel_wave_run, create_wave_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
 pub(crate) fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
@@ -118,36 +117,11 @@ pub struct StartupRecovery {
     pub orphaned_fork_worktrees_removed: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum EphemeralOwnerKind {
-    Fork,
-    Sidecar,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EphemeralWorktree {
-    pub path: String,
-    pub owner_kind: EphemeralOwnerKind,
-    pub owner_id: String,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JanitorReport {
     pub removed: u32,
     pub active: u32,
     pub errors: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CiFailure {
-    pub wave_id: LfdId,
-    pub wave_run_id: LfdId,
-    pub pr_number: u32,
-    pub branch: String,
-    pub commit_sha: String,
-    pub check_name: String,
-    pub logs_url: String,
 }
 
 // -- Stream helpers ----------------------------------------------------------

@@ -1,51 +1,67 @@
 # 03: Listen Authoring
 
-Wire listen stimuli into wave schema files and explore richer inter-wave communication beyond "source completed, fire me."
+Wire listen stimuli into wave schema files and make listen triggers actually execute.
 
-## What exists after this
+## Status
 
-Users can declare `listen` stimuli in wave schema files (`.yaml`), not just via the API. Optionally, a listen-triggered wave gets context about *what* its source did (PR content, changed files) rather than just knowing it ran.
+Shipped on `jack-heart.chords.20260225_2241`.
 
-## What Phase 01–02 established
+## What shipped
 
-Phase 01 added `StimulusKind::Listen` and `source_wave_id` to the stimulus model, persisted in both SQLite and Postgres. The Python client supports `add_stimulus(..., kind="listen", source_wave_id="infra")`. Phase 02 shipped chord CRUD so waves now have first-class named groups.
+### Schema authoring for `listen`
 
-The listen stimulus currently fires when the source wave completes. The listening wave starts a normal run — it doesn't know *what* the source did, only that it ran.
-
-## What to build
-
-### Schema file support
-
-Currently `parse_schema_stimulus` handles `once`, `loop`, `watch`, and `cron`. Add `listen`:
+- Added schema support for:
 
 ```yaml
 stimulus:
   kind: listen
-  source: infra  # wave name or ID
+  source: infra
+  source_repo: /Users/jack/src/other-repo # optional
 ```
 
-### Source context injection (optional/exploratory)
+- `source` is required for `kind: listen`
+- `source_repo` is optional; defaults to the listener wave's repo
+- `source` resolves to `source_wave_id` at wave creation time (name or ID)
 
-When a listen-triggered wave starts, inject context about the source wave's last run:
-- PR title and summary from the source's most recent run
-- Changed file list
-- Optionally full diff content (configurable depth)
+### Eager source validation
 
-This is the essence of the old "listen step" concept, adapted to the flat model. Instead of a special step in a chord iteration, it's context assembled when a listen stimulus fires.
+- Listen sources are resolved before wave persistence/workspace setup
+- Invalid listen config fails fast (no create-then-cleanup path)
+- Self-reference is rejected
+- Source wave must exist when listener wave is created
+
+### Listen execution trigger
+
+- On `FlowAction::Complete`, completed source runs now trigger enabled listeners
+- Triggering is success-only (`Completed`, not `Failed`)
+- If listener is already running or scheduler is full, activation is queued/coalesced
+- A shared pending-activation drain loop retries deferred activations
 
 ### Terminology cleanup
 
-Finish the sidecar → listening naming cleanup wherever stale names remain in the codebase. Phase 01 covered the data model but display strings, comments, and variable names may still reference the old terminology.
+- Renamed sidecar terminology to CI fix terminology:
+  - `WaveRunKind::Sidecar` → `WaveRunKind::CiFix`
+  - `sidecar_kind` → `ci_fix_kind`
+  - `executor/wave/sidecar.rs` → `executor/wave/ci_fix.rs`
+- Added migration `016_rename_sidecar_kind_to_ci_fix_kind.sql`
+- CI webhook target updates now apply to main runs only (CI-fix runs are excluded)
 
-## Open questions
+### Validation
 
-- Should source context injection be a separate phase? It adds scope beyond schema authoring.
-- What context depth levels make sense? (title-only / summary / full diff)
-- Should the listening wave see only its direct source, or all waves it listens to?
+- Added/updated tests for listen schema parsing, source resolution, trigger behavior, and queue/drain behavior
+- Full validation run completed across Rust, Python, Swift, and smoke suites
 
-## Done when
+## Decisions locked
 
-- `listen` stimulus kind accepted in wave schema YAML files
-- Schema-defined listen stimuli are persisted correctly with `source_wave_id`
-- Stale sidecar/voice terminology cleaned up
-- Source context injection designed (and optionally implemented)
+- Keep eager source resolution with FK-backed `source_wave_id`
+- Keep success-only listen triggering
+- Queue/coalesce deferred activations instead of dropping them
+- ~~Keep `CiFixKind` as an enum (extensible)~~ — superseded by Phase 03.5 signal simplification (`wave/chords/035-signal-simplification.md`)
+
+## Carry-forward follow-ups
+
+- Context injection from source runs into listener prompts (`none | summary | full`)
+- Optional failure-triggered listening behavior
+- Cycle detection for chained listen graphs
+- Multi-source listen schema support
+- Optimize listener lookup and drain latency if listen cardinality grows

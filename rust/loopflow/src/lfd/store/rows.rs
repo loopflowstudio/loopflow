@@ -2,9 +2,9 @@ use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ActivationSource, AgentRun, AgentStatus, ChatMemoryBlock,
-    ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-    SidecarKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot,
-    WaveRunStackStatus, WaveRunStatus, WaveStatus,
+    ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest, Signal,
+    Stimulus, Summary, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
+    WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -99,7 +99,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-///        created_at
+///        created_at, serialized
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(4)?)?;
     let area = parse_json_vec(&row.text(5)?)?;
@@ -107,6 +107,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let status_value = row.int(7)?;
     let iteration = row.int(8)? as u32;
     let created_at = unix_to_datetime(row.bigint(9)?);
+    let serialized = row.int(10)? != 0;
     let mut status = WaveStatus::from_i32(status_value);
     if paused {
         status = WaveStatus::Paused;
@@ -122,6 +123,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         status,
         iteration,
         created_at: Some(created_at),
+        serialized,
     })
 }
 
@@ -138,8 +140,8 @@ pub fn map_chord_row(row: &impl StoreRow) -> StoreResult<Chord> {
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
 ///        snapshot_direction, snapshot_area, snapshot_pr, flow_parents,
-///        activation_log_id, run_kind, sidecar_kind, parent_run_id,
-///        parent_pr_number, stack_position, stack_group_id, stack_status,
+///        activation_log_id, parent_run_id, parent_pr_number,
+///        stack_position, stack_group_id, stack_status,
 ///        lineage_inferred
 pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let started_at = unix_to_datetime(row.bigint(7)?);
@@ -149,14 +151,13 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let snapshot_pr = parse_pr(row.opt_text(14)?)?;
     let flow_parents = parse_json_vec(&row.text(15)?)?;
     let activation_log_id = row.opt_text(16)?.map(LfdId::from_raw);
-    let run_kind = WaveRunKind::from_i32(row.int(17)?);
-    let sidecar_kind = row.opt_int(18)?.and_then(SidecarKind::from_i32);
-    let parent_run_id = row.opt_text(19)?.map(LfdId::from_raw);
-    let parent_pr_number = row.opt_bigint(20)?.map(|value| value as u32);
-    let stack_position = row.int(21)? as u32;
-    let stack_group_id = row.text(22)?;
-    let stack_status = WaveRunStackStatus::from_i32(row.int(23)?);
-    let lineage_inferred = row.int(24)? != 0;
+    let parent_run_id = row.opt_text(17)?.map(LfdId::from_raw);
+    let parent_pr_number = row.opt_bigint(18)?.map(|value| value as u32);
+    let stack_position = row.int(19)? as u32;
+    let stack_group_id = row.text(20)?;
+    let stack_status = WaveRunStackStatus::from_i32(row.int(21)?);
+    let lineage_inferred = row.int(22)? != 0;
+    let target_branch = row.text(23)?;
 
     let snapshot = WaveRunSnapshot {
         repo: row.text(10)?,
@@ -180,14 +181,13 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         error: row.opt_text(9)?,
         flow_parents,
         activation_log_id,
-        run_kind,
-        sidecar_kind,
         parent_run_id,
         parent_pr_number,
         stack_position,
         stack_group_id,
         stack_status,
         lineage_inferred,
+        target_branch,
     })
 }
 
@@ -208,25 +208,26 @@ pub fn map_live_pr_state_row(row: &impl StoreRow) -> StoreResult<LivePullRequest
     })
 }
 
-/// SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, created_at, enabled,
-///        source_wave_id
+/// SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at,
+///        enabled, source_wave_id
 pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
-    let created_at = unix_to_datetime(row.bigint(6)?);
+    let created_at = unix_to_datetime(row.bigint(7)?);
 
     Ok(Stimulus {
         id: LfdId::from_raw(row.text(0)?),
         wave_id: LfdId::from_raw(row.text(1)?),
-        kind: StimulusKind::from_i32(row.int(2)?),
-        cron: row.opt_text(3)?,
-        last_main_sha: row.opt_text(4)?,
-        last_triggered_at: row.opt_bigint(5)?,
+        signal: Signal::from_i32(row.int(2)?),
+        flow: row.opt_text(3)?,
+        cron: row.opt_text(4)?,
+        last_main_sha: row.opt_text(5)?,
+        last_triggered_at: row.opt_bigint(6)?,
         created_at: Some(created_at),
-        enabled: row.int(7)? != 0,
-        source_wave_id: row.opt_text(8)?.map(LfdId::from_raw),
+        enabled: row.int(8)? != 0,
+        source_wave_id: row.opt_text(9)?.map(LfdId::from_raw),
     })
 }
 
-/// SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at
+/// SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch
 pub fn map_pending_activation_row(row: &impl StoreRow) -> StoreResult<PendingActivation> {
     Ok(PendingActivation {
         id: LfdId::from_raw(row.text(0)?),
@@ -237,6 +238,7 @@ pub fn map_pending_activation_row(row: &impl StoreRow) -> StoreResult<PendingAct
         from_sha: row.text(5)?,
         to_sha: row.text(6)?,
         queued_at: row.bigint(7)?,
+        target_branch: row.text(8)?,
     })
 }
 

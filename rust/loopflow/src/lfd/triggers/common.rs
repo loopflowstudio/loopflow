@@ -1,8 +1,8 @@
 use time::OffsetDateTime;
 
 use crate::lfd::events::EventHub;
-pub use crate::lfd::executor::create_wave_run_with_id;
 use crate::lfd::executor::WaveExecutor;
+pub use crate::lfd::executor::{create_parallel_wave_run, create_wave_run_with_id};
 use crate::lfd::scheduler::SchedulerSlotGuard;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, WaveRunStatus, WaveStatus};

@@ -142,6 +142,7 @@ pub async fn build_wave_dto(
         open_pr_count: live_snapshot.open_pr_count(),
         stack_count: stack_runs.len() as u32,
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
+        serialized: wave.serialized,
         stimuli,
         active_run,
     })
@@ -367,8 +368,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunKind,
-        WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunSnapshot,
+        WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
@@ -401,14 +402,13 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: "wave-group".to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
     }
 
@@ -433,6 +433,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         }
     }
 
@@ -463,14 +464,13 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: pr_number,
             stack_group_id: wave.id().to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
     }
 

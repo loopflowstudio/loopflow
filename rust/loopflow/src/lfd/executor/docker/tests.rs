@@ -16,7 +16,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::store::{open_store, SharedStore, StorageConfig};
 use crate::lfd::types::{
-    AgentRun, AgentStatus, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+    AgentRun, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 use super::{
@@ -345,6 +345,7 @@ async fn create_running_wave_and_run(
         status: WaveStatus::Running,
         iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
+        serialized: false,
     };
     store
         .create_wave(&wave)
@@ -371,14 +372,13 @@ async fn create_running_wave_and_run(
         error: None,
         flow_parents: vec![],
         activation_log_id: None,
-        run_kind: WaveRunKind::Main,
-        sidecar_kind: None,
         parent_run_id: None,
         parent_pr_number: None,
         stack_position: 0,
         stack_group_id: wave.id().to_string(),
         stack_status: crate::lfd::types::WaveRunStackStatus::Active,
         lineage_inferred: false,
+        target_branch: "main".to_string(),
     };
     store
         .create_wave_run(&run)
@@ -585,6 +585,7 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         status: WaveStatus::Idle,
         iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
+        serialized: false,
     };
     store
         .create_wave(&wave)
@@ -611,14 +612,13 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         error: None,
         flow_parents: vec![],
         activation_log_id: None,
-        run_kind: WaveRunKind::Main,
-        sidecar_kind: None,
         parent_run_id: None,
         parent_pr_number: None,
         stack_position: 0,
         stack_group_id: wave.id().to_string(),
         stack_status: crate::lfd::types::WaveRunStackStatus::Active,
         lineage_inferred: false,
+        target_branch: "main".to_string(),
     };
     store
         .create_wave_run(&run)

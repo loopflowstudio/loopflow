@@ -310,7 +310,7 @@ POST /v0/waves/{wave_id}/check-ci
 
 Set `github.webhook_secret` (or `LFD_GITHUB_WEBHOOK_SECRET`) before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
 
-CI sidecar agents run the built-in `ci-fix` step (not `debug`) so prompts are scoped to resolving failing PR checks.
+CI fix agents run the built-in `ci-fix` step (not `debug`) so prompts are scoped to resolving failing PR checks.
 
 ## Activation telemetry
 

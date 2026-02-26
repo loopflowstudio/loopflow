@@ -89,27 +89,6 @@ impl WaveRunStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum WaveRunKind {
-    #[default]
-    Main = 1,
-    Sidecar = 2,
-}
-
-impl WaveRunKind {
-    pub fn from_i32(value: i32) -> Self {
-        match value {
-            2 => Self::Sidecar,
-            _ => Self::Main,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum WaveRunStackStatus {
     #[default]
     Active = 1,
@@ -202,25 +181,6 @@ impl std::str::FromStr for QueueBlockReason {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SidecarKind {
-    CiFix = 1,
-}
-
-impl SidecarKind {
-    pub fn from_i32(value: i32) -> Option<Self> {
-        match value {
-            1 => Some(Self::CiFix),
-            _ => None,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Wave {
     pub id: LfdId,
@@ -233,6 +193,11 @@ pub struct Wave {
     pub iteration: u32,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    /// When true, only one run at a time — activations queue and dispatch
+    /// sequentially. When false (default), triggers spawn runs immediately
+    /// and git coordinates concurrent execution.
+    #[serde(default)]
+    pub serialized: bool,
 }
 
 impl Wave {
@@ -248,6 +213,7 @@ impl Wave {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         }
     }
 
@@ -323,9 +289,6 @@ pub struct WaveRun {
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
     pub activation_log_id: Option<LfdId>,
-    #[serde(default)]
-    pub run_kind: WaveRunKind,
-    pub sidecar_kind: Option<SidecarKind>,
     pub parent_run_id: Option<LfdId>,
     pub parent_pr_number: Option<u32>,
     pub stack_position: u32,
@@ -334,6 +297,14 @@ pub struct WaveRun {
     pub stack_status: WaveRunStackStatus,
     #[serde(default)]
     pub lineage_inferred: bool,
+    /// The branch this run targets. "main" means new branch off main (produce
+    /// PR). Any other value means check out that branch and push to it (no PR).
+    #[serde(default = "default_target_branch")]
+    pub target_branch: String,
+}
+
+fn default_target_branch() -> String {
+    "main".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -392,29 +363,13 @@ impl WaveRun {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id,
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
-    }
-
-    pub fn is_main(&self) -> bool {
-        self.run_kind == WaveRunKind::Main
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::WaveRunKind;
-
-    #[test]
-    fn wave_run_kind_main_storage_value_is_stable() {
-        assert_eq!(WaveRunKind::Main.as_i32(), 1);
-        assert_eq!(WaveRunKind::from_i32(1), WaveRunKind::Main);
     }
 }

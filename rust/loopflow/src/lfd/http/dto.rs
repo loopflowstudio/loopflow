@@ -5,8 +5,8 @@ use time::OffsetDateTime;
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
 use crate::lfd::types::{
-    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Stimulus,
-    StimulusKind, WaveRun, WaveRunStatus,
+    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Signal, Stimulus,
+    WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -105,6 +105,7 @@ pub struct WaveDto {
     pub open_pr_count: u32,
     pub stack_count: u32,
     pub has_stale_pr_state: bool,
+    pub serialized: bool,
     pub stimuli: Vec<StimulusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
@@ -133,6 +134,7 @@ pub struct WaveRunDto {
     pub status: String,
     pub local_worktree: String,
     pub remote_branch: String,
+    pub target_branch: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr: Option<PullRequestDto>,
     pub started_at: Option<String>,
@@ -185,6 +187,8 @@ pub struct StimulusDto {
     pub id: String,
     pub kind: String,
     pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_wave_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -282,14 +286,15 @@ pub struct DeletedResourceResponse {
     pub deleted: bool,
 }
 
-pub fn stimulus_kind_str(kind: StimulusKind) -> &'static str {
-    match kind {
-        StimulusKind::Loop => "loop",
-        StimulusKind::Watch => "watch",
-        StimulusKind::Cron => "cron",
-        StimulusKind::Once => "once",
-        StimulusKind::Listen => "listen",
-        StimulusKind::Unspecified => "unspecified",
+pub fn signal_str(signal: Signal) -> &'static str {
+    match signal {
+        Signal::Loop => "loop",
+        Signal::Watch => "watch",
+        Signal::Cron => "cron",
+        Signal::Once => "once",
+        Signal::Listen => "listen",
+        Signal::CiFailure => "ci_failure",
+        Signal::Unspecified => "unspecified",
     }
 }
 
@@ -328,6 +333,7 @@ pub fn wave_run_dto(
         status: wave_run_status_str(run.status),
         local_worktree: run.worktree,
         remote_branch: run.branch,
+        target_branch: run.target_branch,
         pr: run.snapshot.pr.map(|pr| PullRequestDto {
             url: pr.url,
             number: pr.number,
@@ -357,8 +363,9 @@ pub fn wave_run_dto(
 pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     StimulusDto {
         id: s.id.to_string(),
-        kind: stimulus_kind_str(s.kind).to_string(),
+        kind: signal_str(s.signal).to_string(),
         enabled: s.enabled,
+        flow: s.flow,
         source_wave_id: s.source_wave_id.map(|value| value.to_string()),
         cron: s.cron,
         last_main_sha: s.last_main_sha,

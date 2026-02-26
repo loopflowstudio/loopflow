@@ -18,11 +18,11 @@ pub use chat_message::ChatMessage;
 pub use chord::Chord;
 pub use event::Event;
 pub use stimulus::{
-    ActivationLog, ActivationOutcome, ActivationSource, PendingActivation, Stimulus, StimulusKind,
+    ActivationLog, ActivationOutcome, ActivationSource, PendingActivation, Signal, Stimulus,
+    CI_FIX_FLOW,
 };
 pub use summary::Summary;
 pub use wave::{
     LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,
-    SidecarKind, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-    WaveStatus,
+    Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };

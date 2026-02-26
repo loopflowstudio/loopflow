@@ -1,6 +1,5 @@
 mod fork;
 mod launch;
-mod sidecar;
 mod summary;
 
 use std::collections::{HashMap, HashSet};
@@ -29,21 +28,22 @@ use crate::lfd::sessions::types::{CreateSessionParams, Session, SessionConfig, S
 use crate::lfd::sessions::{SessionManager, SessionManagerError};
 use crate::lfd::store::{ExecutionStore, ForkRunStatus, SharedStore};
 use crate::lfd::triggers::{
-    enqueue_pending_activation, spawn_run_task_with_slot, ActivationEnvelope,
+    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
+    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    ActivationSource, Event, LivePrState, LivePullRequestState, StimulusKind, Wave, WaveRun,
-    WaveRunKind, WaveRunStatus, WaveStatus,
+    ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Wave, WaveRun,
+    WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
 use super::helpers::{
     advance_branch, auto_commit_if_dirty, auto_create_pr, build_agent_capabilities,
-    build_step_prompt, flow_parents_for_index, is_active_wave_run_status,
-    is_ephemeral_worktree_path,
+    build_step_prompt, cleanup_run_worktree, flow_parents_for_index, is_active_wave_run_status,
+    is_ephemeral_worktree_path, post_step_sync, pre_step_sync,
 };
 use super::local::LocalProcessExecutor;
-use super::{AgentExecutor, EphemeralOwnerKind, EphemeralWorktree, JanitorReport, StartupRecovery};
+use super::{AgentExecutor, JanitorReport, StartupRecovery};
 use launch::AgentLaunchRequest;
 
 #[derive(Clone)]
@@ -142,9 +142,7 @@ impl WaveExecutor {
     }
 
     pub async fn run_worktree_janitor(&self, repo_roots: &[PathBuf]) -> Result<JanitorReport> {
-        let active = self.collect_active_ephemeral_worktrees().await?;
-        let active_paths: HashSet<String> =
-            active.into_iter().map(|worktree| worktree.path).collect();
+        let active_paths = self.collect_active_ephemeral_worktrees().await?;
 
         let mut roots = HashSet::new();
         for repo_root in repo_roots {
@@ -193,20 +191,12 @@ impl WaveExecutor {
         Ok(report)
     }
 
-    async fn collect_active_ephemeral_worktrees(&self) -> Result<Vec<EphemeralWorktree>> {
-        let mut active = Vec::new();
+    async fn collect_active_ephemeral_worktrees(&self) -> Result<HashSet<String>> {
+        let mut active = HashSet::new();
         let runs = self.store.list_wave_runs(None, None).await?;
 
         for run in runs {
             let run_is_active = is_active_wave_run_status(run.status);
-            if run_is_active && run.run_kind == WaveRunKind::Sidecar {
-                active.push(EphemeralWorktree {
-                    path: run.worktree.clone(),
-                    owner_kind: EphemeralOwnerKind::Sidecar,
-                    owner_id: run.id.to_string(),
-                });
-            }
-
             if !run_is_active {
                 continue;
             }
@@ -216,11 +206,7 @@ impl WaveExecutor {
                 if !matches!(fork.status, ForkRunStatus::Pending | ForkRunStatus::Running) {
                     continue;
                 }
-                active.push(EphemeralWorktree {
-                    path: fork.worktree,
-                    owner_kind: EphemeralOwnerKind::Fork,
-                    owner_id: fork.id.to_string(),
-                });
+                active.insert(fork.worktree);
             }
         }
 
@@ -322,6 +308,10 @@ impl WaveExecutor {
 
             match next_action(&plan, run.step_index as usize) {
                 FlowAction::RunStep { step } => {
+                    // Pre-step sync: pick up sibling pushes.
+                    if let Err(err) = pre_step_sync(Path::new(&run.worktree), &run.branch) {
+                        warn!(run_id = %run.id, error = %err, "pre-step sync failed, continuing");
+                    }
                     // Ensure area summary is fresh before each step
                     if let Err(err) = self.ensure_summary_fresh(&wave, &run).await {
                         warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
@@ -329,6 +319,19 @@ impl WaveExecutor {
                     info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
                     let exit_code = self.run_step(&wave, &mut run, &step).await?;
                     if exit_code == 0 {
+                        // Post-step sync: commit and push changes.
+                        let step_name = step.step.name.clone();
+                        if let Err(err) =
+                            post_step_sync(Path::new(&run.worktree), &run.branch, &step_name)
+                        {
+                            self.fail_run(
+                                &mut run,
+                                &wave,
+                                format!("post-step sync failed for {step_name}: {err}"),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
                         self.advance_run_step(&mut run, &plan, wave.id()).await?;
                     } else {
                         self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))
@@ -361,6 +364,10 @@ impl WaveExecutor {
                     return Ok(());
                 }
                 FlowAction::Fork { fork } => {
+                    // Pre-fork sync: pick up sibling pushes.
+                    if let Err(err) = pre_step_sync(Path::new(&run.worktree), &run.branch) {
+                        warn!(run_id = %run.id, error = %err, "pre-fork sync failed, continuing");
+                    }
                     info!(
                         run_id = %run.id,
                         branches = fork.branches.len(),
@@ -369,6 +376,13 @@ impl WaveExecutor {
                     );
                     self.run_fork(&wave, &mut run, &plan, &fork).await?;
                     if run.status == WaveRunStatus::Failed {
+                        return Ok(());
+                    }
+                    // Post-fork sync: commit and push changes.
+                    if let Err(err) = post_step_sync(Path::new(&run.worktree), &run.branch, "fork")
+                    {
+                        self.fail_run(&mut run, &wave, format!("post-fork sync failed: {err}"))
+                            .await?;
                         return Ok(());
                     }
                 }
@@ -382,29 +396,33 @@ impl WaveExecutor {
                         .await
                         .map(|stimuli| {
                             stimuli.iter().any(|s| {
-                                matches!(
-                                    s.kind,
-                                    StimulusKind::Loop | StimulusKind::Watch | StimulusKind::Cron
-                                )
+                                matches!(s.signal, Signal::Loop | Signal::Watch | Signal::Cron)
                             })
                         })
                         .unwrap_or(false);
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
-                    let worktree = run.worktree.clone();
-                    let wave_name = wave.name().clone();
-                    match tokio::task::spawn_blocking(move || {
-                        auto_create_pr(Path::new(&worktree), Some(wave_name))
-                    })
-                    .await
-                    {
-                        Ok(Some(pr)) => {
-                            info!(run_id = %run.id, url = %pr.url, "auto-created PR");
-                            run.snapshot.pr = Some(pr);
-                        }
-                        Ok(None) => {}
-                        Err(err) => {
-                            warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                    // Activations targeting "main" produce new branches and PRs.
+                    // Activations targeting a specific branch (e.g. CI-fix on a PR branch)
+                    // push directly to that branch — no new PR needed.
+                    let should_manage_pr =
+                        run.target_branch == "main" || run.target_branch.is_empty();
+                    if should_manage_pr {
+                        let worktree = run.worktree.clone();
+                        let wave_name = wave.name().clone();
+                        match tokio::task::spawn_blocking(move || {
+                            auto_create_pr(Path::new(&worktree), Some(wave_name))
+                        })
+                        .await
+                        {
+                            Ok(Some(pr)) => {
+                                info!(run_id = %run.id, url = %pr.url, "auto-created PR");
+                                run.snapshot.pr = Some(pr);
+                            }
+                            Ok(None) => {}
+                            Err(err) => {
+                                warn!(run_id = %run.id, error = %err, "failed to auto-create PR");
+                            }
                         }
                     }
 
@@ -437,7 +455,7 @@ impl WaveExecutor {
 
                     // For recurring waves, advance to a new branch so the
                     // next iteration gets its own PR.
-                    if run.snapshot.pr.is_some() && is_recurring {
+                    if should_manage_pr && run.snapshot.pr.is_some() && is_recurring {
                         let wt = run.worktree.clone();
                         let name = wave.name().clone();
                         match tokio::task::spawn_blocking(move || {
@@ -470,7 +488,9 @@ impl WaveExecutor {
                     }
 
                     self.store.update_wave_run(&run).await?;
-                    if run.snapshot.pr.is_some() {
+                    self.trigger_listeners_on_completion(wave.id(), &run.branch)
+                        .await;
+                    if should_manage_pr && run.snapshot.pr.is_some() {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
                             &self.store,
                             &self.github_config,
@@ -482,14 +502,115 @@ impl WaveExecutor {
                             warn!(wave_id = %wave.id(), error = %err, "queue reconcile failed after run completion");
                         }
                     }
-                    if let Err(err) = self.enqueue_listen_activations(wave.id(), &run.id).await {
-                        warn!(wave_id = %wave.id(), run_id = %run.id, error = %err, "failed to enqueue listen activations");
+                    // Clean up run-scoped worktrees (parallel execution).
+                    let wt = Path::new(&run.worktree);
+                    if let Err(err) = cleanup_run_worktree(wt) {
+                        warn!(run_id = %run.id, error = %err, "failed to clean up run worktree");
                     }
-                    // Wave goes back to Idle after a run completes — the run
-                    // is done, but the wave is ready for its next iteration.
-                    self.set_wave_status(wave.id(), WaveStatus::Idle).await;
+
+                    // Only go Idle if no other active runs remain for this wave.
+                    let other_active = self
+                        .store
+                        .get_active_wave_run(wave.id())
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    if !other_active {
+                        self.set_wave_status(wave.id(), WaveStatus::Idle).await;
+                    }
                     self.event_hub.send(Event::wave_updated(wave.id().clone()));
                     return Ok(());
+                }
+            }
+        }
+    }
+
+    async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId, source_branch: &str) {
+        let stimuli = match self
+            .store
+            .list_stimuli_by_signal(Signal::Listen.as_i32())
+            .await
+        {
+            Ok(stimuli) => stimuli,
+            Err(err) => {
+                warn!(
+                    wave_id = %source_wave_id,
+                    error = %err,
+                    "failed to list listen stimuli"
+                );
+                return;
+            }
+        };
+
+        for mut stimulus in stimuli {
+            if !stimulus.enabled || stimulus.source_wave_id.as_ref() != Some(source_wave_id) {
+                continue;
+            }
+
+            let listener_wave = match self.store.get_wave(&stimulus.wave_id).await {
+                Ok(Some(wave)) => wave,
+                Ok(None) => continue,
+                Err(err) => {
+                    warn!(stimulus_id = %stimulus.id, error = %err, "failed to load listening wave");
+                    continue;
+                }
+            };
+
+            if listener_wave.status() == WaveStatus::Paused {
+                continue;
+            }
+
+            let reason = format!(
+                "listen stimulus {} triggered by source wave {}",
+                stimulus.id, source_wave_id
+            );
+            let envelope = ActivationEnvelope::new(
+                listener_wave.id(),
+                &stimulus.id,
+                ActivationSource::Listen,
+                reason,
+                "",
+                "",
+                source_branch,
+            );
+            let activated = if listener_wave.serialized {
+                let enqueued = matches!(
+                    enqueue_pending_activation(&self.store, &self.event_hub, envelope).await,
+                    Some(EnqueueOutcome::Queued | EnqueueOutcome::Coalesced)
+                );
+                if enqueued {
+                    let _ = dispatch_wave_if_ready(
+                        &self.store,
+                        self,
+                        &self.scheduler,
+                        &self.event_hub,
+                        &listener_wave,
+                    )
+                    .await;
+                }
+                enqueued
+            } else {
+                spawn_immediate_activation(
+                    &self.store,
+                    self,
+                    &self.scheduler,
+                    &self.event_hub,
+                    &listener_wave,
+                    stimulus.flow.clone(),
+                    envelope,
+                )
+                .await
+                .is_some()
+            };
+            if activated {
+                stimulus.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
+                if let Err(err) = self.store.update_stimulus(&stimulus).await {
+                    warn!(
+                        stimulus_id = %stimulus.id,
+                        error = %err,
+                        "failed to update listen stimulus last_triggered_at"
+                    );
                 }
             }
         }
@@ -504,45 +625,18 @@ impl WaveExecutor {
         }
     }
 
-    async fn enqueue_listen_activations(
-        &self,
-        source_wave_id: &LfdId,
-        completed_run_id: &LfdId,
-    ) -> Result<()> {
-        let stimuli = self
-            .store
-            .list_stimuli_by_kind(StimulusKind::Listen.as_i32())
-            .await?;
-        for stimulus in stimuli {
-            if !stimulus.enabled {
-                continue;
-            }
-            if stimulus.source_wave_id.as_ref() != Some(source_wave_id) {
-                continue;
-            }
-            let reason = format!("wave {} completed run {}", source_wave_id, completed_run_id);
-            let _ = enqueue_pending_activation(
-                &self.store,
-                &self.event_hub,
-                ActivationEnvelope::new(
-                    &stimulus.wave_id,
-                    &stimulus.id,
-                    ActivationSource::Listen,
-                    reason,
-                    "",
-                    "",
-                ),
-            )
-            .await;
-        }
-        Ok(())
-    }
-
     async fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
         run.status = WaveRunStatus::Failed;
         run.ended_at = Some(OffsetDateTime::now_utc());
         run.error = Some(error);
         self.store.update_wave_run(run).await?;
+
+        // Clean up run-scoped worktrees.
+        let wt = Path::new(&run.worktree);
+        if let Err(err) = cleanup_run_worktree(wt) {
+            warn!(run_id = %run.id, error = %err, "failed to clean up run worktree on failure");
+        }
+
         self.set_wave_status(wave.id(), WaveStatus::Failed).await;
         self.event_hub.send(Event::wave_updated(wave.id().clone()));
         Ok(())
@@ -808,7 +902,7 @@ mod tests {
     use crate::lfd::sessions::types::{Session, SessionConfig};
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{ActivationSource, Stimulus, StimulusKind, WaveRunSnapshot};
+    use crate::lfd::types::{Signal, Stimulus, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -922,6 +1016,7 @@ mod tests {
             status: WaveStatus::Running,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
         store
             .create_wave(&wave)
@@ -948,20 +1043,85 @@ mod tests {
             error: None,
             flow_parents: vec![],
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
             stack_group_id: wave_id.to_string(),
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         };
         store
             .create_wave_run(&run)
             .await
             .expect("wave run should be created");
         (wave_id, run_id)
+    }
+
+    fn make_wave(name: &str, repo: &Path, flow: &str, status: WaveStatus) -> Wave {
+        Wave {
+            id: LfdId::new(),
+            name: name.to_string(),
+            repo: repo.to_string_lossy().to_string(),
+            flow: flow.to_string(),
+            direction: vec![],
+            area: vec![],
+            status,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
+        }
+    }
+
+    async fn create_main_run(store: &SharedStore, wave: &Wave, status: WaveRunStatus) -> WaveRun {
+        let run = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo().clone(),
+                flow: wave.flow().clone(),
+                direction: wave.direction().clone(),
+                area: wave.area().clone(),
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 0,
+            status,
+            worktree: wave.repo().clone(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+            activation_log_id: None,
+            parent_run_id: None,
+            parent_pr_number: None,
+            stack_position: 0,
+            stack_group_id: wave.id().to_string(),
+            stack_status: crate::lfd::types::WaveRunStackStatus::Active,
+            lineage_inferred: false,
+            target_branch: "main".to_string(),
+        };
+        store
+            .create_wave_run(&run)
+            .await
+            .expect("wave run should be created");
+        run
+    }
+
+    fn make_listen_stimulus(listener_wave_id: &LfdId, source_wave_id: &LfdId) -> Stimulus {
+        Stimulus {
+            id: LfdId::new(),
+            wave_id: listener_wave_id.clone(),
+            source_wave_id: Some(source_wave_id.clone()),
+            signal: Signal::Listen,
+            flow: None,
+            cron: None,
+            last_main_sha: None,
+            last_triggered_at: None,
+            created_at: Some(OffsetDateTime::now_utc()),
+            enabled: true,
+        }
     }
 
     #[tokio::test]
@@ -1027,51 +1187,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_enqueues_listen_activation_on_completion() {
-        let tmp = tempdir().expect("tempdir");
-        let repo = tmp.path();
+    async fn execute_starts_listen_wave_on_completion() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
+        repo.create_file(".lf/steps/step-a.md", "do step a");
+        repo.stage_all();
+        repo.commit("add flow fixtures");
 
-        let flow_dir = repo.join(".lf/flows");
-        std::fs::create_dir_all(&flow_dir).unwrap();
-        std::fs::write(flow_dir.join("test-flow.yaml"), "- step-a\n").unwrap();
-        let step_dir = repo.join(".lf/steps");
-        std::fs::create_dir_all(&step_dir).unwrap();
-        std::fs::write(step_dir.join("step-a.md"), "do step a").unwrap();
-
-        let db_path = tmp.path().join("test.db");
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
         let store: SharedStore = Arc::new(
             open_store(&StorageConfig::sqlite(db_path))
                 .await
                 .expect("store should open"),
         );
 
-        let (source_wave_id, source_run_id) = create_wave_and_run(&store, repo, "test-flow").await;
+        let (source_wave_id, source_run_id) =
+            create_wave_and_run(&store, repo.path(), "test-flow").await;
         let target_wave = Wave {
             id: LfdId::new(),
             name: "target-wave".to_string(),
-            repo: repo.to_string_lossy().to_string(),
+            repo: repo.path().to_string_lossy().to_string(),
             flow: "test-flow".to_string(),
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: true,
         };
         store
             .create_wave(&target_wave)
             .await
             .expect("create target wave");
-        let listen_stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: target_wave.id.clone(),
-            source_wave_id: Some(source_wave_id.clone()),
-            kind: StimulusKind::Listen,
-            cron: None,
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
+        let listen_stimulus = make_listen_stimulus(&target_wave.id, &source_wave_id);
         store
             .create_stimulus(&listen_stimulus)
             .await
@@ -1094,13 +1242,176 @@ mod tests {
             .await
             .expect("execute source run");
 
+        let runs = store
+            .list_wave_runs(Some(&target_wave.id), None)
+            .await
+            .expect("listener runs");
+        assert!(
+            runs.iter().any(|run| run.wave_id == target_wave.id),
+            "listener should receive a run"
+        );
+
         let pending = store
             .list_pending_activations(&target_wave.id)
             .await
             .expect("pending activations");
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].stimulus_id, listen_stimulus.id);
-        assert_eq!(pending[0].source, ActivationSource::Listen);
+        assert!(
+            pending.is_empty(),
+            "listener should start immediately when runnable"
+        );
+
+        let updated_stimulus = store
+            .get_stimulus(&listen_stimulus.id)
+            .await
+            .expect("stimulus lookup should succeed")
+            .expect("stimulus should exist");
+        assert!(
+            updated_stimulus.last_triggered_at.is_some(),
+            "listen stimulus should record trigger time"
+        );
+    }
+
+    #[tokio::test]
+    async fn listen_trigger_queues_when_listener_running() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
+        repo.create_file(".lf/steps/step-a.md", "do step");
+        repo.stage_all();
+        repo.commit("add test flow");
+
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let source_wave = make_wave("source", repo.path(), "test-flow", WaveStatus::Running);
+        let mut listener_wave =
+            make_wave("listener", repo.path(), "test-flow", WaveStatus::Running);
+        listener_wave.serialized = true;
+        store
+            .create_wave(&source_wave)
+            .await
+            .expect("create source wave");
+        store
+            .create_wave(&listener_wave)
+            .await
+            .expect("create listener wave");
+        let source_run = create_main_run(&store, &source_wave, WaveRunStatus::Running).await;
+        let _listener_active_run =
+            create_main_run(&store, &listener_wave, WaveRunStatus::Running).await;
+
+        let stimulus = make_listen_stimulus(listener_wave.id(), source_wave.id());
+        store
+            .create_stimulus(&stimulus)
+            .await
+            .expect("create listen stimulus");
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&source_run.id)
+            .await
+            .expect("source run should complete");
+
+        let pending = store
+            .get_pending_for_stimulus(listener_wave.id(), &stimulus.id)
+            .await
+            .expect("pending activation lookup should succeed");
+        assert!(
+            pending.is_some(),
+            "listen activation should queue while listener is running"
+        );
+
+        let updated = store
+            .get_stimulus(&stimulus.id)
+            .await
+            .expect("stimulus lookup should succeed")
+            .expect("stimulus should exist");
+        assert!(
+            updated.last_triggered_at.is_some(),
+            "queued listen activation should update last_triggered_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn listen_trigger_queues_when_scheduler_full() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
+        repo.create_file(".lf/steps/step-a.md", "do step");
+        repo.stage_all();
+        repo.commit("add test flow");
+
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let source_wave = make_wave("source", repo.path(), "test-flow", WaveStatus::Running);
+        let listener_wave = make_wave("listener", repo.path(), "test-flow", WaveStatus::Idle);
+        store
+            .create_wave(&source_wave)
+            .await
+            .expect("create source wave");
+        store
+            .create_wave(&listener_wave)
+            .await
+            .expect("create listener wave");
+        let source_run = create_main_run(&store, &source_wave, WaveRunStatus::Running).await;
+
+        let stimulus = make_listen_stimulus(listener_wave.id(), source_wave.id());
+        store
+            .create_stimulus(&stimulus)
+            .await
+            .expect("create listen stimulus");
+
+        let scheduler = Arc::new(Scheduler::new(0));
+        let output_dir = tempdir().expect("output dir");
+        let output = OutputHub::new(16, output_dir.path().to_path_buf());
+        let event_hub = EventHub::new(64);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler,
+            output,
+            event_hub,
+            Arc::new(MockRunner),
+        );
+
+        executor
+            .execute(&source_run.id)
+            .await
+            .expect("source run should complete");
+
+        let pending = store
+            .get_pending_for_stimulus(listener_wave.id(), &stimulus.id)
+            .await
+            .expect("pending activation lookup should succeed");
+        assert!(
+            pending.is_some(),
+            "listen activation should queue when scheduler is full"
+        );
+
+        let listener_runs = store
+            .list_wave_runs(Some(listener_wave.id()), None)
+            .await
+            .expect("list listener runs");
+        assert!(
+            listener_runs.is_empty(),
+            "listener should not start immediately when scheduler is full"
+        );
     }
 
     #[tokio::test]

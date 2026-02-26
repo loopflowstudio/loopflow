@@ -524,8 +524,7 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunKind, WaveRunSnapshot, WaveRunStatus,
-        WaveStatus,
+        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -595,6 +594,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         }
     }
 
@@ -625,14 +625,13 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             activation_log_id: None,
-            run_kind: WaveRunKind::Main,
-            sidecar_kind: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position,
             stack_group_id: wave.id().to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
     }
 

@@ -1702,7 +1702,7 @@ mod tests {
         assert!(has_orphan_error);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn stop_session_while_starting_marks_failed_and_cleans_up_harness() {
         STARTING_STOP_CALLED.store(false, Ordering::SeqCst);
         let tmp = tempdir().expect("tempdir");

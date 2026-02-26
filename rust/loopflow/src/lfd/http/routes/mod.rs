@@ -5,6 +5,7 @@ pub mod hooks;
 pub mod repos;
 pub mod sessions;
 pub mod system;
+pub mod usage;
 pub mod wave_config;
 pub mod wave_runs;
 pub mod waves;

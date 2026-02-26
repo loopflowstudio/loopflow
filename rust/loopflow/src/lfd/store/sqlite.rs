@@ -16,7 +16,7 @@ use crate::lfd::store::rows::{
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
     map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
     LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent,
@@ -435,6 +435,74 @@ impl SqliteStore {
             .map(|s| Box::new(s.as_i32() as i64) as Box<dyn ToSql>)
             .collect();
         let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut rows = stmt.query(param_refs.as_slice())?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(Self::map_session_row(row)?);
+        }
+        Ok(sessions)
+    }
+
+    pub fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.harness, s.status, s.wave_run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
+             FROM sessions s
+             JOIN wave_runs wr ON wr.id = s.wave_run_id
+             WHERE wr.wave_id = ?1
+             ORDER BY s.created_at ASC",
+        )?;
+        let mut rows = stmt.query(params![wave_id])?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(Self::map_session_row(row)?);
+        }
+        Ok(sessions)
+    }
+
+    pub fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut sql = String::from(
+            "SELECT s.id, s.harness, s.status, s.wave_run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
+             FROM sessions s",
+        );
+        let mut predicates = Vec::new();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+
+        if filters.wave.is_some() || filters.flow.is_some() {
+            sql.push_str(" JOIN wave_runs wr ON wr.id = s.wave_run_id");
+        }
+        if let Some(wave) = filters.wave.as_ref() {
+            predicates.push(format!("wr.wave_id = ?{}", params.len() + 1));
+            params.push(Box::new(wave.clone()));
+        }
+        if let Some(flow) = filters.flow.as_ref() {
+            predicates.push(format!("wr.snapshot_flow = ?{}", params.len() + 1));
+            params.push(Box::new(flow.clone()));
+        }
+        if let Some(step) = filters.step.as_ref() {
+            predicates.push(format!(
+                "json_extract(s.config, '$.step') = ?{}",
+                params.len() + 1
+            ));
+            params.push(Box::new(step.clone()));
+        }
+        if let Some(from) = filters.from {
+            predicates.push(format!("s.created_at >= ?{}", params.len() + 1));
+            params.push(Box::new(from));
+        }
+        if let Some(to) = filters.to {
+            predicates.push(format!("s.created_at <= ?{}", params.len() + 1));
+            params.push(Box::new(to));
+        }
+        if !predicates.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&predicates.join(" AND "));
+        }
+        sql.push_str(" ORDER BY s.created_at ASC");
+
+        let mut stmt = conn.prepare(&sql)?;
+        let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
         let mut rows = stmt.query(param_refs.as_slice())?;
         let mut sessions = Vec::new();
         while let Some(row) = rows.next()? {

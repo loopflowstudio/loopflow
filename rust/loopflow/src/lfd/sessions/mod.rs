@@ -1,6 +1,7 @@
 mod harness;
 pub(crate) mod opencode_runtime;
 pub mod types;
+pub mod usage;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

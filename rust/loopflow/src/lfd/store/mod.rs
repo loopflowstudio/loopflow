@@ -70,6 +70,15 @@ pub enum StorageConfig {
     Postgres { database_url: String },
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionFilters {
+    pub wave: Option<String>,
+    pub flow: Option<String>,
+    pub step: Option<String>,
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+}
+
 impl StorageConfig {
     pub fn sqlite(path: PathBuf) -> Self {
         Self::Sqlite { path }
@@ -512,6 +521,17 @@ impl Store {
         TokenStore::list_provider_tokens(self).await
     }
 
+    pub async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {
+        SessionStore::list_sessions_for_wave(self, wave_id).await
+    }
+
+    pub async fn list_sessions_filtered(
+        &self,
+        filters: &SessionFilters,
+    ) -> StoreResult<Vec<Session>> {
+        SessionStore::list_sessions_filtered(self, filters).await
+    }
+
     pub async fn health_check(&self) -> StoreResult<()> {
         StoreAdmin::health_check(self).await
     }
@@ -682,6 +702,8 @@ pub trait SessionStore: Send + Sync {
         session_id: &LfdId,
         after_seq: Option<i64>,
     ) -> StoreResult<Vec<PersistedSessionEvent>>;
+    async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>>;
+    async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1641,6 +1663,26 @@ impl SessionStore for Store {
                 .await
             }
             StoreBackend::Postgres(store) => store.list_session_events(session_id, after_seq).await,
+        }
+    }
+
+    async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.to_string();
+                run_sqlite(store, move |store| store.list_sessions_for_wave(&wave_id)).await
+            }
+            StoreBackend::Postgres(store) => store.list_sessions_for_wave(wave_id).await,
+        }
+    }
+
+    async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let filters = filters.clone();
+                run_sqlite(store, move |store| store.list_sessions_filtered(&filters)).await
+            }
+            StoreBackend::Postgres(store) => store.list_sessions_filtered(filters).await,
         }
     }
 }

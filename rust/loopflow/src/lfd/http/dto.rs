@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
@@ -284,6 +284,87 @@ pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,
     pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenTotalsDto {
+    pub input: u64,
+    pub output: u64,
+    pub reasoning: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextSnapshotDto {
+    pub sources: BTreeMap<String, u64>,
+    pub budget: u64,
+    pub total: u64,
+    pub diff_tier: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionUsageSessionDto {
+    pub step: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave: Option<String>,
+    pub status: String,
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionUsageDto {
+    pub object: String,
+    pub session_id: String,
+    pub tokens: TokenTotalsDto,
+    pub turns: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextSnapshotDto>,
+    pub models: BTreeMap<String, u64>,
+    pub session: SessionUsageSessionDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WaveStepUsageDto {
+    pub input: u64,
+    pub output: u64,
+    pub reasoning: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub sessions: u64,
+    pub turns: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WaveUsageDto {
+    pub object: String,
+    pub wave_id: String,
+    pub tokens: TokenTotalsDto,
+    pub sessions: u64,
+    pub turns: u64,
+    pub models: BTreeMap<String, u64>,
+    pub by_step: BTreeMap<String, WaveStepUsageDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageSummaryGroupDto {
+    pub key: String,
+    pub tokens: TokenTotalsDto,
+    pub sessions: u64,
+    pub turns: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageSummaryDto {
+    pub object: String,
+    pub group_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    pub groups: Vec<UsageSummaryGroupDto>,
 }
 
 pub fn signal_str(signal: Signal) -> &'static str {

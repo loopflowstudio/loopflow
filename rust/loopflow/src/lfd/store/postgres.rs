@@ -17,7 +17,7 @@ use crate::lfd::store::rows::{
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
     map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
-use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
     LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent,
@@ -493,6 +493,88 @@ impl PostgresStore {
                     &[&status_ints],
                 )
                 .await?;
+            rows.iter().map(Self::map_session_row).collect()
+        })
+        .await
+    }
+
+    pub async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>> {
+        let wave_id = wave_id.to_string();
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT s.id, s.harness, s.status, s.wave_run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
+                     FROM sessions s
+                     JOIN wave_runs wr ON wr.id = s.wave_run_id
+                     WHERE wr.wave_id = $1
+                     ORDER BY s.created_at ASC",
+                    &[&wave_id],
+                )
+                .await?;
+            rows.iter().map(Self::map_session_row).collect()
+        })
+        .await
+    }
+
+    pub async fn list_sessions_filtered(
+        &self,
+        filters: &SessionFilters,
+    ) -> StoreResult<Vec<Session>> {
+        enum QueryParam {
+            Text(String),
+            Int(i64),
+        }
+
+        impl QueryParam {
+            fn as_tosql(&self) -> &(dyn ToSql + Sync) {
+                match self {
+                    Self::Text(value) => value,
+                    Self::Int(value) => value,
+                }
+            }
+        }
+
+        let filters = filters.clone();
+        self.with_client(|client| async move {
+            let mut query = String::from(
+                "SELECT s.id, s.harness, s.status, s.wave_run_id, s.provider_session_id, s.config, s.created_at, s.ended_at
+                 FROM sessions s",
+            );
+            let mut predicates = Vec::new();
+            let mut params: Vec<QueryParam> = Vec::new();
+
+            if filters.wave.is_some() || filters.flow.is_some() {
+                query.push_str(" JOIN wave_runs wr ON wr.id = s.wave_run_id");
+            }
+            if let Some(wave) = filters.wave.as_ref() {
+                predicates.push(format!("wr.wave_id = ${}", params.len() + 1));
+                params.push(QueryParam::Text(wave.clone()));
+            }
+            if let Some(flow) = filters.flow.as_ref() {
+                predicates.push(format!("wr.snapshot_flow = ${}", params.len() + 1));
+                params.push(QueryParam::Text(flow.clone()));
+            }
+            if let Some(step) = filters.step.as_ref() {
+                predicates.push(format!("(s.config::jsonb ->> 'step') = ${}", params.len() + 1));
+                params.push(QueryParam::Text(step.clone()));
+            }
+            if let Some(from) = filters.from {
+                predicates.push(format!("s.created_at >= ${}", params.len() + 1));
+                params.push(QueryParam::Int(from));
+            }
+            if let Some(to) = filters.to {
+                predicates.push(format!("s.created_at <= ${}", params.len() + 1));
+                params.push(QueryParam::Int(to));
+            }
+            if !predicates.is_empty() {
+                query.push_str(" WHERE ");
+                query.push_str(&predicates.join(" AND "));
+            }
+            query.push_str(" ORDER BY s.created_at ASC");
+
+            let param_refs: Vec<&(dyn ToSql + Sync)> =
+                params.iter().map(QueryParam::as_tosql).collect();
+            let rows = client.query(&query, &param_refs).await?;
             rows.iter().map(Self::map_session_row).collect()
         })
         .await

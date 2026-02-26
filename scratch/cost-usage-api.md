@@ -86,11 +86,12 @@ Fleet-wide grouped aggregation. Powers the analytics dashboard.
 | Param | Type | Description |
 |-------|------|-------------|
 | `wave` | string | Filter to one wave |
+| `flow` | string | Filter to one flow |
 | `step` | string | Filter to one step |
 | `model` | string | Filter to one model |
 | `from` | ISO 8601 | Start of time range |
 | `to` | ISO 8601 | End of time range |
-| `group_by` | string | Dimension: `wave`, `step`, `model`, `source` |
+| `group_by` | string | Dimension: `wave`, `flow`, `step`, `model`, `source` |
 
 ```json
 {
@@ -115,9 +116,11 @@ Fleet-wide grouped aggregation. Powers the analytics dashboard.
 }
 ```
 
-**Implementation**: New store method `list_sessions_filtered(filters)` that queries sessions with optional wave/step/time predicates. Step and wave filter via `session.config` JSON extraction in SQL (`json_extract(config, '$.step')` for SQLite, `config->>'step'` for Postgres). Time range filters on `sessions.created_at`. Model filtering happens post-scan since model is per-turn, not per-session.
+**Implementation**: New store method `list_sessions_filtered(filters)` that queries sessions with optional wave/flow/step/time predicates. Wave and flow filters join `sessions.wave_run_id -> wave_runs.id` and filter on `wave_runs.wave_id` / `wave_runs.snapshot_flow` (canonical source of wave/run metadata). Step filter uses `session.config.step` JSON extraction (`json_extract(config, '$.step')` for SQLite, `config->>'step'` for Postgres). Time range filters on `sessions.created_at`. Model filtering happens post-scan since model is per-turn, not per-session.
 
 For `group_by=source`, aggregate `ContextSnapshot.sources` across matching sessions — shows where input tokens come from (step prompts, diffs, docs, etc.).
+
+`group_by=source` with `model` filter is rejected with `400` in v0 (ambiguous cross-granularity semantics: source is session-level snapshot, model is turn-level usage). If this combination proves valuable, add explicit semantics in a follow-up.
 
 ## Alternatives considered
 
@@ -142,7 +145,11 @@ For `group_by=source`, aggregate `ContextSnapshot.sources` across matching sessi
 
 **Session metadata in session usage.** Include step, wave, status, and timestamps so the caller doesn't need a second request to contextualize the numbers.
 
-**Filters in SQL, grouping in Rust.** The store filters sessions by wave/step/time using SQL (efficient). Grouping by model or source happens in Rust after scanning events (necessary because those dimensions live inside event JSON). Hybrid approach: SQL narrows the set, Rust does the final aggregation.
+**Wave/flow filters use wave-run joins, not session config.** Wave identity and flow snapshot live on `wave_runs`; filtering through `sessions.wave_run_id` avoids drift and keeps semantics aligned with orchestration state.
+
+**Filters in SQL, grouping in Rust.** The store filters sessions by wave/flow/step/time using SQL (efficient). Grouping by model or source happens in Rust after scanning events (necessary because those dimensions live inside event JSON). Hybrid approach: SQL narrows the set, Rust does the final aggregation.
+
+**Time range is session-created window in v0.** `from`/`to` apply to `sessions.created_at` (not per-event timestamps). This keeps SQL simple and predictable for operator queries. If operators need event-time slicing later, add event-time filtering in a follow-up.
 
 ## Scope
 
@@ -154,14 +161,13 @@ For `group_by=source`, aggregate `ContextSnapshot.sources` across matching sessi
 
 **Out of scope:**
 - Materialized views or caching (add when latency warrants)
-- `flow` as a filter/group-by dimension (flow lives on wave_run, not session — would require an extra join through wave_runs. Step is the more useful granularity. Add flow later if operators ask for it.)
 - Cost in USD (Phase 03 adds model rates; usage API returns tokens only)
 - Streaming/live usage (SSE already delivers events; aggregation is for completed or in-progress snapshots)
 - Pagination on summary groups (group count is bounded by distinct values of the dimension)
 
 ## Implementation plan
 
-### 1. Aggregation module — `rust/loopflow/src/sessions/usage.rs`
+### 1. Aggregation module — `rust/loopflow/src/lfd/sessions/usage.rs`
 
 Pure functions, no DB dependency. Takes `Vec<PersistedSessionEvent>` + `Session`, returns usage DTOs.
 
@@ -193,19 +199,20 @@ async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<
 ```rust
 pub struct SessionFilters {
     pub wave: Option<String>,
+    pub flow: Option<String>,
     pub step: Option<String>,
     pub from: Option<i64>,    // unix timestamp
     pub to: Option<i64>,
 }
 ```
 
-`list_sessions_for_wave` joins through `wave_runs` to find all sessions belonging to any run of that wave. `list_sessions_filtered` applies optional predicates. Step filter uses `json_extract(config, '$.step')` (SQLite) / `config->>'step'` (Postgres).
+`list_sessions_for_wave` joins through `wave_runs` to find all sessions belonging to any run of that wave. `list_sessions_filtered` applies optional predicates. Wave/flow filters use `sessions.wave_run_id -> wave_runs` joins; step filter uses `json_extract(config, '$.step')` (SQLite) / `config->>'step'` (Postgres).
 
-### 3. HTTP handlers — `rust/loopflow/src/http/routes/usage.rs`
+### 3. HTTP handlers — `rust/loopflow/src/lfd/http/routes/usage.rs`
 
 Three handler functions following the existing pattern. Register under `/v0/sessions/{id}/usage`, `/v0/waves/{id}/usage`, `/v0/usage/summary`.
 
-### 4. DTOs — `rust/loopflow/src/http/dto.rs`
+### 4. DTOs — `rust/loopflow/src/lfd/http/dto.rs`
 
 Add `SessionUsageDto`, `WaveUsageDto`, `UsageSummaryDto`, `TokenTotals`, `ContextSnapshotDto`. All derive `Serialize, Debug`.
 
@@ -229,6 +236,10 @@ curl http://localhost:4242/v0/waves/engbot/usage
 # Summary grouped by step
 curl "http://localhost:4242/v0/usage/summary?group_by=step&from=2026-02-20T00:00:00Z"
 # → 200 with groups array, each group has key + token totals + counts
+
+# Summary grouped by flow
+curl "http://localhost:4242/v0/usage/summary?group_by=flow&wave=engbot"
+# → 200 with grouped totals by flow snapshot
 ```
 
 Wave goals advanced: "Surface tokens inline at every level of the Concerto hierarchy" (this API is the data source) and "Provide a dedicated analytics surface with work lens" (summary endpoint powers it).

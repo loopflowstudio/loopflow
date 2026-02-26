@@ -208,33 +208,7 @@ pub(super) fn process_line(
 
         "result" => {
             flush_text_delta_parser(events, state, turn_id);
-            let usage = TurnUsage {
-                input_tokens: event
-                    .pointer("/usage/input_tokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
-                output_tokens: event
-                    .pointer("/usage/output_tokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0),
-                reasoning_tokens: event
-                    .pointer("/usage/reasoning_tokens")
-                    .and_then(Value::as_u64),
-                cache_read_tokens: event
-                    .pointer("/usage/cache_read_input_tokens")
-                    .and_then(Value::as_u64),
-                cache_write_tokens: event
-                    .pointer("/usage/cache_creation_input_tokens")
-                    .and_then(Value::as_u64),
-                model: event
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string),
-                cost_usd: event
-                    .get("cost_usd")
-                    .or_else(|| event.get("total_cost_usd"))
-                    .and_then(Value::as_f64),
-            };
+            let usage = map_turn_usage(event);
             let status = if event
                 .get("is_error")
                 .and_then(Value::as_bool)
@@ -270,6 +244,36 @@ pub(super) fn process_line(
     }
 
     false
+}
+
+fn map_turn_usage(event: &Value) -> TurnUsage {
+    TurnUsage {
+        input_tokens: event
+            .pointer("/usage/input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        output_tokens: event
+            .pointer("/usage/output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        reasoning_tokens: event
+            .pointer("/usage/reasoning_tokens")
+            .and_then(Value::as_u64),
+        cache_read_tokens: event
+            .pointer("/usage/cache_read_input_tokens")
+            .and_then(Value::as_u64),
+        cache_write_tokens: event
+            .pointer("/usage/cache_creation_input_tokens")
+            .and_then(Value::as_u64),
+        model: event
+            .get("model")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        cost_usd: event
+            .get("cost_usd")
+            .or_else(|| event.get("total_cost_usd"))
+            .and_then(Value::as_f64),
+    }
 }
 
 /// Map Claude tool name to a SessionItem category.

@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use super::claude_mapping::{self, ReaderState};
 use super::codex_mapping::{self, ItemPhase};
 use super::opencode_mapping;
-use crate::lfd::sessions::types::{SessionEvent, SessionItem, TurnStatus, TurnUsage};
+use crate::lfd::sessions::types::{SessionEvent, SessionItem, TurnStatus};
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -104,27 +104,10 @@ fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
                     turn_id: turn_id.clone(),
                     status: codex_mapping::map_turn_status(&params),
                 });
-                let usage = TurnUsage {
-                    input_tokens: params
-                        .pointer("/usage/input_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
-                    output_tokens: params
-                        .pointer("/usage/output_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
-                    reasoning_tokens: params
-                        .pointer("/usage/reasoning_tokens")
-                        .and_then(Value::as_u64),
-                    cache_read_tokens: None,
-                    cache_write_tokens: None,
-                    model: params
-                        .get("model")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string),
-                    cost_usd: None,
-                };
-                events.push(SessionEvent::TurnUsage { turn_id, usage });
+                events.push(SessionEvent::TurnUsage {
+                    turn_id,
+                    usage: codex_mapping::map_turn_usage(&params),
+                });
             }
             "item/started" => {
                 let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);

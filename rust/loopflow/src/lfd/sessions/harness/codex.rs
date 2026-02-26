@@ -17,7 +17,7 @@ use crate::lfd::sessions::harness::codex_mapping::ItemPhase;
 use crate::lfd::sessions::harness::common::spawn_stderr_logger;
 use crate::lfd::sessions::harness::lf_tag::LfTagParser;
 use crate::lfd::sessions::harness::{codex_mapping, Harness};
-use crate::lfd::sessions::types::{SessionEvent, TurnUsage};
+use crate::lfd::sessions::types::SessionEvent;
 
 async fn resolve_turn_id(
     turn_id_from_params: Option<&str>,
@@ -310,29 +310,9 @@ impl CodexHarness {
                             turn_id: tid.clone(),
                             status,
                         });
-                        let usage = TurnUsage {
-                            input_tokens: params
-                                .pointer("/usage/input_tokens")
-                                .and_then(Value::as_u64)
-                                .unwrap_or(0),
-                            output_tokens: params
-                                .pointer("/usage/output_tokens")
-                                .and_then(Value::as_u64)
-                                .unwrap_or(0),
-                            reasoning_tokens: params
-                                .pointer("/usage/reasoning_tokens")
-                                .and_then(Value::as_u64),
-                            cache_read_tokens: None,
-                            cache_write_tokens: None,
-                            model: params
-                                .get("model")
-                                .and_then(Value::as_str)
-                                .map(ToString::to_string),
-                            cost_usd: None,
-                        };
                         let _ = event_tx.send(SessionEvent::TurnUsage {
                             turn_id: tid,
-                            usage,
+                            usage: codex_mapping::map_turn_usage(&params),
                         });
                     }
                     "item/started" => {

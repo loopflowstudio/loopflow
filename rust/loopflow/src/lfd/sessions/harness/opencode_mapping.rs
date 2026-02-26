@@ -102,18 +102,7 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
         }
         SessionState::Idle => {
             if was_active {
-                let usage = properties.get("usage").map(|usage| TurnUsage {
-                    input_tokens: usage
-                        .pointer("/input_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
-                    output_tokens: usage
-                        .pointer("/output_tokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
-                    cost_usd: usage.get("cost").and_then(Value::as_f64),
-                    ..TurnUsage::default()
-                });
+                let usage = map_turn_usage(properties);
                 complete_turn(state, TurnStatus::Completed, usage, mapped);
             }
         }
@@ -146,6 +135,21 @@ fn complete_turn(
             .events
             .push(SessionEvent::TurnUsage { turn_id, usage });
     }
+}
+
+fn map_turn_usage(properties: &Value) -> Option<TurnUsage> {
+    properties.get("usage").map(|usage| TurnUsage {
+        input_tokens: usage
+            .pointer("/input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        output_tokens: usage
+            .pointer("/output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        cost_usd: usage.get("cost").and_then(Value::as_f64),
+        ..TurnUsage::default()
+    })
 }
 
 fn parse_session_state(properties: &Value) -> SessionState {

@@ -26,6 +26,7 @@ loopflow is a "smart router" — 91k lines orchestrating coding agents, not reim
 - **Chasing peers.** opencode and convex made different tradeoffs for different reasons. Adopt patterns that fit loopflow's delegation model, not patterns that fight it.
 - **Stale reference blast radius.** Direction taxonomy restructuring required three gate iterations to catch all stale references across docs, Swift previews, and wave configs. Pass 1 structural renames (docker module path, store capability imports) had narrower blast radius than expected — the `AgentExecutor` surface isolation helped.
 - **Metadata convention drift in docker recovery.** Pass 1 decomposition revealed that recovery correctness depends on label/mount conventions staying consistent across image, workspace, and recovery modules. Pass 2 made these explicit via shared constants and invariant tests. Remaining risk: daemon-restart e2e coverage beyond unit tests.
+- **Release bootstrap heuristics can drift.** `lf ops release` bootstrap gating currently detects workflow triggers with lightweight string checks (`tags:` + `{prefix}v*`). Fast and simple, but susceptible to unusual YAML layouts.
 
 ## Roadmap (4 passes)
 
@@ -37,6 +38,10 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 | 2 | *(shipped)* | Contract hardening (prompt stage newtypes + Docker metadata constants + SQL catalog invariants + golden prompts) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Done |
 | 3 | `03-orchestration-expansion.md` | Orchestration expansion (activation ingress + push/listen + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | In progress (Milestone A shipped) |
 | 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |
+
+### Shipped side milestone: release ops generalization
+
+- `05-release-general.md` — generalized `lf ops release` for bootstrap-from-zero repos, target-scoped monorepo releases, inline manifest version bumps, and post-tag workflow/release status visibility.
 
 ### Pass 1 retrospective
 

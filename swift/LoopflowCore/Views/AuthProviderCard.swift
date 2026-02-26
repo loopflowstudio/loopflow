@@ -66,7 +66,7 @@ public struct AuthProviderCard: View {
 
             stateBody
 
-            if shouldShowError, let error {
+            if let error {
                 Text(error)
                     .font(Typography.caption())
                     .foregroundStyle(Color.statusError)
@@ -212,10 +212,6 @@ public struct AuthProviderCard: View {
         case .expired:
             "Expired"
         }
-    }
-
-    private var shouldShowError: Bool {
-        status.status == .none || status.status == .expired
     }
 
     private func copyButton(

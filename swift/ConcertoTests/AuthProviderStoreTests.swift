@@ -97,6 +97,25 @@ struct AuthProviderStoreTests {
         #expect(await service.listCallCount == 2)
         #expect(store.providers[.github]?.status == ProviderAuthStatus.none)
     }
+
+    @Test("disconnect failure keeps current status and surfaces provider error")
+    func disconnectFailurePreservesStatus() async {
+        let service = MockAuthProviderService(
+            disconnectResults: [
+                .github: .failure(WaveServiceError.commandFailed("Disconnect failed"))
+            ]
+        )
+
+        let store = AuthProviderStore()
+        store.bindService(service)
+        store.handleEvent(makeAuthEvent(type: .connected, login: "octocat"))
+
+        await store.disconnect(.github)
+
+        #expect(store.providers[.github]?.status == .active)
+        #expect(store.errorProvider == .github)
+        #expect(store.error == "Disconnect failed")
+    }
 }
 
 private func makeAuthEvent(

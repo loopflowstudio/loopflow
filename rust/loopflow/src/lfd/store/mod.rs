@@ -594,6 +594,8 @@ pub trait StoreAdmin: Send + Sync {
 
 #[async_trait::async_trait]
 impl WaveStateStore for Store {
+    // Keep backend dispatch explicit and centralized in this file.
+    // Verbose match arms are intentional: they keep sqlite/postgres behavior greppable.
     async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {

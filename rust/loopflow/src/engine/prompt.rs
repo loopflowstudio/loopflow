@@ -604,7 +604,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
         directions,
-        summaries, // TODO: implement summary loading
+        summaries,
         wave_memory,
         wave: opts.wave.clone(),
         loopflow_doc,

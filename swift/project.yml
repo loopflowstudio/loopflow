@@ -14,6 +14,9 @@ packages:
   ViewInspector:
     url: https://github.com/nalexn/ViewInspector.git
     from: 0.10.0
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit.git
+    minorVersion: 0.9.0
 
 targets:
   LoopflowCore:
@@ -28,6 +31,8 @@ targets:
         INFOPLIST_FILE: LoopflowCore/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.core
         DEFINES_MODULE: YES
+    dependencies:
+      - package: WhisperKit
 
   Concerto:
     type: application
@@ -45,6 +50,7 @@ targets:
         type: folder
     dependencies:
       - target: LoopflowCore
+      - package: WhisperKit
       # GhosttyKit is available via SPM binary target. For local development with
       # GhosttyKit, use `swift build` or add the framework manually after building
       # with: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
@@ -61,6 +67,7 @@ targets:
         INFOPLIST_FILE: Concerto/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.concerto
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Concerto/Concerto.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 2V3M244HF2
         # GhosttyKit is disabled in Xcode project - use SPM build for full terminal support

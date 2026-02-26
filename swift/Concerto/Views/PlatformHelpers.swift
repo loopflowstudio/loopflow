@@ -1,10 +1,23 @@
 #if os(macOS)
 import SwiftUI
 import AppKit
+import LoopflowCore
+
+let platformVoiceButtonSize: CGFloat = HitTarget.comfortable
 
 func copyToClipboard(_ content: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(content, forType: .string)
+}
+
+func openMicrophoneSettings() {
+    if let privacyURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+        NSWorkspace.shared.open(privacyURL)
+        return
+    }
+    if let settingsURL = URL(string: "x-apple.systempreferences:com.apple.systempreferences") {
+        NSWorkspace.shared.open(settingsURL)
+    }
 }
 
 extension View {
@@ -25,9 +38,20 @@ extension View {
 #elseif canImport(UIKit)
 import SwiftUI
 import UIKit
+import LoopflowCore
+
+let platformVoiceButtonSize: CGFloat = HitTarget.touch
 
 func copyToClipboard(_ content: String) {
     UIPasteboard.general.string = content
+}
+
+func openMicrophoneSettings() {
+    guard let settingsURL = URL(string: UIApplication.openSettingsURLString),
+          UIApplication.shared.canOpenURL(settingsURL) else {
+        return
+    }
+    UIApplication.shared.open(settingsURL)
 }
 
 extension View {

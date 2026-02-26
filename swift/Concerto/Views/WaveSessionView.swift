@@ -10,11 +10,13 @@ struct WaveSessionView: View {
     let managesLifecycle: Bool
 
     @State private var composerText = ""
+    @State private var voiceService = VoiceInputService()
     @State private var expandedItemIds: Set<UUID> = []
     @State private var expandedRunIds: Set<UUID> = []
     @State private var isNearBottom = true
     @State private var replyQueue = ReplyQueue()
     @State private var isReplyTrayExpanded = false
+    @State private var voiceComposerBaseline: String?
     @FocusState private var focusedField: FocusField?
 
     private enum FocusField: Hashable {
@@ -85,29 +87,37 @@ struct WaveSessionView: View {
                 .padding(.horizontal, Spacing.lg)
             }
 
-            HStack(alignment: .bottom, spacing: Spacing.sm) {
-                TextField("Message", text: $composerText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...6)
-                    .focused($focusedField, equals: .composer)
-                    .macOSOnExitCommand {
-                        focusedField = .transcript
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(alignment: .bottom, spacing: Spacing.sm) {
+                    VoiceInputButton(voiceService: voiceService) { transcript in
+                        insertTranscriptIntoComposer(transcript)
                     }
 
-                Button("End") {
-                    Task {
-                        await state.endSession()
-                    }
-                }
-                .buttonStyle(DarkButtonStyle())
-                .disabled(!state.canEndSession)
+                    TextField("Message", text: $composerText, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...6)
+                        .focused($focusedField, equals: .composer)
+                        .macOSOnExitCommand {
+                            focusedField = .transcript
+                        }
 
-                Button("Send") {
-                    sendMessage()
+                    Button("End") {
+                        Task {
+                            await state.endSession()
+                        }
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(!state.canEndSession)
+
+                    Button("Send") {
+                        sendMessage()
+                    }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(!canSendMessage || !state.canSend)
                 }
-                .keyboardShortcut(.return, modifiers: .command)
-                .buttonStyle(DarkButtonStyle())
-                .disabled(!canSendMessage || !state.canSend)
+
+                voiceFeedback
             }
             .padding(.horizontal, Spacing.lg)
             .padding(.bottom, Spacing.lg)
@@ -117,9 +127,6 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: horizontalSizeClass == .compact)
             await state.onAppear()
-            if focusedField == nil {
-                focusedField = .transcript
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusSessionComposer)) { notification in
             if let waveId = notification.userInfo?["waveId"] as? String, waveId != state.waveId {
@@ -131,7 +138,15 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: value == .compact)
         }
+        .onChange(of: voiceService.state) { _, newState in
+            handleVoiceStateChange(newState)
+        }
+        .onChange(of: voiceService.partialTranscript) { _, partial in
+            syncVoicePartialIntoComposer(partial)
+        }
         .onDisappear {
+            voiceService.cancel()
+            voiceComposerBaseline = nil
             guard managesLifecycle else { return }
             state.onDisappear()
         }
@@ -248,6 +263,123 @@ struct WaveSessionView: View {
         replyQueue.clear()
         if collapseTray {
             isReplyTrayExpanded = false
+        }
+    }
+
+    private func insertTranscriptIntoComposer(_ rawTranscript: String) {
+        let transcript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcript.isEmpty else { return }
+
+        beginVoiceComposerSessionIfNeeded()
+        composerText = mergedComposerText(base: voiceComposerBaseline ?? composerText, transcript: transcript)
+        voiceComposerBaseline = nil
+
+        focusedField = .composer
+    }
+
+    private func handleVoiceStateChange(_ newState: VoiceInputService.State) {
+        switch newState {
+        case .recording:
+            beginVoiceComposerSessionIfNeeded()
+        case .transcribing:
+            break
+        case .idle:
+            voiceComposerBaseline = nil
+        }
+    }
+
+    private func syncVoicePartialIntoComposer(_ rawPartial: String) {
+        guard voiceService.state == .recording || voiceService.state == .transcribing else { return }
+
+        let partial = rawPartial.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !partial.isEmpty else { return }
+
+        beginVoiceComposerSessionIfNeeded()
+        composerText = mergedComposerText(base: voiceComposerBaseline ?? composerText, transcript: partial)
+    }
+
+    private func beginVoiceComposerSessionIfNeeded() {
+        guard voiceComposerBaseline == nil else { return }
+        voiceComposerBaseline = composerText
+    }
+
+    private func mergedComposerText(base: String, transcript: String) -> String {
+        let cleanBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanBase.isEmpty {
+            return transcript
+        }
+        let needsSpacer = base.last?.isWhitespace == false
+        return base + (needsSpacer ? " \(transcript)" : transcript)
+    }
+
+    @ViewBuilder
+    private var voiceFeedback: some View {
+        if voiceService.permissionStatus == .denied {
+            VoicePermissionNotice()
+        } else if voiceService.state == .transcribing,
+                  let statusText = voiceService.modelStatusText {
+            VoiceStatusRow(
+                statusText: statusText,
+                progress: voiceService.modelDownloadProgress
+            )
+        } else if let errorMessage = voiceService.errorMessage {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+                Text(errorMessage)
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+            }
+        }
+    }
+}
+
+private struct VoiceStatusRow: View {
+    @Environment(\.palette) private var palette
+
+    let statusText: String
+    let progress: Double?
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            if let progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(width: 120)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Text(statusText)
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct VoicePermissionNotice: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "mic.slash")
+                .font(Typography.caption())
+                .foregroundStyle(Color.statusError)
+            Text("Microphone access needed.")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+
+            Button("Open Settings") {
+                openMicrophoneSettings()
+            }
+            .font(Typography.caption())
+            .buttonStyle(.plain)
+            .foregroundStyle(palette.accent)
+            .minHitTarget()
+            .accessibilityLabel("Open microphone settings")
         }
     }
 }

@@ -154,6 +154,17 @@ Wave detail now has two tabs:
 
 Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).
 
+## Voice input (push-to-talk)
+
+- Tap the mic button in the composer to start/stop recording
+- Press and hold to record only while held
+- Partial transcript appears under the composer while recording
+- Final transcript is inserted into the composer for manual edit + send
+- On macOS 26+/iOS 26+, Concerto uses Apple Dictation (`SpeechAnalyzer` + `DictationTranscriber`)
+- On macOS 15–25/iOS 18–25, Concerto falls back to WhisperKit `tiny`
+- Voice warmup runs at app launch to preinstall/prepare speech assets in the background
+- If microphone permission is denied, Concerto shows an inline settings shortcut
+
 ## Keyboard Shortcuts
 
 ```text

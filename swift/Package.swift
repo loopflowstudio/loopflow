@@ -14,11 +14,15 @@ let package = Package(
         .executable(name: "Symphonia", targets: ["Symphonia"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0")
+        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0"),
+        .package(url: "https://github.com/argmaxinc/WhisperKit.git", .upToNextMinor(from: "0.9.0")),
     ],
     targets: [
         .target(
             name: "LoopflowCore",
+            dependencies: [
+                .product(name: "WhisperKit", package: "WhisperKit"),
+            ],
             path: "LoopflowCore",
             exclude: ["Info.plist"]
         ),
@@ -31,13 +35,14 @@ let package = Package(
             name: "Concerto",
             dependencies: [
                 "LoopflowCore",
+                .product(name: "WhisperKit", package: "WhisperKit"),
                 .target(
                     name: "GhosttyKit",
                     condition: .when(platforms: [.macOS])
                 ),
             ],
             path: "Concerto",
-            exclude: ["Info.plist", "Concerto.sdef", "UX_DESIGN.md", "AppIcon.icns", "Services/Ghostty/README.md"],
+            exclude: ["Info.plist", "Concerto.sdef", "Concerto.entitlements", "UX_DESIGN.md", "AppIcon.icns", "Services/Ghostty/README.md"],
             resources: [
                 .copy("Fonts")
             ],

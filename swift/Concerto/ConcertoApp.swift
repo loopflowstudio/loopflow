@@ -51,10 +51,25 @@ private enum AppFontRegistration {
     }
 }
 
+@MainActor
+private enum VoiceInputWarmup {
+    static let service = VoiceInputService()
+    private static var hasStarted = false
+
+    static func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        service.prewarmModelInBackground()
+    }
+}
+
 private func bootstrapConcertoApp() {
     AppFontRegistration.registerBundledFonts()
     Task {
         try? await NotificationService.shared.requestAuthorization()
+    }
+    Task { @MainActor in
+        VoiceInputWarmup.start()
     }
 }
 

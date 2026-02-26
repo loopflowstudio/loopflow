@@ -41,6 +41,6 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 - ~~Dead harness processes detected and session marked `failed`~~ ✓
 - ~~lfd restart doesn't leave orphaned active sessions or orphaned `opencode serve` processes~~ ✓
 - ~~Session end advances wave run~~ ✓ (tick-driven)
-- Conformance replay tests pass for all three harnesses with recorded traces → `scratch/agentapi-conformance-traces.md`
+- ~~Conformance replay tests pass for all three harnesses with recorded traces~~ ✓ (Claude, Codex, OpenCode)
 - SSE/stream disconnect triggers reconnect with backoff, not terminal failure
-- OpenCode defensive field-name fallbacks replaced with canonical names backed by recorded traces → `scratch/agentapi-conformance-traces.md`
+- ~~OpenCode defensive field-name fallbacks replaced with canonical names backed by recorded traces~~ ✓

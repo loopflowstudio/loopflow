@@ -1,1 +1,2 @@
 - Assumption: `run_mode` remains on lfd agent execution/storage structs (`AgentRun`, DB columns, migrations) because this phase targets prompt assembly/session surface adaptation. If Phase 03 requires DB/API renaming to `surface`, that should be a follow-up migration.
+- Open question: `TESTING.md` references `uv run pytest tests/parity/test_prompt_parity.py`, but that path does not exist in this repo. Is parity now covered solely by `rust/loopflow/tests/golden_prompt.rs`?

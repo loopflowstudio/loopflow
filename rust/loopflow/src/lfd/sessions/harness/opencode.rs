@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 use crate::engine::agent::AgentConfig;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::sessions::harness::{opencode_mapping, Harness, HarnessError};
+use crate::lfd::sessions::opencode_runtime;
 use crate::lfd::sessions::types::SessionEvent;
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
@@ -202,6 +203,17 @@ impl OpenCodeHarness {
 
         let stderr_task = spawn_stderr_logger(stderr, "lfd::sessions::opencode");
 
+        let opencode_pid = child.id();
+        if let Some(pid) = opencode_pid {
+            if let Err(err) = opencode_runtime::register_opencode_server(pid) {
+                tracing::warn!(
+                    opencode_pid = pid,
+                    error = %err,
+                    "failed to register OpenCode server runtime metadata"
+                );
+            }
+        }
+
         self.child = Some(child);
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
@@ -285,10 +297,20 @@ impl Harness for OpenCodeHarness {
             let _ = send_request_with_retry(&self.client, Method::DELETE, &delete_url, None).await;
         }
 
+        let opencode_pid = self.child.as_ref().and_then(|child| child.id());
         if let Some(child) = self.child.as_mut() {
             shutdown_child(child).await;
         }
         self.child = None;
+        if let Some(pid) = opencode_pid {
+            if let Err(err) = opencode_runtime::unregister_opencode_server(pid) {
+                tracing::warn!(
+                    opencode_pid = pid,
+                    error = %err,
+                    "failed to unregister OpenCode server runtime metadata"
+                );
+            }
+        }
 
         if let Some(task) = self.sse_task.take() {
             task.abort();

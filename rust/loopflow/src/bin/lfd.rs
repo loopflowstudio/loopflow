@@ -153,11 +153,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     match session_manager.recover_orphaned_sessions().await {
-        Ok(count) if count > 0 => {
-            tracing::info!(count, "recovered orphaned sessions from previous lfd");
+        Ok(recovery) => {
+            if recovery.sessions_failed > 0 {
+                tracing::info!(
+                    count = recovery.sessions_failed,
+                    "recovered orphaned sessions from previous lfd"
+                );
+            }
+            if recovery.opencode_servers_reaped > 0 {
+                tracing::info!(
+                    count = recovery.opencode_servers_reaped,
+                    "reaped orphaned OpenCode servers from previous lfd"
+                );
+            }
+            if recovery.reap_errors > 0 {
+                tracing::warn!(
+                    count = recovery.reap_errors,
+                    "encountered errors while reaping orphaned OpenCode servers"
+                );
+            }
         }
         Err(err) => tracing::warn!(error = %err, "session orphan recovery failed"),
-        _ => {}
     }
 
     let loop_handles = scheduler.clone().start_loops(

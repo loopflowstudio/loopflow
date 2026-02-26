@@ -1,4 +1,5 @@
 mod harness;
+pub(crate) mod opencode_runtime;
 pub mod types;
 
 use std::collections::HashMap;
@@ -81,6 +82,13 @@ impl std::fmt::Debug for SessionManagerInner {
 #[derive(Clone, Debug)]
 pub struct SessionManager {
     inner: Arc<SessionManagerInner>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SessionStartupRecovery {
+    pub sessions_failed: u32,
+    pub opencode_servers_reaped: u32,
+    pub reap_errors: u32,
 }
 
 impl SessionManager {
@@ -394,17 +402,18 @@ impl SessionManager {
             .and_then(|runtime| runtime.seeded_user_prompt.clone()))
     }
 
-    pub async fn recover_orphaned_sessions(&self) -> Result<u32, SessionManagerError> {
+    pub async fn recover_orphaned_sessions(
+        &self,
+    ) -> Result<SessionStartupRecovery, SessionManagerError> {
+        let mut recovery = SessionStartupRecovery::default();
+        let now = time::OffsetDateTime::now_utc();
+        let now_ts = now.unix_timestamp();
         let sessions = self
             .inner
             .store
             .list_sessions_by_statuses(&[SessionStatus::Starting, SessionStatus::Active])
             .await?;
-        if sessions.is_empty() {
-            return Ok(0);
-        }
 
-        let now = time::OffsetDateTime::now_utc();
         for session in &sessions {
             let existing_events = self
                 .inner
@@ -422,7 +431,7 @@ impl SessionManager {
             };
             self.inner
                 .store
-                .append_session_event(&session.id, next_seq, &error_event, now.unix_timestamp())
+                .append_session_event(&session.id, next_seq, &error_event, now_ts)
                 .await?;
             next_seq += 1;
 
@@ -431,20 +440,20 @@ impl SessionManager {
             };
             self.inner
                 .store
-                .append_session_event(&session.id, next_seq, &status_event, now.unix_timestamp())
+                .append_session_event(&session.id, next_seq, &status_event, now_ts)
                 .await?;
 
             self.inner
                 .store
-                .update_session_status(
-                    &session.id,
-                    SessionStatus::Failed,
-                    Some(now.unix_timestamp()),
-                )
+                .update_session_status(&session.id, SessionStatus::Failed, Some(now_ts))
                 .await?;
+            recovery.sessions_failed += 1;
         }
 
-        Ok(sessions.len() as u32)
+        let opencode_reap = opencode_runtime::reap_orphaned_opencode_servers();
+        recovery.opencode_servers_reaped = opencode_reap.reaped;
+        recovery.reap_errors = opencode_reap.errors;
+        Ok(recovery)
     }
 
     fn spawn_harness_event_bridge(
@@ -1586,7 +1595,7 @@ mod tests {
             .recover_orphaned_sessions()
             .await
             .expect("orphan recovery");
-        assert_eq!(recovered, 1);
+        assert_eq!(recovered.sessions_failed, 1);
 
         let session = fresh_manager
             .get_session(&created.id)

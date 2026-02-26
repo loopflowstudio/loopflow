@@ -196,9 +196,9 @@ struct WaveSessionView: View {
         }.first
     }
 
-    private var timestampPresentationByMessageId: [UUID: MessageTimestampPresentation] {
-        var presentations: [UUID: MessageTimestampPresentation] = [:]
-        var lastMessage: SessionMessage?
+    private var timestampLabelByMessageId: [UUID: String] {
+        var labels: [UUID: String] = [:]
+        var previousTimestamp: Date?
 
         for entry in state.transcript {
             guard case .message(let message) = entry,
@@ -206,30 +206,39 @@ struct WaveSessionView: View {
                 continue
             }
 
-            guard let previous = lastMessage else {
-                presentations[message.id] = .shown(message.timestamp.formatted(date: .omitted, time: .shortened))
-                lastMessage = message
+            let timestamp = message.timestamp
+
+            guard let previous = previousTimestamp else {
+                labels[message.id] = formatTime(timestamp)
+                previousTimestamp = timestamp
                 continue
             }
 
-            let gap = message.timestamp.timeIntervalSince(previous.timestamp)
-            if gap <= 60 {
-                presentations[message.id] = .hidden
-            } else if gap > 3600 {
-                presentations[message.id] = .shown(message.timestamp.formatted(date: .omitted, time: .shortened))
-            } else {
-                presentations[message.id] = .shown(relativeGapLabel(gap))
+            if let label = timestampLabel(
+                forGapSincePreviousMessage: timestamp.timeIntervalSince(previous),
+                timestamp: timestamp
+            ) {
+                labels[message.id] = label
             }
-
-            lastMessage = message
+            previousTimestamp = timestamp
         }
 
-        return presentations
+        return labels
     }
 
-    private func relativeGapLabel(_ gap: TimeInterval) -> String {
+    private func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
+        if gap <= 60 {
+            return nil
+        }
+        if gap > 3600 {
+            return formatTime(timestamp)
+        }
         let minutes = max(1, Int(gap / 60))
         return "\(minutes)m ago"
+    }
+
+    private func formatTime(_ timestamp: Date) -> String {
+        timestamp.formatted(date: .omitted, time: .shortened)
     }
 
     @ViewBuilder
@@ -243,9 +252,7 @@ struct WaveSessionView: View {
                 isExpanded: expandedRunIds.contains(group.id),
                 expandedItemIds: $expandedItemIds,
                 onToggleRun: {
-                    if !expandedRunIds.insert(group.id).inserted {
-                        expandedRunIds.remove(group.id)
-                    }
+                    toggleMembership(group.id, in: &expandedRunIds)
                 }
             )
         }
@@ -255,7 +262,7 @@ struct WaveSessionView: View {
     private func transcriptRow(_ entry: TranscriptEntry) -> some View {
         switch entry {
         case .message(let message):
-            let timestamp = timestampPresentationByMessageId[message.id]?.label
+            let timestamp = timestampLabelByMessageId[message.id]
             MessageRow(
                 message: message,
                 timestampLabel: timestamp,
@@ -270,9 +277,7 @@ struct WaveSessionView: View {
                 item: item,
                 isExpanded: expandedItemIds.contains(item.id),
                 onToggleExpanded: {
-                    if !expandedItemIds.insert(item.id).inserted {
-                        expandedItemIds.remove(item.id)
-                    }
+                    toggleMembership(item.id, in: &expandedItemIds)
                 }
             )
         }
@@ -297,20 +302,6 @@ struct WaveSessionView: View {
         replyQueue.clear()
         if collapseTray {
             isReplyTrayExpanded = false
-        }
-    }
-}
-
-private enum MessageTimestampPresentation {
-    case hidden
-    case shown(String)
-
-    var label: String? {
-        switch self {
-        case .hidden:
-            return nil
-        case .shown(let value):
-            return value
         }
     }
 }
@@ -348,21 +339,19 @@ private struct SessionThinkingIndicator: View {
             }
             .accessibilityLabel("Thinking")
         } else if streamPhase == .replaying {
-            Text("Replaying…")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-                .accessibilityLabel("Replaying")
+            statusLabel("Replaying…", accessibilityLabel: "Replaying")
         } else if awaitingSessionJoin {
-            Text("Waiting for session…")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-                .accessibilityLabel("Waiting for session")
+            statusLabel("Waiting for session…", accessibilityLabel: "Waiting for session")
         } else if streamPhase == .ending {
-            Text("Ending session…")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-                .accessibilityLabel("Ending session")
+            statusLabel("Ending session…", accessibilityLabel: "Ending session")
         }
+    }
+
+    private func statusLabel(_ text: String, accessibilityLabel: String) -> some View {
+        Text(text)
+            .font(Typography.caption())
+            .foregroundStyle(palette.textSecondary)
+            .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -493,6 +482,10 @@ private struct CopyButton: View {
         horizontalSizeClass == .compact ? HitTarget.touch : HitTarget.minimum
     }
 
+    private var isInteractive: Bool {
+        isVisible || didCopy
+    }
+
     var body: some View {
         Button {
             copyToClipboard(content)
@@ -511,8 +504,8 @@ private struct CopyButton: View {
                 .frame(minWidth: minimumHitTarget, minHeight: minimumHitTarget)
         }
         .buttonStyle(.plain)
-        .opacity((isVisible || didCopy) ? 1 : 0)
-        .allowsHitTesting(isVisible || didCopy)
+        .opacity(isInteractive ? 1 : 0)
+        .allowsHitTesting(isInteractive)
         .animation(DesignAnimation.standard(reduceMotion), value: isVisible)
         .animation(DesignAnimation.standard(reduceMotion), value: didCopy)
         .accessibilityLabel(didCopy ? "Copied" : "Copy")
@@ -652,9 +645,7 @@ private struct ToolRunView: View {
                             item: item,
                             isExpanded: expandedItemIds.contains(item.id),
                             onToggleExpanded: {
-                                if !expandedItemIds.insert(item.id).inserted {
-                                    expandedItemIds.remove(item.id)
-                                }
+                                toggleMembership(item.id, in: &expandedItemIds)
                             }
                         )
                     }
@@ -709,11 +700,11 @@ func parseMessageSegments(_ content: String) -> [MessageSegment] {
             continue
         }
 
-        let fence = parseFenceStart(from: trimmed)
-        if fence.isFence {
+        if trimmed.hasPrefix("```") {
             flushText()
             inCodeBlock = true
-            currentLanguage = fence.language
+            let suffix = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
+            currentLanguage = suffix.isEmpty ? nil : String(suffix)
         } else {
             textLines.append(line)
         }
@@ -728,10 +719,10 @@ func parseMessageSegments(_ content: String) -> [MessageSegment] {
     return segments.isEmpty ? [.text(content)] : segments
 }
 
-private func parseFenceStart(from trimmedLine: String) -> (isFence: Bool, language: String?) {
-    guard trimmedLine.hasPrefix("```") else { return (false, nil) }
-    let suffix = trimmedLine.dropFirst(3).trimmingCharacters(in: .whitespaces)
-    return (true, suffix.isEmpty ? nil : String(suffix))
+private func toggleMembership(_ id: UUID, in set: inout Set<UUID>) {
+    if !set.insert(id).inserted {
+        set.remove(id)
+    }
 }
 
 private func copyToClipboard(_ content: String) {

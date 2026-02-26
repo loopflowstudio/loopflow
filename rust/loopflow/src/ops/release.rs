@@ -8,7 +8,9 @@ use std::time::Duration;
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{
+    launch_agent, AgentCapabilities, AgentConfig, LaunchResult, ProcessConfig,
+};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::command::run_command;
 use crate::engine::config::{load_config_or_default, Config, ReleaseTargetConfig};
@@ -274,16 +276,12 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
     let target = resolve_target(&config, target_name, &main_repo)?;
 
     let latest_tag = latest_tag_optional(&main_repo, &target)?;
-    let workflow = if let Some(tag) = latest_tag.as_deref() {
-        find_workflow_run(&main_repo, tag, &target)?
-    } else {
-        None
-    };
-
-    let release_exists = if let Some(tag) = latest_tag.as_deref() {
-        github_release_exists(&main_repo, tag)?
-    } else {
-        false
+    let (workflow, release_exists) = match latest_tag.as_deref() {
+        Some(tag) => (
+            find_workflow_run(&main_repo, tag, &target)?,
+            github_release_exists(&main_repo, tag)?,
+        ),
+        None => (None, false),
     };
 
     Ok(ReleaseStatusResult {
@@ -535,6 +533,22 @@ fn target_tag(target: &ReleaseTarget, version: &str) -> String {
     format!("{}v{version}", target.tag_prefix)
 }
 
+fn display_tag_prefix(target: &ReleaseTarget) -> &str {
+    if target.tag_prefix.is_empty() {
+        "(none)"
+    } else {
+        target.tag_prefix.as_str()
+    }
+}
+
+fn display_area_scope(target: &ReleaseTarget) -> String {
+    if target.area.is_empty() {
+        "(entire repository)".to_string()
+    } else {
+        target.area.join(", ")
+    }
+}
+
 fn latest_tag(repo: &Path, target: &ReleaseTarget) -> OpsResult<String> {
     latest_tag_optional(repo, target)?.ok_or_else(|| {
         OpsError::Message(format!(
@@ -763,42 +777,16 @@ fn generate_release_notes(
             .join("\n\n")
     };
 
-    let area_scope = if target.area.is_empty() {
-        "(entire repository)".to_string()
-    } else {
-        target.area.join(", ")
-    };
+    let area_scope = display_area_scope(target);
 
     let prompt = format!(
         "{template}\n\n## Release context\n\n- Target version: v{version}\n- Previous tag: {prev_tag}\n- Release target: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Merged PRs\n\n{pr_summary}\n",
         target.name,
-        if target.tag_prefix.is_empty() {
-            "(none)"
-        } else {
-            target.tag_prefix.as_str()
-        },
+        display_tag_prefix(target),
         area_scope
     );
 
-    let config = load_config_or_default(Some(repo));
-    let launch = AgentConfig {
-        task_prompt: prompt,
-        model: Some(config.agent_model.clone()),
-        skip_permissions: true,
-        cwd: Some(repo.to_path_buf()),
-        ..Default::default()
-    };
-    let process = ProcessConfig {
-        auto: true,
-        stream: false,
-        ..Default::default()
-    };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
-
-    let result = launch_agent(&launch, &process, &capabilities)
-        .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
+    let result = launch_ops_agent(repo, prompt, true)?;
     if result.exit_code != 0 {
         return Err(OpsError::AgentFailed(result.stderr));
     }
@@ -962,7 +950,6 @@ fn set_pyproject_dynamic_version(content: &str, version: &str) -> OpsResult<Stri
     let mut in_project = false;
     let mut saw_project = false;
     let mut inserted = false;
-    let mut changed = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -970,7 +957,6 @@ fn set_pyproject_dynamic_version(content: &str, version: &str) -> OpsResult<Stri
             if in_project && !inserted {
                 lines.push(format!("version = \"{version}\""));
                 inserted = true;
-                changed = true;
             }
 
             in_project = trimmed == "[project]";
@@ -989,7 +975,6 @@ fn set_pyproject_dynamic_version(content: &str, version: &str) -> OpsResult<Stri
                 let before = items.len();
                 items.retain(|item| item != "version");
                 if items.len() != before {
-                    changed = true;
                     if !inserted {
                         lines.push(format!("{indent}version = \"{version}\""));
                         inserted = true;
@@ -1019,7 +1004,6 @@ fn set_pyproject_dynamic_version(content: &str, version: &str) -> OpsResult<Stri
     if in_project && !inserted {
         lines.push(format!("version = \"{version}\""));
         inserted = true;
-        changed = true;
     }
 
     if !saw_project {
@@ -1028,17 +1012,13 @@ fn set_pyproject_dynamic_version(content: &str, version: &str) -> OpsResult<Stri
         ));
     }
 
-    if !changed && inserted {
+    if inserted {
         return Ok(join_lines_like_original(content, lines));
     }
 
-    if changed {
-        Ok(join_lines_like_original(content, lines))
-    } else {
-        Err(OpsError::Parse(
-            "pyproject.toml missing version or dynamic version field".to_string(),
-        ))
-    }
+    Err(OpsError::Parse(
+        "pyproject.toml missing version or dynamic version field".to_string(),
+    ))
 }
 
 fn parse_toml_string_array(raw_items: &str) -> Vec<String> {
@@ -1292,41 +1272,16 @@ fn diagnose_release_failure(
     })?;
 
     let clipped_logs = clip_text(logs, 20_000);
+    let area_scope = display_area_scope(target);
     let prompt = format!(
         "{template}\n\n## Failure context\n\n- Tag: {tag}\n- Target: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Workflow logs\n\n{}\n",
         target.name,
-        if target.tag_prefix.is_empty() {
-            "(none)"
-        } else {
-            target.tag_prefix.as_str()
-        },
-        if target.area.is_empty() {
-            "(entire repository)".to_string()
-        } else {
-            target.area.join(", ")
-        },
+        display_tag_prefix(target),
+        area_scope,
         clipped_logs
     );
 
-    let config = load_config_or_default(Some(repo));
-    let launch = AgentConfig {
-        task_prompt: prompt,
-        model: Some(config.agent_model.clone()),
-        skip_permissions: true,
-        cwd: Some(repo.to_path_buf()),
-        ..Default::default()
-    };
-    let process = ProcessConfig {
-        auto: false,
-        stream: false,
-        ..Default::default()
-    };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
-
-    let result = launch_agent(&launch, &process, &capabilities)
-        .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
+    let result = launch_ops_agent(repo, prompt, false)?;
     if result.exit_code != 0 {
         return Err(OpsError::AgentFailed(
             "diagnosis agent session failed".to_string(),
@@ -1409,22 +1364,26 @@ fn bootstrap_release(repo: &Path, target: &ReleaseTarget) -> OpsResult<()> {
             .join("\n")
     };
 
+    let area_scope = display_area_scope(target);
     let prompt = format!(
         "{template}\n\n## Release target\n\n- Name: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Manifest files\n\n{}\n",
         target.name,
-        if target.tag_prefix.is_empty() {
-            "(none)"
-        } else {
-            target.tag_prefix.as_str()
-        },
-        if target.area.is_empty() {
-            "(entire repository)".to_string()
-        } else {
-            target.area.join(", ")
-        },
+        display_tag_prefix(target),
+        area_scope,
         manifests
     );
 
+    let result = launch_ops_agent(repo, prompt, false)?;
+    if result.exit_code != 0 {
+        return Err(OpsError::AgentFailed(
+            "release bootstrap session failed".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn launch_ops_agent(repo: &Path, prompt: String, auto: bool) -> OpsResult<LaunchResult> {
     let config = load_config_or_default(Some(repo));
     let launch = AgentConfig {
         task_prompt: prompt,
@@ -1434,23 +1393,15 @@ fn bootstrap_release(repo: &Path, target: &ReleaseTarget) -> OpsResult<()> {
         ..Default::default()
     };
     let process = ProcessConfig {
-        auto: false,
+        auto,
         stream: false,
         ..Default::default()
     };
     let capabilities = AgentCapabilities {
         chrome: config.chrome,
     };
-
-    let result = launch_agent(&launch, &process, &capabilities)
-        .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
-    if result.exit_code != 0 {
-        return Err(OpsError::AgentFailed(
-            "release bootstrap session failed".to_string(),
-        ));
-    }
-
-    Ok(())
+    launch_agent(&launch, &process, &capabilities)
+        .map_err(|err| OpsError::AgentFailed(err.to_string()))
 }
 
 fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {

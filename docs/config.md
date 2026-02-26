@@ -57,7 +57,7 @@ Defaults work well for most repos. Summaries require configuration.
 
 **Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
 
-For most settings, repo overrides global. For additive settings (`context`, `exclude`, `skill_sources`, `summaries`), lists combine from both.
+For most settings, repo overrides global. For additive settings (`context`, `exclude`, `skill_sources`, `summaries`, `supported_harnesses`), lists combine from both.
 
 ```yaml
 # ~/.lf/config.yaml (global)
@@ -197,10 +197,10 @@ Default model for all steps.
 | | |
 |---|---|
 | **CLI** | `lf review -m codex:o3` |
-| **Config** | `agent_model: claude:opus` |
-| **Default** | `claude:opus` |
+| **Config** | `agent_model: claude:opus` (optional) |
+| **Default** | unset (resolution falls back to step defaults, then `claude:opus`) |
 
-Backends: `claude`, `codex`, `gemini`, `opencode`. Use `backend:variant` for specific models.
+Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
 
 OpenCode passes model strings through to its own provider system:
 
@@ -209,6 +209,19 @@ agent_model: opencode                          # use opencode's default model
 agent_model: opencode:anthropic/claude-sonnet  # explicit model
 agent_model: opencode:openai/gpt-4o            # any provider opencode supports
 ```
+
+### Supported Harnesses
+
+Optional list of harnesses exposed in Concerto's model picker and settings.
+
+```yaml
+supported_harnesses:
+  - claude
+  - codex
+  - gemini
+```
+
+This list is additive across global and repo config.
 
 ### Run Mode
 

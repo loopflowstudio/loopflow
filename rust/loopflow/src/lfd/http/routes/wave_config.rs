@@ -148,4 +148,30 @@ mod tests {
             Some("claude:sonnet")
         );
     }
+
+    #[test]
+    fn update_wave_model_config_removes_fields_on_empty_values() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("scan.yaml"),
+            "flow: build\narea: ['.']\nmodel: codex:o3\nstep_models:\n  implement: claude:sonnet\n",
+        )
+        .expect("write");
+
+        update_wave_model_config(
+            temp.path(),
+            "scan",
+            Some(String::new()),
+            Some(HashMap::new()),
+        )
+        .expect("update config");
+
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        assert!(config.model.is_none());
+        assert!(config.step_models.is_none());
+        assert_eq!(config.flow.as_deref(), Some("build"));
+        assert_eq!(config.area, Some(vec![".".to_string()]));
+    }
 }

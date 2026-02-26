@@ -86,6 +86,10 @@ Config template:
 # Model to use (harness or harness:model)
 agent_model: claude:opus
 
+# Optional: harnesses shown in Concerto model pickers
+supported_harnesses:
+  - claude
+
 # Context: files/directories to include by default
 context: "."
 

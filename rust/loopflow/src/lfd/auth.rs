@@ -326,6 +326,7 @@ mod tests {
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::output::OutputHub;
+    use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
@@ -544,6 +545,7 @@ mod tests {
             executor,
             event_hub,
             output_hub,
+            provider_auth: ProviderAuthService::new(),
             auth,
             registration: None,
             started_at: OffsetDateTime::now_utc(),

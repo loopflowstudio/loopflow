@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod flows;
 pub mod hooks;
 pub mod repos;

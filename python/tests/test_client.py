@@ -7,7 +7,14 @@ import json
 import httpx
 import pytest
 
-from conftest import SESSION_MINIMAL, WAVE_MINIMAL, WAVE_RUN_MINIMAL
+from conftest import (
+    AUTH_FLOW,
+    AUTH_PROVIDER_ACTIVE,
+    AUTH_PROVIDER_NONE,
+    SESSION_MINIMAL,
+    WAVE_MINIMAL,
+    WAVE_RUN_MINIMAL,
+)
 
 from loopflow.client import Client, _extract_error_message, _resolve_base_url, _resolve_token
 from loopflow.errors import LoopflowError, WaveAlreadyRunning
@@ -121,6 +128,57 @@ class TestClientErrors:
 
 
 class TestClientResponses:
+    def test_auth_status_parses_all_providers(self):
+        def handler(request):
+            assert request.url.path == "/v0/auth"
+            return httpx.Response(
+                200,
+                json={"providers": [AUTH_PROVIDER_ACTIVE, AUTH_PROVIDER_NONE]},
+            )
+
+        client = _mock_client(handler)
+        statuses = client.auth_status()
+        assert len(statuses) == 2
+        assert statuses[0].provider == "github"
+        assert statuses[0].status == "active"
+        assert statuses[0].login == "jackdanger"
+        client.close()
+
+    def test_auth_status_parses_single_provider(self):
+        def handler(request):
+            assert request.url.path == "/v0/auth/github"
+            return httpx.Response(200, json=AUTH_PROVIDER_ACTIVE)
+
+        client = _mock_client(handler)
+        status = client.auth_status("github")
+        assert status.provider == "github"
+        assert status.status == "active"
+        client.close()
+
+    def test_start_auth_parses_flow_response(self):
+        def handler(request):
+            assert request.url.path == "/v0/auth/github"
+            assert request.method == "POST"
+            return httpx.Response(200, json=AUTH_FLOW)
+
+        client = _mock_client(handler)
+        flow = client.start_auth("github")
+        assert flow.provider == "github"
+        assert flow.user_code == "ABCD-1234"
+        client.close()
+
+    def test_disconnect_auth_returns_status(self):
+        def handler(request):
+            assert request.url.path == "/v0/auth/github"
+            assert request.method == "DELETE"
+            return httpx.Response(200, json={"provider": "github", "status": "none"})
+
+        client = _mock_client(handler)
+        status = client.disconnect_auth("github")
+        assert status.provider == "github"
+        assert status.status == "none"
+        client.close()
+
     def test_waves_parses_list(self):
         def handler(request):
             return httpx.Response(200, json={"object": "list", "data": [WAVE_MINIMAL]})

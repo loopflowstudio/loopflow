@@ -8,6 +8,7 @@ use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
+use crate::lfd::provider_auth::ProviderAuthService;
 use crate::lfd::registration::RegistrationClient;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::SessionManager;
@@ -21,6 +22,7 @@ pub struct HttpState {
     pub event_hub: EventHub,
     #[allow(dead_code)] // Reserved for output streaming endpoints.
     pub output_hub: OutputHub,
+    pub provider_auth: ProviderAuthService,
     pub auth: AuthProvider,
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,

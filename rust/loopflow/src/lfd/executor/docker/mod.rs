@@ -99,13 +99,14 @@ fn resolve_credential_mount(
         // read-write: agents write debug/session files
         "claude" | ".claude" => Ok((&[".claude", ".claude.json"], false)),
         "codex" | ".codex" => Ok((&[".codex"], false)),
+        "gh" | ".config/gh" => Ok((&[".config/gh"], true)),
         "gemini" | ".config/gemini" => Ok((&[".config/gemini"], false)),
         // read-only: keys and config
         "gitconfig" | ".gitconfig" => Ok((&[".gitconfig"], true)),
         "ssh" | ".ssh" => Ok((&[".ssh"], true)),
         "gnupg" | ".gnupg" => Ok((&[".gnupg"], true)),
         _ => Err(format!(
-            "unknown credential mount '{name}'. allowed mounts: claude, codex, gemini, gitconfig, ssh, gnupg"
+            "unknown credential mount '{name}'. allowed mounts: claude, codex, gh, gemini, gitconfig, ssh, gnupg"
         )),
     }
 }

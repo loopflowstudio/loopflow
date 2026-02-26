@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    flows, hooks, repos, sessions, system, wave_runs, waves, worktrees, ws,
+    auth as auth_routes, flows, hooks, repos, sessions, system, wave_runs, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfd::store::StoreError;
@@ -40,6 +40,13 @@ pub fn router(state: HttpState) -> Router {
 
     // API routes — protected by auth middleware.
     let api_routes = Router::new()
+        .route("/auth", get(auth_routes::list_auth_handler))
+        .route(
+            "/auth/{provider}",
+            get(auth_routes::get_auth_handler)
+                .post(auth_routes::start_auth_handler)
+                .delete(auth_routes::disconnect_auth_handler),
+        )
         .route("/flows", get(flows::list_flows_handler))
         .route("/repos", get(repos::list_repos_handler))
         .route("/sessions", post(sessions::create_session_handler))

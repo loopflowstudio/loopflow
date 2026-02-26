@@ -44,6 +44,15 @@ fn docker_mount_spec_resolves_allowlisted_credentials() {
             .expect("unknown mount name is still valid syntax"),
     )
     .is_err());
+
+    let gh_mount = DockerCredentialMount::from_config(
+        &CredentialMount::try_from("gh".to_string()).expect("gh mount should parse"),
+    )
+    .expect("gh mount should resolve");
+    assert_eq!(gh_mount.len(), 1);
+    assert!(gh_mount[0].host_path.ends_with(".config/gh"));
+    assert_eq!(gh_mount[0].container_path, "/home/agent/.config/gh");
+    assert!(gh_mount[0].read_only);
 }
 
 #[test]

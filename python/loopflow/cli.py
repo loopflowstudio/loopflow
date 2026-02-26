@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+import webbrowser
 from typing import Optional
 
 import typer
@@ -9,10 +11,12 @@ from rich.table import Table
 
 from loopflow import api
 from loopflow.errors import LoopflowError
-from loopflow.models import Wave
+from loopflow.models import AuthProviderStatus, Wave
 
 
 app = typer.Typer(help="Query lfd and manage waves.")
+auth_app = typer.Typer(help="Manage provider authentication.")
+app.add_typer(auth_app, name="auth")
 console = Console()
 
 
@@ -39,6 +43,70 @@ def _wave_table(waves: list[Wave]) -> Table:
             remote_branch,
         )
     return table
+
+
+def _provider_label(provider: str) -> str:
+    labels = {
+        "github": "GitHub",
+        "claude": "Claude",
+        "codex": "Codex",
+    }
+    return labels.get(provider.lower(), provider)
+
+
+def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("provider")
+    table.add_column("status")
+    table.add_column("details")
+
+    for status in statuses:
+        if status.status == "active":
+            icon = "✓"
+            if status.provider == "github" and status.login:
+                details = f"@{status.login}"
+            else:
+                details = "authenticated"
+        elif status.status == "pending":
+            icon = "…"
+            details = "waiting for browser confirmation"
+        elif status.status == "expired":
+            icon = "!"
+            details = "expired"
+        else:
+            icon = "✗"
+            details = "not connected"
+
+        table.add_row(_provider_label(status.provider), f"{icon} {status.status}", details)
+
+    return table
+
+
+def _connect_provider(provider: str) -> None:
+    flow = api.start_auth(provider)
+    verification_url = flow.verification_uri_complete or flow.verification_uri
+    provider_label = _provider_label(provider)
+
+    typer.echo(f"Opening {provider_label} auth in your browser...")
+    opened = webbrowser.open(verification_url)
+    if not opened:
+        typer.echo(verification_url)
+
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        status = api.auth_status(provider)
+        if status.status == "active":
+            if provider == "github" and status.login:
+                typer.echo(f"✓ Authenticated as @{status.login}")
+            else:
+                typer.echo("✓ Authenticated")
+            return
+        if status.status == "expired":
+            typer.echo("Authentication expired. Try again.")
+            return
+        time.sleep(1)
+
+    typer.echo("Authentication still pending. Complete auth in browser and run `lfq auth status`.")
 
 
 @app.callback(invoke_without_command=True)
@@ -142,3 +210,47 @@ def logs_wave(name_or_id: str) -> None:
     except LoopflowError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
+
+
+@auth_app.command("status", help="Show authentication status for all providers.")
+def auth_status(
+    provider: Optional[str] = None,
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    if provider is not None:
+        status = api.auth_status(provider)
+        if json_output:
+            typer.echo(json.dumps(status.model_dump(mode="json"), indent=2))
+            return
+        console.print(_auth_status_table([status]))
+        return
+
+    statuses = api.auth_status()
+    if json_output:
+        typer.echo(json.dumps([status.model_dump(mode="json") for status in statuses], indent=2))
+        return
+    console.print(_auth_status_table(statuses))
+
+
+@auth_app.command("github", help="Start GitHub authentication.")
+def auth_github() -> None:
+    _connect_provider("github")
+
+
+@auth_app.command("claude", help="Start Claude authentication.")
+def auth_claude() -> None:
+    _connect_provider("claude")
+
+
+@auth_app.command("codex", help="Start Codex authentication.")
+def auth_codex() -> None:
+    _connect_provider("codex")
+
+
+@auth_app.command("disconnect", help="Disconnect a provider.")
+def auth_disconnect(provider: str) -> None:
+    status = api.disconnect_auth(provider)
+    if status.status == "none":
+        typer.echo(f"Disconnected {_provider_label(status.provider)}")
+    else:
+        typer.echo(f"Updated {_provider_label(status.provider)} status to {status.status}")

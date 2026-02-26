@@ -12,6 +12,8 @@ A TPM-installable tmux plugin delivering three user-facing capabilities:
 
 Plugin entrypoint (`loopflow.tmux`) sets option defaults, registers status interpolation, and sources keybindings. Idempotent on re-source.
 
+**Also on this branch:** `pr.rs` fix — PR refresh now compares `origin/<branch>` SHA before and after the commit/rebase cycle instead of tracking boolean flags. More reliable detection of actual changes.
+
 ## Key choices
 
 | Decision | Choice | Why |
@@ -22,6 +24,8 @@ Plugin entrypoint (`loopflow.tmux`) sets option defaults, registers status inter
 | Mode detection | `loopflow_mode()` per-action | Short-circuit cache avoids lag; explicit override respected |
 | Picker fallback | `tmux display-menu` when fzf missing | Zero-dep path always works |
 | Help overlay | `display-popup` (3.2+), `display-message` fallback | Popup is better UX; fallback shows compact binding summary |
+| fzf in run-shell | `display-popup` wrapping | fzf needs a TTY; `_loopflow_fzf_pick` detects context and routes through popup when no TTY available |
+| PR change detection | `rev_parse` before/after | Boolean flag tracking (`committed || rebased`) missed edge cases; SHA comparison is definitive |
 
 **Alternatives rejected:**
 - Tmux format variables (`#{E:...}`) for status — harder to debug, less portable across tmux versions.
@@ -48,8 +52,10 @@ Layouts are standalone scripts invoked from dispatch or directly. Status script 
 
 - **`pgrep` for active step detection** — scanning process table on every status refresh (when cache misses). Bounded by TTL, but could be noisy on systems with many processes. Low risk in practice.
 - **`awk` subprocess in mode detection** — spawned to convert ms → seconds for timeout. Could use pure bash but decimal division isn't trivial in bash. Acceptable for now.
+- **`timeout` command availability** — macOS doesn't ship GNU `timeout` by default. The code falls back to running `lfq status` without a timeout when `timeout` is missing. Acceptable since the 2s cache TTL bounds repeat calls.
 - **tmux version parsing** — `sed 's/[^0-9.]//g'` on `tmux -V` output. Works for `tmux 3.4` but may break on unusual version strings (e.g., `tmux next-3.5`). Minor risk.
-- **Picker in `run-shell` context** — fzf needs a TTY. The `run-shell` context may not provide one. The fzf picker path may need `display-popup` wrapping for interactive use. Container mode `run` and `stop` actions that invoke fzf may fail silently. This is the biggest UX risk.
+- **Picker in `run-shell` context** — fzf needs a TTY. The `_loopflow_fzf_pick` function detects this and routes through `display-popup` when available, or returns rc=2 to signal the caller to use a tmux-native fallback. Container mode `run` and `stop` actions that invoke fzf route through this path.
+- **Cache JSON with special chars** — `loopflow_cache_write` uses `printf %s` for the text field. Wave names or branch names with double quotes would break the JSON. Low risk since git branch names and wave names don't typically contain quotes.
 
 ## What's not included
 
@@ -67,12 +73,13 @@ Layouts are standalone scripts invoked from dispatch or directly. Status script 
 4. **Review doc**: Fixed stale `lf-flow` reference — layout count is two, not three.
 5. **`tmux-review.py`**: Fixed skipped checklist item (numbering jumped from 5 to 7).
 6. **`pr.rs`**: Applied `cargo fmt` to fix formatting.
+7. **`tmux-review.py`**: Removed unnecessary f-string prefix.
 
 ## Test results
 
 - Shell syntax: all 6 scripts pass `bash -n`
 - Python syntax: `tmux-review.py` passes `ast.parse`
 - Python tests: 67/67 pass
-- Rust: `cargo fmt`, `cargo clippy`, `cargo test --all` all pass (656+ tests, 0 failures)
+- Rust: `cargo fmt`, `cargo clippy`, `cargo test --all` all pass
 - E2E smoke: passes
 - All scripts executable

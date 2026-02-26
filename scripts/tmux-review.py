@@ -207,7 +207,7 @@ def main():
         print("ERROR: tmux not found in PATH")
         sys.exit(1)
 
-    print(f"loopflow tmux plugin review")
+    print("loopflow tmux plugin review")
     print(f"plugin dir: {PLUGIN_DIR}")
     print()
 

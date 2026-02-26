@@ -189,13 +189,19 @@ fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
         .output()?;
 
     if !output.status.success() {
-        return Ok(None);
+        return Err(OpsError::CommandFailed {
+            command: format!("gh pr list --head {branch}"),
+            stderr: stderr_from_output(&output),
+        });
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let mut list: Vec<GhPr> = serde_json::from_str(&stdout).unwrap_or_default();
-    list.retain(|pr| pr.state.to_uppercase() == "OPEN");
-    Ok(list.into_iter().next())
+    let list: Vec<GhPr> = serde_json::from_str(&stdout)
+        .map_err(|e| OpsError::Message(format!("failed to parse gh pr list output: {e}")))?;
+    let open = list
+        .into_iter()
+        .find(|pr| pr.state.to_uppercase() == "OPEN");
+    Ok(open)
 }
 
 pub fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()> {

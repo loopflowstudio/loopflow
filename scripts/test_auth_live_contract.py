@@ -249,6 +249,10 @@ async def run_provider_contract(
                 if flow_started.get("verification_uri") != result["start_payload"].get("verification_uri"):
                     result["reason"] = "auth.flow_started verification_uri mismatch"
                     return result
+
+                final_status = await fetch_auth_status(client, provider)
+                result["status_final"] = final_status
+                _write_json(evidence_dir / "status-final.json", final_status)
         except Exception as exc:  # pragma: no cover - defensive script path
             result["reason"] = f"websocket contract failure: {type(exc).__name__}: {exc}"
             return result
@@ -261,10 +265,6 @@ async def run_provider_contract(
             result["cleanup_http_status"] = cleanup_response.status_code
             result["cleanup_payload"] = cleanup_payload
             _write_json(evidence_dir / "cleanup.json", cleanup_payload)
-
-        final_status = await fetch_auth_status(client, provider)
-        result["status_final"] = final_status
-        _write_json(evidence_dir / "status-final.json", final_status)
 
     terminal_type = result.get("terminal_event")
     final_status_name = result.get("status_final", {}).get("status")
@@ -401,7 +401,18 @@ def validate_claude_disconnect(
         headers={"Authorization": f"Bearer {token}"},
     ) as client:
         response = client.delete("/v0/auth/claude")
-        payload = parse_json_object(response)
+        try:
+            payload = parse_json_object(response)
+        except AssertionError as exc:
+            _write_json(
+                evidence_dir / "disconnect-response.json",
+                {
+                    "http_status": response.status_code,
+                    "raw": response.text,
+                },
+            )
+            reason = f"DELETE /v0/auth/claude returned non-JSON response: {exc}"
+            return _claude_disconnect_result(False, reason, evidence_dir)
         payload["http_status"] = response.status_code
         _write_json(evidence_dir / "disconnect-response.json", payload)
 

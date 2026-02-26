@@ -94,7 +94,7 @@ def check_keybindings() -> bool:
         print("  FAIL: no loopflow keybindings found")
         return False
     binding_count = len(keys.splitlines())
-    expected = 9  # r, s, o, p, n, d, w, L, ?
+    expected = 10  # r, s, o, p, n, d, u, w, L, ?
     if binding_count < expected:
         print(f"  WARN: expected {expected} bindings, found {binding_count}")
     else:
@@ -149,6 +149,37 @@ def check_layout_scripts() -> bool:
     return ok
 
 
+def check_bootstrap_script() -> bool:
+    """Verify lf-up.sh exists and is executable."""
+    path = os.path.join(PLUGIN_DIR, "scripts", "lf-up.sh")
+    if not os.path.isfile(path):
+        print("  FAIL: scripts/lf-up.sh missing")
+        return False
+    if not os.access(path, os.X_OK):
+        print("  FAIL: scripts/lf-up.sh not executable")
+        return False
+    print("  OK: lf-up.sh exists and is executable")
+    return True
+
+
+def check_help_overlay_content() -> bool:
+    """Verify help overlay includes all keybindings."""
+    helpers = os.path.join(PLUGIN_DIR, "scripts", "helpers.sh")
+    with open(helpers) as f:
+        content = f.read()
+    expected_bindings = ["r", "s", "o", "p", "n", "d", "u", "w", "L", "?"]
+    ok = True
+    for key in expected_bindings:
+        # Check for the key in the help text (e.g., "prefix+$prefix+u")
+        pattern = f"prefix+$prefix+{key}"
+        if pattern not in content:
+            print(f"  FAIL: help overlay missing binding for '{key}'")
+            ok = False
+    if ok:
+        print(f"  OK: help overlay contains all {len(expected_bindings)} bindings")
+    return ok
+
+
 def check_layouts_create_windows() -> bool:
     """Run each layout and verify it creates a named window."""
     ok = True
@@ -189,9 +220,10 @@ def print_checklist():
     print("6. [ ] Press prefix+l+w — wave picker appears")
     print("7. [ ] Press prefix+l+r — run action executes or shows message")
     print("8. [ ] Press prefix+l+p — PR action opens or shows 'gh not found'")
-    print("9. [ ] Resize terminal to <120 cols, open layout — simplified 2-pane")
-    print("10.[ ] Remove fzf from PATH, try picker — fallback works")
-    print("11.[ ] Source plugin twice — no duplicate keybindings")
+    print("9. [ ] Press prefix+l+u — bootstrap starts or shows 'lfd not found'")
+    print("10.[ ] Resize terminal to <120 cols, open layout — simplified 2-pane")
+    print("11.[ ] Remove fzf from PATH, try picker — fallback works")
+    print("12.[ ] Source plugin twice — no duplicate keybindings")
     print()
     print("Interactive commands for follow-up testing:")
     print()
@@ -228,6 +260,8 @@ def main():
             ("Prefix binding", check_prefix_binding),
             ("Status script", check_status_script),
             ("Layout scripts", check_layout_scripts),
+            ("Bootstrap script", check_bootstrap_script),
+            ("Help overlay content", check_help_overlay_content),
             ("Layout windows", check_layouts_create_windows),
         ]
 

@@ -330,7 +330,13 @@ loopflow_dispatch() {
             ;;
         next)
             if [[ "$mode" == "container" ]]; then
-                loopflow_display "next: not yet implemented for container mode"
+                if ! loopflow_has_cmd lfq; then
+                    loopflow_display "lfq not found"
+                    return 1
+                fi
+                local wave
+                wave="$(loopflow_pick_wave)" || return 1
+                tmux send-keys "lfq land '$wave'" Enter
             else
                 if loopflow_has_cmd lf; then
                     tmux send-keys "lf ops next" Enter
@@ -341,7 +347,13 @@ loopflow_dispatch() {
             ;;
         land)
             if [[ "$mode" == "container" ]]; then
-                loopflow_display "land: not yet implemented for container mode"
+                if ! loopflow_has_cmd lfq; then
+                    loopflow_display "lfq not found"
+                    return 1
+                fi
+                local wave
+                wave="$(loopflow_pick_wave)" || return 1
+                tmux send-keys "lfq land '$wave'" Enter
             else
                 if loopflow_has_cmd lf; then
                     tmux send-keys "lf ops land" Enter
@@ -362,6 +374,9 @@ loopflow_dispatch() {
             ;;
         layout-pick)
             loopflow_open_layout
+            ;;
+        up)
+            tmux send-keys "'$LOOPFLOW_DIR/scripts/lf-up.sh'" Enter
             ;;
         help)
             loopflow_show_help
@@ -393,6 +408,7 @@ prefix+$prefix+o  open logs
 prefix+$prefix+p  open PR
 prefix+$prefix+n  next iteration
 prefix+$prefix+d  land PR
+prefix+$prefix+u  start/bootstrap
 prefix+$prefix+w  pick wave
 prefix+$prefix+L  pick layout
 prefix+$prefix+?  this help
@@ -400,8 +416,8 @@ EOF
 
     # Try display-popup (tmux 3.2+), fallback to display-message
     if loopflow_has_popup; then
-        tmux display-popup -w 40 -h 14 -E "cat '$help_file'; read -n 1"
+        tmux display-popup -w 40 -h 15 -E "cat '$help_file'; read -n 1"
     else
-        loopflow_display "prefix+$prefix+{r,s,o,p,n,d,w,L,?} — use ? in popup-capable tmux 3.2+"
+        loopflow_display "prefix+$prefix+{r,s,o,p,n,d,u,w,L,?} — use ? in popup-capable tmux 3.2+"
     fi
 }

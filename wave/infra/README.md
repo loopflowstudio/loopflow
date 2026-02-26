@@ -22,11 +22,13 @@ loopflow is a "smart router" — 91k lines orchestrating coding agents, not reim
 ## Risks
 
 - **Abstraction creep.** Refactoring for elegance can add lines instead of removing them. Every change should net-reduce or hold steady on LOC.
-- **Over-decomposition.** Splitting traits/modules too far creates indirection without value. The store should be 4-5 focused traits, not 15 micro-traits.
+- **Over-decomposition.** Splitting traits/modules too far creates indirection without value. Pass 1 proved this: the harness command builder trait added a registry, a trait, and 5 files for what a match block and a helper function handle cleanly. The store should be 4-5 focused traits, not 15 micro-traits.
 - **Chasing peers.** opencode and convex made different tradeoffs for different reasons. Adopt patterns that fit loopflow's delegation model, not patterns that fight it.
-- **Release bootstrap heuristics can drift.** `lf ops release` bootstrap gating currently detects workflow triggers with lightweight string checks. Fast and simple, but susceptible to unusual YAML layouts.
+- **Stale reference blast radius.** Direction taxonomy restructuring required three gate iterations to catch all stale references across docs, Swift previews, and wave configs. Pass 1 structural renames (docker module path, store capability imports) had narrower blast radius than expected — the `AgentExecutor` surface isolation helped.
+- **Metadata convention drift in docker recovery.** Pass 1 decomposition revealed that recovery correctness depends on label/mount conventions staying consistent across image, workspace, and recovery modules. Pass 2 made these explicit via shared constants and invariant tests. Remaining risk: daemon-restart e2e coverage beyond unit tests.
+- **Release bootstrap heuristics can drift.** `lf ops release` bootstrap gating currently detects workflow triggers with lightweight string checks (`tags:` + `{prefix}v*`). Fast and simple, but susceptible to unusual YAML layouts.
 
-## Reference
+## Roadmap (4 passes)
 
 Deep-review findings shifted priority toward deconcentrating hotspot files before adding more feature surface.
 
@@ -34,7 +36,7 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 |---|---|---|---|---|
 | 1 | *(shipped)* | Core boundary cleanup (`store` + `docker` + harness commands) | Lower blast radius in hotspot files; deconcentrate docker lifecycle | Done |
 | 2 | *(shipped)* | Contract hardening (prompt stage newtypes + Docker metadata constants + SQL catalog invariants + golden prompts) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Done |
-| 3 | `03-orchestration-expansion.md` | Orchestration expansion (activation ingress + push/listen + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | In progress (Milestone A shipped) |
+| 3 | *(Milestone A shipped; Milestone B ingested → `scratch/infra-flow-language-enrichment.md`)* | Orchestration expansion (activation ingress + push/listen + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | In progress |
 | 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |
 
 ### Shipped side milestones

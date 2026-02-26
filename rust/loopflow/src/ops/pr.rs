@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::git::{current_branch, get_default_branch, sync_main};
+use crate::engine::git::{current_branch, get_default_branch, rev_parse, sync_main};
 use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -55,17 +55,21 @@ pub fn create_or_update_pr(
         crate::ops::lint::ensure_lint_passes(repo, progress)?;
     }
 
+    // Snapshot origin's view of our branch before any work
+    let branch = current_branch(repo)?
+        .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let origin_before = rev_parse(repo, &format!("origin/{branch}")).ok();
+
     // Commit before sync — sync_main checks is_clean() and fails on dirty trees
     let commit_options = CommitOptions {
         add: true,
         push: true,
         ..CommitOptions::for_task("commit")
     };
-    let committed = commit_workflow(repo, &commit_options, progress)?;
+    commit_workflow(repo, &commit_options, progress)?;
 
     sync_main_repo(repo)?;
 
-    let mut rebased = false;
     if commits_behind_main(repo)? > 0 {
         progress.status("Branch behind base, rebasing...");
         let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
@@ -78,10 +82,11 @@ pub fn create_or_update_pr(
             },
             progress,
         )?;
-        rebased = true;
     }
 
-    let has_changes = committed || rebased;
+    // Refresh PR if HEAD moved from where origin was before we started
+    let head_now = rev_parse(repo, "HEAD").ok();
+    let has_changes = origin_before.is_none() || origin_before != head_now;
     let wave = resolve_wave_name(repo, None);
 
     if let Some(pr) = find_open_pr(repo)? {

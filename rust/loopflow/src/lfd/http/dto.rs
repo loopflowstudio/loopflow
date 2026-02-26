@@ -1,9 +1,11 @@
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
+use crate::lfd::sessions::types::ContextSnapshot;
+use crate::lfd::sessions::usage::{StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate};
 use crate::lfd::types::{
     ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Signal, Stimulus,
     WaveRun, WaveRunStatus,
@@ -284,6 +286,51 @@ pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,
     pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionUsageSessionDto {
+    pub step: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave: Option<String>,
+    pub status: String,
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionUsageDto {
+    pub object: String,
+    pub session_id: String,
+    pub tokens: TokenTotals,
+    pub turns: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextSnapshot>,
+    pub models: BTreeMap<String, u64>,
+    pub session: SessionUsageSessionDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WaveUsageDto {
+    pub object: String,
+    pub wave_id: String,
+    pub tokens: TokenTotals,
+    pub sessions: u64,
+    pub turns: u64,
+    pub models: BTreeMap<String, u64>,
+    pub by_step: BTreeMap<String, StepUsageAggregate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageSummaryDto {
+    pub object: String,
+    pub group_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    pub groups: Vec<UsageSummaryGroupAggregate>,
 }
 
 pub fn signal_str(signal: Signal) -> &'static str {

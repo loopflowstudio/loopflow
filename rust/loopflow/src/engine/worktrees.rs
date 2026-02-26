@@ -460,7 +460,6 @@ pub fn preserve_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, GitErr
 #[cfg(test)]
 mod tests {
     use super::{worktree_path, worktree_path_with_config};
-    use crate::engine::config::BranchNameConfig;
     use std::path::Path;
 
     #[test]
@@ -477,13 +476,10 @@ mod tests {
 
     #[test]
     fn worktree_path_extracts_wave_name_from_branch_style_input() {
-        let config = BranchNameConfig {
-            schema_: "{user}.{name}.{timestamp}.{words}".to_string(),
-        };
         let path = worktree_path_with_config(
             Path::new("/tmp/repo"),
             "jack-heart.mobile.20260225_1122",
-            Some(&config),
+            None,
         );
         assert_eq!(path, Path::new("/tmp/repo.mobile"));
     }

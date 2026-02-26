@@ -41,29 +41,26 @@ fn placeholder_pattern(name: &str) -> &'static str {
     }
 }
 
-type CompiledVariants = Vec<(Regex, Vec<String>)>;
-type SchemaCache = Option<(String, CompiledVariants)>;
+type CompiledSchema = (Regex, Vec<String>);
+type SchemaCache = Option<(String, CompiledSchema)>;
 
 static SCHEMA_REGEX_CACHE: Mutex<SchemaCache> = Mutex::new(None);
 
-/// Compile a schema string into cached regex variants.
-///
-/// Produces a full-match regex plus a shortened variant without trailing
-/// `{words}` (the only optional segment). Results are cached per schema string.
-fn compile_schema(schema: &str) -> Option<CompiledVariants> {
+/// Compile a schema string into a cached regex with named placeholder groups.
+fn compile_schema(schema: &str) -> Option<CompiledSchema> {
     let mut cache = SCHEMA_REGEX_CACHE.lock().ok()?;
-    if let Some((ref cached, ref variants)) = *cache {
+    if let Some((ref cached, ref compiled)) = *cache {
         if cached == schema {
-            return Some(variants.clone());
+            return Some(compiled.clone());
         }
     }
 
-    // Parse schema into (regex_fragment, placeholder_name) segments
-    let mut segments: Vec<(String, Option<String>)> = Vec::new();
+    let mut pattern = String::new();
+    let mut names = Vec::new();
     let mut remaining = schema;
     while let Some(open) = remaining.find('{') {
         if open > 0 {
-            segments.push((regex::escape(&remaining[..open]), None));
+            pattern.push_str(&regex::escape(&remaining[..open]));
         }
         let after = &remaining[open + 1..];
         let close = after.find('}')?;
@@ -71,48 +68,20 @@ fn compile_schema(schema: &str) -> Option<CompiledVariants> {
         if name.is_empty() {
             return None;
         }
-        segments.push((
-            format!("({})", placeholder_pattern(name)),
-            Some(name.to_string()),
-        ));
+        pattern.push_str(&format!("({})", placeholder_pattern(name)));
+        names.push(name.to_string());
         remaining = &after[close + 1..];
     }
     if !remaining.is_empty() {
-        segments.push((regex::escape(remaining), None));
+        pattern.push_str(&regex::escape(remaining));
     }
-    if !segments.iter().any(|(_, n)| n.is_some()) {
+    if names.is_empty() {
         return None;
     }
 
-    let build = |segs: &[(String, Option<String>)]| -> Option<(Regex, Vec<String>)> {
-        let pattern: String = segs.iter().map(|(p, _)| p.as_str()).collect();
-        let names: Vec<String> = segs.iter().filter_map(|(_, n)| n.clone()).collect();
-        Regex::new(&format!("^{pattern}$")).ok().map(|r| (r, names))
-    };
-
-    let mut variants = Vec::new();
-    if let Some(v) = build(&segments) {
-        variants.push(v);
-    }
-
-    // If trailing placeholder is {words}, add a variant without it and its separator.
-    if segments.last().and_then(|(_, n)| n.as_deref()) == Some("words") {
-        let mut short = segments[..segments.len() - 1].to_vec();
-        if short.last().map(|(_, n)| n.is_none()).unwrap_or(false) {
-            short.pop();
-        }
-        if short.iter().any(|(_, n)| n.is_some()) {
-            if let Some(v) = build(&short) {
-                variants.push(v);
-            }
-        }
-    }
-
-    if variants.is_empty() {
-        return None;
-    }
-    let result = variants.clone();
-    *cache = Some((schema.to_string(), variants));
+    let regex = Regex::new(&format!("^{pattern}$")).ok()?;
+    let result = (regex, names);
+    *cache = Some((schema.to_string(), result.clone()));
     Some(result)
 }
 
@@ -125,31 +94,28 @@ pub fn parse_branch_name(
     let default = BranchNameConfig::default();
     let config = config.unwrap_or(&default);
 
-    compile_schema(config.schema_.as_str())?
-        .into_iter()
-        .find_map(|(regex, placeholders)| {
-            let captures = regex.captures(branch)?;
-            let mut user = None;
-            let mut name = None;
-            let mut timestamp = None;
-            let mut words = None;
-            for (i, ph) in placeholders.iter().enumerate() {
-                let value = captures.get(i + 1)?.as_str().to_string();
-                match ph.as_str() {
-                    "user" => user = Some(value),
-                    "name" => name = Some(value),
-                    "timestamp" | "ts" | "date" => timestamp = Some(value),
-                    "words" => words = Some(value),
-                    _ => {}
-                }
-            }
-            Some(BranchNameParts {
-                user,
-                name: name?,
-                timestamp,
-                words,
-            })
-        })
+    let (regex, placeholders) = compile_schema(config.schema_.as_str())?;
+    let captures = regex.captures(branch)?;
+    let mut user = None;
+    let mut name = None;
+    let mut timestamp = None;
+    let mut words = None;
+    for (i, ph) in placeholders.iter().enumerate() {
+        let value = captures.get(i + 1)?.as_str().to_string();
+        match ph.as_str() {
+            "user" => user = Some(value),
+            "name" => name = Some(value),
+            "timestamp" | "ts" | "date" => timestamp = Some(value),
+            "words" => words = Some(value),
+            _ => {}
+        }
+    }
+    Some(BranchNameParts {
+        user,
+        name: name?,
+        timestamp,
+        words,
+    })
 }
 
 /// Extract the wave name ({name} component) from a branch name.
@@ -289,22 +255,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_branch_name_parses_default_schema_with_words() {
-        let parts = parse_branch_name("jack-heart.mobile.20260225_1122.aurora-fugue", None)
-            .expect("parse branch");
-        assert_eq!(parts.user.as_deref(), Some("jack-heart"));
-        assert_eq!(parts.name, "mobile");
-        assert_eq!(parts.timestamp.as_deref(), Some("20260225_1122"));
-        assert_eq!(parts.words.as_deref(), Some("aurora-fugue"));
-    }
-
-    #[test]
-    fn parse_branch_name_allows_missing_words_for_default_schema() {
+    fn parse_branch_name_parses_default_schema() {
         let parts = parse_branch_name("jack-heart.mobile.20260225_1122", None).expect("parse");
         assert_eq!(parts.user.as_deref(), Some("jack-heart"));
         assert_eq!(parts.name, "mobile");
         assert_eq!(parts.timestamp.as_deref(), Some("20260225_1122"));
         assert_eq!(parts.words, None);
+    }
+
+    #[test]
+    fn parse_branch_name_with_words_in_custom_schema() {
+        let config = BranchNameConfig {
+            schema_: "{user}.{name}.{timestamp}.{words}".to_string(),
+        };
+        let parts = parse_branch_name(
+            "jack-heart.mobile.20260225_1122.aurora-fugue",
+            Some(&config),
+        )
+        .expect("parse branch");
+        assert_eq!(parts.user.as_deref(), Some("jack-heart"));
+        assert_eq!(parts.name, "mobile");
+        assert_eq!(parts.timestamp.as_deref(), Some("20260225_1122"));
+        assert_eq!(parts.words.as_deref(), Some("aurora-fugue"));
     }
 
     #[test]

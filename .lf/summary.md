@@ -274,7 +274,7 @@ pub struct BudgetConfig {
 }
 
 pub struct BranchNameConfig {
-    pub schema_: String,  // default: "{user}.{name}.{timestamp}.{words}"
+    pub schema_: String,  // default: "{user}.{name}.{timestamp}"
 }
 
 pub struct SummaryConfig { pub path: String, pub tokens: Option<usize>, pub model: Option<String> }

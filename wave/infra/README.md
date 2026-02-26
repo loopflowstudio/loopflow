@@ -36,7 +36,7 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 |---|---|---|---|---|
 | 1 | *(shipped)* | Core boundary cleanup (`store` + `docker` + harness commands) | Lower blast radius in hotspot files; deconcentrate docker lifecycle | Done |
 | 2 | *(shipped)* | Contract hardening (prompt stage newtypes + Docker metadata constants + SQL catalog invariants + golden prompts) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Done |
-| 3 | *(Milestone A shipped; Milestone B in progress → `scratch/infra-flow-language-enrichment.md`)* | Orchestration expansion (activation ingress + push/listen + multi-step fork branches) | Faster reactions and richer wave composition once core boundaries are stable | In progress |
+| 3 | *(shipped)* | Orchestration expansion (activation ingress + push/listen + multi-step fork branches) | Faster reactions and richer wave composition once core boundaries are stable | Done |
 | 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Next |
 
 ### Shipped side milestones
@@ -76,7 +76,19 @@ What shipped: `triggers/activation.rs` now owns enqueue/coalesce/drop/dispatch p
 
 What was revised: activation queue semantics are now explicit (stimulus-level dedupe, per-wave queue cap defaults, immutable activation outcome log) instead of ad-hoc trigger-specific behavior.
 
-What remains: Milestone B scoped to multi-step fork branches (allow fork branches to reference named flows, run steps sequentially per branch). Original `when` predicates and decision persistence deferred — stimulus→flow routing (shipped in chords wave) covers the reactive flow use case at the wave level instead.
+What remains: Pass 3 complete. Original `when` predicates and decision persistence deferred — stimulus→flow routing (shipped in chords wave) covers the reactive flow use case at the wave level instead.
+
+### Pass 3 retrospective (Milestone B)
+
+Shipped multi-step fork branches. Fork branches can now reference named flows and run multiple steps sequentially within a single worktree. Both CLI (`lf flow`) and daemon (`lfd`) executors support this.
+
+What shipped: `ConcreteForkBranch` struct with `Vec<ConcreteStep>`, `flow:` key in fork YAML parsing, `expand_fork` resolving flow references into multi-step branches (rejecting nested forks), `ForkManifestBranch.steps: Vec<ForkManifestStep>` with per-step exit codes, fail-fast execution in both executors, and `is_multi_step_flow()` extraction to deduplicate the flow-expansion heuristic.
+
+What went as planned: the type-level design (`ConcreteForkBranch` wrapping steps + directions + label) kept the executor changes mechanical. The three YAML formats (`step:` shorthand, `flow:` shorthand, explicit `branches:`) parsed cleanly with backwards compatibility. All 61 existing flow/fork tests passed unchanged.
+
+What was deferred: conditional flow nodes (`when` predicates), activation payload persistence, decision persistence/replay, and decision observability. These were scoped in the original `03-orchestration-expansion.md` but cut during milestone scoping. Stimulus→flow routing at the wave level (shipped in chords wave) covers the primary reactive use case.
+
+What we learned: manifest schema changes are safe because manifests are ephemeral (written per-run, consumed by synthesize). The `lf flow` CLI error message doesn't name the specific failed step in a multi-step branch — daemon executor logs step-level detail via tracing. Minor UX gap, not blocking.
 
 ## Reference report
 

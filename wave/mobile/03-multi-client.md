@@ -33,43 +33,13 @@ Done in `MobileWaveDetailView` with shared behavior parity:
 - Action taps use the existing shared path: `await sessionState.sendSuggestedAction(action)`.
 - Session lifecycle/context (`configureClientContext`, `onAppear`, `onDisappear`) is owned by the iOS detail container so actions stay live while users watch Output.
 
-### Manual iOS visual verification for action rail
+### ~~Manual iOS visual verification for action rail~~ ingested → scratch/mobile-complete-stage-03.md
 
-Headless builds passed, but we still need an on-screen simulator check for:
+### ~~Suggested action consistency across clients~~ ingested → scratch/mobile-complete-stage-03.md
 
-- iPhone 17 Pro: bottom rail thumb-zone spacing and keyboard overlap behavior
-- iPad Pro 13-inch (M5): adaptive action layout and tap ergonomics
+### ~~Connection UX on iOS~~ ingested → scratch/mobile-complete-stage-03.md
 
-### Suggested action consistency across clients
-
-Suggested actions are client-side ephemeral state in `SessionState`. When one client taps an action (sending a message), the other client needs to clear its stale suggestions. This should happen naturally: the session event stream carries the new user message, the other client's `SessionState` sees the turn change and clears. Verify this works — if session events don't propagate user messages to other clients in real time, stale action buttons will linger.
-
-### Connection UX on iOS
-
-iOS Concerto connects to a remote lfd (no local daemon). Needs:
-
-- Connection setup screen (host, port, optional auth token) — *shipped in Stage 01 as ConnectionSetupView*
-- Saved connection profiles (like SSH configs) — *revisit here if needed; Stage 01 tried ConnectionProfile and removed it — ConnectionStore with ConnectionMode (bundled/remote) was sufficient for single-connection use*
-- Reconnect handling (mobile goes to background, comes back)
-
-**Note from Stage 01:** ConnectionProfileStore was prototyped and removed. The current ConnectionStore handles one active connection. If multi-client needs multiple saved connections (e.g., switching between lfds), reintroduce profiles. If users only connect to one lfd at a time, the current model may suffice — just persist the last-used host:port.
-
-### Reconnect resilience
-
-Mobile clients disconnect frequently (background, network switch, lock screen). On foreground resume:
-
-- EventService WebSocket: reconnect with last sequence number for gap-free replay
-- Output streaming: reconnect to stream endpoint
-- SessionState: already has reconnect logic (sequence numbers, replay) — verify it works with real network interruption
-
-Hook into `UIApplication.didBecomeActiveNotification` on iOS:
-
-```swift
-#if os(iOS)
-NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
-    .sink { _ in reconnect() }
-#endif
-```
+### ~~Reconnect resilience~~ ingested → scratch/mobile-complete-stage-03.md
 
 ### ~~Verify concurrent clients work~~ ingested → scratch/mobile-verify-concurrent-clients.md
 

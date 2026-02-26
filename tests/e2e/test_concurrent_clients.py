@@ -149,14 +149,12 @@ def test_chat_input_from_either_client_visible_to_both(
 
     saw_input_events_a = any(event in _INPUT_EVENT_TYPES for event in events_a)
     saw_input_events_b = any(event in _INPUT_EVENT_TYPES for event in events_b)
-    if saw_input_events_a or saw_input_events_b:
+    if send_succeeded:
         assert saw_input_events_a, f"client A missed input events: {events_a}"
         assert saw_input_events_b, f"client B missed input events: {events_b}"
-    elif not send_succeeded:
+    else:
         assert send_error, "failed send should provide an error"
         assert status in {"starting", "failed", "ended", "active"}
-    else:
-        assert status in {"active", "failed", "ended"}
 
 
 def test_suggested_actions_event_type_is_parseable() -> None:
@@ -285,6 +283,7 @@ def _wait_for_threads(
 ) -> None:
     for thread in threads:
         thread.join(timeout_seconds + 2)
+        assert not thread.is_alive(), "timed out waiting for session event collector thread"
 
 
 def _collect_session_event_types(

@@ -8,28 +8,33 @@ Next.
 
 ## Why this is the next phase
 
-Phase 03.5 removed CI-fix special casing and lets auxiliary runs operate as normal wave runs. That unifies activation behavior, but branch sync behavior still assumes a single writer in many paths.
+Phase 03.5 shipped basic pre/post step sync (fetch+rebase before steps, commit+push after). This works for the happy path but lacks recovery when concurrent writers cause conflicts or non-fast-forward pushes.
 
-## What to build
+## What shipped in 03.5 (baseline)
 
-### Pre-step sync for every flow step
+- Pre-step: `fetch + rebase` onto `origin/{wave-branch}`
+- Post-step: auto-commit + push
+- Rebase failures: step skipped with warning, run continues on stale state
+- Push failures: fetch+rebase retry, then hard fail
 
-Before each step:
+## What to build (hardening)
 
-1. Rebase onto `origin/{wave-branch}` to pick up auxiliary run pushes
-2. Rebase onto `origin/{default-branch}` to pick up upstream changes
+### Dual rebase
 
-Use `rebase_with_recovery` so rebase conflicts go through the dedicated rebase agent path.
+Pre-step should rebase onto both:
 
-### Post-step sync for every flow step
+1. `origin/{wave-branch}` — pick up auxiliary run pushes
+2. `origin/{default-branch}` — pick up upstream changes
 
-After each step:
+Requires `target_branch` on `WaveRun` and `PendingActivation` (migration 019 staged).
 
-1. Auto-commit dirty changes
-2. Push with recovery:
-   - Try push
-   - On non-fast-forward: fetch + rebase-with-recovery + push retry
-   - If still failing: escalate through `lf debug` with command output
+### Rebase conflict recovery
+
+Use `rebase_with_recovery` so rebase conflicts go through the dedicated rebase agent path instead of skipping the step silently.
+
+### Push failure escalation
+
+After the existing fetch+rebase+retry cycle, escalate stubborn push failures through `lf debug` with command output instead of hard-failing.
 
 ### Worktree reuse hardening
 
@@ -37,7 +42,8 @@ When reusing an existing wave worktree, run an immediate fetch/rebase instead of
 
 ## Done when
 
-- Step execution loop wraps every step with pre-step and post-step sync
-- Pushes no longer fail permanently on non-fast-forward due to concurrent auxiliary writes
+- Pre-step rebases onto both wave-branch and default-branch
+- Rebase conflicts route through rebase agent recovery
+- Push failures escalate through debug agent after retry exhaustion
+- Worktree reuse includes eager sync
 - Main runs reliably ingest CI-fix or other auxiliary commits on the next step
-- Failure handling is unified: rebase conflicts via rebase agent, stubborn push failures via debug agent

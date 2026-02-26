@@ -1,12 +1,14 @@
-# 03.5: Signal Simplification
+# 03.5: Signal Simplification + Parallel Execution
 
-Unify CI fix and listen under one stimulus activation model.
+Unify CI fix and listen under one stimulus activation model. Add parallel execution for non-serialized waves.
 
 ## Status
 
 Shipped on `jack-heart.chords.20260225_2241`.
 
 ## What shipped
+
+### Signal simplification
 
 - Replaced internal `StimulusKind` usage with `Signal`
 - Added `stimulus.flow` override so a stimulus can select a flow at activation time
@@ -19,6 +21,14 @@ Shipped on `jack-heart.chords.20260225_2241`.
 - Updated build flow ordering to `implement → compress → lint → gate → update-wave`
 - Added migration `017_signal_simplification.sql` for `stimuli.signal`, `stimuli.flow`, and wave-run kind column removal
 
+### Parallel execution foundation
+
+- Added `wave.serialized: bool` to control queue vs parallel dispatch
+- Non-serialized waves spawn per-run worktrees with `-run-{hash}` suffix
+- Serialized waves continue using the pending activation queue for sequential dispatch
+- Added pre-step `fetch+rebase` and post-step `commit+push` git sync at step boundaries
+- Added migration `018_wave_serialized.sql` for the serialized flag
+
 ## Decisions locked
 
 - Keep external API/config field name `kind` for stimulus DTO parsing; map it to internal `Signal`
@@ -27,8 +37,9 @@ Shipped on `jack-heart.chords.20260225_2241`.
 
 ## Not included in this phase
 
-- Pre/post-step git sync hardening and push recovery changes across wave execution
-- External API rename from `stimulus.kind` to `stimulus.signal`
+- Git sync recovery paths (rebase conflict handling, push failure escalation) — deferred to Phase 03.6
+- Dual rebase (wave-branch + default-branch) — deferred to Phase 03.6
+- External API rename from `stimulus.kind` to `stimulus.signal` — coordinated rollout needed
 - Swift/Python/UI expansion beyond docs and flow metadata touched here
 
 ## Carry-forward risks

@@ -33,6 +33,8 @@ Waves are flat. Chords group them. Listening connects them.
 - **Flow-name guard coupling for CI recursion.** CI failure webhook recursion prevention currently keys off `snapshot.flow == "ci-fix"`. Renaming the flow without updating this guard can reintroduce recursion.
 - **Signal migration assumptions.** Migration 017 backfills `stimuli.signal` from `stimuli.kind` and drops wave-run kind columns. Unexpected legacy rows could make migration behavior drift from intent.
 - **Concurrent CI stimulus creation.** CI failure trigger currently resolves-then-creates `Signal::CiFailure` stimuli. Today it is serialized by one event loop; future parallelism needs uniqueness guarantees.
+- **Run worktree accumulation.** Parallel runs create per-run worktrees that are cleaned up on completion/failure. If the daemon crashes mid-run, orphaned worktrees remain until the next janitor sweep.
+- **Stale proto definitions.** `proto/loopflow/control/v1/control.proto` still references `StimulusKind`. Proto is vestigial (HTTP JSON API is primary). Update when proto becomes active.
 - **Duplicate-name conflict mapping is backend-detail sensitive.** Phase 02 maps duplicate chord names to `409`, but detection currently depends on backend-specific DB error details. If schema/constraint names change, this mapping can drift.
 - **Membership mutation paths do pre-check reads.** Membership add/remove validates chord and wave existence before mutation; this is correct but adds DB round-trips on hot paths.
 
@@ -50,8 +52,8 @@ Waves are flat. Chords group them. Listening connects them.
 | 01 | Flatten + Listen | Drop tree model, add listen stimulus, migration 012 | shipped |
 | 02 | Chord CRUD | Domain type, store ops, HTTP API, Python client | shipped |
 | 03 | Listen Authoring | Listen stimulus in wave schema files, listener triggering, CI fix rename | shipped |
-| 03.5 | Signal Simplification | Drop WaveRunKind/CiFixKind, rename StimulusKind→Signal, add stimulus flow override, route CI failures through pending activations | shipped |
-| 03.6 | Git Sync Hardening | Make wave branches multi-writer safe via pre-step rebase + post-step push with recovery | next |
+| 03.5 | Signal + Parallel Execution | Signal unification, stimulus flow override, CI failures as activations, per-run worktrees for parallel waves, pre/post step git sync | shipped |
+| 03.6 | Git Sync Hardening | Recovery paths for rebase conflicts and push failures, dual rebase (wave-branch + default-branch), worktree reuse sync | next |
 | 04 | Concerto UI | Chord groups and listen wiring in the macOS app | planned |
 
 ### Phase 01 retrospective
@@ -146,9 +148,31 @@ CREATE TABLE chord_members (
 
 ### Phase 03.5 retrospective
 
-Phase 03.5 shipped the signal simplification and CI activation unification. CI fix is now represented as a normal stimulus activation (`Signal::CiFailure` + `flow: ci-fix`) instead of a dedicated run kind and executor path.
+Phase 03.5 shipped signal simplification, CI activation unification, and the parallel execution foundation:
 
-See `wave/chords/035-signal-simplification.md` for implementation details, risks, and validation results.
+- Collapsed `WaveRunKind`/`StimulusKind` into a single `Signal` enum
+- CI fix is now a normal stimulus activation (`Signal::CiFailure` + `flow: ci-fix`) — no dedicated executor path
+- Added `Stimulus.flow` override so any stimulus can select a flow at activation time
+- Added `wave.serialized: bool` — serialized waves use queue/coalesce, non-serialized spawn per-run worktrees (`-run-{hash}` suffix)
+- Added pre-step `fetch+rebase` and post-step `commit+push` at step boundaries for multi-writer safety
+- Migrations: 017 (signal column, flow column, drop legacy kind columns), 018 (serialized flag)
+
+Key decisions now locked:
+
+- `Signal` enum is the single type for all stimulus/run kinds
+- `wave.serialized` is a simple boolean — no per-stimulus concurrency limits
+- Per-run worktrees for parallel execution; cleanup on run completion
+- Keep external API field name `kind` — coordinated rename to `signal` deferred (requires Python client + Concerto + wave config schema update in lockstep)
+- Pre/post step sync is basic fetch+rebase/commit+push — recovery hardening deferred to Phase 03.6
+
+Carry-forward follow-ups:
+
+- Coordinated API rename: `stimulus.kind` → `stimulus.signal` across JSON API, Python client, Concerto, wave config YAML
+- Update vestigial proto (`StimulusKind` in `control.proto`) when proto becomes active
+- CI recursion guard is coupled to literal flow name `ci-fix` — consider making configurable
+- CI stimulus resolution is list-then-create; needs uniqueness guard if event loop parallelizes
+
+See `wave/chords/035-signal-simplification.md` for additional details.
 
 ### Phase 03.6 target
 

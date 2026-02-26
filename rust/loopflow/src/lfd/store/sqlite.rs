@@ -912,10 +912,10 @@ impl SqliteStore {
         Ok(stimuli)
     }
 
-    pub fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    pub fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListStimuliByKind))?;
-        let rows = stmt.query_map(params![kind as i64], |row| Ok(map_stimulus_row(row)))?;
+        let mut stmt = conn.prepare(Self::sql(Query::ListStimuliBySignal))?;
+        let rows = stmt.query_map(params![signal as i64], |row| Ok(map_stimulus_row(row)))?;
         let mut stimuli = Vec::new();
         for stimulus in rows {
             stimuli.push(stimulus??);

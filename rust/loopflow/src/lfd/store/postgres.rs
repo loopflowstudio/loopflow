@@ -1016,10 +1016,10 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    pub async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
         self.with_client(|client| async move {
             let rows = client
-                .query(Self::sql(Query::ListStimuliByKind), &[&kind])
+                .query(Self::sql(Query::ListStimuliBySignal), &[&signal])
                 .await?;
             rows.iter().map(map_stimulus_row).collect()
         })

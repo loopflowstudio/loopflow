@@ -225,8 +225,8 @@ impl Store {
         WaveStateStore::list_stimuli(self, wave_id).await
     }
 
-    pub async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
-        WaveStateStore::list_stimuli_by_signal(self, kind).await
+    pub async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
+        WaveStateStore::list_stimuli_by_signal(self, signal).await
     }
 
     pub async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
@@ -555,7 +555,7 @@ pub trait WaveStateStore: Send + Sync {
     async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool>;
 
     async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
-    async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
+    async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>>;
     async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>>;
     async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
     async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
@@ -973,12 +973,12 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_stimuli_by_signal(&self, kind: i32) -> StoreResult<Vec<Stimulus>> {
+    async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_stimuli_by_signal(kind)).await
+                run_sqlite(store, move |store| store.list_stimuli_by_signal(signal)).await
             }
-            StoreBackend::Postgres(store) => store.list_stimuli_by_signal(kind).await,
+            StoreBackend::Postgres(store) => store.list_stimuli_by_signal(signal).await,
         }
     }
 

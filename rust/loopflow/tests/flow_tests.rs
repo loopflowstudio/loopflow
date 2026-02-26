@@ -270,7 +270,7 @@ fn builtin_wave_reduce_expands_to_update_wave() {
         let branch_directions: Vec<Vec<String>> = fork
             .branches
             .iter()
-            .map(|branch| branch.step.directions.clone())
+            .map(|branch| branch.directions.clone())
             .collect();
         assert_eq!(
             branch_directions,

@@ -1,6 +1,6 @@
 use crate::engine::flow::expand_direction_names;
 use crate::engine::fork::{
-    fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch,
+    fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
@@ -81,7 +81,7 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
 #[derive(Debug, Clone)]
 struct ForkBranchTask {
     index: usize,
-    step_name: String,
+    step_names: Vec<String>,
     directions: Vec<String>,
     worktree: PathBuf,
     branch_name: String,
@@ -115,7 +115,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         worktrees.push(worktree.clone());
         tasks.push(ForkBranchTask {
             index,
-            step_name: branch.step.step.name.clone(),
+            step_names: branch.steps.iter().map(|s| s.step.name.clone()).collect(),
             directions: branch.directions.clone(),
             worktree,
             branch_name,
@@ -125,17 +125,17 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
     let mut handles = Vec::new();
     for task in tasks.iter().cloned() {
         let worktree = task.worktree.clone();
-        let step_name = task.step_name.clone();
+        let step_names = task.step_names.clone();
         let directions = task.directions.clone();
         let branch_label = format!("fork-{}", task.index);
         let msg = message.map(|value| value.to_string());
         let handle = std::thread::spawn(move || {
-            run_fork_branch(
+            run_fork_branch_steps(
                 &worktree,
-                &step_name,
+                &step_names,
                 &directions,
                 msg.as_deref(),
-                branch_label.as_str(),
+                &branch_label,
             )
         });
         handles.push((task, handle));
@@ -143,10 +143,10 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
 
     let mut outcomes = Vec::new();
     for (task, handle) in handles {
-        let (exit_code, err) = match handle.join() {
-            Ok(Ok(code)) => (code, None),
-            Ok(Err(err)) => (1, Some(err.to_string())),
-            Err(_) => (1, Some("fork thread panicked".to_string())),
+        let (exit_code, step_results, err) = match handle.join() {
+            Ok(Ok((code, results))) => (code, results, None),
+            Ok(Err(err)) => (1, Vec::new(), Some(err.to_string())),
+            Err(_) => (1, Vec::new(), Some("fork thread panicked".to_string())),
         };
 
         if exit_code != 0 || err.is_some() {
@@ -165,7 +165,7 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
 
         outcomes.push(ForkManifestBranch {
             index: task.index,
-            step: task.step_name.clone(),
+            steps: step_results,
             direction: task.directions.join(","),
             worktree: task.worktree.to_string_lossy().to_string(),
             branch: task.branch_name.clone(),
@@ -218,7 +218,31 @@ fn cleanup_fork_worktrees(worktrees: &[PathBuf]) {
     }
 }
 
-fn run_fork_branch(
+/// Run steps sequentially within a fork branch. Returns the first non-zero
+/// exit code (fail-fast) or 0, along with per-step outcomes.
+fn run_fork_branch_steps(
+    worktree: &Path,
+    step_names: &[String],
+    directions: &[String],
+    message: Option<&str>,
+    branch_label: &str,
+) -> Result<(i32, Vec<ForkManifestStep>)> {
+    let mut step_results = Vec::new();
+    for step_name in step_names {
+        let exit_code =
+            run_fork_branch_step(worktree, step_name, directions, message, branch_label)?;
+        step_results.push(ForkManifestStep {
+            name: step_name.clone(),
+            exit_code,
+        });
+        if exit_code != 0 {
+            return Ok((exit_code, step_results));
+        }
+    }
+    Ok((0, step_results))
+}
+
+fn run_fork_branch_step(
     worktree: &Path,
     step: &str,
     directions: &[String],

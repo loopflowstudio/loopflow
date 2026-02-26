@@ -81,8 +81,16 @@ impl ConcreteStep {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteForkBranch {
+    pub steps: Vec<ConcreteStep>,
+    pub flow_parents: Vec<String>,
+    pub label: String,
+    pub directions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteFork {
-    pub branches: Vec<ConcreteStep>,
+    pub branches: Vec<ConcreteForkBranch>,
     pub flow_parents: Vec<String>,
 }
 
@@ -477,12 +485,16 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("fork must be mapping".to_string()))?;
 
-    // Two formats:
+    // Three formats:
     // 1. Explicit branches: fork: { branches: [...] }
-    // 2. Shorthand: fork: { step: "reduce", drafts: [{ direction: "..." }, ...] }
+    // 2. Step shorthand:    fork: { step: "reduce", drafts: [...] }
+    // 3. Flow shorthand:    fork: { flow: "build", drafts: [...] }
     let branches = if let Some(branches_value) = map.get(key("branches")) {
         match branches_value {
-            Value::Sequence(seq) => seq.iter().map(parse_flow_item).collect::<Result<_, _>>()?,
+            Value::Sequence(seq) => seq
+                .iter()
+                .map(parse_fork_branch_item)
+                .collect::<Result<_, _>>()?,
             _ => {
                 return Err(LoadError::InvalidFlow(
                     "fork branches must be list".to_string(),
@@ -493,27 +505,15 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         let step_name = step_value
             .as_str()
             .ok_or_else(|| LoadError::InvalidFlow("fork step must be string".to_string()))?;
-        let drafts = map
-            .get(key("drafts"))
-            .ok_or_else(|| LoadError::InvalidFlow("fork with step requires drafts".to_string()))?;
-        let drafts_seq = drafts
-            .as_sequence()
-            .ok_or_else(|| LoadError::InvalidFlow("fork drafts must be list".to_string()))?;
-
-        let mut branches = Vec::new();
-        for draft in drafts_seq {
-            let draft_map = draft
-                .as_mapping()
-                .ok_or_else(|| LoadError::InvalidFlow("fork draft must be mapping".to_string()))?;
-            let directions = parse_directions_field(draft_map);
-            let mut step = Step::named(step_name);
-            step.directions = directions;
-            branches.push(FlowItem::Step(step));
-        }
-        branches
+        parse_fork_drafts(map, step_name)?
+    } else if let Some(flow_value) = map.get(key("flow")) {
+        let flow_name = flow_value
+            .as_str()
+            .ok_or_else(|| LoadError::InvalidFlow("fork flow must be string".to_string()))?;
+        parse_fork_drafts(map, flow_name)?
     } else {
         return Err(LoadError::InvalidFlow(
-            "fork must have branches or step+drafts".to_string(),
+            "fork must have branches, step+drafts, or flow+drafts".to_string(),
         ));
     };
 
@@ -528,6 +528,72 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         ));
     }
     Ok(FlowItem::Fork { branches })
+}
+
+/// Parse fork drafts for the step/flow shorthand format.
+fn parse_fork_drafts(map: &serde_yaml_ng::Mapping, name: &str) -> Result<Vec<FlowItem>, LoadError> {
+    let drafts = map
+        .get(key("drafts"))
+        .ok_or_else(|| LoadError::InvalidFlow("fork with step/flow requires drafts".to_string()))?;
+    let drafts_seq = drafts
+        .as_sequence()
+        .ok_or_else(|| LoadError::InvalidFlow("fork drafts must be list".to_string()))?;
+
+    let mut branches = Vec::new();
+    for draft in drafts_seq {
+        let draft_map = draft
+            .as_mapping()
+            .ok_or_else(|| LoadError::InvalidFlow("fork draft must be mapping".to_string()))?;
+        let directions = parse_directions_field(draft_map);
+        branches.push(FlowItem::Step(Step {
+            name: name.to_string(),
+            model: None,
+            directions,
+            action_style: None,
+            interactive: None,
+            content: None,
+        }));
+    }
+    Ok(branches)
+}
+
+/// Parse a fork branch item. Unlike `parse_flow_item`, this handles
+/// `direction:` as a sibling key for both `step:` and `flow:` branches.
+fn parse_fork_branch_item(value: &Value) -> Result<FlowItem, LoadError> {
+    match value {
+        Value::String(name) => Ok(FlowItem::Step(Step::named(name))),
+        Value::Mapping(map) => {
+            let directions = parse_directions_field(map);
+            if let Some(step_value) = map.get(key("step")) {
+                let mut step = parse_step_value(step_value)?;
+                if !directions.is_empty() && step.directions.is_empty() {
+                    step.directions = directions;
+                }
+                return Ok(FlowItem::Step(step));
+            }
+            if let Some(flow_value) = map.get(key("flow")) {
+                let name = flow_value.as_str().ok_or_else(|| {
+                    LoadError::InvalidFlow("fork branch flow must be string".to_string())
+                })?;
+                return Ok(FlowItem::Step(Step {
+                    name: name.to_string(),
+                    directions,
+                    ..Step::named(name)
+                }));
+            }
+            if map.get(key("fork")).is_some() {
+                return Err(LoadError::InvalidFlow(
+                    "nested forks are not supported".to_string(),
+                ));
+            }
+            Err(LoadError::InvalidFlow(
+                "fork branch must have step or flow".to_string(),
+            ))
+        }
+        _ => Err(LoadError::InvalidFlow(
+            "fork branch must be string or mapping".to_string(),
+        )),
+    }
 }
 
 fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
@@ -660,36 +726,120 @@ fn expand_fork(
 ) -> Result<ConcreteFork, LoadError> {
     let mut expanded_branches = Vec::new();
     for branch in branches {
-        let (step, label) = match branch {
-            FlowItem::Step(step) => (step.clone(), step.name.clone()),
-            FlowItem::FlowRef(name) => {
-                let nested = load_flow(name, repo)?;
-                let nested_items = expand_with_chain(&nested, repo, chain.to_vec(), depth + 1)?;
-                match nested_items.as_slice() {
-                    [ConcreteItem::Step(step)] => (step.step.clone(), name.clone()),
-                    _ => {
-                        return Err(LoadError::InvalidFlow(format!(
-                            "fork flow ref {name} must expand to a single step"
-                        )))
-                    }
-                }
-            }
-            FlowItem::Fork { .. } => {
-                return Err(LoadError::InvalidFlow(
-                    "fork branches cannot contain nested forks".to_string(),
-                ))
-            }
-        };
-
-        let mut flow_parents = chain.to_vec();
-        flow_parents.push(format!("fork/{label}"));
-        expanded_branches.push(ConcreteStep { step, flow_parents });
+        expanded_branches.push(expand_fork_branch(branch, repo, chain, depth)?);
     }
 
     Ok(ConcreteFork {
         branches: expanded_branches,
         flow_parents: chain.to_vec(),
     })
+}
+
+fn expand_fork_branch(
+    branch: &FlowItem,
+    repo: &Path,
+    chain: &[String],
+    depth: usize,
+) -> Result<ConcreteForkBranch, LoadError> {
+    match branch {
+        FlowItem::Step(step) => {
+            // A step name in a fork branch might actually reference a flow.
+            // Try loading it as a flow first (same resolution as expand_with_chain).
+            if step.content.is_none() {
+                if let Some(branch) = try_expand_step_as_flow(step, repo, chain, depth)? {
+                    return Ok(branch);
+                }
+            }
+            let resolved = resolve_step_reference(step, repo);
+            let mut flow_parents = chain.to_vec();
+            flow_parents.push(format!("fork/{}", step.name));
+            Ok(ConcreteForkBranch {
+                steps: vec![ConcreteStep {
+                    step: resolved,
+                    flow_parents: flow_parents.clone(),
+                }],
+                flow_parents,
+                label: step.name.clone(),
+                directions: step.directions.clone(),
+            })
+        }
+        FlowItem::FlowRef(name) => expand_flow_ref_branch(name, &[], repo, chain, depth),
+        FlowItem::Fork { .. } => Err(LoadError::InvalidFlow(
+            "fork branches cannot contain nested forks".to_string(),
+        )),
+    }
+}
+
+/// Try to expand a step name as a flow reference. Returns `Some(branch)` if
+/// the name resolves to a multi-step flow, `None` if it's just a step.
+fn try_expand_step_as_flow(
+    step: &Step,
+    repo: &Path,
+    chain: &[String],
+    depth: usize,
+) -> Result<Option<ConcreteForkBranch>, LoadError> {
+    let Ok(nested) = load_flow(&step.name, repo) else {
+        return Ok(None);
+    };
+    // Only expand if it resolved as a genuine multi-step flow, not if
+    // load_flow auto-wrapped a step as a single-step flow.
+    if nested.items.len() <= 1
+        && nested
+            .items
+            .first()
+            .map(|i| matches!(i, FlowItem::Step(s) if s.name == step.name))
+            .unwrap_or(true)
+    {
+        return Ok(None);
+    }
+    let branch = expand_flow_ref_branch(&step.name, &step.directions, repo, chain, depth)?;
+    Ok(Some(branch))
+}
+
+/// Expand a flow reference into a multi-step fork branch.
+fn expand_flow_ref_branch(
+    name: &str,
+    directions: &[String],
+    repo: &Path,
+    chain: &[String],
+    depth: usize,
+) -> Result<ConcreteForkBranch, LoadError> {
+    let nested = load_flow(name, repo)?;
+    let nested_items = expand_with_chain(&nested, repo, chain.to_vec(), depth + 1)?;
+    let steps = extract_fork_branch_steps(name, &nested_items)?;
+    let mut flow_parents = chain.to_vec();
+    flow_parents.push(format!("fork/{name}"));
+    Ok(ConcreteForkBranch {
+        steps,
+        flow_parents,
+        label: name.to_string(),
+        directions: directions.to_vec(),
+    })
+}
+
+/// Extract concrete steps from expanded flow items for a fork branch.
+/// Rejects nested forks — only sequential steps are allowed within branches.
+fn extract_fork_branch_steps(
+    flow_name: &str,
+    items: &[ConcreteItem],
+) -> Result<Vec<ConcreteStep>, LoadError> {
+    let mut steps = Vec::new();
+    for item in items {
+        match item {
+            ConcreteItem::Step(s) => steps.push(s.clone()),
+            ConcreteItem::Fork(_) => {
+                return Err(LoadError::InvalidFlow(format!(
+                    "fork branch flow ref '{flow_name}' contains a nested fork"
+                )))
+            }
+        }
+    }
+    if steps.is_empty() {
+        return Err(LoadError::InvalidFlow(format!(
+            "fork branch flow ref '{flow_name}' expands to zero steps"
+        )));
+    }
+    Ok(steps)
 }
 
 /// Home directory for global lookups. Can be overridden for testing.
@@ -1023,15 +1173,17 @@ Be careful.
                         );
                     }
                     ConcreteItem::Fork(fork) => {
-                        for branch in fork.branches {
-                            let result = load_step(&branch.step.name, tmp.path());
-                            assert!(
-                                result.is_ok(),
-                                "builtin flow '{}' fork references missing step '{}': {:?}",
-                                name,
-                                branch.step.name,
-                                result.err()
-                            );
+                        for branch in &fork.branches {
+                            for step in &branch.steps {
+                                let result = load_step(&step.step.name, tmp.path());
+                                assert!(
+                                    result.is_ok(),
+                                    "builtin flow '{}' fork references missing step '{}': {:?}",
+                                    name,
+                                    step.step.name,
+                                    result.err()
+                                );
+                            }
                         }
                     }
                 }
@@ -1203,5 +1355,213 @@ Be careful.
         let items = expand_flow(&flow, repo.path()).unwrap();
         let action = next_action(&items, 0);
         assert!(matches!(action, FlowAction::Complete));
+    }
+
+    #[test]
+    fn parse_fork_flow_drafts_shorthand() {
+        let yaml = r#"
+- fork:
+    flow: build
+    drafts:
+      - direction: infra
+      - direction: ux
+      - direction: ceo
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            FlowItem::Fork { branches, .. } => {
+                assert_eq!(branches.len(), 3);
+                for (i, branch) in branches.iter().enumerate() {
+                    match branch {
+                        FlowItem::Step(step) => {
+                            assert_eq!(step.name, "build");
+                            assert_eq!(step.directions.len(), 1);
+                        }
+                        _ => panic!("expected Step branch at index {i}"),
+                    }
+                }
+            }
+            _ => panic!("expected Fork item"),
+        }
+    }
+
+    #[test]
+    fn parse_fork_explicit_branches_with_flow_and_step() {
+        let yaml = r#"
+- fork:
+    branches:
+      - flow: build
+        direction: infra
+      - step: review
+        direction: ux
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            FlowItem::Fork { branches, .. } => {
+                assert_eq!(branches.len(), 2);
+                // First branch: flow ref "build" with direction "infra"
+                match &branches[0] {
+                    FlowItem::Step(step) => {
+                        assert_eq!(step.name, "build");
+                        assert_eq!(step.directions, vec!["infra"]);
+                    }
+                    _ => panic!("expected Step branch"),
+                }
+                // Second branch: step "review" with direction "ux"
+                match &branches[1] {
+                    FlowItem::Step(step) => {
+                        assert_eq!(step.name, "review");
+                        assert_eq!(step.directions, vec!["ux"]);
+                    }
+                    _ => panic!("expected Step branch"),
+                }
+            }
+            _ => panic!("expected Fork item"),
+        }
+    }
+
+    #[test]
+    fn expand_fork_multi_step_flow_ref() {
+        let tmp = TempDir::new().unwrap();
+        let flows_dir = tmp.path().join(".lf/flows");
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&flows_dir).unwrap();
+        fs::create_dir_all(&steps_dir).unwrap();
+
+        // Create a multi-step flow
+        fs::write(
+            flows_dir.join("multi.yaml"),
+            "- step-a\n- step-b\n- step-c\n",
+        )
+        .unwrap();
+        fs::write(steps_dir.join("step-a.md"), "Step A").unwrap();
+        fs::write(steps_dir.join("step-b.md"), "Step B").unwrap();
+        fs::write(steps_dir.join("step-c.md"), "Step C").unwrap();
+
+        let flow = Flow {
+            name: "test".to_string(),
+            items: vec![FlowItem::Fork {
+                branches: vec![
+                    FlowItem::Step(Step {
+                        name: "multi".to_string(),
+                        directions: vec!["infra".to_string()],
+                        ..Step::named("multi")
+                    }),
+                    FlowItem::Step(Step {
+                        name: "multi".to_string(),
+                        directions: vec!["ux".to_string()],
+                        ..Step::named("multi")
+                    }),
+                ],
+            }],
+        };
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            ConcreteItem::Fork(fork) => {
+                assert_eq!(fork.branches.len(), 2);
+                // Each branch should have 3 steps from the "multi" flow
+                for branch in &fork.branches {
+                    assert_eq!(branch.steps.len(), 3, "branch should have 3 steps");
+                    assert_eq!(branch.steps[0].step.name, "step-a");
+                    assert_eq!(branch.steps[1].step.name, "step-b");
+                    assert_eq!(branch.steps[2].step.name, "step-c");
+                    assert_eq!(branch.label, "multi");
+                }
+                assert_eq!(fork.branches[0].directions, vec!["infra"]);
+                assert_eq!(fork.branches[1].directions, vec!["ux"]);
+            }
+            _ => panic!("expected Fork item"),
+        }
+    }
+
+    #[test]
+    fn expand_fork_single_step_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(steps_dir.join("reduce.md"), "Reduce things.").unwrap();
+
+        let flow = Flow {
+            name: "test".to_string(),
+            items: vec![FlowItem::Fork {
+                branches: vec![
+                    FlowItem::Step(Step {
+                        name: "reduce".to_string(),
+                        directions: vec!["infra".to_string()],
+                        ..Step::named("reduce")
+                    }),
+                    FlowItem::Step(Step {
+                        name: "reduce".to_string(),
+                        directions: vec!["ux".to_string()],
+                        ..Step::named("reduce")
+                    }),
+                ],
+            }],
+        };
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            ConcreteItem::Fork(fork) => {
+                assert_eq!(fork.branches.len(), 2);
+                // Each branch should have exactly 1 step
+                for branch in &fork.branches {
+                    assert_eq!(branch.steps.len(), 1, "single-step branch");
+                    assert_eq!(branch.steps[0].step.name, "reduce");
+                }
+            }
+            _ => panic!("expected Fork item"),
+        }
+    }
+
+    #[test]
+    fn expand_fork_rejects_nested_fork_in_flow_ref() {
+        let tmp = TempDir::new().unwrap();
+        let flows_dir = tmp.path().join(".lf/flows");
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&flows_dir).unwrap();
+        fs::create_dir_all(&steps_dir).unwrap();
+
+        // Create a flow that contains a fork
+        fs::write(
+            flows_dir.join("has-fork.yaml"),
+            r#"
+- step-a
+- fork:
+    step: step-b
+    drafts:
+      - direction: x
+      - direction: y
+"#,
+        )
+        .unwrap();
+        fs::write(steps_dir.join("step-a.md"), "Step A").unwrap();
+        fs::write(steps_dir.join("step-b.md"), "Step B").unwrap();
+
+        let flow = Flow {
+            name: "test".to_string(),
+            items: vec![FlowItem::Fork {
+                branches: vec![FlowItem::Step(Step {
+                    name: "has-fork".to_string(),
+                    directions: vec!["infra".to_string()],
+                    ..Step::named("has-fork")
+                })],
+            }],
+        };
+        let result = expand_flow(&flow, tmp.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nested fork"),
+            "expected nested fork error, got: {err}"
+        );
     }
 }

@@ -207,30 +207,13 @@ impl Surface {
         !matches!(self, Self::Headless)
     }
 
-    pub fn instructions(self) -> String {
-        let interactive = "Run mode is interactive. This is a conversation—ask questions, \
-             propose approaches, and wait for feedback before taking major actions.";
+    pub fn instructions(self) -> &'static str {
+        use crate::engine::builtins;
         match self {
-            Self::Headless => {
-                "Run mode is auto (headless). Proceed without pausing for questions. \
-                 If you need clarification, make the best assumption you can and append \
-                 any open questions to `scratch/questions.md`.\n\n\
-                 No rendering environment. Output is logged, not displayed. \
-                 Optimize for structured, parseable output over human readability."
-                    .to_string()
-            }
-            Self::Cli => interactive.to_string(),
-            Self::ConcertoMac => format!(
-                "{interactive}\n\n\
-                 Surface: Concerto (macOS). Output renders in a desktop UI, streamed \
-                 in real time. Keep responses scannable—prefer lists and short paragraphs \
-                 over walls of text."
-            ),
-            Self::ConcertoIphone => format!(
-                "{interactive}\n\n\
-                 Surface: Concerto (iPhone). Screen real estate is limited. Be concise—bullets \
-                 over paragraphs, short snippets over full files. Minimize back-and-forth."
-            ),
+            Self::Headless => builtins::SURFACE_HEADLESS,
+            Self::Cli => builtins::SURFACE_CLI,
+            Self::ConcertoMac => builtins::SURFACE_CONCERTO_MAC,
+            Self::ConcertoIphone => builtins::SURFACE_CONCERTO_IPHONE,
         }
     }
 }
@@ -1393,7 +1376,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     }
 
     // Surface (interaction + rendering guidance)
-    parts.push(components.surface.instructions());
+    parts.push(components.surface.instructions().to_string());
 
     // Wave context
     if let Some(ref wave) = components.wave {
@@ -2228,7 +2211,7 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_empty_components() {
+    fn format_prompt_default_components_has_headless_surface() {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is auto"));

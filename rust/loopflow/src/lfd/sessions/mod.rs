@@ -217,14 +217,8 @@ impl SessionManager {
         config.step = step.clone();
         config.repo_root = repo_root.to_string_lossy().to_string();
         config.cwd = cwd.as_ref().map(|path| path.to_string_lossy().to_string());
-        let surface = config
-            .surface
-            .as_deref()
-            .map_or(Surface::ConcertoMac, |value| {
-                value
-                    .parse::<Surface>()
-                    .expect("Surface parser is infallible")
-            });
+        // Sessions are primarily a Concerto feature; default to macOS surface.
+        let surface = config.surface.unwrap_or(Surface::ConcertoMac);
 
         let file_config = load_config_or_default(Some(&repo_root));
         let prepared = prepare_launch_prompt(
@@ -1194,7 +1188,7 @@ mod tests {
             .prepare_session_prompt(SessionConfig {
                 step: "design".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
-                surface: Some("concerto_iphone".to_string()),
+                surface: Some(Surface::ConcertoIphone),
                 ..Default::default()
             })
             .await

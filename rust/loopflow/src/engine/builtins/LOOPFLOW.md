@@ -27,7 +27,7 @@ Your working scope. Everything here is relevant.
 Check the surface at the top of the prompt. It determines your interaction
 pattern and output style.
 
-**cli** (default): Interactive terminal session. Ask questions, propose
+**cli**: Interactive terminal session. Ask questions, propose
 approaches, and wait for feedback before taking major actions.
 
 **headless**: Autonomous, no user. Proceed without pausing for questions.

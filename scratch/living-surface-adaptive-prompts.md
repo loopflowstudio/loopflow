@@ -52,7 +52,7 @@ Surface now flows through prompt assembly end-to-end:
 
 - DB/storage rename from `run_mode` to `surface` for agent execution records.
 - Surface-specific token budgets or context trimming.
-- CLI `--surface` override.
+- `lf run --surface` override (`lf-prompt` has `--surface` for parity tests; `lf run` hardcodes `Surface::Cli`).
 
 ## Risks and follow-ups
 

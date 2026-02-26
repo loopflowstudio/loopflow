@@ -403,12 +403,7 @@ struct WaveDetailPanel: View {
 
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Button {
-                guard hasContent else { return }
-                if isExpanded {
-                    expandedSections.remove(item.id)
-                } else {
-                    expandedSections.insert(item.id)
-                }
+                toggleSection(item.id)
             } label: {
                 HStack(alignment: .top, spacing: Spacing.sm) {
                     if hasContent {
@@ -435,24 +430,18 @@ struct WaveDetailPanel: View {
             .disabled(!hasContent)
 
             if isExpanded, let content = item.content {
+                let indent = 12 + Spacing.sm
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     Text(markdownAttributedString(content))
                         .font(Typography.caption())
                         .foregroundStyle(palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
-                        .padding(.leading, hasContent ? 12 + Spacing.sm : 0)
+                        .padding(.leading, indent)
 
                     if let filePath = item.filePath {
-                        Button {
-                            openInIDE(path: filePath)
-                        } label: {
-                            Label("Open in \(ideApp.displayName)", systemImage: "curlybraces")
-                                .font(Typography.caption())
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(palette.textSecondary)
-                        .padding(.leading, hasContent ? 12 + Spacing.sm : 0)
+                        openInIDEButton(path: filePath)
+                            .padding(.leading, indent)
                     }
                 }
             }
@@ -498,13 +487,7 @@ struct WaveDetailPanel: View {
                 }
 
                 if canExpand {
-                    Button {
-                        if isExpanded {
-                            expandedSections.remove(sectionKey)
-                        } else {
-                            expandedSections.insert(sectionKey)
-                        }
-                    } label: {
+                    Button { toggleSection(sectionKey) } label: {
                         Text(isExpanded ? "Show less" : "Show more")
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
@@ -544,6 +527,25 @@ struct WaveDetailPanel: View {
         )) ?? AttributedString(text)
     }
 
+    private func toggleSection(_ key: String) {
+        if expandedSections.contains(key) {
+            expandedSections.remove(key)
+        } else {
+            expandedSections.insert(key)
+        }
+    }
+
+    private func openInIDEButton(path: String) -> some View {
+        Button {
+            openInIDE(path: path)
+        } label: {
+            Label("Open in \(ideApp.displayName)", systemImage: "curlybraces")
+                .font(Typography.caption())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(palette.textSecondary)
+    }
+
     // MARK: - Scratch Doc Section
 
     @ViewBuilder
@@ -559,11 +561,7 @@ struct WaveDetailPanel: View {
 
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Button {
-                    if isExpanded {
-                        expandedSections.remove(sectionKey)
-                    } else {
-                        expandedSections.insert(sectionKey)
-                    }
+                    toggleSection(sectionKey)
                 } label: {
                     HStack(spacing: Spacing.sm) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -594,14 +592,7 @@ struct WaveDetailPanel: View {
                 }
 
                 if let scratchDocPath = waveContent?.scratchDocPath {
-                    Button {
-                        openInIDE(path: scratchDocPath)
-                    } label: {
-                        Label("Open in \(ideApp.displayName)", systemImage: "curlybraces")
-                            .font(Typography.caption())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(palette.textSecondary)
+                    openInIDEButton(path: scratchDocPath)
                 }
             }
             .padding(Spacing.md)

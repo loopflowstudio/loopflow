@@ -104,6 +104,22 @@ where
 }
 
 impl Store {
+    pub fn wave_state(&self) -> &dyn WaveStateStore {
+        self
+    }
+
+    pub fn execution(&self) -> &dyn ExecutionStore {
+        self
+    }
+
+    pub fn sessions(&self) -> &dyn SessionStore {
+        self
+    }
+
+    pub fn admin(&self) -> &dyn StoreAdmin {
+        self
+    }
+
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         WaveStateStore::list_waves(self, repo).await
     }
@@ -364,41 +380,18 @@ impl Store {
     }
 
     pub async fn create_session(&self, session: &Session) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session = session.clone();
-                run_sqlite(store, move |store| store.create_session(&session)).await
-            }
-            StoreBackend::Postgres(store) => store.create_session(session).await,
-        }
+        SessionStore::create_session(self, session).await
     }
 
     pub async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                run_sqlite(store, move |store| store.get_session(&session_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_session(session_id).await,
-        }
+        SessionStore::get_session(self, session_id).await
     }
 
     pub async fn get_active_session_for_wave_run(
         &self,
         wave_run_id: &str,
     ) -> StoreResult<Option<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_run_id = wave_run_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.get_active_session_for_wave_run(&wave_run_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store.get_active_session_for_wave_run(wave_run_id).await
-            }
-        }
+        SessionStore::get_active_session_for_wave_run(self, wave_run_id).await
     }
 
     pub async fn update_provider_session_id(
@@ -406,21 +399,7 @@ impl Store {
         session_id: &LfdId,
         provider_session_id: &str,
     ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                let provider_session_id = provider_session_id.to_string();
-                run_sqlite(store, move |store| {
-                    store.update_provider_session_id(&session_id, &provider_session_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_provider_session_id(session_id, provider_session_id)
-                    .await
-            }
-        }
+        SessionStore::update_provider_session_id(self, session_id, provider_session_id).await
     }
 
     pub async fn update_session_status(
@@ -429,20 +408,7 @@ impl Store {
         status: SessionStatus,
         ended_at: Option<i64>,
     ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                run_sqlite(store, move |store| {
-                    store.update_session_status(&session_id, status, ended_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_session_status(session_id, status, ended_at)
-                    .await
-            }
-        }
+        SessionStore::update_session_status(self, session_id, status, ended_at).await
     }
 
     pub async fn append_session_event(
@@ -452,37 +418,14 @@ impl Store {
         event: &SessionEvent,
         created_at: i64,
     ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                let event = event.clone();
-                run_sqlite(store, move |store| {
-                    store.append_session_event(&session_id, seq, &event, created_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .append_session_event(session_id, seq, event, created_at)
-                    .await
-            }
-        }
+        SessionStore::append_session_event(self, session_id, seq, event, created_at).await
     }
 
     pub async fn list_sessions_by_statuses(
         &self,
         statuses: &[SessionStatus],
     ) -> StoreResult<Vec<Session>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let statuses = statuses.to_vec();
-                run_sqlite(store, move |store| {
-                    store.list_sessions_by_statuses(&statuses)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_sessions_by_statuses(statuses).await,
-        }
+        SessionStore::list_sessions_by_statuses(self, statuses).await
     }
 
     pub async fn list_session_events(
@@ -490,16 +433,7 @@ impl Store {
         session_id: &LfdId,
         after_seq: Option<i64>,
     ) -> StoreResult<Vec<PersistedSessionEvent>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let session_id = session_id.clone();
-                run_sqlite(store, move |store| {
-                    store.list_session_events(&session_id, after_seq)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_session_events(session_id, after_seq).await,
-        }
+        SessionStore::list_session_events(self, session_id, after_seq).await
     }
 
     pub async fn health_check(&self) -> StoreResult<()> {
@@ -613,6 +547,43 @@ pub trait ExecutionStore: Send + Sync {
     async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<AgentRun>>;
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
+}
+
+#[async_trait::async_trait]
+pub trait SessionStore: Send + Sync {
+    async fn create_session(&self, session: &Session) -> StoreResult<()>;
+    async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>>;
+    async fn get_active_session_for_wave_run(
+        &self,
+        wave_run_id: &str,
+    ) -> StoreResult<Option<Session>>;
+    async fn update_provider_session_id(
+        &self,
+        session_id: &LfdId,
+        provider_session_id: &str,
+    ) -> StoreResult<()>;
+    async fn update_session_status(
+        &self,
+        session_id: &LfdId,
+        status: SessionStatus,
+        ended_at: Option<i64>,
+    ) -> StoreResult<()>;
+    async fn append_session_event(
+        &self,
+        session_id: &LfdId,
+        seq: i64,
+        event: &SessionEvent,
+        created_at: i64,
+    ) -> StoreResult<()>;
+    async fn list_sessions_by_statuses(
+        &self,
+        statuses: &[SessionStatus],
+    ) -> StoreResult<Vec<Session>>;
+    async fn list_session_events(
+        &self,
+        session_id: &LfdId,
+        after_seq: Option<i64>,
+    ) -> StoreResult<Vec<PersistedSessionEvent>>;
 }
 
 #[async_trait::async_trait]
@@ -1277,6 +1248,148 @@ impl ExecutionStore for Store {
                 run_sqlite(store, |store| store.fail_orphaned_runs()).await
             }
             StoreBackend::Postgres(store) => store.fail_orphaned_runs().await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStore for Store {
+    async fn create_session(&self, session: &Session) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session = session.clone();
+                run_sqlite(store, move |store| store.create_session(&session)).await
+            }
+            StoreBackend::Postgres(store) => store.create_session(session).await,
+        }
+    }
+
+    async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                run_sqlite(store, move |store| store.get_session(&session_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_session(session_id).await,
+        }
+    }
+
+    async fn get_active_session_for_wave_run(
+        &self,
+        wave_run_id: &str,
+    ) -> StoreResult<Option<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_run_id = wave_run_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.get_active_session_for_wave_run(&wave_run_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store.get_active_session_for_wave_run(wave_run_id).await
+            }
+        }
+    }
+
+    async fn update_provider_session_id(
+        &self,
+        session_id: &LfdId,
+        provider_session_id: &str,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                let provider_session_id = provider_session_id.to_string();
+                run_sqlite(store, move |store| {
+                    store.update_provider_session_id(&session_id, &provider_session_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_provider_session_id(session_id, provider_session_id)
+                    .await
+            }
+        }
+    }
+
+    async fn update_session_status(
+        &self,
+        session_id: &LfdId,
+        status: SessionStatus,
+        ended_at: Option<i64>,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                run_sqlite(store, move |store| {
+                    store.update_session_status(&session_id, status, ended_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .update_session_status(session_id, status, ended_at)
+                    .await
+            }
+        }
+    }
+
+    async fn append_session_event(
+        &self,
+        session_id: &LfdId,
+        seq: i64,
+        event: &SessionEvent,
+        created_at: i64,
+    ) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                let event = event.clone();
+                run_sqlite(store, move |store| {
+                    store.append_session_event(&session_id, seq, &event, created_at)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .append_session_event(session_id, seq, event, created_at)
+                    .await
+            }
+        }
+    }
+
+    async fn list_sessions_by_statuses(
+        &self,
+        statuses: &[SessionStatus],
+    ) -> StoreResult<Vec<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let statuses = statuses.to_vec();
+                run_sqlite(store, move |store| {
+                    store.list_sessions_by_statuses(&statuses)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_sessions_by_statuses(statuses).await,
+        }
+    }
+
+    async fn list_session_events(
+        &self,
+        session_id: &LfdId,
+        after_seq: Option<i64>,
+    ) -> StoreResult<Vec<PersistedSessionEvent>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                run_sqlite(store, move |store| {
+                    store.list_session_events(&session_id, after_seq)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_session_events(session_id, after_seq).await,
         }
     }
 }

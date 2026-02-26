@@ -387,79 +387,23 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     }
 }
 
-#[derive(Debug, Clone)]
-enum LaunchHarnessAdapter {
-    Claude { model_variant: Option<String> },
-    Codex { model_variant: Option<String> },
-    Gemini { model_variant: Option<String> },
-    Opencode { model_variant: Option<String> },
-    FallbackClaude { model: String },
-}
-
-impl LaunchHarnessAdapter {
-    fn select(model: &str) -> Self {
-        let (backend, variant) = parse_model(model);
-        match backend.as_str() {
-            "claude" => Self::Claude {
-                model_variant: variant,
-            },
-            "codex" => Self::Codex {
-                model_variant: resolve_codex_model(model),
-            },
-            "gemini" => Self::Gemini {
-                model_variant: variant,
-            },
-            "opencode" => Self::Opencode {
-                model_variant: variant,
-            },
-            _ => Self::FallbackClaude {
-                model: model.to_string(),
-            },
-        }
-    }
-
-    fn build_command(
-        &self,
-        launch: &AgentConfig,
-        process: &ProcessConfig,
-        capabilities: &AgentCapabilities,
-    ) -> Vec<String> {
-        match self {
-            Self::Claude { model_variant } => {
-                build_claude_command(launch, process, capabilities, model_variant.as_deref())
-            }
-            Self::Codex { model_variant } => {
-                build_codex_command(launch, process, model_variant.as_deref())
-            }
-            Self::Gemini { model_variant } => {
-                build_gemini_command(launch, process, model_variant.as_deref())
-            }
-            Self::Opencode { model_variant } => {
-                build_opencode_command(process, model_variant.as_deref())
-            }
-            Self::FallbackClaude { model } => {
-                build_claude_command(launch, process, capabilities, Some(model.as_str()))
+/// Apply harness-specific environment variables to a command.
+fn apply_harness_env(harness: &str, cmd: &mut Command, process: &ProcessConfig) {
+    match harness {
+        "gemini" => {
+            if let Some(ref context_file) = process.context_file {
+                cmd.env(
+                    "GEMINI_SYSTEM_MD",
+                    context_file.to_string_lossy().to_string(),
+                );
             }
         }
-    }
-
-    fn apply_env(&self, cmd: &mut Command, process: &ProcessConfig) {
-        match self {
-            Self::Gemini { .. } => {
-                if let Some(ref context_file) = process.context_file {
-                    cmd.env(
-                        "GEMINI_SYSTEM_MD",
-                        context_file.to_string_lossy().to_string(),
-                    );
-                }
+        "opencode" => {
+            if let Some(env_val) = build_opencode_env(process) {
+                cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
             }
-            Self::Opencode { .. } => {
-                if let Some(env_val) = build_opencode_env(process) {
-                    cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
-                }
-            }
-            _ => {}
         }
+        _ => {}
     }
 }
 
@@ -470,8 +414,16 @@ pub fn build_model_command(
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
     let model = launch.model.as_deref().unwrap_or("claude");
-    let adapter = LaunchHarnessAdapter::select(model);
-    adapter.build_command(launch, process, capabilities)
+    let (harness, variant) = parse_model(model);
+    let variant = variant.as_deref();
+    match harness.as_str() {
+        "codex" => build_codex_command(launch, process, variant),
+        "gemini" => build_gemini_command(launch, process, variant),
+        "opencode" => build_opencode_command(process, variant),
+        "claude" => build_claude_command(launch, process, capabilities, variant),
+        // Unknown harness: fall back to Claude with the full model string as variant.
+        _ => build_claude_command(launch, process, capabilities, Some(model)),
+    }
 }
 
 /// Build a full CLI command (including prompt) for a model.
@@ -494,9 +446,7 @@ pub fn launch_agent(
     capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
-    let model = launch.model.as_deref().unwrap_or("claude");
-    let adapter = LaunchHarnessAdapter::select(model);
-    let cmd_args = adapter.build_command(launch, process, capabilities);
+    let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
         return Err(CoreError::ExecutionFailed("Empty command".to_string()));
     }
@@ -532,7 +482,10 @@ pub fn launch_agent(
     cmd.env_remove("OPENAI_API_KEY");
     cmd.env_remove("GEMINI_API_KEY");
 
-    adapter.apply_env(&mut cmd, process);
+    // Harness-specific environment setup.
+    let model = launch.model.as_deref().unwrap_or("claude");
+    let (harness, _) = parse_model(model);
+    apply_harness_env(&harness, &mut cmd, process);
 
     propagate_rlm_env(&mut cmd);
 
@@ -1288,5 +1241,19 @@ mod tests {
         let process = auto_process();
         let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
         assert!(!cmd.iter().any(|arg| arg.contains("model=\"codex\"")));
+    }
+
+    #[test]
+    fn build_model_command_falls_back_to_claude_for_unknown_model() {
+        let unknown_model = "gpt-5.1-codex-high";
+        let launch = AgentConfig {
+            model: Some(unknown_model.to_string()),
+            ..default_launch()
+        };
+        let process = auto_process();
+        let cmd = build_model_command(&launch, &process, &AgentCapabilities::default());
+        assert_eq!(cmd.first(), Some(&"claude".to_string()));
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&unknown_model.to_string()));
     }
 }

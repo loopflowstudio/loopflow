@@ -57,6 +57,7 @@ When editing `*.rs` files:
 - Run `cargo clippy -- -D warnings` locally; CI treats warnings as errors
 - Dead code must be deleted, not commented out (use git for history)
 - If code is intentionally unused (e.g., for FFI/PyO3), use `#[allow(dead_code)]` with a comment explaining why
+- Avoid `use super::*` in submodules; use explicit imports so dependencies between modules are visible
 - Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
 - Use `thiserror` for library error types callers need to match on
 - Use `expect("why this is safe")` over `unwrap()` outside tests

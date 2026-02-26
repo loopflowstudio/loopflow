@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::Config;
 use crate::engine::error::CoreError;
+use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     default_gather_sources, drop_native_instruction_docs, format_context_prompt, format_prompt,
@@ -26,6 +27,7 @@ pub struct ContextSourceOverrides {
 pub struct LaunchPromptInput {
     pub repo_root: PathBuf,
     pub step: Option<String>,
+    pub resolved_step: Option<Step>,
     pub surface: Surface,
     pub directions: Vec<String>,
     pub area: Option<String>,
@@ -59,8 +61,9 @@ pub fn prepare_launch_prompt(
     let LaunchPromptInput {
         repo_root,
         step,
+        resolved_step,
         surface,
-        directions: requested_directions,
+        directions: mut requested_directions,
         area,
         wave,
         message,
@@ -74,6 +77,10 @@ pub fn prepare_launch_prompt(
         summary,
         client_context,
     } = input;
+
+    if let Some(step) = resolved_step.as_ref() {
+        requested_directions = merge_directions(&step.directions, &requested_directions);
+    }
 
     let config_directions: &[String] = if include_config_directions {
         config.direction.as_deref().unwrap_or_default()
@@ -97,7 +104,7 @@ pub fn prepare_launch_prompt(
 
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
-        step,
+        step: if resolved_step.is_some() { None } else { step },
         message,
         surface,
         directions,
@@ -108,6 +115,9 @@ pub fn prepare_launch_prompt(
     };
 
     let mut gathered = gather_context(&opts)?;
+    if let Some(step) = resolved_step {
+        gathered.components_mut().step = Some(step);
+    }
     drop_native_instruction_docs(gathered.components_mut(), &repo_root);
 
     if let Some(summary) = summary {
@@ -318,5 +328,44 @@ Test step body.
                 .contains("workflow forward"),
             "step action_style should shape guidance"
         );
+    }
+
+    #[test]
+    fn prepare_launch_prompt_uses_resolved_skill_step_without_loading_by_name() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                step: Some("npx:skill-creator".to_string()),
+                resolved_step: Some(Step {
+                    name: "npx:skill-creator".to_string(),
+                    model: Some("codex:o3".to_string()),
+                    directions: vec!["thorough".to_string()],
+                    action_style: Some("procedural".to_string()),
+                    interactive: Some(true),
+                    content: Some("Skill body".to_string()),
+                }),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(
+            prepared
+                .components
+                .step
+                .as_ref()
+                .map(|step| step.name.as_str()),
+            Some("npx:skill-creator")
+        );
+        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
+        assert!(prepared
+            .components
+            .directions
+            .iter()
+            .any(|direction| direction.name == "thorough"));
     }
 }

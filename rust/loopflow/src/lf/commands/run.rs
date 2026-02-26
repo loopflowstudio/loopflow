@@ -88,6 +88,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         LaunchPromptInput {
             repo_root: repo_root.clone(),
             step: step.map(|value| value.to_string()),
+            resolved_step: discovered_step.clone(),
             surface: Surface::Cli,
             directions: cli.direction.clone(),
             area: cli
@@ -231,9 +232,9 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     seed_rlm_env(&built.config);
 
-    // Inject steps and directions as .claude/commands/ for Claude agents.
+    // Inject steps and directions as .agents/skills/ for agent auto-discovery.
     // Default off for CLI; always on for lfd. Enable with `inject_skills: true` in .lf/config.yaml.
-    let injected_skills = if built.config.inject_skills && built.backend == "claude" {
+    let injected_skills = if built.config.inject_skills {
         crate::engine::skills::inject_skills(&built.repo_root, &built.repo_root)
     } else {
         Vec::new()
@@ -265,19 +266,13 @@ pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {
     let first = args.first().ok_or_else(|| anyhow!("no step specified"))?;
 
     let mut step = first.clone();
-    let mut step_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
+    let step_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
 
+    // Trailing colon is a separator: `implement: add auth` → step="implement"
     if let Some(stripped) = step.strip_suffix(':') {
         step = stripped.to_string();
-    } else if let Some((name, rest)) = step
-        .split_once(':')
-        .map(|(name, rest)| (name.to_string(), rest.to_string()))
-    {
-        step = name;
-        if !rest.is_empty() {
-            step_args.insert(0, rest);
-        }
     }
+    // Inline colons are skill source prefixes: `npx:explain-code` stays intact.
 
     if step.is_empty() {
         return Err(anyhow!("no step specified"));
@@ -303,10 +298,18 @@ mod tests {
     }
 
     #[test]
-    fn split_step_args_handles_inline_suffix() {
-        let args = vec!["fix:bug".to_string(), "now".to_string()];
+    fn split_step_args_preserves_skill_prefix() {
+        let args = vec!["npx:explain-code".to_string()];
         let (step, rest) = split_step_args(&args).expect("split args");
-        assert_eq!(step, "fix");
-        assert_eq!(rest, vec!["bug".to_string(), "now".to_string()]);
+        assert_eq!(step, "npx:explain-code");
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn split_step_args_preserves_skill_prefix_with_args() {
+        let args = vec!["sp:brainstorm".to_string(), "auth flow".to_string()];
+        let (step, rest) = split_step_args(&args).expect("split args");
+        assert_eq!(step, "sp:brainstorm");
+        assert_eq!(rest, vec!["auth flow".to_string()]);
     }
 }

@@ -1,0 +1,11 @@
+---
+name: direction-living
+description: Software that reacts to its environment, itself, and its collaborative humans. Systems that learn continuously — from their own runs, from changing conditions, from human feedback — and rewrite themselves to fit.
+loopflow: true
+user-invocable: false
+---
+Software that reacts to its environment, itself, and its collaborative humans. Systems that learn continuously — from their own runs, from changing conditions, from human feedback — and rewrite themselves to fit.
+Agency grows on substrates rich in agency. Small competent parts compose into wholes greater than their sum. When components align, the system wakes up — not because it was programmed to, but because the conditions were right.
+The unit of life is the wave, not the agent. Agents are ephemeral. Waves persist, remember, adapt. The wave curates context so each agent starts sharp, not bloated with history. Self-meta-programming: the system edits its own prompts, reshapes its own tools, rebuilds its own environment.
+Hand-designed solutions are eventually replaced by learned ones. Open-ended systems never plateau because the environment keeps changing. Emergent capabilities arise from good conditions, not explicit programming.
+Consider: does this keep working when no one is watching? Can the system rewrite itself to handle a situation it's never seen? Is it learning, or just executing?

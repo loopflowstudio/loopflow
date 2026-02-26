@@ -58,7 +58,7 @@ struct SessionRuntime {
     events_tx: broadcast::Sender<PersistedSessionEvent>,
     next_seq: AtomicI64,
     seeded_user_prompt: Option<String>,
-    /// Paths of skill files injected into .claude/commands/ for cleanup.
+    /// Paths of injected skill directories for cleanup.
     injected_skills: Mutex<Vec<PathBuf>>,
 }
 
@@ -237,6 +237,7 @@ impl SessionManager {
             LaunchPromptInput {
                 repo_root: repo_root.to_path_buf(),
                 step: Some(step.clone()),
+                resolved_step: None,
                 surface,
                 directions: config.directions.clone(),
                 area: config.area.clone(),
@@ -533,20 +534,19 @@ impl SessionManager {
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
-            // Inject steps and directions as .claude/commands/ for Claude agents.
+            // Inject steps and directions as .agents/skills/ for agent auto-discovery.
             // repo_root: where to read .lf/steps/ and .lf/directions/.
-            // cwd: where to write .claude/commands/ (Claude Code discovers them relative to cwd).
-            if harness_name == "claude" {
-                if let Some(cwd) = &launch.cwd {
-                    let injected = crate::engine::skills::inject_skills(&repo_root, cwd);
-                    if !injected.is_empty() {
-                        tracing::debug!(
-                            session_id = %session_id,
-                            count = injected.len(),
-                            "injected skills into .claude/commands/"
-                        );
-                        *runtime.injected_skills.lock().await = injected;
-                    }
+            // cwd: where to write .agents/skills/ (agents discover relative to cwd).
+            if let Some(cwd) = &launch.cwd {
+                let injected = crate::engine::skills::inject_skills(&repo_root, cwd);
+                if !injected.is_empty() {
+                    tracing::debug!(
+                        session_id = %session_id,
+                        harness = %harness_name,
+                        count = injected.len(),
+                        "injected skills into .agents/skills/"
+                    );
+                    *runtime.injected_skills.lock().await = injected;
                 }
             }
 

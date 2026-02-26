@@ -1,7 +1,7 @@
 import Foundation
 
 public enum WaveContentParser {
-    public static func parse(repoRoot: URL, waveName: String) -> WaveContent? {
+    public static func parse(repoRoot: URL, waveName: String, branch: String? = nil) -> WaveContent? {
         let normalizedName = waveName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { return nil }
 
@@ -12,12 +12,14 @@ public enum WaveContentParser {
         let readmeURL = waveDirectory.appendingPathComponent("README.md", isDirectory: false)
         let readmeSections = parseReadmeSections(at: readmeURL)
         let roadmapItems = parseRoadmapItems(in: waveDirectory)
+        let (scratchDoc, scratchDocPath) = parseScratchDoc(repoRoot: repoRoot, branch: branch)
 
         if readmeSections.vision == nil,
            readmeSections.goals == nil,
            readmeSections.risks == nil,
            readmeSections.metrics == nil,
-           roadmapItems.isEmpty {
+           roadmapItems.isEmpty,
+           scratchDoc == nil {
             return nil
         }
 
@@ -26,7 +28,9 @@ public enum WaveContentParser {
             goals: readmeSections.goals,
             risks: readmeSections.risks,
             metrics: readmeSections.metrics,
-            roadmapItems: roadmapItems
+            roadmapItems: roadmapItems,
+            scratchDoc: scratchDoc,
+            scratchDocPath: scratchDocPath
         )
     }
 
@@ -141,7 +145,49 @@ public enum WaveContentParser {
             $0.trimmingCharacters(in: .whitespaces) == "## Shipped"
         }
 
-        return RoadmapItem(id: stem, number: number, title: title, isShipped: isShipped)
+        let content: String? = isShipped ? nil : extractContent(from: lines)
+
+        return RoadmapItem(
+            id: stem,
+            number: number,
+            title: title,
+            isShipped: isShipped,
+            content: content,
+            filePath: fileURL.path
+        )
+    }
+
+    private static func extractContent(from lines: [String]) -> String? {
+        // Drop lines up to and including the first `# ` heading, take up to 20 lines after.
+        var foundHeading = false
+        var contentLines: [String] = []
+
+        for line in lines {
+            if !foundHeading {
+                if line.trimmingCharacters(in: .whitespaces).hasPrefix("# ") {
+                    foundHeading = true
+                }
+                continue
+            }
+            if contentLines.count >= 20 { break }
+            contentLines.append(line)
+        }
+
+        let text = contentLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private static func parseScratchDoc(repoRoot: URL, branch: String?) -> (String?, String?) {
+        guard let branch, !branch.isEmpty else { return (nil, nil) }
+        let scratchURL = repoRoot
+            .appendingPathComponent("scratch", isDirectory: true)
+            .appendingPathComponent("\(branch).md", isDirectory: false)
+        guard let text = try? String(contentsOf: scratchURL, encoding: .utf8) else {
+            return (nil, nil)
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return (nil, nil) }
+        return (trimmed, scratchURL.path)
     }
 
     private static func firstHeading(in lines: [String]) -> String? {

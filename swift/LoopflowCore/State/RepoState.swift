@@ -1153,9 +1153,13 @@ public final class RepoState {
             return
         }
 
-        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name)
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
         _ = waveStore.applyOptimistic(waveId) { $0.content = content }
         waveStore.commitMutation(waveId)
+    }
+
+    public func fileDiff(waveId: String, path: String) async throws -> String {
+        try await waveService.fileDiff(waveId: waveId, path: path)
     }
 
     private func makeWaveViewModel(api wave: Wave) -> WaveViewModel {

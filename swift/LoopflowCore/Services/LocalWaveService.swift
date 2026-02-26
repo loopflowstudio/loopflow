@@ -540,6 +540,22 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    public func fileDiff(waveId: String, path: String) async throws -> String {
+        let url = baseURL
+            .appendingPathComponent("waves")
+            .appendingPathComponent(waveId)
+            .appendingPathComponent("diff")
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "path", value: path)]
+        let requestURL = components.url!
+        let (data, response) = try await performGet(requestURL)
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return json?["diff"] as? String ?? ""
+    }
+
     public func checkConnection() async throws {
         let url = baseURL.appendingPathComponent("status")
         let (_, response) = try await performGet(url)

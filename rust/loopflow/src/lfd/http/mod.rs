@@ -98,6 +98,10 @@ pub fn router(state: HttpState) -> Router {
                 .patch(waves::update_wave_handler)
                 .delete(waves::delete_wave_handler),
         )
+        .route(
+            "/waves/{wave_id}/diff",
+            get(waves::get_wave_file_diff_handler),
+        )
         .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
             "/waves/{wave_id}/stimulus",

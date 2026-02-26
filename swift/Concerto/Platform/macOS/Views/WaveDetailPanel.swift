@@ -28,6 +28,9 @@ struct WaveDetailPanel: View {
     @State private var currentTime = Date()
     @State private var selectedTab: DetailTab = .current
     @State private var hasAppliedScreenshotTab = false
+    @State private var expandedSections: Set<String> = []
+    @State private var expandedDiffFiles: Set<String> = []
+    @State private var fileDiffs: [String: String] = [:]
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
@@ -160,6 +163,8 @@ struct WaveDetailPanel: View {
                                 if wave.status == .idle {
                                     goalsSection
                                 }
+
+                                scratchDocSection
 
                                 if wave.status == .failed {
                                     failedRunDetail
@@ -380,18 +385,7 @@ struct WaveDetailPanel: View {
 
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(roadmapItems) { item in
-                        HStack(alignment: .top, spacing: Spacing.sm) {
-                            Image(systemName: item.isShipped ? "checkmark.circle.fill" : "circle")
-                                .font(Typography.caption())
-                                .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
-
-                            Text("\(String(format: "%02d", item.number)) · \(item.title)")
-                                .font(Typography.caption())
-                                .foregroundStyle(palette.text)
-                                .lineLimit(1)
-
-                            Spacer()
-                        }
+                        roadmapItemRow(item)
                     }
                 }
                 .padding(.vertical, Spacing.xs)
@@ -403,28 +397,119 @@ struct WaveDetailPanel: View {
     }
 
     @ViewBuilder
+    private func roadmapItemRow(_ item: RoadmapItem) -> some View {
+        let hasContent = item.content != nil
+        let isExpanded = expandedSections.contains(item.id)
+
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Button {
+                guard hasContent else { return }
+                if isExpanded {
+                    expandedSections.remove(item.id)
+                } else {
+                    expandedSections.insert(item.id)
+                }
+            } label: {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    if hasContent {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(palette.textSecondary)
+                            .frame(width: 12, alignment: .center)
+                            .padding(.top, 3)
+                    }
+
+                    Image(systemName: item.isShipped ? "checkmark.circle.fill" : "circle")
+                        .font(Typography.caption())
+                        .foregroundStyle(item.isShipped ? Color.statusSuccess : palette.textSecondary)
+
+                    Text("\(String(format: "%02d", item.number)) · \(item.title)")
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.text)
+                        .lineLimit(1)
+
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasContent)
+
+            if isExpanded, let content = item.content {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text(markdownAttributedString(content))
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(.leading, hasContent ? 12 + Spacing.sm : 0)
+
+                    if let filePath = item.filePath {
+                        Button {
+                            openInIDE(path: filePath)
+                        } label: {
+                            Label("Open in \(ideApp.displayName)", systemImage: "curlybraces")
+                                .font(Typography.caption())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(palette.textSecondary)
+                        .padding(.leading, hasContent ? 12 + Spacing.sm : 0)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private func contentCard(title: String, icon: String, text: String?) -> some View {
         if let text, !text.isEmpty {
+            let sectionKey = title.lowercased()
+            let isExpanded = expandedSections.contains(sectionKey)
+            let allLines = contentLines(from: text, truncate: false)
+            let canExpand = allLines.count > 6
+
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Label(title, systemImage: icon)
                     .font(Typography.caption())
                     .fontWeight(.medium)
                     .foregroundStyle(palette.textSecondary)
 
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(Array(contentLines(from: text).enumerated()), id: \.offset) { _, line in
-                        HStack(alignment: .top, spacing: Spacing.xs) {
-                            Circle()
-                                .fill(palette.textSecondary.opacity(0.6))
-                                .frame(width: 4, height: 4)
-                                .padding(.top, 6)
+                if isExpanded {
+                    Text(markdownAttributedString(text))
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(Array(contentLines(from: text).enumerated()), id: \.offset) { _, line in
+                            HStack(alignment: .top, spacing: Spacing.xs) {
+                                Circle()
+                                    .fill(palette.textSecondary.opacity(0.6))
+                                    .frame(width: 4, height: 4)
+                                    .padding(.top, 6)
 
-                            Text(line)
-                                .font(Typography.caption())
-                                .foregroundStyle(palette.text)
-                                .fixedSize(horizontal: false, vertical: true)
+                                Text(line)
+                                    .font(Typography.caption())
+                                    .foregroundStyle(palette.text)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
+                }
+
+                if canExpand {
+                    Button {
+                        if isExpanded {
+                            expandedSections.remove(sectionKey)
+                        } else {
+                            expandedSections.insert(sectionKey)
+                        }
+                    } label: {
+                        Text(isExpanded ? "Show less" : "Show more")
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(Spacing.md)
@@ -433,7 +518,7 @@ struct WaveDetailPanel: View {
         }
     }
 
-    private func contentLines(from text: String) -> [String] {
+    private func contentLines(from text: String, truncate: Bool = true) -> [String] {
         let lines = text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -449,7 +534,80 @@ struct WaveDetailPanel: View {
                 return line
             }
 
-        return Array(lines.prefix(6))
+        return truncate ? Array(lines.prefix(6)) : lines
+    }
+
+    private func markdownAttributedString(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+    }
+
+    // MARK: - Scratch Doc Section
+
+    @ViewBuilder
+    private var scratchDocSection: some View {
+        if let scratchDoc = waveContent?.scratchDoc {
+            let sectionKey = "design"
+            let isExpanded = expandedSections.contains(sectionKey)
+            let previewLines = scratchDoc
+                .components(separatedBy: .newlines)
+                .prefix(5)
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Button {
+                    if isExpanded {
+                        expandedSections.remove(sectionKey)
+                    } else {
+                        expandedSections.insert(sectionKey)
+                    }
+                } label: {
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(palette.textSecondary)
+
+                        Label("Design", systemImage: "doc.text")
+                            .font(Typography.caption())
+                            .fontWeight(.medium)
+                            .foregroundStyle(palette.textSecondary)
+
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if isExpanded {
+                    Text(markdownAttributedString(scratchDoc))
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else {
+                    Text(markdownAttributedString(previewLines))
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(5)
+                }
+
+                if let scratchDocPath = waveContent?.scratchDocPath {
+                    Button {
+                        openInIDE(path: scratchDocPath)
+                    } label: {
+                        Label("Open in \(ideApp.displayName)", systemImage: "curlybraces")
+                            .font(Typography.caption())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.textSecondary)
+                }
+            }
+            .padding(Spacing.md)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        }
     }
 
     // MARK: - Quick Actions Bar
@@ -656,7 +814,7 @@ struct WaveDetailPanel: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(stat.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
-                    coloredDiffStatLine(line)
+                    diffStatFileLine(line)
                 }
             }
             .font(Typography.code(11))
@@ -665,6 +823,77 @@ struct WaveDetailPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        }
+    }
+
+    @ViewBuilder
+    private func diffStatFileLine(_ line: String) -> some View {
+        let filePath = extractFilePath(from: line)
+        let isFile = filePath != nil
+        let isExpanded = filePath.map { expandedDiffFiles.contains($0) } ?? false
+
+        VStack(alignment: .leading, spacing: 0) {
+            if isFile, let path = filePath {
+                Button {
+                    if isExpanded {
+                        expandedDiffFiles.remove(path)
+                    } else {
+                        expandedDiffFiles.insert(path)
+                        if fileDiffs[path] == nil {
+                            loadFileDiff(path: path)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(palette.textSecondary)
+                            .frame(width: 10, alignment: .center)
+
+                        coloredDiffStatLine(line)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if isExpanded {
+                    if let diff = fileDiffs[path], !diff.isEmpty {
+                        DiffLinesView(diff: diff)
+                            .padding(.leading, Spacing.xl)
+                            .padding(.vertical, Spacing.xs)
+                    } else {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .padding(.leading, Spacing.xl)
+                            .padding(.vertical, Spacing.xs)
+                    }
+                }
+            } else {
+                coloredDiffStatLine(line)
+            }
+        }
+    }
+
+    private func extractFilePath(from line: String) -> String? {
+        guard let pipeRange = line.range(of: " | ") else { return nil }
+        let path = String(line[line.startIndex..<pipeRange.lowerBound])
+            .trimmingCharacters(in: .whitespaces)
+        return path.isEmpty ? nil : path
+    }
+
+    private func loadFileDiff(path: String) {
+        Task {
+            do {
+                let diff = try await repoState.fileDiff(waveId: wave.id, path: path)
+                await MainActor.run {
+                    fileDiffs[path] = diff
+                }
+            } catch {
+                await MainActor.run {
+                    fileDiffs[path] = ""
+                }
+            }
         }
     }
 

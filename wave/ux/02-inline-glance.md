@@ -6,31 +6,16 @@ Inline the glance, link to the deep dive. Eliminate context-switches to GitHub/C
 
 ## What to build
 
-Four features that make diffs and wave content visible inside Concerto. G1 is done — the remaining three build on it.
+All items picked. G1 shipped. G2–G5 in progress — see `scratch/ux-inline-glance.md`.
 
 ### ~~File items show diffs (G1)~~ — done
 
-`DiffLinesView` renders colored inline diffs. `synthesize_edit_diff()` in the Claude harness populates `FileEdit.diff` from Edit tool inputs. Write/NotebookEdit leave diff nil (no before-state). Limitations: no context lines, no hunk headers, `replace_all` shows one instance. G2's `git diff` approach addresses these.
+`DiffLinesView` renders colored inline diffs. `synthesize_edit_diff()` in the Claude harness populates `FileEdit.diff` from Edit tool inputs.
 
-### Wave diff stat per-file expand (G2)
-
-Each file line in `diffStatSection` becomes tappable. Tap → expand to show that file's full diff inline (reuses `DiffLinesView`).
-
-Requires lfd: lazy-load endpoint `GET /waves/:id/diff/:path` serving per-file unified diff. Don't send full diffs in every wave poll.
-
-### Roadmap item expansion (G3)
-
-Tapping a roadmap item expands to show first ~20 lines of its markdown. "Open in Cursor" link at bottom.
-
-Add `content: String?` to `RoadmapItem`. `WaveContentParser` already reads these files — include truncated raw content.
-
-### Wave README full content (G4)
-
-Add "Show more" toggle to vision/goals/risks sections. Default: condensed bullet view (as today). Expanded: full section text with basic markdown rendering.
-
-### Scratch doc glance (G5)
-
-If `scratch/<branch>.md` exists in the worktree, show a "Design" section in Current tab. Condensed: first 5 lines. Expandable: full content with markdown rendering. "Open in Cursor" link.
+### ~~Wave diff stat per-file expand (G2)~~ — in progress
+### ~~Roadmap item expansion (G3)~~ — in progress
+### ~~Wave README full content (G4)~~ — in progress
+### ~~Scratch doc glance (G5)~~ — in progress
 
 ## Constraints
 

@@ -2,8 +2,8 @@ use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ActivationSource, AgentRun, AgentStatus, ChatMemoryBlock,
-    ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-    CiFixKind, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot,
+    ChatMessage, Chord, CiFixKind, LivePrState, LivePullRequestState, PendingActivation,
+    PullRequest, Stimulus, StimulusKind, Summary, Wave, WaveRun, WaveRunKind, WaveRunSnapshot,
     WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 

@@ -553,7 +553,10 @@ impl WaveExecutor {
             .flatten()
             .is_some()
         {
-            let reason = format!("listen stimulus {} deferred: wave already running", stimulus.id);
+            let reason = format!(
+                "listen stimulus {} deferred: wave already running",
+                stimulus.id
+            );
             return matches!(
                 enqueue_pending_activation(
                     &self.store,
@@ -898,7 +901,7 @@ mod tests {
     use crate::lfd::sessions::types::{Session, SessionConfig};
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{ActivationSource, Stimulus, StimulusKind, WaveRunSnapshot};
+    use crate::lfd::types::{Stimulus, StimulusKind, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -1168,29 +1171,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_enqueues_listen_activation_on_completion() {
-        let tmp = tempdir().expect("tempdir");
-        let repo = tmp.path();
+    async fn execute_starts_listen_wave_on_completion() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/flows/test-flow.yaml", "- step-a\n");
+        repo.create_file(".lf/steps/step-a.md", "do step a");
+        repo.stage_all();
+        repo.commit("add flow fixtures");
 
-        let flow_dir = repo.join(".lf/flows");
-        std::fs::create_dir_all(&flow_dir).unwrap();
-        std::fs::write(flow_dir.join("test-flow.yaml"), "- step-a\n").unwrap();
-        let step_dir = repo.join(".lf/steps");
-        std::fs::create_dir_all(&step_dir).unwrap();
-        std::fs::write(step_dir.join("step-a.md"), "do step a").unwrap();
-
-        let db_path = tmp.path().join("test.db");
+        let db_path = tempdir().expect("tempdir").path().join("test.db");
         let store: SharedStore = Arc::new(
             open_store(&StorageConfig::sqlite(db_path))
                 .await
                 .expect("store should open"),
         );
 
-        let (source_wave_id, source_run_id) = create_wave_and_run(&store, repo, "test-flow").await;
+        let (source_wave_id, source_run_id) =
+            create_wave_and_run(&store, repo.path(), "test-flow").await;
         let target_wave = Wave {
             id: LfdId::new(),
             name: "target-wave".to_string(),
-            repo: repo.to_string_lossy().to_string(),
+            repo: repo.path().to_string_lossy().to_string(),
             flow: "test-flow".to_string(),
             direction: vec![],
             area: vec![],
@@ -1235,13 +1235,33 @@ mod tests {
             .await
             .expect("execute source run");
 
+        let runs = store
+            .list_wave_runs(Some(&target_wave.id), None)
+            .await
+            .expect("listener runs");
+        assert!(
+            runs.iter().any(|run| run.wave_id == target_wave.id),
+            "listener should receive a run"
+        );
+
         let pending = store
             .list_pending_activations(&target_wave.id)
             .await
             .expect("pending activations");
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].stimulus_id, listen_stimulus.id);
-        assert_eq!(pending[0].source, ActivationSource::Listen);
+        assert!(
+            pending.is_empty(),
+            "listener should start immediately when runnable"
+        );
+
+        let updated_stimulus = store
+            .get_stimulus(&listen_stimulus.id)
+            .await
+            .expect("stimulus lookup should succeed")
+            .expect("stimulus should exist");
+        assert!(
+            updated_stimulus.last_triggered_at.is_some(),
+            "listen stimulus should record trigger time"
+        );
     }
 
     #[tokio::test]

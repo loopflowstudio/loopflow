@@ -35,7 +35,7 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 |---|---|---|---|---|
 | 1 | *(shipped)* | Core boundary cleanup (`store` + `docker` + harness commands) | Lower blast radius in hotspot files; deconcentrate docker lifecycle | Done |
 | 2 | *(shipped)* | Contract hardening (prompt stage newtypes + Docker metadata constants + SQL catalog invariants + golden prompts) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Done |
-| 3 | `03-orchestration-expansion.md` | Orchestration expansion (push triggers + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | Next |
+| 3 | `03-orchestration-expansion.md` | Orchestration expansion (activation ingress + push/listen + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | In progress (Milestone A shipped) |
 | 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |
 
 ### Pass 1 retrospective
@@ -60,7 +60,17 @@ What was revised: prompt pipeline used newtypes (`GatheredContext`, `BudgetedCon
 
 What remains: `prompt.rs` concentration risk is documented but not blocking. Docker recovery would benefit from daemon-restart e2e tests beyond the unit invariant tests shipped here. Store dispatch verbosity is a conscious tradeoff, not debt — revisit only if backend count grows.
 
-What we learned: contract hardening via invariant tests (catalog completeness, metadata constants, stage newtypes) is high-ROI relative to structural decomposition. The contracts catch drift at compile/test time without the indirection cost of splitting files further. Pass 3 (orchestration expansion) is now unblocked — boundaries are stable and contracts are explicit.
+What we learned: contract hardening via invariant tests (catalog completeness, metadata constants, stage newtypes) is high-ROI relative to structural decomposition. The contracts catch drift at compile/test time without the indirection cost of splitting files further. Pass 3 moved from "unblocked" to active implementation with Milestone A shipped.
+
+### Pass 3 retrospective (Milestone A)
+
+Shipped unified activation ingress and queue policy across watch/cron/loop/manual/listen, plus push hook ingestion and activation observability.
+
+What shipped: `triggers/activation.rs` now owns enqueue/coalesce/drop/dispatch policy; watch and cron pollers use it as a shared ingress; loop/manual/listen activations route through the same path. Added `/hooks/git` and `/v0/hooks/github` push ingestion, activation audit storage, run linkage, websocket activation events, and `GET /v0/waves/{wave_id}/activations`.
+
+What was revised: activation queue semantics are now explicit (stimulus-level dedupe, per-wave queue cap defaults, immutable activation outcome log) instead of ad-hoc trigger-specific behavior.
+
+What remains: Milestone B flow-language enrichment is still open (`when` predicates, multi-step fork branch plans, persisted flow decision snapshots, and replay coverage). See `03-orchestration-expansion.md` for remaining contract.
 
 ## Reference report
 
@@ -77,3 +87,4 @@ What we learned: contract hardening via invariant tests (catalog completeness, m
 - Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all four passes.
 - **Pass 1 shipped.** Docker lifecycle decomposition and store capability accessors landed. Harness command trait was tried and simplified back to match dispatch — over-decomposition for 4 model types.
 - **Pass 2 shipped.** Prompt stage newtypes, Docker metadata constants + invariant tests, SQL catalog completeness checks, golden prompt fixtures. Store backend `match` dispatch deliberately retained — documented as intentional single dispatch point, not accidental boilerplate. Known flaky test: `wave_worktree_tests::wave_rename_renames_branch` (unrelated, intermittent).
+- **Pass 3 Milestone A shipped.** Activation ingress is centralized with push/listen/manual coverage, queue/audit observability, and explicit drop/coalesce semantics. Flow-language Milestone B remains.

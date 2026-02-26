@@ -184,7 +184,10 @@ async fn enrich_event(
         | Event::WaveStarted { wave_id, .. }
         | Event::WaveStopped { wave_id, .. }
         | Event::WaveWaiting { wave_id, .. }
-        | Event::CiFailure { wave_id, .. } => wave_id.clone(),
+        | Event::CiFailure { wave_id, .. }
+        | Event::ActivationQueued { wave_id, .. }
+        | Event::ActivationCoalesced { wave_id, .. }
+        | Event::ActivationDropped { wave_id, .. } => wave_id.clone(),
         _ => return None,
     };
 

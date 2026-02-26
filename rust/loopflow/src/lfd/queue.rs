@@ -624,6 +624,7 @@ mod tests {
             ended_at: Some(OffsetDateTime::now_utc()),
             error: None,
             flow_parents: Vec::new(),
+            activation_log_id: None,
             run_kind: WaveRunKind::Main,
             sidecar_kind: None,
             parent_run_id: None,

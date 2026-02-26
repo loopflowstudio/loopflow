@@ -76,6 +76,7 @@ impl WaveExecutor {
             ended_at: None,
             error: None,
             flow_parents: Vec::new(),
+            activation_log_id: None,
             run_kind: WaveRunKind::Sidecar,
             sidecar_kind: Some(SidecarKind::CiFix),
             parent_run_id: Some(source_run.id.clone()),

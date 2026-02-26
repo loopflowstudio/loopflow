@@ -307,6 +307,21 @@ Set `github.webhook_secret` (or `LFD_GITHUB_WEBHOOK_SECRET`) before enabling the
 
 CI sidecar agents run the built-in `ci-fix` step (not `debug`) so prompts are scoped to resolving failing PR checks.
 
+## Activation telemetry
+
+```bash
+# Recent activation decisions for a wave (queued/coalesced/dropped/dispatched)
+GET /v0/waves/{wave_id}/activations?limit=50
+```
+
+Activation sources are `poll`, `push`, `listen`, or `manual`.
+
+WebSocket streams also emit activation queue events:
+
+- `activation_queued`
+- `activation_coalesced`
+- `activation_dropped`
+
 ## Stacked PR queue state
 
 Wave PRs are created as Draft first. `lfd` reconciles queue roles so only the oldest unmerged run is promoted to Ready.

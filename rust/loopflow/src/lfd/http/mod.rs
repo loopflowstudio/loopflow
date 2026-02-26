@@ -103,6 +103,10 @@ pub fn router(state: HttpState) -> Router {
             "/waves/{wave_id}/chords",
             get(chords::list_wave_chords_handler),
         )
+        .route(
+            "/waves/{wave_id}/activations",
+            get(waves::list_activations_handler),
+        )
         .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
         .route(
             "/waves/{wave_id}/restart-step",

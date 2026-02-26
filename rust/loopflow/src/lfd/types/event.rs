@@ -6,6 +6,7 @@ use time::OffsetDateTime;
 use crate::lfd::id::LfdId;
 use crate::lfd::provider_auth::Provider;
 use crate::lfd::types::agent::AgentStatus;
+use crate::lfd::types::ActivationSource;
 
 /// Event payload variants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +98,33 @@ pub enum Event {
         commit_sha: String,
         check_name: String,
         logs_url: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    ActivationQueued {
+        wave_id: LfdId,
+        stimulus_id: LfdId,
+        source: ActivationSource,
+        reason: String,
+        queue_depth: u32,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    ActivationCoalesced {
+        wave_id: LfdId,
+        stimulus_id: LfdId,
+        source: ActivationSource,
+        reason: String,
+        queue_depth: u32,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    ActivationDropped {
+        wave_id: LfdId,
+        stimulus_id: LfdId,
+        source: ActivationSource,
+        reason: String,
+        queue_depth: u32,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
@@ -260,6 +288,57 @@ impl Event {
         }
     }
 
+    pub fn activation_queued(
+        wave_id: LfdId,
+        stimulus_id: LfdId,
+        source: ActivationSource,
+        reason: String,
+        queue_depth: u32,
+    ) -> Self {
+        Self::ActivationQueued {
+            wave_id,
+            stimulus_id,
+            source,
+            reason,
+            queue_depth,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn activation_coalesced(
+        wave_id: LfdId,
+        stimulus_id: LfdId,
+        source: ActivationSource,
+        reason: String,
+        queue_depth: u32,
+    ) -> Self {
+        Self::ActivationCoalesced {
+            wave_id,
+            stimulus_id,
+            source,
+            reason,
+            queue_depth,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn activation_dropped(
+        wave_id: LfdId,
+        stimulus_id: LfdId,
+        source: ActivationSource,
+        reason: String,
+        queue_depth: u32,
+    ) -> Self {
+        Self::ActivationDropped {
+            wave_id,
+            stimulus_id,
+            source,
+            reason,
+            queue_depth,
+            timestamp: Self::now(),
+        }
+    }
+
     pub fn agent_started(agent_id: LfdId, step: String, worktree: String) -> Self {
         Self::AgentStarted {
             agent_id,
@@ -402,5 +481,20 @@ mod tests {
         );
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("wave_id").is_none());
+    }
+
+    #[test]
+    fn activation_event_serializes_source_and_depth() {
+        let event = Event::activation_queued(
+            test_id("wave-1"),
+            test_id("stimulus-1"),
+            ActivationSource::Push,
+            "refs/heads/main advanced abc..def".to_string(),
+            2,
+        );
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "activation_queued");
+        assert_eq!(json["source"], "push");
+        assert_eq!(json["queue_depth"], 2);
     }
 }

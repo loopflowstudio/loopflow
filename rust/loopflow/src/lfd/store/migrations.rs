@@ -71,6 +71,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "014_rename_provider_to_harness",
         sql: include_str!("migrations/014_rename_provider_to_harness.sql"),
     },
+    Migration {
+        version: "015_activation_orchestration",
+        sql: include_str!("migrations/015_activation_orchestration.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

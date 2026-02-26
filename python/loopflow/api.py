@@ -7,6 +7,7 @@ from .client import Client
 from .models import (
     AuthFlow,
     AuthProviderStatus,
+    Chord,
     CommitEntry,
     PullRequest,
     Session,
@@ -83,6 +84,30 @@ def update_wave(
 
 def delete_wave(name_or_id: str) -> None:
     _client().delete_wave(name_or_id)
+
+
+def create_chord(name: str) -> Chord:
+    return _client().create_chord(name)
+
+
+def list_chords() -> list[Chord]:
+    return _client().list_chords()
+
+
+def get_chord(chord_id: str) -> Optional[Chord]:
+    return _client().get_chord(chord_id)
+
+
+def delete_chord(chord_id: str) -> None:
+    _client().delete_chord(chord_id)
+
+
+def add_chord_member(chord_id: str, wave_id: str) -> None:
+    _client().add_chord_member(chord_id, wave_id)
+
+
+def remove_chord_member(chord_id: str, wave_id: str) -> None:
+    _client().remove_chord_member(chord_id, wave_id)
 
 
 def run_wave(
@@ -191,6 +216,7 @@ __all__ = [
     "Client",
     "AuthFlow",
     "AuthProviderStatus",
+    "Chord",
     "CommitEntry",
     "PullRequest",
     "Session",
@@ -209,6 +235,12 @@ __all__ = [
     "create_wave",
     "update_wave",
     "delete_wave",
+    "create_chord",
+    "list_chords",
+    "get_chord",
+    "delete_chord",
+    "add_chord_member",
+    "remove_chord_member",
     "run_wave",
     "add_stimulus",
     "remove_stimulus",

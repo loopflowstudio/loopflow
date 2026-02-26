@@ -11,6 +11,7 @@ from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_NONE,
+    CHORD_MINIMAL,
     SESSION_MINIMAL,
     WAVE_MINIMAL,
     WAVE_RUN_MINIMAL,
@@ -235,6 +236,55 @@ class TestClientResponses:
         client = _mock_client(handler)
         result = client.next_wave("reduce")
         assert result["new_branch"] == "wave/reduce.2"
+        client.close()
+
+    def test_create_chord_sends_correct_body(self):
+        received = {}
+
+        def handler(request):
+            received.update(json.loads(request.content))
+            return httpx.Response(200, json=CHORD_MINIMAL)
+
+        client = _mock_client(handler)
+        chord = client.create_chord("ensemble-a")
+        assert received["name"] == "ensemble-a"
+        assert chord.name == "ensemble-a"
+        client.close()
+
+    def test_list_chords_parses_list(self):
+        def handler(request):
+            return httpx.Response(200, json={"object": "list", "data": [CHORD_MINIMAL]})
+
+        client = _mock_client(handler)
+        chords = client.list_chords()
+        assert len(chords) == 1
+        assert chords[0].name == "ensemble-a"
+        client.close()
+
+    def test_get_chord_404_returns_none(self):
+        def handler(request):
+            return httpx.Response(404, json={"error": "not found"})
+
+        client = _mock_client(handler)
+        assert client.get_chord("missing") is None
+        client.close()
+
+    def test_chord_membership_mutations_handle_204(self):
+        requests = []
+
+        def handler(request):
+            requests.append((request.method, request.url.path))
+            return httpx.Response(204)
+
+        client = _mock_client(handler)
+        client.add_chord_member("chord-1", "wave-1")
+        client.remove_chord_member("chord-1", "wave-1")
+        client.delete_chord("chord-1")
+        assert requests == [
+            ("POST", "/v0/chords/chord-1/members"),
+            ("DELETE", "/v0/chords/chord-1/members/wave-1"),
+            ("DELETE", "/v0/chords/chord-1"),
+        ]
         client.close()
 
     def test_create_session_sends_correct_body(self):

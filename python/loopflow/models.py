@@ -78,6 +78,13 @@ class AuthFlow(BaseModel):
     expires_in: Optional[int] = None
 
 
+class Chord(BaseModel):
+    id: str
+    name: str
+    is_default: bool = False
+    created_at: Optional[datetime] = None
+
+
 class SessionConfig(BaseModel):
     model: Optional[str] = None
     cwd: Optional[str] = None

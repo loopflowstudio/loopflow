@@ -13,6 +13,7 @@ from .errors import LoopflowError, WaveAlreadyRunning
 from .models import (
     AuthFlow,
     AuthProviderStatus,
+    Chord,
     Session,
     SessionConfig,
     SessionEventEnvelope,
@@ -155,6 +156,41 @@ class Client:
 
     def delete_wave(self, name_or_id: str) -> None:
         self._request_json("DELETE", f"/v0/waves/{name_or_id}")
+
+    def create_chord(self, name: str) -> Chord:
+        payload = self._request_json("POST", "/v0/chords", json={"name": name})
+        return Chord.model_validate(payload)
+
+    def list_chords(self) -> list[Chord]:
+        payload = self._request_json("GET", "/v0/chords")
+        data = payload.get("data", [])
+        return [Chord.model_validate(item) for item in data]
+
+    def get_chord(self, chord_id: str) -> Optional[Chord]:
+        payload = self._request_json(
+            "GET",
+            f"/v0/chords/{chord_id}",
+            allow_not_found=True,
+        )
+        if payload is None:
+            return None
+        return Chord.model_validate(payload)
+
+    def delete_chord(self, chord_id: str) -> None:
+        self._request_json("DELETE", f"/v0/chords/{chord_id}")
+
+    def add_chord_member(self, chord_id: str, wave_id: str) -> None:
+        self._request_json(
+            "POST",
+            f"/v0/chords/{chord_id}/members",
+            json={"wave_id": wave_id},
+        )
+
+    def remove_chord_member(self, chord_id: str, wave_id: str) -> None:
+        self._request_json(
+            "DELETE",
+            f"/v0/chords/{chord_id}/members/{wave_id}",
+        )
 
     def run_wave(
         self,
@@ -359,6 +395,11 @@ class Client:
 
         if response.status_code >= 400:
             self._raise_for_error(response)
+
+        if response.status_code == 204:
+            return None
+        if not response.content:
+            return None
 
         return response.json()
 

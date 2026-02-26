@@ -7,8 +7,8 @@ use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, publish_release,
-    rebase_with_recovery, AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions,
-    Progress, PublishOptions, RebaseOptions,
+    rebase_with_recovery, release_status, AbandonOptions, CommitOptions, LandOptions, NextOptions,
+    PrOptions, Progress, PublishOptions, RebaseOptions,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, Write};
@@ -57,7 +57,18 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
-        OpsCommand::Release { version, dry_run } => release_publish(version, *dry_run, &progress),
+        OpsCommand::Release {
+            version,
+            dry_run,
+            target,
+            status,
+        } => {
+            if *status {
+                release_status_cmd(target.as_deref())
+            } else {
+                release_publish(version, *dry_run, target.as_deref(), &progress)
+            }
+        }
         OpsCommand::Lint => run_check("lint"),
         OpsCommand::Test => run_check("test"),
     }
@@ -224,19 +235,57 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
     Ok(())
 }
 
-fn release_publish(version: &str, dry_run: bool, progress: &impl Progress) -> Result<()> {
+fn release_publish(
+    version: &str,
+    dry_run: bool,
+    target: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
     let result = publish_release(
         &repo_root,
         &PublishOptions {
             version_input: version.to_string(),
             dry_run,
+            target: target.map(str::to_string),
         },
         progress,
     )?;
     if !dry_run {
-        println!("v{}", result.version);
+        if let Some(version) = result.version.as_deref() {
+            println!("v{}", version);
+        } else if result.bootstrapped {
+            println!("release bootstrap complete for target {}", result.target);
+        }
     }
+    Ok(())
+}
+
+fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let status = release_status(&repo_root, target_name)?;
+    println!("Target: {}", status.target);
+    match status.latest_tag.as_deref() {
+        Some(tag) => println!("Latest tag: {tag}"),
+        None => println!("Latest tag: (none)"),
+    }
+
+    match status.workflow_status.as_deref() {
+        Some(workflow_status) => {
+            let conclusion = status.workflow_conclusion.as_deref().unwrap_or("(pending)");
+            println!("Workflow: {workflow_status} / {conclusion}");
+        }
+        None => println!("Workflow: (not found)"),
+    }
+
+    if let Some(url) = status.workflow_url.as_deref() {
+        println!("Workflow URL: {url}");
+    }
+
+    println!(
+        "GitHub Release: {}",
+        if status.release_exists { "yes" } else { "no" }
+    );
     Ok(())
 }
 

@@ -233,6 +233,10 @@ pub enum OpsCommand {
         version: String,
         #[arg(short = 'n', long = "dry-run")]
         dry_run: bool,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+        #[arg(long = "status")]
+        status: bool,
     },
     /// Run configured lint checks
     Lint,

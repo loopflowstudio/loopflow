@@ -3,6 +3,7 @@
 //! Loads config from `~/.lf/config.yaml` (global) and `.lf/config.yaml` (repo).
 //! Repo config overrides global. Additive keys (context, exclude, summaries) combine.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -147,6 +148,26 @@ impl Default for IdeConfig {
     }
 }
 
+/// Release configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReleaseConfig {
+    #[serde(default)]
+    pub targets: HashMap<String, ReleaseTargetConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReleaseTargetConfig {
+    #[serde(default)]
+    pub area: Vec<String>,
+    #[serde(default)]
+    pub tag_prefix: String,
+    /// Manifest files to bump version in (auto-detected if omitted).
+    #[serde(default)]
+    pub manifests: Vec<String>,
+    #[serde(default)]
+    pub workflow: Option<String>,
+}
+
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -259,6 +280,10 @@ pub struct Config {
     #[serde(default)]
     pub rlm_model: Option<String>,
 
+    /// Release targets and scoping rules.
+    #[serde(default)]
+    pub release: ReleaseConfig,
+
     /// Max concurrent RLM sub-agents
     #[serde(default = "default_rlm_max_parallel")]
     pub rlm_max_parallel: usize,
@@ -318,6 +343,7 @@ impl Default for Config {
             budgets: BudgetConfig::default(),
             inject_skills: false,
             rlm_model: None,
+            release: ReleaseConfig::default(),
             rlm_max_parallel: default_rlm_max_parallel(),
             rlm_max_depth: default_rlm_max_depth(),
         }
@@ -525,6 +551,7 @@ mod tests {
         assert!(config.interactive.is_empty());
         assert!(config.direction.is_none());
         assert!(config.area.is_none());
+        assert!(config.release.targets.is_empty());
     }
 
     #[test]
@@ -789,6 +816,30 @@ test: "cargo test --all"
             Some("cargo fmt --check && cargo clippy -- -D warnings".to_string())
         );
         assert_eq!(config.test, Some("cargo test --all".to_string()));
+    }
+
+    #[test]
+    fn config_from_yaml_release_targets() {
+        let yaml = r#"
+release:
+  targets:
+    cli:
+      area:
+        - packages/cli/
+      tag_prefix: cli/
+      manifests:
+        - packages/cli/package.json
+      workflow: .github/workflows/release-cli.yml
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+        let target = config.release.targets.get("cli").expect("cli target");
+        assert_eq!(target.area, vec!["packages/cli/"]);
+        assert_eq!(target.tag_prefix, "cli/");
+        assert_eq!(target.manifests, vec!["packages/cli/package.json"]);
+        assert_eq!(
+            target.workflow.as_deref(),
+            Some(".github/workflows/release-cli.yml")
+        );
     }
 
     // ==========================================================================

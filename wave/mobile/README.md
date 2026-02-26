@@ -31,7 +31,6 @@ LoopflowCore holds shared state, models, and services. Platform shells stay thin
 
 - Keep Mac behavior stable while iOS/iPad UX evolves independently.
 - Keep shared models/services in LoopflowCore and avoid cross-platform drift in protocol behavior.
-- Make first mobile connection zero-config for studio-auth users.
 - Make session feedback workflows (quote replies) work reliably on touch devices.
 
 ## Risks

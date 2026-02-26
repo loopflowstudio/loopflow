@@ -129,32 +129,24 @@ final class CredentialSocketServer: @unchecked Sendable {
         }
 
         if request.method == "POST", let provider = routeProvider(route, prefix: "/auth/"), route.hasSuffix("/start") {
-            guard let response = startAuth(provider: provider) else {
-                writeResponse(clientFD, statusCode: 404, jsonBody: ["error": "provider not found"])
-                return
-            }
-            writeJSON(clientFD, statusCode: 200, payload: response)
+            writeJSON(clientFD, statusCode: 200, payload: startAuth(provider: provider))
             return
         }
 
         writeResponse(clientFD, statusCode: 404, jsonBody: ["error": "not found"])
     }
 
-    private func routeProvider(_ path: String, prefix: String) -> String? {
+    private func routeProvider(_ path: String, prefix: String) -> CredentialProvider? {
         guard path.hasPrefix(prefix) else { return nil }
         let suffix = String(path.dropFirst(prefix.count))
-        let provider = suffix.replacingOccurrences(of: "/start", with: "")
-        let normalized = provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard ["github", "claude", "codex"].contains(normalized) else {
-            return nil
-        }
-        return normalized
+        let providerName = suffix.replacingOccurrences(of: "/start", with: "")
+        let normalized = providerName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return CredentialProvider(rawValue: normalized)
     }
 
     private func readRequest(_ fd: Int32) -> HTTPRequest? {
         var data = Data()
         let headerDelimiter = Data("\r\n\r\n".utf8)
-        var contentLength = 0
 
         while true {
             var buffer = [UInt8](repeating: 0, count: 4096)
@@ -183,30 +175,7 @@ final class CredentialSocketServer: @unchecked Sendable {
             }
             let method = String(parts[0]).uppercased()
             let path = String(parts[1])
-
-            if let contentLengthLine = lines.first(where: { $0.lowercased().hasPrefix("content-length:") }) {
-                let value = contentLengthLine.split(separator: ":", maxSplits: 1).last?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
-                contentLength = Int(value) ?? 0
-            } else {
-                contentLength = 0
-            }
-
-            let bodyStart = headerRange.upperBound
-            let requiredBytes = bodyStart + contentLength
-            while data.count < requiredBytes {
-                var extraBuffer = [UInt8](repeating: 0, count: 4096)
-                let extraRead = Darwin.read(fd, &extraBuffer, extraBuffer.count)
-                if extraRead <= 0 {
-                    break
-                }
-                data.append(extraBuffer, count: Int(extraRead))
-            }
-
-            let body = bodyStart < data.count
-                ? data.subdata(in: bodyStart ..< min(requiredBytes, data.count))
-                : Data()
-            return HTTPRequest(method: method, path: path, body: body)
+            return HTTPRequest(method: method, path: path)
         }
 
         return nil
@@ -255,41 +224,22 @@ final class CredentialSocketServer: @unchecked Sendable {
         }
     }
 
-    private func startAuth(provider: String) -> CredentialAuthStartResponse? {
-        guard let verificationURI = verificationURI(for: provider) else {
-            return nil
-        }
-
-        if let url = URL(string: verificationURI) {
+    private func startAuth(provider: CredentialProvider) -> CredentialAuthStartResponse {
+        if let url = URL(string: provider.verificationURI) {
             NSWorkspace.shared.open(url)
         }
 
         return CredentialAuthStartResponse(
-            verification_uri: verificationURI,
+            verification_uri: provider.verificationURI,
             verification_uri_complete: nil,
             user_code: nil,
             expires_in: nil
         )
     }
 
-    private func verificationURI(for provider: String) -> String? {
-        switch provider {
-        case "github":
-            return "https://github.com/login/device"
-        case "claude":
-            return "https://console.anthropic.com/settings/keys"
-        case "codex":
-            return "https://platform.openai.com/api-keys"
-        default:
-            return nil
-        }
-    }
-
-    private func readKeychain(provider: String) -> CredentialResponse? {
-        guard let service = keychainService(for: provider) else {
-            return nil
-        }
-        let account = keychainAccount(for: provider)
+    private func readKeychain(provider: CredentialProvider) -> CredentialResponse? {
+        let service = provider.keychainService
+        let account = provider.keychainAccount
 
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -311,11 +261,9 @@ final class CredentialSocketServer: @unchecked Sendable {
         return CredentialResponse(token: token, login: nil, expires_at: nil)
     }
 
-    private func deleteKeychain(provider: String) -> Bool {
-        guard let service = keychainService(for: provider) else {
-            return false
-        }
-        let account = keychainAccount(for: provider)
+    private func deleteKeychain(provider: CredentialProvider) -> Bool {
+        let service = provider.keychainService
+        let account = provider.keychainAccount
 
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -328,30 +276,50 @@ final class CredentialSocketServer: @unchecked Sendable {
         let status = SecItemDelete(query as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
     }
-
-    private func keychainService(for provider: String) -> String? {
-        switch provider {
-        case "github": return "gh:github.com"
-        case "claude": return "Claude Safe Storage"
-        case "codex": return "Codex Safe Storage"
-        default: return nil
-        }
-    }
-
-    private func keychainAccount(for provider: String) -> String? {
-        switch provider {
-        case "github": return nil
-        case "claude": return "Claude"
-        case "codex": return "Codex"
-        default: return nil
-        }
-    }
 }
 
 private struct HTTPRequest {
     let method: String
     let path: String
-    let body: Data
+}
+
+private enum CredentialProvider: String {
+    case github
+    case claude
+    case codex
+
+    var verificationURI: String {
+        switch self {
+        case .github:
+            return "https://github.com/login/device"
+        case .claude:
+            return "https://console.anthropic.com/settings/keys"
+        case .codex:
+            return "https://platform.openai.com/api-keys"
+        }
+    }
+
+    var keychainService: String {
+        switch self {
+        case .github:
+            return "gh:github.com"
+        case .claude:
+            return "Claude Safe Storage"
+        case .codex:
+            return "Codex Safe Storage"
+        }
+    }
+
+    var keychainAccount: String? {
+        switch self {
+        case .github:
+            return nil
+        case .claude:
+            return "Claude"
+        case .codex:
+            return "Codex"
+        }
+    }
 }
 
 private struct CredentialAuthStartResponse: Codable {

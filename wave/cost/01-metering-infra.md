@@ -2,6 +2,12 @@
 
 Parse token data from all three harnesses and capture prompt composition. Rust only — no UI, no new HTTP endpoints.
 
+## Status
+
+- **Shipped:** 2026-02-26
+- **Validation run:** `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all`, `uv run pytest python/tests/`, `swift test --package-path swift`, `tests/e2e/test_smoke.sh`, `uv run pytest tests/e2e/test_api_smoke.py -v`
+- **Notes:** Concerto UI tests were locally sensitive to signing/runner bootstrap setup (`CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO` required for CI-aligned invocation).
+
 ## What to build
 
 Two new `SessionEvent` variants (`TurnUsage`, `ContextSnapshot`) that flow through the existing event stream and persist to `session_events` without schema migration.

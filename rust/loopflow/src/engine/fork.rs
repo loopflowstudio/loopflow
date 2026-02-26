@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::flow::ConcreteStep;
+use crate::engine::flow::{ConcreteForkBranch, ConcreteStep};
 
 pub const FORK_MANIFEST_RELATIVE_PATH: &str = ".lf/fork-manifest.json";
 pub const FORK_SYNTHESIZE_STEP: &str = "synthesize";
@@ -17,10 +17,17 @@ pub struct ForkManifest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkManifestBranch {
     pub index: usize,
-    pub step: String,
+    pub steps: Vec<ForkManifestStep>,
     pub direction: String,
     pub worktree: String,
     pub branch: String,
+    pub exit_code: i32,
+}
+
+/// Per-step outcome within a fork branch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForkManifestStep {
+    pub name: String,
     pub exit_code: i32,
 }
 
@@ -28,7 +35,7 @@ pub struct ForkManifestBranch {
 pub struct ForkBranchExecutionPlan {
     pub index: usize,
     pub label: String,
-    pub step: ConcreteStep,
+    pub steps: Vec<ConcreteStep>,
     pub directions: Vec<String>,
 }
 
@@ -56,7 +63,7 @@ pub fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
 }
 
 pub fn plan_fork_execution(
-    branches: &[ConcreteStep],
+    branches: &[ConcreteForkBranch],
     base_directions: &[String],
 ) -> Result<Vec<ForkBranchExecutionPlan>, String> {
     if branches.is_empty() {
@@ -64,18 +71,19 @@ pub fn plan_fork_execution(
     }
 
     let build_branch = |index: usize| -> Result<ForkBranchExecutionPlan, String> {
-        let step = branches
+        let branch = branches
             .get(index)
-            .cloned()
             .ok_or_else(|| format!("fork selected branch {index}, but it does not exist"))?;
-        if step.step.interactive.unwrap_or(false) {
-            return Err("interactive fork branches are not supported".to_string());
+        for step in &branch.steps {
+            if step.step.interactive.unwrap_or(false) {
+                return Err("interactive fork branches are not supported".to_string());
+            }
         }
         Ok(ForkBranchExecutionPlan {
             index,
             label: format!("fork-{index}"),
-            directions: merge_directions(base_directions, &step.step.directions),
-            step,
+            directions: merge_directions(base_directions, &branch.directions),
+            steps: branch.steps.clone(),
         })
     };
 
@@ -85,7 +93,7 @@ pub fn plan_fork_execution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::flow::{ConcreteStep, Step};
+    use crate::engine::flow::{ConcreteForkBranch, ConcreteStep, Step};
 
     #[test]
     fn fork_worktree_path_uses_dash_suffix() {
@@ -113,30 +121,71 @@ mod tests {
         assert_eq!(merged, base);
     }
 
-    fn branch(name: &str) -> ConcreteStep {
-        ConcreteStep {
-            step: Step::named(name),
+    fn single_step_branch(name: &str) -> ConcreteForkBranch {
+        ConcreteForkBranch {
+            steps: vec![ConcreteStep {
+                step: Step::named(name),
+                flow_parents: Vec::new(),
+            }],
             flow_parents: Vec::new(),
+            label: name.to_string(),
+            directions: Vec::new(),
+        }
+    }
+
+    fn multi_step_branch(names: &[&str], directions: Vec<String>) -> ConcreteForkBranch {
+        ConcreteForkBranch {
+            steps: names
+                .iter()
+                .map(|name| ConcreteStep {
+                    step: Step::named(name),
+                    flow_parents: Vec::new(),
+                })
+                .collect(),
+            flow_parents: Vec::new(),
+            label: names.first().unwrap_or(&"branch").to_string(),
+            directions,
         }
     }
 
     #[test]
     fn plan_fork_execution_returns_labeled_branches() {
-        let branches = vec![branch("a"), branch("b")];
+        let branches = vec![single_step_branch("a"), single_step_branch("b")];
         let base = vec!["base".to_string()];
         let planned = plan_fork_execution(&branches, &base).expect("planned");
         assert_eq!(planned.len(), 2);
         assert_eq!(planned[0].label, "fork-0");
         assert_eq!(planned[0].directions, vec!["base".to_string()]);
+        assert_eq!(planned[0].steps.len(), 1);
+        assert_eq!(planned[0].steps[0].step.name, "a");
+    }
+
+    #[test]
+    fn plan_fork_execution_multi_step_branches() {
+        let branches = vec![
+            multi_step_branch(&["impl", "compress", "gate"], vec!["infra".to_string()]),
+            multi_step_branch(&["impl", "compress", "gate"], vec!["ux".to_string()]),
+        ];
+        let base = vec!["base".to_string()];
+        let planned = plan_fork_execution(&branches, &base).expect("planned");
+        assert_eq!(planned.len(), 2);
+        assert_eq!(planned[0].steps.len(), 3);
+        assert_eq!(planned[0].directions, vec!["base", "infra"]);
+        assert_eq!(planned[1].directions, vec!["base", "ux"]);
     }
 
     #[test]
     fn plan_fork_execution_rejects_interactive_branch() {
         let mut step = Step::named("a");
         step.interactive = Some(true);
-        let branches = vec![ConcreteStep {
-            step,
+        let branches = vec![ConcreteForkBranch {
+            steps: vec![ConcreteStep {
+                step,
+                flow_parents: Vec::new(),
+            }],
             flow_parents: Vec::new(),
+            label: "a".to_string(),
+            directions: Vec::new(),
         }];
         let err = plan_fork_execution(&branches, &[]).expect_err("interactive branch should fail");
         assert_eq!(err, "interactive fork branches are not supported");
@@ -153,7 +202,10 @@ mod tests {
         let branches = [
             ForkManifestBranch {
                 index: 0,
-                step: "reduce".to_string(),
+                steps: vec![ForkManifestStep {
+                    name: "reduce".to_string(),
+                    exit_code: 0,
+                }],
                 direction: "ux".to_string(),
                 worktree: "/tmp/repo-fork-0".to_string(),
                 branch: "main-fork-0".to_string(),
@@ -161,7 +213,10 @@ mod tests {
             },
             ForkManifestBranch {
                 index: 1,
-                step: "reduce".to_string(),
+                steps: vec![ForkManifestStep {
+                    name: "reduce".to_string(),
+                    exit_code: 42,
+                }],
                 direction: "infra".to_string(),
                 worktree: "/tmp/repo-fork-1".to_string(),
                 branch: "main-fork-1".to_string(),
@@ -173,5 +228,34 @@ mod tests {
         assert_eq!(failed, 1);
         assert_eq!(branches.len(), 2);
         assert_eq!(branches[1].exit_code, 42);
+    }
+
+    #[test]
+    fn fork_manifest_serde_roundtrip() {
+        let manifest = ForkManifest {
+            branches: vec![ForkManifestBranch {
+                index: 0,
+                steps: vec![
+                    ForkManifestStep {
+                        name: "implement".to_string(),
+                        exit_code: 0,
+                    },
+                    ForkManifestStep {
+                        name: "compress".to_string(),
+                        exit_code: 1,
+                    },
+                ],
+                direction: "infra".to_string(),
+                worktree: "/tmp/repo-fork-0".to_string(),
+                branch: "run-1-fork-0".to_string(),
+                exit_code: 1,
+            }],
+        };
+        let json = serde_json::to_string_pretty(&manifest).unwrap();
+        let parsed: ForkManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(manifest, parsed);
+        assert_eq!(parsed.branches[0].steps.len(), 2);
+        assert_eq!(parsed.branches[0].steps[1].name, "compress");
+        assert_eq!(parsed.branches[0].steps[1].exit_code, 1);
     }
 }

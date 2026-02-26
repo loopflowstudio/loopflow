@@ -2,19 +2,29 @@
 
 ## Problem
 
-Users can connect GitHub, Claude, and Codex through `lfq auth` in the terminal, but not from Concerto. Provider auth should be browser-first and identical across clients — click connect, finish auth, continue working. The API contract is already shipped (steps 1–2 of the lfd-repos wave). This is purely Swift client + UI work.
+Users can connect GitHub, Claude, and Codex through `lfq auth` in terminal, but not from Concerto. Provider auth should be browser-first and consistent across clients: click connect, finish auth, continue working.
+
+Step 1–2 server/CLI contract is already shipped. This step is Swift client + UI only.
+
+## Human-reviewed scope choice (Feb 26, 2026)
+
+**Selected package: Do it all.**
+
+Ship full scope now, including correctness hardening and UX polish, not just minimal wiring.
 
 ## Approach
 
-Add auth provider cards to Concerto's existing connection settings views. Five layers, bottom-up:
+Add provider auth cards to existing connection settings surfaces using five layers:
 
-1. **Models** — `AuthProvider`, `AuthProviderStatus`, `AuthFlow` in `LoopflowCore/Models/`
+1. **Models** — auth provider/status/flow models in `LoopflowCore/Models/`
 2. **Events** — `LFDEvent.auth(AuthEvent)` in `LocalEventService`
-3. **Service** — auth HTTP methods on `LocalWaveService`
+3. **Service** — `/v0/auth` methods on `LocalWaveService`
 4. **State** — `AuthProviderStore` in `LoopflowCore/State/`
-5. **Views** — `AuthProviderCard` component, integrated into `ConnectionSettingsView` (macOS) and `ConnectionSetupView` (iOS)
+5. **Views** — shared `AuthProviderCard` integrated into macOS/iOS connection screens
 
-### Layer 1: Models
+---
+
+## Layer 1: Models
 
 New file: `swift/LoopflowCore/Models/AuthProvider.swift`
 
@@ -34,14 +44,14 @@ public enum AuthProvider: String, Codable, Sendable, CaseIterable {
 
     public var icon: String {
         switch self {
-        case .github: "terminal"         // SF Symbol
+        case .github: "terminal"
         case .claude: "brain.head.profile"
         case .codex: "cpu"
         }
     }
 }
 
-public enum AuthStatus: String, Codable, Sendable {
+public enum ProviderAuthStatus: String, Codable, Sendable {
     case active
     case pending
     case none
@@ -50,7 +60,7 @@ public enum AuthStatus: String, Codable, Sendable {
 
 public struct AuthProviderStatus: Codable, Sendable, Identifiable {
     public let provider: AuthProvider
-    public let status: AuthStatus
+    public let status: ProviderAuthStatus
     public let login: String?
 
     public var id: AuthProvider { provider }
@@ -63,13 +73,21 @@ public struct AuthFlow: Codable, Sendable {
     public let user_code: String?
     public let expires_in: UInt64?
 }
+
+public struct AuthProviderListResponse: Codable, Sendable {
+    public let providers: [AuthProviderStatus]
+}
 ```
 
-JSON field names match the Rust DTOs exactly (snake_case) — `Codable` handles this with `keyDecodingStrategy: .convertFromSnakeCase` or matching field names directly.
+Notes:
+- Keep snake_case field names to match Rust DTOs exactly.
+- `/v0/auth` decodes `AuthProviderListResponse` (`{ providers: [...] }`), not raw array.
 
-### Layer 2: Events
+---
 
-Extend `LFDEvent` enum in `LocalEventService.swift`:
+## Layer 2: Events
+
+Extend `LFDEvent` in `LocalEventService.swift`:
 
 ```swift
 case auth(AuthEvent)
@@ -84,21 +102,38 @@ public struct AuthEvent: Sendable {
 
     public let type: EventType
     public let provider: AuthProvider
-    public let login: String?       // only on .connected
-    public let error: String?       // only on .failed
+
+    // flow_started payload
+    public let verificationURI: String?
+    public let verificationURIComplete: String?
+
+    // connected payload
+    public let login: String?
+
+    // failed payload
+    public let error: String?
+
     public let timestamp: Date
 }
 ```
 
-Add parsing in `parseEvent(text:)` — the existing pattern switches on the event type string. Auth events all start with `"auth."`.
+Parsing requirements:
+- Parse dotted event names (`"auth.flow_started"`, etc.)
+- Include flow URLs from `auth.flow_started`
+- Keep unknown auth payload fields ignored
 
-### Layer 3: Service
+---
 
-Add three methods to `LocalWaveService`:
+## Layer 3: Service
+
+Add auth methods to `LocalWaveService`:
 
 ```swift
-// GET /v0/auth
+// GET /v0/auth -> { providers: [...] }
 public func listAuthProviders() async throws -> [AuthProviderStatus]
+
+// GET /v0/auth/{provider}
+public func getAuthProvider(provider: AuthProvider) async throws -> AuthProviderStatus
 
 // POST /v0/auth/{provider}
 public func startAuthFlow(provider: AuthProvider) async throws -> AuthFlow
@@ -107,9 +142,17 @@ public func startAuthFlow(provider: AuthProvider) async throws -> AuthFlow
 public func disconnectProvider(provider: AuthProvider) async throws -> AuthProviderStatus
 ```
 
-These follow the existing `performRequest`/`makeRequest` pattern. Standard timeouts for list/disconnect, long timeout for start (the POST may wait for the provider CLI to launch).
+Timeout policy:
+- list/get/disconnect: standard timeouts
+- start: long timeout (provider CLI launch can block)
 
-### Layer 4: State
+Error policy:
+- Preserve status code from existing `WaveServiceError.serverError(status:message:)`
+- Store handles `409` specially (refresh and continue pending)
+
+---
+
+## Layer 4: State
 
 New file: `swift/LoopflowCore/State/AuthProviderStore.swift`
 
@@ -117,157 +160,168 @@ New file: `swift/LoopflowCore/State/AuthProviderStore.swift`
 @MainActor
 @Observable
 public final class AuthProviderStore {
-    public private(set) var providers: [AuthProvider: AuthProviderStatus]
-    public private(set) var pendingFlow: AuthFlow?  // active flow in progress
+    public struct BrowserLaunchRequest: Sendable, Equatable {
+        public let provider: AuthProvider
+        public let url: URL
+    }
+
+    public private(set) var providers: [AuthProvider: AuthProviderStatus] = [:]
+    public private(set) var pendingFlows: [AuthProvider: AuthFlow] = [:]
+    public private(set) var browserLaunchRequest: BrowserLaunchRequest?
     public private(set) var error: String?
 
-    public var ordered: [AuthProviderStatus]  // computed, stable order
+    public var ordered: [AuthProviderStatus] { ... } // stable AuthProvider.allCases order
 
-    public func refresh()           // GET /v0/auth, reconcile state
-    public func connect(_ provider: AuthProvider)   // POST, open browser, set pending
-    public func disconnect(_ provider: AuthProvider) // DELETE, update card
-    public func handleEvent(_ event: AuthEvent)      // websocket reconciliation
+    public func bindService(_ waveService: LocalWaveService)
+    public func refresh() async
+    public func connect(_ provider: AuthProvider) async
+    public func disconnect(_ provider: AuthProvider) async
+    public func handleEvent(_ event: AuthEvent)
+    public func handleConnectionState(_ state: ConnectionState) async
+    public func consumeBrowserLaunchRequest() -> BrowserLaunchRequest?
 }
 ```
 
 Key behaviors:
 
-- **Optimistic pending**: `connect()` sets local status to `.pending` *before* the POST returns. This prevents the race where the websocket `auth.connected` event arrives before the UI shows pending state.
-- **Browser launch**: After POST returns, open `verification_uri_complete` (fallback `verification_uri`) via `NSWorkspace.shared.open()` (macOS) or `openURL` environment (iOS).
-- **Event reconciliation**: `handleEvent` updates provider status from websocket events. `auth.connected` → `.active` with login. `auth.failed` → `.none` with error message. `auth.disconnected` → `.none`.
-- **Refresh on reconnect**: When `LocalEventService` reconnects, call `refresh()` to reconcile any missed events.
+- **Optimistic pending (per provider):** `connect(provider)` sets that provider to `.pending` immediately.
+- **Pending flow map (not singleton):** multiple providers can be pending simultaneously.
+- **No platform side effects in store:** store emits `browserLaunchRequest`; view performs `openURL`/`NSWorkspace`.
+- **`auth.flow_started` reconciliation:** update provider to `.pending`; cache flow URL in `pendingFlows` even when event originated from another client.
+- **`auth.connected`:** set `.active`, set `login`, clear pending flow.
+- **`auth.failed`:** set `.none`, clear pending flow, set user-visible error.
+- **`auth.disconnected`:** set `.none`, clear pending flow.
+- **`POST` 409:** call `refresh()`, keep pending state, no fatal error.
+- **Reconnect reconciliation:** when connection state transitions to `.connected`, call `refresh()`.
 
-Wire into `RepoState`:
+RepoState wiring:
 
 ```swift
 public final class RepoState {
     public let authProviderStore = AuthProviderStore()
-    // ...
 }
 ```
 
-In `RepoState.startEventSubscription`, add auth event handling alongside existing wave event handling.
+- Rebind `authProviderStore` whenever services are rebuilt for a new connection/token.
+- Forward `.auth` events in `startEventSubscription`.
+- Forward `ConnectionState` updates into `authProviderStore.handleConnectionState`.
 
-### Layer 5: Views
+---
+
+## Layer 5: Views
 
 New shared file: `swift/LoopflowCore/Views/AuthProviderCard.swift`
 
-Each card shows one of three states:
+States:
 
-**Disconnected (status: `.none` or `.expired`)**
-```
-┌─────────────────────────────────────┐
-│  ⌘  GitHub                         │
-│  Not connected                      │
-│                        [Connect]    │
-└─────────────────────────────────────┘
-```
+1. **Disconnected** (`none`/`expired`) — “Not connected” + Connect/Reconnect button
+2. **Pending with flow details** — status dot + code (if present) + copy code + waiting text + Cancel
+3. **Pending without flow details** — status dot + “Auth pending (possibly started from another client)” + Cancel
+4. **Connected** (`active`) — status dot + login + Disconnect
 
-**Pending (status: `.pending`, flow active)**
-```
-┌─────────────────────────────────────┐
-│  ⌘  GitHub              ● Pending  │
-│  Enter code: ABCD-1234    [Copy]    │
-│  Waiting for browser...             │
-│                        [Cancel]     │
-└─────────────────────────────────────┘
-```
+Design tokens:
+- Card: `palette.surface`, `CornerRadius.lg`, `palette.border`
+- Status dots: success/warning/neutral
+- Typography: section/body/code
+- Buttons: `DarkButtonStyle`, `DestructiveButtonStyle`
+- Hit targets: desktop `HitTarget.comfortable`, iOS `HitTarget.touch`
 
-**Connected (status: `.active`)**
-```
-┌─────────────────────────────────────┐
-│  ⌘  GitHub            ● Connected  │
-│  octocat                            │
-│                     [Disconnect]    │
-└─────────────────────────────────────┘
-```
+Copy behavior:
+- macOS: `NSPasteboard`
+- iOS: `UIPasteboard`
+- Copy button has accessibility label/hint
 
-Design token usage:
-- Card: `palette.surface` background, `CornerRadius.lg`, `palette.border` stroke
-- Status dot: `statusSuccess` (active), `statusWarning` (pending), `statusNeutral` (none)
-- Provider name: `Typography.sectionTitle()`, `palette.text`
-- Login/status text: `Typography.body()`, `palette.textSecondary`
-- Connect button: `DarkButtonStyle`
-- Disconnect button: `DestructiveButtonStyle`
-- User code: `Typography.code()`, monospaced, with copy-to-clipboard button
-- Hit targets: `HitTarget.comfortable` minimum (44pt on iOS)
+URL launch behavior:
+- View observes store `browserLaunchRequest`
+- View opens URL via `openURL` (iOS) / `NSWorkspace.shared.open` (macOS wrapper)
+- If open fails, card shows inline copyable URL fallback
 
-**macOS integration**: Add a "Provider Connections" section below the existing daemon connection section in `ConnectionSettingsView`. Three cards stacked vertically.
+Integrations:
+- macOS: add “Provider Connections” section below daemon connection in `ConnectionSettingsView`
+- iOS: add “Provider Connections” section in `ConnectionSetupView` form and settings tab
+- If lfd is disconnected, section remains visible but disabled with “Connect to server first” guidance
 
-**iOS integration**: Add a "Provider Connections" `Section` to the `ConnectionSetupView` `Form`. Same three cards adapted to form styling.
+---
 
-## Alternatives considered
+## Key decisions (updated after review)
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Separate "Providers" settings tab | Cleaner separation of concerns | Over-navigated — auth is part of connection setup, not a separate concept. Users shouldn't hunt for it. |
-| Provider cards on the main dashboard | More visible, first-class | Dashboard real estate is for waves. Auth is setup, not ongoing work. Once connected, you don't look at it again. |
-| AuthProviderStore merged into ConnectionStore | Fewer store objects | Provider auth state is independent of daemon connection. Mixing them couples unrelated lifecycles. |
-| Polling instead of websocket events | Simpler implementation | Auth flow takes 5–30 seconds. Polling would either waste resources (fast interval) or feel sluggish (slow interval). Events give instant feedback. |
+1. **Separate store remains correct.** Provider auth lifecycle is independent of daemon connection lifecycle.
+2. **Pending is per provider, never global.** Avoid state loss when more than one flow is pending.
+3. **`auth.flow_started` is first-class.** Without it, multi-client reconciliation is stale.
+4. **Store is state-only.** Browser open is UI/platform work.
+5. **Refresh on reconnect is mandatory.** WS “connected” snapshot includes waves, not auth provider state.
+6. **409 is continuity, not failure.** Refresh + continue pending UI.
 
-## Key decisions
-
-1. **AuthProviderStore is separate from ConnectionStore.** Provider auth (GitHub/Claude/Codex tokens) and daemon connection (bundled/remote lfd) are independent concerns. A user can be connected to lfd but have no provider auth, or vice versa. Separate stores prevent coupling.
-
-2. **Optimistic pending state.** The instant a user clicks Connect, the card flips to pending *before* the POST returns. This eliminates the race where `auth.connected` arrives via websocket before the HTTP response. The POST response only matters for extracting the `user_code` and `verification_uri`.
-
-3. **User code is prominent with copy button.** Device auth flows (GitHub, Codex) require entering a code in the browser. The code gets `Typography.code()` styling and a dedicated copy-to-clipboard button. Users shouldn't have to squint or manually select text.
-
-4. **Refresh on every reconnect.** When the websocket reconnects (after network loss, sleep, lfd restart), immediately `GET /v0/auth` to reconcile. Events missed during disconnection could leave the UI stale. This is the same pattern used for wave state reconciliation.
-
-5. **Extend existing views, don't create new ones.** Provider cards go in the existing ConnectionSettingsView/ConnectionSetupView. Auth is part of "connecting Concerto to services" — the same mental model as connecting to lfd. No new navigation, no new screens.
-
-6. **AuthProviderCard is a shared component in LoopflowCore.** One implementation, used in both macOS and iOS views. Platform-specific URL opening handled via environment (`openURL`).
-
-7. **409 (already pending) shows the existing pending state.** If a user clicks Connect while a flow is already pending, the service returns 409. The store catches this and shows the existing pending card rather than an error. The user sees continuity, not failure.
+---
 
 ## Failure modes
 
 | Failure | Handling |
 |---------|----------|
-| Provider binary missing (`gh`/`claude`/`codex` not installed) | POST returns an error with "command not available" — display in card as descriptive message with install hint |
-| Flow already pending (409) | Catch 409, treat as no-op, keep showing pending state |
-| Browser launch failure | Show copyable URL as fallback — `verification_uri_complete` or `verification_uri` displayed inline |
-| lfd reconnect mid-flow | `refresh()` on reconnect reconciles state from `GET /v0/auth` |
-| Auth flow timeout (user never completes browser auth) | `auth.failed` event arrives when `expires_in` elapses — card returns to disconnected with "Flow expired" message |
-| Provider returns expired status | Show "Expired" state with "Reconnect" button (same as Connect) |
+| `gh`/`claude`/`codex` missing | Show provider-specific install hint from server message |
+| Flow already pending (409) | Refresh auth providers, preserve pending state |
+| Browser open fails | Keep pending state and show copyable URL |
+| Reconnect mid-flow | Refresh `/v0/auth` on `.connected` |
+| Flow started from another client | Pending card appears from `auth.flow_started` or refresh |
+| Flow timeout/deny | `auth.failed` transitions back to disconnected with error |
+| Provider status expired | Show expired + reconnect action |
+
+---
 
 ## Scope
 
-**In scope:**
-- Shared auth models in `LoopflowCore`
-- Auth event parsing in `LocalEventService`
-- Auth HTTP methods on `LocalWaveService`
-- `AuthProviderStore` state container
-- `AuthProviderCard` shared view component
-- Integration into macOS `ConnectionSettingsView`
-- Integration into iOS `ConnectionSetupView`
-- Tests for models, event parsing, and store logic
+**In scope now (full package):**
+- Shared auth models + DTO wrapper
+- Auth event parsing (`auth.*`, including dotted names)
+- Auth HTTP methods (`list/get/start/disconnect`)
+- `AuthProviderStore` with per-provider pending flows + reconnect reconciliation
+- Shared `AuthProviderCard` with copy/open fallback UX
+- macOS + iOS connection screen integration
+- RepoState wiring for auth events + connection-state reconciliation
+- Tests for models, service decoding, event parsing, store reducer, and RepoState event routing
 
 **Out of scope:**
-- Server-side auth API changes (already shipped)
-- Repo onboarding (`POST /v0/repos`) — that's step 4
-- Provider auto-detection (checking if `gh`/`claude`/`codex` are installed proactively)
-- Token display or management in Concerto (tokens are lfd's concern)
-- Custom provider support (only GitHub, Claude, Codex)
+- Server API changes
+- Repo onboarding (`POST /v0/repos`) (step 4)
+- proactive host binary detection
+- token inspection/management UI
+- custom providers beyond GitHub/Claude/Codex
+
+---
 
 ## Implementation order
 
-1. Models (`AuthProvider.swift`) — no dependencies, testable immediately
-2. Event parsing (`LocalEventService` extension) — depends on models
-3. Service methods (`LocalWaveService` extension) — depends on models
-4. Store (`AuthProviderStore`) — depends on models + service
-5. Views (`AuthProviderCard` + view integration) — depends on store
-6. Wire into `RepoState` event loop — depends on store + events
+1. Models + DTO wrapper
+2. Service methods for `/v0/auth`
+3. Event parsing for `auth.*`
+4. `AuthProviderStore` + connection-state reconciliation
+5. `RepoState` wiring (service rebinding + event forwarding)
+6. Shared `AuthProviderCard`
+7. macOS + iOS integration
+8. Tests + validation
 
-Each layer is independently testable. Layers 1–3 can be implemented in parallel.
+---
+
+## Validation plan
+
+- `swift test --package-path swift`
+- Targeted tests for:
+  - `/v0/auth` wrapper decode
+  - `auth.flow_started`/`auth.connected`/`auth.failed`/`auth.disconnected` parse
+  - store pending/connected/failed transitions
+  - 409 conflict handling path
+  - refresh on reconnect path
+- Manual smoke:
+  - connect/disconnect each provider from macOS settings
+  - connect/disconnect from iOS settings
+  - start flow in one client, observe pending reconciliation in other client
 
 ## Done when
 
 - Users can connect/disconnect GitHub, Claude, and Codex from Concerto with no terminal steps.
-- Card state tracks `active` / `pending` / `none` from HTTP + websocket events.
-- Pending state shows user code with copy button when applicable.
-- Auth state refreshes on websocket reconnect.
-- `cargo test --all` and `swift test --package-path swift` pass.
+- Card states correctly track `active` / `pending` / `none` / `expired` from HTTP + websocket events.
+- Pending state shows code and copy action when available; otherwise clear fallback text.
+- Auth state reconciles on websocket reconnect and multi-client flow events.
+- `swift test --package-path swift` passes.
 
-Wave goals advanced: *"Concerto Connections panel wired to `/v0/auth` + auth events"* (step 3, lfd-repos wave).
+Wave goal advanced: **“Concerto Connections panel wired to `/v0/auth` + auth events”** (step 3).

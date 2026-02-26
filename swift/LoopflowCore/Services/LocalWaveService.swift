@@ -269,6 +269,77 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
+    private func authURL(_ provider: AuthProvider? = nil) -> URL {
+        var url = apiBaseURL.appendingPathComponent("auth")
+        if let provider {
+            url = url.appendingPathComponent(provider.rawValue)
+        }
+        return url
+    }
+
+    // MARK: - Provider auth
+
+    public func listAuthProviders() async throws -> [AuthProviderStatus] {
+        let (data, response) = try await performGet(authURL())
+
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        let decoded: AuthProviderListResponse
+        do {
+            decoded = try JSONDecoder().decode(AuthProviderListResponse.self, from: data)
+        } catch {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return decoded.providers
+    }
+
+    public func getAuthProvider(provider: AuthProvider) async throws -> AuthProviderStatus {
+        let (data, response) = try await performGet(authURL(provider))
+
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        do {
+            return try JSONDecoder().decode(AuthProviderStatus.self, from: data)
+        } catch {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+    }
+
+    public func startAuthFlow(provider: AuthProvider) async throws -> AuthFlow {
+        let request = try makeRequest(authURL(provider), method: "POST")
+        let (data, response) = try await performRequest(request, useLongTimeouts: true)
+
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        do {
+            return try JSONDecoder().decode(AuthFlow.self, from: data)
+        } catch {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+    }
+
+    public func disconnectProvider(provider: AuthProvider) async throws -> AuthProviderStatus {
+        let request = try makeRequest(authURL(provider), method: "DELETE")
+        let (data, response) = try await performRequest(request)
+
+        guard response.statusCode == 200 else {
+            throw parseStatusCodeError(statusCode: response.statusCode, data: data)
+        }
+
+        do {
+            return try JSONDecoder().decode(AuthProviderStatus.self, from: data)
+        } catch {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.

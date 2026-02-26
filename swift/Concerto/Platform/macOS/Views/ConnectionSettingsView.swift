@@ -1,5 +1,6 @@
 import SwiftUI
 import LoopflowCore
+import AppKit
 
 struct ConnectionSettingsView: View {
     @Environment(RepoState.self) private var repoState
@@ -15,6 +16,7 @@ struct ConnectionSettingsView: View {
     @State private var errorMessage: String?
     @State private var cliMessage: String?
     @State private var selectedInstallDirectory = CLIInstallManager.defaultInstallDir.path
+    @State private var browserFallbackProviders: Set<AuthProvider> = []
 
     private let cliInstallManager = CLIInstallManager()
 
@@ -31,6 +33,7 @@ struct ConnectionSettingsView: View {
                 }
 
                 statusContent
+                providerConnectionsContent
 
                 if let cliMessage, mode == .bundled {
                     Text(cliMessage)
@@ -52,8 +55,15 @@ struct ConnectionSettingsView: View {
             Spacer(minLength: 0)
         }
         .background(palette.background)
-        .frame(width: 420, height: mode == .bundled ? 520 : 460)
-        .onAppear { loadFromCurrentConnection() }
+        .frame(width: 420, height: mode == .bundled ? 760 : 720)
+        .onAppear {
+            loadFromCurrentConnection()
+            guard repoState.isConnected else { return }
+            Task { await repoState.authProviderStore.refresh() }
+        }
+        .onChange(of: repoState.authProviderStore.browserLaunchRequest) { _, request in
+            handleBrowserLaunchRequest(request)
+        }
     }
 
     private var header: some View {
@@ -222,6 +232,48 @@ struct ConnectionSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var providerConnectionsContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Provider Connections")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+
+            if !repoState.isConnected {
+                Text("Connect to server first.")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+            }
+
+            ForEach(repoState.authProviderStore.ordered) { status in
+                AuthProviderCard(
+                    status: status,
+                    pendingFlow: repoState.authProviderStore.pendingFlows[status.provider],
+                    isEnabled: repoState.isConnected,
+                    error: repoState.authProviderStore.errorProvider == status.provider
+                        ? repoState.authProviderStore.error
+                        : nil,
+                    showURLFallback: browserFallbackProviders.contains(status.provider),
+                    onConnect: { provider in
+                        Task {
+                            await repoState.authProviderStore.connect(provider)
+                        }
+                    },
+                    onDisconnect: { provider in
+                        Task {
+                            await repoState.authProviderStore.disconnect(provider)
+                        }
+                    },
+                    onCancel: { provider in
+                        Task {
+                            await repoState.authProviderStore.disconnect(provider)
+                        }
+                    }
+                )
+            }
+        }
+    }
+
     private var statusColor: Color {
         switch repoState.connectionState {
         case .connected: return Color.statusSuccess
@@ -364,5 +416,18 @@ struct ConnectionSettingsView: View {
             staticToken: trimmedToken
         )
     }
-}
 
+    private func handleBrowserLaunchRequest(_ request: AuthProviderStore.BrowserLaunchRequest?) {
+        guard request != nil,
+              let launchRequest = repoState.authProviderStore.consumeBrowserLaunchRequest() else {
+            return
+        }
+
+        let opened = NSWorkspace.shared.open(launchRequest.url)
+        if opened {
+            browserFallbackProviders.remove(launchRequest.provider)
+        } else {
+            browserFallbackProviders.insert(launchRequest.provider)
+        }
+    }
+}

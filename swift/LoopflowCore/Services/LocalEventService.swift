@@ -59,6 +59,23 @@ public struct OutputEvent: Sendable {
     public let timestamp: Date
 }
 
+public struct AuthEvent: Sendable {
+    public enum EventType: String, Sendable {
+        case flowStarted = "auth.flow_started"
+        case connected = "auth.connected"
+        case failed = "auth.failed"
+        case disconnected = "auth.disconnected"
+    }
+
+    public let type: EventType
+    public let provider: AuthProvider
+    public let verificationURI: String?
+    public let verificationURIComplete: String?
+    public let login: String?
+    public let error: String?
+    public let timestamp: Date
+}
+
 public enum LFDEvent: Sendable {
     case connected(ConnectedEvent)
     case wave(WaveEvent)
@@ -66,6 +83,7 @@ public enum LFDEvent: Sendable {
     case agentStarted(AgentStartedEvent)
     case agentEnded(AgentEndedEvent)
     case output(OutputEvent)
+    case auth(AuthEvent)
 }
 
 public actor EventService {
@@ -420,7 +438,7 @@ public actor EventService {
         }
     }
 
-    private nonisolated static func parseEvent(text: String) -> LFDEvent? {
+    nonisolated static func parseEvent(text: String) -> LFDEvent? {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else {
@@ -488,6 +506,33 @@ public actor EventService {
                 text: text,
                 timestamp: parseTimestamp(json["timestamp"])
             ))
+        case "auth.flow_started", "auth.connected", "auth.failed", "auth.disconnected":
+            guard let eventType = AuthEvent.EventType(rawValue: type),
+                  let providerRaw = json["provider"] as? String,
+                  let provider = AuthProvider(rawValue: providerRaw) else {
+                return nil
+            }
+
+            let errorMessage: String?
+            if let error = json["error"] as? String {
+                errorMessage = error
+            } else if let errorJSON = json["error"] as? [String: Any] {
+                errorMessage = errorJSON["message"] as? String
+            } else {
+                errorMessage = nil
+            }
+
+            return .auth(
+                AuthEvent(
+                    type: eventType,
+                    provider: provider,
+                    verificationURI: json["verification_uri"] as? String,
+                    verificationURIComplete: json["verification_uri_complete"] as? String,
+                    login: json["login"] as? String,
+                    error: errorMessage,
+                    timestamp: parseTimestamp(json["timestamp"])
+                )
+            )
         default:
             return nil
         }

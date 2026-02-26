@@ -1,0 +1,8 @@
+flow: ship-wave
+area:
+  - loopflow.tmux
+  - scripts/
+  - wave/tmux/
+direction:
+  - ux
+  - craft

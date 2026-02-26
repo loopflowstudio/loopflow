@@ -213,6 +213,32 @@ loopflow.remove_chord_member(chord.id, waves[0].id)
 
 [Documentation →](docs/index.md)
 
+## tmux Plugin
+
+```bash
+# Add to .tmux.conf
+set -g @plugin 'loopflowstudio/loopflow.tmux'
+run '~/.tmux/plugins/tpm/tpm'
+```
+
+Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Keybindings start with `prefix+l`:
+
+| Key | Action |
+|-----|--------|
+| `r` | Run step/wave |
+| `s` | Stop |
+| `o` | Open logs |
+| `p` | Open PR |
+| `n` | Next iteration |
+| `d` | Land PR |
+| `w` | Pick wave/worktree |
+| `L` | Pick layout |
+| `?` | Help |
+
+Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
+
+Works without `lf` or `lfq` installed — status shows placeholder, keybindings display clear messages.
+
 ## Integrations
 
 **Coding Agents**

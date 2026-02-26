@@ -120,23 +120,20 @@ impl DockerExecutor {
             }
         }
 
-        // When credential socket integration is enabled, inject provider tokens
-        // cached during executor initialization.
-        if self.credential_socket_client.is_some() {
-            for (provider, env_var) in [
-                ("github", "GH_TOKEN"),
-                ("claude", "ANTHROPIC_API_KEY"),
-                ("codex", "OPENAI_API_KEY"),
-            ] {
-                if env
-                    .iter()
-                    .any(|entry| entry.starts_with(&format!("{env_var}=")))
-                {
-                    continue;
-                }
-                if let Some(credential) = self.cached_credentials.get(provider) {
-                    env.push(format!("{env_var}={}", credential.token));
-                }
+        // Inject provider tokens cached during executor initialization.
+        for (provider, env_var) in [
+            ("github", "GH_TOKEN"),
+            ("claude", "ANTHROPIC_API_KEY"),
+            ("codex", "OPENAI_API_KEY"),
+        ] {
+            if env
+                .iter()
+                .any(|entry| entry.starts_with(&format!("{env_var}=")))
+            {
+                continue;
+            }
+            if let Some(credential) = self.cached_credentials.get(provider) {
+                env.push(format!("{env_var}={}", credential.token));
             }
         }
 

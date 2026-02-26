@@ -51,7 +51,7 @@ pub async fn get_chord_handler(
     State(state): State<HttpState>,
     Path(chord_id): Path<String>,
 ) -> ApiResult<ChordDto> {
-    let chord_id = parse_chord_id(&chord_id)?;
+    let chord_id = parse_lfd_id(&chord_id, "invalid chord id")?;
     let chord = state
         .store
         .get_chord(&chord_id)
@@ -65,7 +65,7 @@ pub async fn delete_chord_handler(
     State(state): State<HttpState>,
     Path(chord_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let chord_id = parse_chord_id(&chord_id)?;
+    let chord_id = parse_lfd_id(&chord_id, "invalid chord id")?;
     state
         .store
         .delete_chord(&chord_id)
@@ -79,8 +79,8 @@ pub async fn add_chord_member_handler(
     Path(chord_id): Path<String>,
     Json(payload): Json<AddChordMemberRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let chord_id = parse_chord_id(&chord_id)?;
-    let wave_id = parse_wave_id(&payload.wave_id)?;
+    let chord_id = parse_lfd_id(&chord_id, "invalid chord id")?;
+    let wave_id = parse_lfd_id(&payload.wave_id, "invalid wave id")?;
     state
         .store
         .add_chord_member(&chord_id, &wave_id)
@@ -93,8 +93,8 @@ pub async fn remove_chord_member_handler(
     State(state): State<HttpState>,
     Path((chord_id, wave_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    let chord_id = parse_chord_id(&chord_id)?;
-    let wave_id = parse_wave_id(&wave_id)?;
+    let chord_id = parse_lfd_id(&chord_id, "invalid chord id")?;
+    let wave_id = parse_lfd_id(&wave_id, "invalid wave id")?;
     state
         .store
         .remove_chord_member(&chord_id, &wave_id)
@@ -103,16 +103,10 @@ pub async fn remove_chord_member_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn parse_chord_id(value: &str) -> Result<LfdId, ApiError> {
+fn parse_lfd_id(value: &str, error_message: &'static str) -> Result<LfdId, ApiError> {
     value
         .parse::<LfdId>()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid chord id"))
-}
-
-fn parse_wave_id(value: &str) -> Result<LfdId, ApiError> {
-    value
-        .parse::<LfdId>()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid wave id"))
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, error_message))
 }
 
 fn is_duplicate_chord_name_error(error: &StoreError) -> bool {

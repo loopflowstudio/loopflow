@@ -104,24 +104,45 @@ impl SqliteStore {
         Ok(())
     }
 
-    fn chord_exists(&self, chord_id: &LfdId) -> StoreResult<bool> {
+    fn resource_exists(&self, query: &str, id: &LfdId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare("SELECT 1 FROM chords WHERE id = ?1")?;
+        let mut stmt = conn.prepare(query)?;
         let exists = stmt
-            .query_row(params![chord_id], |_| Ok(()))
+            .query_row(params![id], |_| Ok(()))
             .optional()?
             .is_some();
         Ok(exists)
     }
 
+    fn chord_exists(&self, chord_id: &LfdId) -> StoreResult<bool> {
+        self.resource_exists("SELECT 1 FROM chords WHERE id = ?1", chord_id)
+    }
+
     fn wave_exists(&self, wave_id: &LfdId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare("SELECT 1 FROM waves WHERE id = ?1")?;
-        let exists = stmt
-            .query_row(params![wave_id], |_| Ok(()))
-            .optional()?
-            .is_some();
-        Ok(exists)
+        self.resource_exists("SELECT 1 FROM waves WHERE id = ?1", wave_id)
+    }
+
+    fn ensure_chord_exists(&self, chord_id: &LfdId) -> StoreResult<()> {
+        if self.chord_exists(chord_id)? {
+            return Ok(());
+        }
+        Err(StoreError::NotFound)
+    }
+
+    fn ensure_wave_exists(&self, wave_id: &LfdId) -> StoreResult<()> {
+        if self.wave_exists(wave_id)? {
+            return Ok(());
+        }
+        Err(StoreError::NotFound)
+    }
+
+    fn ensure_chord_member_resources_exist(
+        &self,
+        chord_id: &LfdId,
+        wave_id: &LfdId,
+    ) -> StoreResult<()> {
+        self.ensure_chord_exists(chord_id)?;
+        self.ensure_wave_exists(wave_id)
     }
 
     fn map_session_row(row: &rusqlite::Row<'_>) -> Result<Session, rusqlite::Error> {
@@ -436,9 +457,7 @@ impl SqliteStore {
     }
 
     pub fn add_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        if !self.chord_exists(chord_id)? || !self.wave_exists(wave_id)? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_chord_member_resources_exist(chord_id, wave_id)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT OR IGNORE INTO chord_members (chord_id, wave_id) VALUES (?1, ?2)",
@@ -448,9 +467,7 @@ impl SqliteStore {
     }
 
     pub fn remove_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        if !self.chord_exists(chord_id)? || !self.wave_exists(wave_id)? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_chord_member_resources_exist(chord_id, wave_id)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "DELETE FROM chord_members WHERE chord_id = ?1 AND wave_id = ?2",
@@ -460,9 +477,7 @@ impl SqliteStore {
     }
 
     pub fn list_chord_members(&self, chord_id: &LfdId) -> StoreResult<Vec<Wave>> {
-        if !self.chord_exists(chord_id)? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_chord_exists(chord_id)?;
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
@@ -481,9 +496,7 @@ impl SqliteStore {
     }
 
     pub fn list_chords_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Chord>> {
-        if !self.wave_exists(wave_id)? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_wave_exists(wave_id)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT c.id, c.name, c.is_default, c.created_at

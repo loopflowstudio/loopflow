@@ -132,24 +132,45 @@ impl PostgresStore {
         .await
     }
 
-    async fn chord_exists(&self, chord_id: &LfdId) -> StoreResult<bool> {
+    async fn resource_exists(&self, query: &'static str, id: &LfdId) -> StoreResult<bool> {
         self.with_client(|client| async move {
-            let row = client
-                .query_opt("SELECT 1 FROM chords WHERE id = $1", &[&chord_id])
-                .await?;
+            let row = client.query_opt(query, &[&id]).await?;
             Ok(row.is_some())
         })
         .await
     }
 
+    async fn chord_exists(&self, chord_id: &LfdId) -> StoreResult<bool> {
+        self.resource_exists("SELECT 1 FROM chords WHERE id = $1", chord_id)
+            .await
+    }
+
     async fn wave_exists(&self, wave_id: &LfdId) -> StoreResult<bool> {
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt("SELECT 1 FROM waves WHERE id = $1", &[&wave_id])
-                .await?;
-            Ok(row.is_some())
-        })
-        .await
+        self.resource_exists("SELECT 1 FROM waves WHERE id = $1", wave_id)
+            .await
+    }
+
+    async fn ensure_chord_exists(&self, chord_id: &LfdId) -> StoreResult<()> {
+        if self.chord_exists(chord_id).await? {
+            return Ok(());
+        }
+        Err(StoreError::NotFound)
+    }
+
+    async fn ensure_wave_exists(&self, wave_id: &LfdId) -> StoreResult<()> {
+        if self.wave_exists(wave_id).await? {
+            return Ok(());
+        }
+        Err(StoreError::NotFound)
+    }
+
+    async fn ensure_chord_member_resources_exist(
+        &self,
+        chord_id: &LfdId,
+        wave_id: &LfdId,
+    ) -> StoreResult<()> {
+        self.ensure_chord_exists(chord_id).await?;
+        self.ensure_wave_exists(wave_id).await
     }
 
     fn map_session_row(row: &tokio_postgres::Row) -> StoreResult<Session> {
@@ -493,9 +514,8 @@ impl PostgresStore {
     }
 
     pub async fn add_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        if !self.chord_exists(chord_id).await? || !self.wave_exists(wave_id).await? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_chord_member_resources_exist(chord_id, wave_id)
+            .await?;
 
         self.with_client(|client| async move {
             client
@@ -512,9 +532,8 @@ impl PostgresStore {
     }
 
     pub async fn remove_chord_member(&self, chord_id: &LfdId, wave_id: &LfdId) -> StoreResult<()> {
-        if !self.chord_exists(chord_id).await? || !self.wave_exists(wave_id).await? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_chord_member_resources_exist(chord_id, wave_id)
+            .await?;
 
         self.with_client(|client| async move {
             client
@@ -529,9 +548,7 @@ impl PostgresStore {
     }
 
     pub async fn list_chord_members(&self, chord_id: &LfdId) -> StoreResult<Vec<Wave>> {
-        if !self.chord_exists(chord_id).await? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_chord_exists(chord_id).await?;
         self.with_client(|client| async move {
             let rows = client
                 .query(
@@ -549,9 +566,7 @@ impl PostgresStore {
     }
 
     pub async fn list_chords_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Chord>> {
-        if !self.wave_exists(wave_id).await? {
-            return Err(StoreError::NotFound);
-        }
+        self.ensure_wave_exists(wave_id).await?;
         self.with_client(|client| async move {
             let rows = client
                 .query(

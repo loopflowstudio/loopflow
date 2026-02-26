@@ -6,7 +6,7 @@ from __future__ import annotations
 import traceback
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 import httpx
 
@@ -21,26 +21,25 @@ class ScenarioResult:
 class ApiClient:
     """Thin authenticated HTTP client wrapper for lfd API tests."""
 
-    def __init__(self, base_url: str, token: str, timeout_seconds: float = 10.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout_seconds: float = 10.0,
+        verify: bool | str = True,
+    ) -> None:
+        client_kwargs = {
+            "base_url": base_url,
+            "timeout": timeout_seconds,
+            "verify": verify,
+        }
         self._authed_client = httpx.Client(
-            base_url=base_url,
-            timeout=timeout_seconds,
+            **client_kwargs,
             headers={"Authorization": f"Bearer {token}"},
         )
-        self._anonymous_client = httpx.Client(base_url=base_url, timeout=timeout_seconds)
+        self._anonymous_client = httpx.Client(**client_kwargs)
 
     def __enter__(self) -> "ApiClient":
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def __enter__(self) -> "ApiHarness":
         return self
 
     def __exit__(
@@ -59,12 +58,11 @@ class ApiClient:
         client = self._authed_client if auth else self._anonymous_client
         return client.request(method, path, **kwargs)
 
+    def stream(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        return self._authed_client.stream(method, path, **kwargs)
+
 
 class ApiAssertions:
-    @staticmethod
-    def expect_json_object(response: httpx.Response) -> dict[str, Any]:
-        return _json_dict(response)
-
     @staticmethod
     def expect_json_object(response: httpx.Response) -> dict[str, Any]:
         return _json_dict(response)
@@ -104,12 +102,6 @@ class ApiAssertions:
             )
 
         return payload
-
-    @staticmethod
-    def expect_fields(payload: dict[str, Any], required_fields: Iterable[str]) -> None:
-        missing = [field for field in required_fields if field not in payload]
-        if missing:
-            raise AssertionError(f"missing fields: {missing}; payload={payload}")
 
 
 class ScenarioRunner:

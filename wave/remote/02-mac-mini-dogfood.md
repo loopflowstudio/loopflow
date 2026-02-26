@@ -27,12 +27,19 @@ A second production-like lane is stable:
 
 ## Parity checks
 
-Use the same user flows as EC2 and call out differences:
+Run `scripts/test_remote_smoke.py` against the Mac Mini target. The same script covers health, auth, wave CRUD, SSE, WS, run+logs, and reconnect. Call out differences:
 
 - wave CRUD, run lifecycle, logs, SSE/WS
 - fork execution + cleanup behavior
-- remote editor/terminal launch behavior
+- remote editor/terminal launch behavior (manual — not covered by smoke script)
 - config expectations (`executor.agent_timeout`, credentials, repo paths)
+
+### Learnings from EC2
+
+- Fresh hosts require explicit `--repo` flag — no `/v0/repos` fallback until a repo is registered.
+- Session checks depend on a configured harness (`--session-harness`, default `claude`) on the remote host.
+- TLS verification supports three modes: default, custom CA (`--ca-cert`), insecure (`--insecure`). Mac Mini may not need Caddy/TLS if running on a trusted network — document which mode applies.
+- Slow hosts may need higher `--events-timeout` and `--logs-timeout` tuning.
 
 Any divergence from EC2 must be either:
 

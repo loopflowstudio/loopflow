@@ -1,8 +1,17 @@
 {
-	default_sni localhost
+	default_sni {$LF_DOMAIN:localhost}
 }
 
-localhost, 127.0.0.1 {
-	tls internal
-	reverse_proxy lfd:2486
+{$LF_DOMAIN:localhost} {
+	tls {$LF_TLS_MODE:internal}
+
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websocket lfd:2486
+
+	reverse_proxy lfd:2486 {
+		flush_interval -1
+	}
 }

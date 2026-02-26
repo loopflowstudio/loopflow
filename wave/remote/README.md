@@ -14,7 +14,7 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 |------|------|--------|
 | 0 | Error mapping + remote editor/terminal launch | Shipped |
 | — | Bundled daemon runtime + connection mode switcher | Shipped |
-| 1 | EC2 dogfood lane: deploy (Docker + Caddy + static token) and run remote smoke from laptop | Next |
+| 1 | EC2 dogfood lane: deploy (Docker + Caddy + static token) and run remote smoke from laptop | Shipped |
 | 2 | Mac Mini dogfood lane: deploy (native + launchd) and run the same smoke suite for parity | Next |
 | 3 | Fork executor cleanup before auth rollout (shared constants, branch threading, executor hook parity) | Next |
 | 4 | Studio auth (JWT validation, sign-in UX, JWKS hardening) | After 1-3 |
@@ -54,7 +54,7 @@ Phase 05 (remote connection correctness) and Phase 06 (remote editor/terminal ac
 
 ## Risks
 
-- **TLS proxy latency for SSE/WSS.** Real-time event streaming through Caddy TLS proxy adds latency that hasn't been validated at scale. Mitigate: smoke test SSE/WSS through Caddy during deployment steps 1-2, not as a separate phase.
+- **TLS proxy latency for SSE/WSS.** Real-time event streaming through Caddy TLS proxy adds latency that hasn't been validated at scale. Partially mitigated: EC2 smoke validates SSE event receipt and WS handshake through Caddy. Remaining gap: sustained load and reconnect under real latency. Monitor during Mac Mini parity (step 2).
 - **Host-side git worktrees for prompt assembly.** Docker fork branches rely on host-side worktrees before container launch. Moving prompt assembly into containers would require container→host sync or a prompt build path that doesn't need host materialization. Acceptable for now.
 - **Stale PR state without GitHub token.** Queue UX must degrade gracefully when no token is configured — treat as degraded mode, not hard failure.
 - **Remote file access depends on editor SSH support.** Cursor/VSCode/Zed each have different Remote SSH implementations. If any breaks or changes behavior, the one-click workflow breaks for that editor. Mitigate: "Copy SSH Command" as universal fallback.

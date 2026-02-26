@@ -688,32 +688,29 @@ impl AuthBroker for ClaudeAuthBroker {
         let mut command = Command::new("claude");
         command.args(["auth", "logout"]);
 
-        match command.output().await {
-            Ok(output) if output.status.success() => Ok(()),
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let message = if stderr.is_empty() { stdout } else { stderr };
-                Err(AuthError::CommandFailed {
-                    provider: Provider::Claude,
-                    message,
-                })
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                Err(AuthError::CommandUnavailable {
-                    provider: Provider::Claude,
-                    command: "claude".to_string(),
-                })
-            }
-            Err(err) => Err(AuthError::CommandIo {
-                provider: Provider::Claude,
-                source: err,
-            }),
-        }
+        // Best-effort CLI logout; always clean up auth files regardless
+        let _ = command.output().await;
+        self.remove_claude_auth_files()
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
         extract_claude_token(&self.home_dir)
+    }
+}
+
+impl ClaudeAuthBroker {
+    fn remove_claude_auth_files(&self) -> Result<(), AuthError> {
+        let claude_dir = self.home_dir.join(".claude");
+        if !claude_dir.exists() {
+            return Ok(());
+        }
+        for name in &["auth.json", "session-cache"] {
+            let path = claude_dir.join(name);
+            if path.exists() {
+                remove_path(&path)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1360,26 +1357,6 @@ mod tests {
     // Requires local claude CLI; keep ignored.
     #[tokio::test]
     #[ignore]
-    async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
-        let temp = tempdir().expect("tempdir");
-        let claude_dir = temp.path().join(".claude");
-        fs::create_dir_all(&claude_dir).expect("claude dir");
-        fs::write(claude_dir.join("settings.json"), "{\"theme\":\"dark\"}").expect("settings");
-        fs::write(claude_dir.join("auth.json"), "{\"token\":\"abc\"}").expect("auth file");
-        fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
-        fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
-
-        let broker = ClaudeAuthBroker {
-            home_dir: temp.path().to_path_buf(),
-        };
-        broker.disconnect().await.expect("disconnect");
-
-        assert!(claude_dir.join("settings.json").exists());
-        assert!(!claude_dir.join("auth.json").exists());
-        assert!(!claude_dir.join("session-cache").exists());
-    }
-
-    #[tokio::test]
     async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
         let temp = tempdir().expect("tempdir");
         let claude_dir = temp.path().join(".claude");

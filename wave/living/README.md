@@ -32,8 +32,8 @@ A living wave:
 - **Memory quality.** Agents write varying-quality observations. Wrong-but-plausible observations persist until consolidation catches them. Mitigate: consolidation step reviews memory for accuracy against current code.
 - **Memory bloat.** Without pressure, `MEMORY.md` grows until it crowds out other context. Mitigate: memory trims before summaries/docs in prompt assembly, and ops maintenance distills durable items into canonical docs.
 - **Cross-wave leakage.** Shared memory between listening waves could propagate bad observations. Mitigate: memory is wave-private by default; sharing is explicit.
-- **Orphaned skill files on crash.** If lfd crashes mid-session, injected `.claude/commands/` files linger. Harmless (overwritten on next injection) but messy. Tracked, not urgent.
-- **Skill injection gap.** Global `~/.lf/steps/` and external skills (superpowers, rams) are not injected yet — only builtins and repo-local. Acceptable for now; revisit when external skill sources mature.
+- **Orphaned skill files on crash.** If lfd crashes mid-session, injected `.agents/skills/` directories linger. Harmless (overwritten on next injection) but messy. Tracked, not urgent.
+- ~~**Skill injection gap.** Global `~/.lf/steps/` and external skills (superpowers, rams) are not injected yet — only builtins and repo-local.~~ **Addressed** — `npx:` skill source adds fetch-on-miss from the npx skills ecosystem. External skills install to `.agents/skills/` cache and are discoverable by all agents. `lf npx:<name>` works for any published skill.
 - **Prompt/storage model split.** Prompt assembly uses `Surface` enum; execution and storage still persist `run_mode` strings. Two mental models coexist. Acceptable while the prompt-side abstraction stabilizes, but should converge before adding surface-aware execution behavior.
 
 ## Metrics
@@ -57,6 +57,8 @@ A living wave:
 Shipped simpler than designed. The `collect_injectable_skills()` abstraction from the original design collapsed into `inject_skills()` which does collection and writing in one pass. Track-and-remove cleanup works. One gate fix was needed: sessions had to thread `repo_root` separately from `cwd` to discover repo-local steps when the working directory differs from the repo root.
 
 Scope narrower than planned: only builtins and repo-local steps/directions are injected. Global `~/.lf/steps/` and external skill sources (superpowers, rams) are not yet included. This is fine — the pattern is established and extending it is straightforward.
+
+Follow-up: injection migrated from `.claude/commands/*.md` to `.agents/skills/<name>/SKILL.md` (Agent Skills open standard). Frontmatter projection maps loopflow fields to SKILL.md format — `name`, `description`, `loopflow: true` marker, `disable-model-invocation` for non-interactive steps, `user-invocable: false` for directions. One write covers Claude Code, Codex, and OpenCode. Added `npx:` skill source with cache-first resolution from `.agents/skills/` and fetch-on-miss via `npx skills add`/`npx skills find`. Step resolution chain extended: builtins and repo-local steps still take priority; `.agents/skills/` is the final fallback, also serving as the npx cache.
 
 ### Phase 02 retrospective
 

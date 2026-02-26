@@ -162,8 +162,9 @@ fn generate_pr_message_with_diff(
     diff: Option<&str>,
     wave: Option<&str>,
 ) -> OpsResult<Message> {
+    let wave = wave.and_then(normalize_wave_name);
     let non_trivial_diff = diff.is_some_and(is_non_trivial_diff);
-    let task = if let Some(wave_name) = wave {
+    let task = if let Some(wave_name) = wave.as_deref() {
         format!(
             "{PR_MESSAGE_PROMPT}\n\n## Topic\n\nAlways use `{wave_name}` as the area prefix in the title. Do not invent a different topic."
         )
@@ -171,24 +172,75 @@ fn generate_pr_message_with_diff(
         PR_MESSAGE_PROMPT.to_string()
     };
     let prompt = build_message_prompt(diff, &task);
-    generate_message(repo, &prompt, MessageKind::PullRequest { non_trivial_diff })
+    let mut message =
+        generate_message(repo, &prompt, MessageKind::PullRequest { non_trivial_diff })?;
+    if let Some(wave_name) = wave.as_deref() {
+        message.title = enforce_wave_title_prefix(&message.title, wave_name);
+    }
+    message.validate(non_trivial_diff)?;
+    Ok(message)
 }
 
 /// Resolve the wave name for PR message generation.
 ///
 /// Priority: explicit wave name > worktree directory name > branch name component.
 pub fn resolve_wave_name(repo: &Path, explicit: Option<&str>) -> Option<String> {
-    if let Some(name) = explicit {
-        return Some(name.to_string());
+    if let Some(name) = explicit.and_then(normalize_wave_name) {
+        return Some(name);
     }
-    if let Some(name) = wave_name_from_worktree(repo) {
+    if let Some(name) = wave_name_from_worktree(repo).and_then(|name| normalize_wave_name(&name)) {
         return Some(name);
     }
     if let Ok(Some(branch)) = current_branch(repo) {
         let config = load_config_or_default(Some(repo));
-        return wave_name_from_branch(&branch, config.branch_names.as_ref());
+        return wave_name_from_branch(&branch, config.branch_names.as_ref())
+            .and_then(|name| normalize_wave_name(&name));
     }
     None
+}
+
+fn normalize_wave_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed
+        .strip_prefix("wave/")
+        .unwrap_or(trimmed)
+        .trim_matches('/');
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn enforce_wave_title_prefix(title: &str, wave_name: &str) -> String {
+    let canonical_prefix = format!("{wave_name}:");
+    let prefixed_wave = format!("wave/{wave_name}");
+    let trimmed = title.trim();
+
+    if let Some((prefix, rest)) = trimmed.split_once(':') {
+        let prefix = prefix.trim();
+        let rest = rest.trim();
+        if prefix == wave_name || prefix == prefixed_wave {
+            return if rest.is_empty() {
+                canonical_prefix
+            } else {
+                format!("{canonical_prefix} {rest}")
+            };
+        }
+        if rest.is_empty() {
+            return format!("{canonical_prefix} {prefix}");
+        }
+        return format!("{canonical_prefix} {rest}");
+    }
+
+    if trimmed.is_empty() {
+        canonical_prefix
+    } else {
+        format!("{canonical_prefix} {trimmed}")
+    }
 }
 
 fn generate_message(repo: &Path, prompt: &str, kind: MessageKind) -> OpsResult<Message> {
@@ -364,8 +416,9 @@ fn run_git_diff(repo: &Path, args: &[&str]) -> OpsResult<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_non_trivial_diff, parse_message_output, write_message_output_log, Message,
-        NON_TRIVIAL_DIFF_CHANGE_LINES, TITLE_MAX_CHARS,
+        enforce_wave_title_prefix, is_non_trivial_diff, normalize_wave_name, parse_message_output,
+        resolve_wave_name, write_message_output_log, Message, NON_TRIVIAL_DIFF_CHANGE_LINES,
+        TITLE_MAX_CHARS,
     };
     use crate::ops::error::OpsError;
 
@@ -453,5 +506,40 @@ mod tests {
         let content = std::fs::read_to_string(path).expect("read log");
         assert!(content.contains("hello"));
         assert!(content.contains("warning"));
+    }
+
+    #[test]
+    fn normalize_wave_name_strips_wave_prefix() {
+        assert_eq!(
+            normalize_wave_name("wave/mobile"),
+            Some("mobile".to_string())
+        );
+        assert_eq!(normalize_wave_name("mobile"), Some("mobile".to_string()));
+        assert_eq!(normalize_wave_name(""), None);
+    }
+
+    #[test]
+    fn enforce_wave_title_prefix_rewrites_wave_path_prefix() {
+        let title = enforce_wave_title_prefix("wave/mobile: polish terminal ux", "mobile");
+        assert_eq!(title, "mobile: polish terminal ux");
+    }
+
+    #[test]
+    fn enforce_wave_title_prefix_replaces_mismatched_prefix() {
+        let title = enforce_wave_title_prefix("ux: polish terminal ux", "mobile");
+        assert_eq!(title, "mobile: polish terminal ux");
+    }
+
+    #[test]
+    fn enforce_wave_title_prefix_adds_missing_prefix() {
+        let title = enforce_wave_title_prefix("polish terminal ux", "mobile");
+        assert_eq!(title, "mobile: polish terminal ux");
+    }
+
+    #[test]
+    fn resolve_wave_name_normalizes_explicit_prefix() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let wave = resolve_wave_name(tempdir.path(), Some("wave/mobile"));
+        assert_eq!(wave, Some("mobile".to_string()));
     }
 }

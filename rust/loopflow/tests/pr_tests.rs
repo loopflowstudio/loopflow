@@ -2,7 +2,7 @@ mod support;
 
 use std::process::Command;
 
-use loopflow::ops::{create_or_update_pr, NullProgress, PrOptions};
+use loopflow::ops::{create_or_update_pr, current_pr, NullProgress, OpsError, PrOptions};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
@@ -151,4 +151,19 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
 
     assert!(result.created);
     assert_eq!(result.url, "https://example.com/pr/1");
+}
+
+#[test]
+fn current_pr_surfaces_gh_list_errors() {
+    let _env = EnvGuard::new(&[(
+        "gh",
+        "#!/bin/sh\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\n  echo \"gh pr list failed\" >&2\n  exit 1\nfi\nexit 0\n",
+    )]);
+    let repo = TestRepo::new();
+
+    let result = current_pr(repo.path());
+    assert!(matches!(
+        result,
+        Err(OpsError::CommandFailed { stderr, .. }) if stderr.contains("gh pr list failed")
+    ));
 }

@@ -261,8 +261,12 @@ def find_concerto_executable(
     install_path = Path("/Applications/Concerto.app")
     executable_path = install_path / "Contents/MacOS/Concerto"
 
-    # Prefer app bundle for stable app resources and paths.
-    # Check LoopflowSwift builds first, then Concerto and swift builds
+    # Check installed app first
+    if executable_path.exists():
+        print(f"Using installed Concerto: {executable_path}")
+        return executable_path
+
+    # Check DerivedData builds, install to /Applications if found
     for pattern in ["LoopflowSwift-", "Concerto-", "swift-"]:
         for d in derived_data.iterdir():
             if d.name.startswith(pattern):

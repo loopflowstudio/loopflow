@@ -13,7 +13,7 @@ uv run pytest python/tests/            # Python tests
 swift test --package-path swift        # Swift package tests
 cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Concerto UI
 tests/e2e/test_smoke.sh               # E2E smoke
-uv run pytest tests/e2e/test_api_smoke.py -v  # API smoke (live lfd HTTP)
+uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v  # API smoke + concurrent-client broadcast checks (live lfd HTTP)
 ```
 
 Run at minimum the checks that apply to files you changed. A PR that passes locally but fails CI is a broken gate.
@@ -54,7 +54,7 @@ See `.github/workflows/ci.yml`. Six parallel jobs:
 |-----|--------|---------|
 | `rust-test` | ubuntu-latest | `cargo fmt`, `cargo clippy`, `cargo test --all` |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
-| `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` + `uv run pytest tests/e2e/test_api_smoke.py -v` |
+| `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` + `uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v` |
 | `docker-smoke` | ubuntu-latest | `docker version` + `cargo test -p loopflow docker_` |
 | `swift-test` | macos-15 | `swift test --package-path swift` |
 | `concerto-ui-test` | macos-15 | xcodegen + xcodebuild |
@@ -76,7 +76,7 @@ Shell-based workflows for CLI and live HTTP API behavior.
 
 ```bash
 tests/e2e/test_smoke.sh
-uv run pytest tests/e2e/test_api_smoke.py -v
+uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
 ```
 
 Long-running workflow tests for `lf ops`:

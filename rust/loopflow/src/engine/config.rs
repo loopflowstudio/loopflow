@@ -12,7 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::engine::error::LoadError;
 
 /// Keys that combine lists from global + repo config.
-const ADDITIVE_KEYS: &[&str] = &["context", "exclude", "skill_sources", "summaries"];
+const ADDITIVE_KEYS: &[&str] = &[
+    "context",
+    "exclude",
+    "skill_sources",
+    "summaries",
+    "supported_harnesses",
+];
 
 /// Token budgets for prompt sections.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -41,11 +47,11 @@ pub struct SummaryConfig {
     pub path: String,
     #[serde(default)]
     pub tokens: Option<usize>,
-    #[serde(default = "default_summary_model")]
-    pub model: String,
+    #[serde(default = "default_summary_agent")]
+    pub agent: String,
 }
 
-fn default_summary_model() -> String {
+fn default_summary_agent() -> String {
     "gemini".to_string()
 }
 
@@ -171,9 +177,13 @@ pub struct ReleaseTargetConfig {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Model in format backend:variant (e.g., claude:opus, codex)
-    #[serde(default = "default_agent_model")]
-    pub agent_model: String,
+    /// Agent in format harness:model (e.g., claude:opus, codex)
+    #[serde(default)]
+    pub agent: Option<String>,
+
+    /// Supported harnesses for model selection UI.
+    #[serde(default)]
+    pub supported_harnesses: Vec<String>,
 
     /// Skip permissions; Codex also disables sandboxing
     #[serde(default)]
@@ -276,9 +286,9 @@ pub struct Config {
     #[serde(default)]
     pub inject_skills: bool,
 
-    /// Model for RLM sub-agents (default: same as agent_model)
+    /// Agent for RLM sub-agents (default: same as agent)
     #[serde(default)]
-    pub rlm_model: Option<String>,
+    pub rlm_agent: Option<String>,
 
     /// Release targets and scoping rules.
     #[serde(default)]
@@ -291,10 +301,6 @@ pub struct Config {
     /// Max RLM recursion depth
     #[serde(default = "default_rlm_max_depth")]
     pub rlm_max_depth: usize,
-}
-
-fn default_agent_model() -> String {
-    "claude:opus".to_string()
 }
 
 fn default_land() -> String {
@@ -316,7 +322,8 @@ fn default_rlm_max_depth() -> usize {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            agent_model: default_agent_model(),
+            agent: None,
+            supported_harnesses: Vec::new(),
             yolo: false,
             chrome: false,
             push: false,
@@ -342,7 +349,7 @@ impl Default for Config {
             autoprune: AutopruneConfig::default(),
             budgets: BudgetConfig::default(),
             inject_skills: false,
-            rlm_model: None,
+            rlm_agent: None,
             release: ReleaseConfig::default(),
             rlm_max_parallel: default_rlm_max_parallel(),
             rlm_max_depth: default_rlm_max_depth(),
@@ -350,26 +357,25 @@ impl Default for Config {
     }
 }
 
-/// Parse model string like 'claude:opus' into (backend, variant).
+/// Parse agent string like 'claude:opus' into (harness, model).
 ///
-/// Applies smart defaults when no variant is specified:
+/// Applies smart defaults when no model is specified:
 /// - claude -> opus (Claude Opus 4.5)
 /// - gemini -> 2.5-pro (Gemini 2.5 Pro)
 /// - codex -> None (let Codex CLI pick its default)
 /// - opencode -> None (let OpenCode use its own config)
-pub fn parse_model(model: &str) -> (String, Option<String>) {
-    let parts: Vec<&str> = model.splitn(2, ':').collect();
-    let backend = parts[0].to_string();
-    let variant = if parts.len() > 1 {
-        Some(parts[1].to_string())
-    } else {
-        match backend.as_str() {
-            "claude" => Some("opus".to_string()),
-            "gemini" => Some("2.5-pro".to_string()),
-            _ => None,
-        }
+pub fn parse_agent(agent: &str) -> (String, Option<String>) {
+    if let Some((harness, model)) = agent.split_once(':') {
+        return (harness.to_string(), Some(model.to_string()));
+    }
+
+    let harness = agent.to_string();
+    let default_model = match harness.as_str() {
+        "claude" => Some("opus".to_string()),
+        "gemini" => Some("2.5-pro".to_string()),
+        _ => None,
     };
-    (backend, variant)
+    (harness, default_model)
 }
 
 /// Load YAML file, returning None if not present or empty.
@@ -464,70 +470,70 @@ mod tests {
     use super::*;
 
     // ==========================================================================
-    // parse_model tests
+    // parse_agent tests
     // ==========================================================================
 
     #[test]
-    fn parse_model_with_variant() {
-        let (backend, variant) = parse_model("claude:opus");
-        assert_eq!(backend, "claude");
-        assert_eq!(variant, Some("opus".to_string()));
+    fn parse_agent_with_model() {
+        let (harness, model) = parse_agent("claude:opus");
+        assert_eq!(harness, "claude");
+        assert_eq!(model, Some("opus".to_string()));
     }
 
     #[test]
-    fn parse_model_with_complex_variant() {
-        let (backend, variant) = parse_model("gemini:2.5-pro");
-        assert_eq!(backend, "gemini");
-        assert_eq!(variant, Some("2.5-pro".to_string()));
+    fn parse_agent_with_complex_model() {
+        let (harness, model) = parse_agent("gemini:2.5-pro");
+        assert_eq!(harness, "gemini");
+        assert_eq!(model, Some("2.5-pro".to_string()));
     }
 
     #[test]
-    fn parse_model_claude_default() {
-        let (backend, variant) = parse_model("claude");
-        assert_eq!(backend, "claude");
-        assert_eq!(variant, Some("opus".to_string()));
+    fn parse_agent_claude_default() {
+        let (harness, model) = parse_agent("claude");
+        assert_eq!(harness, "claude");
+        assert_eq!(model, Some("opus".to_string()));
     }
 
     #[test]
-    fn parse_model_codex_no_default() {
-        let (backend, variant) = parse_model("codex");
-        assert_eq!(backend, "codex");
-        assert_eq!(variant, None);
+    fn parse_agent_codex_no_default() {
+        let (harness, model) = parse_agent("codex");
+        assert_eq!(harness, "codex");
+        assert_eq!(model, None);
     }
 
     #[test]
-    fn parse_model_gemini_default() {
-        let (backend, variant) = parse_model("gemini");
-        assert_eq!(backend, "gemini");
-        assert_eq!(variant, Some("2.5-pro".to_string()));
+    fn parse_agent_gemini_default() {
+        let (harness, model) = parse_agent("gemini");
+        assert_eq!(harness, "gemini");
+        assert_eq!(model, Some("2.5-pro".to_string()));
     }
 
     #[test]
-    fn parse_model_opencode_no_default() {
-        let (backend, variant) = parse_model("opencode");
-        assert_eq!(backend, "opencode");
-        assert_eq!(variant, None);
+    fn parse_agent_opencode_no_default() {
+        let (harness, model) = parse_agent("opencode");
+        assert_eq!(harness, "opencode");
+        assert_eq!(model, None);
     }
 
     #[test]
-    fn parse_model_opencode_with_variant() {
-        let (backend, variant) = parse_model("opencode:anthropic/claude-sonnet");
-        assert_eq!(backend, "opencode");
-        assert_eq!(variant, Some("anthropic/claude-sonnet".to_string()));
+    fn parse_agent_opencode_with_model() {
+        let (harness, model) = parse_agent("opencode:anthropic/claude-sonnet");
+        assert_eq!(harness, "opencode");
+        assert_eq!(model, Some("anthropic/claude-sonnet".to_string()));
     }
 
     #[test]
-    fn parse_model_unknown_backend() {
-        let (backend, variant) = parse_model("unknown");
-        assert_eq!(backend, "unknown");
-        assert_eq!(variant, None);
+    fn parse_agent_unknown_harness() {
+        let (harness, model) = parse_agent("unknown");
+        assert_eq!(harness, "unknown");
+        assert_eq!(model, None);
     }
 
     #[test]
-    fn parse_model_unknown_with_variant() {
-        let (backend, variant) = parse_model("custom:model-v2");
-        assert_eq!(backend, "custom");
-        assert_eq!(variant, Some("model-v2".to_string()));
+    fn parse_agent_unknown_with_model() {
+        let (harness, model) = parse_agent("custom:model-v2");
+        assert_eq!(harness, "custom");
+        assert_eq!(model, Some("model-v2".to_string()));
     }
 
     // ==========================================================================
@@ -537,7 +543,8 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = Config::default();
-        assert_eq!(config.agent_model, "claude:opus");
+        assert!(config.agent.is_none());
+        assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
         assert!(config.lfdocs);
         assert!(config.diff_files);
@@ -607,14 +614,25 @@ mod tests {
     #[test]
     fn config_from_yaml_basic() {
         let yaml = r#"
-agent_model: codex:o3
+agent: codex:o3
 yolo: true
 chrome: true
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.agent_model, "codex:o3");
+        assert_eq!(config.agent.as_deref(), Some("codex:o3"));
         assert!(config.yolo);
         assert!(config.chrome);
+    }
+
+    #[test]
+    fn config_from_yaml_supported_harnesses() {
+        let yaml = r#"
+supported_harnesses:
+  - claude
+  - codex
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+        assert_eq!(config.supported_harnesses, vec!["claude", "codex"]);
     }
 
     #[test]
@@ -764,16 +782,16 @@ budgets:
 summaries:
   - path: src/
     tokens: 5000
-    model: claude
+    agent: claude
   - path: tests/
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.summaries.len(), 2);
         assert_eq!(config.summaries[0].path, "src/");
         assert_eq!(config.summaries[0].tokens, Some(5000));
-        assert_eq!(config.summaries[0].model, "claude");
+        assert_eq!(config.summaries[0].agent, "claude");
         assert_eq!(config.summaries[1].path, "tests/");
-        assert_eq!(config.summaries[1].model, "gemini"); // default
+        assert_eq!(config.summaries[1].agent, "gemini"); // default
     }
 
     #[test]
@@ -868,7 +886,7 @@ release:
     fn merge_config_values_repo_overrides_scalar() {
         let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             r#"
-agent_model: claude:opus
+agent: claude:opus
 yolo: false
 "#,
         )
@@ -876,7 +894,7 @@ yolo: false
 
         let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             r#"
-agent_model: codex
+agent: codex
 "#,
         )
         .unwrap();
@@ -884,7 +902,7 @@ agent_model: codex
         let merged = merge_config_values(Some(global), Some(repo));
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent.as_deref(), Some("codex"));
         assert!(!config.yolo); // preserved from global
     }
 
@@ -918,24 +936,46 @@ exclude:
     }
 
     #[test]
+    fn merge_config_values_supported_harnesses_combine() {
+        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            r#"
+supported_harnesses:
+  - claude
+"#,
+        )
+        .unwrap();
+
+        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            r#"
+supported_harnesses:
+  - codex
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_config_values(Some(global), Some(repo));
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
+        assert_eq!(config.supported_harnesses, vec!["claude", "codex"]);
+    }
+
+    #[test]
     fn merge_config_values_global_only() {
-        let global: serde_yaml_ng::Value =
-            serde_yaml_ng::from_str("agent_model: claude:opus\n").unwrap();
+        let global: serde_yaml_ng::Value = serde_yaml_ng::from_str("agent: claude:opus\n").unwrap();
 
         let merged = merge_config_values(Some(global), None);
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
-        assert_eq!(config.agent_model, "claude:opus");
+        assert_eq!(config.agent.as_deref(), Some("claude:opus"));
     }
 
     #[test]
     fn merge_config_values_repo_only() {
-        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str("agent_model: codex\n").unwrap();
+        let repo: serde_yaml_ng::Value = serde_yaml_ng::from_str("agent: codex\n").unwrap();
 
         let merged = merge_config_values(None, Some(repo));
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent.as_deref(), Some("codex"));
     }
 
     #[test]
@@ -944,7 +984,7 @@ exclude:
         let config: Config = serde_yaml_ng::from_value(merged).unwrap();
 
         // Should get defaults
-        assert_eq!(config.agent_model, "claude:opus");
+        assert!(config.agent.is_none());
     }
 
     // ==========================================================================
@@ -988,7 +1028,7 @@ exclude:
     fn load_yaml_file_valid_content() {
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_path = temp.path().join("config.yaml");
-        std::fs::write(&config_path, "agent_model: codex\n").expect("write config");
+        std::fs::write(&config_path, "agent: codex\n").expect("write config");
 
         let result = load_yaml_file(&config_path);
         assert!(result.is_ok());
@@ -1001,16 +1041,13 @@ exclude:
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");
-        std::fs::write(
-            config_dir.join("config.yaml"),
-            "agent_model: codex\nyolo: true\n",
-        )
-        .expect("write config");
+        std::fs::write(config_dir.join("config.yaml"), "agent: codex\nyolo: true\n")
+            .expect("write config");
 
         let result = load_config(Some(temp.path()));
         assert!(result.is_ok());
         let config = result.unwrap().expect("config should exist");
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent.as_deref(), Some("codex"));
         assert!(config.yolo);
     }
 
@@ -1019,10 +1056,9 @@ exclude:
         let temp = tempfile::tempdir().expect("create temp dir");
         let config_dir = temp.path().join(".lf");
         std::fs::create_dir_all(&config_dir).expect("create .lf dir");
-        std::fs::write(config_dir.join("config.yaml"), "agent_model: codex\n")
-            .expect("write config");
+        std::fs::write(config_dir.join("config.yaml"), "agent: codex\n").expect("write config");
 
         let config = load_config_or_default(Some(temp.path()));
-        assert_eq!(config.agent_model, "codex");
+        assert_eq!(config.agent.as_deref(), Some("codex"));
     }
 }

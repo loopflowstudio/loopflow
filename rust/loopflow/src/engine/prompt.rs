@@ -1757,7 +1757,8 @@ mod tests {
             step: Some(Step {
                 name: "test".to_string(),
                 content: Some("x".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 interactive: None,
                 action_style: None,
@@ -1804,7 +1805,8 @@ mod tests {
             step: Some(Step {
                 name: "test".to_string(),
                 content: Some("x".to_string()), // Minimal step content
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -1828,7 +1830,8 @@ mod tests {
             step: Some(Step {
                 name: "test".to_string(),
                 content: Some("x".to_string()), // Minimal step content
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -1850,7 +1853,8 @@ mod tests {
             step: Some(Step {
                 name: "implement".to_string(),
                 content: Some("Implement the feature with tests".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2066,7 +2070,8 @@ mod tests {
             step: Some(Step {
                 name: "implement".to_string(),
                 content: Some("Implement the feature described.".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2087,7 +2092,8 @@ mod tests {
             step: Some(Step {
                 name: "review".to_string(),
                 content: None,
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2186,7 +2192,8 @@ mod tests {
             step: Some(Step {
                 name: "implement".to_string(),
                 content: Some("Implement it.".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2636,7 +2643,8 @@ directions:
             step: Some(Step {
                 name: "implement".to_string(),
                 content: Some("Implement the feature.".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2670,7 +2678,8 @@ directions:
             step: Some(Step {
                 name: "debug".to_string(),
                 content: Some("Fix the error.".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2713,7 +2722,8 @@ directions:
             step: Some(Step {
                 name: "implement".to_string(),
                 content: Some("Implement the feature.".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2750,7 +2760,8 @@ directions:
             step: Some(Step {
                 name: "debug".to_string(),
                 content: Some("Debug the error.".to_string()),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,
@@ -2769,7 +2780,8 @@ directions:
             step: Some(Step {
                 name: "review".to_string(),
                 content: None,
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: vec![],
                 action_style: None,
                 interactive: None,

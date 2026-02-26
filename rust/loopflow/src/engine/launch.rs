@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::engine::agent::AgentConfig;
-use crate::engine::config::{parse_model, Config};
+use crate::engine::config::{parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
@@ -33,7 +33,7 @@ pub struct LaunchPromptInput {
     pub area: Option<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
-    pub model: Option<String>,
+    pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
     pub max_turns: Option<u32>,
     pub yolo_mode: bool,
@@ -67,7 +67,7 @@ pub fn prepare_launch_prompt(
         area,
         wave,
         message,
-        model,
+        agent,
         cwd,
         max_turns,
         yolo_mode,
@@ -133,10 +133,17 @@ pub fn prepare_launch_prompt(
     let system_prompt = format_context_prompt(&budgeted);
     let task_prompt = format_task_prompt(&budgeted);
 
-    let model = model
-        .or_else(|| budgeted.step.as_ref().and_then(|step| step.model.clone()))
-        .unwrap_or_else(|| config.agent_model.clone());
-    validate_model_policy(&model)?;
+    let agent = agent
+        .or_else(|| budgeted.step.as_ref().and_then(|step| step.agent.clone()))
+        .or_else(|| config.agent.clone())
+        .or_else(|| {
+            budgeted
+                .step
+                .as_ref()
+                .and_then(|step| step.default_agent.clone())
+        })
+        .unwrap_or_else(|| "claude:opus".to_string());
+    validate_agent_policy(&agent)?;
     let (components, breakdown) = budgeted.into_parts();
     let action_style = components
         .step
@@ -145,7 +152,7 @@ pub fn prepare_launch_prompt(
     let launch = AgentConfig {
         system_prompt,
         task_prompt,
-        model: Some(model),
+        agent: Some(agent),
         max_turns,
         cwd: Some(cwd.unwrap_or(repo_root)),
         skip_permissions: yolo_mode,
@@ -160,8 +167,8 @@ pub fn prepare_launch_prompt(
     })
 }
 
-fn validate_model_policy(model: &str) -> Result<(), CoreError> {
-    let (harness, variant) = parse_model(model);
+fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
+    let (harness, variant) = parse_agent(agent);
     if harness != "opencode" {
         return Ok(());
     }
@@ -211,7 +218,7 @@ mod tests {
         fs::write(
             tmp.path().join(".lf/steps/test.md"),
             r#"---
-model: codex:o3
+agent: codex:o3
 directions: [thorough]
 action_style: procedural
 ---
@@ -234,7 +241,7 @@ Test step body.
 
     fn default_test_config() -> Config {
         Config {
-            agent_model: "claude:opus".to_string(),
+            agent: Some("claude:opus".to_string()),
             lfdocs: false,
             diff_files: false,
             diff: false,
@@ -244,7 +251,7 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_step_model_when_no_override() {
+    fn prepare_launch_prompt_prefers_step_agent_when_no_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
@@ -258,11 +265,11 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_explicit_model_override() {
+    fn prepare_launch_prompt_prefers_explicit_agent_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
@@ -270,14 +277,74 @@ Test step body.
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 step: Some("test".to_string()),
-                model: Some("claude:sonnet".to_string()),
+                agent: Some("claude:sonnet".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.model.as_deref(), Some("claude:sonnet"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_uses_default_agent_when_no_user_config() {
+        let tmp = tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
+        fs::write(
+            tmp.path().join(".lf/steps/test.md"),
+            r#"---
+default_agent: gemini:2.5-pro
+---
+Test step body.
+"#,
+        )
+        .expect("write step");
+
+        let mut config = default_test_config();
+        config.agent = None;
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                step: Some("test".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.agent.as_deref(), Some("gemini:2.5-pro"));
+    }
+
+    #[test]
+    fn prepare_launch_prompt_user_config_overrides_default_agent() {
+        let tmp = tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
+        fs::write(
+            tmp.path().join(".lf/steps/test.md"),
+            r#"---
+default_agent: gemini:2.5-pro
+---
+Test step body.
+"#,
+        )
+        .expect("write step");
+
+        let mut config = default_test_config();
+        config.agent = Some("codex:o3".to_string());
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                step: Some("test".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
@@ -380,7 +447,8 @@ Test step body.
                 step: Some("npx:skill-creator".to_string()),
                 resolved_step: Some(Step {
                     name: "npx:skill-creator".to_string(),
-                    model: Some("codex:o3".to_string()),
+                    agent: Some("codex:o3".to_string()),
+                    default_agent: None,
                     directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
                     interactive: Some(true),
@@ -400,7 +468,7 @@ Test step body.
                 .map(|step| step.name.as_str()),
             Some("npx:skill-creator")
         );
-        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
         assert!(prepared
             .components
             .directions
@@ -416,7 +484,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                model: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
+                agent: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
@@ -436,7 +504,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                model: Some("opencode:moonshotai/kimi-k2".to_string()),
+                agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
@@ -444,7 +512,7 @@ Test step body.
         .expect("supported OpenCode model should pass");
 
         assert_eq!(
-            prepared.config.model.as_deref(),
+            prepared.config.agent.as_deref(),
             Some("opencode:moonshotai/kimi-k2")
         );
     }
@@ -457,7 +525,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                model: Some("opencode".to_string()),
+                agent: Some("opencode".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },

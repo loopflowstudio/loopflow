@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::engine::agent::AgentConfig;
-use crate::engine::config::parse_model;
+use crate::engine::config::parse_agent;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::sessions::harness::{opencode_mapping, Harness, HarnessError};
 use crate::lfd::sessions::opencode_runtime;
@@ -514,8 +514,8 @@ fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> 
 }
 
 fn opencode_model(config: &AgentConfig) -> Option<(String, String)> {
-    let model = config.model.as_deref()?;
-    let (harness, variant) = parse_model(model);
+    let agent_str = config.agent.as_deref()?;
+    let (harness, variant) = parse_agent(agent_str);
     if harness != "opencode" {
         return None;
     }
@@ -616,7 +616,7 @@ mod tests {
         let payload = build_turn_payload(
             "hello",
             &AgentConfig {
-                model: Some("opencode:moonshotai/kimi-k2".to_string()),
+                agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 ..Default::default()
             },
             false,
@@ -635,7 +635,7 @@ mod tests {
         let payload = build_turn_payload(
             "hello",
             &AgentConfig {
-                model: Some("claude:sonnet".to_string()),
+                agent: Some("claude:sonnet".to_string()),
                 ..Default::default()
             },
             false,

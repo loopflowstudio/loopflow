@@ -40,7 +40,8 @@ fn flow_parsing_parity() {
         flow.items[0],
         FlowItem::Step(Step {
             name: "implement".to_string(),
-            model: None,
+            agent: None,
+            default_agent: None,
             directions: vec![],
             action_style: None,
             interactive: None,
@@ -51,7 +52,8 @@ fn flow_parsing_parity() {
         flow.items[1],
         FlowItem::Step(Step {
             name: "review".to_string(),
-            model: None,
+            agent: None,
+            default_agent: None,
             directions: vec!["ux".to_string(), "security".to_string()],
             action_style: None,
             interactive: Some(true),

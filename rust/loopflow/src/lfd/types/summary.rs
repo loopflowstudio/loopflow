@@ -11,6 +11,6 @@ pub struct Summary {
     pub content: String,
     pub source_hash: String,
     pub token_budget: u32,
-    pub model: String,
+    pub agent: String,
     pub created_at: Option<OffsetDateTime>,
 }

@@ -1,6 +1,7 @@
 ---
 requires: diff vs main
 produces: simpler code
+default_agent: codex
 action_style: procedural
 ---
 Leave the codebase simpler than you found it. Delete what isn't needed. Flatten unnecessary abstractions.

@@ -96,7 +96,7 @@ class TestSessionModel:
         session = Session.model_validate(SESSION_FULL)
         assert session.wave_run_id == "run-1"
         assert session.provider_session_id == "provider-1"
-        assert session.config.model == "claude-sonnet-4-5-20250929"
+        assert session.config.agent == "claude-sonnet-4-5-20250929"
         assert session.created_at is not None
         assert session.ended_at is not None
 

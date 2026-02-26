@@ -86,7 +86,7 @@ class Chord(BaseModel):
 
 
 class SessionConfig(BaseModel):
-    model: Optional[str] = None
+    agent: Optional[str] = None
     cwd: Optional[str] = None
     system_prompt: Optional[str] = None
     max_turns: Optional[int] = None

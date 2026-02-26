@@ -169,7 +169,7 @@ public struct AgentSessionConfig: Sendable, Hashable {
     public var area: String?
     public var wave: String?
     public var message: String?
-    public var model: String?
+    public var agent: String?
     public var cwd: String?
     public var maxTurns: Int?
     public var yoloMode: Bool
@@ -183,7 +183,7 @@ public struct AgentSessionConfig: Sendable, Hashable {
         area: String? = nil,
         wave: String? = nil,
         message: String? = nil,
-        model: String? = nil,
+        agent: String? = nil,
         cwd: String? = nil,
         maxTurns: Int? = nil,
         yoloMode: Bool = false,
@@ -196,7 +196,7 @@ public struct AgentSessionConfig: Sendable, Hashable {
         self.area = area
         self.wave = wave
         self.message = message
-        self.model = model
+        self.agent = agent
         self.cwd = cwd
         self.maxTurns = maxTurns
         self.yoloMode = yoloMode

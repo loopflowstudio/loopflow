@@ -99,6 +99,7 @@ pub async fn build_wave_dto(
         .await
         .unwrap_or_default();
     let stimuli = stimuli_list.into_iter().map(stimulus_dto).collect();
+    let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
 
     let active_run = if include_active_run {
         latest.map(|run| {
@@ -128,6 +129,8 @@ pub async fn build_wave_dto(
         flow: wave.flow().clone(),
         direction: wave.direction().clone(),
         area: wave.area().clone(),
+        agent: wave_config.as_ref().and_then(|config| config.agent.clone()),
+        step_agents: wave_config.and_then(|config| config.step_agents),
         created_at: format_datetime(wave.created_at()),
         status: wave.status().as_str().to_string(),
         iteration: wave.iteration(),

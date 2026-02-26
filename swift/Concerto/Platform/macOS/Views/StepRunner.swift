@@ -10,6 +10,7 @@ struct StepRunner: View {
     @Environment(\.palette) private var palette
 
     @State private var selectedFlow: String = ""
+    @State private var selectedAgent: String = ""
     @State private var autoMode: Stimulus.Kind = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
@@ -23,6 +24,7 @@ struct StepRunner: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 areaHeader
                 directionHeader
+                agentHeader
             }
 
             Divider()
@@ -54,6 +56,7 @@ struct StepRunner: View {
         }
         .onAppear {
             selectedFlow = wave.flow
+            selectedAgent = wave.agent ?? ""
             if let s = wave.stimulus {
                 autoMode = s.kind
                 if let cron = s.cron {
@@ -90,6 +93,46 @@ struct StepRunner: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var agentHeader: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Model")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+
+            if repoState.supportedHarnesses.isEmpty {
+                TextField("Default (claude:opus)", text: $selectedAgent)
+                    .textFieldStyle(.plain)
+                    .font(Typography.code(12))
+                    .padding(Spacing.sm)
+                    .background(palette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                    .onSubmit {
+                        persistAgent(selectedAgent)
+                    }
+            } else {
+                Picker("Model", selection: $selectedAgent) {
+                    Text("Default").tag("")
+                    ForEach(agentPickerOptions, id: \.self) { agent in
+                        Text(agent).tag(agent)
+                    }
+                }
+                .labelsHidden()
+                .onChange(of: selectedAgent) { _, newValue in
+                    persistAgent(newValue)
+                }
+            }
+        }
+    }
+
+    private var agentPickerOptions: [String] {
+        var options = repoState.supportedHarnesses
+        if let activeAgent = wave.agent, !activeAgent.isEmpty, !options.contains(activeAgent) {
+            options.append(activeAgent)
+        }
+        return options.sorted()
     }
 
     // MARK: - Fields
@@ -288,6 +331,17 @@ struct StepRunner: View {
         Task {
             do {
                 try await repoState.removeStimulus(wave: wave, stimulusId: stimulusId)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    private func persistAgent(_ agent: String) {
+        let trimmed = agent.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            do {
+                try await repoState.updateWave(wave, agent: trimmed)
             } catch {
                 showError(error)
             }

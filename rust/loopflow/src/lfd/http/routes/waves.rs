@@ -20,7 +20,9 @@ use crate::lfd::http::dto::{
     LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse, RunWaveResponse,
     StopWaveResponse, WaveDto,
 };
-use crate::lfd::http::routes::wave_config::{read_wave_config, StimulusDef};
+use crate::lfd::http::routes::wave_config::{
+    read_wave_config, update_wave_agent_config, StimulusDef,
+};
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
@@ -113,6 +115,8 @@ pub struct UpdateWaveRequest {
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
     status: Option<String>,
+    agent: Option<String>,
+    step_agents: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -189,13 +193,13 @@ pub async fn create_wave_handler(
         .map(parse_stimulus)
         .transpose()?;
     let flow = flow
-        .or_else(|| wave_config.as_ref().map(|c| c.flow.clone()))
+        .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "build".to_string());
     let direction = direction
         .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();
     let area = area
-        .or_else(|| wave_config.as_ref().map(|c| c.area.clone()))
+        .or_else(|| wave_config.as_ref().and_then(|c| c.area.clone()))
         .unwrap_or_default();
 
     // Check for duplicate wave name in the same repo.
@@ -435,6 +439,18 @@ pub async fn update_wave_handler(
     if let Some(status) = payload.status {
         wave.status = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
+    }
+
+    if payload.agent.is_some() || payload.step_agents.is_some() {
+        let repo = wave.repo().clone();
+        let wave_name = wave.name().clone();
+        let agent = payload.agent.clone();
+        let step_agents = payload.step_agents.clone();
+        run_blocking_result(
+            move || update_wave_agent_config(FsPath::new(&repo), &wave_name, agent, step_agents),
+            StatusCode::BAD_REQUEST,
+        )
+        .await?;
     }
 
     state

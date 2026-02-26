@@ -1416,31 +1416,31 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
+    pub async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()> {
         self.with_client(|client| async move {
-            let started_at = agent
+            let started_at = agent_run
                 .started_at
                 .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
-            let ended_at = agent.ended_at.map(|dt| dt.unix_timestamp());
-            let pid = agent.pid.map(|v| v as i32);
-            let container_id = agent.container_id.as_deref();
+            let ended_at = agent_run.ended_at.map(|dt| dt.unix_timestamp());
+            let pid = agent_run.pid.map(|v| v as i32);
+            let container_id = agent_run.container_id.as_deref();
             client
                 .execute(
                     Self::sql(Query::InsertAgent),
                     &[
-                        &agent.id,
-                        &agent.step,
-                        &agent.repo,
-                        &agent.worktree,
-                        &agent.wave_run_id,
-                        &agent.status.as_i32(),
+                        &agent_run.id,
+                        &agent_run.step,
+                        &agent_run.repo,
+                        &agent_run.worktree,
+                        &agent_run.wave_run_id,
+                        &agent_run.status.as_i32(),
                         &started_at,
                         &ended_at,
                         &pid,
                         &container_id,
-                        &agent.model,
-                        &agent.run_mode,
+                        &agent_run.agent,
+                        &agent_run.run_mode,
                     ],
                 )
                 .await?;
@@ -1554,7 +1554,7 @@ impl PostgresStore {
                         &summary.content,
                         &summary.source_hash,
                         &(summary.token_budget as i32),
-                        &summary.model,
+                        &summary.agent,
                         &created_at,
                     ],
                 )

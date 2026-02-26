@@ -1,6 +1,7 @@
 ---
 requires: scratch/<slug>.md (ingested wave item)
 produces: scratch/<slug>.md (elaborated design)
+default_agent: claude
 ---
 Transform a wave item into a bold, well-considered design.
 

@@ -326,12 +326,12 @@ class TestClientResponses:
             return httpx.Response(200, json=SESSION_MINIMAL)
 
         client = _mock_client(handler)
-        config = SessionConfig(model="claude-sonnet", yolo_mode=True)
+        config = SessionConfig(agent="claude-sonnet", yolo_mode=True)
         session = client.create_session("claude", wave_run_id="run-1", config=config)
 
         assert received["harness"] == "claude"
         assert received["wave_run_id"] == "run-1"
-        assert received["config"]["model"] == "claude-sonnet"
+        assert received["config"]["agent"] == "claude-sonnet"
         assert received["config"]["yolo_mode"] is True
         assert session.id == "session-1"
         client.close()

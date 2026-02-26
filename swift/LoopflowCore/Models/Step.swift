@@ -5,18 +5,35 @@ import Foundation
 
 /// Per-step configuration overrides.
 public struct StepConfig: Sendable, Codable, Equatable {
-    public var model: String?
+    public var agent: String?
+    public var defaultAgent: String?
     public var direction: String?
     public var context: [String]?
 
-    public init(model: String? = nil, direction: String? = nil, context: [String]? = nil) {
-        self.model = model
+    public init(
+        agent: String? = nil,
+        defaultAgent: String? = nil,
+        direction: String? = nil,
+        context: [String]? = nil
+    ) {
+        self.agent = agent
+        self.defaultAgent = defaultAgent
         self.direction = direction
         self.context = context
     }
 
     public var isEmpty: Bool {
-        model == nil && direction == nil && (context == nil || context!.isEmpty)
+        agent == nil &&
+            defaultAgent == nil &&
+            direction == nil &&
+            (context?.isEmpty ?? true)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case agent
+        case defaultAgent = "default_agent"
+        case direction
+        case context
     }
 }
 
@@ -62,11 +79,11 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
     public let status: String
     public let startedAt: Date
     public let endedAt: Date?
-    public let model: String
+    public let agent: String
     public let runMode: String
 
     enum CodingKeys: String, CodingKey {
-        case id, step, repo, worktree, status, model
+        case id, step, repo, worktree, status, agent
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case runMode = "run_mode"
@@ -93,7 +110,7 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
         status: String,
         startedAt: Date,
         endedAt: Date?,
-        model: String,
+        agent: String,
         runMode: String
     ) {
         self.id = id
@@ -103,7 +120,7 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
         self.status = status
         self.startedAt = startedAt
         self.endedAt = endedAt
-        self.model = model
+        self.agent = agent
         self.runMode = runMode
     }
 }

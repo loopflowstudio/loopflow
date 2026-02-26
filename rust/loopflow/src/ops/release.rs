@@ -1387,7 +1387,7 @@ fn launch_ops_agent(repo: &Path, prompt: String, auto: bool) -> OpsResult<Launch
     let config = load_config_or_default(Some(repo));
     let launch = AgentConfig {
         task_prompt: prompt,
-        model: Some(config.agent_model.clone()),
+        agent: config.agent.clone(),
         skip_permissions: true,
         cwd: Some(repo.to_path_buf()),
         ..Default::default()

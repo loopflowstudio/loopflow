@@ -291,7 +291,7 @@ pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<AgentRun> {
         ended_at: ended_at.map(unix_to_datetime),
         pid: pid.map(|v| v as u32),
         container_id,
-        model: row.text(10)?,
+        agent: row.text(10)?,
         run_mode: row.text(11)?,
     })
 }
@@ -304,7 +304,7 @@ pub fn map_summary_row(row: &impl StoreRow) -> StoreResult<Summary> {
         content: row.text(2)?,
         source_hash: row.text(3)?,
         token_budget: row.int(4)? as u32,
-        model: row.text(5)?,
+        agent: row.text(5)?,
         created_at: Some(unix_to_datetime(row.bigint(6)?)),
     })
 }

@@ -7,6 +7,7 @@ struct FlowProgressPills: View {
     let steps: [String]
     let currentIndex: Int
     let startedAt: Date?
+    var stepAgents: [String: String]? = nil
     var onRestartStep: (() -> Void)?
 
     @Environment(\.palette) private var palette
@@ -62,6 +63,15 @@ struct FlowProgressPills: View {
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .monospacedDigit()
+            }
+
+            if let overrideAgent = stepAgents?[step] {
+                Text(overrideAgent)
+                    .font(Typography.caption(9))
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, 2)
+                    .background(palette.surface.opacity(isCurrent ? 0.3 : 1))
+                    .clipShape(Capsule())
             }
 
             if isCurrent, let onRestartStep {

@@ -460,7 +460,7 @@ struct SessionStateTests {
             area: "swift/Concerto",
             wave: "wavemodel",
             message: "Focus on UX",
-            model: "claude-sonnet-4-6",
+            agent: "claude-sonnet-4-6",
             cwd: "/tmp/repo/swift",
             maxTurns: 2,
             yoloMode: true

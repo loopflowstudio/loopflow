@@ -83,8 +83,12 @@ Config template:
 ```yaml
 # Loopflow configuration
 
-# Model to use (backend or backend:variant)
-agent_model: claude:opus
+# Agent to use (harness or harness:model)
+agent: claude:opus
+
+# Optional: harnesses shown in Concerto model pickers
+supported_harnesses:
+  - claude
 
 # Context: files/directories to include by default
 context: "."

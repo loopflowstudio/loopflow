@@ -65,10 +65,13 @@ impl WaveExecutor {
                 &format!("Read and summarize these paths: {area_list}"),
             );
 
-        let model = config.agent_model.clone();
+        let agent = config
+            .agent
+            .clone()
+            .unwrap_or_else(|| "claude:opus".to_string());
         let launch = AgentConfig {
             task_prompt: prompt,
-            model: Some(model.clone()),
+            agent: Some(agent.clone()),
             cwd: Some(PathBuf::from(&run.worktree)),
             skip_permissions: config.yolo,
             ..Default::default()
@@ -83,12 +86,13 @@ impl WaveExecutor {
         };
 
         let cmd = build_agent_command(&launch, &process, &capabilities);
-        info!(wave = %wave.name(), model = %model, "running internal summarize step");
+        info!(wave = %wave.name(), agent = %agent, "running internal summarize step");
 
         let step = ConcreteStep {
             step: Step {
                 name: "_summarize".to_string(),
-                model: Some(model.clone()),
+                agent: Some(agent.clone()),
+                default_agent: None,
                 directions: Vec::new(),
                 action_style: None,
                 interactive: Some(false),
@@ -105,7 +109,7 @@ impl WaveExecutor {
                 repo: run.snapshot.repo.clone(),
                 worktree: run.worktree.clone(),
                 step,
-                model: model.clone(),
+                agent: agent.clone(),
                 cmd,
                 output_prefix: None,
             })
@@ -125,7 +129,7 @@ impl WaveExecutor {
                     content,
                     source_hash: source_hash.to_string(),
                     token_budget: token_budget as u32,
-                    model: config.agent_model,
+                    agent,
                     created_at: Some(OffsetDateTime::now_utc()),
                 };
                 self.store.upsert_summary(&summary).await?;

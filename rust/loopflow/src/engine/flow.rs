@@ -11,7 +11,9 @@ use crate::engine::error::LoadError;
 pub struct Step {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+    pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_agent: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub directions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -26,7 +28,8 @@ impl Step {
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            model: None,
+            agent: None,
+            default_agent: None,
             directions: Vec::new(),
             action_style: None,
             interactive: None,
@@ -166,7 +169,8 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
 
 #[derive(Debug, Default)]
 struct StepFrontmatter {
-    model: Option<String>,
+    agent: Option<String>,
+    default_agent: Option<String>,
     directions: Vec<String>,
     action_style: Option<String>,
     interactive: Option<bool>,
@@ -186,7 +190,8 @@ fn step_from_content(name: &str, content: &str) -> Result<Step, LoadError> {
     let (frontmatter, body) = parse_step_frontmatter(content)?;
     Ok(Step {
         name: name.to_string(),
-        model: frontmatter.model,
+        agent: frontmatter.agent,
+        default_agent: frontmatter.default_agent,
         directions: frontmatter.directions,
         action_style: frontmatter.action_style,
         interactive: frontmatter.interactive,
@@ -212,18 +217,14 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
         None => return StepFrontmatter::default(),
     };
 
-    let model = map
-        .get(key("model"))
-        .and_then(|val| val.as_str())
-        .map(|val| val.to_string());
-    let action_style = map
-        .get(key("action_style"))
-        .and_then(|val| val.as_str())
-        .map(|val| val.to_string());
+    let agent = parse_optional_string(map, "agent");
+    let default_agent = parse_optional_string(map, "default_agent");
+    let action_style = parse_optional_string(map, "action_style");
     let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
 
     StepFrontmatter {
-        model,
+        agent,
+        default_agent,
         directions: parse_directions_field(map),
         action_style,
         interactive,
@@ -450,19 +451,15 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
                     ))
                 }
             };
-            let model = map
-                .get(key("model"))
-                .and_then(|val| val.as_str())
-                .map(|val| val.to_string());
-            let action_style = map
-                .get(key("action_style"))
-                .and_then(|val| val.as_str())
-                .map(|val| val.to_string());
+            let agent = parse_optional_string(map, "agent");
+            let default_agent = parse_optional_string(map, "default_agent");
+            let action_style = parse_optional_string(map, "action_style");
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
             let directions = parse_directions_field(map);
             Ok(Step {
                 name,
-                model,
+                agent,
+                default_agent,
                 directions,
                 action_style,
                 interactive,
@@ -509,14 +506,9 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
                 .as_mapping()
                 .ok_or_else(|| LoadError::InvalidFlow("fork draft must be mapping".to_string()))?;
             let directions = parse_directions_field(draft_map);
-            branches.push(FlowItem::Step(Step {
-                name: step_name.to_string(),
-                model: None,
-                directions,
-                action_style: None,
-                interactive: None,
-                content: None,
-            }));
+            let mut step = Step::named(step_name);
+            step.directions = directions;
+            branches.push(FlowItem::Step(step));
         }
         branches
     } else {
@@ -556,6 +548,12 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
     }
 }
 
+fn parse_optional_string(map: &serde_yaml_ng::Mapping, field: &str) -> Option<String> {
+    map.get(key(field))
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+}
+
 fn resolve_step_reference(step: &Step, repo: &Path) -> Step {
     if step.content.is_some() {
         return step.clone();
@@ -565,8 +563,11 @@ fn resolve_step_reference(step: &Step, repo: &Path) -> Step {
         return step.clone();
     };
 
-    if let Some(model) = &step.model {
-        resolved.model = Some(model.clone());
+    if let Some(agent) = &step.agent {
+        resolved.agent = Some(agent.clone());
+    }
+    if let Some(default_agent) = &step.default_agent {
+        resolved.default_agent = Some(default_agent.clone());
     }
     if !step.directions.is_empty() {
         resolved.directions = step.directions.clone();
@@ -741,14 +742,14 @@ mod tests {
     }
 
     #[test]
-    fn load_step_parses_frontmatter_model() {
+    fn load_step_parses_frontmatter_agent() {
         let tmp = TempDir::new().unwrap();
         let steps_dir = tmp.path().join(".lf/steps");
         fs::create_dir_all(&steps_dir).unwrap();
         fs::write(
             steps_dir.join("fast.md"),
             r#"---
-model: claude:haiku
+agent: claude:haiku
 ---
 # Fast Step
 Do it quickly.
@@ -757,7 +758,27 @@ Do it quickly.
         .unwrap();
 
         let step = load_step("fast", tmp.path()).unwrap();
-        assert_eq!(step.model, Some("claude:haiku".to_string()));
+        assert_eq!(step.agent, Some("claude:haiku".to_string()));
+    }
+
+    #[test]
+    fn load_step_parses_frontmatter_default_agent() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("fast.md"),
+            r#"---
+default_agent: gemini:2.5-pro
+---
+# Fast Step
+Do it quickly.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("fast", tmp.path()).unwrap();
+        assert_eq!(step.default_agent, Some("gemini:2.5-pro".to_string()));
     }
 
     #[test]
@@ -903,7 +924,8 @@ Be careful.
             name: "demo".to_string(),
             items: vec![FlowItem::Step(Step {
                 name: "design".to_string(),
-                model: None,
+                agent: None,
+                default_agent: None,
                 directions: Vec::new(),
                 action_style: None,
                 interactive: Some(true),

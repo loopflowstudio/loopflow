@@ -10,7 +10,7 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::Instant;
 
-use crate::engine::config::parse_model;
+use crate::engine::config::parse_agent;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
@@ -60,8 +60,8 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
-    /// Model string (for example: "claude:opus" or "codex").
-    pub model: Option<String>,
+    /// Agent string (for example: "claude:opus" or "codex").
+    pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
     /// Working directory.
@@ -137,9 +137,9 @@ impl ClaudeArgs {
     /// Strips the `claude:` prefix if present, applies defaults (bare `"claude"` → `"opus"`),
     /// and passes through non-claude model strings unchanged.
     pub fn resolve_model(model: &str) -> Option<String> {
-        let (backend, variant) = parse_model(model);
-        if backend == "claude" {
-            variant
+        let (harness, model_variant) = parse_agent(model);
+        if harness == "claude" {
+            model_variant
         } else {
             Some(model.to_string())
         }
@@ -203,7 +203,7 @@ pub fn build_claude_session_turn_args(
 ) -> Vec<String> {
     let mut args = vec!["-p".to_string(), content.to_string()];
     let claude_args = ClaudeArgs {
-        model: config.model.as_deref().and_then(ClaudeArgs::resolve_model),
+        model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
         system_prompt: Some(system_prompt_with_structured_replies(config)),
         system_prompt_file: None,
         skip_permissions: config.skip_permissions,
@@ -221,9 +221,9 @@ pub fn build_claude_session_turn_args(
 /// For `codex:<variant>`, returns `<variant>`. For bare `codex`, returns `None`
 /// so Codex can pick its own default. Non-codex model strings pass through.
 pub fn resolve_codex_model(model: &str) -> Option<String> {
-    let (backend, variant) = parse_model(model);
-    if backend == "codex" {
-        variant
+    let (harness, model_variant) = parse_agent(model);
+    if harness == "codex" {
+        model_variant
     } else {
         Some(model.to_string())
     }
@@ -238,7 +238,7 @@ pub fn build_codex_thread_start_params(
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
 
-    if let Some(model) = launch.model.as_deref().and_then(resolve_codex_model) {
+    if let Some(model) = launch.agent.as_deref().and_then(resolve_codex_model) {
         params.insert("model".to_string(), serde_json::Value::String(model));
     }
 
@@ -429,16 +429,16 @@ pub fn build_model_command(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
-    let model = launch.model.as_deref().unwrap_or("claude");
-    let (harness, variant) = parse_model(model);
-    let variant = variant.as_deref();
+    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let (harness, model_variant) = parse_agent(agent);
+    let model_variant = model_variant.as_deref();
     match harness.as_str() {
-        "codex" => build_codex_command(launch, process, variant),
-        "gemini" => build_gemini_command(launch, process, variant),
-        "opencode" => build_opencode_command(process, variant),
-        "claude" => build_claude_command(launch, process, capabilities, variant),
+        "codex" => build_codex_command(launch, process, model_variant),
+        "gemini" => build_gemini_command(launch, process, model_variant),
+        "opencode" => build_opencode_command(process, model_variant),
+        "claude" => build_claude_command(launch, process, capabilities, model_variant),
         // Unknown harness: fall back to Claude with the full model string as variant.
-        _ => build_claude_command(launch, process, capabilities, Some(model)),
+        _ => build_claude_command(launch, process, capabilities, Some(agent)),
     }
 }
 
@@ -499,8 +499,8 @@ pub fn launch_agent(
     cmd.env_remove("GEMINI_API_KEY");
 
     // Harness-specific environment setup.
-    let model = launch.model.as_deref().unwrap_or("claude");
-    let (harness, _) = parse_model(model);
+    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let (harness, _) = parse_agent(agent);
     apply_harness_env(&harness, &mut cmd, process);
 
     propagate_rlm_env(&mut cmd);
@@ -530,8 +530,8 @@ pub fn seed_rlm_env(config: &crate::engine::config::Config) {
         std::env::set_var("RLM_MAX_PARALLEL", config.rlm_max_parallel.to_string());
     }
     if std::env::var("RLM_MODEL").is_err() {
-        if let Some(ref model) = config.rlm_model {
-            std::env::set_var("RLM_MODEL", model);
+        if let Some(ref rlm_agent) = config.rlm_agent {
+            std::env::set_var("RLM_MODEL", rlm_agent);
         }
     }
 }
@@ -1021,7 +1021,7 @@ mod tests {
     #[test]
     fn build_agent_command_opencode_default() {
         let launch = AgentConfig {
-            model: Some("opencode".to_string()),
+            agent: Some("opencode".to_string()),
             task_prompt: "fix the bug".to_string(),
             ..Default::default()
         };
@@ -1038,7 +1038,7 @@ mod tests {
     #[test]
     fn build_agent_command_opencode_with_variant() {
         let launch = AgentConfig {
-            model: Some("opencode:anthropic/claude-sonnet".to_string()),
+            agent: Some("opencode:anthropic/claude-sonnet".to_string()),
             task_prompt: "fix the bug".to_string(),
             ..Default::default()
         };
@@ -1177,7 +1177,7 @@ mod tests {
     #[test]
     fn build_codex_thread_start_params_with_variant_and_cwd() {
         let launch = AgentConfig {
-            model: Some("codex:o3".to_string()),
+            agent: Some("codex:o3".to_string()),
             cwd: Some("/tmp/repo".into()),
             ..default_launch()
         };
@@ -1196,7 +1196,7 @@ mod tests {
     #[test]
     fn build_codex_thread_start_params_omits_model_for_bare_codex() {
         let launch = AgentConfig {
-            model: Some("codex".to_string()),
+            agent: Some("codex".to_string()),
             cwd: Some("/tmp/repo".into()),
             ..default_launch()
         };
@@ -1214,7 +1214,7 @@ mod tests {
         let config = AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
-            model: None,
+            agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,
             skip_permissions: false,
@@ -1232,7 +1232,7 @@ mod tests {
         let config = AgentConfig {
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
-            model: Some("claude-sonnet-4-5-20250514".to_string()),
+            agent: Some("claude-sonnet-4-5-20250514".to_string()),
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
             skip_permissions: true,
@@ -1255,7 +1255,7 @@ mod tests {
         let config = AgentConfig {
             system_prompt: "Base prompt".to_string(),
             task_prompt: "task".to_string(),
-            model: None,
+            agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,
             skip_permissions: false,
@@ -1282,7 +1282,7 @@ mod tests {
     #[test]
     fn build_model_command_uses_codex_default_for_bare_codex_model() {
         let launch = AgentConfig {
-            model: Some("codex".to_string()),
+            agent: Some("codex".to_string()),
             ..default_launch()
         };
         let process = auto_process();
@@ -1294,7 +1294,7 @@ mod tests {
     fn build_model_command_falls_back_to_claude_for_unknown_model() {
         let unknown_model = "gpt-5.1-codex-high";
         let launch = AgentConfig {
-            model: Some(unknown_model.to_string()),
+            agent: Some(unknown_model.to_string()),
             ..default_launch()
         };
         let process = auto_process();

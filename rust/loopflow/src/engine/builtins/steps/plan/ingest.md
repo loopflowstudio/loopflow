@@ -1,6 +1,7 @@
 ---
 requires: wave/<wave>/ items
 produces: scratch/<slug>.md
+default_agent: claude
 ---
 Pick the highest-priority item from the wave's backlog and move it to scratch/.
 

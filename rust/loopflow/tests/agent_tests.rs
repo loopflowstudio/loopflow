@@ -75,7 +75,7 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
 fn base_launch() -> AgentConfig {
     AgentConfig {
         task_prompt: "prompt".to_string(),
-        model: Some("claude".to_string()),
+        agent: Some("claude".to_string()),
         skip_permissions: true,
         cwd: None,
         ..Default::default()

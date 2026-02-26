@@ -399,7 +399,7 @@ fn make_running_agent(run: &WaveRun, container_id: Option<&str>, name: &str) -> 
         ended_at: None,
         pid: None,
         container_id: container_id.map(str::to_string),
-        model: "claude-code".to_string(),
+        agent: "claude-code".to_string(),
         run_mode: "auto".to_string(),
     }
 }

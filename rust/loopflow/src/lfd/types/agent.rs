@@ -57,6 +57,6 @@ pub struct AgentRun {
     pub ended_at: Option<OffsetDateTime>,
     pub pid: Option<u32>,
     pub container_id: Option<String>,
-    pub model: String,
+    pub agent: String,
     pub run_mode: String,
 }

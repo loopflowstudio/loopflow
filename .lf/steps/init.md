@@ -83,8 +83,8 @@ Config template:
 ```yaml
 # Loopflow configuration
 
-# Model to use (backend or backend:variant)
-agent_model: claude:opus
+# Agent to use (harness or harness:model)
+agent: claude:opus
 
 # Context: files/directories to include by default
 context: "."

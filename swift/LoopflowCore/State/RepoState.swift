@@ -84,6 +84,7 @@ public final class RepoState {
     public var repoTarget: RepoTarget?
     public var flows: [Flow] = []
     public var availableDirections: [String] = []
+    public var supportedHarnesses: [String] = []
 
     // Wave state — delegated to WaveStore
     public let waveStore = WaveStore()
@@ -229,6 +230,7 @@ public final class RepoState {
         currentRepo = repoURL
         repoTarget = .local(repoURL)
         flows = []
+        supportedHarnesses = []
         waveStore.removeAll()
         worktreeStore.removeAll()
         sessionStates.removeAll()
@@ -551,11 +553,15 @@ public final class RepoState {
 
     public func refreshFlowsAsync() async {
         guard let repo = repoTarget else { return }
-        guard let result = try? await waveService.listFlowsAndDirections(repo: repo) else { return }
+        guard let result = try? await waveService.listFlowsAndDirections(repo: repo) else {
+            supportedHarnesses = []
+            return
+        }
         if !result.flows.isEmpty {
             flows = result.flows
         }
         availableDirections = result.directions
+        supportedHarnesses = result.supportedHarnesses
     }
 
     // MARK: - Waves
@@ -784,15 +790,26 @@ public final class RepoState {
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
-        status: WaveStatus? = nil
+        status: WaveStatus? = nil,
+        agent: String? = nil,
+        stepAgents: [String: String]? = nil
     ) async throws {
         try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
             if let flow { w.flow = flow }
             if let status { w.status = status }
+            if let agent { w.agent = agent.isEmpty ? nil : agent }
+            if let stepAgents { w.stepAgents = stepAgents }
         }) {
-            let config = WaveConfigUpdate(area: area, direction: direction, flow: flow, status: status)
+            let config = WaveConfigUpdate(
+                area: area,
+                direction: direction,
+                flow: flow,
+                status: status,
+                agent: agent,
+                stepAgents: stepAgents
+            )
             _ = try await self.waveService.updateWave(wave.id, config: config)
         }
     }

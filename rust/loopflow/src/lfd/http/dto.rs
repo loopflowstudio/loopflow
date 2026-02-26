@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashMap;
 use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
@@ -86,6 +87,10 @@ pub struct WaveDto {
     pub flow: String,
     pub direction: Vec<String>,
     pub area: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_agents: Option<HashMap<String, String>>,
     pub created_at: Option<String>,
     pub status: String,
     pub iteration: u32,

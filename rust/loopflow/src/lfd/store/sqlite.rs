@@ -1262,27 +1262,27 @@ impl SqliteStore {
         run.transpose()
     }
 
-    pub fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
+    pub fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let started_at = agent
+        let started_at = agent_run
             .started_at
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
         conn.execute(
             Self::sql(Query::InsertAgent),
             params![
-                agent.id,
-                agent.step,
-                agent.repo,
-                agent.worktree,
-                agent.wave_run_id,
-                agent.status.as_i32() as i64,
+                agent_run.id,
+                agent_run.step,
+                agent_run.repo,
+                agent_run.worktree,
+                agent_run.wave_run_id,
+                agent_run.status.as_i32() as i64,
                 started_at,
-                agent.ended_at.map(|dt| dt.unix_timestamp()),
-                agent.pid.map(|v| v as i64),
-                agent.container_id.as_deref(),
-                agent.model,
-                agent.run_mode,
+                agent_run.ended_at.map(|dt| dt.unix_timestamp()),
+                agent_run.pid.map(|v| v as i64),
+                agent_run.container_id.as_deref(),
+                agent_run.agent,
+                agent_run.run_mode,
             ],
         )?;
         Ok(())
@@ -1382,7 +1382,7 @@ impl SqliteStore {
                 summary.content,
                 summary.source_hash,
                 summary.token_budget as i64,
-                summary.model,
+                summary.agent,
                 created_at,
             ],
         )?;

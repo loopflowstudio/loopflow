@@ -27,10 +27,10 @@ impl DockerExecutor {
     pub(super) async fn find_running_container(
         &self,
         backend: &dyn DockerRecoveryBackend,
-        agent: &AgentRun,
+        agent_run: &AgentRun,
     ) -> Result<Option<String>> {
-        let container_name = Self::build_container_name(agent.id.as_str());
-        let persisted_ref = agent
+        let container_name = Self::build_container_name(agent_run.id.as_str());
+        let persisted_ref = agent_run
             .container_id
             .as_deref()
             .map(str::trim)
@@ -45,7 +45,7 @@ impl DockerExecutor {
                 Ok(None) => {}
                 Err(err) => {
                     warn!(
-                        agent_id = %agent.id,
+                        agent_id = %agent_run.id,
                         container_ref,
                         error = %err,
                         "failed inspecting container during startup recovery"
@@ -67,28 +67,27 @@ impl DockerExecutor {
             lost: Vec::new(),
         };
 
-        for agent in agents
-            .into_iter()
-            .filter(|agent| agent.status == AgentStatus::Running && agent.ended_at.is_none())
-        {
-            let Some(wave_run_id) = agent.wave_run_id.clone() else {
-                plan.lost.push(agent);
+        for agent_run in agents.into_iter().filter(|agent_run| {
+            agent_run.status == AgentStatus::Running && agent_run.ended_at.is_none()
+        }) {
+            let Some(wave_run_id) = agent_run.wave_run_id.clone() else {
+                plan.lost.push(agent_run);
                 continue;
             };
 
             let Some(run) = self.store.get_wave_run(&wave_run_id).await? else {
-                plan.lost.push(agent);
+                plan.lost.push(agent_run);
                 continue;
             };
 
-            match self.find_running_container(backend, &agent).await? {
+            match self.find_running_container(backend, &agent_run).await? {
                 Some(container_id) => plan.reattach.push(ReattachTarget {
-                    agent,
+                    agent_run,
                     wave_id: run.wave_id.clone(),
                     wave_run_id,
                     container_id,
                 }),
-                None => plan.lost.push(agent),
+                None => plan.lost.push(agent_run),
             }
         }
 
@@ -103,11 +102,16 @@ impl DockerExecutor {
         let executor = self.clone();
         tokio::spawn(async move {
             let result = executor
-                .reattach_agent(&output, &target.agent, &target.wave_id, &target.wave_run_id)
+                .reattach_agent(
+                    &output,
+                    &target.agent_run,
+                    &target.wave_id,
+                    &target.wave_run_id,
+                )
                 .await;
             if let Err(err) = executor
                 .finalize_reattached_agent(
-                    &target.agent,
+                    &target.agent_run,
                     &target.wave_id,
                     &target.wave_run_id,
                     result,
@@ -115,7 +119,7 @@ impl DockerExecutor {
                 .await
             {
                 warn!(
-                    agent_id = %target.agent.id,
+                    agent_id = %target.agent_run.id,
                     wave_run_id = %target.wave_run_id,
                     error = %err,
                     "failed finalizing reattached container"
@@ -127,7 +131,7 @@ impl DockerExecutor {
     pub(super) async fn reattach_agent(
         &self,
         output: &OutputHub,
-        agent: &AgentRun,
+        agent_run: &AgentRun,
         wave_id: &LfdId,
         wave_run_id: &LfdId,
     ) -> Result<i32> {
@@ -135,7 +139,7 @@ impl DockerExecutor {
             .active
             .lock()
             .await
-            .get(agent.id.as_str())
+            .get(agent_run.id.as_str())
             .cloned()
             .ok_or_else(|| anyhow!("active container missing for reattach"))?;
 
@@ -143,7 +147,7 @@ impl DockerExecutor {
             .resolve_workspace_for_recovery(
                 wave_id.as_str(),
                 wave_run_id.as_str(),
-                Path::new(&agent.worktree),
+                Path::new(&agent_run.worktree),
             )
             .await?;
         let exit_code = self
@@ -152,17 +156,17 @@ impl DockerExecutor {
                 OutputContext {
                     wave_id: wave_id.to_string(),
                     wave_run_id: wave_run_id.to_string(),
-                    agent_id: agent.id.to_string(),
+                    agent_id: agent_run.id.to_string(),
                     output: output.clone(),
                     output_prefix: None,
                 },
             )
             .await;
 
-        self.active.lock().await.remove(agent.id.as_str());
+        self.active.lock().await.remove(agent_run.id.as_str());
 
         let sync_result = self
-            .sync_to_host_worktree(&workspace, Path::new(&agent.worktree))
+            .sync_to_host_worktree(&workspace, Path::new(&agent_run.worktree))
             .await;
         self.remove_container(&container_id).await;
         sync_result?;
@@ -172,7 +176,7 @@ impl DockerExecutor {
 
     pub(super) async fn finalize_reattached_agent(
         &self,
-        agent: &AgentRun,
+        agent_run: &AgentRun,
         wave_id: &LfdId,
         wave_run_id: &LfdId,
         result: Result<i32>,
@@ -194,7 +198,7 @@ impl DockerExecutor {
 
         let _ = self
             .store
-            .end_agent(&agent.id, agent_status.as_i32(), ended_at)
+            .end_agent(&agent_run.id, agent_status.as_i32(), ended_at)
             .await;
 
         let mut next_wave_status = None;
@@ -222,14 +226,14 @@ impl DockerExecutor {
         Ok(())
     }
 
-    pub(super) async fn mark_agent_lost(&self, agent: &AgentRun) -> Result<()> {
+    pub(super) async fn mark_agent_lost(&self, agent_run: &AgentRun) -> Result<()> {
         let ended_at = OffsetDateTime::now_utc().unix_timestamp();
         let _ = self
             .store
-            .end_agent(&agent.id, AgentStatus::Failed.as_i32(), ended_at)
+            .end_agent(&agent_run.id, AgentStatus::Failed.as_i32(), ended_at)
             .await;
 
-        if let Some(wave_run_id) = &agent.wave_run_id {
+        if let Some(wave_run_id) = &agent_run.wave_run_id {
             if let Some(mut run) = self.store.get_wave_run(wave_run_id).await? {
                 let mut should_fail_wave = false;
                 if !matches!(run.status, WaveRunStatus::Completed | WaveRunStatus::Failed) {
@@ -306,7 +310,7 @@ impl DockerExecutor {
             self.active
                 .lock()
                 .await
-                .insert(target.agent.id.to_string(), target.container_id.clone());
+                .insert(target.agent_run.id.to_string(), target.container_id.clone());
             if spawn_reattach {
                 std::mem::drop(self.spawn_reattach_task(output.clone(), target));
             }

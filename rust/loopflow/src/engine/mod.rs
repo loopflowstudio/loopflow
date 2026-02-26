@@ -24,7 +24,7 @@ pub use agent::{
     AgentCapabilities, AgentConfig, ClaudeArgs, DefaultRunner, LaunchResult, ProcessConfig, Runner,
 };
 pub use command::{run_command, CommandError};
-pub use config::{load_config, load_config_or_default, parse_model, Config};
+pub use config::{load_config, load_config_or_default, parse_agent, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use flow::{
     expand_flow, load_direction, load_flow, load_step, next_action, ConcreteFork, ConcreteItem,

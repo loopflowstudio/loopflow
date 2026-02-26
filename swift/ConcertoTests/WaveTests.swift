@@ -253,7 +253,7 @@ struct WaveModelTests {
             status: "completed",
             startedAt: startDate,
             endedAt: endDate,
-            model: "claude",
+            agent: "claude",
             runMode: "auto"
         )
         let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
@@ -272,7 +272,7 @@ struct WaveModelTests {
             status: "running",
             startedAt: startDate,
             endedAt: nil,
-            model: "claude",
+            agent: "claude",
             runMode: "auto"
         )
         let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
@@ -297,7 +297,7 @@ struct WaveModelTests {
             status: "completed",
             startedAt: Date().addingTimeInterval(-60),
             endedAt: Date(),
-            model: "claude",
+            agent: "claude",
             runMode: "auto"
         )
         let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])

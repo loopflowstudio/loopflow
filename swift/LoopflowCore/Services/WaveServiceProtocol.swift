@@ -5,10 +5,12 @@ import Foundation
 public struct WaveFlowsResult: Sendable {
     public var flows: [Flow]
     public var directions: [String]
+    public var supportedHarnesses: [String]
 
-    public init(flows: [Flow], directions: [String]) {
+    public init(flows: [Flow], directions: [String], supportedHarnesses: [String] = []) {
         self.flows = flows
         self.directions = directions
+        self.supportedHarnesses = supportedHarnesses
     }
 }
 

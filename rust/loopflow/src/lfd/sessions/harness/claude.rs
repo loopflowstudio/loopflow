@@ -242,7 +242,7 @@ mod tests {
         harness.config = Some(AgentConfig {
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
-            model: None,
+            agent: None,
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
             skip_permissions: false,

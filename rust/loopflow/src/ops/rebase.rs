@@ -86,7 +86,7 @@ fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsRes
 
     let launch = AgentConfig {
         task_prompt: prompt,
-        model: Some(config.agent_model.clone()),
+        agent: config.agent.clone(),
         cwd: Some(repo.to_path_buf()),
         skip_permissions: true,
         ..Default::default()

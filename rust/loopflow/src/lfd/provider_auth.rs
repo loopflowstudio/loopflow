@@ -26,6 +26,9 @@ use crate::lfd::types::Event;
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const SOCKET_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const SOCKET_AUTH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const SOCKET_AUTH_MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 static USER_CODE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b([A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+)\b").expect("user code regex"));
@@ -228,7 +231,11 @@ impl AuthBroker for SocketAuthBroker {
             .start_auth(self.provider_name.as_str())
             .await
             .map_err(|err| self.map_socket_error(err))?;
-        Ok(socket_auth_flow_handle(self.provider_name, response))
+        Ok(socket_auth_flow_handle(
+            self.provider_name,
+            response,
+            self.client.clone(),
+        ))
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -487,7 +494,17 @@ impl ProviderAuthService {
     }
 }
 
-fn socket_auth_flow_handle(provider: Provider, response: AuthStartResponse) -> AuthFlowHandle {
+fn socket_auth_flow_handle(
+    provider: Provider,
+    response: AuthStartResponse,
+    client: Arc<CredentialSocketClient>,
+) -> AuthFlowHandle {
+    let timeout = response
+        .expires_in
+        .map(Duration::from_secs)
+        .unwrap_or(SOCKET_AUTH_DEFAULT_TIMEOUT)
+        .min(SOCKET_AUTH_MAX_TIMEOUT);
+    let provider_name = provider.as_str().to_string();
     let flow_response = AuthFlowResponse {
         provider,
         verification_uri: response.verification_uri,
@@ -495,7 +512,32 @@ fn socket_auth_flow_handle(provider: Provider, response: AuthStartResponse) -> A
         user_code: response.user_code,
         expires_in: response.expires_in,
     };
-    let monitor = tokio::spawn(async { Ok(()) });
+    let monitor = tokio::spawn(async move {
+        let started_at = Instant::now();
+        loop {
+            match client.get_credential(provider_name.as_str()).await {
+                Ok(_) => return Ok(()),
+                Err(CredentialSocketError::NotFound { .. }) => {
+                    if started_at.elapsed() >= timeout {
+                        return Err(AuthError::CredentialSocket {
+                            provider,
+                            message: format!(
+                                "timed out waiting for credential after {} seconds",
+                                timeout.as_secs()
+                            ),
+                        });
+                    }
+                    tokio::time::sleep(SOCKET_AUTH_POLL_INTERVAL).await;
+                }
+                Err(err) => {
+                    return Err(AuthError::CredentialSocket {
+                        provider,
+                        message: err.to_string(),
+                    });
+                }
+            }
+        }
+    });
     AuthFlowHandle::new(flow_response, monitor)
 }
 
@@ -1162,8 +1204,44 @@ pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String,
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixListener;
+    use std::thread;
+
     use super::*;
     use tempfile::tempdir;
+
+    fn start_sequenced_socket_server(
+        socket_path: PathBuf,
+        statuses: Vec<u16>,
+    ) -> thread::JoinHandle<()> {
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
+        thread::spawn(move || {
+            for status in statuses {
+                let (mut stream, _) = listener.accept().expect("accept unix connection");
+                let mut request = [0_u8; 4096];
+                let _ = stream.read(&mut request);
+
+                let response = match status {
+                    200 => {
+                        let body = r#"{"token":"abc123","login":"jack","expires_at":null}"#;
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                    }
+                    404 => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_string(),
+                    other => format!("HTTP/1.1 {other} Error\r\nContent-Length: 0\r\n\r\n"),
+                };
+
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write HTTP response");
+            }
+        })
+    }
 
     #[test]
     fn provider_parses_aliases() {
@@ -1299,6 +1377,50 @@ mod tests {
         assert!(claude_dir.join("settings.json").exists());
         assert!(!claude_dir.join("auth.json").exists());
         assert!(!claude_dir.join("session-cache").exists());
+    }
+
+    #[tokio::test]
+    async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
+        let temp = tempdir().expect("tempdir");
+        let claude_dir = temp.path().join(".claude");
+        fs::create_dir_all(&claude_dir).expect("claude dir");
+        fs::write(claude_dir.join("settings.json"), "{\"theme\":\"dark\"}").expect("settings");
+        fs::write(claude_dir.join("auth.json"), "{\"token\":\"abc\"}").expect("auth file");
+        fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
+        fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
+
+        let broker = ClaudeAuthBroker {
+            home_dir: temp.path().to_path_buf(),
+        };
+        broker.disconnect().await.expect("disconnect");
+
+        assert!(claude_dir.join("settings.json").exists());
+        assert!(!claude_dir.join("auth.json").exists());
+        assert!(!claude_dir.join("session-cache").exists());
+    }
+
+    #[tokio::test]
+    async fn socket_auth_monitor_waits_until_credential_exists() {
+        let temp = tempdir().expect("tempdir");
+        let socket_path = temp.path().join("credentials.sock");
+        let server = start_sequenced_socket_server(socket_path.clone(), vec![404, 200]);
+
+        let response = AuthStartResponse {
+            verification_uri: "https://github.com/login/device".to_string(),
+            verification_uri_complete: None,
+            user_code: None,
+            expires_in: Some(30),
+        };
+        let client = Arc::new(CredentialSocketClient::new(socket_path));
+        let handle = socket_auth_flow_handle(Provider::GitHub, response, client);
+
+        tokio::time::timeout(Duration::from_secs(3), handle.monitor)
+            .await
+            .expect("monitor should complete")
+            .expect("monitor task should join")
+            .expect("credential should eventually be detected");
+
+        server.join().expect("server join");
     }
 
     #[tokio::test]

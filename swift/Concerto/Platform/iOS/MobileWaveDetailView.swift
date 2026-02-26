@@ -75,6 +75,7 @@ struct MobileWaveDetailView: View {
             } else {
                 WaveSessionView(
                     state: sessionState,
+                    // Keep a single action surface on iOS via the bottom rail.
                     showsSuggestedActions: false,
                     managesLifecycle: false
                 )

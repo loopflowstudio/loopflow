@@ -501,16 +501,11 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
                 ))
             }
         }
-    } else if let Some(step_value) = map.get(key("step")) {
-        let step_name = step_value
+    } else if let Some(name_value) = map.get(key("step")).or_else(|| map.get(key("flow"))) {
+        let name = name_value
             .as_str()
-            .ok_or_else(|| LoadError::InvalidFlow("fork step must be string".to_string()))?;
-        parse_fork_drafts(map, step_name)?
-    } else if let Some(flow_value) = map.get(key("flow")) {
-        let flow_name = flow_value
-            .as_str()
-            .ok_or_else(|| LoadError::InvalidFlow("fork flow must be string".to_string()))?;
-        parse_fork_drafts(map, flow_name)?
+            .ok_or_else(|| LoadError::InvalidFlow("fork step/flow must be string".to_string()))?;
+        parse_fork_drafts(map, name)?
     } else {
         return Err(LoadError::InvalidFlow(
             "fork must have branches, step+drafts, or flow+drafts".to_string(),
@@ -546,12 +541,8 @@ fn parse_fork_drafts(map: &serde_yaml_ng::Mapping, name: &str) -> Result<Vec<Flo
             .ok_or_else(|| LoadError::InvalidFlow("fork draft must be mapping".to_string()))?;
         let directions = parse_directions_field(draft_map);
         branches.push(FlowItem::Step(Step {
-            name: name.to_string(),
-            model: None,
             directions,
-            action_style: None,
-            interactive: None,
-            content: None,
+            ..Step::named(name)
         }));
     }
     Ok(branches)
@@ -576,7 +567,6 @@ fn parse_fork_branch_item(value: &Value) -> Result<FlowItem, LoadError> {
                     LoadError::InvalidFlow("fork branch flow must be string".to_string())
                 })?;
                 return Ok(FlowItem::Step(Step {
-                    name: name.to_string(),
                     directions,
                     ..Step::named(name)
                 }));
@@ -670,15 +660,7 @@ fn expand_with_chain(
                 // check if a flow with this name exists and expand it.
                 if step.content.is_none() && !chain.contains(&step.name) {
                     if let Ok(nested) = load_flow(&step.name, repo) {
-                        // Only expand if it resolved as a multi-step flow, not
-                        // if load_flow auto-wrapped a step as a single-step flow.
-                        if nested.items.len() > 1
-                            || nested
-                                .items
-                                .first()
-                                .map(|i| !matches!(i, FlowItem::Step(s) if s.name == step.name))
-                                .unwrap_or(false)
-                        {
+                        if is_multi_step_flow(&nested, &step.name) {
                             let mut nested_chain = chain.clone();
                             nested_chain.push(step.name.clone());
                             items.extend(expand_with_chain(
@@ -724,13 +706,12 @@ fn expand_fork(
     chain: &[String],
     depth: usize,
 ) -> Result<ConcreteFork, LoadError> {
-    let mut expanded_branches = Vec::new();
-    for branch in branches {
-        expanded_branches.push(expand_fork_branch(branch, repo, chain, depth)?);
-    }
-
+    let branches = branches
+        .iter()
+        .map(|b| expand_fork_branch(b, repo, chain, depth))
+        .collect::<Result<_, _>>()?;
     Ok(ConcreteFork {
-        branches: expanded_branches,
+        branches,
         flow_parents: chain.to_vec(),
     })
 }
@@ -770,6 +751,17 @@ fn expand_fork_branch(
     }
 }
 
+/// Check whether a loaded flow is a genuine multi-step flow vs a single step
+/// auto-wrapped by `load_flow`. Returns `true` if the flow should be expanded.
+fn is_multi_step_flow(flow: &Flow, step_name: &str) -> bool {
+    flow.items.len() > 1
+        || flow
+            .items
+            .first()
+            .map(|i| !matches!(i, FlowItem::Step(s) if s.name == step_name))
+            .unwrap_or(false)
+}
+
 /// Try to expand a step name as a flow reference. Returns `Some(branch)` if
 /// the name resolves to a multi-step flow, `None` if it's just a step.
 fn try_expand_step_as_flow(
@@ -781,15 +773,7 @@ fn try_expand_step_as_flow(
     let Ok(nested) = load_flow(&step.name, repo) else {
         return Ok(None);
     };
-    // Only expand if it resolved as a genuine multi-step flow, not if
-    // load_flow auto-wrapped a step as a single-step flow.
-    if nested.items.len() <= 1
-        && nested
-            .items
-            .first()
-            .map(|i| matches!(i, FlowItem::Step(s) if s.name == step.name))
-            .unwrap_or(true)
-    {
+    if !is_multi_step_flow(&nested, &step.name) {
         return Ok(None);
     }
     let branch = expand_flow_ref_branch(&step.name, &step.directions, repo, chain, depth)?;

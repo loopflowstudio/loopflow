@@ -460,7 +460,8 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
     Some(Step {
         name: name.to_string(),
         content: Some(content),
-        model: None,
+        agent: None,
+        default_agent: None,
         directions: Vec::new(),
         action_style: None,
         interactive: Some(true),

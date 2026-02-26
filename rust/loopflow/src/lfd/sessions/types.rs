@@ -332,7 +332,7 @@ pub struct SessionConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub surface: Option<Surface>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+    pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -285,7 +285,7 @@ pub(crate) async fn build_step_prompt(
     directions: &[String],
     wave: Option<&str>,
     summary_source: Option<(&SharedStore, &LfdId)>,
-    model: Option<String>,
+    agent: Option<String>,
     message: Option<String>,
 ) -> Result<(AgentConfig, ProcessConfig)> {
     let repo_root = Path::new(worktree);
@@ -313,7 +313,7 @@ pub(crate) async fn build_step_prompt(
             area: None,
             wave: wave.map(str::to_string),
             message,
-            model,
+            agent,
             cwd: None,
             max_turns: None,
             yolo_mode: false,
@@ -365,7 +365,7 @@ pub(crate) fn build_agent_for_step(
     worktree: &str,
     step: &ConcreteStep,
     status: AgentStatus,
-    model: &str,
+    agent: &str,
 ) -> AgentRun {
     AgentRun {
         id: LfdId::new(),
@@ -378,7 +378,7 @@ pub(crate) fn build_agent_for_step(
         ended_at: None,
         pid: None,
         container_id: None,
-        model: model.to_string(),
+        agent: agent.to_string(),
         run_mode: "auto".to_string(),
     }
 }

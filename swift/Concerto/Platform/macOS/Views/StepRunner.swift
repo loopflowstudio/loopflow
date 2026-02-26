@@ -10,7 +10,7 @@ struct StepRunner: View {
     @Environment(\.palette) private var palette
 
     @State private var selectedFlow: String = ""
-    @State private var selectedModel: String = ""
+    @State private var selectedAgent: String = ""
     @State private var autoMode: Stimulus.Kind = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
@@ -24,7 +24,7 @@ struct StepRunner: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 areaHeader
                 directionHeader
-                modelHeader
+                agentHeader
             }
 
             Divider()
@@ -56,7 +56,7 @@ struct StepRunner: View {
         }
         .onAppear {
             selectedFlow = wave.flow
-            selectedModel = wave.model ?? ""
+            selectedAgent = wave.agent ?? ""
             if let s = wave.stimulus {
                 autoMode = s.kind
                 if let cron = s.cron {
@@ -96,41 +96,41 @@ struct StepRunner: View {
     }
 
     @ViewBuilder
-    private var modelHeader: some View {
+    private var agentHeader: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Model")
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
 
             if repoState.supportedHarnesses.isEmpty {
-                TextField("Default (claude:opus)", text: $selectedModel)
+                TextField("Default (claude:opus)", text: $selectedAgent)
                     .textFieldStyle(.plain)
                     .font(Typography.code(12))
                     .padding(Spacing.sm)
                     .background(palette.surface)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
                     .onSubmit {
-                        persistModel(selectedModel)
+                        persistAgent(selectedAgent)
                     }
             } else {
-                Picker("Model", selection: $selectedModel) {
+                Picker("Model", selection: $selectedAgent) {
                     Text("Default").tag("")
-                    ForEach(modelPickerOptions, id: \.self) { model in
-                        Text(model).tag(model)
+                    ForEach(agentPickerOptions, id: \.self) { agent in
+                        Text(agent).tag(agent)
                     }
                 }
                 .labelsHidden()
-                .onChange(of: selectedModel) { _, newValue in
-                    persistModel(newValue)
+                .onChange(of: selectedAgent) { _, newValue in
+                    persistAgent(newValue)
                 }
             }
         }
     }
 
-    private var modelPickerOptions: [String] {
+    private var agentPickerOptions: [String] {
         var options = repoState.supportedHarnesses
-        if let activeModel = wave.model, !activeModel.isEmpty, !options.contains(activeModel) {
-            options.append(activeModel)
+        if let activeAgent = wave.agent, !activeAgent.isEmpty, !options.contains(activeAgent) {
+            options.append(activeAgent)
         }
         return options.sorted()
     }
@@ -337,11 +337,11 @@ struct StepRunner: View {
         }
     }
 
-    private func persistModel(_ model: String) {
-        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func persistAgent(_ agent: String) {
+        let trimmed = agent.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                try await repoState.updateWave(wave, model: trimmed)
+                try await repoState.updateWave(wave, agent: trimmed)
             } catch {
                 showError(error)
             }

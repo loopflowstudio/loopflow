@@ -33,7 +33,7 @@ pub struct LaunchPromptInput {
     pub area: Option<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
-    pub model: Option<String>,
+    pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
     pub max_turns: Option<u32>,
     pub yolo_mode: bool,
@@ -67,7 +67,7 @@ pub fn prepare_launch_prompt(
         area,
         wave,
         message,
-        model,
+        agent,
         cwd,
         max_turns,
         yolo_mode,
@@ -133,14 +133,14 @@ pub fn prepare_launch_prompt(
     let system_prompt = format_context_prompt(&budgeted);
     let task_prompt = format_task_prompt(&budgeted);
 
-    let model = model
-        .or_else(|| budgeted.step.as_ref().and_then(|step| step.model.clone()))
-        .or_else(|| config.agent_model.clone())
+    let agent = agent
+        .or_else(|| budgeted.step.as_ref().and_then(|step| step.agent.clone()))
+        .or_else(|| config.agent.clone())
         .or_else(|| {
             budgeted
                 .step
                 .as_ref()
-                .and_then(|step| step.default_model.clone())
+                .and_then(|step| step.default_agent.clone())
         })
         .unwrap_or_else(|| "claude:opus".to_string());
     validate_model_policy(&model)?;
@@ -152,7 +152,7 @@ pub fn prepare_launch_prompt(
     let launch = AgentConfig {
         system_prompt,
         task_prompt,
-        model: Some(model),
+        agent: Some(agent),
         max_turns,
         cwd: Some(cwd.unwrap_or(repo_root)),
         skip_permissions: yolo_mode,
@@ -218,7 +218,7 @@ mod tests {
         fs::write(
             tmp.path().join(".lf/steps/test.md"),
             r#"---
-model: codex:o3
+agent: codex:o3
 directions: [thorough]
 action_style: procedural
 ---
@@ -241,7 +241,7 @@ Test step body.
 
     fn default_test_config() -> Config {
         Config {
-            agent_model: Some("claude:opus".to_string()),
+            agent: Some("claude:opus".to_string()),
             lfdocs: false,
             diff_files: false,
             diff: false,
@@ -251,7 +251,7 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_step_model_when_no_override() {
+    fn prepare_launch_prompt_prefers_step_agent_when_no_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
@@ -265,11 +265,11 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_explicit_model_override() {
+    fn prepare_launch_prompt_prefers_explicit_agent_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
@@ -277,24 +277,24 @@ Test step body.
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 step: Some("test".to_string()),
-                model: Some("claude:sonnet".to_string()),
+                agent: Some("claude:sonnet".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.model.as_deref(), Some("claude:sonnet"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_default_model_when_no_user_config() {
+    fn prepare_launch_prompt_uses_default_agent_when_no_user_config() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
         fs::write(
             tmp.path().join(".lf/steps/test.md"),
             r#"---
-default_model: gemini:2.5-pro
+default_agent: gemini:2.5-pro
 ---
 Test step body.
 "#,
@@ -302,7 +302,7 @@ Test step body.
         .expect("write step");
 
         let mut config = default_test_config();
-        config.agent_model = None;
+        config.agent = None;
         let prepared = prepare_launch_prompt(
             &config,
             LaunchPromptInput {
@@ -314,17 +314,17 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.model.as_deref(), Some("gemini:2.5-pro"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("gemini:2.5-pro"));
     }
 
     #[test]
-    fn prepare_launch_prompt_user_config_overrides_default_model() {
+    fn prepare_launch_prompt_user_config_overrides_default_agent() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
         fs::write(
             tmp.path().join(".lf/steps/test.md"),
             r#"---
-default_model: gemini:2.5-pro
+default_agent: gemini:2.5-pro
 ---
 Test step body.
 "#,
@@ -332,7 +332,7 @@ Test step body.
         .expect("write step");
 
         let mut config = default_test_config();
-        config.agent_model = Some("codex:o3".to_string());
+        config.agent = Some("codex:o3".to_string());
         let prepared = prepare_launch_prompt(
             &config,
             LaunchPromptInput {
@@ -344,7 +344,7 @@ Test step body.
         )
         .expect("prepare launch prompt");
 
-        assert_eq!(prepared.config.model.as_deref(), Some("codex:o3"));
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]

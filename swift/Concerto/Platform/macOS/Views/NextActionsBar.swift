@@ -93,8 +93,8 @@ struct NextActionsBar: View {
         worktreePath: "/tmp/test-worktree",
         hasDiff: true,
         recentSteps: [
-            StepRun(id: "1", step: "design", repo: "", worktree: "", status: "completed", startedAt: Date(), endedAt: nil, model: "", runMode: ""),
-            StepRun(id: "2", step: "implement", repo: "", worktree: "", status: "completed", startedAt: Date(), endedAt: nil, model: "", runMode: "")
+            StepRun(id: "1", step: "design", repo: "", worktree: "", status: "completed", startedAt: Date(), endedAt: nil, agent: "", runMode: ""),
+            StepRun(id: "2", step: "implement", repo: "", worktree: "", status: "completed", startedAt: Date(), endedAt: nil, agent: "", runMode: "")
         ]
     )
 

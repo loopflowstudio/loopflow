@@ -15,9 +15,9 @@ pub struct ListFlowsQuery {
 struct StepSummary {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<String>,
+    agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    default_model: Option<String>,
+    default_agent: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,13 +166,13 @@ fn load_step_summary(repo: &Path, name: String) -> StepSummary {
     match crate::engine::flow::load_step(&name, repo) {
         Ok(step) => StepSummary {
             name,
-            model: step.model,
-            default_model: step.default_model,
+            agent: step.agent,
+            default_agent: step.default_agent,
         },
         Err(_) => StepSummary {
             name,
-            model: None,
-            default_model: None,
+            agent: None,
+            default_agent: None,
         },
     }
 }

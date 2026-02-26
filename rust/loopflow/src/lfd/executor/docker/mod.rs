@@ -188,7 +188,7 @@ struct DockerWorkspace {
 
 #[derive(Debug, Clone)]
 struct ReattachTarget {
-    agent: AgentRun,
+    agent_run: AgentRun,
     wave_id: LfdId,
     wave_run_id: LfdId,
     container_id: String,

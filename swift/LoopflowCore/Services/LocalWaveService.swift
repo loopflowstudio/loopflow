@@ -8,8 +8,8 @@ public struct WaveConfigUpdate: Sendable {
     public var direction: [String]?
     public var flow: String?
     public var status: WaveStatus?
-    public var model: String?
-    public var stepModels: [String: String]?
+    public var agent: String?
+    public var stepAgents: [String: String]?
 
     public init(
         name: String? = nil,
@@ -17,16 +17,16 @@ public struct WaveConfigUpdate: Sendable {
         direction: [String]? = nil,
         flow: String? = nil,
         status: WaveStatus? = nil,
-        model: String? = nil,
-        stepModels: [String: String]? = nil
+        agent: String? = nil,
+        stepAgents: [String: String]? = nil
     ) {
         self.name = name
         self.area = area
         self.direction = direction
         self.flow = flow
         self.status = status
-        self.model = model
-        self.stepModels = stepModels
+        self.agent = agent
+        self.stepAgents = stepAgents
     }
 }
 
@@ -407,8 +407,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         let stepConfigs = stepsData.reduce(into: [String: StepConfig]()) { partial, stepDict in
             guard let name = stepDict["name"] as? String else { return }
             let config = StepConfig(
-                model: stepDict["model"] as? String,
-                defaultModel: stepDict["default_model"] as? String
+                agent: stepDict["agent"] as? String,
+                defaultAgent: stepDict["default_agent"] as? String
             )
             if !config.isEmpty {
                 partial[name] = config
@@ -647,7 +647,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
 
         let flowSteps = json["flow_steps"] as? [String] ?? []
-        let stepModels = (json["step_models"] as? [String: Any])?.reduce(into: [String: String]()) { partial, entry in
+        let stepAgents = (json["step_agents"] as? [String: Any])?.reduce(into: [String: String]()) { partial, entry in
             if let value = entry.value as? String {
                 partial[entry.key] = value
             }
@@ -660,8 +660,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             flow: json["flow"] as? String ?? "",
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
-            model: json["model"] as? String,
-            stepModels: stepModels,
+            agent: json["agent"] as? String,
+            stepAgents: stepAgents,
             stimuli: stimuli,
             status: status,
             iteration: json["iteration"] as? Int ?? 0,
@@ -676,7 +676,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    /// Update wave configuration (name, area, direction, flow, status, model).
+    /// Update wave configuration (name, area, direction, flow, status, agent).
     public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
         var body: [String: Any] = [:]
         if let name = config.name { body["name"] = name }
@@ -684,8 +684,8 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let direction = config.direction { body["direction"] = direction }
         if let flow = config.flow { body["flow"] = flow }
         if let status = config.status { body["status"] = status.rawValue }
-        if let model = config.model { body["model"] = model }
-        if let stepModels = config.stepModels { body["step_models"] = stepModels }
+        if let agent = config.agent { body["agent"] = agent }
+        if let stepAgents = config.stepAgents { body["step_agents"] = stepAgents }
 
         let request = try makeRequest(
             apiBaseURL.appendingPathComponent("waves/\(id)"),
@@ -1180,7 +1180,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             area: configJSON["area"] as? String,
             wave: configJSON["wave"] as? String,
             message: configJSON["message"] as? String,
-            model: configJSON["model"] as? String,
+            agent: configJSON["agent"] as? String,
             cwd: configJSON["cwd"] as? String,
             maxTurns: normalizeOptionalInt(configJSON["max_turns"]),
             yoloMode: configJSON["yolo_mode"] as? Bool ?? false,
@@ -1210,7 +1210,7 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         if let area = config.area { json["area"] = area }
         if let wave = config.wave { json["wave"] = wave }
         if let message = config.message { json["message"] = message }
-        if let model = config.model { json["model"] = model }
+        if let agent = config.agent { json["agent"] = agent }
         if let cwd = config.cwd { json["cwd"] = cwd }
         if let maxTurns = config.maxTurns { json["max_turns"] = maxTurns }
         if let clientHasUI = config.clientHasUI { json["client_has_ui"] = clientHasUI }

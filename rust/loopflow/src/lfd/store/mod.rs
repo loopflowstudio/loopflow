@@ -404,8 +404,8 @@ impl Store {
         ExecutionStore::get_waiting_agent_for_wave(self, wave_id).await
     }
 
-    pub async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
-        ExecutionStore::start_agent(self, agent).await
+    pub async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()> {
+        ExecutionStore::start_agent(self, agent_run).await
     }
 
     pub async fn update_agent_status(
@@ -631,7 +631,7 @@ pub trait ExecutionStore: Send + Sync {
     ) -> StoreResult<Vec<AgentRun>>;
     async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<AgentRun>>;
     async fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<AgentRun>>;
-    async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()>;
+    async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()>;
     async fn update_agent_status(
         &self,
         agent_id: &LfdId,
@@ -1420,13 +1420,13 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn start_agent(&self, agent: &AgentRun) -> StoreResult<()> {
+    async fn start_agent(&self, agent_run: &AgentRun) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let agent = agent.clone();
-                run_sqlite(store, move |store| store.start_agent(&agent)).await
+                let agent_run = agent_run.clone();
+                run_sqlite(store, move |store| store.start_agent(&agent_run)).await
             }
-            StoreBackend::Postgres(store) => store.start_agent(agent).await,
+            StoreBackend::Postgres(store) => store.start_agent(agent_run).await,
         }
     }
 
@@ -1981,7 +1981,7 @@ mod tests {
             .expect("delete fork runs");
         assert_eq!(deleted_forks, 1);
 
-        let agent = AgentRun {
+        let agent_run = AgentRun {
             id: LfdId::new(),
             step: "plan".to_string(),
             repo: "/repo".to_string(),
@@ -1992,10 +1992,10 @@ mod tests {
             ended_at: None,
             pid: None,
             container_id: None,
-            model: "claude-code".to_string(),
+            agent: "claude-code".to_string(),
             run_mode: "auto".to_string(),
         };
-        store.start_agent(&agent).await.expect("start agent");
+        store.start_agent(&agent_run).await.expect("start agent");
         assert!(store
             .get_waiting_agent_for_wave(wave.id())
             .await
@@ -2008,7 +2008,7 @@ mod tests {
             content: "summary".to_string(),
             source_hash: "abc".to_string(),
             token_budget: 100,
-            model: "claude-code".to_string(),
+            agent: "claude-code".to_string(),
             created_at: Some(OffsetDateTime::now_utc()),
         };
         store
@@ -2028,7 +2028,7 @@ mod tests {
             content: "# Updated summary".to_string(),
             source_hash: "def456".to_string(),
             token_budget: 10000,
-            model: "claude-code".to_string(),
+            agent: "claude-code".to_string(),
             created_at: Some(OffsetDateTime::now_utc()),
         };
         store

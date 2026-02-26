@@ -1,7 +1,7 @@
 ---
 requires: scratch/<branch>.md
 produces: code, tests
-model: codex
+agent: codex
 action_style: procedural
 ---
 Turn the design doc into working code.

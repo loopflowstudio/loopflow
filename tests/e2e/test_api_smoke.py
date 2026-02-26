@@ -16,7 +16,7 @@ from scripts.lib.wave_scenarios import (
     list_waves_happy,
     update_wave_happy,
     update_wave_invalid_status_error,
-    update_wave_model_overrides_happy,
+    update_wave_agent_overrides_happy,
 )
 
 pytestmark = pytest.mark.e2e
@@ -56,8 +56,8 @@ def test_update_wave_invalid_status_error(api_client: ApiClient) -> None:
     update_wave_invalid_status_error(api_client, _state)
 
 
-def test_update_wave_model_overrides_happy(api_client: ApiClient) -> None:
-    update_wave_model_overrides_happy(api_client, _state)
+def test_update_wave_agent_overrides_happy(api_client: ApiClient) -> None:
+    update_wave_agent_overrides_happy(api_client, _state)
 
 
 def test_delete_wave_happy(lf_client: Client, lfd_runtime: LfdRuntime) -> None:

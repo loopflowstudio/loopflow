@@ -250,7 +250,7 @@ fn generate_message(repo: &Path, prompt: &str, kind: MessageKind) -> OpsResult<M
             "{}\n\nReturn JSON with keys: title, body. No extra text.",
             prompt
         ),
-        model: config.agent_model.clone(),
+        agent: config.agent.clone(),
         cwd: Some(repo.to_path_buf()),
         skip_permissions: true,
         ..Default::default()

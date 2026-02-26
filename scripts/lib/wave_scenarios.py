@@ -79,30 +79,30 @@ def update_wave_invalid_status_error(raw: ApiClient, state: dict[str, str]) -> N
     ApiAssertions.expect_error(response, 400, message_contains="invalid status")
 
 
-def update_wave_model_overrides_happy(raw: ApiClient, state: dict[str, str]) -> None:
+def update_wave_agent_overrides_happy(raw: ApiClient, state: dict[str, str]) -> None:
     wave_id = state["primary_wave_id"]
     update = raw.request(
         "PATCH",
         f"/v0/waves/{wave_id}",
         json={
-            "model": "codex:o3",
-            "step_models": {"implement": "claude:sonnet"},
+            "agent": "codex:o3",
+            "step_agents": {"implement": "claude:sonnet"},
         },
     )
     ApiAssertions.expect_status(update, 200)
     payload = ApiAssertions.expect_json_object(update)
-    assert payload.get("model") == "codex:o3"
-    assert payload.get("step_models") == {"implement": "claude:sonnet"}
+    assert payload.get("agent") == "codex:o3"
+    assert payload.get("step_agents") == {"implement": "claude:sonnet"}
 
     clear = raw.request(
         "PATCH",
         f"/v0/waves/{wave_id}",
-        json={"model": "", "step_models": {}},
+        json={"agent": "", "step_agents": {}},
     )
     ApiAssertions.expect_status(clear, 200)
     cleared = ApiAssertions.expect_json_object(clear)
-    assert "model" not in cleared
-    assert "step_models" not in cleared
+    assert "agent" not in cleared
+    assert "step_agents" not in cleared
 
 
 def delete_wave_happy(client: Client, runtime: LfdRuntime, state: dict[str, str]) -> None:

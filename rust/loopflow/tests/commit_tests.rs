@@ -66,7 +66,7 @@ fn commit_skips_empty() {
 fn commit_with_lint_failure() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
     let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "lint: 'false'\nagent_model: claude\n");
+    repo.create_file(".lf/config.yaml", "lint: 'false'\nagent: claude\n");
     repo.create_file("bad.py", "print('hi')\n");
 
     let options = CommitOptions {

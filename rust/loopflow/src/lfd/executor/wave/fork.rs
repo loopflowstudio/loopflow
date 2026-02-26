@@ -154,12 +154,12 @@ impl WaveExecutor {
                     }
                 };
                 let capabilities = build_agent_capabilities(&worktree);
-                let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
+                let agent = launch.agent.clone().unwrap_or_else(|| "claude".to_string());
                 let cmd = build_agent_command(&launch, &process, &capabilities);
                 info!(
                     fork_run_id = %fork_run_id,
                     step = %step.step.name,
-                    model = %model,
+                    agent = %agent,
                     cmd_len = cmd.len(),
                     "launching fork branch agent"
                 );
@@ -172,7 +172,7 @@ impl WaveExecutor {
                         repo: wave_repo.clone(),
                         worktree: worktree.clone(),
                         step: step.clone(),
-                        model,
+                        agent,
                         cmd,
                         output_prefix: Some(format!("[{}] ", branch_label)),
                     })

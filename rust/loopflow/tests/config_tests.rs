@@ -19,7 +19,7 @@ fn load_config_or_default_handles_missing_file() {
     let temp = TempDir::new().unwrap();
     // Should return defaults without error
     let config = load_config_or_default(Some(temp.path()));
-    assert!(config.agent_model.is_none());
+    assert!(config.agent.is_none());
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn load_config_or_default_handles_empty_file() {
     write_config(temp.path(), "");
     // Should return defaults without error
     let config = load_config_or_default(Some(temp.path()));
-    assert!(config.agent_model.is_none());
+    assert!(config.agent.is_none());
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn load_config_or_default_handles_whitespace_only() {
     write_config(temp.path(), "   \n\n  ");
     // Should return defaults without error
     let config = load_config_or_default(Some(temp.path()));
-    assert!(config.agent_model.is_none());
+    assert!(config.agent.is_none());
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn load_config_parses_basic_yaml() {
     write_config(
         temp.path(),
         r#"
-agent_model: claude:sonnet
+agent: claude:sonnet
 yolo: true
 "#,
     );
@@ -54,7 +54,7 @@ yolo: true
     let config = load_config(Some(temp.path()))
         .expect("config should load")
         .expect("config should exist");
-    assert_eq!(config.agent_model.as_deref(), Some("claude:sonnet"));
+    assert_eq!(config.agent.as_deref(), Some("claude:sonnet"));
     assert!(config.yolo);
 }
 
@@ -63,7 +63,7 @@ fn load_config_or_default_returns_defaults() {
     let temp = TempDir::new().unwrap();
     let config = load_config_or_default(Some(temp.path()));
 
-    assert!(config.agent_model.is_none());
+    assert!(config.agent.is_none());
     assert!(!config.yolo);
     assert!(!config.chrome);
 }
@@ -75,19 +75,19 @@ fn load_config_or_default_returns_defaults() {
 #[test]
 fn config_model_with_variant() {
     let temp = TempDir::new().unwrap();
-    write_config(temp.path(), "agent_model: gemini:2.5-pro");
+    write_config(temp.path(), "agent: gemini:2.5-pro");
 
     let config = load_config(Some(temp.path())).unwrap().unwrap();
-    assert_eq!(config.agent_model.as_deref(), Some("gemini:2.5-pro"));
+    assert_eq!(config.agent.as_deref(), Some("gemini:2.5-pro"));
 }
 
 #[test]
 fn config_model_without_variant() {
     let temp = TempDir::new().unwrap();
-    write_config(temp.path(), "agent_model: codex");
+    write_config(temp.path(), "agent: codex");
 
     let config = load_config(Some(temp.path())).unwrap().unwrap();
-    assert_eq!(config.agent_model.as_deref(), Some("codex"));
+    assert_eq!(config.agent.as_deref(), Some("codex"));
 }
 
 // =============================================================================

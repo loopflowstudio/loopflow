@@ -1,8 +1,8 @@
 use crate::engine::{
-    check_cli_available, launch_agent, load_config_or_default, parse_harness_model,
-    prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
-    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents,
-    StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
+    check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
+    seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextBreakdown,
+    ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents, StreamFormat,
+    Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -54,7 +54,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         "loaded config"
     );
     trace!(
-        agent_model = config.agent_model.as_deref().unwrap_or("claude:opus"),
+        agent = config.agent.as_deref().unwrap_or("claude:opus"),
         ?config.yolo,
         "loaded config"
     );
@@ -101,7 +101,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
                 .map(|path| path.to_string_lossy().to_string()),
             wave: cli.wave.clone(),
             message: message.map(|value| value.to_string()),
-            model: cli.model.clone(),
+            agent: cli.model.clone(),
             cwd: Some(repo_root.clone()),
             max_turns: None,
             yolo_mode: cli.yolo || config.yolo,
@@ -121,12 +121,12 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         elapsed_ms = prepare_start.elapsed().as_millis(),
         "prepared launch prompt"
     );
-    let model = prepared
+    let agent = prepared
         .config
-        .model
+        .agent
         .clone()
-        .expect("prepare_launch_prompt always sets launch model");
-    let (harness, _model) = parse_harness_model(&model);
+        .expect("prepare_launch_prompt always sets agent");
+    let (harness, _model) = parse_agent(&agent);
 
     let step_name = step.map(|value| value.to_string());
     let log_name = step_name
@@ -167,7 +167,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         .map(|d| d.name.clone())
         .collect();
     let cli_model = if cli.model.is_some() {
-        built.agent_config.model.as_deref()
+        built.agent_config.agent.as_deref()
     } else {
         None
     };

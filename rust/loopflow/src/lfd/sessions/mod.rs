@@ -243,7 +243,7 @@ impl SessionManager {
                 area: config.area.clone(),
                 wave: config.wave.clone(),
                 message: config.message.clone(),
-                model: config.model.clone(),
+                agent: config.agent.clone(),
                 cwd,
                 max_turns: config.max_turns,
                 yolo_mode: config.yolo_mode,
@@ -1273,7 +1273,7 @@ mod tests {
                 config: SessionConfig {
                     step: "design".to_string(),
                     repo_root: tmp.path().to_string_lossy().to_string(),
-                    model: Some("gpt-5.1-codex".to_string()),
+                    agent: Some("gpt-5.1-codex".to_string()),
                     cwd: Some(tmp.path().to_string_lossy().to_string()),
                     ..Default::default()
                 },
@@ -1347,7 +1347,7 @@ mod tests {
                 config: SessionConfig {
                     step: "seed-step".to_string(),
                     repo_root: tmp.path().to_string_lossy().to_string(),
-                    model: Some("gpt-5.1-codex".to_string()),
+                    agent: Some("gpt-5.1-codex".to_string()),
                     cwd: Some(tmp.path().to_string_lossy().to_string()),
                     ..Default::default()
                 },

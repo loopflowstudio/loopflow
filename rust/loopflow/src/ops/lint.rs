@@ -69,7 +69,7 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
 
     let launch = AgentConfig {
         task_prompt: prompt,
-        model: config.agent_model.clone(),
+        agent: config.agent.clone(),
         cwd: Some(repo.to_path_buf()),
         skip_permissions: true,
         ..Default::default()

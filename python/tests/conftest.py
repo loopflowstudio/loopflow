@@ -70,7 +70,7 @@ SESSION_FULL = {
     "wave_run_id": "run-1",
     "provider_session_id": "provider-1",
     "config": {
-        "model": "claude-sonnet-4-5-20250929",
+        "agent": "claude-sonnet-4-5-20250929",
         "cwd": "/tmp/repo",
         "system_prompt": "be concise",
         "max_turns": 3,

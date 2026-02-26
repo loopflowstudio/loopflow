@@ -7,7 +7,7 @@ struct FlowProgressPills: View {
     let steps: [String]
     let currentIndex: Int
     let startedAt: Date?
-    var stepModels: [String: String]? = nil
+    var stepAgents: [String: String]? = nil
     var onRestartStep: (() -> Void)?
 
     @Environment(\.palette) private var palette
@@ -65,8 +65,8 @@ struct FlowProgressPills: View {
                     .monospacedDigit()
             }
 
-            if let overrideModel = stepModels?[step] {
-                Text(overrideModel)
+            if let overrideAgent = stepAgents?[step] {
+                Text(overrideAgent)
                     .font(Typography.caption(9))
                     .padding(.horizontal, Spacing.xs)
                     .padding(.vertical, 2)

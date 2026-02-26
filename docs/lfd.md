@@ -113,7 +113,7 @@ curl -s -X POST "http://127.0.0.1:2486/v0/sessions" \
     \"step\": \"design\",
     \"repo_root\": \"$(pwd)\",
     \"directions\": [\"clarity\"],
-    \"model\": \"claude-sonnet-4-6\",
+    \"agent\": \"claude-sonnet-4-6\",
     \"cwd\": \"$(pwd)\"
   }"
 ```

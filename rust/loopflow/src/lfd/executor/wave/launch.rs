@@ -19,7 +19,7 @@ pub(super) struct AgentLaunchRequest {
     pub repo: String,
     pub worktree: String,
     pub step: ConcreteStep,
-    pub model: String,
+    pub agent: String,
     pub cmd: Vec<String>,
     pub output_prefix: Option<String>,
 }
@@ -42,7 +42,7 @@ impl WaveExecutor {
             repo,
             worktree,
             step,
-            model,
+            agent,
             cmd,
             output_prefix,
         } = request;
@@ -52,7 +52,7 @@ impl WaveExecutor {
             &worktree,
             &step,
             AgentStatus::Running,
-            &model,
+            &agent,
         );
         let agent_id = agent.id.clone();
         self.store.start_agent(&agent).await?;

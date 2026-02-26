@@ -88,9 +88,9 @@ pub struct WaveDto {
     pub direction: Vec<String>,
     pub area: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+    pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub step_models: Option<HashMap<String, String>>,
+    pub step_agents: Option<HashMap<String, String>>,
     pub created_at: Option<String>,
     pub status: String,
     pub iteration: u32,

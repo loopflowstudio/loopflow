@@ -131,7 +131,7 @@ for f in .lf/rlm/raw/chunk_*; do
   name=$(basename "$f")
   cat > ".lf/steps/rlm-${name}.md" <<EOF
 ---
-model: claude:sonnet
+agent: claude:sonnet
 ---
 Find all named characters in this text.
 Write one name per line to .lf/rlm/results/${name}.out
@@ -188,7 +188,7 @@ Recursion depth is tracked automatically via `RLM_DEPTH`. Each nested `lf` invoc
 
 ## Tips
 
-- Use step frontmatter `model: claude:sonnet` (or `-m sonnet`) for cheaper sub-agents
+- Use step frontmatter `agent: claude:sonnet` (or `-m sonnet`) for cheaper sub-agents
 - Chunk at natural boundaries — file boundaries, paragraph breaks, function boundaries
 - Write focused step instructions — each sub-agent should do one thing per chunk
 - Use `.lf/rlm/` for intermediate files (gitignored)

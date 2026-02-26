@@ -138,7 +138,7 @@ impl WaveExecutor {
         )
         .await?;
         let capabilities = build_agent_capabilities(&run.worktree);
-        let model = launch.model.clone().unwrap_or_else(|| "claude".to_string());
+        let agent = launch.agent.clone().unwrap_or_else(|| "claude".to_string());
 
         let outcome = self
             .launch_agent(AgentLaunchRequest {
@@ -148,7 +148,7 @@ impl WaveExecutor {
                 repo: run.snapshot.repo.clone(),
                 worktree: run.worktree.clone(),
                 step,
-                model: model.clone(),
+                agent: agent.clone(),
                 cmd: build_agent_command(&launch, &process, &capabilities),
                 output_prefix: None,
             })

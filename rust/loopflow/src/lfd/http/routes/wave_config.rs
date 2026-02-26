@@ -16,8 +16,8 @@ pub(crate) struct WaveConfig {
     pub area: Option<Vec<String>>,
     pub stimulus: Option<StimulusDef>,
     pub direction: Option<Vec<String>>,
-    pub model: Option<String>,
-    pub step_models: Option<HashMap<String, String>>,
+    pub agent: Option<String>,
+    pub step_agents: Option<HashMap<String, String>>,
 }
 
 /// Read wave config from `wave/<name>/<name>.yaml`.
@@ -40,12 +40,12 @@ pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     }
 }
 
-/// Update model fields in `wave/<name>/<name>.yaml`, preserving existing keys.
-pub(crate) fn update_wave_model_config(
+/// Update agent fields in `wave/<name>/<name>.yaml`, preserving existing keys.
+pub(crate) fn update_wave_agent_config(
     repo: &Path,
     name: &str,
-    model: Option<String>,
-    step_models: Option<HashMap<String, String>>,
+    agent: Option<String>,
+    step_agents: Option<HashMap<String, String>>,
 ) -> Result<(), String> {
     let path = repo.join("wave").join(name).join(format!("{name}.yaml"));
     if let Some(parent) = path.parent() {
@@ -65,25 +65,25 @@ pub(crate) fn update_wave_model_config(
     let map = value
         .as_mapping_mut()
         .ok_or_else(|| format!("wave config at {} must be a mapping", path.display()))?;
-    let model_key = serde_yaml_ng::Value::String("model".to_string());
-    let step_models_key = serde_yaml_ng::Value::String("step_models".to_string());
+    let agent_key = serde_yaml_ng::Value::String("agent".to_string());
+    let step_agents_key = serde_yaml_ng::Value::String("step_agents".to_string());
 
-    if let Some(model) = model {
-        if model.trim().is_empty() {
-            map.remove(&model_key);
+    if let Some(agent) = agent {
+        if agent.trim().is_empty() {
+            map.remove(&agent_key);
         } else {
-            map.insert(model_key, serde_yaml_ng::Value::String(model));
+            map.insert(agent_key, serde_yaml_ng::Value::String(agent));
         }
     }
 
-    if let Some(step_models) = step_models {
-        if step_models.is_empty() {
-            map.remove(&step_models_key);
+    if let Some(step_agents) = step_agents {
+        if step_agents.is_empty() {
+            map.remove(&step_agents_key);
         } else {
             map.insert(
-                step_models_key,
-                serde_yaml_ng::to_value(step_models)
-                    .map_err(|err| format!("failed to encode step_models: {err}"))?,
+                step_agents_key,
+                serde_yaml_ng::to_value(step_agents)
+                    .map_err(|err| format!("failed to encode step_agents: {err}"))?,
             );
         }
     }
@@ -120,13 +120,13 @@ mod tests {
     }
 
     #[test]
-    fn update_wave_model_config_writes_model_fields() {
+    fn update_wave_agent_config_writes_agent_fields() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(dir.join("scan.yaml"), "flow: build\narea: ['.']\n").expect("write");
 
-        update_wave_model_config(
+        update_wave_agent_config(
             temp.path(),
             "scan",
             Some("codex:o3".to_string()),
@@ -138,29 +138,29 @@ mod tests {
         .expect("update config");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.model.as_deref(), Some("codex:o3"));
+        assert_eq!(config.agent.as_deref(), Some("codex:o3"));
         assert_eq!(
             config
-                .step_models
+                .step_agents
                 .as_ref()
-                .and_then(|models| models.get("implement"))
+                .and_then(|agents| agents.get("implement"))
                 .map(String::as_str),
             Some("claude:sonnet")
         );
     }
 
     #[test]
-    fn update_wave_model_config_removes_fields_on_empty_values() {
+    fn update_wave_agent_config_removes_fields_on_empty_values() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("scan.yaml"),
-            "flow: build\narea: ['.']\nmodel: codex:o3\nstep_models:\n  implement: claude:sonnet\n",
+            "flow: build\narea: ['.']\nagent: codex:o3\nstep_agents:\n  implement: claude:sonnet\n",
         )
         .expect("write");
 
-        update_wave_model_config(
+        update_wave_agent_config(
             temp.path(),
             "scan",
             Some(String::new()),
@@ -169,8 +169,8 @@ mod tests {
         .expect("update config");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert!(config.model.is_none());
-        assert!(config.step_models.is_none());
+        assert!(config.agent.is_none());
+        assert!(config.step_agents.is_none());
         assert_eq!(config.flow.as_deref(), Some("build"));
         assert_eq!(config.area, Some(vec![".".to_string()]));
     }

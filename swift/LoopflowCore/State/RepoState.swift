@@ -791,24 +791,24 @@ public final class RepoState {
         direction: [String]? = nil,
         flow: String? = nil,
         status: WaveStatus? = nil,
-        model: String? = nil,
-        stepModels: [String: String]? = nil
+        agent: String? = nil,
+        stepAgents: [String: String]? = nil
     ) async throws {
         try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
             if let flow { w.flow = flow }
             if let status { w.status = status }
-            if let model { w.model = model.isEmpty ? nil : model }
-            if let stepModels { w.stepModels = stepModels }
+            if let agent { w.agent = agent.isEmpty ? nil : agent }
+            if let stepAgents { w.stepAgents = stepAgents }
         }) {
             let config = WaveConfigUpdate(
                 area: area,
                 direction: direction,
                 flow: flow,
                 status: status,
-                model: model,
-                stepModels: stepModels
+                agent: agent,
+                stepAgents: stepAgents
             )
             _ = try await self.waveService.updateWave(wave.id, config: config)
         }

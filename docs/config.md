@@ -11,7 +11,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
-| Model | `-m claude:opus` | `agent_model: claude:opus` |
+| Model | `-m claude:opus` | `agent: claude:opus` |
 | Interactive mode | `-i` | frontmatter: `interactive: true` |
 | Include lf docs | `--lfdocs` (default) | `lfdocs: true` |
 | Include branch files | `--diff-files` (default) | `diff_files: true` |
@@ -61,11 +61,11 @@ For most settings, repo overrides global. For additive settings (`context`, `exc
 
 ```yaml
 # ~/.lf/config.yaml (global)
-agent_model: claude:opus
+agent: claude:opus
 direction: clarity
 
 # .lf/config.yaml (repo)
-agent_model: codex        # overrides global
+agent: codex        # overrides global
 context:
   - docs/api.md           # combined with global context
 ```
@@ -73,7 +73,7 @@ context:
 Example repo config:
 
 ```yaml
-agent_model: claude:opus
+agent: claude:opus
 push: true
 
 direction: clarity
@@ -197,7 +197,7 @@ Default model for all steps.
 | | |
 |---|---|
 | **CLI** | `lf review -m codex:o3` |
-| **Config** | `agent_model: claude:opus` (optional) |
+| **Config** | `agent: claude:opus` (optional) |
 | **Default** | unset (resolution falls back to step defaults, then `claude:opus`) |
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
@@ -205,9 +205,9 @@ Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for spec
 OpenCode passes model strings through to its own provider system:
 
 ```yaml
-agent_model: opencode                          # use opencode's default model
-agent_model: opencode:anthropic/claude-sonnet  # explicit model
-agent_model: opencode:openai/gpt-4o            # any provider opencode supports
+agent: opencode                          # use opencode's default model
+agent: opencode:anthropic/claude-sonnet  # explicit model
+agent: opencode:openai/gpt-4o            # any provider opencode supports
 ```
 
 ### Supported Harnesses
@@ -413,14 +413,14 @@ See [superpowers](https://github.com/obra/superpowers) for an example skill libr
 Configure recursive sub-agent behavior for processing large inputs.
 
 ```yaml
-rlm_model: claude:sonnet    # model for sub-agents (default: same as agent_model)
+rlm_agent: claude:sonnet    # model for sub-agents (default: same as agent)
 rlm_max_parallel: 10        # max concurrent sub-agents
 rlm_max_depth: 3            # max recursion depth
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `rlm_model` | (agent_model) | Model for RLM sub-agents |
+| `rlm_agent` | (agent) | Model for RLM sub-agents |
 | `rlm_max_parallel` | 10 | Suggested max concurrent sub-agents |
 | `rlm_max_depth` | 3 | Maximum recursion depth |
 

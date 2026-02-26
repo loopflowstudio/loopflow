@@ -74,12 +74,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
       - name: Build DMG
         run: python3 scripts/concerto-dev.py release
         working-directory: ${{ github.workspace }}
       - name: Upload DMG to R2
         run: |
-          pip3 install boto3
+          uv pip install --system boto3
           python3 - <<'SCRIPT'
           import boto3, os
           version = os.environ["GITHUB_REF_NAME"].lstrip("v")

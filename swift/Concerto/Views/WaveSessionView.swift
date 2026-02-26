@@ -55,8 +55,7 @@ struct WaveSessionView: View {
             if showsSuggestedActions, !state.suggestedActions.isEmpty {
                 ActionButtonsView(actions: state.suggestedActions) { action in
                     composerText = ""
-                    replyQueue.clear()
-                    replyTrayFreeText = ""
+                    clearReplyInputs()
                     Task {
                         await state.sendSuggestedAction(action)
                     }
@@ -172,7 +171,7 @@ struct WaveSessionView: View {
         switch entry {
         case .message(let message):
             MessageRow(message: message) { newEntry in
-                replyQueue.entries.append(newEntry)
+                replyQueue.add(newEntry)
                 isReplyTrayExpanded = true
             }
 
@@ -193,9 +192,7 @@ struct WaveSessionView: View {
         let text = replyQueue.assembleMessage(extraFreeText: composerText)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         composerText = ""
-        replyQueue.clear()
-        replyTrayFreeText = ""
-        isReplyTrayExpanded = false
+        clearReplyInputs(collapseTray: true)
         Task {
             await state.send(text)
         }
@@ -204,12 +201,20 @@ struct WaveSessionView: View {
     private var canSendMessage: Bool {
         !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !replyQueue.isEmpty
     }
+
+    private func clearReplyInputs(collapseTray: Bool = false) {
+        replyQueue.clear()
+        replyTrayFreeText = ""
+        if collapseTray {
+            isReplyTrayExpanded = false
+        }
+    }
 }
 
 private struct MessageRow: View {
     @Environment(\.palette) private var palette
     let message: SessionMessage
-    var onQueueEntry: ((ReplyEntry) -> Void)? = nil
+    let onQueueEntry: (ReplyEntry) -> Void
 
 #if os(macOS)
     @State private var selectedQuote: String?
@@ -242,7 +247,7 @@ private struct MessageRow: View {
     @ViewBuilder
     private var content: some View {
 #if os(macOS)
-        if message.role == .assistant, onQueueEntry != nil {
+        if message.role == .assistant {
             SelectableAssistantMessageTextView(
                 text: message.content,
                 selectionResetToken: selectionResetToken
@@ -266,22 +271,16 @@ private struct MessageRow: View {
                     )
                 }
             }
-        } else if message.role == .assistant,
-                  let markdown = try? AttributedString(
-                      markdown: message.content,
-                      options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-                  ) {
-            Text(markdown)
-                .font(Typography.body())
-                .foregroundStyle(palette.text)
-                .textSelection(.enabled)
         } else {
-            Text(message.content)
-                .font(Typography.body())
-                .foregroundStyle(message.role == .error ? .statusError : palette.text)
-                .textSelection(.enabled)
+            defaultMessageText
         }
 #else
+        defaultMessageText
+#endif
+    }
+
+    @ViewBuilder
+    private var defaultMessageText: some View {
         if message.role == .assistant,
            let markdown = try? AttributedString(
                markdown: message.content,
@@ -297,7 +296,6 @@ private struct MessageRow: View {
                 .foregroundStyle(message.role == .error ? .statusError : palette.text)
                 .textSelection(.enabled)
         }
-#endif
     }
 
     private var accentBar: some View {
@@ -332,13 +330,13 @@ private struct MessageRow: View {
         guard let selectedQuote else { return }
         let reply = replyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else { return }
-        onQueueEntry?(.quoteReply(quoted: selectedQuote, reply: reply))
+        onQueueEntry(.quoteReply(quoted: selectedQuote, reply: reply))
         closeReplyComposer()
     }
 
     private func queueEmojiReply(_ emoji: String) {
         guard let selectedQuote else { return }
-        onQueueEntry?(.emojiReact(quoted: selectedQuote, emoji: emoji))
+        onQueueEntry(.emojiReact(quoted: selectedQuote, emoji: emoji))
         closeReplyComposer()
     }
 

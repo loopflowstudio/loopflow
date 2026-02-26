@@ -19,7 +19,7 @@ struct ReplyDraftTray: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    if queue.entries.isEmpty {
+                    if queue.isEmpty {
                         Text("No replies queued yet")
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
@@ -71,7 +71,7 @@ struct ReplyDraftTray: View {
                         .font(Typography.caption())
                         .foregroundStyle(palette.textSecondary)
 
-                    Text("\(queue.entries.count) replies queued")
+                    Text("\(queue.count) replies queued")
                         .font(Typography.caption())
                         .foregroundStyle(palette.text)
                 }
@@ -85,7 +85,7 @@ struct ReplyDraftTray: View {
                 onSend()
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(queue.entries.isEmpty)
+            .disabled(queue.isEmpty)
         }
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.sm)
@@ -102,13 +102,13 @@ private struct ReplyDraftEntryRow: View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 if let quoted = entry.quotedText {
-                    Text("\(quotePrefix) \(truncate(quoted, limit: 80))")
+                    Text("> \(truncate(quoted, limit: 80))")
                         .font(Typography.caption())
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(2)
                 }
 
-                Text(truncate(payload, limit: 160))
+                Text(truncate(entry.responseText, limit: 160))
                     .font(Typography.body())
                     .foregroundStyle(palette.text)
                     .lineLimit(3)
@@ -132,26 +132,6 @@ private struct ReplyDraftEntryRow: View {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .fill(palette.surfaceMuted)
         )
-    }
-
-    private var payload: String {
-        switch entry {
-        case .quoteReply(_, _, let reply):
-            return reply
-        case .emojiReact(_, _, let emoji):
-            return emoji
-        case .freeText(_, let text):
-            return text
-        }
-    }
-
-    private var quotePrefix: String {
-        switch entry {
-        case .quoteReply, .emojiReact:
-            return ">"
-        case .freeText:
-            return ""
-        }
     }
 
     private func truncate(_ text: String, limit: Int) -> String {

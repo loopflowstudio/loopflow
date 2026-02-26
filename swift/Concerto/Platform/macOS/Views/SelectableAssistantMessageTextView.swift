@@ -15,17 +15,11 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
         let textView = AutosizingSelectableTextView(frame: .zero, textContainer: nil)
         textView.delegate = context.coordinator
         textView.string = text
-        textView.onIntrinsicSizeInvalidated = {
-            context.coordinator.invalidateHostLayout()
-        }
         return textView
     }
 
     func updateNSView(_ nsView: AutosizingSelectableTextView, context: Context) {
         context.coordinator.onSelectionChanged = onSelectionChanged
-        context.coordinator.invalidateLayout = {
-            nsView.invalidateIntrinsicContentSize()
-        }
 
         if nsView.string != text {
             nsView.string = text
@@ -42,7 +36,6 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var onSelectionChanged: (String?) -> Void
         var selectionResetToken = 0
-        var invalidateLayout: (() -> Void)?
 
         init(onSelectionChanged: @escaping (String?) -> Void) {
             self.onSelectionChanged = onSelectionChanged
@@ -66,16 +59,10 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
             let cleaned = rawSelected.trimmingCharacters(in: .whitespacesAndNewlines)
             onSelectionChanged(cleaned.isEmpty ? nil : cleaned)
         }
-
-        func invalidateHostLayout() {
-            invalidateLayout?()
-        }
     }
 }
 
 final class AutosizingSelectableTextView: NSTextView {
-    var onIntrinsicSizeInvalidated: (() -> Void)?
-
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
         let textStorage = NSTextStorage()
         let layoutManager = NSLayoutManager()
@@ -121,14 +108,12 @@ final class AutosizingSelectableTextView: NSTextView {
     override func layout() {
         super.layout()
         invalidateIntrinsicContentSize()
-        onIntrinsicSizeInvalidated?()
     }
 
     override var frame: NSRect {
         didSet {
             if oldValue.size.width != frame.size.width {
                 invalidateIntrinsicContentSize()
-                onIntrinsicSizeInvalidated?()
             }
         }
     }

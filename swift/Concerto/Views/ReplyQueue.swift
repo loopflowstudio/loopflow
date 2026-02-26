@@ -27,36 +27,53 @@ enum ReplyEntry: Identifiable, Equatable {
             return nil
         }
     }
+
+    var responseText: String {
+        switch self {
+        case .quoteReply(_, _, let reply):
+            return reply
+        case .emojiReact(_, _, let emoji):
+            return emoji
+        case .freeText(_, let text):
+            return text
+        }
+    }
+
+    var assembledBlock: String {
+        guard let quotedText else { return responseText }
+        return "> \(quotedText)\n\n\(responseText)"
+    }
 }
 
 // MARK: - Reply Queue
 
 @Observable
 final class ReplyQueue {
-    var entries: [ReplyEntry] = []
+    private(set) var entries: [ReplyEntry] = []
 
     var isEmpty: Bool {
         entries.isEmpty
     }
 
+    var count: Int {
+        entries.count
+    }
+
+    func add(_ entry: ReplyEntry) {
+        guard let normalizedEntry = normalized(entry) else { return }
+        entries.append(normalizedEntry)
+    }
+
     func addQuoteReply(quoted rawQuoted: String, reply rawReply: String) {
-        let quoted = sanitize(rawQuoted)
-        let reply = sanitize(rawReply)
-        guard !quoted.isEmpty, !reply.isEmpty else { return }
-        entries.append(.quoteReply(quoted: quoted, reply: reply))
+        add(.quoteReply(quoted: rawQuoted, reply: rawReply))
     }
 
     func addEmojiReact(quoted rawQuoted: String, emoji: String) {
-        let quoted = sanitize(rawQuoted)
-        let trimmedEmoji = sanitize(emoji)
-        guard !quoted.isEmpty, !trimmedEmoji.isEmpty else { return }
-        entries.append(.emojiReact(quoted: quoted, emoji: trimmedEmoji))
+        add(.emojiReact(quoted: rawQuoted, emoji: emoji))
     }
 
     func addFreeText(_ rawText: String) {
-        let text = sanitize(rawText)
-        guard !text.isEmpty else { return }
-        entries.append(.freeText(text: text))
+        add(.freeText(text: rawText))
     }
 
     func remove(id: UUID) {
@@ -68,54 +85,37 @@ final class ReplyQueue {
     }
 
     func assembleMessage(extraFreeText rawExtraText: String = "") -> String {
-        let entryBlocks = entries.compactMap(assembleBlock)
+        let entryBlocks = entries.map(\.assembledBlock)
         let extraText = sanitize(rawExtraText)
-
-        if extraText.isEmpty {
+        guard !extraText.isEmpty else {
             return entryBlocks.joined(separator: "\n\n")
         }
-
-        if entryBlocks.isEmpty {
-            return extraText
-        }
-
         return (entryBlocks + [extraText]).joined(separator: "\n\n")
-    }
-
-    func previewLabel(for entry: ReplyEntry) -> String {
-        switch entry {
-        case .quoteReply(_, _, let reply):
-            return reply
-        case .emojiReact(_, _, let emoji):
-            return emoji
-        case .freeText(_, let text):
-            return text
-        }
-    }
-
-    private func assembleBlock(_ entry: ReplyEntry) -> String? {
-        switch entry {
-        case .quoteReply(_, let quoted, let reply):
-            return quoteBlock(quoted: quoted, response: reply)
-        case .emojiReact(_, let quoted, let emoji):
-            return quoteBlock(quoted: quoted, response: emoji)
-        case .freeText(_, let text):
-            let normalized = sanitize(text)
-            return normalized.isEmpty ? nil : normalized
-        }
-    }
-
-    private func quoteBlock(quoted rawQuoted: String, response rawResponse: String) -> String? {
-        let quoted = sanitize(rawQuoted)
-        let response = sanitize(rawResponse)
-        guard !quoted.isEmpty, !response.isEmpty else { return nil }
-        return "> \(quoted)\n\n\(response)"
     }
 
     private func sanitize(_ text: String) -> String {
         text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalized(_ entry: ReplyEntry) -> ReplyEntry? {
+        switch entry {
+        case .quoteReply(let id, let rawQuoted, let rawReply):
+            let quoted = sanitize(rawQuoted)
+            let reply = sanitize(rawReply)
+            guard !quoted.isEmpty, !reply.isEmpty else { return nil }
+            return .quoteReply(id: id, quoted: quoted, reply: reply)
+        case .emojiReact(let id, let rawQuoted, let rawEmoji):
+            let quoted = sanitize(rawQuoted)
+            let emoji = sanitize(rawEmoji)
+            guard !quoted.isEmpty, !emoji.isEmpty else { return nil }
+            return .emojiReact(id: id, quoted: quoted, emoji: emoji)
+        case .freeText(let id, let rawText):
+            let text = sanitize(rawText)
+            guard !text.isEmpty else { return nil }
+            return .freeText(id: id, text: text)
+        }
     }
 }
 

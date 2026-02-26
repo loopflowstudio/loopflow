@@ -41,10 +41,6 @@ loopflow_status_timeout_ms() {
 # Mode detection
 # ---------------------------------------------------------------------------
 
-loopflow_mode_explicit() {
-    loopflow_get_option "@loopflow_mode" "auto"
-}
-
 loopflow_detect_container_mode() {
     if ! loopflow_has_cmd lfq; then
         return 1
@@ -54,14 +50,13 @@ loopflow_detect_container_mode() {
     if loopflow_has_cmd timeout; then
         timeout "$timeout_s" lfq status >/dev/null 2>&1
     else
-        # macOS: use perl as timeout fallback
-        perl -e "alarm $(loopflow_status_timeout_ms) / 1000; exec @ARGV" lfq status >/dev/null 2>&1
+        lfq status >/dev/null 2>&1
     fi
 }
 
 loopflow_mode() {
     local explicit
-    explicit="$(loopflow_mode_explicit)"
+    explicit="$(loopflow_get_option "@loopflow_mode" "auto")"
     case "$explicit" in
         lf) echo "lf"; return 0 ;;
         container) echo "container"; return 0 ;;
@@ -93,13 +88,6 @@ loopflow_pane_path() {
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
-
-loopflow_cache_read() {
-    if [[ ! -f "$LOOPFLOW_CACHE_FILE" ]]; then
-        return 1
-    fi
-    cat "$LOOPFLOW_CACHE_FILE"
-}
 
 loopflow_cache_write() {
     local text="$1"
@@ -143,24 +131,6 @@ loopflow_cache_text() {
 # Picker helpers
 # ---------------------------------------------------------------------------
 
-loopflow_pick_with_fzf() {
-    local prompt="$1"
-    shift
-    printf '%s\n' "$@" | fzf --prompt="$prompt> " --height=10 --reverse 2>/dev/null
-}
-
-loopflow_pick_with_tmux_menu() {
-    local title="$1"
-    shift
-    local args=()
-    local idx=0
-    for item in "$@"; do
-        args+=("$item" "$idx" "run-shell 'echo $item'")
-        idx=$((idx + 1))
-    done
-    tmux display-menu -T "$title" "${args[@]}" 2>/dev/null
-}
-
 loopflow_pick_wave() {
     local mode items selection
     mode="$(loopflow_mode)"
@@ -198,27 +168,27 @@ loopflow_pick_wave() {
     echo "$selection"
 }
 
-loopflow_pick_layout() {
+loopflow_open_layout() {
     local layouts=("dev" "swarm" "flow")
     local selection
 
     if loopflow_has_cmd fzf; then
         selection="$(printf '%s\n' "${layouts[@]}" | fzf --prompt="layout> " --height=6 --reverse 2>/dev/null)"
     else
-        # Fallback: tmux display-menu
+        # Fallback: tmux display-menu (runs layout directly on selection)
         tmux display-menu -T "Layout" \
             "dev"   "d" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-dev.sh'" \
             "swarm" "s" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-swarm.sh'" \
             "flow"  "f" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-flow.sh'" \
             2>/dev/null
-        return $?
+        return 0
     fi
 
     if [[ -z "$selection" ]]; then
         loopflow_display "nothing selected"
         return 1
     fi
-    echo "$selection"
+    "$LOOPFLOW_DIR/scripts/layouts/lf-${selection}.sh"
 }
 
 # ---------------------------------------------------------------------------
@@ -315,14 +285,7 @@ loopflow_dispatch() {
             fi
             ;;
         layout-pick)
-            local layout
-            layout="$(loopflow_pick_layout)" || return 1
-            case "$layout" in
-                dev)   "$LOOPFLOW_DIR/scripts/layouts/lf-dev.sh" ;;
-                swarm) "$LOOPFLOW_DIR/scripts/layouts/lf-swarm.sh" ;;
-                flow)  "$LOOPFLOW_DIR/scripts/layouts/lf-flow.sh" ;;
-                *)     loopflow_display "unknown layout: $layout" ;;
-            esac
+            loopflow_open_layout
             ;;
         help)
             loopflow_show_help

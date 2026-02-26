@@ -14,6 +14,7 @@ struct MobileWaveDetailView: View {
     @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.palette) private var palette
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
 
     @State private var tab: Tab = .output
@@ -106,6 +107,15 @@ struct MobileWaveDetailView: View {
         }
         .onChange(of: horizontalSizeClass) { _, value in
             sessionState.configureClientContext(compact: value == .compact)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            outputBuffer.stopStreaming(waveId: wave.id)
+            outputBuffer.startStreaming(waveId: wave.id)
+            sessionState.onDisappear()
+            Task {
+                await sessionState.onAppear()
+            }
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)

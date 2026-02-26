@@ -10,6 +10,7 @@ struct MobileRootView: View {
     @State private var selectedTab = 0
     @State private var showingSettings = false
 
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
@@ -44,6 +45,12 @@ struct MobileRootView: View {
         }
         .environment(repoState)
         .environment(outputBuffer)
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, !needsInitialSetup else { return }
+            Task {
+                await repoState.checkConnectionHealth()
+            }
+        }
         .preferredColorScheme(theme.preferredScheme)
         .environment(\.palette, theme.palette)
     }

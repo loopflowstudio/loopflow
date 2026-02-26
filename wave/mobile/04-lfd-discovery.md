@@ -4,69 +4,62 @@ Login on mobile, see your running lfds. Tailscale handles connectivity. Zero con
 
 ## What to build
 
-lfd registers with studio auth servers when started in publish mode. Studio is a discovery service — it tracks which lfds are online and their Tailscale addresses. When you login on mobile, Concerto discovers your lfds via studio and connects directly over Tailscale.
+lfd registers with studio auth servers automatically when using the `loopflow.studio` auth provider. Registration = discoverable — no `--publish` flag needed. Studio is a discovery service that tracks which lfds are online and their addresses. When you login on mobile, Concerto discovers your lfds via studio and connects directly.
 
-No relay service. Tailscale handles NAT traversal. Studio just answers "where are my lfds?"
+No relay service. Tailscale handles NAT traversal for remote access. Studio just answers "where are my lfds?"
 
 Stage 04 is additive on top of direct/manual connection from Stage 01/03. If discovery is unavailable, manual host:port must still work.
 
 ## How it works
 
-### Publish mode (lfd side)
+### Registration (lfd side)
 
-`lfd dev --publish` (or `publish = true` in config):
+lfd already registers with `auth.loopflow.studio`, heartbeats every 30s, deregisters on shutdown. Two additions to the existing payload:
 
-1. Authenticates with studio using loopflow account token
-2. Detects Tailscale IP via `tailscale status --json`
-3. Reports address + port to studio's discovery registry
-4. Sends periodic heartbeats: repo name, address, online status
-5. Deregisters on graceful shutdown, times out on crash (~30s)
+1. **`address`** — detected host:port for direct connections
+2. **`repos`** — list of `{ name, wave_count }` so discovery can show repo names without connecting
 
-```
-lfd dev --publish
-# → authenticates with studio.loopflow.dev
-# → Tailscale: 100.64.1.5
-# → "Publishing as jack/loopflow (lfd-abc123)"
-# → ready for remote connections
-```
+Address detection order:
+1. `tailscale status --json` → extract `TailscaleIPs[0]` if Tailscale is running
+2. Fall back to primary non-loopback network interface IP
+3. Fall back to bind address from config
 
-Tailscale is the expected connectivity layer. If Tailscale isn't running, `--publish` warns and publishes LAN address only (works on same network but not remotely).
+Both `address` and `repos` are included in heartbeats too (addresses can change — DHCP, Tailscale reconnect).
 
-lfd's existing HTTP + WebSocket APIs work unchanged. No new lfd API surface.
+Tailscale is the expected connectivity layer for remote access. Without Tailscale, LAN address works on the same network but not remotely.
+
+lfd's existing HTTP + WebSocket APIs work unchanged. No new lfd API surface. No new CLI flags.
 
 ### Discovery service (studio side)
 
-Studio runs a lightweight discovery registry — no relay, no proxying, no data plane:
+Studio needs one new endpoint. Studio-side implementation is a separate concern — this is the contract.
 
-- **Registry**: maps user → list of published lfds (id, repo name, address, online status, last heartbeat)
-- **Discovery endpoint**: `GET /v0/lfds` — returns the user's published lfds (authenticated)
-- **Health**: marks lfds offline when heartbeats stop
+**`GET /api/v1/daemons`** — returns registered lfds for the authenticated user.
+
+```
+Authorization: Bearer <user JWT>
+```
 
 ```json
-GET /v0/lfds
-Authorization: Bearer <token>
-
 {
-  "lfds": [
+  "daemons": [
     {
-      "id": "lfd-abc123",
-      "name": "loopflow",
-      "repo": "loopflow",
+      "machine_id": "abc-123",
+      "machine_name": "jacks-macbook",
+      "address": "100.64.1.5:2486",
       "status": "online",
-      "address": "100.64.1.5:4242",
-      "last_heartbeat": "2026-02-24T18:45:00Z"
-    },
-    {
-      "id": "lfd-def456",
-      "name": "concerto",
-      "repo": "loopflow.mobile",
-      "status": "online",
-      "address": "100.64.1.5:4243",
-      "last_heartbeat": "2026-02-24T18:44:55Z"
+      "repos": [
+        { "name": "loopflow", "wave_count": 3 },
+        { "name": "concerto", "wave_count": 1 }
+      ],
+      "connection_token": "ct_xxxxxxxxxxxx",
+      "last_heartbeat": "2026-02-26T18:45:00Z"
     }
   ]
 }
 ```
+
+`connection_token` is studio-issued and valid for lfd's `validate-connection` endpoint. Studio generates it per-request for the authenticated user. Same validation path that lfd already implements via `ConnectionValidator`.
 
 This is a thin service — a table of heartbeats behind an auth check. No WebSocket proxying, no connection state, no data flowing through studio.
 
@@ -74,10 +67,11 @@ This is a thin service — a table of heartbeats behind an auth check. No WebSoc
 
 On login:
 
-1. Authenticate with studio (OAuth / token)
-2. `GET /v0/lfds` — fetch list of published lfds
-3. If one lfd → auto-connect; if multiple → show picker; if none → show instructions
-4. Connect directly to lfd's Tailscale address
+1. `ASWebAuthenticationSession` opens `https://auth.loopflow.studio/oauth/authorize?...` in an in-app browser sheet
+2. Studio redirects to `loopflow://auth/callback?token=<jwt>` — token stored in Keychain
+3. `GET /api/v1/daemons` with JWT — fetch list of registered lfds
+4. If one lfd → auto-connect; if multiple → show picker; if none → show instructions
+5. Connect directly to lfd's address using studio-issued `connection_token`
 
 Discovery resolves to a concrete `ServerConnection` (host, port, useTLS, authMode, token) — the same struct used for manual connections. No new enum cases or connection types. The distinction is in how the connection parameters are obtained (user-entered vs. studio-discovered), not how they're used.
 
@@ -141,17 +135,20 @@ After sign-in, auto-discovery replaces manual connection setup as the default pa
 ## Constraints
 
 - Direct connection (03-multi-client) must still work — discovery is additive
-- lfd without `--publish` behaves exactly as before
-- Tailscale is the connectivity layer — no studio relay service to build or operate
-- No lfd API changes
+- If lfd doesn't use `loopflow.studio` auth, it's not discoverable — manual connection still works
+- Tailscale is the connectivity layer for remote — no studio relay service to build or operate
+- No lfd API changes — existing registration/heartbeat payloads get two new fields
 - Studio discovery service is stateless (in-memory registry, no database)
 - Discovery failure must degrade gracefully to manual connection, not block mobile usage
 
 ## Done when
 
-- `lfd dev --publish` registers with studio, reports Tailscale address
+- lfd registration payload includes address (Tailscale-preferred) and repo summaries
+- lfd heartbeat updates address and repo summaries
+- `StudioAuthStore` handles OAuth sign-in via ASWebAuthenticationSession
+- `DiscoveryService` calls `GET /api/v1/daemons` and returns typed results
 - Mobile app: sign in → see list of running lfds → tap to connect directly
-- Wave list, live output, and chat all work over Tailscale connection
+- Tapping a discovered lfd connects using studio-issued connection token
+- Wave list, live output, and chat all work over a discovered connection
 - Disconnecting lfd removes it from discovery within 30s
-- Mobile app shows clear guidance when Tailscale isn't set up
 - Direct connection (manual host:port) still works as fallback

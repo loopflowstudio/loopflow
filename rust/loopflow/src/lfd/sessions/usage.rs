@@ -88,7 +88,7 @@ impl GroupBy {
 }
 
 impl std::str::FromStr for GroupBy {
-    type Err = ();
+    type Err = InvalidGroupBy;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
@@ -97,10 +97,13 @@ impl std::str::FromStr for GroupBy {
             "step" => Ok(Self::Step),
             "model" => Ok(Self::Model),
             "source" => Ok(Self::Source),
-            _ => Err(()),
+            _ => Err(InvalidGroupBy),
         }
     }
 }
+
+#[derive(Debug)]
+pub struct InvalidGroupBy;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UsageSummaryGroupAggregate {

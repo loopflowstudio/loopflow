@@ -385,19 +385,20 @@ pub(crate) fn build_agent_for_step(
 
 /// Commit any remaining changes, push, and create a draft PR.
 /// Returns the PR info if successful, None if skipped or failed.
-pub(crate) fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
+pub(crate) fn auto_create_pr(
+    worktree: &Path,
+    wave_name: Option<String>,
+) -> Option<crate::lfd::types::PullRequest> {
     use crate::ops::{
         commit_workflow, current_pr, generate_pr_message, update_pr, CommitOptions, NullProgress,
     };
 
     let commit_options = CommitOptions {
         add: true,
-        lint: false,
         push: true,
         create_draft_pr: true,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: None,
+        wave: wave_name,
+        ..CommitOptions::for_task("commit")
     };
     if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {
         warn!(worktree = %worktree.display(), error = %err, "auto-create PR: commit/push failed");

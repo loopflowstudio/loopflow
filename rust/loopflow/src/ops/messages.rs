@@ -135,9 +135,16 @@ struct MessagePayload {
     body: String,
 }
 
-pub fn generate_commit_message(repo: &Path) -> OpsResult<Message> {
+pub fn generate_commit_message(repo: &Path, wave: Option<&str>) -> OpsResult<Message> {
     let diff = get_staged_diff(repo)?;
-    let prompt = build_message_prompt(diff.as_deref(), COMMIT_MESSAGE_PROMPT);
+    let task = if let Some(wave_name) = wave {
+        format!(
+            "{COMMIT_MESSAGE_PROMPT}\n\n## Topic\n\nAlways use `{wave_name}` as the area prefix. Do not invent a different topic."
+        )
+    } else {
+        COMMIT_MESSAGE_PROMPT.to_string()
+    };
+    let prompt = build_message_prompt(diff.as_deref(), &task);
     generate_message(repo, &prompt, MessageKind::Commit)
 }
 

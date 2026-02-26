@@ -62,12 +62,9 @@ fn prepare_land(
     if !options.strict {
         let commit_options = CommitOptions {
             add: true,
-            lint: false,
             push: true,
             create_draft_pr: true,
-            task: "commit".to_string(),
-            flow_parents: Vec::new(),
-            message: None,
+            ..CommitOptions::for_task("commit")
         };
         let _ = commit_workflow(repo_root, &commit_options, progress)?;
     }

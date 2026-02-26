@@ -58,12 +58,8 @@ pub fn create_or_update_pr(
     // Commit before sync — sync_main checks is_clean() and fails on dirty trees
     let commit_options = CommitOptions {
         add: true,
-        lint: false,
         push: true,
-        create_draft_pr: false,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: None,
+        ..CommitOptions::for_task("commit")
     };
     let committed = commit_workflow(repo, &commit_options, progress)?;
 

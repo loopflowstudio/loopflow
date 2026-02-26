@@ -389,8 +389,11 @@ impl WaveExecutor {
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
                     let worktree = run.worktree.clone();
-                    match tokio::task::spawn_blocking(move || auto_create_pr(Path::new(&worktree)))
-                        .await
+                    let wave_name = wave.name().clone();
+                    match tokio::task::spawn_blocking(move || {
+                        auto_create_pr(Path::new(&worktree), Some(wave_name))
+                    })
+                    .await
                     {
                         Ok(Some(pr)) => {
                             info!(run_id = %run.id, url = %pr.url, "auto-created PR");

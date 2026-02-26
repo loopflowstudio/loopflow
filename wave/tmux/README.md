@@ -1,52 +1,129 @@
 # Tmux
 
-loopflow.tmux — an installable tmux plugin. Named layouts, keybindings, status bar, and container-friendly daemon lifecycle. The "barebones Concerto" for terminal users.
+loopflow.tmux: a TPM-installable tmux surface for loopflow. Status, layouts, and action bindings first. Container lifecycle second.
 
-## Vision
+## Product intent
 
-A developer opens a tmux session and loopflow is already there. Status bar shows running waves. Prefix keys start and tail agents. Layouts arrange panes for the right workflow. No setup beyond adding one line to `.tmux.conf`.
+Open tmux and start working immediately.
 
-Two modes serve different needs:
+- Show loopflow state without leaving the terminal.
+- Start common workflows in one keypress.
+- Keep a strict fallback path when deps are missing.
 
-- **lf mode** (default): `lf` commands run directly in tmux panes. No daemon, no container. Works anywhere `lf` is installed. This is the entry point — everything else is optional.
-- **Container mode**: `lfd install` pulls a container with lfd + agent harnesses. `lf up` starts it. `lfq` queries the running daemon. Streaming output, multi-wave orchestration, session interaction. The Linux-native equivalent of Concerto.
+The plugin must feel reliable in two environments:
 
-The container is the deployment unit. `lfd` (the CLI command) is a lifecycle manager for the container, not the daemon binary. Running raw `lfd serve` is possible but not paved.
+1. **lf mode (baseline/default):** no daemon required, `lf` commands run directly.
+2. **container mode (advanced):** `lfd` + `lfq` power streaming and multi-wave orchestration.
 
-### Not here
+## Scope and non-goals
 
-- TUI / ratatui application (tmux panes + shell scripts, not a terminal app)
-- Session persistence beyond what lfd provides
-- Integration with tmux session managers (tmux-sessionizer, etc.)
-- Concerto feature parity (quote-replies, action buttons, etc.)
+### In scope
 
-## Goals
+- TPM plugin entrypoint (`loopflow.tmux`)
+- status segment with low-latency mode-aware rendering
+- named layouts (`lf-dev`, `lf-swarm`, `lf-flow`)
+- mode-aware keybindings
+- container lifecycle commands (`lfd install/start/stop/status/update/uninstall`)
+- `lf up` one-command bootstrap
 
-- TPM-installable in one `.tmux.conf` line
-- Status bar shows wave count and health at a glance
-- Named layouts cover common workflows without custom config
-- `lf` mode works immediately with zero daemon setup
-- Container mode unlocks streaming and multi-wave on Linux
+### Out of scope
 
-## Phase boundaries
+- Full-screen TUI app
+- Concerto feature parity
+- tmux session manager integration
+- multi-user access controls
 
-- **01-tpm-skeleton**: Plugin entry point, TPM registration, status segment, option keys, basic keybindings.
-- **02-named-layouts**: `lf-dev`, `lf-swarm`, `lf-flow` layouts callable via keybinding or `lf tmux`.
-- **03-keybindings**: Wave action bindings (run, logs, status, stop, land, next) with configurable prefix.
-- **04-container-mode**: `lfd install/start/stop/status/update` lifecycle. Container auto-discovery of repos from `repos_root`. `lf up` as the one-command entry point.
+## Default behavior contract
 
-## Risks
+- `@loopflow_mode` default: `auto`
+- `auto` resolution:
+  1. explicit override wins (`lf` or `container`)
+  2. healthy `lfq status` => container mode
+  3. otherwise lf mode
+- tmux plugin load must **not** auto-start a container.
+- keybindings and status must fail soft with clear `tmux display-message`.
 
-- **PATH at plugin load time.** If `lf`/`lfq` aren't in `$PATH` when tmux sources the plugin, status commands silently fail. The status script must handle missing binaries gracefully — show `--` not an error.
-- **Status segment latency.** tmux `status-interval` defaults to 15s. If the status script shells out to `lfq`, it needs to be fast. Consider caching to a file that lfd updates via event, or reading git state directly for lf mode.
-- **Layout assumptions.** Layout scripts assume minimum terminal dimensions. Degrade gracefully (fewer panes) on small terminals. Document minimums.
-- **Container cleanup.** Container mode creates persistent state. `lfd stop` must clean up reliably. `lfd uninstall` removes everything.
-- **Two-mode complexity.** Supporting both lf mode and container mode means every keybinding needs to know which mode it's in. Keep the dispatch simple — check if lfd is running, use `lfq` if yes, `lf` if no.
+## Phase plan
 
-## Metrics
+### 01 — TPM skeleton ✓
+Plugin load, options, status plumbing, baseline helper functions.
 
-- `set -g @plugin 'loopflowstudio/loopflow.tmux'` + TPM install works on a fresh machine
-- Status bar updates within one `status-interval` of a wave state change
-- All three layouts open without errors on a 200x50 terminal
-- `lfd install && lf up` starts the container and drops into a tmux layout
-- lf mode keybindings work with no daemon running
+### 02 — Named layouts ✓
+Window/pane creation scripts (`lf-dev`, `lf-swarm`, `lf-flow`).
+
+### 03 — Keybindings ✓
+Mode-aware action dispatch, picker flows, and help overlay.
+
+### 04 — Container mode
+Deliver lifecycle commands, repo discovery, and `lf up` entrypoint.
+
+## Dependency graph
+
+- 01 is prerequisite for 02 and 03.
+- 04 is independent at runtime, but 03 references container actions.
+- 03 can ship before 04 if container actions degrade gracefully.
+
+## Required artifacts
+
+- `loopflow.tmux`
+- `scripts/helpers.sh`
+- `scripts/loopflow-status.sh`
+- `scripts/keybindings.sh`
+- `scripts/layouts/lf-dev.sh`
+- `scripts/layouts/lf-swarm.sh`
+- `scripts/layouts/lf-flow.sh`
+- `scripts/lfd` (or equivalent lifecycle CLI)
+- `scripts/lf-up.sh` (or `lf up` integration point)
+- README install + troubleshooting section
+
+## Quality bars
+
+### UX
+- one-line install path
+- keybinding feedback on every action
+- no silent no-op
+
+### Reliability
+- idempotent lifecycle commands
+- status script bounded latency
+- explicit fallback when binaries missing
+
+### Performance
+- status script target <100ms hot path, <250ms cold path
+- avoid repeated heavy subprocess calls per render tick
+
+### Security
+- no auth secrets in status output or logs
+- no shell eval of untrusted picker text
+
+## Test matrix (manual)
+
+1. Fresh machine, no `lf`/`lfq`
+2. `lf` only
+3. `lf` + `lfq` + running daemon
+4. Docker unavailable
+5. narrow terminal (<120 cols)
+6. large terminal (>=200 cols)
+7. slow `lfq` / daemon unavailable
+8. repos with and without git remotes
+
+## Rollout sequence
+
+1. Ship 01 + 02 + 03 in lf mode first.
+2. Dogfood plugin with container mode disabled by default.
+3. Ship 04 and enable `auto` container detection.
+4. Harden with failure telemetry and operator docs.
+
+## Risks and mitigations
+
+- **Status jitter:** cache with TTL + stale marker.
+- **Mode confusion:** include active mode marker in status and help overlay.
+- **Command drift:** centralize dispatch in helpers; no duplicated command strings.
+- **Container lifecycle edge cases:** make every command safe to retry.
+
+## Success criteria
+
+- install + first successful action in <2 minutes
+- status updates within one `status-interval`
+- all keybindings operate (or fail-soft) in both modes
+- `lf up` gives a usable workspace on first run

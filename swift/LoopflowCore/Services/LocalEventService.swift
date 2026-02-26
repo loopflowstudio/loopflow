@@ -366,20 +366,13 @@ public actor EventService {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
             Task {
-                await self?.handleNetworkRestored()
+                await self?.resumeFromBackground()
             }
         }
         pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
     }
 
     public func resumeFromBackground() async {
-        guard !_isConnected else { return }
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        await retryNow()
-    }
-
-    private func handleNetworkRestored() async {
         guard !_isConnected else { return }
         reconnectTask?.cancel()
         reconnectTask = nil

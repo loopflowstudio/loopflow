@@ -584,8 +584,21 @@ async fn start_wave_run(
         ),
     )
     .await;
-    if matches!(outcome, Some(EnqueueOutcome::Dropped)) {
-        return Ok(None);
+    match outcome {
+        Some(EnqueueOutcome::Dropped) => {
+            warn!(
+                wave_id = %wave.id(),
+                "manual activation dropped because activation queue is full"
+            );
+            return Ok(None);
+        }
+        Some(_) => {}
+        None => {
+            return Err(api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to queue manual activation",
+            ));
+        }
     }
 
     Ok(dispatch_wave_if_ready(

@@ -15,6 +15,12 @@ struct WaveSessionView: View {
     @State private var isNearBottom = true
     @State private var replyQueue = ReplyQueue()
     @State private var isReplyTrayExpanded = false
+    @FocusState private var focusedField: FocusField?
+
+    private enum FocusField: Hashable {
+        case transcript
+        case composer
+    }
 
     var body: some View {
         VStack(spacing: Spacing.md) {
@@ -27,10 +33,12 @@ struct WaveSessionView: View {
                         }
 
                         if state.isLoading {
-                            ProgressView(state.streamPhase == .replaying ? "Replaying…" : "Thinking…")
-                                .font(Typography.caption())
-                                .foregroundStyle(palette.textSecondary)
-                                .padding(.top, Spacing.sm)
+                            SessionThinkingIndicator(
+                                turnState: state.turnState,
+                                streamPhase: state.streamPhase,
+                                awaitingSessionJoin: state.awaitingSessionJoin
+                            )
+                            .padding(.top, Spacing.sm)
                         }
 
                         Color.clear
@@ -43,6 +51,13 @@ struct WaveSessionView: View {
                     .padding(Spacing.lg)
                 }
                 .background(palette.background)
+                .overlay {
+                    if state.transcript.isEmpty && !state.isLoading {
+                        SessionEmptyStateView()
+                    }
+                }
+                .macOSFocusable()
+                .focused($focusedField, equals: .transcript)
                 .onChange(of: state.transcript.count) { _, _ in
                     guard isNearBottom, let last = state.transcript.last else { return }
                     withAnimation {
@@ -74,6 +89,10 @@ struct WaveSessionView: View {
                 TextField("Message", text: $composerText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...6)
+                    .focused($focusedField, equals: .composer)
+                    .macOSOnExitCommand {
+                        focusedField = .transcript
+                    }
 
                 Button("End") {
                     Task {
@@ -98,6 +117,15 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: horizontalSizeClass == .compact)
             await state.onAppear()
+            if focusedField == nil {
+                focusedField = .transcript
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSessionComposer)) { notification in
+            if let waveId = notification.userInfo?["waveId"] as? String, waveId != state.waveId {
+                return
+            }
+            focusedField = .composer
         }
         .onChange(of: horizontalSizeClass) { _, value in
             guard managesLifecycle else { return }
@@ -146,6 +174,19 @@ struct WaveSessionView: View {
         return groups
     }
 
+    private var latestAssistantMessageId: UUID? {
+        state.transcript.reversed().compactMap { entry -> UUID? in
+            guard case .message(let message) = entry, message.role == .assistant else {
+                return nil
+            }
+            return message.id
+        }.first
+    }
+
+    private var timestampLabelByMessageId: [UUID: String] {
+        messageTimestampLabels(for: state.transcript)
+    }
+
     @ViewBuilder
     private func transcriptGroupRow(_ group: TranscriptGroup) -> some View {
         switch group {
@@ -157,9 +198,7 @@ struct WaveSessionView: View {
                 isExpanded: expandedRunIds.contains(group.id),
                 expandedItemIds: $expandedItemIds,
                 onToggleRun: {
-                    if !expandedRunIds.insert(group.id).inserted {
-                        expandedRunIds.remove(group.id)
-                    }
+                    toggleMembership(group.id, in: &expandedRunIds)
                 }
             )
         }
@@ -169,7 +208,12 @@ struct WaveSessionView: View {
     private func transcriptRow(_ entry: TranscriptEntry) -> some View {
         switch entry {
         case .message(let message):
-            MessageRow(message: message) { newEntry in
+            let timestamp = timestampLabelByMessageId[message.id]
+            MessageRow(
+                message: message,
+                timestampLabel: timestamp,
+                showStreamingCursor: state.turnState == .running && latestAssistantMessageId == message.id
+            ) { newEntry in
                 replyQueue.add(newEntry)
                 isReplyTrayExpanded = true
             }
@@ -179,9 +223,7 @@ struct WaveSessionView: View {
                 item: item,
                 isExpanded: expandedItemIds.contains(item.id),
                 onToggleExpanded: {
-                    if !expandedItemIds.insert(item.id).inserted {
-                        expandedItemIds.remove(item.id)
-                    }
+                    toggleMembership(item.id, in: &expandedItemIds)
                 }
             )
         }
@@ -210,14 +252,231 @@ struct WaveSessionView: View {
     }
 }
 
+private struct SessionThinkingIndicator: View {
+    @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let turnState: TurnState
+    let streamPhase: StreamPhase
+    let awaitingSessionJoin: Bool
+
+    @State private var isPulsing = false
+
+    var body: some View {
+        if turnState == .running {
+            HStack(spacing: Spacing.sm) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(palette.accent)
+                    .frame(width: 3, height: 14)
+                    .opacity(reduceMotion ? 1 : (isPulsing ? 1 : 0.3))
+                    .onAppear {
+                        guard !reduceMotion else { return }
+                        isPulsing = false
+                        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                            isPulsing = true
+                        }
+                    }
+
+                Text("Thinking…")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+
+                Spacer(minLength: 0)
+            }
+            .accessibilityLabel("Thinking")
+        } else if streamPhase == .replaying {
+            statusLabel("Replaying…", accessibilityLabel: "Replaying")
+        } else if awaitingSessionJoin {
+            statusLabel("Waiting for session…", accessibilityLabel: "Waiting for session")
+        } else if streamPhase == .ending {
+            statusLabel("Ending session…", accessibilityLabel: "Ending session")
+        }
+    }
+
+    private func statusLabel(_ text: String, accessibilityLabel: String) -> some View {
+        Text(text)
+            .font(Typography.caption())
+            .foregroundStyle(palette.textSecondary)
+            .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct SessionEmptyStateView: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack {
+            Text("What would you like to work on?")
+                .font(.custom(Typography.serifFamily, size: 28).italic())
+                .foregroundStyle(palette.textSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(Spacing.xl)
+        .allowsHitTesting(false)
+    }
+}
+
+struct AssistantTextSegment: View {
+    @Environment(\.palette) private var palette
+
+    let text: String
+
+    var body: some View {
+        if let markdown = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            Text(markdown)
+                .font(Typography.body())
+                .foregroundStyle(palette.text)
+        } else {
+            Text(text)
+                .font(Typography.body())
+                .foregroundStyle(palette.text)
+        }
+    }
+}
+
+struct StreamingCursorView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var isVisible = false
+
+    var body: some View {
+        Text("▊")
+            .font(Typography.code(13))
+            .foregroundStyle(Color.statusInfo)
+            .opacity(reduceMotion ? 1 : (isVisible ? 1 : 0))
+            .onAppear {
+                guard !reduceMotion else {
+                    isVisible = true
+                    return
+                }
+                isVisible = false
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    isVisible = true
+                }
+            }
+            .accessibilityLabel("Streaming")
+    }
+}
+
+struct CodeBlockView: View {
+    @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    let language: String?
+    let content: String
+
+    @State private var isHovering = false
+
+    private var showCopyButton: Bool {
+        horizontalSizeClass == .compact || isHovering
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                if let language, !language.isEmpty {
+                    Text(language.uppercased())
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.xxs)
+                        .background(palette.surfaceMuted)
+                        .clipShape(Capsule())
+                        .accessibilityLabel("Code language \(language)")
+                }
+
+                Spacer(minLength: 0)
+
+                CopyButton(content: content, isVisible: showCopyButton)
+            }
+
+            ScrollView(.horizontal) {
+                Text(content)
+                    .font(Typography.code(13))
+                    .foregroundStyle(palette.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .padding(Spacing.md)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .stroke(palette.border, lineWidth: 1)
+        )
+        .hoverTracking { hovering in
+            isHovering = hovering
+        }
+    }
+}
+
+private struct CopyButton: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let content: String
+    let isVisible: Bool
+
+    @State private var didCopy = false
+
+    private var minimumHitTarget: CGFloat {
+        horizontalSizeClass == .compact ? HitTarget.touch : HitTarget.minimum
+    }
+
+    private var isInteractive: Bool {
+        isVisible || didCopy
+    }
+
+    var body: some View {
+        Button {
+            copyToClipboard(content)
+            didCopy = true
+
+            Task {
+                try? await Task.sleep(for: .milliseconds(1500))
+                withAnimation(DesignAnimation.standard(reduceMotion)) {
+                    didCopy = false
+                }
+            }
+        } label: {
+            Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                .font(Typography.caption())
+                .foregroundStyle(didCopy ? Color.statusSuccess : Color.primary.opacity(0.75))
+                .frame(minWidth: minimumHitTarget, minHeight: minimumHitTarget)
+        }
+        .buttonStyle(.plain)
+        .opacity(isInteractive ? 1 : 0)
+        .allowsHitTesting(isInteractive)
+        .animation(DesignAnimation.standard(reduceMotion), value: isVisible)
+        .animation(DesignAnimation.standard(reduceMotion), value: didCopy)
+        .accessibilityLabel(didCopy ? "Copied" : "Copy")
+    }
+}
+
 private struct TranscriptItemCardView: View {
     @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let item: TranscriptItem
     let isExpanded: Bool
     let onToggleExpanded: () -> Void
 
+    @State private var isHoveringDetail = false
+
     private var card: TranscriptItemCard { item.card }
+
+    private var usesMonospaceDetail: Bool {
+        card.type == .command || card.type == .tool
+    }
+
+    private var showCopyButton: Bool {
+        horizontalSizeClass == .compact || isHoveringDetail
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -250,11 +509,32 @@ private struct TranscriptItemCardView: View {
             }
 
             if isExpanded, let detail = card.detail {
-                Text(detail)
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        CopyButton(content: detail, isVisible: showCopyButton)
+                    }
+
+                    if usesMonospaceDetail {
+                        ScrollView(.horizontal) {
+                            Text(detail)
+                                .font(Typography.code(12))
+                                .foregroundStyle(palette.textSecondary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    } else {
+                        Text(detail)
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .hoverTracking { hovering in
+                    isHoveringDetail = hovering
+                }
             }
         }
         .padding(Spacing.md)
@@ -311,9 +591,7 @@ private struct ToolRunView: View {
                             item: item,
                             isExpanded: expandedItemIds.contains(item.id),
                             onToggleExpanded: {
-                                if !expandedItemIds.insert(item.id).inserted {
-                                    expandedItemIds.remove(item.id)
-                                }
+                                toggleMembership(item.id, in: &expandedItemIds)
                             }
                         )
                     }
@@ -322,6 +600,125 @@ private struct ToolRunView: View {
         }
     }
 }
+
+enum MessageSegment: Equatable {
+    case text(String)
+    case code(language: String?, content: String)
+}
+
+func messageTimestampLabels(for transcript: [TranscriptEntry]) -> [UUID: String] {
+    var labels: [UUID: String] = [:]
+    var previousTimestamp: Date?
+
+    for entry in transcript {
+        guard case .message(let message) = entry,
+              message.role != .system else {
+            continue
+        }
+
+        let timestamp = message.timestamp
+
+        guard let previous = previousTimestamp else {
+            labels[message.id] = formatMessageTimestamp(timestamp)
+            previousTimestamp = timestamp
+            continue
+        }
+
+        if message.role == .user {
+            labels[message.id] = formatMessageTimestamp(timestamp)
+        } else if let label = timestampLabel(
+            forGapSincePreviousMessage: timestamp.timeIntervalSince(previous),
+            timestamp: timestamp
+        ) {
+            labels[message.id] = label
+        }
+
+        previousTimestamp = timestamp
+    }
+
+    return labels
+}
+
+func timestampLabel(forGapSincePreviousMessage gap: TimeInterval, timestamp: Date) -> String? {
+    if gap <= 60 {
+        return nil
+    }
+    if gap > 3600 {
+        return formatMessageTimestamp(timestamp)
+    }
+    let minutes = max(1, Int(gap / 60))
+    return "\(minutes)m ago"
+}
+
+func formatMessageTimestamp(_ timestamp: Date) -> String {
+    timestamp.formatted(date: .omitted, time: .shortened)
+}
+
+func parseMessageSegments(_ content: String) -> [MessageSegment] {
+    guard !content.isEmpty else { return [] }
+    guard content.contains("```") else { return [.text(content)] }
+
+    let lines = content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+    var segments: [MessageSegment] = []
+    var textLines: [String] = []
+    var codeLines: [String] = []
+    var currentLanguage: String?
+    var inCodeBlock = false
+
+    func flushText() {
+        let value = textLines.joined(separator: "\n")
+        if !value.isEmpty {
+            segments.append(.text(value))
+        }
+        textLines.removeAll(keepingCapacity: true)
+    }
+
+    func flushCode() {
+        let value = codeLines.joined(separator: "\n")
+        segments.append(.code(language: currentLanguage, content: value))
+        codeLines.removeAll(keepingCapacity: true)
+        currentLanguage = nil
+    }
+
+    for rawLine in lines {
+        let line = String(rawLine)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+        if inCodeBlock {
+            if trimmed == "```" {
+                flushCode()
+                inCodeBlock = false
+            } else {
+                codeLines.append(line)
+            }
+            continue
+        }
+
+        if trimmed.hasPrefix("```") {
+            flushText()
+            inCodeBlock = true
+            let suffix = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
+            currentLanguage = suffix.isEmpty ? nil : String(suffix)
+        } else {
+            textLines.append(line)
+        }
+    }
+
+    if inCodeBlock {
+        flushCode()
+    } else {
+        flushText()
+    }
+
+    return segments.isEmpty ? [.text(content)] : segments
+}
+
+private func toggleMembership(_ id: UUID, in set: inout Set<UUID>) {
+    if !set.insert(id).inserted {
+        set.remove(id)
+    }
+}
+
 
 extension SessionItemType {
     var isToolLike: Bool {

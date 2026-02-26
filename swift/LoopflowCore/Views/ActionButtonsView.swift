@@ -43,7 +43,8 @@ public struct ActionButtonsView: View {
         .animation(DesignAnimation.standard(reduceMotion), value: actions)
         .task(id: actionSetID) {
             interactive = false
-            try? await Task.sleep(for: .milliseconds(300))
+            let delayMs = isCompact ? 150 : 100
+            try? await Task.sleep(for: .milliseconds(delayMs))
             guard !Task.isCancelled else { return }
             interactive = true
         }

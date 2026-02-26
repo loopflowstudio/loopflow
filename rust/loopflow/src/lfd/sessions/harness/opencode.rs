@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 use crate::engine::agent::AgentConfig;
 use crate::lfd::sessions::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::lfd::sessions::harness::{opencode_mapping, Harness, HarnessError};
+use crate::lfd::sessions::opencode_runtime;
 use crate::lfd::sessions::types::SessionEvent;
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
@@ -25,6 +26,7 @@ pub struct OpenCodeHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     child: Option<Child>,
+    opencode_pid: Option<u32>,
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
@@ -47,6 +49,7 @@ impl OpenCodeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             child: None,
+            opencode_pid: None,
             stderr_task: None,
             sse_task: None,
             server_base_url: None,
@@ -202,7 +205,19 @@ impl OpenCodeHarness {
 
         let stderr_task = spawn_stderr_logger(stderr, "lfd::sessions::opencode");
 
+        let opencode_pid = child.id();
+        if let Some(pid) = opencode_pid {
+            if let Err(err) = opencode_runtime::register_opencode_server(pid) {
+                tracing::warn!(
+                    opencode_pid = pid,
+                    error = %err,
+                    "failed to register OpenCode server runtime metadata"
+                );
+            }
+        }
+
         self.child = Some(child);
+        self.opencode_pid = opencode_pid;
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
         self.server_base_url = Some(base_url);
@@ -289,6 +304,15 @@ impl Harness for OpenCodeHarness {
             shutdown_child(child).await;
         }
         self.child = None;
+        if let Some(pid) = self.opencode_pid.take() {
+            if let Err(err) = opencode_runtime::unregister_opencode_server(pid) {
+                tracing::warn!(
+                    opencode_pid = pid,
+                    error = %err,
+                    "failed to unregister OpenCode server runtime metadata"
+                );
+            }
+        }
 
         if let Some(task) = self.sse_task.take() {
             task.abort();

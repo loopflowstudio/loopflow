@@ -105,14 +105,13 @@ mod tests {
     #[test]
     fn select_preferred_ip_uses_fallback_chain() {
         let bind = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        let iface = Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)));
-        let tailscale = Some(IpAddr::V4(Ipv4Addr::new(100, 101, 102, 103)));
+        let iface_ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10));
+        let tailscale_ip = IpAddr::V4(Ipv4Addr::new(100, 101, 102, 103));
+        let iface = Some(iface_ip);
+        let tailscale = Some(tailscale_ip);
 
-        assert_eq!(
-            select_preferred_ip(tailscale, iface, bind),
-            tailscale.unwrap()
-        );
-        assert_eq!(select_preferred_ip(None, iface, bind), iface.unwrap());
+        assert_eq!(select_preferred_ip(tailscale, iface, bind), tailscale_ip);
+        assert_eq!(select_preferred_ip(None, iface, bind), iface_ip);
         assert_eq!(select_preferred_ip(None, None, bind), bind);
     }
 

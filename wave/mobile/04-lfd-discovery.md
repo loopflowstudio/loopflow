@@ -79,12 +79,7 @@ On login:
 3. If one lfd → auto-connect; if multiple → show picker; if none → show instructions
 4. Connect directly to lfd's Tailscale address
 
-```swift
-public enum ServerConnection: Codable, Sendable, Hashable {
-    case direct(host: String, port: Int)      // manual host:port
-    case discovered(lfdId: String)            // resolved via studio discovery
-}
-```
+Discovery resolves to a concrete `ServerConnection` (host, port, useTLS, authMode, token) — the same struct used for manual connections. No new enum cases or connection types. The distinction is in how the connection parameters are obtained (user-entered vs. studio-discovered), not how they're used.
 
 ### Prerequisites
 

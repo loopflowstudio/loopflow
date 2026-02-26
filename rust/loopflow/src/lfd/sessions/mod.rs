@@ -406,59 +406,48 @@ impl SessionManager {
         &self,
     ) -> Result<SessionStartupRecovery, SessionManagerError> {
         let mut recovery = SessionStartupRecovery::default();
+        let now = time::OffsetDateTime::now_utc();
+        let now_ts = now.unix_timestamp();
         let sessions = self
             .inner
             .store
             .list_sessions_by_statuses(&[SessionStatus::Starting, SessionStatus::Active])
             .await?;
 
-        if !sessions.is_empty() {
-            let now = time::OffsetDateTime::now_utc();
-            for session in &sessions {
-                let existing_events = self
-                    .inner
-                    .store
-                    .list_session_events(&session.id, None)
-                    .await?;
-                let mut next_seq = existing_events
-                    .last()
-                    .map(|event| event.seq + 1)
-                    .unwrap_or(0);
+        for session in &sessions {
+            let existing_events = self
+                .inner
+                .store
+                .list_session_events(&session.id, None)
+                .await?;
+            let mut next_seq = existing_events
+                .last()
+                .map(|event| event.seq + 1)
+                .unwrap_or(0);
 
-                let error_event = SessionEvent::Error {
-                    code: "lfd_restarted_orphaned_session".to_string(),
-                    message: "session was orphaned when lfd restarted".to_string(),
-                };
-                self.inner
-                    .store
-                    .append_session_event(&session.id, next_seq, &error_event, now.unix_timestamp())
-                    .await?;
-                next_seq += 1;
+            let error_event = SessionEvent::Error {
+                code: "lfd_restarted_orphaned_session".to_string(),
+                message: "session was orphaned when lfd restarted".to_string(),
+            };
+            self.inner
+                .store
+                .append_session_event(&session.id, next_seq, &error_event, now_ts)
+                .await?;
+            next_seq += 1;
 
-                let status_event = SessionEvent::StatusChanged {
-                    status: SessionStatus::Failed,
-                };
-                self.inner
-                    .store
-                    .append_session_event(
-                        &session.id,
-                        next_seq,
-                        &status_event,
-                        now.unix_timestamp(),
-                    )
-                    .await?;
+            let status_event = SessionEvent::StatusChanged {
+                status: SessionStatus::Failed,
+            };
+            self.inner
+                .store
+                .append_session_event(&session.id, next_seq, &status_event, now_ts)
+                .await?;
 
-                self.inner
-                    .store
-                    .update_session_status(
-                        &session.id,
-                        SessionStatus::Failed,
-                        Some(now.unix_timestamp()),
-                    )
-                    .await?;
-            }
-
-            recovery.sessions_failed = sessions.len() as u32;
+            self.inner
+                .store
+                .update_session_status(&session.id, SessionStatus::Failed, Some(now_ts))
+                .await?;
+            recovery.sessions_failed += 1;
         }
 
         let opencode_reap = opencode_runtime::reap_orphaned_opencode_servers();

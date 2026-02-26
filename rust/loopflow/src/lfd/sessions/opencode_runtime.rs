@@ -32,7 +32,6 @@ pub(crate) fn reap_orphaned_opencode_servers() -> OpenCodeReapReport {
     reap_orphaned_opencode_servers_at_path(
         &registry_path(),
         pid_is_alive,
-        pid_is_alive,
         process_looks_like_opencode_serve,
         terminate_process,
     )
@@ -71,7 +70,6 @@ fn unregister_opencode_server_at_path(path: &Path, opencode_pid: u32) -> Result<
 fn reap_orphaned_opencode_servers_at_path(
     path: &Path,
     owner_pid_alive: impl Fn(u32) -> bool,
-    process_pid_alive: impl Fn(u32) -> bool,
     process_matches_opencode: impl Fn(u32) -> bool,
     terminate_pid: impl Fn(u32) -> bool,
 ) -> OpenCodeReapReport {
@@ -89,10 +87,6 @@ fn reap_orphaned_opencode_servers_at_path(
     for entry in entries {
         if owner_pid_alive(entry.owner_lfd_pid) {
             retained.push(entry);
-            continue;
-        }
-
-        if !process_pid_alive(entry.opencode_pid) {
             continue;
         }
 
@@ -252,14 +246,12 @@ mod tests {
         .expect("write registry");
 
         let owner_alive: HashSet<u32> = [1].into_iter().collect();
-        let running_pids: HashSet<u32> = [10, 11, 13].into_iter().collect();
         let opencode_pids: HashSet<u32> = [11].into_iter().collect();
         let killed = Mutex::new(Vec::new());
 
         let report = reap_orphaned_opencode_servers_at_path(
             &path,
             |pid| owner_alive.contains(&pid),
-            |pid| running_pids.contains(&pid),
             |pid| opencode_pids.contains(&pid),
             |pid| {
                 killed.lock().expect("lock killed list").push(pid);
@@ -287,13 +279,8 @@ mod tests {
         let path = registry_path(tmp.path());
         write_registry_entries(&path, &[entry(20, 2, 1)]).expect("write registry");
 
-        let first = reap_orphaned_opencode_servers_at_path(
-            &path,
-            |_| false,
-            |pid| pid == 20,
-            |pid| pid == 20,
-            |_| true,
-        );
+        let first =
+            reap_orphaned_opencode_servers_at_path(&path, |_| false, |pid| pid == 20, |_| true);
         assert_eq!(
             first,
             OpenCodeReapReport {
@@ -302,13 +289,8 @@ mod tests {
             }
         );
 
-        let second = reap_orphaned_opencode_servers_at_path(
-            &path,
-            |_| false,
-            |pid| pid == 20,
-            |pid| pid == 20,
-            |_| true,
-        );
+        let second =
+            reap_orphaned_opencode_servers_at_path(&path, |_| false, |pid| pid == 20, |_| true);
         assert_eq!(second, OpenCodeReapReport::default());
     }
 }

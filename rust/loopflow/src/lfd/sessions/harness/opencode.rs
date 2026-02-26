@@ -26,7 +26,6 @@ pub struct OpenCodeHarness {
     turn_in_progress: Arc<AtomicBool>,
     shutdown_requested: Arc<AtomicBool>,
     child: Option<Child>,
-    opencode_pid: Option<u32>,
     stderr_task: Option<JoinHandle<()>>,
     sse_task: Option<JoinHandle<()>>,
     server_base_url: Option<String>,
@@ -49,7 +48,6 @@ impl OpenCodeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             child: None,
-            opencode_pid: None,
             stderr_task: None,
             sse_task: None,
             server_base_url: None,
@@ -217,7 +215,6 @@ impl OpenCodeHarness {
         }
 
         self.child = Some(child);
-        self.opencode_pid = opencode_pid;
         self.stderr_task = Some(stderr_task);
         self.sse_task = Some(sse_task);
         self.server_base_url = Some(base_url);
@@ -300,11 +297,12 @@ impl Harness for OpenCodeHarness {
             let _ = send_request_with_retry(&self.client, Method::DELETE, &delete_url, None).await;
         }
 
+        let opencode_pid = self.child.as_ref().and_then(|child| child.id());
         if let Some(child) = self.child.as_mut() {
             shutdown_child(child).await;
         }
         self.child = None;
-        if let Some(pid) = self.opencode_pid.take() {
+        if let Some(pid) = opencode_pid {
             if let Err(err) = opencode_runtime::unregister_opencode_server(pid) {
                 tracing::warn!(
                     opencode_pid = pid,

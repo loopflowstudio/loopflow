@@ -1,0 +1,6 @@
+flow: build
+area:
+  - swift/
+direction:
+  - aesthetics
+  - care

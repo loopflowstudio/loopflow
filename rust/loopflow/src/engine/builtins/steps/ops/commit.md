@@ -30,11 +30,12 @@ Understand what changed:
 
 **Title style:**
 - Lowercase, concise
-- Optional area prefix when focused (e.g. `llm_http: add structured output`)
+- If running within a wave (`<lf:wave>`), always use the wave name as the area prefix
+- Otherwise, use an area prefix when focused on a specific module
 - Examples:
+  - `wave-name: add structured output for pr messages`
   - `llm_http: add structured output for pr messages`
   - `fix typo in readme`
-  - `add dark mode toggle`
 
 **Body style:**
 - One sentence or a few bullets if needed

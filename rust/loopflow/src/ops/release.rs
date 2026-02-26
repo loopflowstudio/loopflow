@@ -328,12 +328,8 @@ fn publish_in_worktree(wt_path: &Path, version: &str, progress: &impl Progress) 
         wt_path,
         &CommitOptions {
             add: true,
-            lint: false,
-            push: false,
-            create_draft_pr: false,
-            task: "release".to_string(),
-            flow_parents: Vec::new(),
             message: Some(format!("release: v{version}")),
+            ..CommitOptions::for_task("release")
         },
         progress,
     )?;

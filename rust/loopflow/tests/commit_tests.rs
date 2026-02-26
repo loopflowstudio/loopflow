@@ -15,20 +15,20 @@ fn last_commit_message(repo: &TestRepo) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+fn commit_options(message: &str) -> CommitOptions {
+    CommitOptions {
+        add: true,
+        message: Some(message.to_string()),
+        ..CommitOptions::for_task("commit")
+    }
+}
+
 #[test]
 fn commit_stages_and_commits() {
     let repo = TestRepo::new();
     repo.create_file("notes.txt", "hello");
 
-    let options = CommitOptions {
-        add: true,
-        lint: false,
-        push: false,
-        create_draft_pr: false,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: Some("test commit".to_string()),
-    };
+    let options = commit_options("test commit");
 
     let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
     assert!(committed);
@@ -41,13 +41,8 @@ fn commit_with_push() {
     repo.create_file("push.txt", "hello");
 
     let options = CommitOptions {
-        add: true,
-        lint: false,
         push: true,
-        create_draft_pr: false,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: Some("push commit".to_string()),
+        ..commit_options("push commit")
     };
 
     let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
@@ -60,15 +55,7 @@ fn commit_skips_empty() {
     let repo = TestRepo::new();
     let before = repo.head_sha();
 
-    let options = CommitOptions {
-        add: true,
-        lint: false,
-        push: false,
-        create_draft_pr: false,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: Some("skip".to_string()),
-    };
+    let options = commit_options("skip");
 
     let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
     assert!(!committed);
@@ -83,13 +70,8 @@ fn commit_with_lint_failure() {
     repo.create_file("bad.py", "print('hi')\n");
 
     let options = CommitOptions {
-        add: true,
         lint: true,
-        push: false,
-        create_draft_pr: false,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: Some("lint".to_string()),
+        ..commit_options("lint")
     };
 
     let result = commit_workflow(repo.path(), &options, &NullProgress);
@@ -101,15 +83,7 @@ fn commit_with_message_override() {
     let repo = TestRepo::new();
     repo.create_file("override.txt", "hello");
 
-    let options = CommitOptions {
-        add: true,
-        lint: false,
-        push: false,
-        create_draft_pr: false,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: Some("override message".to_string()),
-    };
+    let options = commit_options("override message");
 
     let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
     assert!(committed);

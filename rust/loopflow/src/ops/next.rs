@@ -53,12 +53,9 @@ pub fn next_branch(
 
     let commit_options = CommitOptions {
         add: true,
-        lint: false,
         push: true,
         create_draft_pr: true,
-        task: "commit".to_string(),
-        flow_parents: Vec::new(),
-        message: None,
+        ..CommitOptions::for_task("commit")
     };
     let _ = commit_workflow(repo, &commit_options, progress)?;
 

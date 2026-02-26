@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::lfd::sessions::types::{FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus};
+use crate::lfd::sessions::types::{
+    FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus, TurnUsage,
+};
 
 #[derive(Debug, Default)]
 pub(super) struct ReaderState {
@@ -100,27 +102,50 @@ fn map_status(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEv
         }
         SessionState::Idle => {
             if was_active {
-                complete_turn(state, TurnStatus::Completed, mapped);
+                let usage = properties.get("usage").map(|usage| TurnUsage {
+                    input_tokens: usage
+                        .pointer("/input_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    output_tokens: usage
+                        .pointer("/output_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    cost_usd: usage.get("cost").and_then(Value::as_f64),
+                    ..TurnUsage::default()
+                });
+                complete_turn(state, TurnStatus::Completed, usage, mapped);
             }
         }
         SessionState::Error => {
             if was_active {
-                complete_turn(state, TurnStatus::Failed, mapped);
+                complete_turn(state, TurnStatus::Failed, None, mapped);
             }
         }
         SessionState::Unknown => {}
     }
 }
 
-fn complete_turn(state: &mut ReaderState, status: TurnStatus, mapped: &mut MappedEvent) {
+fn complete_turn(
+    state: &mut ReaderState,
+    status: TurnStatus,
+    usage: Option<TurnUsage>,
+    mapped: &mut MappedEvent,
+) {
     let turn_id = state
         .current_turn_id
         .take()
         .unwrap_or_else(|| "unknown".to_string());
     state.tools.clear();
-    mapped
-        .events
-        .push(SessionEvent::TurnCompleted { turn_id, status });
+    mapped.events.push(SessionEvent::TurnCompleted {
+        turn_id: turn_id.clone(),
+        status,
+    });
+    if let Some(usage) = usage {
+        mapped
+            .events
+            .push(SessionEvent::TurnUsage { turn_id, usage });
+    }
 }
 
 fn parse_session_state(properties: &Value) -> SessionState {
@@ -250,7 +275,7 @@ fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEve
 
     if state.status == SessionState::Active {
         state.status = SessionState::Error;
-        complete_turn(state, TurnStatus::Failed, mapped);
+        complete_turn(state, TurnStatus::Failed, None, mapped);
     }
 
     mapped.events.push(SessionEvent::Error { code, message });
@@ -455,6 +480,54 @@ mod tests {
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn session_status_idle_with_usage_emits_turn_usage() {
+        let mut state = ReaderState::new("session_1".to_string());
+
+        let started = map_event(
+            &json!({
+                "type": "session.status",
+                "properties": { "sessionID": "session_1", "status": "active" }
+            }),
+            &mut state,
+        );
+        let started_turn_id = match &started.events[0] {
+            SessionEvent::TurnStarted { turn_id } => turn_id.clone(),
+            other => panic!("expected TurnStarted, got {other:?}"),
+        };
+
+        let completed = map_event(
+            &json!({
+                "type": "session.status",
+                "properties": {
+                    "sessionID": "session_1",
+                    "status": "idle",
+                    "usage": {
+                        "input_tokens": 222,
+                        "output_tokens": 77,
+                        "cost": 0.13
+                    }
+                }
+            }),
+            &mut state,
+        );
+
+        assert_eq!(completed.events.len(), 2);
+        assert!(matches!(
+            &completed.events[0],
+            SessionEvent::TurnCompleted { turn_id, status }
+                if turn_id == &started_turn_id && *status == TurnStatus::Completed
+        ));
+        assert!(matches!(
+            &completed.events[1],
+            SessionEvent::TurnUsage { turn_id, usage }
+                if turn_id == &started_turn_id
+                    && usage.input_tokens == 222
+                    && usage.output_tokens == 77
+                    && usage.cost_usd == Some(0.13)
+        ));
     }
 
     #[test]

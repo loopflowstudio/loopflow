@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use super::claude_mapping::{self, ReaderState};
 use super::codex_mapping::{self, ItemPhase};
 use super::opencode_mapping;
-use crate::lfd::sessions::types::{SessionEvent, SessionItem, TurnStatus};
+use crate::lfd::sessions::types::{SessionEvent, SessionItem, TurnStatus, TurnUsage};
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -71,10 +71,14 @@ fn resolve_turn_id(
 }
 
 fn replay_codex_trace(file_name: &str) -> Vec<SessionEvent> {
+    replay_codex_lines(read_trace_lines(file_name))
+}
+
+fn replay_codex_lines(lines: Vec<String>) -> Vec<SessionEvent> {
     let mut events = Vec::new();
     let mut current_turn_id: Option<String> = None;
 
-    for line in read_trace_lines(file_name) {
+    for line in lines {
         if line.trim().is_empty() {
             continue;
         }
@@ -97,9 +101,30 @@ fn replay_codex_trace(file_name: &str) -> Vec<SessionEvent> {
                 let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
                 current_turn_id = None;
                 events.push(SessionEvent::TurnCompleted {
-                    turn_id,
+                    turn_id: turn_id.clone(),
                     status: codex_mapping::map_turn_status(&params),
                 });
+                let usage = TurnUsage {
+                    input_tokens: params
+                        .pointer("/usage/input_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    output_tokens: params
+                        .pointer("/usage/output_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    reasoning_tokens: params
+                        .pointer("/usage/reasoning_tokens")
+                        .and_then(Value::as_u64),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    model: params
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string),
+                    cost_usd: None,
+                };
+                events.push(SessionEvent::TurnUsage { turn_id, usage });
             }
             "item/started" => {
                 let turn_id = resolve_turn_id(turn_id_from_params, &current_turn_id);
@@ -200,10 +225,17 @@ fn claude_trace_normal_turn() {
     let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
     assert_eq!(
         event_types,
-        vec!["provider_session_id", "text_delta", "turn_completed"]
+        vec![
+            "provider_session_id",
+            "text_delta",
+            "turn_completed",
+            "turn_usage",
+        ]
     );
     assert!(matches!(
-        events.last(),
+        events
+            .iter()
+            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
         Some(SessionEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
@@ -257,7 +289,9 @@ fn claude_trace_multi_tool_lifecycle() {
     assert_eq!(started, 2);
     assert_eq!(completed, 2);
     assert!(matches!(
-        events.last(),
+        events
+            .iter()
+            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
         Some(SessionEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
@@ -276,11 +310,14 @@ fn codex_trace_normal_turn() {
             "item_started",
             "text_delta",
             "item_completed",
-            "turn_completed"
+            "turn_completed",
+            "turn_usage",
         ]
     );
     assert!(matches!(
-        events.last(),
+        events
+            .iter()
+            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
         Some(SessionEvent::TurnCompleted {
             status: TurnStatus::Completed,
             ..
@@ -289,16 +326,48 @@ fn codex_trace_normal_turn() {
 }
 
 #[test]
+fn codex_turn_completed_maps_usage_payload() {
+    let events = replay_codex_lines(vec![
+        r#"{"method":"turn/started","params":{"turn":{"id":"turn_codex_usage"}}}"#.to_string(),
+        r#"{"method":"turn/completed","params":{"turn":{"id":"turn_codex_usage","status":"completed"},"model":"gpt-5.1-codex","usage":{"input_tokens":144,"output_tokens":55,"reasoning_tokens":3}}}"#.to_string(),
+    ]);
+
+    assert!(matches!(
+        events[1],
+        SessionEvent::TurnCompleted {
+            ref turn_id,
+            status: TurnStatus::Completed
+        } if turn_id == "turn_codex_usage"
+    ));
+    assert!(matches!(
+        events[2],
+        SessionEvent::TurnUsage {
+            ref turn_id,
+            ref usage,
+        } if turn_id == "turn_codex_usage"
+            && usage.input_tokens == 144
+            && usage.output_tokens == 55
+            && usage.reasoning_tokens == Some(3)
+            && usage.model.as_deref() == Some("gpt-5.1-codex")
+    ));
+}
+
+#[test]
 fn codex_trace_error_turn() {
     let events = replay_codex_trace("codex_error.jsonl");
     let event_types: Vec<_> = events.iter().map(SessionEvent::event_type).collect();
-    assert_eq!(event_types, vec!["turn_started", "error", "turn_completed"]);
+    assert_eq!(
+        event_types,
+        vec!["turn_started", "error", "turn_completed", "turn_usage"]
+    );
     assert!(matches!(
         events[1],
         SessionEvent::Error { ref code, .. } if code == "codex_internal"
     ));
     assert!(matches!(
-        events.last(),
+        events
+            .iter()
+            .find(|event| matches!(event, SessionEvent::TurnCompleted { .. })),
         Some(SessionEvent::TurnCompleted {
             status: TurnStatus::Failed,
             ..

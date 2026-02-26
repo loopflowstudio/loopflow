@@ -4,7 +4,9 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::lfd::sessions::harness::lf_tag::LfTagParser;
-use crate::lfd::sessions::types::{FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus};
+use crate::lfd::sessions::types::{
+    FileEdit, ItemStatus, SessionEvent, SessionItem, TurnStatus, TurnUsage,
+};
 
 /// Reader-local state for tracking in-flight content blocks.
 #[derive(Debug, Default)]
@@ -206,6 +208,33 @@ pub(super) fn process_line(
 
         "result" => {
             flush_text_delta_parser(events, state, turn_id);
+            let usage = TurnUsage {
+                input_tokens: event
+                    .pointer("/usage/input_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                output_tokens: event
+                    .pointer("/usage/output_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                reasoning_tokens: event
+                    .pointer("/usage/reasoning_tokens")
+                    .and_then(Value::as_u64),
+                cache_read_tokens: event
+                    .pointer("/usage/cache_read_input_tokens")
+                    .and_then(Value::as_u64),
+                cache_write_tokens: event
+                    .pointer("/usage/cache_creation_input_tokens")
+                    .and_then(Value::as_u64),
+                model: event
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+                cost_usd: event
+                    .get("cost_usd")
+                    .or_else(|| event.get("total_cost_usd"))
+                    .and_then(Value::as_f64),
+            };
             let status = if event
                 .get("is_error")
                 .and_then(Value::as_bool)
@@ -218,6 +247,10 @@ pub(super) fn process_line(
             let _ = events.send(SessionEvent::TurnCompleted {
                 turn_id: turn_id.to_string(),
                 status,
+            });
+            let _ = events.send(SessionEvent::TurnUsage {
+                turn_id: turn_id.to_string(),
+                usage,
             });
             return true;
         }
@@ -640,6 +673,17 @@ mod tests {
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
         }
+
+        let usage_event = rx.try_recv().expect("should have usage event");
+        match usage_event {
+            SessionEvent::TurnUsage { turn_id, usage } => {
+                assert_eq!(turn_id, "turn_1");
+                assert_eq!(usage.input_tokens, 0);
+                assert_eq!(usage.output_tokens, 0);
+                assert_eq!(usage.cost_usd, Some(0.01));
+            }
+            other => panic!("expected TurnUsage, got {other:?}"),
+        }
     }
 
     #[test]
@@ -658,6 +702,32 @@ mod tests {
                 assert_eq!(status, TurnStatus::Failed);
             }
             other => panic!("expected TurnCompleted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_line_result_extracts_turn_usage_tokens() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut state = ReaderState::default();
+        let line = r#"{"type":"result","is_error":false,"model":"claude-sonnet-4","total_cost_usd":0.2,"usage":{"input_tokens":321,"output_tokens":123,"reasoning_tokens":9,"cache_read_input_tokens":11,"cache_creation_input_tokens":5}}"#;
+
+        let result = process_line(line, "turn_42", &tx, &mut state);
+        assert!(result);
+
+        let _completed = rx.try_recv().expect("completion event");
+        let usage_event = rx.try_recv().expect("usage event");
+        match usage_event {
+            SessionEvent::TurnUsage { turn_id, usage } => {
+                assert_eq!(turn_id, "turn_42");
+                assert_eq!(usage.input_tokens, 321);
+                assert_eq!(usage.output_tokens, 123);
+                assert_eq!(usage.reasoning_tokens, Some(9));
+                assert_eq!(usage.cache_read_tokens, Some(11));
+                assert_eq!(usage.cache_write_tokens, Some(5));
+                assert_eq!(usage.model.as_deref(), Some("claude-sonnet-4"));
+                assert_eq!(usage.cost_usd, Some(0.2));
+            }
+            other => panic!("expected TurnUsage, got {other:?}"),
         }
     }
 

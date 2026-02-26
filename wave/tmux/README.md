@@ -119,6 +119,8 @@ Deliver lifecycle commands, repo discovery, and `lf up` entrypoint.
 
 - **`@loopflow_status_format` customization:** option is documented but not implemented. Status format is hardcoded. Wire up the tmux option or remove it from the spec.
 - **fzf picker in `run-shell` context:** fzf needs a TTY. `run-shell` may not provide one. Interactive picker paths (`w`, `L`, container `r`/`s`) may need `display-popup` wrapping. Biggest UX risk from phases 01–03.
+- **tmux version parsing:** `sed 's/[^0-9.]//g'` on `tmux -V` works for `tmux 3.4` but may break on dev builds (`tmux next-3.5`). Low risk but worth a defensive fallback.
+- **Interactive test coverage:** `tmux-review.py` verifies structure (bindings exist, scripts load) but doesn't exercise interactive flows (pickers, layout creation, mode switching). Add automated interactive tests when tmux is available in CI.
 
 ## Risks and mitigations
 

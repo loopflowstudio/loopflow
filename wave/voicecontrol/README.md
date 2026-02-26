@@ -33,9 +33,9 @@ Alternatives considered:
 
 ## Phase boundaries
 
-- **01-push-to-talk**: Mic button in composer, WhisperKit integration, streaming transcription, manual send
-- **02-vad**: Voice Activity Detection replaces push-to-talk — speech starts/stops recording automatically
-- **03-auto-send**: Silence threshold triggers send. Confidence-based — high confidence auto-sends, low confidence highlights uncertain words
+- **01-push-to-talk**: Mic button in composer, WhisperKit integration, streaming transcription, manual send. *Shipped on branch `jack-heart.voicecontrol.20260226_0925` with `VoiceInputService`, `VoiceInputButton`, inline partial/download/transcribing feedback, denied-permission notice, and unit coverage.*
+- **02-vad**: Voice Activity Detection replaces push-to-talk — speech starts/stops recording automatically. *Next.*
+- **03-auto-send**: Silence threshold triggers send. Confidence-based — high confidence auto-sends, low confidence highlights uncertain words. *Later.*
 
 ## Risks
 

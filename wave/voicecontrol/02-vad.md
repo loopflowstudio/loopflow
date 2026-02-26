@@ -2,6 +2,8 @@
 
 Replace push-to-talk with hands-free operation. WhisperKit's built-in VAD detects speech start/stop automatically. No button press needed to begin or end recording.
 
+**Status: planned (next)**
+
 ## What to build
 
 ### VAD mode in VoiceInputService

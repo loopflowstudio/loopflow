@@ -14,15 +14,14 @@ These are glance operations — 5–30 seconds of reading. The overhead of switc
 
 Four features, one shared pattern. Each makes something tappable that wasn't, revealing content inline with an optional "Open in Cursor" escape hatch.
 
-### Shared expand pattern
+### Shared conventions (not a shared component)
 
-All four features use the same interaction: tap header → expand content → optional "Open in Cursor" link. Extract an `ExpandableContentCard` view that handles:
-- Condensed preview (configurable line count)
-- "Show more" / "Show less" toggle
-- Markdown rendering via `AttributedString(markdown:, options: .inlineOnlyPreservingWhitespace)` (proven in `AssistantTextSegment`)
-- Optional action button (e.g., "Open in Cursor")
+All four features use the same interaction: tap header → expand content → optional "Open in Cursor" link. No shared `ExpandableContentCard` view — each feature handles its own expand inline because the content types differ (diffs, markdown, bullet lists). The shared pieces are:
 
-State: `@State private var expandedSections: Set<String>` on `WaveDetailPanel`, keyed by section identifier. Single source of truth for all expand/collapse state in the view.
+- `@State private var expandedSections: Set<String>` on `WaveDetailPanel`, keyed by section identifier. Single source of truth for G3/G4/G5 expand/collapse state.
+- Chevron indicator convention (right → down) matching session file item pattern.
+- Markdown rendering via `AttributedString(markdown:, options: .inlineOnlyPreservingWhitespace)` where applicable (G3/G4/G5).
+- "Open in Cursor" reuses existing `openInIDE(path:)` on WaveDetailPanel.
 
 ---
 
@@ -45,10 +44,11 @@ Query param for path (not path segment — file paths contain slashes). Returns:
 ```
 
 Implementation in `routes/waves.rs`:
-1. Resolve wave → worktree via `worktree_path()`
-2. Compute base ref via `nearest_base_ref()` (same as `build_wave_dto`)
-3. Run `git diff <base>..HEAD -- <path>` in the worktree
-4. Return unified diff string, or empty string if file has no diff
+1. Reject paths containing `..` — return 400. Defense in depth; git only operates on tracked files, but fail fast with a clear error.
+2. Resolve wave → worktree via `worktree_path()`
+3. Compute base ref via `nearest_base_ref()` (same as `build_wave_dto`)
+4. Run `git diff <base>..HEAD -- <path>` in the worktree via `Command::new("git").arg("diff").arg(...)` — pass the path as a separate arg, never interpolate into a shell string.
+5. Return unified diff string, or empty string if file has no diff
 
 Truncate at 500 lines — append `\n... (truncated, N more lines)` if exceeded. Glance, not review.
 

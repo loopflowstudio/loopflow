@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::engine::agent::AgentConfig;
-use crate::engine::config::{parse_model, Config};
+use crate::engine::config::{parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Step;
 use crate::engine::fork::merge_directions;
@@ -143,7 +143,7 @@ pub fn prepare_launch_prompt(
                 .and_then(|step| step.default_agent.clone())
         })
         .unwrap_or_else(|| "claude:opus".to_string());
-    validate_model_policy(&model)?;
+    validate_agent_policy(&agent)?;
     let (components, breakdown) = budgeted.into_parts();
     let action_style = components
         .step
@@ -167,8 +167,8 @@ pub fn prepare_launch_prompt(
     })
 }
 
-fn validate_model_policy(model: &str) -> Result<(), CoreError> {
-    let (harness, variant) = parse_model(model);
+fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
+    let (harness, variant) = parse_agent(agent);
     if harness != "opencode" {
         return Ok(());
     }
@@ -484,7 +484,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                model: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
+                agent: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
@@ -504,7 +504,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                model: Some("opencode:moonshotai/kimi-k2".to_string()),
+                agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
@@ -512,7 +512,7 @@ Test step body.
         .expect("supported OpenCode model should pass");
 
         assert_eq!(
-            prepared.config.model.as_deref(),
+            prepared.config.agent.as_deref(),
             Some("opencode:moonshotai/kimi-k2")
         );
     }
@@ -525,7 +525,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                model: Some("opencode".to_string()),
+                agent: Some("opencode".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },

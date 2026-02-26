@@ -1,4 +1,0 @@
-time: 2026-02-25T21:05:30.047273
-args: /Applications/Concerto.app/Contents/MacOS/Concerto --snapshot /Users/jack/src/loopflow/.claude/worktrees/fix-screenshot-signing/docs/screenshots/concerto-empty.png --repo /Users/jack/src/loopflow-demos --size 1200x800 --mock-loops --mock-config empty
-timeout_seconds: 30
-result: timeout

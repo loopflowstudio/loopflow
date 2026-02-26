@@ -1,9 +1,0 @@
-time: 2026-02-25T21:05:32.529702
-args: /Applications/Concerto.app/Contents/MacOS/Concerto --snapshot /Users/jack/src/loopflow/.claude/worktrees/fix-screenshot-signing/docs/screenshots/concerto-wave-failed.png --repo /Users/jack/src/loopflow-demos --size 1200x800 --select wave-deploy-fix --mock-loops
-returncode: 0
-duration_seconds: 2.48
-stdout:
-2026-02-26T05:05:30.244Z [WORKTREES] openRepo.total elapsed=0ms
-2026-02-26T05:05:30.290Z [LFD] listWaveRuns: GET http://127.0.0.1:2486/v0/wave_runs?limit=50&wave_id=mock-wave-5
-2026-02-26T05:05:30.297Z [LFD] listWaveRuns: error=Server unreachable
-

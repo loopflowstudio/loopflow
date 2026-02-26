@@ -1,7 +1,0 @@
-time: 2026-02-25T21:04:55.317956
-args: /Applications/Concerto.app/Contents/MacOS/Concerto --snapshot /Users/jack/src/loopflow/.claude/worktrees/fix-screenshot-signing/docs/screenshots/concerto-main.png --repo /Users/jack/src/loopflow-demos --size 1200x800 --mock-loops
-returncode: 0
-duration_seconds: 2.48
-stdout:
-2026-02-26T05:04:53.132Z [WORKTREES] openRepo.total elapsed=0ms
-

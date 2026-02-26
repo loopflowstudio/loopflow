@@ -74,16 +74,34 @@ public final class ConnectionStore {
     public var activeConnection: ServerConnection
     private var remoteConnection: ServerConnection?
 
-    public init(
+    public convenience init(
         secretStore: ConnectionSecretStore = .shared,
         pinStore: CertificatePinStore = .shared,
         defaults: UserDefaults = .standard
+    ) {
+        self.init(
+            secretStore: secretStore,
+            pinStore: pinStore,
+            defaults: defaults,
+            configLoader: { loadConcertoConfig() }
+        )
+    }
+
+    init(
+        secretStore: ConnectionSecretStore = .shared,
+        pinStore: CertificatePinStore = .shared,
+        defaults: UserDefaults = .standard,
+        configLoader: () -> ConcertoConfig?
     ) {
         self.secretStore = secretStore
         self.pinStore = pinStore
         self.defaults = defaults
 
-        let initial = Self.loadInitialState(defaults: defaults, secretStore: secretStore)
+        let initial = Self.loadInitialState(
+            defaults: defaults,
+            secretStore: secretStore,
+            configLoader: configLoader
+        )
         mode = initial.mode
         activeConnection = initial.activeConnection
         remoteConnection = initial.remoteConnection
@@ -215,7 +233,8 @@ public final class ConnectionStore {
 
     private static func loadInitialState(
         defaults: UserDefaults,
-        secretStore: ConnectionSecretStore
+        secretStore: ConnectionSecretStore,
+        configLoader: () -> ConcertoConfig?
     ) -> InitialState {
         if let loaded = loadSettings(from: defaults) {
             switch loaded {
@@ -264,10 +283,25 @@ public final class ConnectionStore {
             )
         }
 
+        if let connection = configLoader()?.connection, !connection.isLocalhost {
+            return remoteState(
+                from: connection.toServerConnection(),
+                secretStore: secretStore,
+                shouldPersist: true
+            )
+        }
+
         return bundledState(
             remoteConnection: nil,
             secretStore: secretStore,
             shouldPersist: false
         )
+    }
+}
+
+private extension RemoteConnectionConfig {
+    var isLocalhost: Bool {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
     }
 }

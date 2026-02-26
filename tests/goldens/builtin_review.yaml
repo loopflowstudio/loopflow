@@ -1,0 +1,11 @@
+name: builtin_review
+repo: tests/parity/fixtures/basic
+step: review
+run_mode: auto
+directions: []
+lfdocs: false
+diff_files: false
+diff: false
+clipboard: false
+area: null
+wave: null

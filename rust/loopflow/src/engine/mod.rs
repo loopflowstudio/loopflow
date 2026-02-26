@@ -35,9 +35,9 @@ pub use launch::{
 pub use prompt::{
     count_tokens, default_gather_sources, drop_native_instruction_docs, format_context_prompt,
     format_prompt, format_task_prompt, gather_context, gather_documents,
-    trim_context_with_breakdown, write_prompt_log, ContextBreakdown, DiffTier, Document,
-    DocumentSource, GatherContextOpts, GatherSpec, PromptComponents, PromptFormatMode,
-    DEFAULT_CONTEXT_BUDGET,
+    trim_context_with_breakdown, write_prompt_log, BudgetedContext, ContextBreakdown, DiffTier,
+    Document, DocumentSource, GatherContextOpts, GatherSpec, GatheredContext, PromptComponents,
+    PromptFormatMode, RenderedPrompt, DEFAULT_CONTEXT_BUDGET,
 };
 pub use stream::{
     format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,

@@ -784,7 +784,7 @@ fn copy_context(paths: &[String], exclude: &[String], lfdocs: bool, no_lfdocs: b
         ..Default::default()
     };
 
-    let components = gather_context(&opts)?;
+    let components = gather_context(&opts)?.into_components();
 
     // Collect all documents to format
     let mut all_docs: Vec<Document> = Vec::new();

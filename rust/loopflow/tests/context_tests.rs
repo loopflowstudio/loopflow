@@ -2,7 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use loopflow::engine::{
-    format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptFormatMode,
+    format_prompt, gather_context, trim_context_with_breakdown, DocumentSource, GatherContextOpts,
+    GatheredContext, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
 };
 use tempfile::TempDir;
 
@@ -53,6 +54,11 @@ fn write_direction_group(repo: &Path, group: &str, name: &str, content: &str) {
     let dir = repo.join(".lf/directions").join(group);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join(format!("{name}.md")), content).unwrap();
+}
+
+fn render_prompt(components: GatheredContext) -> String {
+    let budgeted = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
+    format_prompt(PromptFormatMode::Full, &budgeted).into_string()
 }
 
 // =============================================================================
@@ -374,7 +380,7 @@ fn format_prompt_includes_step_content() {
     })
     .unwrap();
 
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let prompt = render_prompt(components);
     assert!(prompt.contains("Build the feature now."));
 }
 
@@ -400,7 +406,7 @@ fn format_prompt_includes_auto_mode_header() {
     })
     .unwrap();
 
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let prompt = render_prompt(components);
     assert!(prompt.contains("auto"));
 }
 
@@ -427,7 +433,7 @@ fn format_prompt_includes_directions() {
     })
     .unwrap();
 
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let prompt = render_prompt(components);
     assert!(prompt.contains("Be brief."));
 }
 
@@ -459,7 +465,7 @@ fn format_prompt_includes_wave_context() {
     })
     .unwrap();
 
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let prompt = render_prompt(components);
     assert!(prompt.contains("payments"));
 }
 
@@ -762,7 +768,7 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         .content
         .contains("keep tests focused on behavior"));
 
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let prompt = render_prompt(components);
     assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
 }
 

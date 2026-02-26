@@ -16,17 +16,18 @@ use crate::engine::stream::StreamParser;
 use super::{
     container_host_config, handle_output_line, logs_options, remove_container_options,
     sanitize_token, stop_container_options, DockerCredentialMount, DockerExecutor, DockerWorkspace,
-    OutputContext, AGENT_API_KEYS, AGENT_USER, CONTAINER_WORKSPACE,
+    OutputContext, AGENT_API_KEYS, AGENT_USER, CONTAINER_PREFIX_AGENT, CONTAINER_PREFIX_PREP,
+    CONTAINER_WORKSPACE, LABEL_AGENT_ID, LABEL_MANAGED, LABEL_WAVE_ID, LABEL_WAVE_RUN_ID,
 };
 
 impl DockerExecutor {
     pub(super) fn build_container_name(agent_id: &str) -> String {
-        format!("lfd-agent-{}", agent_id.replace('_', "-"))
+        format!("{CONTAINER_PREFIX_AGENT}{}", agent_id.replace('_', "-"))
     }
 
     pub(super) fn build_helper_container_name(label: &str) -> String {
         format!(
-            "lfd-prep-{}-{}",
+            "{CONTAINER_PREFIX_PREP}{}-{}",
             sanitize_token(label),
             uuid::Uuid::new_v4().simple()
         )
@@ -38,13 +39,10 @@ impl DockerExecutor {
         wave_run_id: &str,
     ) -> HashMap<String, String> {
         HashMap::from([
-            ("io.loopflow.managed".to_string(), "true".to_string()),
-            ("io.loopflow.agent-id".to_string(), agent_id.to_string()),
-            ("io.loopflow.wave-id".to_string(), wave_id.to_string()),
-            (
-                "io.loopflow.wave-run-id".to_string(),
-                wave_run_id.to_string(),
-            ),
+            (LABEL_MANAGED.to_string(), "true".to_string()),
+            (LABEL_AGENT_ID.to_string(), agent_id.to_string()),
+            (LABEL_WAVE_ID.to_string(), wave_id.to_string()),
+            (LABEL_WAVE_RUN_ID.to_string(), wave_run_id.to_string()),
         ])
     }
 
@@ -364,7 +362,7 @@ impl DockerExecutor {
                     user: Some(AGENT_USER.to_string()),
                     host_config: Some(container_host_config(mounts, &self.limits)),
                     labels: Some(HashMap::from([(
-                        "io.loopflow.managed".to_string(),
+                        LABEL_MANAGED.to_string(),
                         "true".to_string(),
                     )])),
                     attach_stdout: Some(true),

@@ -22,7 +22,8 @@ use crate::lfd::types::{
 use super::{
     container_host_config, normalize_repo_url, DockerCredentialMount, DockerExecutor,
     DockerRecoveryBackend, InspectedContainer, RepoIdentity, RepoMutationLocks, RepoVolumeIdentity,
-    CONTAINER_WORKSPACE,
+    CONTAINER_PREFIX_AGENT, CONTAINER_PREFIX_PREP, CONTAINER_WORKSPACE, LABEL_AGENT_ID, LABEL_KIND,
+    LABEL_KIND_REPO_VOLUME, LABEL_MANAGED, LABEL_WAVE_ID, LABEL_WAVE_RUN_ID, VOLUME_PREFIX,
 };
 
 #[test]
@@ -77,10 +78,10 @@ fn docker_rewrites_paths_into_workspace() {
 
 #[test]
 fn docker_workspace_mount_uses_volume() {
-    let mounts = DockerExecutor::build_mounts_for("lfd-repo-abc", &[]);
+    let mounts = DockerExecutor::build_mounts_for(&format!("{VOLUME_PREFIX}abc"), &[]);
     assert_eq!(mounts.len(), 1);
     assert_eq!(mounts[0].typ, Some(MountTypeEnum::VOLUME));
-    assert_eq!(mounts[0].source, Some("lfd-repo-abc".to_string()));
+    assert_eq!(mounts[0].source, Some(format!("{VOLUME_PREFIX}abc")));
     assert_eq!(mounts[0].target, Some(CONTAINER_WORKSPACE.to_string()));
 }
 
@@ -200,7 +201,7 @@ fn repo_volume_identity_is_deterministic_and_safe() {
     let second = RepoVolumeIdentity::from_identity(&RepoIdentity::from_repo(repo.path()));
 
     assert_eq!(first, second);
-    assert!(first.volume_name.starts_with("lfd-repo-"));
+    assert!(first.volume_name.starts_with(VOLUME_PREFIX));
     assert!(first
         .volume_name
         .chars()
@@ -396,21 +397,46 @@ fn make_running_agent(run: &WaveRun, container_id: Option<&str>, name: &str) -> 
 #[test]
 fn docker_agent_labels_include_rehydration_metadata() {
     let labels = DockerExecutor::build_agent_labels("agent-1", "wave-1", "run-1");
+    assert_eq!(labels.get(LABEL_MANAGED).map(String::as_str), Some("true"));
     assert_eq!(
-        labels.get("io.loopflow.managed").map(String::as_str),
-        Some("true")
-    );
-    assert_eq!(
-        labels.get("io.loopflow.agent-id").map(String::as_str),
+        labels.get(LABEL_AGENT_ID).map(String::as_str),
         Some("agent-1")
     );
     assert_eq!(
-        labels.get("io.loopflow.wave-id").map(String::as_str),
+        labels.get(LABEL_WAVE_ID).map(String::as_str),
         Some("wave-1")
     );
     assert_eq!(
-        labels.get("io.loopflow.wave-run-id").map(String::as_str),
+        labels.get(LABEL_WAVE_RUN_ID).map(String::as_str),
         Some("run-1")
+    );
+}
+
+#[test]
+fn docker_container_name_prefixes_match_contract_constants() {
+    let container_name = DockerExecutor::build_container_name("agent_1");
+    assert!(container_name.starts_with(CONTAINER_PREFIX_AGENT));
+    assert_eq!(container_name, format!("{CONTAINER_PREFIX_AGENT}agent-1"));
+
+    let helper_name = DockerExecutor::build_helper_container_name("sync-lfs");
+    assert!(helper_name.starts_with(CONTAINER_PREFIX_PREP));
+}
+
+#[test]
+fn managed_container_filter_uses_managed_label_contract() {
+    assert_eq!(
+        super::managed_label_filter(),
+        format!("{LABEL_MANAGED}=true")
+    );
+}
+
+#[test]
+fn repo_volume_labels_use_contract_keys_and_values() {
+    let labels = super::image::repo_volume_labels();
+    assert_eq!(labels.get(LABEL_MANAGED).map(String::as_str), Some("true"));
+    assert_eq!(
+        labels.get(LABEL_KIND).map(String::as_str),
+        Some(LABEL_KIND_REPO_VOLUME)
     );
 }
 

@@ -1,0 +1,11 @@
+name: builtin_debug
+repo: tests/parity/fixtures/basic
+step: debug
+run_mode: auto
+directions: []
+lfdocs: false
+diff_files: false
+diff: false
+clipboard: false
+area: null
+wave: null

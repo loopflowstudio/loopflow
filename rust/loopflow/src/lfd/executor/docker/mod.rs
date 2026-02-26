@@ -126,11 +126,6 @@ pub(super) const CONTAINER_PREFIX_AGENT: &str = "lfd-agent-";
 pub(super) const CONTAINER_PREFIX_PREP: &str = "lfd-prep-";
 pub(super) const VOLUME_PREFIX: &str = "lfd-repo-";
 
-/// API keys auto-forwarded to containers when present in host environment.
-/// OAuth tokens live in the OS keychain and can't be mounted, so API keys
-/// are the primary auth mechanism for containerized agents.
-const AGENT_API_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"];
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RepoVolumeIdentity {
     repo_key: String,
@@ -503,7 +498,7 @@ impl AgentExecutor for DockerExecutor {
         let cmd = Self::rewrite_command_paths(cmd, cwd, &workspace.container_worktree);
         // Strip flags that require host-side services unavailable in containers
         let cmd: Vec<String> = cmd.into_iter().filter(|arg| arg != "--chrome").collect();
-        let env = self.collect_env().await;
+        let env = self.collect_env(cmd.first().map(String::as_str)).await;
         let mounts = self.build_mounts(&workspace.volume.volume_name);
         let labels =
             Self::build_agent_labels(context.agent_id, context.wave_id, context.wave_run_id);

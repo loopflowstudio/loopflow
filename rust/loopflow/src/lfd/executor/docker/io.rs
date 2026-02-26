@@ -16,8 +16,8 @@ use crate::engine::stream::StreamParser;
 use super::{
     container_host_config, handle_output_line, logs_options, remove_container_options,
     sanitize_token, stop_container_options, DockerCredentialMount, DockerExecutor, DockerWorkspace,
-    OutputContext, AGENT_API_KEYS, AGENT_USER, CONTAINER_PREFIX_AGENT, CONTAINER_PREFIX_PREP,
-    CONTAINER_WORKSPACE, LABEL_AGENT_ID, LABEL_MANAGED, LABEL_WAVE_ID, LABEL_WAVE_RUN_ID,
+    OutputContext, AGENT_USER, CONTAINER_PREFIX_AGENT, CONTAINER_PREFIX_PREP, CONTAINER_WORKSPACE,
+    LABEL_AGENT_ID, LABEL_MANAGED, LABEL_WAVE_ID, LABEL_WAVE_RUN_ID,
 };
 
 impl DockerExecutor {
@@ -77,29 +77,16 @@ impl DockerExecutor {
         }
     }
 
-    pub(super) async fn collect_env(&self) -> Vec<String> {
-        let mut env: Vec<String> = self
-            .credential_env
-            .iter()
-            .filter_map(|name| {
-                std::env::var(name)
-                    .ok()
-                    .map(|value| format!("{name}={value}"))
-            })
-            .collect();
+    pub(super) async fn collect_env(&self, program: Option<&str>) -> Vec<String> {
+        let mut env: Vec<String> = Vec::new();
 
-        // Auto-forward well-known agent API keys when present in host env.
-        for key in AGENT_API_KEYS {
-            if self.credential_env.iter().any(|e| e == key) {
-                continue; // Already included via explicit config
-            }
-            if let Ok(value) = std::env::var(key) {
-                env.push(format!("{key}={value}"));
-            }
-        }
-
-        // Inject provider tokens from the DB.
+        // Inject provider tokens from the DB first so OAuth credentials win.
         for (env_var, value) in crate::lfd::provider_auth::provider_env_vars(&self.store).await {
+            if let Some(program) = program {
+                if !crate::lfd::provider_auth::provider_env_allowed_for_program(program, &env_var) {
+                    continue;
+                }
+            }
             if env
                 .iter()
                 .any(|entry| entry.starts_with(&format!("{env_var}=")))
@@ -107,6 +94,30 @@ impl DockerExecutor {
                 continue;
             }
             env.push(format!("{env_var}={value}"));
+        }
+
+        for name in &self.credential_env {
+            if crate::lfd::provider_auth::is_api_key_env_name(name) {
+                match program {
+                    Some(program) => {
+                        if !crate::lfd::provider_auth::api_key_env_allowed_for_program(
+                            program, name,
+                        ) {
+                            continue;
+                        }
+                    }
+                    None => continue,
+                }
+            }
+            if env
+                .iter()
+                .any(|entry| entry.starts_with(&format!("{name}=")))
+            {
+                continue;
+            }
+            if let Ok(value) = std::env::var(name) {
+                env.push(format!("{name}={value}"));
+            }
         }
 
         // When SSH credentials are mounted, build a GIT_SSH_COMMAND that:
@@ -367,7 +378,7 @@ impl DockerExecutor {
                     image: Some(self.image.clone()),
                     cmd: Some(cmd),
                     working_dir,
-                    env: Some(self.collect_env().await),
+                    env: Some(self.collect_env(None).await),
                     user: Some(AGENT_USER.to_string()),
                     host_config: Some(container_host_config(mounts, &self.limits)),
                     labels: Some(HashMap::from([(

@@ -52,9 +52,18 @@ impl AgentExecutor for LocalProcessExecutor {
         command.current_dir(cwd);
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
+        let program = cmd[0].as_str();
+        for env_name in crate::lfd::provider_auth::api_key_env_names() {
+            if !crate::lfd::provider_auth::api_key_env_allowed_for_program(program, env_name) {
+                command.env_remove(env_name);
+            }
+        }
 
         // Inject DB-backed provider tokens as env vars.
         for (key, value) in crate::lfd::provider_auth::provider_env_vars(&self.store).await {
+            if !crate::lfd::provider_auth::provider_env_allowed_for_program(program, &key) {
+                continue;
+            }
             command.env(&key, &value);
         }
 

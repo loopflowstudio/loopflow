@@ -15,6 +15,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 use crate::lfd::events::EventHub;
 use crate::lfd::store::{ProviderToken, SharedStore};
@@ -209,7 +210,7 @@ impl ProviderAuthService {
         Self::with_brokers_and_store(
             vec![
                 Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
-                Arc::new(ClaudeAuthBroker) as Arc<dyn AuthBroker>,
+                Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
                 Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
             ],
             Some(store),
@@ -272,13 +273,20 @@ impl ProviderAuthService {
     /// Check DB first; if a token row exists use it, otherwise fall back to broker.
     async fn resolve_status(&self, provider: Provider) -> Result<AuthStatus, AuthError> {
         if let Some(store) = &self.store {
-            if let Ok(Some(token)) = store.get_provider_token(provider.as_str()).await {
-                if let Some(expires_at) = token.expires_at {
-                    if expires_at <= now_unix() {
+            match store.get_provider_token(provider.as_str()).await {
+                Ok(Some(token)) => {
+                    if token
+                        .expires_at
+                        .is_some_and(|expires_at| expires_at <= now_unix())
+                    {
                         return Ok(AuthStatus::Expired);
                     }
+                    return Ok(AuthStatus::Active { login: token.login });
                 }
-                return Ok(AuthStatus::Active { login: token.login });
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(provider = %provider, error = %err, "failed to load provider token")
+                }
             }
         }
         self.broker(provider)?.check_status().await
@@ -323,7 +331,9 @@ impl ProviderAuthService {
                         // Extract and persist the token
                         if let Some(store) = &store_for_task {
                             if let Some(token) = broker_for_task.extract_token().await {
-                                let _ = store.upsert_provider_token(&token).await;
+                                if let Err(err) = store.upsert_provider_token(&token).await {
+                                    warn!(provider = %provider, error = %err, "failed to persist provider token");
+                                }
                             }
                         }
                         event_hub_for_task.send(Event::auth_connected(provider, login));
@@ -359,7 +369,9 @@ impl ProviderAuthService {
         self.abort_pending(provider).await;
         self.broker(provider)?.disconnect().await?;
         if let Some(store) = &self.store {
-            let _ = store.delete_provider_token(provider.as_str()).await;
+            if let Err(err) = store.delete_provider_token(provider.as_str()).await {
+                warn!(provider = %provider, error = %err, "failed to delete provider token");
+            }
         }
         event_hub.send(Event::auth_disconnected(provider));
         Ok(())
@@ -489,8 +501,18 @@ impl AuthBroker for GhAuthBroker {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ClaudeAuthBroker;
+#[derive(Debug, Clone)]
+pub struct ClaudeAuthBroker {
+    home_dir: PathBuf,
+}
+
+impl Default for ClaudeAuthBroker {
+    fn default() -> Self {
+        Self {
+            home_dir: home_dir_or_cwd(),
+        }
+    }
+}
 
 #[async_trait]
 impl AuthBroker for ClaudeAuthBroker {
@@ -555,7 +577,7 @@ impl AuthBroker for ClaudeAuthBroker {
     }
 
     async fn extract_token(&self) -> Option<ProviderToken> {
-        extract_claude_token()
+        extract_claude_token(&self.home_dir)
     }
 }
 
@@ -586,12 +608,11 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let codex_dir = self.home_dir.join(".codex");
-        if directory_has_entries(&codex_dir)? {
-            Ok(AuthStatus::Active { login: None })
+        Ok(if extract_codex_token(&self.home_dir).is_some() {
+            AuthStatus::Active { login: None }
         } else {
-            Ok(AuthStatus::None)
-        }
+            AuthStatus::None
+        })
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
@@ -903,16 +924,6 @@ fn read_github_login(home_dir: &Path) -> Option<String> {
     Some("github".to_string())
 }
 
-fn directory_has_entries(path: &Path) -> Result<bool, AuthError> {
-    if !path.exists() {
-        return Ok(false);
-    }
-
-    let mut entries = fs::read_dir(path)
-        .map_err(|err| AuthError::Filesystem(format!("read {}: {err}", path.display())))?;
-    Ok(entries.next().is_some())
-}
-
 fn remove_path(path: &Path) -> Result<(), AuthError> {
     if path.is_dir() {
         fs::remove_dir_all(path)
@@ -953,9 +964,8 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
     })
 }
 
-fn extract_claude_token() -> Option<ProviderToken> {
-    let home = dirs::home_dir()?;
-    let cred_path = home.join(".claude/.credentials.json");
+fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
+    let cred_path = home_dir.join(".claude/.credentials.json");
     let content = fs::read_to_string(cred_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     let token = json.get("accessToken")?.as_str()?;
@@ -973,10 +983,9 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
     let auth_path = home_dir.join(".codex/auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let token = json
-        .get("api_key")
-        .or_else(|| json.get("access_token"))
-        .and_then(|v| v.as_str())?;
+    // Store OAuth access tokens only.
+    // Never capture manual API keys from Codex auth state.
+    let token = json.get("access_token").and_then(|v| v.as_str())?;
     Some(ProviderToken {
         provider: "codex".to_string(),
         access_token: token.to_string(),
@@ -985,6 +994,56 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
         login: None,
         updated_at: now_unix(),
     })
+}
+
+fn normalize_program_name(program: &str) -> String {
+    std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn normalize_env_name(name: &str) -> String {
+    name.trim().to_ascii_uppercase()
+}
+
+pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
+    match env_name {
+        "GH_TOKEN" => true,
+        "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
+        _ => false,
+    }
+}
+
+const API_KEY_ENV_NAMES: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "CODEX_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENCODE_API_KEY",
+    "MOONSHOT_API_KEY",
+];
+
+pub fn is_api_key_env_name(name: &str) -> bool {
+    let normalized = normalize_env_name(name);
+    API_KEY_ENV_NAMES.iter().any(|item| *item == normalized)
+}
+
+pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
+    let env_name = normalize_env_name(env_name);
+    if !is_api_key_env_name(&env_name) {
+        return true;
+    }
+    if normalize_program_name(program) != "opencode" {
+        return false;
+    }
+    matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY")
+}
+
+pub fn api_key_env_names() -> &'static [&'static str] {
+    API_KEY_ENV_NAMES
 }
 
 /// Build env vars for all stored provider tokens. Used by executors to inject
@@ -996,13 +1055,13 @@ pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String,
     };
     let mut vars = Vec::new();
     for token in tokens {
-        let env_name = match token.provider.as_str() {
-            "github" => "GH_TOKEN",
-            "claude" => "ANTHROPIC_API_KEY",
-            "codex" => "OPENAI_API_KEY",
+        match token.provider.as_str() {
+            "github" => vars.push(("GH_TOKEN".to_string(), token.access_token)),
+            "claude" => vars.push(("CLAUDE_CODE_OAUTH_TOKEN".to_string(), token.access_token)),
+            // Codex OAuth env injection intentionally unsupported for now; keep token in DB.
+            "codex" => {}
             _ => continue,
-        };
-        vars.push((env_name.to_string(), token.access_token));
+        }
     }
     vars
 }
@@ -1126,7 +1185,7 @@ mod tests {
         assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
     }
 
-    // TODO: rework once ClaudeAuthBroker gains home_dir for token extraction
+    // Requires local claude CLI; keep ignored.
     #[tokio::test]
     #[ignore]
     async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
@@ -1138,7 +1197,9 @@ mod tests {
         fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
         fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
 
-        let broker = ClaudeAuthBroker;
+        let broker = ClaudeAuthBroker {
+            home_dir: temp.path().to_path_buf(),
+        };
         broker.disconnect().await.expect("disconnect");
 
         assert!(claude_dir.join("settings.json").exists());
@@ -1192,5 +1253,78 @@ mod tests {
 
         let status = service.status(Provider::GitHub).await.expect("status");
         assert_eq!(status.status, AuthStatus::Pending);
+    }
+
+    #[test]
+    fn api_key_env_filter_is_harness_specific() {
+        assert!(api_key_env_allowed_for_program(
+            "opencode",
+            "OPENCODE_API_KEY"
+        ));
+        assert!(api_key_env_allowed_for_program(
+            "/usr/local/bin/opencode",
+            "MOONSHOT_API_KEY"
+        ));
+        assert!(!api_key_env_allowed_for_program(
+            "opencode",
+            "ANTHROPIC_API_KEY"
+        ));
+        assert!(!api_key_env_allowed_for_program(
+            "opencode",
+            "OPENAI_API_KEY"
+        ));
+        assert!(!api_key_env_allowed_for_program(
+            "claude",
+            "OPENCODE_API_KEY"
+        ));
+        assert!(!api_key_env_allowed_for_program(
+            "codex",
+            "MOONSHOT_API_KEY"
+        ));
+    }
+
+    #[test]
+    fn provider_env_allowed_is_harness_specific() {
+        assert!(provider_env_allowed_for_program("claude", "GH_TOKEN"));
+        assert!(provider_env_allowed_for_program("codex", "GH_TOKEN"));
+        assert!(provider_env_allowed_for_program(
+            "claude",
+            "CLAUDE_CODE_OAUTH_TOKEN"
+        ));
+        assert!(!provider_env_allowed_for_program(
+            "codex",
+            "CLAUDE_CODE_OAUTH_TOKEN"
+        ));
+    }
+
+    #[test]
+    fn extract_codex_token_ignores_manual_api_keys() {
+        let tmp = tempdir().expect("tempdir");
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"api_key":"sk-live-manual-key"}"#,
+        )
+        .expect("write auth json");
+
+        let token = extract_codex_token(tmp.path());
+        assert!(token.is_none());
+    }
+
+    #[test]
+    fn extract_codex_token_reads_oauth_access_token() {
+        let tmp = tempdir().expect("tempdir");
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"access_token":"oauth-access-token"}"#,
+        )
+        .expect("write auth json");
+
+        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
+        assert_eq!(token.provider, "codex");
+        assert_eq!(token.access_token, "oauth-access-token");
     }
 }

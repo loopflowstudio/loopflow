@@ -88,7 +88,7 @@ Phase 03 shipped schema authoring for `stimulus.kind: listen` and made listen ex
 - Added repo-scoped listen source resolution during wave creation (`source` name/ID → `source_wave_id`)
 - Added executor-side listener triggering on successful source completion
 - Added pending activation queue/coalescing + drain loop for deferred starts
-- Renamed sidecar terminology to CI fix terminology, including DB migration 015
+- Renamed sidecar terminology to CI fix terminology, including DB migration 016
 
 Key decisions now locked:
 

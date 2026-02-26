@@ -1,5 +1,7 @@
 # 03: Credential Injection
 
+Status: **shipped**
+
 Executors pull tokens from the DB and inject them into agent processes at launch time.
 
 ## What to build

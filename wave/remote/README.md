@@ -21,7 +21,7 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 | 4 | Studio auth (JWT validation, sign-in UX, JWKS hardening) | After 1-3 |
 | 5 | API expansion (remote file browsing + metadata typeahead) | Later |
 | 6 | Hosted SaaS packaging | Later |
-| 7 | Bundled container hardening (auth flow orchestration, fallback policy, UI test stability) | Next |
+| 7 | Bundled container hardening (auth flow orchestration, fallback policy, UI test stability) | In progress (auth flow done, 2 items remain) |
 
 ### Shipped infrastructure
 
@@ -31,7 +31,7 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 | 02 | Compose Stack | Full stack in Docker (lfd + postgres), test locally |
 | 03 | Pre-shared Token Auth | lfd accepts remote connections |
 | 04 | API Surface Gating | Security hardening for remote-facing API |
-| — | Bundled Daemon Runtime | Concerto runs one bundled lfd with ephemeral port/token per launch. Default path is a Dockerized `loopflow/lfd` runtime with `~/src` read-only, credential socket proxying, shared sqlite volume, and native fallback mode from settings. |
+| — | Bundled Daemon Runtime | Concerto runs one bundled lfd with ephemeral port/token per launch. Default path is a Dockerized `loopflow/lfd` runtime with `~/src` read-only, DB-backed credential injection, shared sqlite volume, and native fallback mode from settings. |
 | — | File-Based Remote Seeding | On first launch, Concerto seeds remote host/port from `~/.lf/concerto.yaml` (`connection.host`/`connection.port`), enforces TLS + static-token auth, reads token from Keychain via `<host>:<port>`, and ignores loopback hosts |
 
 Phase 05 (remote connection correctness) and Phase 06 (remote editor/terminal access) were folded into step 0 and are treated as shipped baseline behavior.

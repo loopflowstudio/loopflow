@@ -1,5 +1,7 @@
 # 01: Token Store
 
+Status: **shipped**
+
 DB-backed token persistence, replacing filesystem detection as the primary auth status source.
 
 ## What to build

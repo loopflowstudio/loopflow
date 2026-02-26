@@ -233,7 +233,7 @@ loopflow_pick_wave() {
 }
 
 loopflow_open_layout() {
-    local layouts=("dev" "swarm" "flow")
+    local layouts=("dev" "swarm")
     local selection result_file="/tmp/loopflow-pick-${USER}.txt"
     rm -f "$result_file"
 
@@ -260,7 +260,6 @@ loopflow_open_layout() {
         tmux display-menu -T "Layout" \
             "dev"   "d" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-dev.sh'" \
             "swarm" "s" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-swarm.sh'" \
-            "flow"  "f" "run-shell '$LOOPFLOW_DIR/scripts/layouts/lf-flow.sh'" \
             2>/dev/null
         return 0
     fi

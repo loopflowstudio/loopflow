@@ -136,7 +136,7 @@ def check_status_script() -> bool:
 def check_layout_scripts() -> bool:
     """Verify layout scripts exist and are executable."""
     ok = True
-    for name in ["lf-dev.sh", "lf-swarm.sh", "lf-flow.sh"]:
+    for name in ["lf-dev.sh", "lf-swarm.sh"]:
         path = os.path.join(PLUGIN_DIR, "scripts", "layouts", name)
         if not os.path.isfile(path):
             print(f"  FAIL: layout script missing: {name}")
@@ -152,7 +152,7 @@ def check_layout_scripts() -> bool:
 def check_layouts_create_windows() -> bool:
     """Run each layout and verify it creates a named window."""
     ok = True
-    for name, window_name in [("lf-dev.sh", "lf-dev"), ("lf-swarm.sh", "lf-swarm"), ("lf-flow.sh", "lf-flow")]:
+    for name, window_name in [("lf-dev.sh", "lf-dev"), ("lf-swarm.sh", "lf-swarm")]:
         script = os.path.join(PLUGIN_DIR, "scripts", "layouts", name)
         # Run inside the tmux server
         run_tmux(
@@ -186,7 +186,6 @@ def print_checklist():
     print("3. [ ] Press prefix+l+L — layout picker appears")
     print("4. [ ] Open lf-dev layout and verify 3 panes")
     print("5. [ ] Open lf-swarm layout and verify 4 panes")
-    print("6. [ ] Open lf-flow layout and verify 3 panes")
     print("7. [ ] Press prefix+l+w — wave picker appears")
     print("8. [ ] Press prefix+l+r — run action executes or shows message")
     print("9. [ ] Press prefix+l+p — PR action opens or shows 'gh not found'")

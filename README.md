@@ -235,7 +235,7 @@ Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Keybindin
 | `L` | Pick layout |
 | `?` | Help |
 
-Three built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (leader + 3 workers), `lf-flow` (status + flow + git).
+Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
 
 Works without `lf` or `lfq` installed — status shows placeholder, keybindings display clear messages.
 

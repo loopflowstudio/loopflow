@@ -2,11 +2,10 @@
 # lf-swarm layout: leader + 3 worker panes
 #
 # +----------------------------------------+
-# |   leader pane (lf flow build)          |
+# |   leader pane (orchestration)          |
 # +------------+------------+--------------+
 # | worker 1   | worker 2   | worker 3     |
-# | lf impl    | lf impl    | lf impl     |
-# | -a src/    | -a tests/  | -a docs/    |
+# | worktree a | worktree b | worktree c   |
 # +------------+------------+--------------+
 
 set -euo pipefail
@@ -27,16 +26,18 @@ if (( cols < 120 )); then
     # Simplified 2-pane layout for narrow terminals
     tmux split-window -v -c "$work_dir" -p 50
 
+    # Top: monitor
     tmux select-pane -t 0
     if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
-        tmux send-keys "# lfq run <wave>  (leader)" Enter
+        tmux send-keys "watch -n 5 lfq list" Enter
     elif loopflow_has_cmd lf; then
-        tmux send-keys "# lf flow build  (leader)" Enter
+        tmux send-keys "watch -n 5 lf ops wt list" Enter
     fi
 
+    # Bottom: worker
     tmux select-pane -t 1
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf implement  (worker)" Enter
+        tmux send-keys "# lf ops wt create a && cd ../\$(git branch --show-current)-a && lf implement" Enter
     fi
 else
     # Full layout: top leader + 3 bottom workers
@@ -48,32 +49,32 @@ else
     tmux split-window -h -c "$work_dir" -p 66
     tmux split-window -h -c "$work_dir" -p 50
 
-    # Leader pane (0)
+    # Leader pane (0): monitor
     tmux select-pane -t 0
     if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
-        tmux send-keys "# lfq run <wave>  (leader)" Enter
+        tmux send-keys "watch -n 5 lfq list" Enter
     elif loopflow_has_cmd lf; then
-        tmux send-keys "# lf flow build  (leader)" Enter
+        tmux send-keys "watch -n 5 lf ops wt list" Enter
     fi
 
-    # Worker 1 (1): src/
+    # Worker 1 (1)
     tmux select-pane -t 1
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf implement -a src/" Enter
+        tmux send-keys "# lf ops wt create a && cd ../\$(git branch --show-current)-a && lf implement" Enter
     fi
 
-    # Worker 2 (2): tests/
+    # Worker 2 (2)
     tmux select-pane -t 2
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf implement -a tests/" Enter
+        tmux send-keys "# lf ops wt create b && cd ../\$(git branch --show-current)-b && lf implement" Enter
     fi
 
-    # Worker 3 (3): docs/
+    # Worker 3 (3)
     tmux select-pane -t 3
     if loopflow_has_cmd lf; then
-        tmux send-keys "# lf implement -a docs/" Enter
+        tmux send-keys "# lf ops wt create c && cd ../\$(git branch --show-current)-c && lf implement" Enter
     fi
 
-    # Focus leader
-    tmux select-pane -t 0
+    # Focus worker 1
+    tmux select-pane -t 1
 fi

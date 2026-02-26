@@ -21,7 +21,7 @@ The plugin must feel reliable in two environments:
 
 - TPM plugin entrypoint (`loopflow.tmux`)
 - status segment with low-latency mode-aware rendering
-- named layouts (`lf-dev`, `lf-swarm`, `lf-flow`)
+- named layouts (`lf-dev`, `lf-swarm`)
 - mode-aware keybindings
 - container lifecycle commands (`lfd install/start/stop/status/update/uninstall`)
 - `lf up` one-command bootstrap
@@ -49,7 +49,7 @@ The plugin must feel reliable in two environments:
 Plugin load, options, status plumbing, baseline helper functions.
 
 ### 02 — Named layouts ✓
-Window/pane creation scripts (`lf-dev`, `lf-swarm`, `lf-flow`).
+Window/pane creation scripts (`lf-dev`, `lf-swarm`).
 
 ### 03 — Keybindings ✓
 Mode-aware action dispatch, picker flows, and help overlay.
@@ -71,7 +71,6 @@ Deliver lifecycle commands, repo discovery, and `lf up` entrypoint.
 - `scripts/keybindings.sh`
 - `scripts/layouts/lf-dev.sh`
 - `scripts/layouts/lf-swarm.sh`
-- `scripts/layouts/lf-flow.sh`
 - `scripts/tmux-review.py`
 - `scripts/lfd` (phase 04)
 - `scripts/lf-up.sh` (phase 04)

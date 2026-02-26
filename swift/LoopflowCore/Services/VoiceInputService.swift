@@ -582,6 +582,10 @@ public final class VoiceInputService {
             await engine.cancelStreaming()
         }
 
+        if let engine {
+            await engine.cancelStreaming()
+        }
+
         try await ensurePermission()
         let currentOperationID = UUID()
         operationID = currentOperationID

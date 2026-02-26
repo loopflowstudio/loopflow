@@ -4,7 +4,7 @@ Pre-built pane arrangements with deterministic behavior and mode-aware command b
 
 ## What to build
 
-### Three layouts in `scripts/layouts/`
+### Two layouts in `scripts/layouts/`
 
 **lf-dev** — single wave focus:
 ```
@@ -19,27 +19,17 @@ Pre-built pane arrangements with deterministic behavior and mode-aware command b
 +------------------+----------------------+
 ```
 
-**lf-swarm** — parallel agents (inspired by DHH's `tsl`):
+**lf-swarm** — parallel worktree agents:
 ```
 +----------------------------------------+
 |   leader pane (lf flow build)          |
 +------------+------------+--------------+
 | worker 1   | worker 2   | worker 3     |
-| lf impl    | lf impl    | lf impl     |
-| -a src/    | -a tests/  | -a docs/    |
+| worktree   | worktree   | worktree    |
 +------------+------------+--------------+
 ```
 
-**lf-flow** — watch a flow execute:
-```
-+------------------+----------------------+
-|  lfq list        |   flow output        |
-|  (refreshing)    |   (lf flow build)    |
-|                  |                      |
-|                  +----------------------+
-|                  |   lazygit / shell    |
-+------------------+----------------------+
-```
+lf-flow was cut from this phase. A flow-monitoring layout can be added later if needed.
 
 ### Shared layout runtime contract
 
@@ -55,15 +45,14 @@ Suggested window names:
 
 - `lf-dev`
 - `lf-swarm`
-- `lf-flow`
 
 ### Layout dispatch
 
 Each layout is a standalone script (`scripts/layouts/lf-dev.sh`, etc.) that creates the pane arrangement using `tmux split-window`, `tmux send-keys`, etc.
 
 Callable via:
-- Keybinding: `prefix + L + d` (dev), `prefix + L + s` (swarm), `prefix + L + f` (flow)
-- CLI: `lf tmux dev`, `lf tmux swarm`, `lf tmux flow`
+- Keybinding: `prefix + L + d` (dev), `prefix + L + s` (swarm)
+- CLI: `lf tmux dev`, `lf tmux swarm`
 
 ### Smart defaults
 
@@ -83,8 +72,7 @@ Callable via:
 Keep command strings centralized in one helper file (avoid drift):
 
 - `lf-dev`: `lf <step>` / `lfq logs <wave>`
-- `lf-swarm`: `lf implement -a ...` variations
-- `lf-flow`: `lf flow build` + `lfq list --json`
+- `lf-swarm`: worktree-based parallel workers
 
 ## Constraints
 
@@ -98,7 +86,6 @@ Keep command strings centralized in one helper file (avoid drift):
 ```bash
 scripts/layouts/lf-dev.sh
 scripts/layouts/lf-swarm.sh
-scripts/layouts/lf-flow.sh
 ```
 
 Manual checks:
@@ -109,7 +96,7 @@ Manual checks:
 
 ## Done when
 
-- All three layouts create correct pane arrangements
+- Both layouts create correct pane arrangements
 - Layouts degrade gracefully on small terminals
 - Keybindings and CLI dispatch both work
 - Window names are stable and discoverable

@@ -47,7 +47,7 @@ Selection opens the chosen wave's worktree in a new lf-dev layout.
 
 ### Layout picker (`prefix + l + L`)
 
-- Preferred: `fzf` with entries `dev`, `swarm`, `flow`.
+- Preferred: `fzf` with entries `dev`, `swarm`.
 - Fallback: `tmux display-menu`.
 - Selection maps to corresponding layout script.
 

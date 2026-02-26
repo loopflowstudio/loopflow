@@ -31,7 +31,7 @@ struct MobileRootView: View {
     var body: some View {
         Group {
             if needsInitialSetup {
-                ConnectionSetupView()
+                DiscoveryView()
             } else if isPadLayout {
                 iPadLayout
             } else {

@@ -1,3 +1,4 @@
+pub mod address;
 pub mod auth;
 pub mod config;
 pub mod credential_socket;
@@ -26,6 +27,7 @@ pub mod store;
 pub mod triggers;
 pub mod types;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use tokio_util::sync::CancellationToken;
@@ -33,6 +35,7 @@ use tokio_util::sync::CancellationToken;
 use self::auth::AuthProvider;
 use self::config::LfdConfig;
 use self::registration::{ConnectionValidator, RegistrationClient};
+use self::store::SharedStore;
 
 /// Set up auth provider based on config.
 ///
@@ -40,6 +43,8 @@ use self::registration::{ConnectionValidator, RegistrationClient};
 /// provider status/deregistration), and optional credentials for deregistration.
 pub async fn setup_auth(
     config: &LfdConfig,
+    store: SharedStore,
+    http_addr: SocketAddr,
     cancel: CancellationToken,
 ) -> (
     AuthProvider,
@@ -63,7 +68,7 @@ pub async fn setup_auth(
             tracing::info!("static token auth configured");
             (AuthProvider::Static { token }, None, None)
         }
-        "loopflow.studio" => setup_studio_registration(config, cancel).await,
+        "loopflow.studio" => setup_studio_registration(config, store, http_addr, cancel).await,
         other => {
             tracing::error!(provider = other, "unknown auth provider");
             std::process::exit(1);
@@ -91,6 +96,8 @@ pub fn setup_local_auth() -> AuthProvider {
 
 async fn setup_studio_registration(
     config: &LfdConfig,
+    store: SharedStore,
+    http_addr: SocketAddr,
     cancel: CancellationToken,
 ) -> (
     AuthProvider,
@@ -106,7 +113,7 @@ async fn setup_studio_registration(
     let machine_name = self::machine_id::machine_name();
     let base_url = &config.auth.base_url;
 
-    let client = RegistrationClient::new(base_url);
+    let client = RegistrationClient::with_context(base_url, store, http_addr);
     let validator = ConnectionValidator::new(base_url);
 
     match client.register(&jwt, &mid, &machine_name).await {

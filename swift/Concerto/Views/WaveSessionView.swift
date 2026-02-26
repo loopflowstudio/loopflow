@@ -6,6 +6,7 @@ struct WaveSessionView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @Bindable var state: SessionState
+    let showsSuggestedActions: Bool
 
     @State private var composerText = ""
     @State private var expandedItemIds: Set<UUID> = []
@@ -47,7 +48,7 @@ struct WaveSessionView: View {
                 }
             }
 
-            if !state.suggestedActions.isEmpty {
+            if showsSuggestedActions, !state.suggestedActions.isEmpty {
                 ActionButtonsView(actions: state.suggestedActions) { action in
                     composerText = ""
                     Task {
@@ -91,6 +92,11 @@ struct WaveSessionView: View {
         .onDisappear {
             state.onDisappear()
         }
+    }
+
+    init(state: SessionState, showsSuggestedActions: Bool = true) {
+        self.state = state
+        self.showsSuggestedActions = showsSuggestedActions
     }
 
     private var groupedTranscript: [TranscriptGroup] {

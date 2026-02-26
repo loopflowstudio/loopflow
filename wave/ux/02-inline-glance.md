@@ -2,7 +2,7 @@
 
 Inline the glance, link to the deep dive. Eliminate context-switches to GitHub/Cursor for the "check in" workflow.
 
-**Status: planned (next)**
+Builds on session polish (shipped) — `CodeBlockView`, `CopyButton`, streaming cursor, and `Typography.code(12)` are established patterns. Reuse them here.
 
 ## What to build
 

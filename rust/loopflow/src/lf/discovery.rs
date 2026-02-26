@@ -50,14 +50,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
     ("Setup", &["init"]),
     (
         "Planning & Design",
-        &[
-            "design",
-            "explore",
-            "refine",
-            "kickoff",
-            "wave-plan",
-            "5whys",
-        ],
+        &["design", "explore", "refine", "kickoff", "5whys"],
     ),
     (
         "Implementation",
@@ -107,9 +100,8 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("gate", "Ship-ready check with reviewer docs"),
         ("5whys", "Root cause analysis on a bug fix"),
         ("kickoff", "Elaborate design with alternatives"),
-        ("wave-plan", "Synthesize analysis into wave plan"),
         ("ingest", "Pick wave item, move to scratch/"),
-        ("update-wave", "Reconcile wave plan and backlog after work"),
+        ("update-wave", "Create, update, or delete wave state"),
         ("synthesize", "Combine multiple perspectives"),
         ("validate", "Validate flows, steps, and directions"),
         ("release", "Generate release notes from merged PRs"),

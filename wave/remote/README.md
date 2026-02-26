@@ -15,6 +15,7 @@ Infrastructure phases (01-04) shipped the foundation. Bundled daemon mode shippe
 | 0 | Error mapping + remote editor/terminal launch | Shipped |
 | — | Bundled daemon runtime + connection mode switcher | Shipped |
 | 1 | EC2 dogfood lane: deploy (Docker + Caddy + static token) and run remote smoke from laptop | Shipped |
+| — | Concerto first-launch remote seeding from `~/.lf/concerto.yaml` + Keychain token lookup | Shipped |
 | 2 | Mac Mini dogfood lane: deploy (native + launchd) and run the same smoke suite for parity | Next |
 | 3 | Fork executor cleanup before auth rollout (shared constants, branch threading, executor hook parity) | Next |
 | 4 | Studio auth (JWT validation, sign-in UX, JWKS hardening) | After 1-3 |
@@ -43,6 +44,7 @@ Keep ownership crisp:
 | 03 | Pre-shared Token Auth | lfd accepts remote connections |
 | 04 | API Surface Gating | Security hardening for remote-facing API |
 | — | Bundled Daemon Runtime | Concerto runs one bundled lfd from the app bundle; ephemeral port/token per launch; shared sqlite db; connection mode switcher (Bundled/Remote) in settings UI |
+| — | File-Based Remote Seeding | On first launch, Concerto seeds remote host/port from `~/.lf/concerto.yaml` (`connection.host`/`connection.port`), enforces TLS + static-token auth, reads token from Keychain via `<host>:<port>`, and ignores loopback hosts |
 
 Phase 05 (remote connection correctness) and Phase 06 (remote editor/terminal access) were folded into step 0 and are treated as shipped baseline behavior.
 
@@ -59,4 +61,5 @@ Phase 05 (remote connection correctness) and Phase 06 (remote editor/terminal ac
 - **Stale PR state without GitHub token.** Queue UX must degrade gracefully when no token is configured — treat as degraded mode, not hard failure.
 - **Remote file access depends on editor SSH support.** Cursor/VSCode/Zed each have different Remote SSH implementations. If any breaks or changes behavior, the one-click workflow breaks for that editor. Mitigate: "Copy SSH Command" as universal fallback.
 - **Agent timeout configuration surface.** `executor.agent_timeout` is daemon-config only. If users need per-wave or per-session timeouts, the config model needs rethinking. Defer until dogfooding reveals whether this is a real need.
+- **Remote bootstrap misconfig can look like generic connection failure.** If `~/.lf/concerto.yaml` is malformed or the `<host>:<port>` Keychain token is missing, startup can still land in a failing remote path. Mitigate during step 2: add explicit operator checks and troubleshooting guidance.
 - **Scope drift before dogfood.** New API/auth surface is easy to add before we have enough EC2/Mac Mini runtime data. Mitigate: run and fix deployment smoke first, then expand surface.

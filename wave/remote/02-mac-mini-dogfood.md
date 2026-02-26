@@ -32,6 +32,7 @@ Run `scripts/test_remote_smoke.py` against the Mac Mini target. The same script 
 - wave CRUD, run lifecycle, logs, SSE/WS
 - fork execution + cleanup behavior
 - remote editor/terminal launch behavior (manual — not covered by smoke script)
+- first-launch Concerto bootstrap path (`~/.lf/concerto.yaml` + Keychain `<host>:<port>` token), including UserDefaults-wins seed behavior and loopback rejection
 - config expectations (`executor.agent_timeout`, credentials, repo paths)
 
 ### Learnings from EC2
@@ -40,6 +41,7 @@ Run `scripts/test_remote_smoke.py` against the Mac Mini target. The same script 
 - Session checks depend on a configured harness (`--session-harness`, default `claude`) on the remote host.
 - TLS verification supports three modes: default, custom CA (`--ca-cert`), insecure (`--insecure`). Mac Mini may not need Caddy/TLS if running on a trusted network — document which mode applies.
 - Slow hosts may need higher `--events-timeout` and `--logs-timeout` tuning.
+- Concerto now supports file-based first-launch remote seeding; operators must ensure both `~/.lf/concerto.yaml` and matching Keychain token are present before smoke runs.
 
 Any divergence from EC2 must be either:
 
@@ -51,4 +53,5 @@ Any divergence from EC2 must be either:
 - Mac Mini lane runs the same smoke suite as EC2 with comparable outcomes
 - launchd lifecycle (boot/restart/crash recovery) is documented and tested
 - Known EC2-only or Mac-only differences are explicit and minimal
+- Remote bootstrap setup/diagnostics (config file shape, Keychain token account, reseed via cleared defaults) are documented for operators
 - Remote day-to-day use works on both lanes without special-case UI behavior

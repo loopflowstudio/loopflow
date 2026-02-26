@@ -2,6 +2,9 @@ import AVFAudio
 import AVFoundation
 import Foundation
 import Speech
+#if canImport(SpeechAnalysis)
+import SpeechAnalysis
+#endif
 @preconcurrency import WhisperKit
 
 public enum VoiceInputServiceError: LocalizedError, Equatable {
@@ -261,6 +264,7 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     }
 }
 
+#if canImport(SpeechAnalysis)
 @available(macOS 26.0, iOS 26.0, *)
 private actor AppleTranscriptBuffer {
     private var latestText = ""
@@ -494,6 +498,7 @@ final class AppleDictationVoiceInputEngine: VoiceInputEngine, @unchecked Sendabl
         }
     }
 }
+#endif
 
 @Observable
 @MainActor
@@ -542,9 +547,11 @@ public final class VoiceInputService {
     }
 
     private static func defaultEngineFactory() -> any VoiceInputEngine {
+        #if canImport(SpeechAnalysis)
         if #available(macOS 26.0, iOS 26.0, *) {
             return AppleDictationVoiceInputEngine()
         }
+        #endif
         return WhisperKitVoiceInputEngine()
     }
 

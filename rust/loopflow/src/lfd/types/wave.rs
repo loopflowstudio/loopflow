@@ -297,6 +297,14 @@ pub struct WaveRun {
     pub stack_status: WaveRunStackStatus,
     #[serde(default)]
     pub lineage_inferred: bool,
+    /// The branch this run targets. "main" means new branch off main (produce
+    /// PR). Any other value means check out that branch and push to it (no PR).
+    #[serde(default = "default_target_branch")]
+    pub target_branch: String,
+}
+
+fn default_target_branch() -> String {
+    "main".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,6 +369,7 @@ impl WaveRun {
             stack_group_id,
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
     }
 }

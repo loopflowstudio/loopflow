@@ -209,6 +209,7 @@ async fn enqueue_watch_for_repo(
                 reason.clone(),
                 from_sha,
                 to_sha,
+                "main",
             ),
         )
         .await;
@@ -875,6 +876,7 @@ mod tests {
             stack_group_id: "wave-group".to_string(),
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
     }
 

@@ -778,6 +778,7 @@ impl PostgresStore {
                         &run.stack_group_id,
                         &run.stack_status.as_i32(),
                         &(if run.lineage_inferred { 1i32 } else { 0i32 }),
+                        &run.target_branch,
                     ],
                 )
                 .await?;
@@ -814,6 +815,7 @@ impl PostgresStore {
                         &run.stack_group_id,
                         &run.stack_status.as_i32(),
                         &(if run.lineage_inferred { 1i32 } else { 0i32 }),
+                        &run.target_branch,
                         &run.id,
                     ],
                 )
@@ -1134,6 +1136,7 @@ impl PostgresStore {
                         &activation.from_sha,
                         &activation.to_sha,
                         &activation.queued_at,
+                        &activation.target_branch,
                     ],
                 )
                 .await?;
@@ -1155,6 +1158,7 @@ impl PostgresStore {
                         &activation.reason,
                         &activation.from_sha,
                         &activation.to_sha,
+                        &activation.target_branch,
                         &activation.id,
                     ],
                 )

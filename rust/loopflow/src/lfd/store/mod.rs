@@ -1797,6 +1797,7 @@ mod tests {
             stack_group_id: wave.id().to_string(),
             stack_status: WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         }
     }
 
@@ -2289,6 +2290,7 @@ mod tests {
                     stack_group_id: wave.id().to_string(),
                     stack_status: WaveRunStackStatus::Active,
                     lineage_inferred: false,
+                    target_branch: "main".to_string(),
                 }
             };
 

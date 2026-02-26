@@ -25,6 +25,7 @@ pub struct ActivationEnvelope {
     pub reason: String,
     pub from_sha: String,
     pub to_sha: String,
+    pub target_branch: String,
 }
 
 impl ActivationEnvelope {
@@ -35,6 +36,7 @@ impl ActivationEnvelope {
         reason: impl Into<String>,
         from_sha: impl Into<String>,
         to_sha: impl Into<String>,
+        target_branch: impl Into<String>,
     ) -> Self {
         Self {
             wave_id: wave_id.clone(),
@@ -43,6 +45,7 @@ impl ActivationEnvelope {
             reason: reason.into(),
             from_sha: from_sha.into(),
             to_sha: to_sha.into(),
+            target_branch: target_branch.into(),
         }
     }
 }
@@ -153,6 +156,7 @@ pub async fn enqueue_pending_activation(
                 from_sha: envelope.from_sha.clone(),
                 to_sha: envelope.to_sha.clone(),
                 queued_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                target_branch: envelope.target_branch.clone(),
             };
             if let Err(err) = store.create_pending_activation(&activation).await {
                 tracing::error!(
@@ -238,7 +242,12 @@ pub async fn spawn_immediate_activation(
         return None;
     }
 
-    let mut run = match create_parallel_wave_run(store, wave, &run_id).await {
+    let target = if envelope.target_branch.is_empty() || envelope.target_branch == "main" {
+        None
+    } else {
+        Some(envelope.target_branch.as_str())
+    };
+    let mut run = match create_parallel_wave_run(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(
@@ -252,6 +261,7 @@ pub async fn spawn_immediate_activation(
     if let Some(flow_override) = stimulus_flow_override {
         run.snapshot.flow = flow_override;
     }
+    run.target_branch = envelope.target_branch.clone();
     run.activation_log_id = Some(dispatch_log.id.clone());
     if let Err(err) = store.update_wave_run(&run).await {
         tracing::error!(
@@ -359,7 +369,12 @@ pub async fn dispatch_wave_if_ready(
         .flatten()
         .and_then(|stimulus| stimulus.flow);
 
-    let mut run = match create_wave_run_with_id(store, wave, &run_id).await {
+    let target = if activation.target_branch.is_empty() || activation.target_branch == "main" {
+        None
+    } else {
+        Some(activation.target_branch.as_str())
+    };
+    let mut run = match create_wave_run_with_id(store, wave, &run_id, target).await {
         Ok(run) => run,
         Err(err) => {
             tracing::error!(wave_id = %wave.id(), error = %err, "failed to create wave run for pending activation");
@@ -369,6 +384,7 @@ pub async fn dispatch_wave_if_ready(
     if let Some(flow_override) = stimulus_flow_override {
         run.snapshot.flow = flow_override;
     }
+    run.target_branch = activation.target_branch.clone();
     run.activation_log_id = Some(dispatch_log.id.clone());
     if let Err(err) = store.update_wave_run(&run).await {
         tracing::error!(wave_id = %wave.id(), run_id = %run.id, error = %err, "failed to attach activation log to run");
@@ -523,6 +539,7 @@ mod tests {
                 "watch poll",
                 "abc",
                 "def",
+                "main",
             ),
         )
         .await;
@@ -536,6 +553,7 @@ mod tests {
                 "push webhook",
                 "def",
                 "fed",
+                "main",
             ),
         )
         .await;
@@ -575,6 +593,7 @@ mod tests {
                     "fill queue",
                     "",
                     "",
+                    "main",
                 ),
             )
             .await;
@@ -592,6 +611,7 @@ mod tests {
                 "overflow",
                 "",
                 "",
+                "main",
             ),
         )
         .await;

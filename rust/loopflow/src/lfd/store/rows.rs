@@ -157,6 +157,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
     let stack_group_id = row.text(20)?;
     let stack_status = WaveRunStackStatus::from_i32(row.int(21)?);
     let lineage_inferred = row.int(22)? != 0;
+    let target_branch = row.text(23)?;
 
     let snapshot = WaveRunSnapshot {
         repo: row.text(10)?,
@@ -186,6 +187,7 @@ pub fn map_wave_run_row(row: &impl StoreRow) -> StoreResult<WaveRun> {
         stack_group_id,
         stack_status,
         lineage_inferred,
+        target_branch,
     })
 }
 
@@ -225,7 +227,7 @@ pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
     })
 }
 
-/// SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at
+/// SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch
 pub fn map_pending_activation_row(row: &impl StoreRow) -> StoreResult<PendingActivation> {
     Ok(PendingActivation {
         id: LfdId::from_raw(row.text(0)?),
@@ -236,6 +238,7 @@ pub fn map_pending_activation_row(row: &impl StoreRow) -> StoreResult<PendingAct
         from_sha: row.text(5)?,
         to_sha: row.text(6)?,
         queued_at: row.bigint(7)?,
+        target_branch: row.text(8)?,
     })
 }
 

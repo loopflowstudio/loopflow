@@ -134,6 +134,7 @@ pub struct WaveRunDto {
     pub status: String,
     pub local_worktree: String,
     pub remote_branch: String,
+    pub target_branch: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr: Option<PullRequestDto>,
     pub started_at: Option<String>,
@@ -332,6 +333,7 @@ pub fn wave_run_dto(
         status: wave_run_status_str(run.status),
         local_worktree: run.worktree,
         remote_branch: run.branch,
+        target_branch: run.target_branch,
         pr: run.snapshot.pr.map(|pr| PullRequestDto {
             url: pr.url,
             number: pr.number,

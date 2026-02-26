@@ -180,55 +180,55 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             ORDER BY started_at DESC",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs\n             ORDER BY started_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             WHERE wave_id = {p1}\n             ORDER BY started_at DESC",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs\n             WHERE wave_id = {p1}\n             ORDER BY started_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             ORDER BY started_at DESC\n             LIMIT {p1}",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs\n             ORDER BY started_at DESC\n             LIMIT {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             WHERE wave_id = {p1}\n             ORDER BY started_at DESC\n             LIMIT {p2}",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs\n             WHERE wave_id = {p1}\n             ORDER BY started_at DESC\n             LIMIT {p2}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs WHERE id = {p1}",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             WHERE wave_id = {p1} AND status IN ({p2}, {p3}, {p4})\n             ORDER BY started_at DESC LIMIT 1",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs\n             WHERE wave_id = {p1} AND status IN ({p2}, {p3}, {p4})\n             ORDER BY started_at DESC LIMIT 1",
         sqlite_override: None,
         postgres_override: Some(
-            "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             WHERE wave_id = {p1} AND status = ANY({p2})\n             ORDER BY started_at DESC LIMIT 1",
+            "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs\n             WHERE wave_id = {p1} AND status = ANY({p2})\n             ORDER BY started_at DESC LIMIT 1",
         ),
     },
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs WHERE wave_id = {p1}\n             ORDER BY started_at DESC LIMIT 1",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs WHERE wave_id = {p1}\n             ORDER BY started_at DESC LIMIT 1",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO wave_runs (\n                id, wave_id, iteration, step_index, status, worktree, branch,\n                started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                lineage_inferred\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14}, {p15}, {p16}, {p17}, {p18}, {p19}, {p20}, {p21}, {p22}, {p23})",
+        template: "INSERT INTO wave_runs (\n                id, wave_id, iteration, step_index, status, worktree, branch,\n                started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                lineage_inferred, target_branch\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14}, {p15}, {p16}, {p17}, {p18}, {p19}, {p20}, {p21}, {p22}, {p23}, {p24})",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "UPDATE wave_runs\n             SET iteration = {p1}, step_index = {p2}, status = {p3}, worktree = {p4},\n                 branch = {p5}, started_at = {p6}, ended_at = {p7}, error = {p8},\n                 snapshot_repo = {p9}, snapshot_flow = {p10}, snapshot_direction = {p11},\n                 snapshot_area = {p12}, snapshot_pr = {p13}, flow_parents = {p14},\n                 activation_log_id = {p15}, parent_run_id = {p16},\n                 parent_pr_number = {p17}, stack_position = {p18}, stack_group_id = {p19},\n                 stack_status = {p20}, lineage_inferred = {p21}\n             WHERE id = {p22}",
+        template: "UPDATE wave_runs\n             SET iteration = {p1}, step_index = {p2}, status = {p3}, worktree = {p4},\n                 branch = {p5}, started_at = {p6}, ended_at = {p7}, error = {p8},\n                 snapshot_repo = {p9}, snapshot_flow = {p10}, snapshot_direction = {p11},\n                 snapshot_area = {p12}, snapshot_pr = {p13}, flow_parents = {p14},\n                 activation_log_id = {p15}, parent_run_id = {p16},\n                 parent_pr_number = {p17}, stack_position = {p18}, stack_group_id = {p19},\n                 stack_status = {p20}, lineage_inferred = {p21}, target_branch = {p22}\n             WHERE id = {p23}",
         sqlite_override: None,
         postgres_override: None,
     },
     // NOTE: 'ci-fix' literal must match types::CI_FIX_FLOW constant.
     QueryDef {
-        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred\n             FROM wave_runs\n             WHERE wave_id = {p1} AND snapshot_flow <> 'ci-fix'\n             ORDER BY stack_position ASC, started_at ASC, id ASC",
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,\n                    snapshot_area, snapshot_pr, flow_parents, activation_log_id,\n                    parent_run_id, parent_pr_number, stack_position, stack_group_id, stack_status,\n                    lineage_inferred, target_branch\n             FROM wave_runs\n             WHERE wave_id = {p1} AND snapshot_flow <> 'ci-fix'\n             ORDER BY stack_position ASC, started_at ASC, id ASC",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -285,17 +285,17 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at\n             FROM pending_activations WHERE wave_id = {p1} ORDER BY queued_at",
+        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} ORDER BY queued_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO pending_activations (id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8})",
+        template: "INSERT INTO pending_activations (id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9})",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "UPDATE pending_activations SET source = {p1}, reason = {p2}, from_sha = {p3}, to_sha = {p4} WHERE id = {p5}",
+        template: "UPDATE pending_activations SET source = {p1}, reason = {p2}, from_sha = {p3}, to_sha = {p4}, target_branch = {p5} WHERE id = {p6}",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -305,7 +305,7 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at\n             FROM pending_activations WHERE wave_id = {p1} AND stimulus_id = {p2}",
+        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} AND stimulus_id = {p2}",
         sqlite_override: None,
         postgres_override: None,
     },

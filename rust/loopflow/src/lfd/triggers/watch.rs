@@ -90,6 +90,7 @@ async fn check_watch_stimuli(
                     reason,
                     &result.from_sha,
                     &result.current_sha,
+                    "main",
                 );
                 if wave.serialized {
                     let _ = enqueue_pending_activation(store, event_hub, envelope).await;

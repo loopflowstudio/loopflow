@@ -15,7 +15,7 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::ensure_wave_worktree;
 use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
 use crate::lfd::http::dto::{
-    activation_log_dto, stimulus_dto, signal_str, ActivationLogDto, CombineResponse,
+    activation_log_dto, signal_str, stimulus_dto, ActivationLogDto, CombineResponse,
     CombineResponseResult, ContinueWaveResponse, DeletedResourceResponse, ErrorResponse,
     LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse, RunWaveResponse,
     StopWaveResponse, WaveDto,
@@ -730,6 +730,7 @@ async fn start_wave_run(
         "manual run requested via API",
         "",
         "",
+        "main",
     );
 
     if wave.serialized {

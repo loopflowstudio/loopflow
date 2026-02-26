@@ -92,6 +92,7 @@ async fn handle_ci_failure_event(
         reason,
         &activation.commit_sha,
         &activation.commit_sha,
+        &activation.branch,
     );
 
     let wave = store

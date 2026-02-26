@@ -154,6 +154,12 @@ pub struct PendingActivation {
     pub from_sha: String,
     pub to_sha: String,
     pub queued_at: i64,
+    #[serde(default = "default_target_branch")]
+    pub target_branch: String,
+}
+
+fn default_target_branch() -> String {
+    "main".to_string()
 }
 
 impl PendingActivation {
@@ -168,6 +174,7 @@ impl PendingActivation {
             from_sha: String::new(),
             to_sha: String::new(),
             queued_at: OffsetDateTime::now_utc().unix_timestamp(),
+            target_branch: "main".to_string(),
         }
     }
 }

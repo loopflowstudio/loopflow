@@ -36,6 +36,7 @@ pub async fn create_parallel_wave_run(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
+    target_branch: Option<&str>,
 ) -> anyhow::Result<WaveRun> {
     let stack_runs = store.list_stack_runs(wave.id()).await?;
     let last_run = stack_runs.last().cloned();
@@ -55,7 +56,8 @@ pub async fn create_parallel_wave_run(
         .unwrap_or_else(|| wave.id().to_string());
 
     let main_repo = Path::new(wave.repo());
-    let (wt_path, branch) = create_run_worktree(main_repo, wave.name(), run_id.as_str())?;
+    let (wt_path, branch) =
+        create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?;
 
     let run = WaveRun {
         id: run_id.clone(),
@@ -83,6 +85,7 @@ pub async fn create_parallel_wave_run(
         stack_group_id,
         stack_status: WaveRunStackStatus::Active,
         lineage_inferred: false,
+        target_branch: target_branch.unwrap_or("main").to_string(),
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
@@ -96,10 +99,14 @@ pub async fn create_parallel_wave_run(
 }
 
 /// Create a wave run with a worktree and branch for the wave.
+///
+/// For serialized waves targeting a specific branch (non-"main"),
+/// uses a per-run worktree instead of the shared wave worktree.
 pub async fn create_wave_run_with_id(
     store: &SharedStore,
     wave: &Wave,
     run_id: &LfdId,
+    target_branch: Option<&str>,
 ) -> anyhow::Result<WaveRun> {
     let stack_runs = store.list_stack_runs(wave.id()).await?;
     let last_run = stack_runs.last().cloned();
@@ -119,7 +126,18 @@ pub async fn create_wave_run_with_id(
         .unwrap_or_else(|| wave.id().to_string());
 
     let main_repo = Path::new(wave.repo());
-    let (wt_path, branch) = ensure_wave_worktree(main_repo, wave.name())?;
+
+    // Targeted activations (non-main branch) get their own worktree
+    // even for serialized waves, since the wave's shared worktree is
+    // on a different branch.
+    let is_targeted = target_branch
+        .map(|b| !b.is_empty() && b != "main")
+        .unwrap_or(false);
+    let (wt_path, branch) = if is_targeted {
+        create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?
+    } else {
+        ensure_wave_worktree(main_repo, wave.name())?
+    };
 
     let run = WaveRun {
         id: run_id.clone(),
@@ -147,6 +165,7 @@ pub async fn create_wave_run_with_id(
         stack_group_id,
         stack_status: WaveRunStackStatus::Active,
         lineage_inferred: false,
+        target_branch: target_branch.unwrap_or("main").to_string(),
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
@@ -180,10 +199,15 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
 /// worktree so concurrent runs don't stomp on each other's files.
 /// The worktree is placed at `{wave-worktree}-run-{hash}` and tracks the
 /// same remote branch as the wave worktree.
+///
+/// When `target_branch` is `Some` and not `"main"`, the worktree tracks
+/// that branch directly (e.g. a PR branch for CI-fix activations) instead
+/// of the wave's own branch.
 pub fn create_run_worktree(
     main_repo: &Path,
     wave_name: &str,
     run_id: &str,
+    target_branch: Option<&str>,
 ) -> anyhow::Result<(String, String)> {
     use crate::engine::git::{worktree_add, WorktreeBranch};
 
@@ -197,8 +221,18 @@ pub fn create_run_worktree(
             .unwrap_or("wave")
     ));
 
-    // Ensure the base wave worktree exists so we know the branch.
-    let branch = if base_wt.exists() {
+    // Determine which remote branch to track.
+    let is_targeted = target_branch
+        .map(|b| !b.is_empty() && b != "main")
+        .unwrap_or(false);
+
+    let branch = if is_targeted {
+        // Targeted activation: track the specified branch directly.
+        let tb = target_branch.expect("checked above");
+        fetch(main_repo, "origin", tb)?;
+        tb.to_string()
+    } else if base_wt.exists() {
+        // Normal: reuse the wave worktree's branch.
         let branch = current_branch(&base_wt)?.unwrap_or_default();
         sync_existing_worktree(main_repo, &base_wt, &branch)?;
         branch

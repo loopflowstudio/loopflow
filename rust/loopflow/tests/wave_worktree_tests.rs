@@ -71,7 +71,7 @@ async fn wave_run_creates_worktree() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id)
+    let run = create_wave_run_with_id(&store, &wave, &run_id, None)
         .await
         .unwrap();
 
@@ -92,7 +92,7 @@ async fn wave_run_creates_branch() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id)
+    let run = create_wave_run_with_id(&store, &wave, &run_id, None)
         .await
         .unwrap();
 
@@ -116,7 +116,7 @@ async fn wave_run_worktree_follows_naming_convention() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_wave_run_with_id(&store, &wave, &run_id)
+    let run = create_wave_run_with_id(&store, &wave, &run_id, None)
         .await
         .unwrap();
 
@@ -136,13 +136,13 @@ async fn wave_run_reuses_existing_worktree() {
     store.create_wave(&wave).await.unwrap();
 
     // First run creates the worktree
-    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
     let wt_path = run1.worktree.clone();
 
     // Second run reuses the existing worktree
-    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
     assert_eq!(run2.worktree, wt_path, "should reuse existing worktree");
@@ -156,10 +156,10 @@ async fn wave_run_records_parent_lineage() {
     let wave = make_wave(&repo.path().to_string_lossy(), "lineage");
     store.create_wave(&wave).await.unwrap();
 
-    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+    let run1 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
-    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new())
+    let run2 = create_wave_run_with_id(&store, &wave, &LfdId::new(), None)
         .await
         .unwrap();
 

@@ -100,6 +100,7 @@ async fn tick_loop_waves(
             "loop ticker observed idle wave",
             "",
             "",
+            "main",
         );
         if wave.serialized {
             let _ = enqueue_pending_activation(store, event_hub, envelope).await;

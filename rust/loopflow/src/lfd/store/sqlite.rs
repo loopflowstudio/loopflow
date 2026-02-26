@@ -689,6 +689,7 @@ impl SqliteStore {
                 run.stack_group_id,
                 run.stack_status.as_i32() as i64,
                 if run.lineage_inferred { 1i64 } else { 0i64 },
+                run.target_branch,
             ],
         )?;
         Ok(())
@@ -721,6 +722,7 @@ impl SqliteStore {
                 run.stack_group_id,
                 run.stack_status.as_i32() as i64,
                 if run.lineage_inferred { 1i64 } else { 0i64 },
+                run.target_branch,
                 run.id,
             ],
         )?;
@@ -1009,6 +1011,7 @@ impl SqliteStore {
                 activation.from_sha,
                 activation.to_sha,
                 activation.queued_at,
+                activation.target_branch,
             ],
         )?;
         Ok(())
@@ -1023,6 +1026,7 @@ impl SqliteStore {
                 activation.reason,
                 activation.from_sha,
                 activation.to_sha,
+                activation.target_branch,
                 activation.id
             ],
         )?;

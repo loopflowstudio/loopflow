@@ -91,6 +91,7 @@ async fn check_cron_stimuli(
                 reason,
                 "",
                 "",
+                "main",
             );
             if wave.serialized {
                 let _ = enqueue_pending_activation(store, event_hub, envelope).await;

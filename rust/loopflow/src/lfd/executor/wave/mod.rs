@@ -33,7 +33,7 @@ use crate::lfd::triggers::{
 };
 use crate::lfd::types::{
     ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Wave, WaveRun,
-    WaveRunStatus, WaveStatus, CI_FIX_FLOW,
+    WaveRunStatus, WaveStatus,
 };
 
 use super::docker::DockerExecutor;
@@ -402,7 +402,11 @@ impl WaveExecutor {
                         .unwrap_or(false);
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
-                    let should_manage_pr = run.snapshot.flow != CI_FIX_FLOW;
+                    // Activations targeting "main" produce new branches and PRs.
+                    // Activations targeting a specific branch (e.g. CI-fix on a PR branch)
+                    // push directly to that branch — no new PR needed.
+                    let should_manage_pr =
+                        run.target_branch == "main" || run.target_branch.is_empty();
                     if should_manage_pr {
                         let worktree = run.worktree.clone();
                         let wave_name = wave.name().clone();
@@ -484,7 +488,8 @@ impl WaveExecutor {
                     }
 
                     self.store.update_wave_run(&run).await?;
-                    self.trigger_listeners_on_completion(wave.id()).await;
+                    self.trigger_listeners_on_completion(wave.id(), &run.branch)
+                        .await;
                     if should_manage_pr && run.snapshot.pr.is_some() {
                         if let Err(err) = crate::lfd::queue::reconcile_wave_queue(
                             &self.store,
@@ -521,7 +526,7 @@ impl WaveExecutor {
         }
     }
 
-    async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId) {
+    async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId, source_branch: &str) {
         let stimuli = match self
             .store
             .list_stimuli_by_signal(Signal::Listen.as_i32())
@@ -567,6 +572,7 @@ impl WaveExecutor {
                 reason,
                 "",
                 "",
+                source_branch,
             );
             let activated = if listener_wave.serialized {
                 let enqueued = matches!(
@@ -1043,6 +1049,7 @@ mod tests {
             stack_group_id: wave_id.to_string(),
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         };
         store
             .create_wave_run(&run)
@@ -1093,6 +1100,7 @@ mod tests {
             stack_group_id: wave.id().to_string(),
             stack_status: crate::lfd::types::WaveRunStackStatus::Active,
             lineage_inferred: false,
+            target_branch: "main".to_string(),
         };
         store
             .create_wave_run(&run)

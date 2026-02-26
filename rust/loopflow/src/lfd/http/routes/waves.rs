@@ -217,6 +217,8 @@ pub async fn create_wave_handler(
     if existing {
         return Err(wave_name_exists_error(&name));
     }
+    let listen_source_wave_id =
+        resolve_listen_source_wave_id(&state.store, &repo, &name, config_stimulus.as_ref()).await?;
 
     let mut wave = Wave {
         id: id.clone(),
@@ -242,37 +244,10 @@ pub async fn create_wave_handler(
     }
 
     if let Some(parsed) = config_stimulus {
-        let source_wave_id = if parsed.kind == StimulusKind::Listen {
-            let source = parsed
-                .source
-                .as_deref()
-                .expect("listen stimulus parsing requires source");
-            let source_repo = parsed.source_repo.as_deref().unwrap_or_else(|| wave.repo());
-            let resolved = match resolve_wave_id_in_repo(&state.store, source_repo, source).await {
-                Ok(resolved) => resolved,
-                Err(err) => {
-                    let wave_id = wave.id().clone();
-                    let _ = state.store.delete_wave(&wave_id).await;
-                    return Err(err);
-                }
-            };
-            if resolved == *wave.id() {
-                let wave_id = wave.id().clone();
-                let _ = state.store.delete_wave(&wave_id).await;
-                return Err(api_error(
-                    StatusCode::BAD_REQUEST,
-                    "listen stimulus cannot target the same wave",
-                ));
-            }
-            Some(resolved)
-        } else {
-            None
-        };
-
         let stimulus = Stimulus {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
-            source_wave_id,
+            source_wave_id: listen_source_wave_id.clone(),
             kind: parsed.kind,
             cron: parsed.cron,
             last_main_sha: None,
@@ -448,6 +423,34 @@ fn parse_stimulus(
         source,
         source_repo,
     })
+}
+
+async fn resolve_listen_source_wave_id(
+    store: &crate::lfd::store::SharedStore,
+    repo: &str,
+    wave_name: &str,
+    parsed: Option<&ParsedStimulus>,
+) -> Result<Option<LfdId>, (StatusCode, Json<ErrorResponse>)> {
+    let Some(parsed) = parsed else {
+        return Ok(None);
+    };
+    if parsed.kind != StimulusKind::Listen {
+        return Ok(None);
+    }
+    let source = parsed
+        .source
+        .as_deref()
+        .expect("listen stimulus parsing requires source");
+    let source_repo = parsed.source_repo.as_deref().unwrap_or(repo);
+    if source_repo == repo && source == wave_name {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "listen stimulus cannot target the same wave",
+        ));
+    }
+    resolve_wave_id_in_repo(store, source_repo, source)
+        .await
+        .map(Some)
 }
 
 async fn resolve_wave_id_in_repo(
@@ -1604,5 +1607,66 @@ mod tests {
             .await
             .expect_err("missing source wave should error");
         assert_eq!(err.0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn resolve_listen_source_wave_id_rejects_self_target() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let parsed = ParsedStimulus {
+            kind: StimulusKind::Listen,
+            cron: None,
+            source: Some("designer".to_string()),
+            source_repo: None,
+        };
+        let err = resolve_listen_source_wave_id(&store, "/tmp/repo", "designer", Some(&parsed))
+            .await
+            .expect_err("self target should be rejected");
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn resolve_listen_source_wave_id_resolves_cross_repo_source() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("store should open"),
+        );
+
+        let source_wave = Wave {
+            id: LfdId::new(),
+            name: "infra".to_string(),
+            repo: "/tmp/source-repo".to_string(),
+            flow: "build".to_string(),
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+        };
+        store
+            .create_wave(&source_wave)
+            .await
+            .expect("create source wave");
+
+        let parsed = ParsedStimulus {
+            kind: StimulusKind::Listen,
+            cron: None,
+            source: Some("infra".to_string()),
+            source_repo: Some("/tmp/source-repo".to_string()),
+        };
+        let resolved =
+            resolve_listen_source_wave_id(&store, "/tmp/listener-repo", "designer", Some(&parsed))
+                .await
+                .expect("source should resolve");
+        assert_eq!(resolved, Some(source_wave.id().clone()));
     }
 }

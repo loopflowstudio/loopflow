@@ -2,6 +2,8 @@
 
 Multiple devices connect to the same lfd. See the same waves, same sessions, same output.
 
+**Status: in progress** (updated February 26, 2026)
+
 ## What to build
 
 Multiple Concerto clients connect to the same lfd and see consistent state. No client awareness — just a shared view. Both clients see the transcript, both can send messages. Like two browser tabs open to the same chat.
@@ -33,15 +35,51 @@ Done in `MobileWaveDetailView` with shared behavior parity:
 - Action taps use the existing shared path: `await sessionState.sendSuggestedAction(action)`.
 - Session lifecycle/context (`configureClientContext`, `onAppear`, `onDisappear`) is owned by the iOS detail container so actions stay live while users watch Output.
 
-### ~~Manual iOS visual verification for action rail~~ ingested → scratch/mobile-complete-stage-03.md
+### ~~Verify concurrent clients work~~ shipped (February 26, 2026)
 
-### ~~Suggested action consistency across clients~~ ingested → scratch/mobile-complete-stage-03.md
+Added `tests/e2e/test_concurrent_clients.py` and CI coverage in the `e2e-smoke` job to verify:
 
-### ~~Connection UX on iOS~~ ingested → scratch/mobile-complete-stage-03.md
+- dual WebSocket wave event fanout
+- dual wave log streaming
+- dual SSE session event fanout
+- chat input visibility across two subscribers
+- `suggested_actions` event parseability in the Python client
 
-### ~~Reconnect resilience~~ ingested → scratch/mobile-complete-stage-03.md
+Validation command:
 
-### ~~Verify concurrent clients work~~ ingested → scratch/mobile-verify-concurrent-clients.md
+```bash
+uv run pytest tests/e2e/test_api_smoke.py tests/e2e/test_concurrent_clients.py -v
+```
+
+### iOS foreground reconnect and stream restart
+
+On iOS foreground resume, verify connection health and restart active streams:
+
+- Add `scenePhase` handling in `MobileRootView` to call `await repoState.checkConnectionHealth()` when the app becomes active.
+- Add `RepoState.checkConnectionHealth()` to ping `GET /health` for connected remotes and mark `.disconnected(.networkUnavailable)` on failure (to trigger existing reconnect machinery).
+- Add `scenePhase` handling in `MobileWaveDetailView` to call `outputBuffer.startStreaming(waveId:)` and `await sessionState.onAppear()` on foreground.
+
+### Cross-client suggested action clearing
+
+Clear stale suggested actions when any client starts a new turn:
+
+```swift
+case .turnStarted(let turnId):
+    currentTurnId = turnId
+    turnState = .running
+    clearSuggestedActions()
+```
+
+This keeps action buttons in sync when input comes from another connected client.
+
+### Manual iOS visual verification script
+
+Add `scripts/verify_mobile_stage03.py` to run iOS simulator setup/build and print a manual checklist for:
+
+- iPhone 17 Pro action rail spacing + keyboard overlap
+- iPad Pro 13-inch (M5) adaptive action layout + tap ergonomics
+- background/foreground reconnect recovery
+- cross-client action clearing behavior (two-device validation)
 
 ## Constraints
 

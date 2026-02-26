@@ -62,6 +62,7 @@ pub struct LfdConfig {
     pub service_manager: ServiceManager,
     pub runtime_backend: RuntimeBackend,
     pub storage: StorageType,
+    pub credential_socket: Option<String>,
     pub auth: AuthConfig,
     pub executor: ExecutorConfig,
     pub github: GitHubConfig,
@@ -98,6 +99,8 @@ struct RawLfdConfig {
     runtime_backend: Option<RuntimeBackend>,
     storage: Option<StorageType>,
     #[serde(default)]
+    credential_socket: Option<String>,
+    #[serde(default)]
     auth: AuthConfig,
     #[serde(default)]
     executor: RawExecutorConfig,
@@ -127,6 +130,13 @@ impl RawLfdConfig {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
                 self.auth.token = Some(SecretString::new(trimmed.to_string()));
+            }
+        }
+
+        if let Ok(value) = std::env::var("LFD_CREDENTIAL_SOCKET") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.credential_socket = Some(trimmed.to_string());
             }
         }
 
@@ -310,6 +320,7 @@ impl RawLfdConfig {
             service_manager: profile.service_manager,
             runtime_backend: profile.runtime_backend,
             storage: profile.storage,
+            credential_socket: self.credential_socket,
             auth: self.auth,
             executor: ExecutorConfig {
                 r#type: profile.executor_type,
@@ -814,6 +825,7 @@ mod tests {
         assert_eq!(config.mode, Mode::Native);
         assert_eq!(config.runtime_backend, RuntimeBackend::Native);
         assert_eq!(config.storage, StorageType::Sqlite);
+        assert_eq!(config.credential_socket, None);
         assert_eq!(config.executor.r#type, ExecutorType::Local);
         assert_eq!(config.executor.agent_timeout, Duration::from_secs(45 * 60));
         assert_eq!(
@@ -895,6 +907,7 @@ executor:
             "LFD_MODE",
             "LFD_AUTH_PROVIDER",
             "LFD_AUTH_TOKEN",
+            "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",
             "LFD_EXECUTOR_IMAGE",
             "LFD_EXECUTOR_AGENT_TIMEOUT",
@@ -916,6 +929,7 @@ executor:
         std::env::set_var("LFD_MODE", "container");
         std::env::set_var("LFD_AUTH_PROVIDER", "static");
         std::env::set_var("LFD_AUTH_TOKEN", "env-token-456");
+        std::env::set_var("LFD_CREDENTIAL_SOCKET", "/tmp/concerto-auth.sock");
         std::env::set_var(
             "LFD_EXECUTOR_CREDENTIALS_ENV",
             "ANTHROPIC_API_KEY,OPENAI_API_KEY",
@@ -944,6 +958,10 @@ executor:
         assert_eq!(resolved.mode, Mode::Container);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+        assert_eq!(
+            resolved.credential_socket,
+            Some("/tmp/concerto-auth.sock".to_string())
+        );
         assert_eq!(resolved.auth.provider, "static");
         assert_eq!(
             resolved
@@ -1055,6 +1073,7 @@ http_security:
             "LFD_MODE",
             "LFD_AUTH_PROVIDER",
             "LFD_AUTH_TOKEN",
+            "LFD_CREDENTIAL_SOCKET",
             "LFD_EXECUTOR_CREDENTIALS_ENV",
             "LFD_EXECUTOR_IMAGE",
             "LFD_EXECUTOR_AGENT_TIMEOUT",

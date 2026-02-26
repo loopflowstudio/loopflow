@@ -1,6 +1,6 @@
 # Tmux
 
-loopflow.tmux: a TPM-installable tmux surface for loopflow. Status, layouts, and action bindings first. Container lifecycle second.
+loopflow.tmux: a TPM-installable tmux surface for loopflow. Status, layouts, keybindings, and container mode bootstrap.
 
 ## Product intent
 
@@ -43,11 +43,6 @@ The plugin must feel reliable in two environments:
 - tmux plugin load must **not** auto-start a container.
 - keybindings and status must fail soft with clear `tmux display-message`.
 
-## Remaining artifacts
-
-- `scripts/lfd` (phase 04)
-- `scripts/lf-up.sh` (phase 04)
-
 ## Quality bars
 
 ### UX
@@ -78,14 +73,6 @@ The plugin must feel reliable in two environments:
 6. large terminal (>=200 cols)
 7. slow `lfq` / daemon unavailable
 8. repos with and without git remotes
-
-## Rollout
-
-Phases 01–03 (plugin skeleton, layouts, keybindings) shipped. Next:
-
-1. Dogfood plugin with container mode disabled by default.
-2. Ship 04 and enable `auto` container detection.
-3. Harden with failure telemetry and operator docs.
 
 ## Risks and mitigations
 

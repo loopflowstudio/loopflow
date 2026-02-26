@@ -150,10 +150,20 @@ fn run_fork(fork: &ConcreteFork, message: Option<&str>, cli: &Cli, repo: &Path) 
         };
 
         if exit_code != 0 || err.is_some() {
+            let failed_step = step_results
+                .iter()
+                .rev()
+                .find(|s| s.exit_code != 0)
+                .map(|s| s.name.as_str());
             if let Some(err) = err {
                 eprintln!(
                     "fork branch {} failed ({}): {}",
                     task.index, task.branch_name, err
+                );
+            } else if let Some(step_name) = failed_step {
+                eprintln!(
+                    "fork branch {} failed ({}) at step '{}': exited with {}",
+                    task.index, task.branch_name, step_name, exit_code
                 );
             } else {
                 eprintln!(

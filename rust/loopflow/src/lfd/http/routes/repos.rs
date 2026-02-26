@@ -61,10 +61,7 @@ pub async fn add_repo_handler(
         .map_err(map_store_error)?
         .len() as u32;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(repo_to_dto(repo, wave_count)),
-    ))
+    Ok((StatusCode::CREATED, Json(repo_to_dto(repo, wave_count))))
 }
 
 pub async fn remove_repo_handler(

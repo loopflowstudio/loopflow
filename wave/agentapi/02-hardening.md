@@ -27,6 +27,7 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 - SSE lag recovery and conformance tests were originally listed as "not worth doing separately." Both turned out to be essential — lag recovery for correctness under real reconnect patterns, conformance tests for catching event mapping bugs that only appear with specific provider output sequences.
 - Claude's reader-task-stop race was more nuanced than expected. Draining the reader before shutdown and handling stop-during-starting required careful state machine work.
 - Unbounded `mpsc` is the right call for harness→bridge. Bounded channels risk subprocess backpressure, which is worse than memory growth.
+- Orphan cleanup was straightforward — no schema migration needed. A runtime registry file (`~/.lf/runtime/opencode-servers.json`) with ownership tracking was sufficient. Ownership-based reaping (check owner PID liveness, verify process looks like `opencode serve`) avoids the blast radius of name-based approaches like `pkill`.
 
 ## What the adapter taught us
 
@@ -38,7 +39,7 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 ## Done when
 
 - ~~Dead harness processes detected and session marked `failed`~~ ✓
-- lfd restart doesn't leave orphaned active sessions or orphaned `opencode serve` processes
+- ~~lfd restart doesn't leave orphaned active sessions or orphaned `opencode serve` processes~~ ✓
 - ~~Session end advances wave run~~ ✓ (tick-driven)
 - Conformance replay tests pass for all three harnesses with recorded traces
 - SSE/stream disconnect triggers reconnect with backoff, not terminal failure

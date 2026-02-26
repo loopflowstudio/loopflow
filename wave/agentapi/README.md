@@ -34,7 +34,7 @@ lfd exposes a harness-agnostic session API. Clients create sessions, send input,
 - **Container-only safety model.** No tool-level permission routing means local (non-container) sessions run with full agent permissions. Acceptable for v1 but becomes a gap if local interactive sessions grow in usage.
 - **SSE replay scalability (mitigated).** Long sessions accumulate events; full replay on reconnect grows linearly. Store-backed SSE lag recovery (backfill on `Lagged`) handles mid-stream reconnects without data loss, but total event volume still grows unbounded. Not a problem at current scale.
 - **Unbounded harness→bridge channel.** Unbounded `mpsc` chosen for correctness (no dropped events). Memory grows with unconsumed burst volume. Acceptable at current session lengths but worth monitoring.
-- **lfd restart orphans.** `SessionRuntime` lives in memory only. Active sessions become orphans on lfd restart. Events survive in the store but sessions need a startup recovery pass to mark orphaned `active`/`starting` sessions as `failed`.
+- **lfd restart orphans (resolved).** Startup recovery pass now marks orphaned `active`/`starting` sessions as `failed` and reaps orphaned `opencode serve` processes via an ownership-based runtime registry. Remaining edge: PID reuse can theoretically cause a false match, but the ownership + process-name check makes this unlikely in practice.
 
 ## Metrics
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 import inspect
 import json
 import os
@@ -37,149 +38,125 @@ _INPUT_EVENT_TYPES = {
 }
 
 
-def test_both_ws_clients_receive_wave_events(lfd_runtime: LfdRuntime) -> None:
-    client = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
+@pytest.fixture
+def session_id(lfd_runtime: LfdRuntime) -> Iterator[str]:
+    (lfd_runtime.repo_dir / ".lf").mkdir(parents=True, exist_ok=True)
+    created_session_id = _create_session(lfd_runtime)
     try:
-        asyncio.run(_assert_dual_ws_wave_event(client, lfd_runtime))
+        yield created_session_id
     finally:
-        client.close()
+        _stop_session(lfd_runtime, created_session_id)
 
 
-def test_both_clients_stream_output(lfd_runtime: LfdRuntime) -> None:
-    client = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
-    try:
-        wave = client.create_wave(_wave_name("concurrent-output"), repo=str(lfd_runtime.repo_dir))
-        lines: dict[str, str] = {}
-        errors: list[str] = []
-        lock = threading.Lock()
-
-        def collect(name: str) -> None:
-            try:
-                line = _read_first_wave_log_line(
-                    base_url=lfd_runtime.base_url,
-                    token=lfd_runtime.token,
-                    wave_id=wave.id,
-                    timeout_seconds=_TIMEOUT_SECONDS,
-                )
-                with lock:
-                    lines[name] = line
-            except Exception as exc:
-                with lock:
-                    errors.append(f"{name}: {type(exc).__name__}: {exc}")
-
-        thread_a = threading.Thread(target=collect, args=("client_a",), daemon=True)
-        thread_b = threading.Thread(target=collect, args=("client_b",), daemon=True)
-        thread_a.start()
-        thread_b.start()
-
-        time.sleep(0.25)
-        client.run_wave(wave.id)
-
-        thread_a.join(_TIMEOUT_SECONDS + 2)
-        thread_b.join(_TIMEOUT_SECONDS + 2)
-
-        assert not errors, f"log stream readers failed: {errors}"
-        assert lines.keys() == {"client_a", "client_b"}, (
-            f"both log readers should receive a line, got {lines}"
-        )
-        assert lines["client_a"] == lines["client_b"], (
-            "both clients should observe the same first output line"
-        )
-    finally:
-        client.close()
-
-
-def test_both_clients_receive_session_events(lfd_runtime: LfdRuntime) -> None:
-    _ensure_session_repo_root(lfd_runtime)
-    session_id = _create_session(lfd_runtime)
-
+@pytest.fixture
+def dual_clients(lfd_runtime: LfdRuntime) -> Iterator[tuple[Client, Client]]:
     client_a = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
     client_b = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
     try:
-        events_a: list[str] = []
-        events_b: list[str] = []
-
-        thread_a = threading.Thread(
-            target=_collect_session_event_types,
-            args=(client_a, session_id, events_a),
-            daemon=True,
-        )
-        thread_b = threading.Thread(
-            target=_collect_session_event_types,
-            args=(client_b, session_id, events_b),
-            daemon=True,
-        )
-        thread_a.start()
-        thread_b.start()
-        thread_a.join(_TIMEOUT_SECONDS + 2)
-        thread_b.join(_TIMEOUT_SECONDS + 2)
-
-        assert events_a, "client A should receive at least one session event"
-        assert events_b, "client B should receive at least one session event"
-        assert events_a[0] == "status_changed", f"unexpected first event: {events_a[0]}"
-        assert events_b[0] == "status_changed", f"unexpected first event: {events_b[0]}"
+        yield client_a, client_b
     finally:
-        _stop_session(lfd_runtime, session_id)
         client_a.close()
         client_b.close()
 
 
-def test_chat_input_from_either_client_visible_to_both(lfd_runtime: LfdRuntime) -> None:
-    _ensure_session_repo_root(lfd_runtime)
-    session_id = _create_session(lfd_runtime)
+def test_both_ws_clients_receive_wave_events(lfd_runtime: LfdRuntime, lf_client: Client) -> None:
+    asyncio.run(_assert_dual_ws_wave_event(lf_client, lfd_runtime))
 
-    client_a = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
-    client_b = Client(base_url=lfd_runtime.base_url, token=lfd_runtime.token)
-    try:
-        events_a: list[str] = []
-        events_b: list[str] = []
 
-        thread_a = threading.Thread(
-            target=_collect_session_event_types,
-            args=(client_a, session_id, events_a),
-            kwargs={"max_events": 20, "timeout_seconds": _TIMEOUT_SECONDS},
-            daemon=True,
-        )
-        thread_b = threading.Thread(
-            target=_collect_session_event_types,
-            args=(client_b, session_id, events_b),
-            kwargs={"max_events": 20, "timeout_seconds": _TIMEOUT_SECONDS},
-            daemon=True,
-        )
-        thread_a.start()
-        thread_b.start()
+def test_both_clients_stream_output(lfd_runtime: LfdRuntime, lf_client: Client) -> None:
+    wave = lf_client.create_wave(_wave_name("concurrent-output"), repo=str(lfd_runtime.repo_dir))
+    lines: dict[str, str] = {}
+    errors: list[str] = []
+    lock = threading.Lock()
 
-        status = _wait_for_session_status(client_a, session_id, timeout_seconds=4)
-        send_succeeded = False
-        send_error = ""
+    def collect(name: str) -> None:
         try:
-            client_a.send_session_input(session_id, "Reply with one short sentence.")
-            send_succeeded = True
-        except LoopflowError as exc:
-            send_error = str(exc)
+            line = _read_first_wave_log_line(
+                base_url=lfd_runtime.base_url,
+                token=lfd_runtime.token,
+                wave_id=wave.id,
+                timeout_seconds=_TIMEOUT_SECONDS,
+            )
+            with lock:
+                lines[name] = line
+        except Exception as exc:
+            with lock:
+                errors.append(f"{name}: {type(exc).__name__}: {exc}")
 
-        thread_a.join(_TIMEOUT_SECONDS + 2)
-        thread_b.join(_TIMEOUT_SECONDS + 2)
+    thread_a = threading.Thread(target=collect, args=("client_a",), daemon=True)
+    thread_b = threading.Thread(target=collect, args=("client_b",), daemon=True)
+    thread_a.start()
+    thread_b.start()
 
-        assert events_a, "client A should receive session events"
-        assert events_b, "client B should receive session events"
-        assert "status_changed" in events_a
-        assert "status_changed" in events_b
+    time.sleep(0.25)
+    lf_client.run_wave(wave.id)
 
-        saw_input_events_a = any(event in _INPUT_EVENT_TYPES for event in events_a)
-        saw_input_events_b = any(event in _INPUT_EVENT_TYPES for event in events_b)
-        if saw_input_events_a or saw_input_events_b:
-            assert saw_input_events_a, f"client A missed input events: {events_a}"
-            assert saw_input_events_b, f"client B missed input events: {events_b}"
-        elif not send_succeeded:
-            assert send_error, "failed send should provide an error"
-            assert status in {"starting", "failed", "ended", "active"}
-        else:
-            assert status in {"active", "failed", "ended"}
-    finally:
-        _stop_session(lfd_runtime, session_id)
-        client_a.close()
-        client_b.close()
+    thread_a.join(_TIMEOUT_SECONDS + 2)
+    thread_b.join(_TIMEOUT_SECONDS + 2)
+
+    assert not errors, f"log stream readers failed: {errors}"
+    assert lines.keys() == {"client_a", "client_b"}, (
+        f"both log readers should receive a line, got {lines}"
+    )
+    assert lines["client_a"] == lines["client_b"], (
+        "both clients should observe the same first output line"
+    )
+
+
+def test_both_clients_receive_session_events(
+    session_id: str, dual_clients: tuple[Client, Client]
+) -> None:
+    client_a, client_b = dual_clients
+    events_a, events_b, threads = _start_session_event_collectors(
+        client_a,
+        client_b,
+        session_id,
+    )
+    _wait_for_threads(threads)
+
+    assert events_a, "client A should receive at least one session event"
+    assert events_b, "client B should receive at least one session event"
+    assert events_a[0] == "status_changed", f"unexpected first event: {events_a[0]}"
+    assert events_b[0] == "status_changed", f"unexpected first event: {events_b[0]}"
+
+
+def test_chat_input_from_either_client_visible_to_both(
+    session_id: str, dual_clients: tuple[Client, Client]
+) -> None:
+    client_a, client_b = dual_clients
+    events_a, events_b, threads = _start_session_event_collectors(
+        client_a,
+        client_b,
+        session_id,
+        max_events=20,
+    )
+
+    status = _wait_for_session_status(client_a, session_id, timeout_seconds=4)
+    send_succeeded = False
+    send_error = ""
+    try:
+        client_a.send_session_input(session_id, "Reply with one short sentence.")
+        send_succeeded = True
+    except LoopflowError as exc:
+        send_error = str(exc)
+
+    _wait_for_threads(threads)
+
+    assert events_a, "client A should receive session events"
+    assert events_b, "client B should receive session events"
+    assert "status_changed" in events_a
+    assert "status_changed" in events_b
+
+    saw_input_events_a = any(event in _INPUT_EVENT_TYPES for event in events_a)
+    saw_input_events_b = any(event in _INPUT_EVENT_TYPES for event in events_b)
+    if saw_input_events_a or saw_input_events_b:
+        assert saw_input_events_a, f"client A missed input events: {events_a}"
+        assert saw_input_events_b, f"client B missed input events: {events_b}"
+    elif not send_succeeded:
+        assert send_error, "failed send should provide an error"
+        assert status in {"starting", "failed", "ended", "active"}
+    else:
+        assert status in {"active", "failed", "ended"}
 
 
 def test_suggested_actions_event_type_is_parseable() -> None:
@@ -250,7 +227,7 @@ def _read_first_wave_log_line(
 
 
 def _create_session(runtime: LfdRuntime) -> str:
-    harness = _session_harness()
+    harness = os.environ.get("LOOPFLOW_E2E_SESSION_HARNESS", "codex")
     with ApiClient(base_url=runtime.base_url, token=runtime.token) as api:
         response = api.request(
             "POST",
@@ -272,6 +249,42 @@ def _create_session(runtime: LfdRuntime) -> str:
 def _stop_session(runtime: LfdRuntime, session_id: str) -> None:
     with ApiClient(base_url=runtime.base_url, token=runtime.token) as api:
         api.request("DELETE", f"/v0/sessions/{session_id}")
+
+
+def _start_session_event_collectors(
+    client_a: Client,
+    client_b: Client,
+    session_id: str,
+    *,
+    max_events: int = 6,
+    timeout_seconds: float = _TIMEOUT_SECONDS,
+) -> tuple[list[str], list[str], tuple[threading.Thread, threading.Thread]]:
+    events_a: list[str] = []
+    events_b: list[str] = []
+
+    thread_a = threading.Thread(
+        target=_collect_session_event_types,
+        args=(client_a, session_id, events_a),
+        kwargs={"max_events": max_events, "timeout_seconds": timeout_seconds},
+        daemon=True,
+    )
+    thread_b = threading.Thread(
+        target=_collect_session_event_types,
+        args=(client_b, session_id, events_b),
+        kwargs={"max_events": max_events, "timeout_seconds": timeout_seconds},
+        daemon=True,
+    )
+    thread_a.start()
+    thread_b.start()
+    return events_a, events_b, (thread_a, thread_b)
+
+
+def _wait_for_threads(
+    threads: tuple[threading.Thread, threading.Thread],
+    timeout_seconds: float = _TIMEOUT_SECONDS,
+) -> None:
+    for thread in threads:
+        thread.join(timeout_seconds + 2)
 
 
 def _collect_session_event_types(
@@ -333,14 +346,6 @@ async def _recv_ws_json(socket: Any, timeout_seconds: float) -> dict[str, Any]:
     payload = json.loads(raw)
     assert isinstance(payload, dict), f"expected object websocket payload, got {payload!r}"
     return payload
-
-
-def _session_harness() -> str:
-    return os.environ.get("LOOPFLOW_E2E_SESSION_HARNESS", "codex")
-
-
-def _ensure_session_repo_root(runtime: LfdRuntime) -> None:
-    (runtime.repo_dir / ".lf").mkdir(parents=True, exist_ok=True)
 
 
 def _wave_name(prefix: str) -> str:

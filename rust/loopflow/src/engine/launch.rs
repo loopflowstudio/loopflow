@@ -103,26 +103,29 @@ pub fn prepare_launch_prompt(
         wave,
     };
 
-    let mut components = gather_context(&opts)?;
-    drop_native_instruction_docs(&mut components, &repo_root);
+    let mut gathered = gather_context(&opts)?;
+    drop_native_instruction_docs(gathered.components_mut(), &repo_root);
 
     if let Some(summary) = summary {
-        components.summaries.push(Document {
+        gathered.components_mut().summaries.push(Document {
             path: "wave-summary".to_string(),
             content: summary,
             source: DocumentSource::Summary,
         });
     }
 
-    let (components, breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
+    let prompt = format_prompt(PromptFormatMode::Full, &budgeted).into_string();
+    let system_prompt = format_context_prompt(&budgeted);
+    let task_prompt = format_task_prompt(&budgeted);
 
     let model = model
-        .or_else(|| components.step.as_ref().and_then(|step| step.model.clone()))
+        .or_else(|| budgeted.step.as_ref().and_then(|step| step.model.clone()))
         .unwrap_or_else(|| config.agent_model.clone());
+    let (components, breakdown) = budgeted.into_parts();
     let launch = AgentConfig {
-        system_prompt: format_context_prompt(&components),
-        task_prompt: format_task_prompt(&components),
+        system_prompt,
+        task_prompt,
         model: Some(model),
         max_turns,
         cwd: Some(cwd.unwrap_or(repo_root)),

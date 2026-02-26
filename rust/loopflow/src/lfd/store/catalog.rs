@@ -570,7 +570,44 @@ fn extract_placeholder_numbers(template: &str) -> Vec<usize> {
 
 #[cfg(test)]
 fn placeholders_are_contiguous(template: &str) -> bool {
-    let mut numbers = extract_placeholder_numbers(template);
+    placeholder_numbers_are_contiguous(extract_placeholder_numbers(template))
+}
+
+#[cfg(test)]
+fn extract_rendered_placeholder_numbers(sql: &str, marker: u8) -> Vec<usize> {
+    let bytes = sql.as_bytes();
+    let mut numbers = Vec::new();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        if bytes[idx] == marker {
+            let start = idx + 1;
+            let mut end = start;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+
+            if end > start {
+                if let Ok(value) = sql[start..end].parse::<usize>() {
+                    numbers.push(value);
+                }
+                idx = end;
+                continue;
+            }
+        }
+        idx += 1;
+    }
+
+    numbers
+}
+
+#[cfg(test)]
+fn rendered_placeholders_are_contiguous(sql: &str, marker: u8) -> bool {
+    placeholder_numbers_are_contiguous(extract_rendered_placeholder_numbers(sql, marker))
+}
+
+#[cfg(test)]
+fn placeholder_numbers_are_contiguous(mut numbers: Vec<usize>) -> bool {
     if numbers.is_empty() {
         return true;
     }
@@ -588,11 +625,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_query_renders_for_both_dialects() {
-        for query in Query::ALL {
-            let sqlite = sql(query, SqlDialect::Sqlite);
-            let postgres = sql(query, SqlDialect::Postgres);
+    fn query_catalog_definitions_cover_every_variant() {
+        assert_eq!(QUERY_DEFS.len(), QUERY_COUNT, "query defs length mismatch");
+        assert_eq!(
+            Query::ALL.len(),
+            QUERY_COUNT,
+            "query enum list missing variants"
+        );
 
+        let mut seen = vec![false; QUERY_COUNT];
+        for query in Query::ALL {
+            let index = query as usize;
+            assert!(
+                index < QUERY_DEFS.len(),
+                "query index out of range for {query:?}"
+            );
+            assert!(
+                !seen[index],
+                "duplicate query variant in Query::ALL for {query:?}"
+            );
+            seen[index] = true;
+
+            let def = QUERY_DEFS[index];
+            assert!(
+                !def.template.trim().is_empty(),
+                "empty SQL template for {query:?}"
+            );
+        }
+
+        assert!(
+            seen.into_iter().all(|value| value),
+            "missing query definitions"
+        );
+    }
+
+    #[test]
+    fn every_query_renders_for_both_dialects_with_valid_placeholders() {
+        for query in Query::ALL {
+            let sqlite = std::panic::catch_unwind(|| sql(query, SqlDialect::Sqlite))
+                .unwrap_or_else(|_| panic!("sqlite rendering panicked for {query:?}"));
+            let postgres = std::panic::catch_unwind(|| sql(query, SqlDialect::Postgres))
+                .unwrap_or_else(|_| panic!("postgres rendering panicked for {query:?}"));
+
+            assert!(
+                !sqlite.trim().is_empty(),
+                "sqlite rendering is empty for {query:?}"
+            );
+            assert!(
+                !postgres.trim().is_empty(),
+                "postgres rendering is empty for {query:?}"
+            );
             assert!(
                 !sqlite.contains("{p"),
                 "sqlite rendering still has placeholders for {query:?}"
@@ -600,6 +682,14 @@ mod tests {
             assert!(
                 !postgres.contains("{p"),
                 "postgres rendering still has placeholders for {query:?}"
+            );
+            assert!(
+                rendered_placeholders_are_contiguous(sqlite, b'?'),
+                "sqlite placeholders not contiguous for {query:?}: {sqlite}"
+            );
+            assert!(
+                rendered_placeholders_are_contiguous(postgres, b'$'),
+                "postgres placeholders not contiguous for {query:?}: {postgres}"
             );
         }
     }

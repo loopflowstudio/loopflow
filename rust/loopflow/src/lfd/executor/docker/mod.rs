@@ -115,6 +115,15 @@ const CONTAINER_REPOS_ROOT: &str = "/workspace/repos";
 const LOCAL_REPO_MOUNT: &str = "/host-repo";
 const HOST_WORKTREE_MOUNT: &str = "/host-worktree";
 const AGENT_USER: &str = "agent";
+pub(super) const LABEL_MANAGED: &str = "io.loopflow.managed";
+pub(super) const LABEL_KIND: &str = "io.loopflow.kind";
+pub(super) const LABEL_AGENT_ID: &str = "io.loopflow.agent-id";
+pub(super) const LABEL_WAVE_ID: &str = "io.loopflow.wave-id";
+pub(super) const LABEL_WAVE_RUN_ID: &str = "io.loopflow.wave-run-id";
+pub(super) const LABEL_KIND_REPO_VOLUME: &str = "repo-volume";
+pub(super) const CONTAINER_PREFIX_AGENT: &str = "lfd-agent-";
+pub(super) const CONTAINER_PREFIX_PREP: &str = "lfd-prep-";
+pub(super) const VOLUME_PREFIX: &str = "lfd-repo-";
 
 /// API keys auto-forwarded to containers when present in host environment.
 /// OAuth tokens live in the OS keychain and can't be mounted, so API keys
@@ -139,7 +148,7 @@ impl RepoVolumeIdentity {
         }
         Self {
             repo_key: format!("{slug}-{repo_hash}"),
-            volume_name: format!("lfd-repo-{}", short_hash(&identity.canonical, 32)),
+            volume_name: format!("{}{}", VOLUME_PREFIX, short_hash(&identity.canonical, 32)),
         }
     }
 }
@@ -220,6 +229,10 @@ impl BollardRecoveryBackend {
     }
 }
 
+fn managed_label_filter() -> String {
+    format!("{LABEL_MANAGED}=true")
+}
+
 #[async_trait]
 impl DockerRecoveryBackend for BollardRecoveryBackend {
     async fn inspect_container(&self, container_ref: &str) -> Result<Option<InspectedContainer>> {
@@ -236,10 +249,7 @@ impl DockerRecoveryBackend for BollardRecoveryBackend {
 
     async fn list_managed_containers(&self) -> Result<Vec<String>> {
         let mut filters = HashMap::new();
-        filters.insert(
-            "label".to_string(),
-            vec!["io.loopflow.managed=true".to_string()],
-        );
+        filters.insert("label".to_string(), vec![managed_label_filter()]);
 
         let containers = self
             .docker

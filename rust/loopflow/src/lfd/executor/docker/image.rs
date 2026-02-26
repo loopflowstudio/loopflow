@@ -8,7 +8,17 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use tracing::{info, warn};
 
-use super::{DockerExecutor, RepoIdentity, RepoVolumeIdentity};
+use super::{
+    DockerExecutor, RepoIdentity, RepoVolumeIdentity, CONTAINER_PREFIX_AGENT, LABEL_KIND,
+    LABEL_KIND_REPO_VOLUME, LABEL_MANAGED,
+};
+
+pub(super) fn repo_volume_labels() -> HashMap<String, String> {
+    HashMap::from([
+        (LABEL_MANAGED.to_string(), "true".to_string()),
+        (LABEL_KIND.to_string(), LABEL_KIND_REPO_VOLUME.to_string()),
+    ])
+}
 
 impl DockerExecutor {
     pub(super) async fn ensure_volume(&self, volume_name: &str) -> Result<()> {
@@ -20,10 +30,7 @@ impl DockerExecutor {
             .docker
             .create_volume(VolumeCreateOptions {
                 name: Some(volume_name.to_string()),
-                labels: Some(HashMap::from([
-                    ("io.loopflow.managed".to_string(), "true".to_string()),
-                    ("io.loopflow.kind".to_string(), "repo-volume".to_string()),
-                ])),
+                labels: Some(repo_volume_labels()),
                 ..Default::default()
             })
             .await?;
@@ -177,7 +184,7 @@ impl DockerExecutor {
 
         let identity = RepoIdentity::from_repo(repo_source);
         let volume_id = RepoVolumeIdentity::from_identity(&identity);
-        let repo_image = format!("lfd-agent-{}:latest", volume_id.repo_key);
+        let repo_image = format!("{CONTAINER_PREFIX_AGENT}{}:latest", volume_id.repo_key);
         let stale_marker = repo_source.join(".lf/.docker-stale");
         if !self
             .repo_image_needs_build(&repo_image, &stale_marker)

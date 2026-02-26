@@ -3,7 +3,8 @@ use std::process::Command;
 
 use crate::engine::config::load_config_or_default;
 use crate::engine::prompt::{
-    default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+    default_gather_sources, format_prompt, gather_context, trim_context_with_breakdown,
+    GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 
@@ -62,8 +63,9 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
         wave: None,
     };
 
-    let components = gather_context(&opts)?;
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let gathered = gather_context(&opts)?;
+    let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
+    let prompt = format_prompt(PromptFormatMode::Full, &budgeted).into_string();
 
     let launch = AgentConfig {
         task_prompt: prompt,

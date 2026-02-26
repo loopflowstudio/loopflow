@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use loopflow::engine::{
-    default_gather_sources, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+    default_gather_sources, format_prompt, gather_context, trim_context_with_breakdown,
+    GatherContextOpts, PromptFormatMode, DEFAULT_CONTEXT_BUDGET,
 };
 
 #[derive(Parser, Debug)]
@@ -66,8 +67,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         wave: args.wave,
     };
 
-    let components = gather_context(&opts)?;
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let gathered = gather_context(&opts)?;
+    let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
+    let prompt = format_prompt(PromptFormatMode::Full, &budgeted);
     println!("{prompt}");
 
     Ok(())

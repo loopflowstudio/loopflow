@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -215,6 +216,84 @@ pub struct PromptComponents {
     pub area: Option<String>,
 }
 
+/// Prompt context gathered from repo/state inputs.
+#[derive(Debug, Clone, Default)]
+pub struct GatheredContext(pub PromptComponents);
+
+impl GatheredContext {
+    pub fn into_components(self) -> PromptComponents {
+        self.0
+    }
+
+    pub fn components(&self) -> &PromptComponents {
+        &self.0
+    }
+
+    pub fn components_mut(&mut self) -> &mut PromptComponents {
+        &mut self.0
+    }
+}
+
+impl Deref for GatheredContext {
+    type Target = PromptComponents;
+
+    fn deref(&self) -> &Self::Target {
+        self.components()
+    }
+}
+
+impl DerefMut for GatheredContext {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.components_mut()
+    }
+}
+
+/// Prompt context after token budgeting.
+#[derive(Debug, Clone, Default)]
+pub struct BudgetedContext(pub PromptComponents, pub ContextBreakdown);
+
+impl BudgetedContext {
+    pub fn components(&self) -> &PromptComponents {
+        &self.0
+    }
+
+    pub fn breakdown(&self) -> &ContextBreakdown {
+        &self.1
+    }
+
+    pub fn into_parts(self) -> (PromptComponents, ContextBreakdown) {
+        (self.0, self.1)
+    }
+}
+
+impl Deref for BudgetedContext {
+    type Target = PromptComponents;
+
+    fn deref(&self) -> &Self::Target {
+        self.components()
+    }
+}
+
+/// Fully rendered prompt content.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RenderedPrompt(pub String);
+
+impl RenderedPrompt {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for RenderedPrompt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TokenCacheEntry {
     mtime_secs: u64,
@@ -268,10 +347,8 @@ fn cached_doc_tokens(
 }
 
 /// Trim context and return token breakdown without re-tokenizing.
-pub fn trim_context_with_breakdown(
-    mut components: PromptComponents,
-    max_tokens: usize,
-) -> (PromptComponents, ContextBreakdown) {
+pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) -> BudgetedContext {
+    let mut components = context.into_components();
     let repo_root = PathBuf::from(&components.repo_root);
     static TOKEN_CACHE: Lazy<std::sync::Mutex<HashMap<String, TokenCacheEntry>>> =
         Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
@@ -423,11 +500,11 @@ pub fn trim_context_with_breakdown(
         *guard = cache;
     }
 
-    (components, breakdown)
+    BudgetedContext(components, breakdown)
 }
 
 /// Gather all prompt components.
-pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, CoreError> {
+pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreError> {
     let start = Instant::now();
     let repo_root = &opts.repo_root;
 
@@ -518,7 +595,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     let loopflow_doc = Some(crate::engine::builtins::LOOPFLOW_DOC.to_string());
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
-    Ok(PromptComponents {
+    Ok(GatheredContext(PromptComponents {
         run_mode: opts.run_mode.clone(),
         docs,
         diff,
@@ -527,7 +604,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
         directions,
-        summaries, // TODO: implement summary loading
+        summaries,
         wave_memory,
         wave: opts.wave.clone(),
         loopflow_doc,
@@ -536,7 +613,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         diff_file_count,
         area_docs,
         area: opts.area.clone(),
-    })
+    }))
 }
 
 /// Gather all requested document sources in stable prompt order.
@@ -1418,8 +1495,8 @@ fn format_step_tag(step: &Step) -> String {
 /// Format prompt content for the requested mode.
 ///
 /// Used by the daemon, ops callers, and prompt log writers.
-pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> String {
-    match mode {
+pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> RenderedPrompt {
+    let rendered = match mode {
         PromptFormatMode::Full => {
             let mut parts = format_reference_sections(components);
 
@@ -1488,17 +1565,18 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> S
 
             parts.join("\n\n")
         }
-    }
+    };
+    RenderedPrompt(rendered)
 }
 
 /// Format context components for system prompt (everything except task).
-pub fn format_context_prompt(components: &PromptComponents) -> String {
-    format_prompt(PromptFormatMode::Context, components)
+pub fn format_context_prompt(components: &BudgetedContext) -> String {
+    format_prompt(PromptFormatMode::Context, components).into_string()
 }
 
 /// Format task prompt for user message (directions + step + free text).
-pub fn format_task_prompt(components: &PromptComponents) -> String {
-    format_prompt(PromptFormatMode::Task, components)
+pub fn format_task_prompt(components: &BudgetedContext) -> String {
+    format_prompt(PromptFormatMode::Task, components).into_string()
 }
 
 /// Write prompt to log file and return the path.
@@ -1583,6 +1661,14 @@ mod tests {
         std::fs::write(full_path, content).expect("write binary file");
     }
 
+    fn budget_context(components: PromptComponents) -> BudgetedContext {
+        trim_context_with_breakdown(GatheredContext(components), usize::MAX)
+    }
+
+    fn render_full_prompt(components: PromptComponents) -> String {
+        format_prompt(PromptFormatMode::Full, &budget_context(components)).into_string()
+    }
+
     #[test]
     fn count_tokens_basic() {
         // tiktoken should give roughly 1 token per 4 chars for English text
@@ -1607,8 +1693,8 @@ mod tests {
             source: DocumentSource::RepoDoc,
         });
 
-        let trimmed = trim_context_with_breakdown(components.clone(), 1000000).0;
-        assert_eq!(trimmed.docs.len(), 1);
+        let trimmed = trim_context_with_breakdown(GatheredContext(components.clone()), 1000000);
+        assert_eq!(trimmed.components().docs.len(), 1);
     }
 
     #[test]
@@ -1629,10 +1715,10 @@ mod tests {
 
         // Set budget to only fit docs, not summaries
         let doc_tokens = count_tokens("Doc content");
-        let trimmed = trim_context_with_breakdown(components, doc_tokens + 5).0;
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), doc_tokens + 5);
 
-        assert!(trimmed.summaries.is_empty());
-        assert_eq!(trimmed.docs.len(), 1);
+        assert!(trimmed.components().summaries.is_empty());
+        assert_eq!(trimmed.components().docs.len(), 1);
     }
 
     #[test]
@@ -1661,10 +1747,10 @@ mod tests {
         let budget = count_tokens("x")
             + count_tokens("Summary should survive after wave memory is dropped")
             + 1;
-        let trimmed = trim_context_with_breakdown(components, budget).0;
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
 
-        assert!(trimmed.wave_memory.is_none());
-        assert_eq!(trimmed.summaries.len(), 1);
+        assert!(trimmed.components().wave_memory.is_none());
+        assert_eq!(trimmed.components().summaries.len(), 1);
     }
 
     #[test]
@@ -1697,9 +1783,9 @@ mod tests {
         // Get token count of step only
         let step_tokens = count_tokens("x");
         // Budget allows step but not docs
-        let trimmed = trim_context_with_breakdown(components, step_tokens + 1).0;
-        assert!(trimmed.docs.is_empty());
-        assert!(trimmed.step.is_some());
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), step_tokens + 1);
+        assert!(trimmed.components().docs.is_empty());
+        assert!(trimmed.components().step.is_some());
     }
 
     #[test]
@@ -1720,9 +1806,9 @@ mod tests {
         // Get token count of step only
         let step_tokens = count_tokens("x");
         // Budget allows step but not diff
-        let trimmed = trim_context_with_breakdown(components, step_tokens + 1).0;
-        assert!(trimmed.diff.is_none());
-        assert!(trimmed.step.is_some());
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), step_tokens + 1);
+        assert!(trimmed.components().diff.is_none());
+        assert!(trimmed.components().step.is_some());
     }
 
     #[test]
@@ -1743,9 +1829,9 @@ mod tests {
             ..Default::default()
         };
 
-        let trimmed = trim_context_with_breakdown(components, 5).0;
-        assert!(trimmed.step.is_some());
-        assert!(trimmed.docs.is_empty());
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), 5);
+        assert!(trimmed.components().step.is_some());
+        assert!(trimmed.components().docs.is_empty());
     }
 
     // ==========================================================================
@@ -1759,7 +1845,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is auto"));
         assert!(prompt.contains("headless"));
         assert!(prompt.contains("scratch/questions.md"));
@@ -1772,7 +1858,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(!prompt.contains("Run mode is auto"));
     }
 
@@ -1783,7 +1869,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:wave"));
         assert!(prompt.contains("name=\"rust\""));
         assert!(prompt.contains("rust program of work"));
@@ -1802,7 +1888,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("Persistent memory at wave/living/MEMORY.md"));
         assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
         assert!(prompt.contains("prefer focused tests"));
@@ -1826,7 +1912,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:docs>"));
         assert!(prompt.contains("</lf:docs>"));
         assert!(prompt.contains("<lf:README>"));
@@ -1847,7 +1933,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("CLAUDE"));
         assert!(prompt.contains("Follow") || prompt.contains("carefully"));
     }
@@ -1862,7 +1948,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("STYLE"));
         assert!(prompt.contains("Follow") || prompt.contains("carefully"));
     }
@@ -1878,7 +1964,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:direction:concise>"));
         assert!(prompt.contains("Be concise and direct."));
         assert!(prompt.contains("</lf:direction:concise>"));
@@ -1905,7 +1991,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:directions>"));
         assert!(prompt.contains("</lf:directions>"));
         assert!(prompt.contains("<lf:direction:concise>"));
@@ -1926,7 +2012,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:step:implement>"));
         assert!(prompt.contains("Implement the feature described."));
         assert!(prompt.contains("</lf:step:implement>"));
@@ -1946,7 +2032,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:step:review>"));
         assert!(prompt.contains("</lf:step:review>"));
     }
@@ -1958,7 +2044,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:diff>"));
         assert!(prompt.contains("+added line"));
         assert!(prompt.contains("</lf:diff>"));
@@ -1976,7 +2062,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:files>"));
         assert!(prompt.contains("<lf:file path=\"src/main.rs\">"));
         assert!(prompt.contains("fn main()"));
@@ -1991,7 +2077,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:clipboard>"));
         assert!(prompt.contains("Error: connection refused"));
         assert!(prompt.contains("</lf:clipboard>"));
@@ -2009,7 +2095,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:summaries>"));
         assert!(prompt.contains("<lf:summary path=\"src/\">"));
         assert!(prompt.contains("Source code summary"));
@@ -2046,7 +2132,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
 
         // Verify order: loopflow -> run_mode -> wave -> docs -> diff -> step -> direction -> clipboard
         let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
@@ -2070,7 +2156,7 @@ mod tests {
     #[test]
     fn format_prompt_empty_components() {
         let components = PromptComponents::default();
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = render_full_prompt(components);
         // Should not crash, just return empty or minimal content
         assert!(prompt.is_empty() || prompt.len() < 100);
     }
@@ -2129,7 +2215,11 @@ mod tests {
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
+        let prompt = format_prompt(
+            PromptFormatMode::Full,
+            &trim_context_with_breakdown(ctx, usize::MAX),
+        )
+        .into_string();
 
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
@@ -2181,10 +2271,15 @@ mod tests {
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
+        let has_diff = ctx.diff.is_some();
+        let prompt = format_prompt(
+            PromptFormatMode::Full,
+            &trim_context_with_breakdown(ctx, usize::MAX),
+        )
+        .into_string();
 
         assert!(
-            ctx.diff.is_none(),
+            !has_diff,
             "files-only context should not include branch diff"
         );
         assert!(!prompt.contains("<lf:diff>"));
@@ -2477,7 +2572,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&components);
+        let context = format_context_prompt(&budget_context(components));
         // Should NOT include step content
         assert!(!context.contains("<lf:step:implement>"));
         assert!(!context.contains("Implement the feature."));
@@ -2510,7 +2605,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&components);
+        let context = format_context_prompt(&budget_context(components));
         // Should include context parts
         assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("<lf:docs>"));
@@ -2529,7 +2624,7 @@ directions:
             ..Default::default()
         };
 
-        let context = format_context_prompt(&components);
+        let context = format_context_prompt(&budget_context(components));
         assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("ask questions"));
         assert!(context.contains("wait for feedback"));
@@ -2552,7 +2647,7 @@ directions:
             ..Default::default()
         };
 
-        let task = format_task_prompt(&components);
+        let task = format_task_prompt(&budget_context(components));
         assert!(task.contains("<lf:step:implement>"));
         assert!(task.contains("Implement the feature."));
         assert!(task.contains("</lf:step:implement>"));
@@ -2561,7 +2656,7 @@ directions:
     #[test]
     fn format_task_prompt_empty_when_no_step_or_message() {
         let components = PromptComponents::default();
-        let task = format_task_prompt(&components);
+        let task = format_task_prompt(&budget_context(components));
         assert!(task.is_empty());
     }
 
@@ -2571,7 +2666,7 @@ directions:
             message: Some("fix the login bug".to_string()),
             ..Default::default()
         };
-        let task = format_task_prompt(&components);
+        let task = format_task_prompt(&budget_context(components));
         assert_eq!(task, "fix the login bug");
     }
 
@@ -2588,7 +2683,7 @@ directions:
             message: Some("login page crashes".to_string()),
             ..Default::default()
         };
-        let task = format_task_prompt(&components);
+        let task = format_task_prompt(&budget_context(components));
         assert!(task.contains("<lf:step:debug>"));
         assert!(task.contains("login page crashes"));
     }
@@ -2606,7 +2701,7 @@ directions:
             ..Default::default()
         };
 
-        let task = format_task_prompt(&components);
+        let task = format_task_prompt(&budget_context(components));
         assert!(task.contains("<lf:step:review>"));
         assert!(task.contains("</lf:step:review>"));
     }

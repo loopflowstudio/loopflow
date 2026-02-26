@@ -71,16 +71,7 @@ NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotificat
 #endif
 ```
 
-### Verify concurrent clients work
-
-lfd may not have been tested with multiple simultaneous WebSocket connections or concurrent session input. Verify:
-
-- Two clients subscribed to the same wave's events both receive updates
-- Two clients streaming the same wave's output both receive lines
-- Two clients viewing the same chat session both see messages
-- Sending from either client works without conflict
-
-If lfd has single-client assumptions (e.g. one WebSocket per repo), fix those.
+### ~~Verify concurrent clients work~~ ingested → scratch/mobile-verify-concurrent-clients.md
 
 ## Constraints
 

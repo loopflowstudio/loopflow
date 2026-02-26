@@ -227,6 +227,7 @@ impl SessionManager {
             LaunchPromptInput {
                 repo_root: repo_root.to_path_buf(),
                 step: Some(step.clone()),
+                resolved_step: None,
                 surface,
                 directions: config.directions.clone(),
                 area: config.area.clone(),

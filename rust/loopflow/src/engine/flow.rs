@@ -156,6 +156,11 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
         return step_from_content(name, content);
     }
 
+    // Fall back to .agents/skills/<name>/SKILL.md (user-installed, not loopflow-injected)
+    if let Some(content) = load_agent_skill(name, repo) {
+        return step_from_content(name, &content);
+    }
+
     Err(LoadError::StepNotFound(name.to_string()))
 }
 
@@ -238,13 +243,19 @@ pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
     let (content, source) = match find_direction_path(name, repo) {
         Ok(direction_path) => (fs::read_to_string(&direction_path)?, direction_path),
         Err(LoadError::DirectionNotFound(_)) => {
-            let Some(builtin) = crate::engine::builtins::get_builtin_direction(name) else {
+            if let Some(builtin) = crate::engine::builtins::get_builtin_direction(name) {
+                (
+                    builtin.to_string(),
+                    PathBuf::from(format!("builtin:{name}")),
+                )
+            } else if let Some(content) = load_agent_skill(name, repo) {
+                (
+                    content,
+                    repo.join(format!(".agents/skills/{name}/SKILL.md")),
+                )
+            } else {
                 return Err(LoadError::DirectionNotFound(name.to_string()));
-            };
-            (
-                builtin.to_string(),
-                PathBuf::from(format!("builtin:{name}")),
-            )
+            }
         }
         Err(err) => return Err(err),
     };
@@ -369,6 +380,12 @@ fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     }
 
     Err(LoadError::DirectionNotFound(name.to_string()))
+}
+
+/// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
+fn load_agent_skill(name: &str, repo: &Path) -> Option<String> {
+    let skill_path = repo.join(".agents/skills").join(name).join("SKILL.md");
+    fs::read_to_string(&skill_path).ok()
 }
 
 // -----------------------------------------------------------------------------
@@ -846,6 +863,38 @@ Be careful.
         let result = load_direction("nonexistent", tmp.path());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("nonexistent"));
+    }
+
+    #[test]
+    fn load_step_falls_back_to_agent_skills() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".agents/skills/my-tool");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-tool\n---\nDo the thing.",
+        )
+        .unwrap();
+
+        let step = load_step("my-tool", tmp.path()).unwrap();
+        assert_eq!(step.name, "my-tool");
+        assert!(step.content.unwrap().contains("Do the thing."));
+    }
+
+    #[test]
+    fn load_direction_falls_back_to_agent_skills() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".agents/skills/empathy");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: empathy\n---\nDesign with empathy.",
+        )
+        .unwrap();
+
+        let direction = load_direction("empathy", tmp.path()).unwrap();
+        assert_eq!(direction.name, "empathy");
+        assert!(direction.content.contains("Design with empathy."));
     }
 
     #[test]

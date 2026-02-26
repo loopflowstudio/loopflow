@@ -37,6 +37,7 @@ Steps are markdown files in these locations (searched in order):
 2. `.lf/steps/<step>.md` — repo steps
 3. `.claude/commands/<step>.md` — Claude Code compatible
 4. Built-in steps — run `lf --list` for the current built-in catalog (e.g., `debug`, `review`, `implement`)
+5. `.agents/skills/<step>/SKILL.md` — user-installed agent skills (e.g., via `npx skills add`)
 
 ### Step Arguments
 

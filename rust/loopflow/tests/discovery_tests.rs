@@ -303,3 +303,53 @@ exit 1
     assert!(trace.contains("skills find deep-research"));
     assert!(trace.contains("skills add vercel-labs/deep-research"));
 }
+
+#[test]
+fn npx_find_handles_qualified_skill_format() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let trace_file = repo.path().join("npx-qualified.log");
+    let npx_script = repo.path().join("fake-npx-qualified.sh");
+
+    // Simulate npx skills find returning owner/repo@skill with ANSI codes
+    let script = format!(
+        r#"#!/bin/sh
+set -e
+echo "$@" >> "{trace}"
+if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "skill-creator" ]; then
+  exit 1
+fi
+if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "find" ] && [ "$4" = "skill-creator" ]; then
+  printf '\033[38;5;145manthropics/skills@skill-creator\033[0m \033[36m50.4K installs\033[0m\n'
+  exit 0
+fi
+if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "anthropics/skills@skill-creator" ]; then
+  mkdir -p ".agents/skills/skill-creator"
+  cat > ".agents/skills/skill-creator/SKILL.md" <<'EOF'
+---
+name: skill-creator
+description: Create skills
+---
+Loaded via qualified format
+EOF
+  exit 0
+fi
+exit 1
+"#,
+        trace = trace_file.display()
+    );
+    write_executable(&npx_script, &script);
+
+    let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
+
+    let step = discover_step(repo.path(), "npx:skill-creator").expect("load qualified npx skill");
+    assert!(step
+        .content
+        .as_deref()
+        .is_some_and(|content| content.contains("Loaded via qualified format")));
+
+    let trace = fs::read_to_string(&trace_file).expect("read trace file");
+    assert!(trace.contains("skills add skill-creator"));
+    assert!(trace.contains("skills find skill-creator"));
+    assert!(trace.contains("skills add anthropics/skills@skill-creator"));
+}

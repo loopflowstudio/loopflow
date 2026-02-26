@@ -32,7 +32,7 @@ The [npx skills](https://github.com/vercel-labs/skills) ecosystem installs to `.
 
 ## Architecture
 
-### Resolution (unchanged)
+### Resolution (updated)
 
 `lf` resolves steps in this order:
 
@@ -41,8 +41,11 @@ The [npx skills](https://github.com/vercel-labs/skills) ecosystem installs to `.
 3. `~/.lf/steps/<name>.md` — global loopflow steps
 4. `~/.claude/commands/<name>.md` — global legacy commands
 5. Built-in — compiled into binary
+6. `.agents/skills/<name>/SKILL.md` — user-installed agent skills
 
-No change here. Loopflow does NOT read from `.claude/skills/` — that would create circular dependency (inject steps as skills, discover them back as steps).
+Directions follow the same fallback: `.lf/directions/` → builtins → `.agents/skills/<name>/SKILL.md`.
+
+This means `npx skills add` installs once, then `lf <name>` works without a prefix.
 
 ### Injection (changed)
 

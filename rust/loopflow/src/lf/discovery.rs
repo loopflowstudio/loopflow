@@ -403,7 +403,11 @@ fn find_npx_skill(
         return None;
     }
 
+    // After `npx skills add owner/repo@skill`, the skill lands at .agents/skills/<skill>/
+    let skill_from_qualified = found.split_once('@').map(|(_, skill)| skill);
+
     find_cached_npx_skill(&cache_dir, skill_name)
+        .or_else(|| skill_from_qualified.and_then(|s| find_cached_npx_skill(&cache_dir, s)))
         .or_else(|| find_cached_npx_skill(&cache_dir, &found))
         .and_then(|path| load_skill_from_path(qualified_name, &path))
 }
@@ -472,7 +476,10 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
 }
 
 fn run_npx_add(skill_name: &str, repo_root: &Path) -> bool {
-    match run_npx(repo_root, &["--yes", "skills", "add", skill_name]) {
+    // First `--yes` is for npx itself; trailing `--yes` is for the skills CLI.
+    // Without the latter, `skills add` can open an interactive selector and
+    // return without writing `.agents/skills/<name>/SKILL.md`.
+    match run_npx(repo_root, &["--yes", "skills", "add", skill_name, "--yes"]) {
         Ok(output) => {
             if output.status.success() {
                 return true;
@@ -512,7 +519,14 @@ fn run_npx_find(skill_name: &str, repo_root: &Path) -> Option<String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_npx_find_output(&stdout)
+    let result = parse_npx_find_output(&stdout);
+    debug!(
+        skill = skill_name,
+        stdout_len = stdout.len(),
+        ?result,
+        "npx skills find output"
+    );
+    result
 }
 
 fn run_npx(repo_root: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
@@ -523,12 +537,21 @@ fn run_npx(repo_root: &Path, args: &[&str]) -> std::io::Result<std::process::Out
 }
 
 fn parse_npx_find_output(stdout: &str) -> Option<String> {
-    for token in stdout.split_whitespace() {
+    let stripped = strip_ansi(stdout);
+    for token in stripped.split_whitespace() {
+        // Skip placeholder templates like <owner/repo@skill>
+        if token.starts_with('<') && token.ends_with('>') {
+            continue;
+        }
         let cleaned = token.trim_matches(|c: char| {
-            c.is_ascii_punctuation() && c != '/' && c != '-' && c != '_' && c != '.'
+            c.is_ascii_punctuation() && c != '/' && c != '-' && c != '_' && c != '.' && c != '@'
         });
         if cleaned.is_empty() {
             continue;
+        }
+        // owner/repo@skill format from `npx skills find`
+        if let Some(hint) = normalize_qualified_skill(cleaned) {
+            return Some(hint);
         }
         if let Some(rest) = cleaned.strip_prefix("https://github.com/") {
             return normalize_repo_hint(rest);
@@ -543,9 +566,41 @@ fn parse_npx_find_output(stdout: &str) -> Option<String> {
     None
 }
 
+/// Recognize `owner/repo@skill` format and return the full string.
+fn normalize_qualified_skill(value: &str) -> Option<String> {
+    let (repo_part, skill_part) = value.split_once('@')?;
+    if is_repo_hint(repo_part) && !skill_part.is_empty() && skill_part.chars().all(is_skill_char) {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
 fn normalize_repo_hint(value: &str) -> Option<String> {
     let trimmed = value.trim_end_matches(".git").trim_matches('/');
     is_repo_hint(trimmed).then(|| trimmed.to_string())
+}
+
+/// Strip ANSI escape sequences (e.g. `\x1b[38;5;145m`) from a string.
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 fn is_repo_hint(token: &str) -> bool {

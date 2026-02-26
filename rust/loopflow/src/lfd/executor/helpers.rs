@@ -306,6 +306,7 @@ pub(crate) async fn build_step_prompt(
         LaunchPromptInput {
             repo_root: repo_root.to_path_buf(),
             step: Some(step.step.name.clone()),
+            resolved_step: None,
             surface: Surface::Headless,
             directions: directions.to_vec(),
             area: None,

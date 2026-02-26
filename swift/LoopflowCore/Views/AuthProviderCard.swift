@@ -111,13 +111,12 @@ public struct AuthProviderCard: View {
                             .font(Typography.code())
                             .foregroundStyle(palette.text)
 
-                        Button("Copy") {
-                            copyToClipboard(userCode)
-                        }
-                        .buttonStyle(GhostButtonStyle())
-                        .accessibilityLabel("Copy code")
-                        .accessibilityHint("Copies the verification code")
-                        .minHitTarget()
+                        copyButton(
+                            "Copy",
+                            value: userCode,
+                            accessibilityLabel: "Copy code",
+                            accessibilityHint: "Copies the verification code"
+                        )
                     }
                 }
 
@@ -152,13 +151,12 @@ public struct AuthProviderCard: View {
                     .textSelection(.enabled)
                     .lineLimit(2)
 
-                Button("Copy") {
-                    copyToClipboard(flowURL)
-                }
-                .buttonStyle(GhostButtonStyle())
-                .accessibilityLabel("Copy URL")
-                .accessibilityHint("Copies the provider verification URL")
-                .minHitTarget()
+                copyButton(
+                    "Copy",
+                    value: flowURL,
+                    accessibilityLabel: "Copy URL",
+                    accessibilityHint: "Copies the provider verification URL"
+                )
             }
         }
     }
@@ -217,12 +215,22 @@ public struct AuthProviderCard: View {
     }
 
     private var shouldShowError: Bool {
-        switch status.status {
-        case .none, .expired:
-            return true
-        case .active, .pending:
-            return false
+        status.status == .none || status.status == .expired
+    }
+
+    private func copyButton(
+        _ title: LocalizedStringKey,
+        value: String,
+        accessibilityLabel: String,
+        accessibilityHint: String
+    ) -> some View {
+        Button(title) {
+            copyToClipboard(value)
         }
+        .buttonStyle(GhostButtonStyle())
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
+        .minHitTarget()
     }
 
     private func copyToClipboard(_ value: String) {

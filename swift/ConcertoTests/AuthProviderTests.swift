@@ -32,7 +32,7 @@ struct AuthProviderModelTests {
 @Suite("Auth event parsing")
 struct AuthEventParsingTests {
     @Test("auth.flow_started parses provider and URLs")
-    func parseFlowStartedEvent() {
+    func parseFlowStartedEvent() throws {
         let text = """
         {
           "type": "auth.flow_started",
@@ -43,15 +43,7 @@ struct AuthEventParsingTests {
         }
         """
 
-        guard let event = EventService.parseEvent(text: text) else {
-            Issue.record("Expected auth event")
-            return
-        }
-
-        guard case .auth(let auth) = event else {
-            Issue.record("Expected auth event case")
-            return
-        }
+        let auth = try parseAuthEvent(text)
 
         #expect(auth.type == .flowStarted)
         #expect(auth.provider == .github)
@@ -60,7 +52,7 @@ struct AuthEventParsingTests {
     }
 
     @Test("auth.connected parses login")
-    func parseConnectedEvent() {
+    func parseConnectedEvent() throws {
         let text = """
         {
           "type": "auth.connected",
@@ -70,15 +62,7 @@ struct AuthEventParsingTests {
         }
         """
 
-        guard let event = EventService.parseEvent(text: text) else {
-            Issue.record("Expected auth event")
-            return
-        }
-
-        guard case .auth(let auth) = event else {
-            Issue.record("Expected auth event case")
-            return
-        }
+        let auth = try parseAuthEvent(text)
 
         #expect(auth.type == .connected)
         #expect(auth.provider == .claude)
@@ -87,7 +71,7 @@ struct AuthEventParsingTests {
     }
 
     @Test("auth.failed parses nested error payload")
-    func parseFailedEvent() {
+    func parseFailedEvent() throws {
         let text = """
         {
           "type": "auth.failed",
@@ -97,15 +81,7 @@ struct AuthEventParsingTests {
         }
         """
 
-        guard let event = EventService.parseEvent(text: text) else {
-            Issue.record("Expected auth event")
-            return
-        }
-
-        guard case .auth(let auth) = event else {
-            Issue.record("Expected auth event case")
-            return
-        }
+        let auth = try parseAuthEvent(text)
 
         #expect(auth.type == .failed)
         #expect(auth.provider == .codex)
@@ -113,7 +89,7 @@ struct AuthEventParsingTests {
     }
 
     @Test("auth.disconnected parses provider")
-    func parseDisconnectedEvent() {
+    func parseDisconnectedEvent() throws {
         let text = """
         {
           "type": "auth.disconnected",
@@ -122,17 +98,21 @@ struct AuthEventParsingTests {
         }
         """
 
-        guard let event = EventService.parseEvent(text: text) else {
-            Issue.record("Expected auth event")
-            return
-        }
-
-        guard case .auth(let auth) = event else {
-            Issue.record("Expected auth event case")
-            return
-        }
+        let auth = try parseAuthEvent(text)
 
         #expect(auth.type == .disconnected)
         #expect(auth.provider == .github)
     }
+}
+
+private enum AuthEventParseError: Error {
+    case expectedAuthEvent
+}
+
+private func parseAuthEvent(_ text: String) throws -> AuthEvent {
+    guard let event = EventService.parseEvent(text: text),
+          case .auth(let auth) = event else {
+        throw AuthEventParseError.expectedAuthEvent
+    }
+    return auth
 }

@@ -105,26 +105,26 @@ private struct StubResponse {
 
 private final class TimeoutRecorder: @unchecked Sendable {
     private let lock = NSLock()
-    private var requestTimeouts: [TimeInterval] = []
-    private var resourceTimeouts: [TimeInterval] = []
+    private var requestTimeout: TimeInterval?
+    private var resourceTimeout: TimeInterval?
 
     func append(request: TimeInterval, resource: TimeInterval) {
         lock.lock()
         defer { lock.unlock() }
-        requestTimeouts.append(request)
-        resourceTimeouts.append(resource)
+        requestTimeout = request
+        resourceTimeout = resource
     }
 
     var lastRequestTimeout: TimeInterval? {
         lock.lock()
         defer { lock.unlock() }
-        return requestTimeouts.last
+        return requestTimeout
     }
 
     var lastResourceTimeout: TimeInterval? {
         lock.lock()
         defer { lock.unlock() }
-        return resourceTimeouts.last
+        return resourceTimeout
     }
 }
 

@@ -79,8 +79,8 @@ struct ConnectionSetupView: View {
                 guard repoState.isConnected else { return }
                 Task { await repoState.authProviderStore.refresh() }
             }
-            .onChange(of: repoState.authProviderStore.browserLaunchRequest) { _, request in
-                handleBrowserLaunchRequest(request)
+            .onChange(of: repoState.authProviderStore.browserLaunchRequest) { _, _ in
+                handleBrowserLaunchRequest()
             }
         }
         .tint(.loopflowBurgundy)
@@ -103,15 +103,9 @@ struct ConnectionSetupView: View {
                         ? repoState.authProviderStore.error
                         : nil,
                     showURLFallback: browserFallbackProviders.contains(status.provider),
-                    onConnect: { provider in
-                        Task { await repoState.authProviderStore.connect(provider) }
-                    },
-                    onDisconnect: { provider in
-                        Task { await repoState.authProviderStore.disconnect(provider) }
-                    },
-                    onCancel: { provider in
-                        Task { await repoState.authProviderStore.disconnect(provider) }
-                    }
+                    onConnect: connectProvider,
+                    onDisconnect: disconnectProvider,
+                    onCancel: disconnectProvider
                 )
                 .listRowInsets(EdgeInsets())
                 .listRowSeparator(.hidden)
@@ -178,9 +172,16 @@ struct ConnectionSetupView: View {
         )
     }
 
-    private func handleBrowserLaunchRequest(_ request: AuthProviderStore.BrowserLaunchRequest?) {
-        guard request != nil,
-              let launchRequest = repoState.authProviderStore.consumeBrowserLaunchRequest() else {
+    private func connectProvider(_ provider: AuthProvider) {
+        Task { await repoState.authProviderStore.connect(provider) }
+    }
+
+    private func disconnectProvider(_ provider: AuthProvider) {
+        Task { await repoState.authProviderStore.disconnect(provider) }
+    }
+
+    private func handleBrowserLaunchRequest() {
+        guard let launchRequest = repoState.authProviderStore.consumeBrowserLaunchRequest() else {
             return
         }
 

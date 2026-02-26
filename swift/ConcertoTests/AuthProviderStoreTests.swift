@@ -44,63 +44,23 @@ struct AuthProviderStoreTests {
     func authEventReconciliation() {
         let store = AuthProviderStore()
 
-        store.handleEvent(
-            AuthEvent(
-                type: .flowStarted,
-                provider: .github,
-                verificationURI: "https://github.com/login/device",
-                verificationURIComplete: nil,
-                login: nil,
-                error: nil,
-                timestamp: Date()
-            )
-        )
+        store.handleEvent(makeAuthEvent(type: .flowStarted, verificationURI: "https://github.com/login/device"))
 
         #expect(store.providers[.github]?.status == .pending)
         #expect(store.pendingFlows[.github] != nil)
 
-        store.handleEvent(
-            AuthEvent(
-                type: .connected,
-                provider: .github,
-                verificationURI: nil,
-                verificationURIComplete: nil,
-                login: "octocat",
-                error: nil,
-                timestamp: Date()
-            )
-        )
+        store.handleEvent(makeAuthEvent(type: .connected, login: "octocat"))
 
         #expect(store.providers[.github]?.status == .active)
         #expect(store.providers[.github]?.login == "octocat")
         #expect(store.pendingFlows[.github] == nil)
 
-        store.handleEvent(
-            AuthEvent(
-                type: .failed,
-                provider: .github,
-                verificationURI: nil,
-                verificationURIComplete: nil,
-                login: nil,
-                error: "Denied",
-                timestamp: Date()
-            )
-        )
+        store.handleEvent(makeAuthEvent(type: .failed, error: "Denied"))
 
         #expect(store.providers[.github]?.status == ProviderAuthStatus.none)
         #expect(store.error == "Denied")
 
-        store.handleEvent(
-            AuthEvent(
-                type: .disconnected,
-                provider: .github,
-                verificationURI: nil,
-                verificationURIComplete: nil,
-                login: nil,
-                error: nil,
-                timestamp: Date()
-            )
-        )
+        store.handleEvent(makeAuthEvent(type: .disconnected))
 
         #expect(store.providers[.github]?.status == ProviderAuthStatus.none)
         #expect(store.pendingFlows[.github] == nil)
@@ -139,6 +99,25 @@ struct AuthProviderStoreTests {
     }
 }
 
+private func makeAuthEvent(
+    type: AuthEvent.EventType,
+    provider: AuthProvider = .github,
+    verificationURI: String? = nil,
+    verificationURIComplete: String? = nil,
+    login: String? = nil,
+    error: String? = nil
+) -> AuthEvent {
+    AuthEvent(
+        type: type,
+        provider: provider,
+        verificationURI: verificationURI,
+        verificationURIComplete: verificationURIComplete,
+        login: login,
+        error: error,
+        timestamp: Date()
+    )
+}
+
 private actor MockAuthProviderService: AuthProviderService {
     private var listResponses: [Result<[AuthProviderStatus], Error>]
     private var startResults: [AuthProvider: Result<AuthFlow, Error>]
@@ -163,24 +142,13 @@ private actor MockAuthProviderService: AuthProviderService {
         if listResponses.isEmpty {
             return []
         }
-
-        switch listResponses.removeFirst() {
-        case .success(let statuses):
-            return statuses
-        case .failure(let error):
-            throw error
-        }
+        return try listResponses.removeFirst().get()
     }
 
     func startAuthFlow(provider: AuthProvider) async throws -> AuthFlow {
         startCallCount += 1
         if let result = startResults[provider] {
-            switch result {
-            case .success(let flow):
-                return flow
-            case .failure(let error):
-                throw error
-            }
+            return try result.get()
         }
 
         return AuthFlow(
@@ -192,12 +160,7 @@ private actor MockAuthProviderService: AuthProviderService {
     func disconnectProvider(provider: AuthProvider) async throws -> AuthProviderStatus {
         disconnectCallCount += 1
         if let result = disconnectResults[provider] {
-            switch result {
-            case .success(let status):
-                return status
-            case .failure(let error):
-                throw error
-            }
+            return try result.get()
         }
 
         return AuthProviderStatus(provider: provider, status: .none)

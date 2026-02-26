@@ -33,9 +33,7 @@ public final class AuthProviderStore {
     public init() {}
 
     public var ordered: [AuthProviderStatus] {
-        AuthProvider.allCases.map { provider in
-            providers[provider] ?? AuthProviderStatus(provider: provider, status: .none, login: nil)
-        }
+        AuthProvider.allCases.map(status(for:))
     }
 
     public func bindService(_ waveService: LocalWaveService) {
@@ -53,73 +51,45 @@ public final class AuthProviderStore {
 
         do {
             let statuses = try await waveService.listAuthProviders()
-            var next: [AuthProvider: AuthProviderStatus] = [:]
-            for provider in AuthProvider.allCases {
-                next[provider] = AuthProviderStatus(provider: provider, status: .none, login: nil)
-            }
-            for status in statuses {
-                next[status.provider] = status
-            }
-            providers = next
+            providers = mergedStatuses(statuses)
             pendingFlows = pendingFlows.filter { provider, _ in
                 providers[provider]?.status == .pending
             }
-            error = nil
-            errorProvider = nil
+            setError(nil, provider: nil)
         } catch {
-            self.error = error.localizedDescription
-            self.errorProvider = nil
+            setError(error.localizedDescription, provider: nil)
         }
     }
 
     public func connect(_ provider: AuthProvider) async {
         guard let waveService else {
-            error = "Connect to server first."
-            errorProvider = provider
+            setError("Connect to server first.", provider: provider)
             return
         }
 
-        setProvider(provider, status: .pending, login: providers[provider]?.login)
-        error = nil
-        errorProvider = nil
+        setProvider(provider, status: .pending, login: status(for: provider).login)
+        setError(nil, provider: nil)
 
         do {
             let flow = try await waveService.startAuthFlow(provider: provider)
             pendingFlows[provider] = flow
-            setProvider(provider, status: .pending, login: providers[provider]?.login)
-
-            let preferredURL = flow.verification_uri_complete ?? flow.verification_uri
-            if let url = URL(string: preferredURL) {
-                browserLaunchRequest = BrowserLaunchRequest(provider: provider, url: url)
-            } else {
-                error = "Could not open provider auth URL. Copy the link manually."
-                errorProvider = provider
-            }
+            enqueueBrowserLaunch(provider: provider, flow: flow)
         } catch let serviceError as WaveServiceError {
-            switch serviceError {
-            case .serverError(let status, _) where status == 409:
+            if isConflict(serviceError) {
                 await refresh()
-                setProvider(provider, status: .pending, login: providers[provider]?.login)
-                error = nil
-                errorProvider = nil
-            default:
-                pendingFlows.removeValue(forKey: provider)
-                setProvider(provider, status: .none, login: nil)
-                error = serviceError.localizedDescription
-                errorProvider = provider
+                setProvider(provider, status: .pending, login: status(for: provider).login)
+                setError(nil, provider: nil)
+            } else {
+                failConnect(provider: provider, message: serviceError.localizedDescription)
             }
-        } catch let caughtError {
-            pendingFlows.removeValue(forKey: provider)
-            setProvider(provider, status: .none, login: nil)
-            error = caughtError.localizedDescription
-            errorProvider = provider
+        } catch {
+            failConnect(provider: provider, message: error.localizedDescription)
         }
     }
 
     public func disconnect(_ provider: AuthProvider) async {
         guard let waveService else {
-            error = "Connect to server first."
-            errorProvider = provider
+            setError("Connect to server first.", provider: provider)
             return
         }
 
@@ -127,11 +97,9 @@ public final class AuthProviderStore {
             let status = try await waveService.disconnectProvider(provider: provider)
             providers[provider] = status
             pendingFlows.removeValue(forKey: provider)
-            error = nil
-            errorProvider = nil
-        } catch let caughtError {
-            error = caughtError.localizedDescription
-            errorProvider = provider
+            setError(nil, provider: nil)
+        } catch {
+            setError(error.localizedDescription, provider: provider)
         }
     }
 
@@ -146,21 +114,18 @@ public final class AuthProviderStore {
         case .connected:
             setProvider(event.provider, status: .active, login: event.login)
             pendingFlows.removeValue(forKey: event.provider)
-            error = nil
-            errorProvider = nil
+            setError(nil, provider: nil)
 
         case .failed:
             setProvider(event.provider, status: .none, login: nil)
             pendingFlows.removeValue(forKey: event.provider)
-            error = event.error ?? "Authentication failed."
-            errorProvider = event.provider
+            setError(event.error ?? "Authentication failed.", provider: event.provider)
 
         case .disconnected:
             setProvider(event.provider, status: .none, login: nil)
             pendingFlows.removeValue(forKey: event.provider)
             if errorProvider == event.provider {
-                error = nil
-                errorProvider = nil
+                setError(nil, provider: nil)
             }
         }
     }
@@ -193,6 +158,50 @@ public final class AuthProviderStore {
 
     private func setProvider(_ provider: AuthProvider, status: ProviderAuthStatus, login: String?) {
         providers[provider] = AuthProviderStatus(provider: provider, status: status, login: login)
+    }
+
+    private func status(for provider: AuthProvider) -> AuthProviderStatus {
+        providers[provider] ?? AuthProviderStatus(provider: provider, status: .none, login: nil)
+    }
+
+    private func mergedStatuses(_ statuses: [AuthProviderStatus]) -> [AuthProvider: AuthProviderStatus] {
+        var next = Dictionary(
+            uniqueKeysWithValues: AuthProvider.allCases.map {
+                ($0, AuthProviderStatus(provider: $0, status: .none, login: nil))
+            }
+        )
+        for status in statuses {
+            next[status.provider] = status
+        }
+        return next
+    }
+
+    private func setError(_ message: String?, provider: AuthProvider?) {
+        error = message
+        errorProvider = provider
+    }
+
+    private func enqueueBrowserLaunch(provider: AuthProvider, flow: AuthFlow) {
+        let preferredURL = flow.verification_uri_complete ?? flow.verification_uri
+        if let url = URL(string: preferredURL) {
+            browserLaunchRequest = BrowserLaunchRequest(provider: provider, url: url)
+            return
+        }
+
+        setError("Could not open provider auth URL. Copy the link manually.", provider: provider)
+    }
+
+    private func failConnect(provider: AuthProvider, message: String) {
+        pendingFlows.removeValue(forKey: provider)
+        setProvider(provider, status: .none, login: nil)
+        setError(message, provider: provider)
+    }
+
+    private func isConflict(_ error: WaveServiceError) -> Bool {
+        if case .serverError(let status, _) = error {
+            return status == 409
+        }
+        return false
     }
 
     private func flowFrom(_ event: AuthEvent) -> AuthFlow? {

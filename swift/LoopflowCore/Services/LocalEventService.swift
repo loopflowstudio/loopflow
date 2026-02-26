@@ -507,35 +507,41 @@ public actor EventService {
                 timestamp: parseTimestamp(json["timestamp"])
             ))
         case "auth.flow_started", "auth.connected", "auth.failed", "auth.disconnected":
-            guard let eventType = AuthEvent.EventType(rawValue: type),
-                  let providerRaw = json["provider"] as? String,
-                  let provider = AuthProvider(rawValue: providerRaw) else {
+            guard let authEvent = parseAuthEvent(type: type, json: json) else {
                 return nil
             }
-
-            let errorMessage: String?
-            if let error = json["error"] as? String {
-                errorMessage = error
-            } else if let errorJSON = json["error"] as? [String: Any] {
-                errorMessage = errorJSON["message"] as? String
-            } else {
-                errorMessage = nil
-            }
-
-            return .auth(
-                AuthEvent(
-                    type: eventType,
-                    provider: provider,
-                    verificationURI: json["verification_uri"] as? String,
-                    verificationURIComplete: json["verification_uri_complete"] as? String,
-                    login: json["login"] as? String,
-                    error: errorMessage,
-                    timestamp: parseTimestamp(json["timestamp"])
-                )
-            )
+            return .auth(authEvent)
         default:
             return nil
         }
+    }
+
+    private nonisolated static func parseAuthEvent(type: String, json: [String: Any]) -> AuthEvent? {
+        guard let eventType = AuthEvent.EventType(rawValue: type),
+              let providerRaw = json["provider"] as? String,
+              let provider = AuthProvider(rawValue: providerRaw) else {
+            return nil
+        }
+
+        return AuthEvent(
+            type: eventType,
+            provider: provider,
+            verificationURI: json["verification_uri"] as? String,
+            verificationURIComplete: json["verification_uri_complete"] as? String,
+            login: json["login"] as? String,
+            error: parseErrorMessage(json["error"]),
+            timestamp: parseTimestamp(json["timestamp"])
+        )
+    }
+
+    private nonisolated static func parseErrorMessage(_ value: Any?) -> String? {
+        if let error = value as? String {
+            return error
+        }
+        if let errorJSON = value as? [String: Any] {
+            return errorJSON["message"] as? String
+        }
+        return nil
     }
 
     private nonisolated static func parseTimestamp(_ value: Any?) -> Date {

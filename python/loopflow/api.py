@@ -5,6 +5,8 @@ from typing import Any, Optional
 
 from .client import Client
 from .models import (
+    AuthFlow,
+    AuthProviderStatus,
     CommitEntry,
     PullRequest,
     Session,
@@ -31,6 +33,18 @@ def health() -> dict[str, Any]:
 
 def status() -> dict[str, Any]:
     return _client().status()
+
+
+def auth_status(provider: Optional[str] = None) -> list[AuthProviderStatus] | AuthProviderStatus:
+    return _client().auth_status(provider=provider)
+
+
+def start_auth(provider: str) -> AuthFlow:
+    return _client().start_auth(provider)
+
+
+def disconnect_auth(provider: str) -> AuthProviderStatus:
+    return _client().disconnect_auth(provider)
 
 
 def waves(repo: Optional[str] = None) -> list[Wave]:
@@ -175,6 +189,8 @@ def stream_session_events(
 
 __all__ = [
     "Client",
+    "AuthFlow",
+    "AuthProviderStatus",
     "CommitEntry",
     "PullRequest",
     "Session",
@@ -185,6 +201,9 @@ __all__ = [
     "WaveRun",
     "health",
     "status",
+    "auth_status",
+    "start_auth",
+    "disconnect_auth",
     "waves",
     "wave",
     "create_wave",

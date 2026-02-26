@@ -457,6 +457,7 @@ mod tests {
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::http::state::HttpState;
     use crate::lfd::output::OutputHub;
+    use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
@@ -496,6 +497,7 @@ mod tests {
             executor,
             event_hub,
             output_hub,
+            provider_auth: ProviderAuthService::new(),
             auth: AuthProvider::Local {
                 session_token: secrecy::SecretString::from("test-token".to_string()),
             },

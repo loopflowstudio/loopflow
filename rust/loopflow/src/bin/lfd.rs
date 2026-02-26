@@ -12,6 +12,7 @@ use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
+use loopflow::lfd::provider_auth::ProviderAuthService;
 use loopflow::lfd::scheduler::Scheduler;
 use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfd::sessions::SessionManager;
@@ -226,6 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         executor: Arc::new(executor),
         event_hub,
         output_hub: output,
+        provider_auth: ProviderAuthService::new(),
         auth: auth_provider,
         registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),

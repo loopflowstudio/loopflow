@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
-from conftest import SESSION_FULL, SESSION_MINIMAL, WAVE_FULL, WAVE_MINIMAL, WAVE_RUN_MINIMAL
+from conftest import (
+    AUTH_FLOW,
+    AUTH_PROVIDER_ACTIVE,
+    SESSION_FULL,
+    SESSION_MINIMAL,
+    WAVE_FULL,
+    WAVE_MINIMAL,
+    WAVE_RUN_MINIMAL,
+)
 
-from loopflow.models import CommitEntry, Session, SessionEventEnvelope, Wave, WaveRun
+from loopflow.models import (
+    AuthFlow,
+    AuthProviderStatus,
+    CommitEntry,
+    Session,
+    SessionEventEnvelope,
+    Wave,
+    WaveRun,
+)
 
 
 class TestWaveModel:
@@ -90,3 +106,17 @@ class TestSessionEventEnvelopeModel:
         )
         assert event.seq == 12
         assert event.event["type"] == "turn_completed"
+
+
+class TestAuthModels:
+    def test_auth_provider_status(self):
+        status = AuthProviderStatus.model_validate(AUTH_PROVIDER_ACTIVE)
+        assert status.provider == "github"
+        assert status.status == "active"
+        assert status.login == "jackdanger"
+
+    def test_auth_flow(self):
+        flow = AuthFlow.model_validate(AUTH_FLOW)
+        assert flow.provider == "github"
+        assert flow.verification_uri.startswith("https://")
+        assert flow.user_code == "ABCD-1234"

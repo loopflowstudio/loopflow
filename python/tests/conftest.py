@@ -72,3 +72,22 @@ SESSION_FULL = {
     "created_at": "2026-02-24T12:00:00Z",
     "ended_at": "2026-02-24T12:05:00Z",
 }
+
+AUTH_PROVIDER_ACTIVE = {
+    "provider": "github",
+    "status": "active",
+    "login": "jackdanger",
+}
+
+AUTH_PROVIDER_NONE = {
+    "provider": "codex",
+    "status": "none",
+}
+
+AUTH_FLOW = {
+    "provider": "github",
+    "verification_uri": "https://github.com/login/device",
+    "verification_uri_complete": "https://github.com/login/device?user_code=ABCD-1234",
+    "user_code": "ABCD-1234",
+    "expires_in": 900,
+}

@@ -64,6 +64,20 @@ class Wave(BaseModel):
     pr_state: Optional[str] = None
 
 
+class AuthProviderStatus(BaseModel):
+    provider: str
+    status: str
+    login: Optional[str] = None
+
+
+class AuthFlow(BaseModel):
+    provider: str
+    verification_uri: str
+    verification_uri_complete: Optional[str] = None
+    user_code: Optional[str] = None
+    expires_in: Optional[int] = None
+
+
 class SessionConfig(BaseModel):
     model: Optional[str] = None
     cwd: Optional[str] = None

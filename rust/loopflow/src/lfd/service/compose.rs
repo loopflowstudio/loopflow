@@ -240,12 +240,13 @@ fn resolve_credential_mount_name(name: &str) -> Result<&'static str> {
     match key {
         "claude" | ".claude" => Ok(".claude"),
         "codex" | ".codex" => Ok(".codex"),
+        "gh" | ".config/gh" => Ok(".config/gh"),
         "gemini" | ".config/gemini" => Ok(".config/gemini"),
         "gitconfig" | ".gitconfig" => Ok(".gitconfig"),
         "ssh" | ".ssh" => Ok(".ssh"),
         "gnupg" | ".gnupg" => Ok(".gnupg"),
         _ => bail!(
-            "unknown credential mount '{name}'. allowed mounts: claude, codex, gemini, gitconfig, ssh, gnupg"
+            "unknown credential mount '{name}'. allowed mounts: claude, codex, gh, gemini, gitconfig, ssh, gnupg"
         ),
     }
 }
@@ -273,7 +274,7 @@ impl From<ComposePsRow> for ComposeServiceStatus {
 #[cfg(test)]
 mod tests {
     use super::render_compose_file;
-    use crate::lfd::config::{ExecutorType, LfdConfig, Mode, StorageType};
+    use crate::lfd::config::{CredentialMount, ExecutorType, LfdConfig, Mode, StorageType};
     use secrecy::SecretString;
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
@@ -346,5 +347,17 @@ mod tests {
         let content = render_compose_file(&config).expect("render compose file");
         assert!(content.contains("OPENAI_API_KEY: \"${OPENAI_API_KEY:-}\""));
         assert!(content.contains("ANTHROPIC_API_KEY: \"${ANTHROPIC_API_KEY:-}\""));
+    }
+
+    #[test]
+    fn compose_renders_gh_credential_mount() {
+        let mut config = container_config();
+        config.executor.credentials.mounts =
+            vec![CredentialMount::try_from("gh".to_string()).expect("gh mount parses")];
+
+        let content = render_compose_file(&config).expect("render compose file");
+        let home = dirs::home_dir().expect("home dir");
+        let expected = format!("{}/.config/gh:/root/.config/gh", home.display());
+        assert!(content.contains(&expected));
     }
 }

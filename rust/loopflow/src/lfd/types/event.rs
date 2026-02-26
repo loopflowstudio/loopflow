@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
+use crate::lfd::provider_auth::Provider;
 use crate::lfd::types::agent::AgentStatus;
 
 /// Event payload variants.
@@ -16,6 +17,38 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
     Ping,
+
+    // Provider auth
+    #[serde(rename = "auth.flow_started")]
+    AuthFlowStarted {
+        provider: Provider,
+        verification_uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        verification_uri_complete: Option<String>,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "auth.connected")]
+    AuthConnected {
+        provider: Provider,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        login: Option<String>,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "auth.failed")]
+    AuthFailed {
+        provider: Provider,
+        error: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "auth.disconnected")]
+    AuthDisconnected {
+        provider: Provider,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
 
     // Wave lifecycle
     WaveCreated {
@@ -111,6 +144,42 @@ impl Event {
         Self::WaveCreated {
             wave_id,
             name,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn auth_flow_started(
+        provider: Provider,
+        verification_uri: String,
+        verification_uri_complete: Option<String>,
+    ) -> Self {
+        Self::AuthFlowStarted {
+            provider,
+            verification_uri,
+            verification_uri_complete,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn auth_connected(provider: Provider, login: Option<String>) -> Self {
+        Self::AuthConnected {
+            provider,
+            login,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn auth_failed(provider: Provider, error: String) -> Self {
+        Self::AuthFailed {
+            provider,
+            error,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn auth_disconnected(provider: Provider) -> Self {
+        Self::AuthDisconnected {
+            provider,
             timestamp: Self::now(),
         }
     }
@@ -280,6 +349,7 @@ mod tests {
             Event::wave_waiting(id(), id(), "step".to_string(), None, None),
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
             Event::agent_ended(id(), AgentStatus::Failed),
+            Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
         ];
         for event in events {
             let json = serde_json::to_string(&event).unwrap();
@@ -287,6 +357,15 @@ mod tests {
             let json2 = serde_json::to_string(&parsed).unwrap();
             assert_eq!(json, json2);
         }
+    }
+
+    #[test]
+    fn auth_events_use_dotted_type_names() {
+        let event = Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string()));
+        let json = serde_json::to_value(&event).expect("serialize");
+        assert_eq!(json["type"], "auth.connected");
+        assert_eq!(json["provider"], "github");
+        assert_eq!(json["login"], "jackdanger");
     }
 
     #[test]

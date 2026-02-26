@@ -10,7 +10,15 @@ from typing import Any, Optional
 import httpx
 
 from .errors import LoopflowError, WaveAlreadyRunning
-from .models import Session, SessionConfig, SessionEventEnvelope, Wave, WaveRun
+from .models import (
+    AuthFlow,
+    AuthProviderStatus,
+    Session,
+    SessionConfig,
+    SessionEventEnvelope,
+    Wave,
+    WaveRun,
+)
 
 
 def _resolve_base_url() -> str:
@@ -68,6 +76,26 @@ class Client:
 
     def status(self) -> dict[str, Any]:
         return self._request_json("GET", "/status")
+
+    def auth_status(
+        self,
+        provider: Optional[str] = None,
+    ) -> list[AuthProviderStatus] | AuthProviderStatus:
+        if provider is None:
+            payload = self._request_json("GET", "/v0/auth")
+            providers = payload.get("providers", [])
+            return [AuthProviderStatus.model_validate(item) for item in providers]
+
+        payload = self._request_json("GET", f"/v0/auth/{provider}")
+        return AuthProviderStatus.model_validate(payload)
+
+    def start_auth(self, provider: str) -> AuthFlow:
+        payload = self._request_json("POST", f"/v0/auth/{provider}")
+        return AuthFlow.model_validate(payload)
+
+    def disconnect_auth(self, provider: str) -> AuthProviderStatus:
+        payload = self._request_json("DELETE", f"/v0/auth/{provider}")
+        return AuthProviderStatus.model_validate(payload)
 
     def waves(self, repo: Optional[str] = None) -> list[Wave]:
         params: dict[str, str] = {}

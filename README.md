@@ -173,6 +173,8 @@ uv tool install loopflow
 lfq                  # status overview
 lfq list             # list waves
 lfq logs engbot      # tail agent output
+lfq auth status      # provider auth status (GitHub / Claude / Codex)
+lfq auth github      # connect GitHub in your browser
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

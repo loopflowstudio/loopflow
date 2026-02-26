@@ -43,7 +43,6 @@ struct ReplyDemoView: View {
     @State private var emojiVariant: ReplyDemoEmojiVariant = .fixed
     @State private var trayState: ReplyDemoTrayState = .three
     @State private var queue: ReplyQueue = .demoQueueTriple()
-    @State private var freeTextDraft = ""
     @State private var trayExpanded = true
 
     var body: some View {
@@ -67,9 +66,7 @@ struct ReplyDemoView: View {
                     VStack(alignment: .leading, spacing: Spacing.md) {
                         ReplyDraftTray(
                             queue: queue,
-                            isExpanded: $trayExpanded,
-                            freeTextDraft: $freeTextDraft,
-                            onSend: {}
+                            isExpanded: $trayExpanded
                         )
 
                         assembledPreview
@@ -84,7 +81,6 @@ struct ReplyDemoView: View {
         .onChange(of: trayState) { _, newValue in
             queue = newValue.queue
             trayExpanded = true
-            freeTextDraft = ""
         }
     }
 

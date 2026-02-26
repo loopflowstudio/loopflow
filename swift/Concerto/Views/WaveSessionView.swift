@@ -15,7 +15,6 @@ struct WaveSessionView: View {
     @State private var isNearBottom = true
     @State private var replyQueue = ReplyQueue()
     @State private var isReplyTrayExpanded = false
-    @State private var replyTrayFreeText = ""
 
     var body: some View {
         VStack(spacing: Spacing.md) {
@@ -63,14 +62,13 @@ struct WaveSessionView: View {
                 .padding(.horizontal, Spacing.lg)
             }
 
-            ReplyDraftTray(
-                queue: replyQueue,
-                isExpanded: $isReplyTrayExpanded,
-                freeTextDraft: $replyTrayFreeText,
-                canSend: state.canSend,
-                onSend: sendMessage
-            )
-            .padding(.horizontal, Spacing.lg)
+            if !replyQueue.isEmpty {
+                ReplyDraftTray(
+                    queue: replyQueue,
+                    isExpanded: $isReplyTrayExpanded
+                )
+                .padding(.horizontal, Spacing.lg)
+            }
 
             HStack(alignment: .bottom, spacing: Spacing.sm) {
                 TextField("Message", text: $composerText, axis: .vertical)
@@ -206,7 +204,6 @@ struct WaveSessionView: View {
 
     private func clearReplyInputs(collapseTray: Bool = false) {
         replyQueue.clear()
-        replyTrayFreeText = ""
         if collapseTray {
             isReplyTrayExpanded = false
         }
@@ -343,6 +340,7 @@ private struct MessageRow: View {
     }
 
     private func closeReplyComposer() {
+        guard selectedQuote != nil else { return }
         selectedQuote = nil
         replyDraft = ""
         selectionResetToken += 1

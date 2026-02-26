@@ -7,7 +7,7 @@ Attach feedback to exact assistant spans instead of replying to whole messages.
 ## What shipped
 
 - `ReplyEntry` + `ReplyQueue` model/assembly flow for quote replies, emoji reactions, and free-text entries.
-- `ReplyDraftTray` for queued items and optional free-text additions before send.
+- `ReplyDraftTray` for reviewing and deleting queued items (appears when queue non-empty; free-text goes through the existing composer).
 - `ReplyComposerPopover` for text reply + fixed quick-react emoji buttons on selected quote text.
 - `SelectableAssistantMessageTextView` (macOS) so assistant text selection can trigger quote-reply actions.
 - `WaveSessionView` wiring:

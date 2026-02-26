@@ -28,7 +28,9 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
 
         if context.coordinator.selectionResetToken != selectionResetToken {
             context.coordinator.selectionResetToken = selectionResetToken
+            context.coordinator.isResetting = true
             nsView.setSelectedRange(NSRange(location: 0, length: 0))
+            context.coordinator.isResetting = false
             onSelectionChanged(nil)
         }
     }
@@ -36,12 +38,14 @@ struct SelectableAssistantMessageTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var onSelectionChanged: (String?) -> Void
         var selectionResetToken = 0
+        var isResetting = false
 
         init(onSelectionChanged: @escaping (String?) -> Void) {
             self.onSelectionChanged = onSelectionChanged
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
+            guard !isResetting else { return }
             guard let textView = notification.object as? NSTextView else { return }
             let selection = textView.selectedRange()
             guard selection.length > 0 else {

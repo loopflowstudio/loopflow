@@ -9,55 +9,23 @@ struct ReplyDraftTray: View {
 
     @Bindable var queue: ReplyQueue
     @Binding var isExpanded: Bool
-    @Binding var freeTextDraft: String
-
-    var canSend = true
-    let onSend: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    if queue.isEmpty {
-                        Text("No replies queued yet")
-                            .font(Typography.caption())
-                            .foregroundStyle(palette.textSecondary)
-                    } else {
-                        VStack(alignment: .leading, spacing: Spacing.xs) {
-                            ForEach(queue.entries) { entry in
-                                ReplyDraftEntryRow(entry: entry) {
-                                    queue.remove(id: entry.id)
-                                }
-                            }
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(queue.entries) { entry in
+                        ReplyDraftEntryRow(entry: entry) {
+                            queue.remove(id: entry.id)
                         }
-                    }
-
-                    HStack(spacing: Spacing.sm) {
-                        TextField("Add free-text feedback", text: $freeTextDraft)
-                            .textFieldStyle(.roundedBorder)
-
-                        Button("Queue") {
-                            queue.addFreeText(freeTextDraft)
-                            freeTextDraft = ""
-                        }
-                        .buttonStyle(DarkButtonStyle())
-                        .disabled(freeTextDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 .padding(.horizontal, Spacing.md)
-                .padding(.bottom, Spacing.md)
+                .padding(.bottom, Spacing.sm)
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .fill(palette.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .stroke(palette.border, lineWidth: 1)
-        )
     }
 
     private var header: some View {
@@ -81,15 +49,9 @@ struct ReplyDraftTray: View {
             .accessibilityLabel(isExpanded ? "Collapse queued replies" : "Expand queued replies")
 
             Spacer()
-
-            Button("Send") {
-                onSend()
-            }
-            .buttonStyle(DarkButtonStyle())
-            .disabled(queue.isEmpty || !canSend)
         }
         .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
     }
 }
 
@@ -194,14 +156,11 @@ struct ReplyComposerPopover: View {
 private struct ReplyDraftTrayPreviewHarness: View {
     @State private var queue = ReplyQueue.demoQueueTriple()
     @State private var isExpanded = true
-    @State private var freeTextDraft = ""
 
     var body: some View {
         ReplyDraftTray(
             queue: queue,
-            isExpanded: $isExpanded,
-            freeTextDraft: $freeTextDraft,
-            onSend: {}
+            isExpanded: $isExpanded
         )
         .padding()
         .frame(width: 640)

@@ -20,7 +20,7 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 - **Harness reconnect**: All three harnesses treat stream/process death as terminal. OpenCode is most exposed — SSE streams drop for transient reasons (TCP reset, sleep/wake, load balancer timeout) that don't mean the session is gone. Claude and Codex could also benefit from crash recovery via fresh spawn + resume instead of terminal failure. Design needed: reconnect with replay from last known event, partial state recovery, and backoff.
 - ~~**lfd restart / orphan cleanup**~~ → `scratch/agentapi-orphan-cleanup.md`
 - **Immediate wave advancement**: open question whether successful session completion should trigger immediate waiting-step advancement or remain tick-driven. Current choice (tick-driven) is simpler but adds latency.
-- **Conformance traces and schema pinning**: The OpenCode adapter shipped with unit tests for event mapping but no recorded-trace replay tests. The defensive multi-key fallbacks (`sessionID`/`sessionId`/`session_id`, etc.) are a temporary hedge against an inferred schema — they mask bugs by silently matching the wrong field. Record real traces from a live OpenCode server, add replay tests (matching the Claude/Codex pattern), then strip fallbacks to canonical field names. Consider bundling fixed OpenCode binaries (or recorded trace fixtures) so CI can validate without a live server. See `scratch/questions.md` for the two unresolved schema questions.
+- ~~**Conformance traces and schema pinning**~~ → `scratch/agentapi-conformance-traces.md`
 
 ## What we learned
 
@@ -41,6 +41,6 @@ Hardening moved forward before the OpenCode adapter — the reliability gaps wer
 - ~~Dead harness processes detected and session marked `failed`~~ ✓
 - ~~lfd restart doesn't leave orphaned active sessions or orphaned `opencode serve` processes~~ ✓
 - ~~Session end advances wave run~~ ✓ (tick-driven)
-- Conformance replay tests pass for all three harnesses with recorded traces
+- Conformance replay tests pass for all three harnesses with recorded traces → `scratch/agentapi-conformance-traces.md`
 - SSE/stream disconnect triggers reconnect with backoff, not terminal failure
-- OpenCode defensive field-name fallbacks replaced with canonical names backed by recorded traces
+- OpenCode defensive field-name fallbacks replaced with canonical names backed by recorded traces → `scratch/agentapi-conformance-traces.md`

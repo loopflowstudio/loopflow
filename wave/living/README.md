@@ -48,7 +48,7 @@ A living wave:
 |---|-------|----------------|--------|
 | 01 | Skill injection | Agents see loopflow steps/directions as native commands | shipped |
 | 02 | Wave memory | Agents read/write durable observations scoped to their wave | shipped |
-| 03 | Surface-adaptive prompts | Same step adapts to headless, session, TUI, mobile | next |
+| 03 | Surface-adaptive prompts | Same step adapts to headless, session, TUI, mobile | picked |
 | 04 | Memory lifecycle | Aging, inheritance on split-wave, read-failure logging | |
 
 ### Phase 01 retrospective

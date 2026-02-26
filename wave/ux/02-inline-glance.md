@@ -2,20 +2,20 @@
 
 Inline the glance, link to the deep dive. Eliminate context-switches to GitHub/Cursor for the "check in" workflow.
 
-**Status: in progress**
+**Status: done**
 
 ## What to build
 
-All items picked. G1 shipped. G2–G5 in progress — see `scratch/ux-inline-glance.md`.
+All items shipped. G1 shipped in prior PR. G2–G5 shipped — see `scratch/ux-inline-glance.md`.
 
 ### ~~File items show diffs (G1)~~ — done
 
 `DiffLinesView` renders colored inline diffs. `synthesize_edit_diff()` in the Claude harness populates `FileEdit.diff` from Edit tool inputs.
 
-### ~~Wave diff stat per-file expand (G2)~~ — in progress
-### ~~Roadmap item expansion (G3)~~ — in progress
-### ~~Wave README full content (G4)~~ — in progress
-### ~~Scratch doc glance (G5)~~ — in progress
+### ~~Wave diff stat per-file expand (G2)~~ — done
+### ~~Roadmap item expansion (G3)~~ — done
+### ~~Wave README full content (G4)~~ — done
+### ~~Scratch doc glance (G5)~~ — done
 
 ## Constraints
 

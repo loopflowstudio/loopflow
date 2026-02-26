@@ -1,0 +1,6 @@
+flow: ship-wave
+area:
+  - scripts/
+direction:
+  - ux
+  - craft

@@ -167,38 +167,25 @@ fn replay_codex_trace(file_name: &str) -> Vec<SessionEvent> {
     events
 }
 
-fn infer_opencode_session_id(lines: &[String]) -> String {
-    for line in lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        if let Some(session_id) = value.get("id").and_then(Value::as_str) {
-            return session_id.to_string();
-        }
-        if let Some(session_id) = value
-            .get("properties")
-            .and_then(|properties| properties.get("sessionID"))
-            .and_then(Value::as_str)
-        {
-            return session_id.to_string();
-        }
-    }
-    "unknown".to_string()
-}
-
 fn replay_opencode_trace(file_name: &str) -> Vec<SessionEvent> {
-    let lines = read_trace_lines(file_name);
-    let session_id = infer_opencode_session_id(&lines);
+    let mut lines = read_trace_lines(file_name)
+        .into_iter()
+        .filter(|line| !line.trim().is_empty());
+    let session_create: Value = serde_json::from_str(
+        &lines
+            .next()
+            .expect("opencode trace should start with session create payload"),
+    )
+    .expect("session create payload should be valid json");
+    let session_id = session_create
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("session create payload should include canonical id")
+        .to_string();
     let mut state = opencode_mapping::ReaderState::new(session_id);
     let mut events = Vec::new();
 
     for line in lines {
-        if line.trim().is_empty() {
-            continue;
-        }
         let value: Value = serde_json::from_str(&line).expect("trace line should be valid json");
         let mapped = opencode_mapping::map_event(&value, &mut state);
         events.extend(mapped.events);

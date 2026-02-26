@@ -124,7 +124,9 @@ fn complete_turn(state: &mut ReaderState, status: TurnStatus, mapped: &mut Mappe
 }
 
 fn parse_session_state(properties: &Value) -> SessionState {
-    let value = string_by_keys(properties, &["status"])
+    let value = properties
+        .get("status")
+        .and_then(Value::as_str)
         .unwrap_or_default()
         .to_ascii_lowercase();
 
@@ -235,9 +237,15 @@ fn map_diff(properties: &Value, state: &ReaderState, mapped: &mut MappedEvent) {
 }
 
 fn map_error(properties: &Value, state: &mut ReaderState, mapped: &mut MappedEvent) {
-    let code =
-        string_by_keys(properties, &["code"]).unwrap_or_else(|| "opencode_error".to_string());
-    let message = string_by_keys(properties, &["message", "error"])
+    let code = properties
+        .get("code")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "opencode_error".to_string());
+    let message = properties
+        .get("message")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
         .unwrap_or_else(|| "opencode error".to_string());
 
     if state.status == SessionState::Active {

@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState, LivePullRequestState,
-    PendingActivation, QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave, WaveRun,
-    WaveRunStackStatus,
+    ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState,
+    LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent, Stimulus, Summary, Wave,
+    WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;

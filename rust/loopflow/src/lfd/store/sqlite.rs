@@ -13,15 +13,14 @@ use crate::lfd::store::catalog::{
 };
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
-    map_chord_row,
-    map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_stimulus_row,
-    map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
+    map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
+    map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState,
-    PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Stimulus, Summary, Wave,
-    WaveRun, WaveRunStatus, WaveStatus,
+    ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
+    LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent,
+    Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Clone)]

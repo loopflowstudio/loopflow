@@ -25,7 +25,7 @@ loopflow is a "smart router" — 91k lines orchestrating coding agents, not reim
 - **Over-decomposition.** Splitting traits/modules too far creates indirection without value. Pass 1 proved this: the harness command builder trait added a registry, a trait, and 5 files for what a match block and a helper function handle cleanly. The store should be 4-5 focused traits, not 15 micro-traits.
 - **Chasing peers.** opencode and convex made different tradeoffs for different reasons. Adopt patterns that fit loopflow's delegation model, not patterns that fight it.
 - **Stale reference blast radius.** Direction taxonomy restructuring required three gate iterations to catch all stale references across docs, Swift previews, and wave configs. Pass 1 structural renames (docker module path, store capability imports) had narrower blast radius than expected — the `AgentExecutor` surface isolation helped.
-- **Metadata convention drift in docker recovery.** Pass 1 decomposition revealed that recovery correctness depends on label/mount conventions staying consistent across image, workspace, and recovery modules. These conventions are implicit. Pass 2 invariant tests should make them explicit.
+- **Metadata convention drift in docker recovery.** Pass 1 decomposition revealed that recovery correctness depends on label/mount conventions staying consistent across image, workspace, and recovery modules. Pass 2 made these explicit via shared constants and invariant tests. Remaining risk: daemon-restart e2e coverage beyond unit tests.
 
 ## Roadmap (4 passes)
 
@@ -34,8 +34,8 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 | Pass | Phase doc | Scope | What it unlocks | Status |
 |---|---|---|---|---|
 | 1 | *(shipped)* | Core boundary cleanup (`store` + `docker` + harness commands) | Lower blast radius in hotspot files; deconcentrate docker lifecycle | Done |
-| 2 | *(in progress)* | Contract hardening (prompt pipeline split + SQL catalog validation + recovery invariants tests) | Safer iteration on prompt/token policy and fewer runtime contract regressions | In progress |
-| 3 | `03-orchestration-expansion.md` | Orchestration expansion (push triggers + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | Later |
+| 2 | *(shipped)* | Contract hardening (prompt stage newtypes + Docker metadata constants + SQL catalog invariants + golden prompts) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Done |
+| 3 | `03-orchestration-expansion.md` | Orchestration expansion (push triggers + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | Next |
 | 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |
 
 ### Pass 1 retrospective
@@ -50,6 +50,18 @@ What was partial: store backend `match` dispatch still exists inside trait impls
 
 What we learned: docker recovery logic is still high-risk even after decomposition — the problem is metadata convention drift, not file size. Recovery invariant tests (already planned for Pass 2) are higher priority than originally estimated.
 
+### Pass 2 retrospective
+
+Shipped prompt stage newtypes, Docker metadata constants + invariant tests, SQL catalog completeness checks, and golden prompt conformance fixtures.
+
+What went as planned: Docker invariant tests landed cleanly and directly address the metadata convention drift risk identified in Pass 1. SQL catalog checks cover both SQLite and Postgres dialects with placeholder validation. Golden prompt fixtures for implement/review/debug establish regression baselines.
+
+What was revised: prompt pipeline used newtypes (`GatheredContext`, `BudgetedContext`, `RenderedPrompt`) rather than a full structural split of `prompt.rs`. Lower refactor cost, same ordering guarantees. The "prompt pipeline split" in the roadmap was really "prompt pipeline contracts" — the file stays large but the ordering is enforced. Store backend `match` dispatch (flagged as partial work in Pass 1) was deliberately retained and documented as intentional — one greppable dispatch point beats macro indirection for the current number of backends.
+
+What remains: `prompt.rs` concentration risk is documented but not blocking. Docker recovery would benefit from daemon-restart e2e tests beyond the unit invariant tests shipped here. Store dispatch verbosity is a conscious tradeoff, not debt — revisit only if backend count grows.
+
+What we learned: contract hardening via invariant tests (catalog completeness, metadata constants, stage newtypes) is high-ROI relative to structural decomposition. The contracts catch drift at compile/test time without the indirection cost of splitting files further. Pass 3 (orchestration expansion) is now unblocked — boundaries are stable and contracts are explicit.
+
 ## Reference report
 
 - `00-architecture-report.md` — unified architecture + fragility + four-angle analysis (canonical)
@@ -61,6 +73,7 @@ What we learned: docker recovery logic is still high-risk even after decompositi
 - `build.rs` codegen pattern is proven for compile-time discovery and validation. BFS expansion with dedup, compile-time directory scanning, `LazyLock<HashMap>` generation — all battle-tested. The same approach applies to Pass 2's SQL catalog validation.
 - Direction work was additive to `flow.rs`/`fork.rs`/`prompt.rs` — hotspot files from Pass 1 (`docker.rs`, `store/mod.rs`) were not disturbed. Confirms Pass 1 sequencing.
 - Stale references were the biggest friction source. Gate caught stale direction names in docs, Swift preview data, and wave configs across three iterations. Pass 1 renames had narrower blast radius than direction renames — `AgentExecutor` trait surface insulated callers from the docker module split.
-- Core risk moved from “too many features” to “too much responsibility in a few files.” Pass 1 addressed the worst hotspots; remaining concentration is in `prompt.rs` and store backend dispatch.
+- Core risk moved from “too many features” to “too much responsibility in a few files.” Pass 1 addressed the worst hotspots; Pass 2 hardened contracts in the remaining concentrations (`prompt.rs` via stage newtypes, store via catalog invariants). `prompt.rs` concentration remains but is now contractually constrained.
 - Baseline guardrails (hotspot concentration + forwarding-surface tracking) apply across all four passes.
-- **Pass 1 shipped.** Docker lifecycle decomposition and store capability accessors landed. Harness command trait was tried and simplified back to match dispatch — over-decomposition for 4 model types. Store backend-port adapter extraction is partial — remaining `match` dispatch feeds into Pass 2. Known flaky test: `wave_worktree_tests::wave_rename_renames_branch` (unrelated, intermittent).
+- **Pass 1 shipped.** Docker lifecycle decomposition and store capability accessors landed. Harness command trait was tried and simplified back to match dispatch — over-decomposition for 4 model types.
+- **Pass 2 shipped.** Prompt stage newtypes, Docker metadata constants + invariant tests, SQL catalog completeness checks, golden prompt fixtures. Store backend `match` dispatch deliberately retained — documented as intentional single dispatch point, not accidental boilerplate. Known flaky test: `wave_worktree_tests::wave_rename_renames_branch` (unrelated, intermittent).

@@ -36,8 +36,8 @@ Deep-review findings shifted priority toward deconcentrating hotspot files befor
 |---|---|---|---|---|
 | 1 | *(shipped)* | Core boundary cleanup (`store` + `docker` + harness commands) | Lower blast radius in hotspot files; deconcentrate docker lifecycle | Done |
 | 2 | *(shipped)* | Contract hardening (prompt stage newtypes + Docker metadata constants + SQL catalog invariants + golden prompts) | Safer iteration on prompt/token policy and fewer runtime contract regressions | Done |
-| 3 | *(Milestone A shipped; Milestone B ingested → `scratch/infra-flow-language-enrichment.md`)* | Orchestration expansion (activation ingress + push/listen + flow enrichment) | Faster reactions and richer wave composition once core boundaries are stable | In progress |
-| 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Later |
+| 3 | *(Milestone A shipped; Milestone B in progress → `scratch/infra-flow-language-enrichment.md`)* | Orchestration expansion (activation ingress + push/listen + multi-step fork branches) | Faster reactions and richer wave composition once core boundaries are stable | In progress |
+| 4 | `04-lfd-direction-aliases.md` | lfd-managed direction aliases (sqlite + HTTP API + lfq) | Personal direction presets without repo coupling | Next |
 
 ### Shipped side milestones
 
@@ -76,7 +76,7 @@ What shipped: `triggers/activation.rs` now owns enqueue/coalesce/drop/dispatch p
 
 What was revised: activation queue semantics are now explicit (stimulus-level dedupe, per-wave queue cap defaults, immutable activation outcome log) instead of ad-hoc trigger-specific behavior.
 
-What remains: Milestone B flow-language enrichment is still open (`when` predicates, multi-step fork branch plans, persisted flow decision snapshots, and replay coverage). See `03-orchestration-expansion.md` for remaining contract.
+What remains: Milestone B scoped to multi-step fork branches (allow fork branches to reference named flows, run steps sequentially per branch). Original `when` predicates and decision persistence deferred — stimulus→flow routing (shipped in chords wave) covers the reactive flow use case at the wave level instead.
 
 ## Reference report
 

@@ -193,6 +193,11 @@ pub struct Wave {
     pub iteration: u32,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
+    /// When true, only one run at a time — activations queue and dispatch
+    /// sequentially. When false (default), triggers spawn runs immediately
+    /// and git coordinates concurrent execution.
+    #[serde(default)]
+    pub serialized: bool,
 }
 
 impl Wave {
@@ -208,6 +213,7 @@ impl Wave {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         }
     }
 

@@ -35,6 +35,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         status: WaveStatus::Idle,
         iteration: 0,
         created_at: None,
+        serialized: false,
     }
 }
 

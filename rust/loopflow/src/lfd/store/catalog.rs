@@ -150,27 +150,27 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at\n             FROM waves\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, serialized\n             FROM waves\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, serialized\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, repo, flow, direction, area, paused, status, iteration, created_at\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                flow = excluded.flow,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                created_at = excluded.created_at",
+        template: "INSERT INTO waves (\n                id, name, repo, flow, direction, area, paused, status, iteration, created_at, serialized\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                flow = excluded.flow,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                created_at = excluded.created_at,\n                serialized = excluded.serialized",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, serialized\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at\n             FROM waves\n             WHERE name = {p1}",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    created_at, serialized\n             FROM waves\n             WHERE name = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },

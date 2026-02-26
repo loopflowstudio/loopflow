@@ -1,9 +1,14 @@
+use std::sync::Arc;
+
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::activation::{enqueue_pending_activation, ActivationEnvelope, EnqueueOutcome};
+use super::spawn_immediate_activation;
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
+use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{ActivationSource, Event, Signal, Stimulus, CI_FIX_FLOW};
 use time::OffsetDateTime;
@@ -20,6 +25,8 @@ struct CiFailureActivation {
 
 pub fn spawn_ci_failure_handler(
     store: SharedStore,
+    executor: WaveExecutor,
+    scheduler: Arc<Scheduler>,
     event_hub: EventHub,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
@@ -52,7 +59,7 @@ pub fn spawn_ci_failure_handler(
                                 logs_url,
                             };
                             if let Err(err) =
-                                handle_ci_failure_event(&store, &event_hub, activation).await
+                                handle_ci_failure_event(&store, &executor, &scheduler, &event_hub, activation).await
                             {
                                 tracing::warn!(error = %err, "failed handling CI failure activation");
                             }
@@ -68,39 +75,57 @@ pub fn spawn_ci_failure_handler(
 
 async fn handle_ci_failure_event(
     store: &SharedStore,
+    executor: &WaveExecutor,
+    scheduler: &Arc<Scheduler>,
     event_hub: &EventHub,
     activation: CiFailureActivation,
 ) -> Result<(), String> {
-    let stimulus_id = resolve_ci_failure_stimulus(store, &activation.wave_id).await?;
+    let stimulus = resolve_ci_failure_stimulus(store, &activation.wave_id).await?;
     let reason = format!(
         "CI failure for PR #{} on {} ({}): {}",
         activation.pr_number, activation.branch, activation.check_name, activation.logs_url
     );
-    let outcome = enqueue_pending_activation(
-        store,
-        event_hub,
-        ActivationEnvelope::new(
-            &activation.wave_id,
-            &stimulus_id,
-            ActivationSource::Push,
-            reason,
-            &activation.commit_sha,
-            &activation.commit_sha,
-        ),
-    )
-    .await;
-    if outcome.is_none() {
-        return Err(format!(
-            "failed to enqueue CI failure activation for wave {}",
-            activation.wave_id
-        ));
-    }
-    if matches!(outcome, Some(EnqueueOutcome::Dropped)) {
-        tracing::warn!(
-            wave_id = %activation.wave_id,
-            stimulus_id = %stimulus_id,
-            "dropped CI failure activation because queue is full"
-        );
+    let envelope = ActivationEnvelope::new(
+        &activation.wave_id,
+        &stimulus.id,
+        ActivationSource::Push,
+        reason,
+        &activation.commit_sha,
+        &activation.commit_sha,
+    );
+
+    let wave = store
+        .get_wave(&activation.wave_id)
+        .await
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("wave {} not found", activation.wave_id))?;
+
+    if wave.serialized {
+        let outcome = enqueue_pending_activation(store, event_hub, envelope).await;
+        if outcome.is_none() {
+            return Err(format!(
+                "failed to enqueue CI failure activation for wave {}",
+                activation.wave_id
+            ));
+        }
+        if matches!(outcome, Some(EnqueueOutcome::Dropped)) {
+            tracing::warn!(
+                wave_id = %activation.wave_id,
+                stimulus_id = %stimulus.id,
+                "dropped CI failure activation because queue is full"
+            );
+        }
+    } else {
+        let _ = spawn_immediate_activation(
+            store,
+            executor,
+            scheduler,
+            event_hub,
+            &wave,
+            stimulus.flow.clone(),
+            envelope,
+        )
+        .await;
     }
     Ok(())
 }
@@ -108,7 +133,7 @@ async fn handle_ci_failure_event(
 async fn resolve_ci_failure_stimulus(
     store: &SharedStore,
     wave_id: &LfdId,
-) -> Result<LfdId, String> {
+) -> Result<Stimulus, String> {
     let stimuli = store
         .list_stimuli(Some(wave_id))
         .await
@@ -117,7 +142,7 @@ async fn resolve_ci_failure_stimulus(
         .into_iter()
         .find(|stimulus| stimulus.signal == Signal::CiFailure)
     {
-        return Ok(existing.id);
+        return Ok(existing);
     }
 
     let stimulus = Stimulus {
@@ -136,12 +161,13 @@ async fn resolve_ci_failure_stimulus(
         .create_stimulus(&stimulus)
         .await
         .map_err(|err| err.to_string())?;
-    Ok(stimulus.id)
+    Ok(stimulus)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{Wave, WaveStatus};
     use std::sync::Arc;
@@ -165,6 +191,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
         store.create_wave(&wave).await.expect("create wave");
         wave
@@ -196,10 +223,10 @@ mod tests {
         let wave = create_wave(&store).await;
         let existing = create_ci_failure_stimulus(&store, &wave).await;
 
-        let stimulus_id = resolve_ci_failure_stimulus(&store, &wave.id)
+        let stimulus = resolve_ci_failure_stimulus(&store, &wave.id)
             .await
             .expect("resolve stimulus");
-        assert_eq!(stimulus_id, existing.id);
+        assert_eq!(stimulus.id, existing.id);
 
         let stimuli = store
             .list_stimuli(Some(&wave.id))
@@ -213,25 +240,73 @@ mod tests {
         let store = create_store().await;
         let wave = create_wave(&store).await;
 
-        let stimulus_id = resolve_ci_failure_stimulus(&store, &wave.id)
+        let stimulus = resolve_ci_failure_stimulus(&store, &wave.id)
             .await
             .expect("resolve stimulus");
 
-        let stimulus = store
-            .get_stimulus(&stimulus_id)
-            .await
-            .expect("get stimulus")
-            .expect("stimulus");
         assert_eq!(stimulus.signal, Signal::CiFailure);
         assert_eq!(stimulus.flow.as_deref(), Some("ci-fix"));
         assert!(stimulus.enabled);
     }
 
+    async fn create_serialized_wave(store: &SharedStore) -> Wave {
+        let wave = Wave {
+            id: LfdId::new(),
+            name: "ci-wave-serialized".to_string(),
+            repo: ".".to_string(),
+            flow: "build".to_string(),
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+            serialized: true,
+        };
+        store.create_wave(&wave).await.expect("create wave");
+        wave
+    }
+
+    fn stub_executor(store: SharedStore, event_hub: EventHub) -> (WaveExecutor, Arc<Scheduler>) {
+        use crate::lfd::executor::{AgentExecutor, AgentRunContext};
+        use crate::lfd::output::OutputHub;
+        use async_trait::async_trait;
+        use std::path::Path;
+
+        struct StubRunner;
+
+        #[async_trait]
+        impl AgentExecutor for StubRunner {
+            async fn run(
+                &self,
+                _cmd: Vec<String>,
+                _cwd: &Path,
+                _ctx: AgentRunContext<'_>,
+            ) -> anyhow::Result<i32> {
+                Ok(0)
+            }
+            async fn terminate(&self, _agent_id: &str) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_dir = std::env::temp_dir().join(format!("lfd-ci-test-output-{}", LfdId::new()));
+        let output = OutputHub::new(16, output_dir);
+        let executor = WaveExecutor::with_runner(
+            store,
+            scheduler.clone(),
+            output,
+            event_hub,
+            Arc::new(StubRunner),
+        );
+        (executor, scheduler)
+    }
+
     #[tokio::test]
-    async fn handle_ci_failure_event_enqueues_push_activation() {
+    async fn handle_ci_failure_event_enqueues_push_activation_for_serialized_wave() {
         let store = create_store().await;
         let event_hub = EventHub::new(16);
-        let wave = create_wave(&store).await;
+        let wave = create_serialized_wave(&store).await;
         let stimulus = create_ci_failure_stimulus(&store, &wave).await;
         let activation = CiFailureActivation {
             wave_id: wave.id.clone(),
@@ -242,7 +317,9 @@ mod tests {
             logs_url: "https://example.com/logs".to_string(),
         };
 
-        handle_ci_failure_event(&store, &event_hub, activation)
+        let (executor, scheduler) = stub_executor(store.clone(), event_hub.clone());
+
+        handle_ci_failure_event(&store, &executor, &scheduler, &event_hub, activation)
             .await
             .expect("enqueue activation");
 

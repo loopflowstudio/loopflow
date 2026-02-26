@@ -105,6 +105,7 @@ pub struct WaveDto {
     pub open_pr_count: u32,
     pub stack_count: u32,
     pub has_stale_pr_state: bool,
+    pub serialized: bool,
     pub stimuli: Vec<StimulusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,

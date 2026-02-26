@@ -31,6 +31,70 @@ use crate::lfd::types::{
     WaveStatus,
 };
 
+/// Create a wave run using a per-run worktree for parallel execution.
+pub async fn create_parallel_wave_run(
+    store: &SharedStore,
+    wave: &Wave,
+    run_id: &LfdId,
+) -> anyhow::Result<WaveRun> {
+    let stack_runs = store.list_stack_runs(wave.id()).await?;
+    let last_run = stack_runs.last().cloned();
+    let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
+    let stack_position = last_run
+        .as_ref()
+        .map(|run| run.stack_position + 1)
+        .unwrap_or(0);
+    let parent_run_id = last_run.as_ref().map(|run| run.id.clone());
+    let parent_pr_number = last_run
+        .as_ref()
+        .and_then(|run| run.snapshot.pr.as_ref())
+        .and_then(|pr| pr.number);
+    let stack_group_id = last_run
+        .as_ref()
+        .map(|run| run.stack_group_id.clone())
+        .unwrap_or_else(|| wave.id().to_string());
+
+    let main_repo = Path::new(wave.repo());
+    let (wt_path, branch) = create_run_worktree(main_repo, wave.name(), run_id.as_str())?;
+
+    let run = WaveRun {
+        id: run_id.clone(),
+        wave_id: wave.id().clone(),
+        snapshot: WaveRunSnapshot {
+            repo: wave.repo().clone(),
+            flow: wave.flow().clone(),
+            direction: wave.direction().clone(),
+            area: wave.area().clone(),
+            pr: None,
+        },
+        iteration,
+        step_index: 0,
+        status: WaveRunStatus::Running,
+        worktree: wt_path,
+        branch,
+        started_at: Some(OffsetDateTime::now_utc()),
+        ended_at: None,
+        error: None,
+        flow_parents: Vec::new(),
+        activation_log_id: None,
+        parent_run_id,
+        parent_pr_number,
+        stack_position,
+        stack_group_id,
+        stack_status: WaveRunStackStatus::Active,
+        lineage_inferred: false,
+    };
+    store.create_wave_run(&run).await?;
+    if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
+        if let Err(err) = store.update_wave(&wave).await {
+            warn!(wave_id = %wave.id(), error = %err, "failed to set wave status to running");
+        }
+    }
+    Ok(run)
+}
+
 /// Create a wave run with a worktree and branch for the wave.
 pub async fn create_wave_run_with_id(
     store: &SharedStore,
@@ -110,6 +174,62 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     Ok((result.path.to_string_lossy().to_string(), result.branch))
 }
 
+/// Create a run-scoped worktree on the wave's remote branch.
+///
+/// Used for parallel (non-serialized) execution: each run gets its own
+/// worktree so concurrent runs don't stomp on each other's files.
+/// The worktree is placed at `{wave-worktree}-run-{hash}` and tracks the
+/// same remote branch as the wave worktree.
+pub fn create_run_worktree(
+    main_repo: &Path,
+    wave_name: &str,
+    run_id: &str,
+) -> anyhow::Result<(String, String)> {
+    use crate::engine::git::{worktree_add, WorktreeBranch};
+
+    let base_wt = wave_worktree_path(main_repo, wave_name);
+    let suffix = short_hash(run_id, 8);
+    let run_wt = base_wt.with_file_name(format!(
+        "{}-run-{suffix}",
+        base_wt
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("wave")
+    ));
+
+    // Ensure the base wave worktree exists so we know the branch.
+    let branch = if base_wt.exists() {
+        let branch = current_branch(&base_wt)?.unwrap_or_default();
+        sync_existing_worktree(main_repo, &base_wt, &branch)?;
+        branch
+    } else {
+        let config = load_config(Some(main_repo)).ok().flatten();
+        let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
+        let result = create_with_schema(main_repo, wave_name, None, branch_config)?;
+        result.branch
+    };
+
+    // Each run gets a temporary local branch that tracks origin/{branch}.
+    // This lets git push work normally from the worktree.
+    let run_branch = format!("{branch}-run-{suffix}");
+    let remote_ref = format!("origin/{branch}");
+    worktree_add(
+        main_repo,
+        &run_wt,
+        &run_branch,
+        WorktreeBranch::Track {
+            remote: &remote_ref,
+        },
+    )?;
+
+    // Sync to pick up latest from origin.
+    sync_existing_worktree(main_repo, &run_wt, &run_branch)?;
+
+    // Return the wave branch name (not the run-local branch) so the run
+    // record tracks which remote branch it pushes to.
+    Ok((run_wt.to_string_lossy().to_string(), branch))
+}
+
 pub(crate) fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
     crate::engine::fork::fork_worktree_path(Path::new(&run.worktree), branch_index as usize)
         .to_string_lossy()
@@ -128,7 +248,7 @@ pub(crate) fn is_ephemeral_worktree_path(path: &str) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(path);
-    has_fork_suffix(worktree_name)
+    has_fork_suffix(worktree_name) || has_run_suffix(worktree_name)
 }
 
 fn has_fork_suffix(path_component: &str) -> bool {
@@ -136,6 +256,13 @@ fn has_fork_suffix(path_component: &str) -> bool {
         return false;
     };
     !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn has_run_suffix(path_component: &str) -> bool {
+    let Some((_, suffix)) = path_component.rsplit_once("-run-") else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) -> Vec<String> {
@@ -348,6 +475,71 @@ pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result
     Ok(new_branch)
 }
 
+/// Pre-step sync: fetch and rebase the worktree onto its remote branch.
+///
+/// Used at step boundaries so concurrent runs pick up each other's work.
+/// Silently skips if the worktree has no git directory or no remote.
+pub(crate) fn pre_step_sync(worktree: &Path, branch: &str) -> Result<()> {
+    if branch.is_empty() || !worktree.join(".git").exists() {
+        return Ok(());
+    }
+    let remote_ref = format!("origin/{branch}");
+    if fetch(worktree, "origin", branch).is_ok() && rev_parse(worktree, &remote_ref).is_ok() {
+        let result = rebase(worktree, &remote_ref, None)?;
+        if !result.success {
+            return Err(anyhow!(
+                "pre-step rebase onto {remote_ref} failed — aborting step"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Post-step sync: stage, commit, and push changes after a successful step.
+///
+/// On a non-fast-forward push, fetches and rebases then retries once.
+/// Silently skips if the worktree has no git directory or no remote.
+pub(crate) fn post_step_sync(worktree: &Path, branch: &str, step_name: &str) -> Result<()> {
+    if branch.is_empty() || !worktree.join(".git").exists() {
+        return Ok(());
+    }
+
+    if is_clean(worktree)? {
+        return Ok(());
+    }
+    stage_all(worktree)?;
+    let message = format!("lf commit: {step_name}");
+    commit(worktree, &message)?;
+
+    match push_with_upstream(worktree, "origin", branch) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            debug!(branch = %branch, "push failed, retrying after fetch+rebase");
+            let remote_ref = format!("origin/{branch}");
+            fetch(worktree, "origin", branch)?;
+            let result = rebase(worktree, &remote_ref, None)?;
+            if !result.success {
+                return Err(anyhow!(
+                    "post-step rebase onto {remote_ref} failed after push rejection"
+                ));
+            }
+            push_with_upstream(worktree, "origin", branch)
+                .map_err(|err| anyhow!("post-step push failed after rebase: {err}"))
+        }
+    }
+}
+
+/// Clean up a run-scoped worktree after the run completes.
+///
+/// Only removes worktrees with the `-run-` suffix to avoid touching wave worktrees.
+pub(crate) fn cleanup_run_worktree(worktree: &Path) -> Result<()> {
+    let name = worktree.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !has_run_suffix(name) {
+        return Ok(());
+    }
+    super::cleanup_workspace_worktree(worktree)
+}
+
 pub(crate) fn short_hash(value: &str, chars: usize) -> String {
     let digest = Sha256::digest(value.as_bytes());
     let mut hash = hex::encode(digest);
@@ -394,6 +586,14 @@ mod tests {
         assert!(is_ephemeral_worktree_path("/tmp/repo-fork-123"));
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave-fork-x"));
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.fork-1"));
+    }
+
+    #[test]
+    fn is_ephemeral_worktree_path_detects_run_suffix() {
+        assert!(is_ephemeral_worktree_path("/tmp/repo.wave-run-a1b2c3d4"));
+        assert!(is_ephemeral_worktree_path("/tmp/repo-run-deadbeef"));
+        assert!(!is_ephemeral_worktree_path("/tmp/repo.wave-run-"));
+        assert!(!is_ephemeral_worktree_path("/tmp/repo.wave-run-xyz!"));
     }
 
     #[test]

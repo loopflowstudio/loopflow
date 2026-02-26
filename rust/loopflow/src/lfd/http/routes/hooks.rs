@@ -800,6 +800,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
         state.store.create_wave(&wave).await.expect("create wave");
         let stimulus = Stimulus {

@@ -110,6 +110,7 @@ impl PostgresStore {
             };
             let created_at = wave.created_at().map(|dt| dt.unix_timestamp()).unwrap_or(0);
 
+            let serialized: i32 = if wave.serialized { 1 } else { 0 };
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -124,6 +125,7 @@ impl PostgresStore {
                         &(wave.status().as_i32()),
                         &(wave.iteration() as i32),
                         &created_at,
+                        &serialized,
                     ],
                 )
                 .await?;
@@ -647,7 +649,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.created_at
+                    "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.created_at, w.serialized
                      FROM waves w
                      INNER JOIN chord_members cm ON cm.wave_id = w.id
                      WHERE cm.chord_id = $1

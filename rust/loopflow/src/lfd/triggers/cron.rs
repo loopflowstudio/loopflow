@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -6,13 +7,17 @@ use cron::Schedule;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::{enqueue_pending_activation, ActivationEnvelope};
+use super::{enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope};
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::WaveExecutor;
+use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{ActivationSource, Signal, WaveStatus};
 
 pub fn spawn_cron_poller(
     store: SharedStore,
+    executor: WaveExecutor,
+    scheduler: Arc<Scheduler>,
     event_hub: EventHub,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
@@ -25,14 +30,19 @@ pub fn spawn_cron_poller(
                     break;
                 }
                 _ = interval.tick() => {
-                    check_cron_stimuli(&store, &event_hub).await;
+                    check_cron_stimuli(&store, &executor, &scheduler, &event_hub).await;
                 }
             }
         }
     })
 }
 
-async fn check_cron_stimuli(store: &SharedStore, event_hub: &EventHub) {
+async fn check_cron_stimuli(
+    store: &SharedStore,
+    executor: &WaveExecutor,
+    scheduler: &Arc<Scheduler>,
+    event_hub: &EventHub,
+) {
     let stimuli = match store.list_stimuli_by_signal(Signal::Cron.as_i32()).await {
         Ok(stimuli) => stimuli,
         Err(err) => {
@@ -74,19 +84,28 @@ async fn check_cron_stimuli(store: &SharedStore, event_hub: &EventHub) {
             let _ = store.update_stimulus(&stimulus).await;
 
             let reason = format!("cron schedule {cron_expr} due");
-            let _ = enqueue_pending_activation(
-                store,
-                event_hub,
-                ActivationEnvelope::new(
-                    &stimulus.wave_id,
-                    &stimulus.id,
-                    ActivationSource::Poll,
-                    reason,
-                    "",
-                    "",
-                ),
-            )
-            .await;
+            let envelope = ActivationEnvelope::new(
+                &stimulus.wave_id,
+                &stimulus.id,
+                ActivationSource::Poll,
+                reason,
+                "",
+                "",
+            );
+            if wave.serialized {
+                let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+            } else {
+                let _ = spawn_immediate_activation(
+                    store,
+                    executor,
+                    scheduler,
+                    event_hub,
+                    &wave,
+                    stimulus.flow.clone(),
+                    envelope,
+                )
+                .await;
+            }
         }
     }
 }

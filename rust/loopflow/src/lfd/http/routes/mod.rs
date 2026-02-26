@@ -142,6 +142,7 @@ pub async fn build_wave_dto(
         open_pr_count: live_snapshot.open_pr_count(),
         stack_count: stack_runs.len() as u32,
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
+        serialized: wave.serialized,
         stimuli,
         active_run,
     })
@@ -431,6 +432,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         }
     }
 

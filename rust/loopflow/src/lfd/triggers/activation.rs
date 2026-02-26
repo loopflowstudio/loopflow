@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
+use super::common::{create_parallel_wave_run, create_wave_run_with_id, spawn_run_task_with_slot};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
@@ -183,6 +183,93 @@ pub async fn enqueue_pending_activation(
             None
         }
     }
+}
+
+/// Bypass the activation queue and spawn a run immediately.
+///
+/// Used for non-serialized (parallel) waves: the trigger creates a run
+/// directly without going through the pending activation queue. Returns
+/// the WaveRun if a scheduler slot was available.
+pub async fn spawn_immediate_activation(
+    store: &SharedStore,
+    executor: &WaveExecutor,
+    scheduler: &Arc<Scheduler>,
+    event_hub: &EventHub,
+    wave: &Wave,
+    stimulus_flow_override: Option<String>,
+    envelope: ActivationEnvelope,
+) -> Option<WaveRun> {
+    if wave.status() == WaveStatus::Paused {
+        return None;
+    }
+    if scheduler.has_active_session(wave.id().as_str()) {
+        return None;
+    }
+
+    let run_id = LfdId::new();
+    let slot_guard = match scheduler.acquire_guard(run_id.as_str()).await {
+        Ok(guard) => guard,
+        Err(reason) => {
+            tracing::debug!(
+                wave_id = %wave.id(),
+                reason = %reason,
+                "scheduler at capacity; immediate activation deferred to queue"
+            );
+            // Fall back to queue when scheduler is full.
+            let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+            return None;
+        }
+    };
+
+    let dispatch_log = ActivationLog::new(
+        wave.id().clone(),
+        envelope.stimulus_id.clone(),
+        envelope.source,
+        envelope.reason.clone(),
+        ActivationOutcome::Dispatched,
+    );
+    if let Err(err) = store.create_activation_log(&dispatch_log).await {
+        tracing::error!(
+            wave_id = %wave.id(),
+            stimulus_id = %envelope.stimulus_id,
+            error = %err,
+            "failed to write immediate activation dispatch log"
+        );
+        return None;
+    }
+
+    let mut run = match create_parallel_wave_run(store, wave, &run_id).await {
+        Ok(run) => run,
+        Err(err) => {
+            tracing::error!(
+                wave_id = %wave.id(),
+                error = %err,
+                "failed to create parallel wave run for immediate activation"
+            );
+            return None;
+        }
+    };
+    if let Some(flow_override) = stimulus_flow_override {
+        run.snapshot.flow = flow_override;
+    }
+    run.activation_log_id = Some(dispatch_log.id.clone());
+    if let Err(err) = store.update_wave_run(&run).await {
+        tracing::error!(
+            wave_id = %wave.id(),
+            run_id = %run.id,
+            error = %err,
+            "failed to attach activation log to immediate run"
+        );
+    }
+
+    spawn_run_task_with_slot(
+        store.clone(),
+        executor.clone(),
+        event_hub.clone(),
+        run.clone(),
+        slot_guard,
+    );
+    Some(run)
 }
 
 pub async fn dispatch_pending_activations(
@@ -392,6 +479,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
         store.create_wave(&wave).await.expect("create wave");
         wave

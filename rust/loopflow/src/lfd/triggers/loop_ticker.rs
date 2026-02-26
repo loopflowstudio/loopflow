@@ -1,19 +1,22 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::{enqueue_pending_activation, ActivationEnvelope};
+use super::{enqueue_pending_activation, spawn_immediate_activation, ActivationEnvelope};
 use crate::engine::worktrees::worktree_path;
 use crate::lfd::events::EventHub;
+use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::ActivationSource;
 use crate::lfd::types::{Signal, WaveStatus};
 
 pub fn spawn_loop_ticker(
-    scheduler: std::sync::Arc<Scheduler>,
+    scheduler: Arc<Scheduler>,
+    executor: WaveExecutor,
     store: SharedStore,
     event_hub: EventHub,
     cancel: CancellationToken,
@@ -27,7 +30,7 @@ pub fn spawn_loop_ticker(
                     break;
                 }
                 _ = interval.tick() => {
-                    tick_loop_waves(&scheduler, &store, &event_hub).await;
+                    tick_loop_waves(&scheduler, &executor, &store, &event_hub).await;
                 }
             }
         }
@@ -35,7 +38,8 @@ pub fn spawn_loop_ticker(
 }
 
 async fn tick_loop_waves(
-    scheduler: &std::sync::Arc<Scheduler>,
+    scheduler: &Arc<Scheduler>,
+    executor: &WaveExecutor,
     store: &SharedStore,
     event_hub: &EventHub,
 ) {
@@ -69,6 +73,10 @@ async fn tick_loop_waves(
             continue;
         }
 
+        // For serialized waves, skip if there's already an active run or pending activation.
+        // For non-serialized waves, the loop ticker still checks for idle state — a loop
+        // stimulus means "keep running whenever idle", so we only re-trigger when no runs
+        // are active.
         if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
             continue;
         }
@@ -85,18 +93,27 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let _ = enqueue_pending_activation(
-            store,
-            event_hub,
-            ActivationEnvelope::new(
-                wave.id(),
-                &stimulus.id,
-                ActivationSource::Poll,
-                "loop ticker observed idle wave",
-                "",
-                "",
-            ),
-        )
-        .await;
+        let envelope = ActivationEnvelope::new(
+            wave.id(),
+            &stimulus.id,
+            ActivationSource::Poll,
+            "loop ticker observed idle wave",
+            "",
+            "",
+        );
+        if wave.serialized {
+            let _ = enqueue_pending_activation(store, event_hub, envelope).await;
+        } else {
+            let _ = spawn_immediate_activation(
+                store,
+                executor,
+                scheduler,
+                event_hub,
+                &wave,
+                stimulus.flow.clone(),
+                envelope,
+            )
+            .await;
+        }
     }
 }

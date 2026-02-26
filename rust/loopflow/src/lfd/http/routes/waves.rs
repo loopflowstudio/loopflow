@@ -28,8 +28,8 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::triggers::{
-    dispatch_wave_if_ready, enqueue_pending_activation, spawn_run_task_with_slot,
-    ActivationEnvelope, EnqueueOutcome,
+    dispatch_wave_if_ready, enqueue_pending_activation, spawn_immediate_activation,
+    spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
     ActivationSource, AgentStatus, Event, Signal, Stimulus, Wave, WaveRun, WaveRunStatus,
@@ -106,6 +106,8 @@ pub struct CreateWaveRequest {
     area: Option<Vec<String>>,
     #[serde(default)]
     run: bool,
+    #[serde(default)]
+    serialized: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -117,6 +119,7 @@ pub struct UpdateWaveRequest {
     status: Option<String>,
     agent: Option<String>,
     step_agents: Option<std::collections::HashMap<String, String>>,
+    serialized: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -192,6 +195,7 @@ pub async fn create_wave_handler(
         direction,
         area,
         run,
+        serialized,
     } = payload;
     let repo_path = PathBuf::from(&repo);
 
@@ -233,6 +237,7 @@ pub async fn create_wave_handler(
         status: WaveStatus::Idle,
         iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
+        serialized,
     };
     state
         .store
@@ -566,6 +571,9 @@ pub async fn update_wave_handler(
         wave.status = WaveStatus::from_str(&status)
             .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
     }
+    if let Some(serialized) = payload.serialized {
+        wave.serialized = serialized;
+    }
 
     if payload.agent.is_some() || payload.step_agents.is_some() {
         let repo = wave.repo().clone();
@@ -679,16 +687,18 @@ async fn start_wave_run(
     wave: &mut Wave,
     overrides: Option<RunWaveRequest>,
 ) -> Result<Option<WaveRun>, ApiError> {
-    let active_run = state
-        .store
-        .get_active_wave_run(wave.id())
-        .await
-        .map_err(map_store_error)?;
-    if active_run.is_some() {
-        return Err(api_error(
-            StatusCode::PRECONDITION_FAILED,
-            "wave already running",
-        ));
+    if wave.serialized {
+        let active_run = state
+            .store
+            .get_active_wave_run(wave.id())
+            .await
+            .map_err(map_store_error)?;
+        if active_run.is_some() {
+            return Err(api_error(
+                StatusCode::PRECONDITION_FAILED,
+                "wave already running",
+            ));
+        }
     }
 
     if let Some(overrides) = overrides {
@@ -713,44 +723,53 @@ async fn start_wave_run(
     let _ = set_wave_stimuli_enabled(state, wave.id(), true, false).await;
 
     let stimulus_id = ensure_manual_stimulus(state, wave.id()).await?;
-    let outcome = enqueue_pending_activation(
-        &state.store,
-        &state.event_hub,
-        ActivationEnvelope::new(
-            wave.id(),
-            &stimulus_id,
-            ActivationSource::Manual,
-            "manual run requested via API",
-            "",
-            "",
-        ),
-    )
-    .await;
-    match outcome {
-        Some(EnqueueOutcome::Dropped) => {
-            warn!(
-                wave_id = %wave.id(),
-                "manual activation dropped because activation queue is full"
-            );
-            return Ok(None);
-        }
-        Some(_) => {}
-        None => {
-            return Err(api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "failed to queue manual activation",
-            ));
-        }
-    }
+    let envelope = ActivationEnvelope::new(
+        wave.id(),
+        &stimulus_id,
+        ActivationSource::Manual,
+        "manual run requested via API",
+        "",
+        "",
+    );
 
-    Ok(dispatch_wave_if_ready(
-        &state.store,
-        &state.executor,
-        &state.scheduler,
-        &state.event_hub,
-        wave,
-    )
-    .await)
+    if wave.serialized {
+        let outcome = enqueue_pending_activation(&state.store, &state.event_hub, envelope).await;
+        match outcome {
+            Some(EnqueueOutcome::Dropped) => {
+                warn!(
+                    wave_id = %wave.id(),
+                    "manual activation dropped because activation queue is full"
+                );
+                return Ok(None);
+            }
+            Some(_) => {}
+            None => {
+                return Err(api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "failed to queue manual activation",
+                ));
+            }
+        }
+        Ok(dispatch_wave_if_ready(
+            &state.store,
+            &state.executor,
+            &state.scheduler,
+            &state.event_hub,
+            wave,
+        )
+        .await)
+    } else {
+        Ok(spawn_immediate_activation(
+            &state.store,
+            &state.executor,
+            &state.scheduler,
+            &state.event_hub,
+            wave,
+            None,
+            envelope,
+        )
+        .await)
+    }
 }
 
 async fn ensure_manual_stimulus(state: &HttpState, wave_id: &LfdId) -> Result<LfdId, ApiError> {
@@ -1560,6 +1579,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
         let wave_b = Wave {
             id: LfdId::new(),
@@ -1571,6 +1591,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
 
         store.create_wave(&wave_a).await.expect("create wave_a");
@@ -1641,6 +1662,7 @@ mod tests {
             status: WaveStatus::Idle,
             iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
         };
         store
             .create_wave(&source_wave)

@@ -87,6 +87,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "017_signal_simplification",
         sql: include_str!("migrations/017_signal_simplification.sql"),
     },
+    Migration {
+        version: "018_wave_serialized",
+        sql: include_str!("migrations/018_wave_serialized.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

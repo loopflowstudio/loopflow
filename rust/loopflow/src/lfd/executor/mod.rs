@@ -13,7 +13,7 @@ use crate::engine::stream::{render_event, ParseResult, StreamParser};
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::types::Wave;
 
-pub use helpers::{create_wave_run_with_id, ensure_wave_worktree};
+pub use helpers::{create_parallel_wave_run, create_wave_run_with_id, ensure_wave_worktree};
 pub use wave::WaveExecutor;
 
 pub(crate) fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {

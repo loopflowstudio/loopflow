@@ -13,6 +13,9 @@ struct WaveSessionView: View {
     @State private var expandedItemIds: Set<UUID> = []
     @State private var expandedRunIds: Set<UUID> = []
     @State private var isNearBottom = true
+    @State private var replyQueue = ReplyQueue()
+    @State private var isReplyTrayExpanded = false
+    @State private var replyTrayFreeText = ""
 
     var body: some View {
         VStack(spacing: Spacing.md) {
@@ -52,12 +55,22 @@ struct WaveSessionView: View {
             if showsSuggestedActions, !state.suggestedActions.isEmpty {
                 ActionButtonsView(actions: state.suggestedActions) { action in
                     composerText = ""
+                    replyQueue.clear()
+                    replyTrayFreeText = ""
                     Task {
                         await state.sendSuggestedAction(action)
                     }
                 }
                 .padding(.horizontal, Spacing.lg)
             }
+
+            ReplyDraftTray(
+                queue: replyQueue,
+                isExpanded: $isReplyTrayExpanded,
+                freeTextDraft: $replyTrayFreeText,
+                onSend: sendMessage
+            )
+            .padding(.horizontal, Spacing.lg)
 
             HStack(alignment: .bottom, spacing: Spacing.sm) {
                 TextField("Message", text: $composerText, axis: .vertical)
@@ -77,7 +90,7 @@ struct WaveSessionView: View {
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(DarkButtonStyle())
-                .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !state.canSend)
+                .disabled(!canSendMessage || !state.canSend)
             }
             .padding(.horizontal, Spacing.lg)
             .padding(.bottom, Spacing.lg)
@@ -158,7 +171,10 @@ struct WaveSessionView: View {
     private func transcriptRow(_ entry: TranscriptEntry) -> some View {
         switch entry {
         case .message(let message):
-            MessageRow(message: message)
+            MessageRow(message: message) { newEntry in
+                replyQueue.entries.append(newEntry)
+                isReplyTrayExpanded = true
+            }
 
         case .item(let item):
             TranscriptItemCardView(
@@ -174,17 +190,32 @@ struct WaveSessionView: View {
     }
 
     private func sendMessage() {
-        let text = composerText
+        let text = replyQueue.assembleMessage(extraFreeText: composerText)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         composerText = ""
+        replyQueue.clear()
+        replyTrayFreeText = ""
+        isReplyTrayExpanded = false
         Task {
             await state.send(text)
         }
+    }
+
+    private var canSendMessage: Bool {
+        !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !replyQueue.isEmpty
     }
 }
 
 private struct MessageRow: View {
     @Environment(\.palette) private var palette
     let message: SessionMessage
+    var onQueueEntry: ((ReplyEntry) -> Void)? = nil
+
+#if os(macOS)
+    @State private var selectedQuote: String?
+    @State private var replyDraft = ""
+    @State private var selectionResetToken = 0
+#endif
 
     var body: some View {
         if message.role == .system {
@@ -210,6 +241,47 @@ private struct MessageRow: View {
 
     @ViewBuilder
     private var content: some View {
+#if os(macOS)
+        if message.role == .assistant, onQueueEntry != nil {
+            SelectableAssistantMessageTextView(
+                text: message.content,
+                selectionResetToken: selectionResetToken
+            ) { newSelection in
+                selectedQuote = newSelection
+                if newSelection == nil {
+                    replyDraft = ""
+                }
+            }
+            .popover(
+                isPresented: quotePopoverIsPresented,
+                attachmentAnchor: .point(.top),
+                arrowEdge: .top
+            ) {
+                if let selectedQuote {
+                    ReplyComposerPopover(
+                        quoted: selectedQuote,
+                        replyDraft: $replyDraft,
+                        onSubmitText: queueDraftReply,
+                        onEmoji: queueEmojiReply
+                    )
+                }
+            }
+        } else if message.role == .assistant,
+                  let markdown = try? AttributedString(
+                      markdown: message.content,
+                      options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                  ) {
+            Text(markdown)
+                .font(Typography.body())
+                .foregroundStyle(palette.text)
+                .textSelection(.enabled)
+        } else {
+            Text(message.content)
+                .font(Typography.body())
+                .foregroundStyle(message.role == .error ? .statusError : palette.text)
+                .textSelection(.enabled)
+        }
+#else
         if message.role == .assistant,
            let markdown = try? AttributedString(
                markdown: message.content,
@@ -218,11 +290,14 @@ private struct MessageRow: View {
             Text(markdown)
                 .font(Typography.body())
                 .foregroundStyle(palette.text)
+                .textSelection(.enabled)
         } else {
             Text(message.content)
                 .font(Typography.body())
                 .foregroundStyle(message.role == .error ? .statusError : palette.text)
+                .textSelection(.enabled)
         }
+#endif
     }
 
     private var accentBar: some View {
@@ -240,6 +315,39 @@ private struct MessageRow: View {
         case .system: return .clear
         }
     }
+
+#if os(macOS)
+    private var quotePopoverIsPresented: Binding<Bool> {
+        Binding(
+            get: { selectedQuote != nil },
+            set: { isPresented in
+                if !isPresented {
+                    closeReplyComposer()
+                }
+            }
+        )
+    }
+
+    private func queueDraftReply() {
+        guard let selectedQuote else { return }
+        let reply = replyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return }
+        onQueueEntry?(.quoteReply(quoted: selectedQuote, reply: reply))
+        closeReplyComposer()
+    }
+
+    private func queueEmojiReply(_ emoji: String) {
+        guard let selectedQuote else { return }
+        onQueueEntry?(.emojiReact(quoted: selectedQuote, emoji: emoji))
+        closeReplyComposer()
+    }
+
+    private func closeReplyComposer() {
+        selectedQuote = nil
+        replyDraft = ""
+        selectionResetToken += 1
+    }
+#endif
 }
 
 private struct TranscriptItemCardView: View {

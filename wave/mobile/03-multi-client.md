@@ -6,13 +6,7 @@ Builds on multiplatform (shipped) — LoopflowCore holds shared state, iOS has p
 
 ## What needs work
 
-### iOS foreground reconnect and stream restart
-
-On iOS foreground resume, verify connection health and restart active streams:
-
-- Add `scenePhase` handling in `MobileRootView` to call `await repoState.checkConnectionHealth()` when the app becomes active.
-- Add `RepoState.checkConnectionHealth()` to ping `GET /health` for connected remotes and mark `.disconnected(.networkUnavailable)` on failure (to trigger existing reconnect machinery).
-- Add `scenePhase` handling in `MobileWaveDetailView` to call `outputBuffer.startStreaming(waveId:)` and `await sessionState.onAppear()` on foreground.
+### ~~iOS foreground reconnect and stream restart~~ picked → `scratch/mobile-foreground-reconnect.md`
 
 ### Cross-client suggested action clearing
 

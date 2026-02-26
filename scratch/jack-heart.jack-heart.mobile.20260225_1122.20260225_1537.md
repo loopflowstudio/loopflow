@@ -38,3 +38,33 @@ Note: `cargo test --all` in this environment still reports unrelated docker-sock
 ## Follow-ups
 
 - Keep Concerto wave-name input validation strict (`[a-z][a-z0-9-]*`) so branch parsing stays unambiguous.
+
+## Next: drop {words} from schema, "Design a Wave" NUX
+
+### Drop `{words}` from branch schema
+
+Default schema becomes `{user}.{name}.{timestamp}`. The words concept moves out of branch naming entirely — timestamp handles uniqueness, words handle memorability.
+
+This simplifies `compile_schema`: no more optional trailing segments, no variant generation. One schema → one regex.
+
+### "Design a Wave" NUX
+
+Replace the current wave creation flow in Concerto with a single "Design a Wave" button.
+
+**Flow:**
+
+1. User hits "Design a Wave"
+2. Concerto generates a random word-pair name (e.g. `aurora-fugue`) using the existing `MAGICAL × MUSICAL` lists
+3. Wave is created with that placeholder name, branch becomes `jack-heart.aurora-fugue.20260225_1122`
+4. `design` step runs — interactive session to figure out what you're actually building
+5. `design` renames the wave to something meaningful (e.g. `mobile`), branch becomes `jack-heart.mobile.20260225_1122`
+
+The random name gets you into flow immediately — no upfront naming ceremony. Design earns the real name.
+
+### Changes needed
+
+- **Schema**: change default from `{user}.{name}.{timestamp}.{words}` to `{user}.{name}.{timestamp}`
+- **`compile_schema`**: delete optional-segment logic (no more `{words}` stripping)
+- **`generate_word_pair`**: keep it, but it's now used only for initial wave name generation in Concerto
+- **Concerto NUX**: "Design a Wave" button → random name → launches `design` step
+- **`design` step**: add responsibility for renaming the wave once intent is clear (wave rename + branch rename + worktree move)

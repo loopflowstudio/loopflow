@@ -1,5 +1,10 @@
 import SwiftUI
 import LoopflowCore
+#if os(macOS)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 struct WaveSessionView: View {
     @Environment(\.palette) private var palette
@@ -15,6 +20,12 @@ struct WaveSessionView: View {
     @State private var isNearBottom = true
     @State private var replyQueue = ReplyQueue()
     @State private var isReplyTrayExpanded = false
+    @FocusState private var focusedField: FocusField?
+
+    private enum FocusField: Hashable {
+        case transcript
+        case composer
+    }
 
     var body: some View {
         VStack(spacing: Spacing.md) {
@@ -27,10 +38,12 @@ struct WaveSessionView: View {
                         }
 
                         if state.isLoading {
-                            ProgressView(state.streamPhase == .replaying ? "Replaying…" : "Thinking…")
-                                .font(Typography.caption())
-                                .foregroundStyle(palette.textSecondary)
-                                .padding(.top, Spacing.sm)
+                            SessionThinkingIndicator(
+                                turnState: state.turnState,
+                                streamPhase: state.streamPhase,
+                                awaitingSessionJoin: state.awaitingSessionJoin
+                            )
+                            .padding(.top, Spacing.sm)
                         }
 
                         Color.clear
@@ -43,6 +56,15 @@ struct WaveSessionView: View {
                     .padding(Spacing.lg)
                 }
                 .background(palette.background)
+                .overlay {
+                    if state.transcript.isEmpty && !state.isLoading {
+                        SessionEmptyStateView()
+                    }
+                }
+                #if os(macOS)
+                .focusable()
+                .focused($focusedField, equals: .transcript)
+                #endif
                 .onChange(of: state.transcript.count) { _, _ in
                     guard isNearBottom, let last = state.transcript.last else { return }
                     withAnimation {
@@ -74,6 +96,12 @@ struct WaveSessionView: View {
                 TextField("Message", text: $composerText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...6)
+                    .focused($focusedField, equals: .composer)
+                    #if os(macOS)
+                    .onExitCommand {
+                        focusedField = .transcript
+                    }
+                    #endif
 
                 Button("End") {
                     Task {
@@ -98,6 +126,19 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: horizontalSizeClass == .compact)
             await state.onAppear()
+            #if os(macOS)
+            if focusedField == nil {
+                focusedField = .transcript
+            }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSessionComposer)) { notification in
+            #if os(macOS)
+            if let waveId = notification.userInfo?["waveId"] as? String, waveId != state.waveId {
+                return
+            }
+            focusedField = .composer
+            #endif
         }
         .onChange(of: horizontalSizeClass) { _, value in
             guard managesLifecycle else { return }
@@ -146,6 +187,51 @@ struct WaveSessionView: View {
         return groups
     }
 
+    private var latestAssistantMessageId: UUID? {
+        state.transcript.reversed().compactMap { entry -> UUID? in
+            guard case .message(let message) = entry, message.role == .assistant else {
+                return nil
+            }
+            return message.id
+        }.first
+    }
+
+    private var timestampPresentationByMessageId: [UUID: MessageTimestampPresentation] {
+        var presentations: [UUID: MessageTimestampPresentation] = [:]
+        var lastMessage: SessionMessage?
+
+        for entry in state.transcript {
+            guard case .message(let message) = entry,
+                  message.role != .system else {
+                continue
+            }
+
+            guard let previous = lastMessage else {
+                presentations[message.id] = .shown(message.timestamp.formatted(date: .omitted, time: .shortened))
+                lastMessage = message
+                continue
+            }
+
+            let gap = message.timestamp.timeIntervalSince(previous.timestamp)
+            if gap <= 60 {
+                presentations[message.id] = .hidden
+            } else if gap > 3600 {
+                presentations[message.id] = .shown(message.timestamp.formatted(date: .omitted, time: .shortened))
+            } else {
+                presentations[message.id] = .shown(relativeGapLabel(gap))
+            }
+
+            lastMessage = message
+        }
+
+        return presentations
+    }
+
+    private func relativeGapLabel(_ gap: TimeInterval) -> String {
+        let minutes = max(1, Int(gap / 60))
+        return "\(minutes)m ago"
+    }
+
     @ViewBuilder
     private func transcriptGroupRow(_ group: TranscriptGroup) -> some View {
         switch group {
@@ -169,7 +255,12 @@ struct WaveSessionView: View {
     private func transcriptRow(_ entry: TranscriptEntry) -> some View {
         switch entry {
         case .message(let message):
-            MessageRow(message: message) { newEntry in
+            let timestamp = timestampPresentationByMessageId[message.id]?.label
+            MessageRow(
+                message: message,
+                timestampLabel: timestamp,
+                showStreamingCursor: state.turnState == .running && latestAssistantMessageId == message.id
+            ) { newEntry in
                 replyQueue.add(newEntry)
                 isReplyTrayExpanded = true
             }
@@ -210,14 +301,243 @@ struct WaveSessionView: View {
     }
 }
 
+private enum MessageTimestampPresentation {
+    case hidden
+    case shown(String)
+
+    var label: String? {
+        switch self {
+        case .hidden:
+            return nil
+        case .shown(let value):
+            return value
+        }
+    }
+}
+
+private struct SessionThinkingIndicator: View {
+    @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let turnState: TurnState
+    let streamPhase: StreamPhase
+    let awaitingSessionJoin: Bool
+
+    @State private var isPulsing = false
+
+    var body: some View {
+        if turnState == .running {
+            HStack(spacing: Spacing.sm) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(palette.accent)
+                    .frame(width: 3, height: 14)
+                    .opacity(reduceMotion ? 1 : (isPulsing ? 1 : 0.3))
+                    .onAppear {
+                        guard !reduceMotion else { return }
+                        isPulsing = false
+                        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                            isPulsing = true
+                        }
+                    }
+
+                Text("Thinking…")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+
+                Spacer(minLength: 0)
+            }
+            .accessibilityLabel("Thinking")
+        } else if streamPhase == .replaying {
+            Text("Replaying…")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .accessibilityLabel("Replaying")
+        } else if awaitingSessionJoin {
+            Text("Waiting for session…")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .accessibilityLabel("Waiting for session")
+        } else if streamPhase == .ending {
+            Text("Ending session…")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+                .accessibilityLabel("Ending session")
+        }
+    }
+}
+
+private struct SessionEmptyStateView: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack {
+            Text("What would you like to work on?")
+                .font(.custom(Typography.serifFamily, size: 28).italic())
+                .foregroundStyle(palette.textSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(Spacing.xl)
+        .allowsHitTesting(false)
+    }
+}
+
+struct AssistantTextSegment: View {
+    @Environment(\.palette) private var palette
+
+    let text: String
+
+    var body: some View {
+        if let markdown = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            Text(markdown)
+                .font(Typography.body())
+                .foregroundStyle(palette.text)
+        } else {
+            Text(text)
+                .font(Typography.body())
+                .foregroundStyle(palette.text)
+        }
+    }
+}
+
+struct StreamingCursorView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var isVisible = false
+
+    var body: some View {
+        Text("▊")
+            .font(Typography.code(13))
+            .foregroundStyle(Color.statusInfo)
+            .opacity(reduceMotion ? 1 : (isVisible ? 1 : 0))
+            .onAppear {
+                guard !reduceMotion else {
+                    isVisible = true
+                    return
+                }
+                isVisible = false
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    isVisible = true
+                }
+            }
+            .accessibilityLabel("Streaming")
+    }
+}
+
+struct CodeBlockView: View {
+    @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    let language: String?
+    let content: String
+
+    @State private var isHovering = false
+
+    private var showCopyButton: Bool {
+        horizontalSizeClass == .compact || isHovering
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                if let language, !language.isEmpty {
+                    Text(language.uppercased())
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.xxs)
+                        .background(palette.surfaceMuted)
+                        .clipShape(Capsule())
+                        .accessibilityLabel("Code language \(language)")
+                }
+
+                Spacer(minLength: 0)
+
+                CopyButton(content: content, isVisible: showCopyButton)
+            }
+
+            ScrollView(.horizontal) {
+                Text(content)
+                    .font(Typography.code(13))
+                    .foregroundStyle(palette.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .padding(Spacing.md)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .stroke(palette.border, lineWidth: 1)
+        )
+        .hoverTracking { hovering in
+            isHovering = hovering
+        }
+    }
+}
+
+private struct CopyButton: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let content: String
+    let isVisible: Bool
+
+    @State private var didCopy = false
+
+    private var minimumHitTarget: CGFloat {
+        horizontalSizeClass == .compact ? HitTarget.touch : HitTarget.minimum
+    }
+
+    var body: some View {
+        Button {
+            copyToClipboard(content)
+            didCopy = true
+
+            Task {
+                try? await Task.sleep(for: .milliseconds(1500))
+                withAnimation(DesignAnimation.standard(reduceMotion)) {
+                    didCopy = false
+                }
+            }
+        } label: {
+            Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                .font(Typography.caption())
+                .foregroundStyle(didCopy ? Color.statusSuccess : Color.primary.opacity(0.75))
+                .frame(minWidth: minimumHitTarget, minHeight: minimumHitTarget)
+        }
+        .buttonStyle(.plain)
+        .opacity((isVisible || didCopy) ? 1 : 0)
+        .allowsHitTesting(isVisible || didCopy)
+        .animation(DesignAnimation.standard(reduceMotion), value: isVisible)
+        .animation(DesignAnimation.standard(reduceMotion), value: didCopy)
+        .accessibilityLabel(didCopy ? "Copied" : "Copy")
+    }
+}
+
 private struct TranscriptItemCardView: View {
     @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let item: TranscriptItem
     let isExpanded: Bool
     let onToggleExpanded: () -> Void
 
+    @State private var isHoveringDetail = false
+
     private var card: TranscriptItemCard { item.card }
+
+    private var usesMonospaceDetail: Bool {
+        card.type == .command || card.type == .tool
+    }
+
+    private var showCopyButton: Bool {
+        horizontalSizeClass == .compact || isHoveringDetail
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -250,11 +570,32 @@ private struct TranscriptItemCardView: View {
             }
 
             if isExpanded, let detail = card.detail {
-                Text(detail)
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        CopyButton(content: detail, isVisible: showCopyButton)
+                    }
+
+                    if usesMonospaceDetail {
+                        ScrollView(.horizontal) {
+                            Text(detail)
+                                .font(Typography.code(12))
+                                .foregroundStyle(palette.textSecondary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    } else {
+                        Text(detail)
+                            .font(Typography.caption())
+                            .foregroundStyle(palette.textSecondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .hoverTracking { hovering in
+                    isHoveringDetail = hovering
+                }
             }
         }
         .padding(Spacing.md)
@@ -320,6 +661,96 @@ private struct ToolRunView: View {
                 }
             }
         }
+    }
+}
+
+enum MessageSegment: Equatable {
+    case text(String)
+    case code(language: String?, content: String)
+}
+
+func parseMessageSegments(_ content: String) -> [MessageSegment] {
+    guard !content.isEmpty else { return [] }
+    guard content.contains("```") else { return [.text(content)] }
+
+    let lines = content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+    var segments: [MessageSegment] = []
+    var textLines: [String] = []
+    var codeLines: [String] = []
+    var currentLanguage: String?
+    var inCodeBlock = false
+
+    func flushText() {
+        let value = textLines.joined(separator: "\n")
+        if !value.isEmpty {
+            segments.append(.text(value))
+        }
+        textLines.removeAll(keepingCapacity: true)
+    }
+
+    func flushCode() {
+        let value = codeLines.joined(separator: "\n")
+        segments.append(.code(language: currentLanguage, content: value))
+        codeLines.removeAll(keepingCapacity: true)
+        currentLanguage = nil
+    }
+
+    for rawLine in lines {
+        let line = String(rawLine)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+        if inCodeBlock {
+            if trimmed == "```" {
+                flushCode()
+                inCodeBlock = false
+            } else {
+                codeLines.append(line)
+            }
+            continue
+        }
+
+        let fence = parseFenceStart(from: trimmed)
+        if fence.isFence {
+            flushText()
+            inCodeBlock = true
+            currentLanguage = fence.language
+        } else {
+            textLines.append(line)
+        }
+    }
+
+    if inCodeBlock {
+        flushCode()
+    } else {
+        flushText()
+    }
+
+    return segments.isEmpty ? [.text(content)] : segments
+}
+
+private func parseFenceStart(from trimmedLine: String) -> (isFence: Bool, language: String?) {
+    guard trimmedLine.hasPrefix("```") else { return (false, nil) }
+    let suffix = trimmedLine.dropFirst(3).trimmingCharacters(in: .whitespaces)
+    return (true, suffix.isEmpty ? nil : String(suffix))
+}
+
+private func copyToClipboard(_ content: String) {
+    #if os(macOS)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(content, forType: .string)
+    #elseif canImport(UIKit)
+    UIPasteboard.general.string = content
+    #endif
+}
+
+private extension View {
+    @ViewBuilder
+    func hoverTracking(_ onChange: @escaping (Bool) -> Void) -> some View {
+        #if os(macOS)
+        self.onHover(perform: onChange)
+        #else
+        self
+        #endif
     }
 }
 

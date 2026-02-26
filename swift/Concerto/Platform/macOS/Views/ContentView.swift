@@ -256,8 +256,17 @@ struct ContentView: View {
         case .switchToRunsTab:
             post(.switchToRunsTab)
         case .openCommandPalette:
-            keyboardRouter.isHelpOverlayVisible = false
-            showCommandPalette = true
+            if let selectedWave = repoState.selectedWave,
+               repoState.shouldShowInteractiveSession(for: selectedWave) {
+                NotificationCenter.default.post(
+                    name: .focusSessionComposer,
+                    object: nil,
+                    userInfo: ["waveId": selectedWave.id]
+                )
+            } else {
+                keyboardRouter.isHelpOverlayVisible = false
+                showCommandPalette = true
+            }
         case .showHelp:
             showCommandPalette = false
             keyboardRouter.isHelpOverlayVisible.toggle()
@@ -365,4 +374,3 @@ struct ContentView: View {
         .environment(OutputBuffer())
         .environment(KeyboardRouter())
 }
-

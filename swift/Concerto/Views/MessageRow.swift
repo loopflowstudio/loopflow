@@ -5,6 +5,8 @@ import LoopflowCore
 struct MessageRow: View {
     @Environment(\.palette) private var palette
     let message: SessionMessage
+    let timestampLabel: String?
+    let showStreamingCursor: Bool
     let onQueueEntry: (ReplyEntry) -> Void
 
     @State private var selectedQuote: String?
@@ -18,31 +20,54 @@ struct MessageRow: View {
                 .foregroundStyle(palette.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, Spacing.xs)
+        } else if message.role == .assistant {
+            messageContent
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(alignment: .top, spacing: Spacing.sm) {
                 accentBar
-
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    content
-                    Text(message.timestamp, style: .time)
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                }
+                messageContent
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var messageContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            content
+
+            if let timestampLabel {
+                Text(timestampLabel)
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
         }
     }
 
     @ViewBuilder
     private var content: some View {
         if message.role == .assistant {
-            SelectableAssistantMessageTextView(
-                text: message.content,
-                selectionResetToken: selectionResetToken
-            ) { newSelection in
-                selectedQuote = newSelection
-                if newSelection == nil {
-                    replyDraft = ""
+            let segments = parseMessageSegments(message.content)
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    switch segment {
+                    case .text(let text):
+                        SelectableAssistantMessageTextView(
+                            text: text,
+                            selectionResetToken: selectionResetToken
+                        ) { newSelection in
+                            selectedQuote = newSelection
+                            if newSelection == nil {
+                                replyDraft = ""
+                            }
+                        }
+                    case .code(let language, let codeContent):
+                        CodeBlockView(language: language, content: codeContent)
+                    }
+                }
+
+                if showStreamingCursor {
+                    StreamingCursorView()
                 }
             }
             .popover(
@@ -59,22 +84,6 @@ struct MessageRow: View {
                     )
                 }
             }
-        } else {
-            defaultMessageText
-        }
-    }
-
-    @ViewBuilder
-    private var defaultMessageText: some View {
-        if message.role == .assistant,
-           let markdown = try? AttributedString(
-               markdown: message.content,
-               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-           ) {
-            Text(markdown)
-                .font(Typography.body())
-                .foregroundStyle(palette.text)
-                .textSelection(.enabled)
         } else {
             Text(message.content)
                 .font(Typography.body())
@@ -140,6 +149,8 @@ import LoopflowCore
 struct MessageRow: View {
     @Environment(\.palette) private var palette
     let message: SessionMessage
+    let timestampLabel: String?
+    let showStreamingCursor: Bool
     let onQueueEntry: (ReplyEntry) -> Void
 
     var body: some View {
@@ -149,32 +160,48 @@ struct MessageRow: View {
                 .foregroundStyle(palette.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, Spacing.xs)
+        } else if message.role == .assistant {
+            messageContent
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(alignment: .top, spacing: Spacing.sm) {
                 accentBar
-
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    defaultMessageText
-                    Text(message.timestamp, style: .time)
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                }
+                messageContent
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
+    private var messageContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            content
+
+            if let timestampLabel {
+                Text(timestampLabel)
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
+        }
+    }
+
     @ViewBuilder
-    private var defaultMessageText: some View {
-        if message.role == .assistant,
-           let markdown = try? AttributedString(
-               markdown: message.content,
-               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-           ) {
-            Text(markdown)
-                .font(Typography.body())
-                .foregroundStyle(palette.text)
-                .textSelection(.enabled)
+    private var content: some View {
+        if message.role == .assistant {
+            let segments = parseMessageSegments(message.content)
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    switch segment {
+                    case .text(let text):
+                        AssistantTextSegment(text: text)
+                    case .code(let language, let codeContent):
+                        CodeBlockView(language: language, content: codeContent)
+                    }
+                }
+
+                if showStreamingCursor {
+                    StreamingCursorView()
+                }
+            }
         } else {
             Text(message.content)
                 .font(Typography.body())

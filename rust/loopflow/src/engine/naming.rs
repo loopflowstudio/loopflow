@@ -6,6 +6,7 @@ use rand::Rng;
 use regex::Regex;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
 
 const MAGICAL: &[&str] = &[
     "aurora", "cascade", "crystal", "drift", "echo", "ember", "fern", "flume", "frost", "glade",
@@ -161,6 +162,31 @@ fn captures_to_branch_parts(
     })
 }
 
+type CompiledVariants = Vec<(Regex, Vec<String>)>;
+type SchemaCache = Option<(String, CompiledVariants)>;
+
+static SCHEMA_REGEX_CACHE: Mutex<SchemaCache> = Mutex::new(None);
+
+fn compiled_schema_variants(schema: &str) -> Option<Vec<(Regex, Vec<String>)>> {
+    let mut cache = SCHEMA_REGEX_CACHE.lock().ok()?;
+    if let Some((ref cached_schema, ref variants)) = *cache {
+        if cached_schema == schema {
+            return Some(variants.clone());
+        }
+    }
+    let tokens = parse_schema_tokens(schema)?;
+    let variants: Vec<_> = schema_variants(&tokens)
+        .into_iter()
+        .filter_map(|variant| build_schema_regex(&variant))
+        .collect();
+    if variants.is_empty() {
+        return None;
+    }
+    let result = variants.clone();
+    *cache = Some((schema.to_string(), variants));
+    Some(result)
+}
+
 /// Reverse-parse a branch name using the configured schema.
 /// Returns None if the branch doesn't match the schema pattern.
 pub fn parse_branch_name(
@@ -169,13 +195,13 @@ pub fn parse_branch_name(
 ) -> Option<BranchNameParts> {
     let default = BranchNameConfig::default();
     let config = config.unwrap_or(&default);
-    let tokens = parse_schema_tokens(config.schema_.as_str())?;
 
-    schema_variants(&tokens).into_iter().find_map(|variant| {
-        let (regex, placeholders) = build_schema_regex(&variant)?;
-        let captures = regex.captures(branch)?;
-        captures_to_branch_parts(&captures, &placeholders)
-    })
+    compiled_schema_variants(config.schema_.as_str())?
+        .into_iter()
+        .find_map(|(regex, placeholders)| {
+            let captures = regex.captures(branch)?;
+            captures_to_branch_parts(&captures, &placeholders)
+        })
 }
 
 /// Extract the wave name ({name} component) from a branch name.

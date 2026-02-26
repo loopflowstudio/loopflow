@@ -98,6 +98,37 @@ struct VoiceInputServiceTests {
 
         #expect(transcript == "hello world")
     }
+
+    @MainActor
+    @Test("start waits for in-flight cancellation before re-recording")
+    func startAfterCancelStartsStreamingAgain() async {
+        let engine = SlowCancelVoiceInputEngine()
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted),
+            engineFactory: { engine }
+        )
+
+        do {
+            try await service.startRecording()
+        } catch {
+            Issue.record("Expected first startRecording to succeed: \(error)")
+            return
+        }
+
+        #expect(engine.startCallCount() == 1)
+
+        service.cancel()
+
+        do {
+            try await service.startRecording()
+        } catch {
+            Issue.record("Expected second startRecording to succeed: \(error)")
+            return
+        }
+
+        #expect(service.state == .recording)
+        #expect(engine.startCallCount() == 2)
+    }
 }
 
 private struct MockVoicePermissionClient: VoiceInputPermissionClient {
@@ -143,6 +174,34 @@ private final class MockVoiceInputEngine: VoiceInputEngine, @unchecked Sendable 
 
     func cancelCallCount() -> Int {
         cancelCount
+    }
+}
+
+private final class SlowCancelVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
+    private var isStreaming = false
+    private var startCount = 0
+
+    func prepareModel(onProgress: @escaping @Sendable (Double?) -> Void) async throws {}
+
+    func startStreaming(onPartial: @escaping @Sendable (String) -> Void) async throws {
+        guard !isStreaming else { return }
+        isStreaming = true
+        startCount += 1
+        onPartial("partial \(startCount)")
+    }
+
+    func stopStreamingAndFinalizeTranscript() async throws -> String {
+        isStreaming = false
+        return ""
+    }
+
+    func cancelStreaming() async {
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        isStreaming = false
+    }
+
+    func startCallCount() -> Int {
+        startCount
     }
 }
 

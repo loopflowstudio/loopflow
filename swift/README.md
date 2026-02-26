@@ -154,6 +154,15 @@ Wave detail now has two tabs:
 
 Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).
 
+## Voice input (push-to-talk)
+
+- Tap the mic button in the composer to start/stop recording
+- Press and hold to record only while held
+- Partial transcript appears under the composer while recording
+- Final transcript is inserted into the composer for manual edit + send
+- First use downloads WhisperKit `tiny` on-device and shows progress
+- If microphone permission is denied, Concerto shows an inline settings shortcut
+
 ## Keyboard Shortcuts
 
 ```text

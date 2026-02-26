@@ -292,6 +292,10 @@ public final class VoiceInputService {
     public func startRecording() async throws {
         guard state == .idle else { return }
 
+        if let engine {
+            await engine.cancelStreaming()
+        }
+
         try await ensurePermission()
         let currentOperationID = UUID()
         operationID = currentOperationID

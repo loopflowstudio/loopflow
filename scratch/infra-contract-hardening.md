@@ -1,60 +1,78 @@
 # 02: Contract Hardening
 
-Stabilize core contracts after boundary cleanup so prompt/store/recovery behavior is predictable and testable.
+## Problem
 
-## Why this phase exists
+Pass 1 split large modules, but core contracts are still implicit in too many places. Prompt assembly policy can drift across gather/budget/format logic, SQL query coverage can drift across SQLite/Postgres, docker recovery depends on unstated label/mount conventions, and store trait impls still hide backend `match` branching.
 
-After Pass 1 decomposition, the next failure mode is contract drift:
+This hurts three groups now:
+- Maintainers: refactors remain high-risk because invariants are not explicit.
+- Contributors: behavior is hard to predict without reading multiple files.
+- Users: regressions appear in recovery, prompt quality, and cross-backend behavior.
 
-- prompt assembly policy is still intertwined across gather/budget/format stages
-- SQL catalog growth increases dialect/placeholder drift risk
-- recovery/workspace paths need stronger invariant coverage — Pass 1 revealed that docker recovery correctness depends on implicit label/mount conventions across the new lifecycle modules
-- store backend `match` dispatch still exists inside trait impls (Pass 1 added capability accessors but didn't extract backend-port adapters)
+Why now: Pass 3+ expansion depends on stable contracts. If Pass 2 does not harden these seams, later feature work will amplify drift.
 
-Contract hardening keeps feature velocity without hidden regressions.
+## Approach
+
+Ship Pass 2 as a contract-first hardening lane with five concrete tracks:
+
+1. **Prompt pipeline contracts (typed stage boundaries).**
+   Introduce explicit handoff types for GatheredPromptContext → BudgetedPromptContext → RenderedPrompt. Keep current behavior by snapshot-testing parity for built-in steps while moving policy decisions into one stage each.
+
+2. **Build-time SQL catalog validation (single source of truth).**
+   Generate a query catalog index at build time (same pattern already proven in `build.rs` direction discovery), then validate:
+   - required query IDs exist for both dialects,
+   - placeholders are dialect-correct,
+   - malformed definitions fail compile/test early.
+
+3. **Recovery/workspace invariant test suite (convention to contract).**
+   Promote docker metadata conventions into named constants and assert them through focused tests:
+   - startup cleanup and orphan handling,
+   - reattach expectations,
+   - workspace branch-resolution precedence,
+   - ephemeral cleanup guarantees,
+   - label/mount parity across `image`, `workspace`, and `recovery` modules.
+
+4. **Store backend-port adapters (single backend switch point).**
+   Extract remaining backend `match` logic from trait impls into adapter surfaces (`SqliteStoreBackend` / `PostgresStoreBackend` or equivalent macro-reduced adapters). Callers use capability traits only.
+
+5. **Conformance + quality guardrails.**
+   Add API subset checks (lfd semantics remain a subset of lfdhub where overlapping) and add prompt quality-axis evals for critical steps (security/reliability/performance/api/ux), tied to prompt bundle/version outcomes.
+
+This directly advances wave goals: **“Maintain architectural compactness as features grow,” “Eliminate boilerplate and duplicated patterns,”** and **“Make extension points trait-based, not switch-based.”**
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Patch regressions case-by-case without structural contract work | Lowest short-term cost | Keeps drift as the default mode; slows every future change |
+| Full abstraction rewrite (new trait hierarchies everywhere) | Potentially clean conceptual model | High over-decomposition risk; violates infra warning from Pass 1 |
+| Adopt external compile-time frameworks for SQL/API contracts immediately | Strong static guarantees | High migration overhead now; larger blast radius than targeted hardening |
+
+## Key decisions
+
+- **Choose explicit contracts over inferred behavior.** Every high-risk seam gets typed handoffs or invariant tests.
+- **Prefer generated validation over manual review.** Build/test failure is the gate, not tribal knowledge.
+- **Keep decomposition pragmatic.** Extract backend ports where they reduce repeated `match`, but avoid micro-trait explosion.
+- **Wild success target:** contributors can modify prompt/store/recovery paths with confidence because breakage is caught by deterministic tests before runtime.
+- **Wild failure to avoid:** six months later we discover recovery regressions caused by undocumented metadata conventions and scattered backend branching; this design prevents that by centralizing conventions and codifying invariants.
+- **New risk introduced:** test-suite sprawl can slow iteration. Mitigation: keep invariant tests focused on boundary contracts, not internal wiring.
 
 ## Scope
 
-### In scope
+- In scope:
+  - Prompt gather/budget/format stage separation with output parity
+  - Build-time SQL catalog completeness + placeholder validation
+  - Recovery/workspace/store parity invariants
+  - Docker label/mount contract assertions across lifecycle modules
+  - Store backend-port dispatch consolidation
+  - lfd↔lfdhub API subset checks and prompt quality eval harness
+- Out of scope:
+  - New trigger types
+  - New flow language features
+  - Major HTTP API redesign
+  - New provider capability rollout
 
-1. **Prompt pipeline decomposition**
-   - Separate gather → budget/trim → format stages with explicit data handoff types.
-   - Preserve output parity for current flows/steps.
-2. **SQL catalog validation**
-   - Add build-time checks for query coverage and placeholder sanity across SQLite/Postgres.
-   - Fail fast on missing or malformed query definitions.
-   - Pattern proven by direction taxonomy: `build.rs` scans directories, generates `LazyLock<HashMap>`, validated at compile time. Apply the same approach to SQL catalog.
-3. **Invariant-focused test expansion**
-   - Recovery invariants (startup cleanup, orphan handling, reattach expectations). Higher priority than originally estimated — Pass 1 decomposition spread recovery-relevant conventions across `docker/recovery.rs`, `docker/workspace.rs`, and `docker/image.rs`. Label and mount conventions need explicit assertion coverage.
-   - Workspace invariants (branch resolution precedence, ephemeral cleanup contract).
-   - Store parity invariants (critical behavior matches across SQLite/Postgres).
-   - Docker startup-recovery tests that currently soft-skip without Docker — decide whether to split into a Docker-required suite or keep soft-skipping.
-4. **API subset conformance checks**
-   - Assert lfd endpoint semantics remain a subset of lfdhub public API semantics where features overlap.
-   - Mark any local-only lfd endpoints explicitly.
-5. **Prompt quality-eval harness**
-   - Quality directions (`infra/`, `ux/`, `craft/`, `ceo/`) now provide concrete eval axes.
-   - Add quality-axis evals (security/reliability/performance/api/ux) for critical prompt steps.
-   - Track prompt bundle/version outcomes and guard against regressions.
-
-6. **Store backend-port cleanup** (carried from Pass 1)
-   - Remaining backend `match` dispatch inside store trait impls can be extracted into backend-port adapters (`SqliteStoreBackend` / `PostgresStoreBackend`) or reduced via macro generation.
-   - Goal: callers interact only through capability traits; backend selection is a single decision point, not scattered `match` blocks.
-
-### Out of scope
-
-- New trigger types
-- New flow language features
-- Major HTTP API redesign
-- New provider capability rollout
-
-## Contract
-
-- Prompt output remains behaviorally compatible for existing built-in steps/flows.
-- SQL catalog remains single source of truth; checks increase confidence without changing API semantics.
-- Recovery and workspace behavior become assertion-backed at boundary points.
-
-## Validation
+## Done when
 
 - `cargo fmt --all -- --check`
 - `cargo clippy -p loopflow --all-targets -- -D warnings`
@@ -64,12 +82,9 @@ Contract hardening keeps feature velocity without hidden regressions.
 - `cargo test -p loopflow api_subset`
 - `cargo test -p loopflow golden_prompt`
 
-## Done when
-
-- Prompt pipeline has clear stage boundaries and stable outputs.
-- SQL catalog fails at build/test time for coverage/placeholder drift.
-- Recovery/workspace/store parity invariants have explicit tests and pass in CI.
-- Docker label/mount conventions are assertion-backed across lifecycle modules.
-- Store backend dispatch is consolidated (no scattered `match` blocks in trait impls).
-- lfd↔lfdhub API subset conformance checks are explicit and passing.
-- Prompt quality eval/golden checks are explicit and passing for critical steps.
+And all of these are observably true:
+- Prompt stage boundaries are explicit and parity-tested.
+- SQL catalog drift fails at build/test time.
+- Recovery/workspace metadata conventions are assertion-backed.
+- Store trait impls no longer contain scattered backend `match` dispatch.
+- API subset + prompt quality checks run in CI for critical paths.

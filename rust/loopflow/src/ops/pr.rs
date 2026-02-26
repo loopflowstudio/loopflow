@@ -56,8 +56,8 @@ pub fn create_or_update_pr(
     }
 
     // Snapshot origin's view of our branch before any work
-    let branch = current_branch(repo)?
-        .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let origin_before = rev_parse(repo, &format!("origin/{branch}")).ok();
 
     // Commit before sync — sync_main checks is_clean() and fails on dirty trees

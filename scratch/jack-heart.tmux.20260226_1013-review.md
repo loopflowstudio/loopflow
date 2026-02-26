@@ -6,7 +6,7 @@ A TPM-installable tmux plugin delivering three user-facing capabilities:
 
 1. **Status bar segment** (`scripts/loopflow-status.sh`) — displays `[lf: <branch>]` in lf mode or `[lf: N waves | name]` in container mode. Cached with 2s TTL, bounded to <250ms cold path.
 
-2. **Named layouts** (`scripts/layouts/{lf-dev,lf-swarm,lf-flow}.sh`) — three window presets that create pane arrangements with mode-aware command seeding. Graceful fallback to 2-pane on terminals <120 cols.
+2. **Named layouts** (`scripts/layouts/{lf-dev,lf-swarm}.sh`) — two window presets that create pane arrangements with mode-aware command seeding. Graceful fallback to 2-pane on terminals <120 cols.
 
 3. **Mode-aware keybindings** (`scripts/keybindings.sh`) — 9 bindings via `prefix+l+<key>` using a custom tmux key table. All actions route through `loopflow_dispatch` in `helpers.sh`. Every action gives feedback — no silent no-ops.
 
@@ -64,11 +64,15 @@ Layouts are standalone scripts invoked from dispatch or directly. Status script 
 1. **README.md**: Added missing `n` (next) and `d` (land) keybindings to the table.
 2. **`loopflow_show_help`**: Rewrote to use temp file instead of embedding multiline text in double-quoted tmux command string. The original approach would break on shell interpolation of newlines.
 3. **wave/tmux/README.md**: Marked `scripts/lfd` and `scripts/lf-up.sh` as phase 04 artifacts.
+4. **Review doc**: Fixed stale `lf-flow` reference — layout count is two, not three.
+5. **`tmux-review.py`**: Fixed skipped checklist item (numbering jumped from 5 to 7).
+6. **`pr.rs`**: Applied `cargo fmt` to fix formatting.
 
 ## Test results
 
-- Shell syntax: all 7 scripts pass `bash -n`
+- Shell syntax: all 6 scripts pass `bash -n`
 - Python syntax: `tmux-review.py` passes `ast.parse`
 - Python tests: 67/67 pass
-- Rust: `cargo fmt`, `cargo clippy`, `cargo test --all` all pass (700+ tests, 0 failures) with working tree reverts applied
-- `tmux-review.py`: not runnable in this environment (no tmux binary), but exits cleanly with error message
+- Rust: `cargo fmt`, `cargo clippy`, `cargo test --all` all pass (656+ tests, 0 failures)
+- E2E smoke: passes
+- All scripts executable

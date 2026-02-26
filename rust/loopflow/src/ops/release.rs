@@ -1421,3 +1421,307 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
         .output()
         .map_err(OpsError::from)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ======================================================================
+    // bump_cargo_toml
+    // ======================================================================
+
+    #[test]
+    fn cargo_toml_workspace_package() {
+        let input = r#"[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.9.2"
+edition = "2021"
+"#;
+        let result = bump_cargo_toml(input, "0.9.3").unwrap();
+        assert!(result.contains(r#"version = "0.9.3""#));
+        assert!(!result.contains("0.9.2"));
+    }
+
+    #[test]
+    fn cargo_toml_package_section() {
+        let input = r#"[package]
+name = "mylib"
+version = "1.0.0"
+edition = "2021"
+"#;
+        let result = bump_cargo_toml(input, "1.1.0").unwrap();
+        assert!(result.contains(r#"version = "1.1.0""#));
+        assert!(!result.contains("1.0.0"));
+    }
+
+    #[test]
+    fn cargo_toml_prefers_workspace_over_package() {
+        let input = r#"[workspace.package]
+version = "2.0.0"
+edition = "2021"
+
+[package]
+name = "sub"
+version.workspace = true
+"#;
+        let result = bump_cargo_toml(input, "2.1.0").unwrap();
+        assert!(result.contains(r#"version = "2.1.0""#));
+        // workspace version bumped, package version.workspace = true untouched
+        assert!(result.contains("version.workspace = true"));
+    }
+
+    #[test]
+    fn cargo_toml_no_version_errors() {
+        let input = "[package]\nname = \"noversion\"\n";
+        assert!(bump_cargo_toml(input, "1.0.0").is_err());
+    }
+
+    #[test]
+    fn cargo_toml_preserves_trailing_newline() {
+        let input = "[package]\nversion = \"0.1.0\"\n";
+        let result = bump_cargo_toml(input, "0.2.0").unwrap();
+        assert!(result.ends_with('\n'));
+    }
+
+    #[test]
+    fn cargo_toml_single_quotes() {
+        let input = "[package]\nversion = '0.1.0'\n";
+        let result = bump_cargo_toml(input, "0.2.0").unwrap();
+        assert!(result.contains(r#"version = "0.2.0""#));
+    }
+
+    // ======================================================================
+    // bump_package_json
+    // ======================================================================
+
+    #[test]
+    fn package_json_basic() {
+        let input = r#"{
+  "name": "mypackage",
+  "version": "1.2.3",
+  "description": "test"
+}"#;
+        let result = bump_package_json(input, "1.3.0").unwrap();
+        assert!(result.contains(r#""version": "1.3.0""#));
+        assert!(!result.contains("1.2.3"));
+    }
+
+    #[test]
+    fn package_json_only_first_version() {
+        let input = r#"{
+  "version": "1.0.0",
+  "dependencies": {
+    "foo": { "version": "2.0.0" }
+  }
+}"#;
+        let result = bump_package_json(input, "1.1.0").unwrap();
+        assert!(result.contains(r#""version": "1.1.0""#));
+        // second "version" untouched
+        assert!(result.contains(r#""version": "2.0.0""#));
+    }
+
+    #[test]
+    fn package_json_no_version_errors() {
+        let input = r#"{ "name": "noversion" }"#;
+        assert!(bump_package_json(input, "1.0.0").is_err());
+    }
+
+    // ======================================================================
+    // bump_pyproject_toml
+    // ======================================================================
+
+    #[test]
+    fn pyproject_static_version() {
+        let input = r#"[project]
+name = "mypkg"
+version = "0.5.0"
+"#;
+        let result = bump_pyproject_toml(input, "0.6.0").unwrap();
+        assert!(result.contains(r#"version = "0.6.0""#));
+        assert!(!result.contains("0.5.0"));
+    }
+
+    #[test]
+    fn pyproject_dynamic_version() {
+        let input = r#"[project]
+name = "mypkg"
+dynamic = ["version"]
+"#;
+        let result = bump_pyproject_toml(input, "1.0.0").unwrap();
+        assert!(result.contains(r#"version = "1.0.0""#));
+        assert!(!result.contains("dynamic"));
+    }
+
+    #[test]
+    fn pyproject_dynamic_version_with_other_dynamic_fields() {
+        let input = r#"[project]
+name = "mypkg"
+dynamic = ["version", "readme"]
+"#;
+        let result = bump_pyproject_toml(input, "1.0.0").unwrap();
+        assert!(result.contains(r#"version = "1.0.0""#));
+        assert!(result.contains(r#"dynamic = ["readme"]"#));
+    }
+
+    #[test]
+    fn pyproject_no_project_section_errors() {
+        let input = "[tool.something]\nfoo = 1\n";
+        assert!(bump_pyproject_toml(input, "1.0.0").is_err());
+    }
+
+    #[test]
+    fn pyproject_preserves_trailing_newline() {
+        let input = "[project]\nversion = \"0.1.0\"\n";
+        let result = bump_pyproject_toml(input, "0.2.0").unwrap();
+        assert!(result.ends_with('\n'));
+    }
+
+    // ======================================================================
+    // replace_toml_version_in_section
+    // ======================================================================
+
+    #[test]
+    fn toml_version_replace_preserves_surrounding() {
+        let input = r#"[package]
+name = "test"
+version = "0.1.0"
+edition = "2021"
+"#;
+        let result = replace_toml_version_in_section(input, "[package]", "0.2.0")
+            .unwrap()
+            .unwrap();
+        assert!(result.contains("name = \"test\""));
+        assert!(result.contains("edition = \"2021\""));
+        assert!(result.contains(r#"version = "0.2.0""#));
+    }
+
+    #[test]
+    fn toml_version_wrong_section_returns_none() {
+        let input = "[other]\nversion = \"0.1.0\"\n";
+        let result = replace_toml_version_in_section(input, "[package]", "0.2.0").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn toml_version_only_replaces_in_target_section() {
+        let input = r#"[package]
+version = "1.0.0"
+
+[dependencies]
+version = "2.0.0"
+"#;
+        let result = replace_toml_version_in_section(input, "[package]", "1.1.0")
+            .unwrap()
+            .unwrap();
+        assert!(result.contains(r#"version = "1.1.0""#));
+        // dependency section untouched
+        assert!(result.contains("[dependencies]\nversion = \"2.0.0\""));
+    }
+
+    // ======================================================================
+    // area_matches / glob helpers
+    // ======================================================================
+
+    #[test]
+    fn area_matches_directory_prefix() {
+        let patterns = vec!["src/api/".to_string()];
+        assert!(area_matches("src/api/handler.rs", &patterns));
+        assert!(!area_matches("src/web/handler.rs", &patterns));
+    }
+
+    #[test]
+    fn area_matches_exact_file() {
+        let patterns = vec!["README.md".to_string()];
+        assert!(area_matches("README.md", &patterns));
+        assert!(!area_matches("docs/README.md", &patterns));
+    }
+
+    #[test]
+    fn area_matches_glob_star() {
+        let patterns = vec!["src/*.rs".to_string()];
+        assert!(area_matches("src/main.rs", &patterns));
+        assert!(!area_matches("src/sub/main.rs", &patterns));
+    }
+
+    #[test]
+    fn area_matches_glob_doublestar() {
+        let patterns = vec!["src/**/*.rs".to_string()];
+        assert!(area_matches("src/sub/main.rs", &patterns));
+        assert!(area_matches("src/a/b/c/main.rs", &patterns));
+        // **/ requires at least one directory level between src/ and the filename
+        assert!(!area_matches("src/main.rs", &patterns));
+    }
+
+    #[test]
+    fn area_matches_normalizes_dot_slash() {
+        let patterns = vec!["./src/".to_string()];
+        assert!(area_matches("src/main.rs", &patterns));
+        assert!(area_matches("./src/main.rs", &patterns));
+    }
+
+    // ======================================================================
+    // version helpers
+    // ======================================================================
+
+    #[test]
+    fn version_from_tag_default_target() {
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: vec![],
+            tag_prefix: String::new(),
+            manifests: vec![],
+            workflow: None,
+        };
+        assert_eq!(version_from_tag("v1.2.3", &target).unwrap(), "1.2.3");
+    }
+
+    #[test]
+    fn version_from_tag_scoped_target() {
+        let target = ReleaseTarget {
+            name: "cli".to_string(),
+            area: vec![],
+            tag_prefix: "cli/".to_string(),
+            manifests: vec![],
+            workflow: None,
+        };
+        assert_eq!(version_from_tag("cli/v1.2.3", &target).unwrap(), "1.2.3");
+    }
+
+    #[test]
+    fn version_from_tag_prefix_mismatch_errors() {
+        let target = ReleaseTarget {
+            name: "cli".to_string(),
+            area: vec![],
+            tag_prefix: "cli/".to_string(),
+            manifests: vec![],
+            workflow: None,
+        };
+        assert!(version_from_tag("v1.2.3", &target).is_err());
+    }
+
+    #[test]
+    fn target_tag_default() {
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: vec![],
+            tag_prefix: String::new(),
+            manifests: vec![],
+            workflow: None,
+        };
+        assert_eq!(target_tag(&target, "1.0.0"), "v1.0.0");
+    }
+
+    #[test]
+    fn target_tag_scoped() {
+        let target = ReleaseTarget {
+            name: "cli".to_string(),
+            area: vec![],
+            tag_prefix: "cli/".to_string(),
+            manifests: vec![],
+            workflow: None,
+        };
+        assert_eq!(target_tag(&target, "2.0.0"), "cli/v2.0.0");
+    }
+}

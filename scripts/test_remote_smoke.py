@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
-import httpx
-
 from lib.api_harness import ApiAssertions, ApiClient, ScenarioRunner
 
 try:
@@ -87,12 +85,7 @@ def main() -> int:
         token=args.token,
         timeout_seconds=args.timeout,
         verify=verify,
-    ) as api, httpx.Client(
-        base_url=args.url,
-        headers={"Authorization": f"Bearer {args.token}"},
-        timeout=args.timeout,
-        verify=verify,
-    ) as authed_stream:
+    ) as api:
         ws = WebSocketClient(
             base_url=args.url,
             token=args.token,
@@ -111,7 +104,6 @@ def main() -> int:
                 "sse_streaming",
                 lambda: _scenario_sse_streaming(
                     api,
-                    authed_stream,
                     repo_path,
                     args.session_harness,
                     args.events_timeout,
@@ -122,7 +114,6 @@ def main() -> int:
                 "wave_run_and_logs",
                 lambda: _scenario_wave_run_logs(
                     api,
-                    authed_stream,
                     repo_path,
                     args.logs_timeout,
                     cleanup_waves,
@@ -195,7 +186,6 @@ def _scenario_auth_rejection(api: ApiClient) -> None:
 
 def _scenario_sse_streaming(
     api: ApiClient,
-    authed_stream: httpx.Client,
     repo_path: str,
     session_harness: str,
     events_timeout: float,
@@ -226,7 +216,7 @@ def _scenario_sse_streaming(
         seen_session_event = False
         current_event_name = ""
 
-        with authed_stream.stream("GET", f"/v0/sessions/{session_id}/events") as response:
+        with api.stream("GET", f"/v0/sessions/{session_id}/events") as response:
             ApiAssertions.expect_status(response, 200)
             for line in response.iter_lines():
                 if time.monotonic() > deadline:
@@ -267,7 +257,6 @@ def _scenario_websocket(ws: WebSocketClient) -> None:
 
 def _scenario_wave_run_logs(
     api: ApiClient,
-    authed_stream: httpx.Client,
     repo_path: str,
     logs_timeout: float,
     cleanup_waves: list[str],
@@ -284,7 +273,7 @@ def _scenario_wave_run_logs(
     deadline = time.monotonic() + logs_timeout
     saw_output_line = False
 
-    with authed_stream.stream("GET", f"/v0/waves/{wave_id}/logs") as response:
+    with api.stream("GET", f"/v0/waves/{wave_id}/logs") as response:
         ApiAssertions.expect_status(response, 200)
         content_type = response.headers.get("content-type", "")
         if "text/plain" not in content_type:

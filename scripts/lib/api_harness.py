@@ -6,7 +6,7 @@ from __future__ import annotations
 import traceback
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 import httpx
 
@@ -58,6 +58,9 @@ class ApiClient:
         client = self._authed_client if auth else self._anonymous_client
         return client.request(method, path, **kwargs)
 
+    def stream(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        return self._authed_client.stream(method, path, **kwargs)
+
 
 class ApiAssertions:
     @staticmethod
@@ -99,12 +102,6 @@ class ApiAssertions:
             )
 
         return payload
-
-    @staticmethod
-    def expect_fields(payload: dict[str, Any], required_fields: Iterable[str]) -> None:
-        missing = [field for field in required_fields if field not in payload]
-        if missing:
-            raise AssertionError(f"missing fields: {missing}; payload={payload}")
 
 
 class ScenarioRunner:

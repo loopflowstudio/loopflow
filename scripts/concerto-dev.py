@@ -108,6 +108,39 @@ def stream_with_log(
         return process.wait()
 
 
+def run_app_bundle_with_log(app_path: Path, log_path: Path) -> int:
+    """Launch app bundle through LaunchServices and stream redirected stdout/stderr."""
+    DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    open_cmd = [
+        "open",
+        "-n",
+        "-W",
+        "--stdout", str(log_path),
+        "--stderr", str(log_path),
+        str(app_path),
+    ]
+    with log_path.open("a", encoding="utf-8") as log_file:
+        log_file.write(f"\n\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+        log_file.write(f"$ {' '.join(open_cmd)}\n\n")
+        log_file.flush()
+
+    tail_process = subprocess.Popen(["tail", "-n", "0", "-F", str(log_path)])
+    try:
+        return run(open_cmd, check=False).returncode
+    except KeyboardInterrupt:
+        print("\nStopping app...")
+        run(["osascript", "-e", 'tell application id "com.loopflow.concerto" to quit'], check=False)
+        return 130
+    finally:
+        if tail_process.poll() is None:
+            tail_process.terminate()
+            try:
+                tail_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                tail_process.kill()
+
+
 def _read_session_token() -> str | None:
     token_path = Path.home() / ".lf" / "session-token"
     if not token_path.exists():
@@ -376,8 +409,7 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False) -> int:
     print(f"Stream log: {CONCERTO_STREAM_LOG}")
     print("Press Ctrl+C to quit")
     print("---")
-    executable = str(DEV_APP / "Contents" / "MacOS" / "Concerto")
-    app_exit = stream_with_log([executable], log_path=CONCERTO_STREAM_LOG)
+    app_exit = run_app_bundle_with_log(DEV_APP, CONCERTO_STREAM_LOG)
 
     if lfd_process is not None:
         _stop_process(lfd_process, "lfd")
@@ -548,6 +580,8 @@ def cmd_clean() -> int:
     run(["tccutil", "reset", "Accessibility", "com.loopflow.concerto"], check=False)
     print("Resetting Automation permissions...")
     run(["tccutil", "reset", "AppleEvents", "com.loopflow.concerto"], check=False)
+    print("Resetting Microphone permissions...")
+    run(["tccutil", "reset", "Microphone", "com.loopflow.concerto"], check=False)
     print("Done. Next run will require re-granting permissions.")
     return 0
 
@@ -868,7 +902,12 @@ def _install_dev_app() -> None:
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS", profile="debug")
 
-    run(["codesign", "--force", "--deep", "--sign", "-", str(DEV_APP)])
+    entitlements = SWIFT_DIR / "Concerto" / "Concerto.entitlements"
+    codesign_cmd = ["codesign", "--force", "--deep", "--sign", "-"]
+    if entitlements.exists():
+        codesign_cmd += ["--entitlements", str(entitlements)]
+    codesign_cmd.append(str(DEV_APP))
+    run(codesign_cmd)
 
 
 def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:

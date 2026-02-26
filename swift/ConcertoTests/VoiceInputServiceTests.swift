@@ -9,7 +9,7 @@ struct VoiceInputServiceTests {
     func startAndStopRecording() async {
         let engine = MockVoiceInputEngine(partials: ["hello world"], finalTranscript: "hello world")
         let service = VoiceInputService(
-            permissionClient: MockVoicePermissionClient(status: .granted),
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
             engineFactory: { engine }
         )
 
@@ -35,7 +35,10 @@ struct VoiceInputServiceTests {
     @Test("denied microphone permission fails start")
     func deniedMicrophonePermission() async {
         let service = VoiceInputService(
-            permissionClient: MockVoicePermissionClient(status: .denied),
+            permissionClient: MockVoicePermissionClient(
+                status: .denied,
+                requestAccessResult: false
+            ),
             engineFactory: { MockVoiceInputEngine(partials: [], finalTranscript: "") }
         )
 
@@ -53,11 +56,33 @@ struct VoiceInputServiceTests {
     }
 
     @MainActor
+    @Test("not determined microphone permission requests access and starts recording")
+    func undeterminedMicrophonePermissionGrantsAndStarts() async {
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(
+                status: .notDetermined,
+                requestAccessResult: true
+            ),
+            engineFactory: { MockVoiceInputEngine(partials: ["hello"], finalTranscript: "hello") }
+        )
+
+        do {
+            try await service.startRecording()
+        } catch {
+            Issue.record("Expected startRecording to succeed: \(error)")
+            return
+        }
+
+        #expect(service.state == .recording)
+        #expect(service.permissionStatus == .granted)
+    }
+
+    @MainActor
     @Test("cancel resets UI state and stops engine")
     func cancelStopsEngine() async {
         let engine = MockVoiceInputEngine(partials: ["partial"], finalTranscript: "ignored")
         let service = VoiceInputService(
-            permissionClient: MockVoicePermissionClient(status: .granted),
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
             engineFactory: { engine }
         )
 
@@ -82,7 +107,7 @@ struct VoiceInputServiceTests {
     func stopFallsBackToPartialTranscript() async {
         let engine = MockVoiceInputEngine(partials: ["hello world"], finalTranscript: "")
         let service = VoiceInputService(
-            permissionClient: MockVoicePermissionClient(status: .granted),
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
             engineFactory: { engine }
         )
 
@@ -100,11 +125,53 @@ struct VoiceInputServiceTests {
     }
 
     @MainActor
+    @Test("stop removes Whisper control tokens and blank-audio markers")
+    func stopRemovesWhisperControlTokens() async {
+        let noisy = "[BLANK_AUDIO] [MUSIC] (crickets chirping) <|startoftranscript|><|en|><|transcribe|><|notimestamps|> I am Jack, my name is Jack, I have a phone.<|endoftext|>"
+        let engine = MockVoiceInputEngine(partials: ["partial"], finalTranscript: noisy)
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
+            engineFactory: { engine }
+        )
+
+        do {
+            try await service.startRecording()
+        } catch {
+            Issue.record("Expected startRecording to succeed: \(error)")
+            return
+        }
+
+        let transcript = await service.stopRecording()
+        #expect(transcript == "I am Jack, my name is Jack, I have a phone.")
+    }
+
+    @MainActor
+    @Test("partial fallback removes Whisper control tokens and blank-audio markers")
+    func partialFallbackRemovesWhisperControlTokens() async {
+        let noisyPartial = "[BLANK_AUDIO] [MUSIC] (crickets chirping) <|startoftranscript|> hello there <|endoftext|>"
+        let engine = MockVoiceInputEngine(partials: [noisyPartial], finalTranscript: "")
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
+            engineFactory: { engine }
+        )
+
+        do {
+            try await service.startRecording()
+        } catch {
+            Issue.record("Expected startRecording to succeed: \(error)")
+            return
+        }
+
+        let transcript = await service.stopRecording()
+        #expect(transcript == "hello there")
+    }
+
+    @MainActor
     @Test("start waits for in-flight cancellation before re-recording")
     func startAfterCancelStartsStreamingAgain() async {
         let engine = SlowCancelVoiceInputEngine()
         let service = VoiceInputService(
-            permissionClient: MockVoicePermissionClient(status: .granted),
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
             engineFactory: { engine }
         )
 
@@ -129,32 +196,100 @@ struct VoiceInputServiceTests {
         #expect(service.state == .recording)
         #expect(engine.startCallCount() == 2)
     }
+
+    @MainActor
+    @Test("background warmup prepares model without requesting microphone access")
+    func backgroundWarmupPreparesModel() async {
+        let permissionClient = CountingVoicePermissionClient(
+            status: .notDetermined,
+            requestAccessResult: true
+        )
+        let engine = MockVoiceInputEngine(
+            partials: ["hello"],
+            finalTranscript: "hello",
+            prepareDelayNanos: 140_000_000
+        )
+        let service = VoiceInputService(
+            permissionClient: permissionClient,
+            engineFactory: { engine }
+        )
+
+        service.prewarmModelInBackground()
+        await waitUntil {
+            engine.prepareCallCount() == 1
+        }
+
+        #expect(permissionClient.requestAccessCallCount == 0)
+
+        do {
+            try await service.startRecording()
+        } catch {
+            Issue.record("Expected startRecording to succeed after warmup: \(error)")
+            return
+        }
+
+        #expect(engine.prepareCallCount() == 1)
+        #expect(service.state == .recording)
+    }
 }
 
 private struct MockVoicePermissionClient: VoiceInputPermissionClient {
     let status: VoiceInputService.PermissionStatus
+    let requestAccessResult: Bool
 
     func authorizationStatus() async -> VoiceInputService.PermissionStatus {
         status
     }
 
     func requestAccess() async -> Bool {
-        status == .granted
+        requestAccessResult
+    }
+}
+
+@MainActor
+private final class CountingVoicePermissionClient: VoiceInputPermissionClient {
+    let status: VoiceInputService.PermissionStatus
+    let requestAccessResult: Bool
+    private(set) var requestAccessCallCount = 0
+
+    init(status: VoiceInputService.PermissionStatus, requestAccessResult: Bool) {
+        self.status = status
+        self.requestAccessResult = requestAccessResult
+    }
+
+    func authorizationStatus() async -> VoiceInputService.PermissionStatus {
+        status
+    }
+
+    func requestAccess() async -> Bool {
+        requestAccessCallCount += 1
+        return requestAccessResult
     }
 }
 
 private final class MockVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     private let partials: [String]
     private let finalTranscript: String
+    private let prepareDelayNanos: UInt64
+    private var prepareCount = 0
     private var cancelCount = 0
 
-    init(partials: [String], finalTranscript: String) {
+    init(
+        partials: [String],
+        finalTranscript: String,
+        prepareDelayNanos: UInt64 = 0
+    ) {
         self.partials = partials
         self.finalTranscript = finalTranscript
+        self.prepareDelayNanos = prepareDelayNanos
     }
 
     func prepareModel(onProgress: @escaping @Sendable (Double?) -> Void) async throws {
+        prepareCount += 1
         onProgress(0.4)
+        if prepareDelayNanos > 0 {
+            try? await Task.sleep(nanoseconds: prepareDelayNanos)
+        }
         onProgress(1)
     }
 
@@ -174,6 +309,10 @@ private final class MockVoiceInputEngine: VoiceInputEngine, @unchecked Sendable 
 
     func cancelCallCount() -> Int {
         cancelCount
+    }
+
+    func prepareCallCount() -> Int {
+        prepareCount
     }
 }
 

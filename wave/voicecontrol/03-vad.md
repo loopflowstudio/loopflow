@@ -1,8 +1,8 @@
-# 02: Voice Activity Detection
+# 03: Voice Activity Detection
 
 Replace push-to-talk with hands-free operation. WhisperKit's built-in VAD detects speech start/stop automatically. No button press needed to begin or end recording.
 
-**Status: planned (next)**
+**Status: planned (after apple-engine-foundation)**
 
 ## What to build
 

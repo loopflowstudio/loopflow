@@ -1,4 +1,4 @@
-# 03: Auto-Send on Silence
+# 04: Auto-Send on Silence
 
 Close the loop: speak → transcribe → send with zero hand interaction. Silence after speech triggers an automatic send, with a brief cancel window.
 

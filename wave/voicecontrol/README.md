@@ -6,7 +6,7 @@ Voice input for Concerto's WaveSessionView. Speak instead of type — faster, ha
 
 Voice should be a first-class input modality in Concerto. Not a novelty mic button, but a primary way to interact with agents during high-capacity work. The bar: faster than typing for someone in flow.
 
-The key insight: accuracy beats latency. A 0.5s delay you can trust is better than instant text you have to correct. WhisperKit on Apple Silicon gives us Whisper-grade accuracy with real-time performance, plus built-in VAD for hands-free operation.
+The key insight: accuracy beats latency. A 0.5s delay you can trust is better than instant text you have to correct. On-device dictation engines (Apple Speech on latest OS, WhisperKit fallback on older OS) should prioritize trustworthy text over raw speed.
 
 ### Not here
 
@@ -22,20 +22,29 @@ The key insight: accuracy beats latency. A 0.5s delay you can trust is better th
 - Add auto-send on silence so the full loop (speak → transcribe → send) requires zero hand interaction
 - Prime the recognizer with contextual vocabulary (wave names, file paths, loopflow terms)
 
-## Tech decision: WhisperKit
+## Priority roadmap (top)
 
-[WhisperKit](https://github.com/argmaxinc/WhisperKit) by Argmax. Native Swift, SPM integration, Core ML on Apple Silicon Neural Engine. Built-in streaming, built-in VAD, custom vocabulary support. 27x+ real-time on M4 with the tiny model.
+This is the current top of the roadmap, in order:
 
-Alternatives considered:
-- **SFSpeechRecognizer** — streaming but poor accuracy on technical speech, no custom vocabulary
-- **SpeechAnalyzer** (WWDC 2025) — promising but requires macOS 26/iOS 26, still in beta
-- **whisper.cpp** — same models but C++ with a thin Swift wrapper; WhisperKit is the native Swift equivalent with better Apple Silicon optimization
+1. **Apple-first engine (macOS 26+/iOS 26+).** Use `SpeechAnalyzer` + `DictationTranscriber` with progressive dictation for live editable output.
+2. **Background asset preinstall at app launch.** Use `AssetInventory.status(forModules:)` + installation request download so first mic press does not block on model setup.
+3. **Dictation-specific text options.** Enable punctuation/emoji/etiquette replacements for cleaner output by default.
+4. **WhisperKit fallback path.** Keep WhisperKit for macOS 15–25 / iOS 18–25 via runtime engine selection.
+5. **Custom language model (later).** Use `SFSpeechLanguageModel` + `DictationTranscriber.ContentHint.customizedLanguage(...)` for loopflow terms.
+
+## Tech direction: Apple-first with Whisper fallback
+
+- **Primary path (macOS 26+/iOS 26+):** Apple Speech stack (`SpeechAnalyzer` + `DictationTranscriber` + `AssetInventory`).
+- **Fallback path (macOS 15–25 / iOS 18–25):** [WhisperKit](https://github.com/argmaxinc/WhisperKit) tiny model.
+
+This gives us newer dictation behavior and asset management on latest OS versions without dropping support for existing targets.
 
 ## Phase boundaries
 
 - **01-push-to-talk**: Mic button in composer, WhisperKit integration, streaming transcription, manual send. *Shipped on branch `jack-heart.voicecontrol.20260226_0925` with `VoiceInputService`, `VoiceInputButton`, inline partial/download/transcribing feedback, denied-permission notice, and unit coverage.*
-- **02-vad**: Voice Activity Detection replaces push-to-talk — speech starts/stops recording automatically. *Next.*
-- **03-auto-send**: Silence threshold triggers send. Confidence-based — high confidence auto-sends, low confidence highlights uncertain words. *Later.*
+- **02-apple-engine-foundation**: Apple-first `SpeechAnalyzer` + `DictationTranscriber` engine, background asset preinstall, dictation options, runtime fallback. *Shipped on same branch — `AppleDictationVoiceInputEngine`, `VoiceInputWarmup`, runtime engine selection.*
+- **03-vad**: Voice Activity Detection replaces push-to-talk — speech starts/stops recording automatically. *Next.*
+- **04-auto-send**: Silence threshold triggers send. Confidence-based — high confidence auto-sends, low confidence highlights uncertain words. *Later.*
 
 ## Risks
 

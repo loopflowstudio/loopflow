@@ -13,11 +13,11 @@ struct VoiceInputButton: View {
     @State private var isHoldRecording = false
     @State private var isPulsing = false
 
-    private var minimumHitTarget: CGFloat {
+    private var buttonSize: CGFloat {
         #if os(iOS)
         return HitTarget.touch
         #else
-        HitTarget.minimum
+        return HitTarget.comfortable
         #endif
     }
 
@@ -74,7 +74,7 @@ struct VoiceInputButton: View {
                 .font(Typography.body())
                 .foregroundStyle(iconColor)
         }
-        .frame(minWidth: minimumHitTarget, minHeight: minimumHitTarget)
+        .frame(width: buttonSize, height: buttonSize)
         .scaleEffect(voiceService.state == .recording && !reduceMotion ? (isPulsing ? 1.08 : 1) : 1)
         .animation(DesignAnimation.standard(reduceMotion), value: voiceService.state)
         .animation(DesignAnimation.standard(reduceMotion), value: isPulsing)

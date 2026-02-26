@@ -16,6 +16,7 @@ struct WaveSessionView: View {
     @State private var isNearBottom = true
     @State private var replyQueue = ReplyQueue()
     @State private var isReplyTrayExpanded = false
+    @State private var voiceComposerBaseline: String?
     @FocusState private var focusedField: FocusField?
 
     private enum FocusField: Hashable {
@@ -126,9 +127,6 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: horizontalSizeClass == .compact)
             await state.onAppear()
-            if focusedField == nil {
-                focusedField = .transcript
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusSessionComposer)) { notification in
             if let waveId = notification.userInfo?["waveId"] as? String, waveId != state.waveId {
@@ -140,8 +138,15 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: value == .compact)
         }
+        .onChange(of: voiceService.state) { _, newState in
+            handleVoiceStateChange(newState)
+        }
+        .onChange(of: voiceService.partialTranscript) { _, partial in
+            syncVoicePartialIntoComposer(partial)
+        }
         .onDisappear {
             voiceService.cancel()
+            voiceComposerBaseline = nil
             guard managesLifecycle else { return }
             state.onDisappear()
         }
@@ -265,32 +270,67 @@ struct WaveSessionView: View {
         let transcript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !transcript.isEmpty else { return }
 
-        if composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            composerText = transcript
-        } else {
-            let needsSpacer = composerText.last?.isWhitespace == false
-            composerText += needsSpacer ? " \(transcript)" : transcript
-        }
+        beginVoiceComposerSessionIfNeeded()
+        composerText = mergedComposerText(base: voiceComposerBaseline ?? composerText, transcript: transcript)
+        voiceComposerBaseline = nil
 
         focusedField = .composer
+    }
+
+    private func handleVoiceStateChange(_ newState: VoiceInputService.State) {
+        switch newState {
+        case .recording:
+            beginVoiceComposerSessionIfNeeded()
+        case .transcribing:
+            break
+        case .idle:
+            voiceComposerBaseline = nil
+        }
+    }
+
+    private func syncVoicePartialIntoComposer(_ rawPartial: String) {
+        guard voiceService.state == .recording || voiceService.state == .transcribing else { return }
+
+        let partial = rawPartial.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !partial.isEmpty else { return }
+
+        beginVoiceComposerSessionIfNeeded()
+        composerText = mergedComposerText(base: voiceComposerBaseline ?? composerText, transcript: partial)
+    }
+
+    private func beginVoiceComposerSessionIfNeeded() {
+        guard voiceComposerBaseline == nil else { return }
+        voiceComposerBaseline = composerText
+    }
+
+    private func mergedComposerText(base: String, transcript: String) -> String {
+        let cleanBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanBase.isEmpty {
+            return transcript
+        }
+        let needsSpacer = base.last?.isWhitespace == false
+        return base + (needsSpacer ? " \(transcript)" : transcript)
     }
 
     @ViewBuilder
     private var voiceFeedback: some View {
         if voiceService.permissionStatus == .denied {
             VoicePermissionNotice()
-        } else if voiceService.state == .recording, !voiceService.partialTranscript.isEmpty {
-            Text(voiceService.partialTranscript)
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-                .lineLimit(2)
-                .accessibilityLabel("Partial transcript")
         } else if voiceService.state == .transcribing,
                   let statusText = voiceService.modelStatusText {
             VoiceStatusRow(
                 statusText: statusText,
                 progress: voiceService.modelDownloadProgress
             )
+        } else if let errorMessage = voiceService.errorMessage {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+                Text(errorMessage)
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+            }
         }
     }
 }

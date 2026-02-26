@@ -307,8 +307,12 @@ impl CodexHarness {
                         *current_turn_id.lock().await = None;
                         let status = codex_mapping::map_turn_status(&params);
                         let _ = event_tx.send(SessionEvent::TurnCompleted {
-                            turn_id: tid,
+                            turn_id: tid.clone(),
                             status,
+                        });
+                        let _ = event_tx.send(SessionEvent::TurnUsage {
+                            turn_id: tid,
+                            usage: codex_mapping::map_turn_usage(&params),
                         });
                     }
                     "item/started" => {

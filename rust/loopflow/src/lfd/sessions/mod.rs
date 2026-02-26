@@ -12,14 +12,15 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
+use crate::engine::prompt::ContextBreakdown;
 use crate::engine::prompt::{write_prompt_log, Surface};
 use crate::engine::structured_reply::ClientContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
 use crate::lfd::sessions::types::{
-    CreateSessionParams, PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionItem,
-    SessionStatus,
+    ContextSnapshot, CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
+    SessionEvent, SessionItem, SessionStatus,
 };
 use crate::lfd::store::{SharedStore, StoreError};
 
@@ -130,7 +131,8 @@ impl SessionManager {
         params: CreateSessionParams,
     ) -> Result<Session, SessionManagerError> {
         let harness_name = resolve_harness(&params.harness)?;
-        let (session_config, prepared_prompt) = self.prepare_session_prompt(params.config).await?;
+        let (session_config, prepared_prompt, breakdown) =
+            self.prepare_session_prompt(params.config).await?;
 
         if let Some(wave_run_id) = params.wave_run_id.as_deref() {
             if self
@@ -184,6 +186,14 @@ impl SessionManager {
             },
         )
         .await?;
+        self.append_runtime_event(
+            &session.id,
+            &runtime,
+            SessionEvent::ContextSnapshot {
+                snapshot: ContextSnapshot::from(&breakdown),
+            },
+        )
+        .await?;
 
         self.register_wave_session(session.wave_run_id.as_deref())
             .await;
@@ -205,7 +215,7 @@ impl SessionManager {
     async fn prepare_session_prompt(
         &self,
         mut config: SessionConfig,
-    ) -> Result<(SessionConfig, AgentConfig), SessionManagerError> {
+    ) -> Result<(SessionConfig, AgentConfig, ContextBreakdown), SessionManagerError> {
         let repo_root = validate_repo_root(&config.repo_root)?;
         let step = config.step.trim().to_string();
         if step.is_empty() {
@@ -249,7 +259,7 @@ impl SessionManager {
         .map_err(|err| SessionManagerError::InvalidConfig(err.to_string()))?;
 
         let _ = write_prompt_log(&repo_root, &prepared.prompt, &step, None);
-        Ok((config, prepared.config))
+        Ok((config, prepared.config, prepared.breakdown))
     }
 
     pub async fn get_session(&self, session_id: &LfdId) -> Result<Session, SessionManagerError> {
@@ -1189,7 +1199,7 @@ mod tests {
         std::fs::write(tmp.path().join(".lf/steps/design.md"), "Design it.").expect("write step");
 
         let manager = SessionManager::with_create_harness(store, fake_create_harness);
-        let (_, prompt) = manager
+        let (_, prompt, _) = manager
             .prepare_session_prompt(SessionConfig {
                 step: "design".to_string(),
                 repo_root: tmp.path().to_string_lossy().to_string(),
@@ -1200,6 +1210,48 @@ mod tests {
             .expect("prepare session prompt");
 
         assert!(prompt.system_prompt.contains("Surface: Concerto (iPhone)"));
+    }
+
+    #[tokio::test]
+    async fn create_session_emits_context_snapshot_event() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+
+        std::fs::create_dir_all(tmp.path().join(".lf/steps")).expect("create .lf/steps");
+        std::fs::write(tmp.path().join(".lf/steps/design.md"), "Design the system.")
+            .expect("write step");
+
+        let manager = SessionManager::with_create_harness(store, fake_create_harness);
+        let created = manager
+            .create_session(CreateSessionParams {
+                harness: "codex".to_string(),
+                wave_run_id: None,
+                config: SessionConfig {
+                    step: "design".to_string(),
+                    repo_root: tmp.path().to_string_lossy().to_string(),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect("create session");
+
+        let events = manager
+            .list_events(&created.id, None)
+            .await
+            .expect("list events");
+
+        let snapshot = events.iter().find_map(|event| match &event.event {
+            SessionEvent::ContextSnapshot { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        });
+        let snapshot = snapshot.expect("context snapshot event");
+        assert!(snapshot.total > 0);
+        assert!(snapshot.sources.contains_key("step"));
     }
 
     #[tokio::test]

@@ -1,8 +1,12 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::engine::prompt::Surface;
+use crate::engine::prompt::{
+    ContextBreakdown, DiffTier, DocumentSource, Surface, DEFAULT_CONTEXT_BUDGET,
+};
 use crate::lfd::id::LfdId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +150,74 @@ pub struct SuggestedActionPayload {
     pub description: Option<String>,
 }
 
+/// Token usage for a single agent turn.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct TurnUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+
+/// Prompt composition snapshot at session start.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextSnapshot {
+    /// Tokens per source category ("step", "direction", "diff", "area", "repo_doc", etc.)
+    pub sources: HashMap<String, u64>,
+    /// Total context budget available.
+    pub budget: u64,
+    /// Total tokens used.
+    pub total: u64,
+    /// Diff representation tier ("UnifiedDiff", "StatOnly", "None").
+    pub diff_tier: String,
+}
+
+impl From<&ContextBreakdown> for ContextSnapshot {
+    fn from(breakdown: &ContextBreakdown) -> Self {
+        Self {
+            sources: breakdown
+                .source_tokens
+                .iter()
+                .map(|(source, tokens)| (source_key(*source), *tokens as u64))
+                .collect(),
+            budget: DEFAULT_CONTEXT_BUDGET as u64,
+            total: breakdown.total() as u64,
+            diff_tier: diff_tier_key(&breakdown.diff_tier).to_string(),
+        }
+    }
+}
+
+fn source_key(source: DocumentSource) -> String {
+    match source {
+        DocumentSource::Step => "step",
+        DocumentSource::Direction => "direction",
+        DocumentSource::Wave => "wave",
+        DocumentSource::WaveMemory => "wave_memory",
+        DocumentSource::Area => "area",
+        DocumentSource::Diff => "diff",
+        DocumentSource::Clipboard => "clipboard",
+        DocumentSource::RepoDoc => "repo_doc",
+        DocumentSource::Summary => "summary",
+    }
+    .to_string()
+}
+
+fn diff_tier_key(diff_tier: &DiffTier) -> &'static str {
+    match diff_tier {
+        DiffTier::UnifiedDiff => "UnifiedDiff",
+        DiffTier::StatOnly => "StatOnly",
+        DiffTier::None => "None",
+    }
+}
+
 // -- Event stream --
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +231,15 @@ pub enum SessionEvent {
     TurnCompleted {
         turn_id: String,
         status: TurnStatus,
+    },
+    /// Token usage for a completed turn. Emitted after TurnCompleted.
+    TurnUsage {
+        turn_id: String,
+        usage: TurnUsage,
+    },
+    /// Prompt composition snapshot. Emitted once at session start, before first TurnStarted.
+    ContextSnapshot {
+        snapshot: ContextSnapshot,
     },
 
     // Item lifecycle
@@ -216,6 +297,8 @@ impl SessionEvent {
         match self {
             Self::TurnStarted { .. } => "turn_started",
             Self::TurnCompleted { .. } => "turn_completed",
+            Self::TurnUsage { .. } => "turn_usage",
+            Self::ContextSnapshot { .. } => "context_snapshot",
             Self::ItemStarted { .. } => "item_started",
             Self::ItemUpdated { .. } => "item_updated",
             Self::ItemCompleted { .. } => "item_completed",
@@ -290,4 +373,62 @@ pub struct CreateSessionParams {
     pub harness: String,
     pub wave_run_id: Option<String>,
     pub config: SessionConfig,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_snapshot_from_breakdown_preserves_source_tokens() {
+        let breakdown = ContextBreakdown {
+            source_tokens: HashMap::from([
+                (DocumentSource::Step, 120),
+                (DocumentSource::Direction, 80),
+                (DocumentSource::Diff, 450),
+            ]),
+            system_tokens: 25,
+            diff_tier: DiffTier::StatOnly,
+            ..ContextBreakdown::default()
+        };
+
+        let snapshot = ContextSnapshot::from(&breakdown);
+        assert_eq!(snapshot.sources.get("step"), Some(&120));
+        assert_eq!(snapshot.sources.get("direction"), Some(&80));
+        assert_eq!(snapshot.sources.get("diff"), Some(&450));
+        assert_eq!(snapshot.total, 675);
+        assert_eq!(snapshot.budget, DEFAULT_CONTEXT_BUDGET as u64);
+        assert_eq!(snapshot.diff_tier, "StatOnly");
+    }
+
+    #[test]
+    fn turn_usage_round_trips_through_json() {
+        let usage = TurnUsage {
+            input_tokens: 123,
+            output_tokens: 45,
+            reasoning_tokens: Some(12),
+            cache_read_tokens: Some(17),
+            cache_write_tokens: Some(9),
+            model: Some("claude-3-7-sonnet".to_string()),
+            cost_usd: Some(0.021),
+        };
+
+        let value = serde_json::to_value(&usage).expect("serialize usage");
+        let decoded: TurnUsage = serde_json::from_value(value).expect("deserialize usage");
+        assert_eq!(decoded, usage);
+    }
+
+    #[test]
+    fn context_snapshot_round_trips_through_json() {
+        let snapshot = ContextSnapshot {
+            sources: HashMap::from([("step".to_string(), 200), ("direction".to_string(), 50)]),
+            budget: 75_000,
+            total: 250,
+            diff_tier: "UnifiedDiff".to_string(),
+        };
+
+        let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
+        let decoded: ContextSnapshot = serde_json::from_value(value).expect("deserialize snapshot");
+        assert_eq!(decoded, snapshot);
+    }
 }

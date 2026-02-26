@@ -1,6 +1,8 @@
 use serde_json::{json, Value};
 
-use crate::lfd::sessions::types::{FileEdit, ItemDelta, ItemStatus, SessionItem, TurnStatus};
+use crate::lfd::sessions::types::{
+    FileEdit, ItemDelta, ItemStatus, SessionItem, TurnStatus, TurnUsage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ItemPhase {
@@ -28,6 +30,29 @@ pub(super) fn map_turn_status(params: &Value) -> TurnStatus {
         "interrupted" | "cancelled" => TurnStatus::Interrupted,
         "failed" | "error" => TurnStatus::Failed,
         _ => TurnStatus::Completed,
+    }
+}
+
+pub(super) fn map_turn_usage(params: &Value) -> TurnUsage {
+    TurnUsage {
+        input_tokens: params
+            .pointer("/usage/input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        output_tokens: params
+            .pointer("/usage/output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        reasoning_tokens: params
+            .pointer("/usage/reasoning_tokens")
+            .and_then(Value::as_u64),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        model: params
+            .get("model")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        cost_usd: None,
     }
 }
 
@@ -327,5 +352,22 @@ mod tests {
             }
             other => panic!("expected tool item, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn map_turn_usage_reads_token_payload() {
+        let usage = map_turn_usage(&json!({
+            "model": "gpt-5.1-codex",
+            "usage": {
+                "input_tokens": 144,
+                "output_tokens": 55,
+                "reasoning_tokens": 3
+            }
+        }));
+
+        assert_eq!(usage.input_tokens, 144);
+        assert_eq!(usage.output_tokens, 55);
+        assert_eq!(usage.reasoning_tokens, Some(3));
+        assert_eq!(usage.model.as_deref(), Some("gpt-5.1-codex"));
     }
 }

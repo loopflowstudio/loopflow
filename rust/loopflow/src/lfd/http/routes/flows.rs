@@ -156,22 +156,23 @@ fn list_steps(repo: &Path) -> Vec<StepSummary> {
 
     let mut list: Vec<StepSummary> = names
         .into_iter()
-        .map(|name| {
-            if let Ok(step) = crate::engine::flow::load_step(&name, repo) {
-                StepSummary {
-                    name,
-                    model: step.model,
-                    default_model: step.default_model,
-                }
-            } else {
-                StepSummary {
-                    name,
-                    model: None,
-                    default_model: None,
-                }
-            }
-        })
+        .map(|name| load_step_summary(repo, name))
         .collect();
     list.sort_by(|a, b| a.name.cmp(&b.name));
     list
+}
+
+fn load_step_summary(repo: &Path, name: String) -> StepSummary {
+    match crate::engine::flow::load_step(&name, repo) {
+        Ok(step) => StepSummary {
+            name,
+            model: step.model,
+            default_model: step.default_model,
+        },
+        Err(_) => StepSummary {
+            name,
+            model: None,
+            default_model: None,
+        },
+    }
 }

@@ -26,7 +26,7 @@ public struct StepConfig: Sendable, Codable, Equatable {
         model == nil &&
             defaultModel == nil &&
             direction == nil &&
-            (context == nil || context!.isEmpty)
+            (context?.isEmpty ?? true)
     }
 
     enum CodingKeys: String, CodingKey {

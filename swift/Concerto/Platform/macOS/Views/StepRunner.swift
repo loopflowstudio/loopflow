@@ -11,7 +11,6 @@ struct StepRunner: View {
 
     @State private var selectedFlow: String = ""
     @State private var selectedModel: String = ""
-    @State private var customModel: String = ""
     @State private var autoMode: Stimulus.Kind = .loop
     @State private var cronExpression: String = "0 9 * * *"
     @State private var prompt: String = ""
@@ -58,7 +57,6 @@ struct StepRunner: View {
         .onAppear {
             selectedFlow = wave.flow
             selectedModel = wave.model ?? ""
-            customModel = wave.model ?? ""
             if let s = wave.stimulus {
                 autoMode = s.kind
                 if let cron = s.cron {
@@ -105,14 +103,14 @@ struct StepRunner: View {
                 .foregroundStyle(palette.textSecondary)
 
             if repoState.supportedHarnesses.isEmpty {
-                TextField("Default (claude:opus)", text: $customModel)
+                TextField("Default (claude:opus)", text: $selectedModel)
                     .textFieldStyle(.plain)
                     .font(Typography.code(12))
                     .padding(Spacing.sm)
                     .background(palette.surface)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
                     .onSubmit {
-                        persistModel(customModel)
+                        persistModel(selectedModel)
                     }
             } else {
                 Picker("Model", selection: $selectedModel) {
@@ -123,7 +121,6 @@ struct StepRunner: View {
                 }
                 .labelsHidden()
                 .onChange(of: selectedModel) { _, newValue in
-                    customModel = newValue
                     persistModel(newValue)
                 }
             }

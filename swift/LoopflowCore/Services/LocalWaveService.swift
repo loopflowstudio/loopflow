@@ -403,15 +403,19 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             return WaveFlowsResult(flows: [], directions: [], supportedHarnesses: [])
         }
 
-        var stepConfigs: [String: StepConfig] = [:]
-        if let stepsData = result["steps"] as? [[String: Any]] {
-            for stepDict in stepsData {
-                guard let name = stepDict["name"] as? String else { continue }
-                stepConfigs[name] = StepConfig(
-                    model: stepDict["model"] as? String,
-                    defaultModel: stepDict["default_model"] as? String
-                )
+        let stepsData = (result["steps"] as? [[String: Any]]) ?? []
+        let stepConfigs = stepsData.reduce(into: [String: StepConfig]()) { partial, stepDict in
+            guard let name = stepDict["name"] as? String else { return }
+            let config = StepConfig(
+                model: stepDict["model"] as? String,
+                defaultModel: stepDict["default_model"] as? String
+            )
+            if !config.isEmpty {
+                partial[name] = config
             }
+        }
+        let stepFromName: (String) -> Step = { name in
+            Step(prompt: name, config: stepConfigs[name])
         }
 
         var allFlows: [Flow] = []
@@ -419,26 +423,16 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             for flowDict in flowsData {
                 guard let name = flowDict["name"] as? String else { continue }
                 let stepNames = flowDict["steps"] as? [String] ?? []
-                let steps = stepNames.map { stepName in
-                    let config = stepConfigs[stepName]
-                    return Step(prompt: stepName, config: config?.isEmpty == true ? nil : config)
-                }
+                let steps = stepNames.map(stepFromName)
                 allFlows.append(Flow(name: name, steps: steps, type: .flow))
             }
         }
 
-        if let stepsData = result["steps"] as? [[String: Any]] {
-            for stepDict in stepsData {
-                guard let name = stepDict["name"] as? String else { continue }
-                let config = stepConfigs[name]
-                allFlows.append(
-                    Flow(
-                        name: name,
-                        steps: [Step(prompt: name, config: config?.isEmpty == true ? nil : config)],
-                        type: .step
-                    )
-                )
-            }
+        for stepDict in stepsData {
+            guard let name = stepDict["name"] as? String else { continue }
+            allFlows.append(
+                Flow(name: name, steps: [stepFromName(name)], type: .step)
+            )
         }
 
         let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }

@@ -365,18 +365,17 @@ impl Default for Config {
 /// - codex -> None (let Codex CLI pick its default)
 /// - opencode -> None (let OpenCode use its own config)
 pub fn parse_harness_model(model: &str) -> (String, Option<String>) {
-    let parts: Vec<&str> = model.splitn(2, ':').collect();
-    let harness = parts[0].to_string();
-    let model = if parts.len() > 1 {
-        Some(parts[1].to_string())
-    } else {
-        match harness.as_str() {
-            "claude" => Some("opus".to_string()),
-            "gemini" => Some("2.5-pro".to_string()),
-            _ => None,
-        }
+    if let Some((harness, model)) = model.split_once(':') {
+        return (harness.to_string(), Some(model.to_string()));
+    }
+
+    let harness = model.to_string();
+    let default_model = match harness.as_str() {
+        "claude" => Some("opus".to_string()),
+        "gemini" => Some("2.5-pro".to_string()),
+        _ => None,
     };
-    (harness, model)
+    (harness, default_model)
 }
 
 /// Load YAML file, returning None if not present or empty.

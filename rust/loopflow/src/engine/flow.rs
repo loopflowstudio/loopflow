@@ -217,18 +217,9 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
         None => return StepFrontmatter::default(),
     };
 
-    let model = map
-        .get(key("model"))
-        .and_then(|val| val.as_str())
-        .map(|val| val.to_string());
-    let default_model = map
-        .get(key("default_model"))
-        .and_then(|val| val.as_str())
-        .map(|val| val.to_string());
-    let action_style = map
-        .get(key("action_style"))
-        .and_then(|val| val.as_str())
-        .map(|val| val.to_string());
+    let model = parse_optional_string(map, "model");
+    let default_model = parse_optional_string(map, "default_model");
+    let action_style = parse_optional_string(map, "action_style");
     let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
 
     StepFrontmatter {
@@ -460,18 +451,9 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
                     ))
                 }
             };
-            let model = map
-                .get(key("model"))
-                .and_then(|val| val.as_str())
-                .map(|val| val.to_string());
-            let default_model = map
-                .get(key("default_model"))
-                .and_then(|val| val.as_str())
-                .map(|val| val.to_string());
-            let action_style = map
-                .get(key("action_style"))
-                .and_then(|val| val.as_str())
-                .map(|val| val.to_string());
+            let model = parse_optional_string(map, "model");
+            let default_model = parse_optional_string(map, "default_model");
+            let action_style = parse_optional_string(map, "action_style");
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
             let directions = parse_directions_field(map);
             Ok(Step {
@@ -524,15 +506,9 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
                 .as_mapping()
                 .ok_or_else(|| LoadError::InvalidFlow("fork draft must be mapping".to_string()))?;
             let directions = parse_directions_field(draft_map);
-            branches.push(FlowItem::Step(Step {
-                name: step_name.to_string(),
-                model: None,
-                default_model: None,
-                directions,
-                action_style: None,
-                interactive: None,
-                content: None,
-            }));
+            let mut step = Step::named(step_name);
+            step.directions = directions;
+            branches.push(FlowItem::Step(step));
         }
         branches
     } else {
@@ -570,6 +546,12 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn parse_optional_string(map: &serde_yaml_ng::Mapping, field: &str) -> Option<String> {
+    map.get(key(field))
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
 }
 
 fn resolve_step_reference(step: &Step, repo: &Path) -> Step {

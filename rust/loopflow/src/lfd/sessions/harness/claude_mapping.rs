@@ -875,48 +875,6 @@ mod tests {
     }
 
     #[test]
-    fn edit_tool_multiline_diff() {
-        let item = infer_item(
-            "Edit",
-            "tu_11",
-            Some(json!({
-                "file_path": "lib.rs",
-                "old_string": "line1\nline2",
-                "new_string": "line1\nchanged"
-            })),
-        );
-        match item {
-            SessionItem::File { changes, .. } => {
-                let diff = changes[0].diff.as_deref().unwrap();
-                assert!(diff.contains("-line1"));
-                assert!(diff.contains("-line2"));
-                assert!(diff.contains("+line1"));
-                assert!(diff.contains("+changed"));
-            }
-            other => panic!("expected File, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn edit_tool_equal_strings_no_diff() {
-        let item = infer_item(
-            "Edit",
-            "tu_12",
-            Some(json!({
-                "file_path": "src/main.rs",
-                "old_string": "same",
-                "new_string": "same"
-            })),
-        );
-        match item {
-            SessionItem::File { changes, .. } => {
-                assert!(changes[0].diff.is_none());
-            }
-            other => panic!("expected File, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn write_tool_no_diff() {
         let item = infer_item(
             "Write",

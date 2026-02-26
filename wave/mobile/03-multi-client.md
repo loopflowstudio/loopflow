@@ -24,9 +24,7 @@ No session awareness or handoff needed. Multiple clients just connect and see th
 
 ## What needs work
 
-### iOS action button wiring (pre-req)
-
-`ActionButtonsView` exists in LoopflowCore but isn't embedded in `MobileWaveDetailView` yet. Small change — wire it up early in Stage 03 before multi-client testing. Both devices should show the same features.
+### ~~iOS action button wiring (pre-req)~~ → `scratch/mobile-ios-action-buttons.md`
 
 ### Suggested action consistency across clients
 

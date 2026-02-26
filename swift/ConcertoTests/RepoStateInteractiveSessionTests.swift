@@ -6,8 +6,8 @@ import Testing
 @MainActor
 @Suite("RepoState Interactive Session Routing")
 struct RepoStateInteractiveSessionTests {
-    @Test("running wave with optimistic interactive start routes directly to chat")
-    func optimisticInteractiveStartRoutesToChat() {
+    @Test("running wave with optimistic interactive start routes directly to session")
+    func optimisticInteractiveStartRoutesToSession() {
         let state = RepoState()
         state.waveStore.onStatusChange = nil
         let wave = makeWave(id: "wave-running", status: .running)
@@ -25,8 +25,8 @@ struct RepoStateInteractiveSessionTests {
         #expect(state.sessionState(for: wave.id).awaitingSessionJoin == false)
     }
 
-    @Test("waiting wave routes to chat without optimistic state")
-    func waitingWaveRoutesToChat() {
+    @Test("waiting wave routes to session without optimistic state")
+    func waitingWaveRoutesToSession() {
         let state = RepoState()
         state.waveStore.onStatusChange = nil
         let wave = makeWave(id: "wave-waiting", status: .waiting)

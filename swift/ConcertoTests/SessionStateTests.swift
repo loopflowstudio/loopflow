@@ -34,7 +34,7 @@ struct SessionStateTests {
     }
 
     @MainActor
-    @Test("user message session items render as user chat bubbles")
+    @Test("user message session items render as user message rows")
     func userMessageItemsRenderAsMessageRows() async {
         let service = MockSessionService(
             streamPlans: [

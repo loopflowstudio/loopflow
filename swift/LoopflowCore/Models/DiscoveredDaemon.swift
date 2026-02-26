@@ -20,6 +20,8 @@ public struct DiscoveredDaemon: Codable, Hashable, Identifiable, Sendable {
     public let lastHeartbeat: Date?
 
     public var id: String { machineId }
+    public var displayName: String { machineName ?? machineId }
+    public var daemonURL: URL? { Self.parseDaemonURL(url) }
 
     public init(
         machineId: String,
@@ -40,14 +42,9 @@ public struct DiscoveredDaemon: Codable, Hashable, Identifiable, Sendable {
     }
 
     public func makeConnection() throws -> ServerConnection {
-        let trimmedURL = url?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmedURL.isEmpty else {
-            throw DiscoveryServiceError.invalidDaemonURL(url)
-        }
-
-        let normalizedURL = trimmedURL.contains("://") ? trimmedURL : "http://\(trimmedURL)"
-        guard let parsed = URL(string: normalizedURL),
-              let host = parsed.host, !host.isEmpty else {
+        guard let parsed = daemonURL,
+              let host = parsed.host,
+              !host.isEmpty else {
             throw DiscoveryServiceError.invalidDaemonURL(url)
         }
 
@@ -77,5 +74,15 @@ public struct DiscoveredDaemon: Codable, Hashable, Identifiable, Sendable {
         return repos
             .map { "\($0.name) (\($0.waveCount))" }
             .joined(separator: ", ")
+    }
+
+    private static func parseDaemonURL(_ rawURL: String?) -> URL? {
+        let trimmedURL = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedURL.isEmpty else {
+            return nil
+        }
+
+        let normalizedURL = trimmedURL.contains("://") ? trimmedURL : "http://\(trimmedURL)"
+        return URL(string: normalizedURL)
     }
 }

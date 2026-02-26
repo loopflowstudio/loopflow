@@ -65,15 +65,11 @@ public final class DiscoveryService: @unchecked Sendable {
             throw DiscoveryServiceError.httpStatus(httpResponse.statusCode)
         }
 
-        let decoder = Self.decoder()
-        if let daemons = try? decoder.decode([DiscoveredDaemon].self, from: data) {
-            return daemons
+        do {
+            return try Self.decoder().decode(DiscoverResponse.self, from: data).daemons
+        } catch {
+            throw DiscoveryServiceError.invalidResponse
         }
-        if let wrapped = try? decoder.decode(DiscoverPayload.self, from: data) {
-            return wrapped.daemons ?? wrapped.data ?? []
-        }
-
-        throw DiscoveryServiceError.invalidResponse
     }
 
     private func validToken() async throws -> String {
@@ -92,36 +88,53 @@ public final class DiscoveryService: @unchecked Sendable {
     private static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-
-            if let seconds = try? container.decode(Double.self) {
-                return Date(timeIntervalSince1970: seconds)
-            }
-            if let secondsInt = try? container.decode(Int.self) {
-                return Date(timeIntervalSince1970: TimeInterval(secondsInt))
-            }
-            if let raw = try? container.decode(String.self) {
-                let iso8601 = ISO8601DateFormatter()
-                iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let date = iso8601.date(from: raw) {
-                    return date
-                }
-
-                let fallback = ISO8601DateFormatter()
-                fallback.formatOptions = [.withInternetDateTime]
-                if let date = fallback.date(from: raw) {
-                    return date
-                }
-            }
-
-            throw DiscoveryServiceError.invalidResponse
-        }
+        decoder.dateDecodingStrategy = .custom(Self.decodeDate)
         return decoder
+    }
+
+    private static func decodeDate(from decoder: Decoder) throws -> Date {
+        let container = try decoder.singleValueContainer()
+
+        if let seconds = try? container.decode(Double.self) {
+            return Date(timeIntervalSince1970: seconds)
+        }
+        if let secondsInt = try? container.decode(Int.self) {
+            return Date(timeIntervalSince1970: TimeInterval(secondsInt))
+        }
+        if let raw = try? container.decode(String.self) {
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: raw) {
+                return date
+            }
+
+            let standard = ISO8601DateFormatter()
+            standard.formatOptions = [.withInternetDateTime]
+            if let date = standard.date(from: raw) {
+                return date
+            }
+        }
+
+        throw DiscoveryServiceError.invalidResponse
     }
 }
 
-private struct DiscoverPayload: Codable {
-    let daemons: [DiscoveredDaemon]?
-    let data: [DiscoveredDaemon]?
+private struct DiscoverResponse: Decodable {
+    let daemons: [DiscoveredDaemon]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let daemons = try? container.decode([DiscoveredDaemon].self) {
+            self.daemons = daemons
+            return
+        }
+
+        let wrapped = try container.decode(WrappedPayload.self)
+        self.daemons = wrapped.daemons ?? wrapped.data ?? []
+    }
+
+    private struct WrappedPayload: Decodable {
+        let daemons: [DiscoveredDaemon]?
+        let data: [DiscoveredDaemon]?
+    }
 }

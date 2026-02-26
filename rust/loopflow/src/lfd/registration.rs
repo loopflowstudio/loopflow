@@ -113,8 +113,7 @@ impl RegistrationClient {
         machine_id: &str,
         machine_name: &str,
     ) -> Result<SecretString, RegistrationError> {
-        let url = self.detect_url().await;
-        let repos = self.collect_repo_summary().await;
+        let (url, repos) = self.collect_presence().await;
         let payload = serde_json::json!({
             "machine_id": machine_id,
             "machine_name": machine_name,
@@ -123,14 +122,15 @@ impl RegistrationClient {
             "repos": repos,
         });
 
-        let response = self
-            .post_json(
-                "api/v1/daemons/register",
-                &payload,
-                Some(jwt),
-                Duration::from_secs(10),
-            )
-            .await?;
+        let response = send_post_json(
+            &self.http,
+            &self.base_url,
+            "api/v1/daemons/register",
+            &payload,
+            Some(jwt),
+            Duration::from_secs(10),
+        )
+        .await?;
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -181,22 +181,22 @@ impl RegistrationClient {
     }
 
     async fn send_heartbeat(&self, jwt: &str, machine_id: &str) -> Result<(), RegistrationError> {
-        let url = self.detect_url().await;
-        let repos = self.collect_repo_summary().await;
+        let (url, repos) = self.collect_presence().await;
         let payload = serde_json::json!({
             "machine_id": machine_id,
             "url": url,
             "repos": repos,
         });
 
-        let response = self
-            .post_json(
-                "api/v1/daemons/heartbeat",
-                &payload,
-                Some(jwt),
-                Duration::from_secs(10),
-            )
-            .await?;
+        let response = send_post_json(
+            &self.http,
+            &self.base_url,
+            "api/v1/daemons/heartbeat",
+            &payload,
+            Some(jwt),
+            Duration::from_secs(10),
+        )
+        .await?;
 
         if !response.status().is_success() {
             return Err(RegistrationError::Http(response.status().as_u16()));
@@ -221,41 +221,21 @@ impl RegistrationClient {
             "machine_id": machine_id,
         });
 
-        let _ = self
-            .post_json(
-                "api/v1/daemons/deregister",
-                &payload,
-                Some(jwt),
-                Duration::from_secs(5),
-            )
-            .await;
+        let _ = send_post_json(
+            &self.http,
+            &self.base_url,
+            "api/v1/daemons/deregister",
+            &payload,
+            Some(jwt),
+            Duration::from_secs(5),
+        )
+        .await;
 
         {
             let mut state = self.state.write().await;
             state.registered = false;
         }
         *self.connection_token.write().await = None;
-    }
-
-    async fn post_json(
-        &self,
-        path: &str,
-        payload: &serde_json::Value,
-        jwt: Option<&str>,
-        timeout: Duration,
-    ) -> Result<reqwest::Response, RegistrationError> {
-        let url = format!("{}/{}", self.base_url, path);
-        let mut builder = self
-            .http
-            .request(reqwest::Method::POST, &url)
-            .map_err(|error| RegistrationError::Network(error.to_string()))?;
-        if let Some(jwt) = jwt {
-            builder = builder.header("Authorization", format!("Bearer {jwt}"));
-        }
-        self.http
-            .send(builder.json(payload).timeout(timeout))
-            .await
-            .map_err(|error| RegistrationError::Network(error.to_string()))
     }
 
     async fn detect_url(&self) -> String {
@@ -270,6 +250,10 @@ impl RegistrationClient {
                     .and_then(|value| value.parse::<SocketAddr>().ok())
             })
             .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 2486)))
+    }
+
+    async fn collect_presence(&self) -> (String, Vec<RegistrationRepoSummary>) {
+        tokio::join!(self.detect_url(), self.collect_repo_summary())
     }
 
     async fn collect_repo_summary(&self) -> Vec<RegistrationRepoSummary> {
@@ -354,13 +338,15 @@ impl ConnectionValidator {
             "connection_token": token,
         });
 
-        let response = self
-            .post_json(
-                "api/v1/daemons/validate-connection",
-                &payload,
-                Duration::from_secs(5),
-            )
-            .await?;
+        let response = send_post_json(
+            &self.http,
+            &self.base_url,
+            "api/v1/daemons/validate-connection",
+            &payload,
+            None,
+            Duration::from_secs(5),
+        )
+        .await?;
 
         if !response.status().is_success() {
             return Ok(false);
@@ -378,25 +364,26 @@ impl ConnectionValidator {
 
         Ok(data.valid.unwrap_or(false))
     }
+}
 
-    async fn post_json(
-        &self,
-        path: &str,
-        payload: &serde_json::Value,
-        timeout: Duration,
-    ) -> Result<reqwest::Response, RegistrationError> {
-        let url = format!("{}/{}", self.base_url, path);
-        self.http
-            .send(
-                self.http
-                    .request(reqwest::Method::POST, &url)
-                    .map_err(|error| RegistrationError::Network(error.to_string()))?
-                    .json(payload)
-                    .timeout(timeout),
-            )
-            .await
-            .map_err(|error| RegistrationError::Network(error.to_string()))
+async fn send_post_json(
+    http: &SafeHttpClient,
+    base_url: &str,
+    path: &str,
+    payload: &serde_json::Value,
+    jwt: Option<&str>,
+    timeout: Duration,
+) -> Result<reqwest::Response, RegistrationError> {
+    let url = format!("{base_url}/{path}");
+    let mut builder = http
+        .request(reqwest::Method::POST, &url)
+        .map_err(|error| RegistrationError::Network(error.to_string()))?;
+    if let Some(jwt) = jwt {
+        builder = builder.header("Authorization", format!("Bearer {jwt}"));
     }
+    http.send(builder.json(payload).timeout(timeout))
+        .await
+        .map_err(|error| RegistrationError::Network(error.to_string()))
 }
 
 #[derive(Debug, thiserror::Error)]

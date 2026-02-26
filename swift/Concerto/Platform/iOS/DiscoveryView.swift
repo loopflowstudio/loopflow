@@ -157,7 +157,7 @@ struct DiscoveryView: View {
             reachabilityIndicator(for: daemon)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(daemon.machineName ?? daemon.machineId)
+                Text(daemon.displayName)
                     .font(Typography.body())
                     .foregroundStyle(.primary)
 
@@ -200,17 +200,11 @@ struct DiscoveryView: View {
     }
 
     private var isConnecting: Bool {
-        if case .connecting = phase {
-            return true
-        }
-        return false
+        phase.connectingMachineId != nil
     }
 
     private func isCurrentlyConnecting(_ daemon: DiscoveredDaemon) -> Bool {
-        if case let .connecting(machineId) = phase {
-            return machineId == daemon.machineId
-        }
-        return false
+        phase.connectingMachineId == daemon.machineId
     }
 
     @MainActor
@@ -299,11 +293,7 @@ struct DiscoveryView: View {
     }
 
     private func probeReachability(for daemon: DiscoveredDaemon) async -> Bool {
-        guard let rawURL = daemon.url else {
-            return false
-        }
-        let normalized = rawURL.contains("://") ? rawURL : "http://\(rawURL)"
-        guard let baseURL = URL(string: normalized) else {
+        guard let baseURL = daemon.daemonURL else {
             return false
         }
 
@@ -366,6 +356,13 @@ private enum DiscoveryPhase: Equatable {
     case discovering
     case daemonList
     case connecting(machineId: String)
+
+    var connectingMachineId: String? {
+        guard case let .connecting(machineId) = self else {
+            return nil
+        }
+        return machineId
+    }
 }
 
 private enum ReachabilityState: Equatable {

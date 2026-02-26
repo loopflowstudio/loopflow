@@ -74,16 +74,34 @@ public final class ConnectionStore {
     public var activeConnection: ServerConnection
     private var remoteConnection: ServerConnection?
 
-    public init(
+    public convenience init(
         secretStore: ConnectionSecretStore = .shared,
         pinStore: CertificatePinStore = .shared,
         defaults: UserDefaults = .standard
+    ) {
+        self.init(
+            secretStore: secretStore,
+            pinStore: pinStore,
+            defaults: defaults,
+            configLoader: { loadConcertoConfig() }
+        )
+    }
+
+    init(
+        secretStore: ConnectionSecretStore = .shared,
+        pinStore: CertificatePinStore = .shared,
+        defaults: UserDefaults = .standard,
+        configLoader: () -> ConcertoConfig?
     ) {
         self.secretStore = secretStore
         self.pinStore = pinStore
         self.defaults = defaults
 
-        let initial = Self.loadInitialState(defaults: defaults, secretStore: secretStore)
+        let initial = Self.loadInitialState(
+            defaults: defaults,
+            secretStore: secretStore,
+            configLoader: configLoader
+        )
         mode = initial.mode
         activeConnection = initial.activeConnection
         remoteConnection = initial.remoteConnection
@@ -215,7 +233,8 @@ public final class ConnectionStore {
 
     private static func loadInitialState(
         defaults: UserDefaults,
-        secretStore: ConnectionSecretStore
+        secretStore: ConnectionSecretStore,
+        configLoader: () -> ConcertoConfig?
     ) -> InitialState {
         if let loaded = loadSettings(from: defaults) {
             switch loaded {
@@ -259,6 +278,14 @@ public final class ConnectionStore {
             }
             return remoteState(
                 from: legacy,
+                secretStore: secretStore,
+                shouldPersist: true
+            )
+        }
+
+        if let connection = configLoader()?.seededConnection {
+            return remoteState(
+                from: connection,
                 secretStore: secretStore,
                 shouldPersist: true
             )

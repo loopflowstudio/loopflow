@@ -140,7 +140,7 @@ private struct ReplyInteractionOptionCard: View {
 
     @Environment(\.palette) private var palette
 
-    private let highlightedQuote = "use a UUID for the junction table"
+    private let highlightedQuote = "Use a UUID for the junction table"
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {

@@ -57,4 +57,45 @@ struct ReplyQueueTests {
 
         #expect(assembled.contains("> first line\n> second line"))
     }
+
+    @Test("remove deletes entry by id")
+    func removeDeletesById() {
+        let queue = ReplyQueue()
+        queue.addFreeText("first")
+        queue.addFreeText("second")
+        #expect(queue.count == 2)
+
+        let idToRemove = queue.entries[0].id
+        queue.remove(id: idToRemove)
+
+        #expect(queue.count == 1)
+        #expect(queue.entries[0].responseText == "second")
+    }
+
+    @Test("clear removes all entries")
+    func clearRemovesAll() {
+        let queue = ReplyQueue()
+        queue.addFreeText("one")
+        queue.addFreeText("two")
+        #expect(!queue.isEmpty)
+
+        queue.clear()
+
+        #expect(queue.isEmpty)
+        #expect(queue.count == 0)
+    }
+
+    @Test("assembleMessage with empty queue but extra text returns the extra text")
+    func assembleEmptyQueueWithExtraText() {
+        let queue = ReplyQueue()
+        let assembled = queue.assembleMessage(extraFreeText: "Just a thought.")
+        #expect(assembled == "Just a thought.")
+    }
+
+    @Test("CRLF in input is normalized to LF")
+    func crlfNormalized() {
+        let queue = ReplyQueue()
+        queue.addFreeText("line one\r\nline two")
+        #expect(queue.entries[0].responseText == "line one\nline two")
+    }
 }

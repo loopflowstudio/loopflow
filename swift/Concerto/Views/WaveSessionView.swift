@@ -302,6 +302,7 @@ private struct MessageRow: View {
             .fill(accentColor)
             .frame(width: 3)
             .frame(minHeight: Spacing.lg)
+            .accessibilityHidden(true)
     }
 
     private var accentColor: Color {

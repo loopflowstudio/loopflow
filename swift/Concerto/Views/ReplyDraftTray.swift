@@ -46,6 +46,7 @@ struct ReplyDraftTray: View {
                 }
             }
             .buttonStyle(.plain)
+            .minHitTarget()
             .accessibilityLabel(isExpanded ? "Collapse queued replies" : "Expand queued replies")
 
             Spacer()
@@ -131,12 +132,13 @@ struct ReplyComposerPopover: View {
                 .lineLimit(1...4)
 
             HStack(spacing: Spacing.xs) {
-                ForEach(["👍", "👎", "✏️", "❓"], id: \.self) { emoji in
+                ForEach(Array(zip(["👍", "👎", "✏️", "❓"], ["Thumbs up", "Thumbs down", "Edit", "Question"])), id: \.0) { emoji, label in
                     Button(emoji) {
                         onEmoji(emoji)
                     }
                     .buttonStyle(.bordered)
                     .minHitTarget()
+                    .accessibilityLabel(label)
                 }
 
                 Spacer()

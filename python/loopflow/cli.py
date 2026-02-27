@@ -212,7 +212,7 @@ def create_wave(
     typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))
 
 
-@app.command("run", help="Start a wave.")
+@app.command("run", help="Ride a wave.")
 def run_wave(name_or_id: str) -> None:
     api.run_wave(name_or_id)
 

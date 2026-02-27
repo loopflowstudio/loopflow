@@ -2,8 +2,8 @@
 //!
 //! Parses streaming JSON lines from Claude, Codex, Gemini, and OpenCode into
 //! structured events and renders them as human-readable output (tool use
-//! summaries, cost/duration, text fragments). Gracefully degrades: unrecognized
-//! lines pass through to the caller.
+//! summaries, cost/duration, text fragments). Protocol JSON with unrecognized
+//! types is suppressed; non-JSON lines pass through to the caller.
 
 use std::io::Write;
 
@@ -70,9 +70,9 @@ impl StreamParser {
 
     /// Feed a single line of streaming output.
     ///
-    /// Returns `Events` for displayable events, `Skipped` for known-uninteresting
-    /// JSON events, and `Passthrough` for anything unrecognized (non-JSON, unknown
-    /// format, etc.) so the caller can print it raw.
+    /// Returns `Events` for displayable events, `Skipped` for protocol JSON we
+    /// don't need to display, and `Passthrough` for non-JSON lines (plain text,
+    /// malformed input) so the caller can print them raw.
     pub fn feed_line(&mut self, line: &str) -> ParseResult {
         let v = match serde_json::from_str::<serde_json::Value>(line) {
             Ok(v) => v,

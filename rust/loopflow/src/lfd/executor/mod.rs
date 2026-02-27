@@ -255,10 +255,7 @@ mod tests {
 
         let lines = output.read_log("run-2").expect("output log should exist").0;
 
-        assert_eq!(
-            lines,
-            vec![r#"{"type":"mystery","payload":42}"#, "plain text line"]
-        );
+        assert_eq!(lines, vec!["plain text line"]);
     }
 
     #[test]

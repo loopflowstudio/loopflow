@@ -56,7 +56,7 @@ else
     # Top-right pane (1): agent
     tmux select-pane -t 1
     if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
-        tmux send-keys "# lfq run <wave>  (start a wave)" Enter
+        tmux send-keys "# lfq run <wave>  (ride a wave)" Enter
     elif loopflow_has_cmd lf; then
         tmux send-keys "# lf implement  (run your step here)" Enter
     else

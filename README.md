@@ -135,14 +135,14 @@ lf flow wave-reduce    # runs reduce 3x with different perspectives
 
 ## Playing in the Waves
 
-Once you have played with chaining steps into flows, you're ready to start running waves.
+Once you have played with chaining steps into flows, you're ready to ride some waves.
 
 ```bash
 lfq create engbot .                # create a wave
-lfq run engbot                            # start a wave
+lfq run engbot                            # ride a wave
 ```
 
-Configure flow/area/direction with `loopflow.update_wave(...)`, then start it with `loopflow.run_wave(...)`.
+Configure flow/area/direction with `loopflow.update_wave(...)`, then ride it with `loopflow.run_wave(...)`.
 
 ```bash
 python - <<'PY'

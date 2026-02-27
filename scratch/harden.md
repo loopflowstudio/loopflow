@@ -16,7 +16,7 @@ These matter now because listen stimulus (chords) enables fan-out: one source wa
 
 ## Approach
 
-Four targeted changes to `helpers.rs`, all in the executor's sync functions. No new modules, no new abstractions.
+Five changes. Four in `helpers.rs` (executor sync functions), plus one new module: `ops/agent.rs` with a shared `run_builtin_agent` helper that both rebase recovery and push escalation use.
 
 ### 1. Dual rebase in `pre_step_sync`
 
@@ -77,7 +77,86 @@ fn dual_rebase(repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
 
 **Error type conversion.** `rebase_with_recovery` returns `OpsResult<RebaseResult>`. Sync functions return `anyhow::Result<()>`. `OpsError` derives `thiserror::Error`, so the `?` operator converts automatically. The `RebaseResult.success` field is always `true` when `Ok` (agent path assumes success or returns `Err`), so there's no need to check it — just propagate the `Result`.
 
-### 3. Push failure escalation via debug agent
+### 3. Shared `run_builtin_agent` helper (`ops/agent.rs`)
+
+Extract the "load builtin step → gather context → format prompt → launch headlessly" pattern from `run_rebase_agent` into a public helper. Both rebase recovery and push escalation use it.
+
+```rust
+// ops/agent.rs
+
+pub struct BuiltinAgentOptions {
+    pub step_name: String,       // key for get_builtin_step (e.g. "rebase", "debug")
+    pub suffix: String,          // appended after the step content in the prompt
+    pub timeout: Option<Duration>,
+}
+
+/// Launch a builtin step as a headless agent session.
+pub fn run_builtin_agent(
+    repo: &Path,
+    options: &BuiltinAgentOptions,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let config = load_config_or_default(Some(repo));
+    let step_content = get_builtin_step(&options.step_name)
+        .ok_or_else(|| OpsError::AgentFailed(
+            format!("built-in step '{}' not found", options.step_name)
+        ))?;
+
+    let opts = GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: None,
+        message: None,
+        surface: Surface::Headless,
+        directions: config.direction.unwrap_or_default(),
+        files: Vec::new(),
+        sources: default_gather_sources(config.lfdocs, config.diff_files || config.diff, config.paste),
+        area: config.area,
+        wave: None,
+    };
+    let gathered = gather_context(&opts)?;
+    let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);
+    let base_prompt = format_prompt(PromptFormatMode::Full, &budgeted).into_string();
+    let prompt = format!("{}\n\n<lf:step>\n{}\n</lf:step>\n\n{}\n", base_prompt, step_content, options.suffix);
+
+    let launch = AgentConfig {
+        task_prompt: prompt,
+        agent: config.agent.clone(),
+        cwd: Some(repo.to_path_buf()),
+        skip_permissions: true,
+        ..Default::default()
+    };
+    let process = ProcessConfig {
+        auto: true,
+        stream: true,
+        timeout: options.timeout,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities { chrome: config.chrome };
+
+    progress.status(&format!("Launching {} agent...", options.step_name));
+    let result = launch_agent(&launch, &process, &capabilities)
+        .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
+    if result.exit_code != 0 {
+        return Err(OpsError::AgentFailed(result.stderr));
+    }
+    Ok(())
+}
+```
+
+`run_rebase_agent` in `ops/rebase.rs` becomes a thin wrapper:
+
+```rust
+fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsResult<()> {
+    let options = BuiltinAgentOptions {
+        step_name: "rebase".into(),
+        suffix: format!("Rebase onto: {onto}"),
+        timeout: Some(Duration::from_secs(30 * 60)),  // 30 minutes
+    };
+    run_builtin_agent(repo, &options, progress)
+}
+```
+
+### 4. Push failure escalation via debug agent
 
 After the existing fetch+rebase+retry cycle in `post_step_sync`, escalate to a debug agent session instead of hard-failing.
 
@@ -92,7 +171,12 @@ Err(push_err) => {
          Branch: {branch}",
         worktree.display()
     );
-    match run_debug_agent(worktree, &error_context) {
+    let agent_opts = BuiltinAgentOptions {
+        step_name: "debug".into(),
+        suffix: error_context.clone(),
+        timeout: Some(Duration::from_secs(5 * 60)),  // 5 minutes
+    };
+    match run_builtin_agent(worktree, &agent_opts, &TracingProgress) {
         Ok(()) => {
             push_with_upstream(worktree, "origin", branch)
                 .map_err(|err| anyhow!(
@@ -120,15 +204,15 @@ Err(push_err) => {
 }
 ```
 
-`run_debug_agent` mirrors `run_rebase_agent` — loads the built-in `debug` step (`get_builtin_step("debug")` exists at `builtins/steps/code/debug.md`), assembles context, launches the agent headlessly with the error output. The agent can investigate and fix whatever is blocking the push (dirty state, diverged refs, authentication issues).
+No `run_debug_agent` function needed — `run_builtin_agent` with `step_name: "debug"` does the job directly.
 
 The retry path's rebase also upgrades from bare `rebase()` to `rebase_with_recovery()`, so conflicts during the push-retry cycle also route through the agent.
 
-### 3a. Agent session timeouts
+### 4a. Agent session timeouts
 
 `launch_agent` (CLI-side) has no timeout support — it does unbounded `wait()`. The daemon's `LocalProcessExecutor` has timeouts via `tokio::time::timeout`, but sync helpers call `launch_agent` directly, bypassing that.
 
-Add an optional `timeout: Option<Duration>` field to `ProcessConfig`. `launch_agent` enforces it by spawning a monitor thread that kills the child process after the deadline.
+Add an optional `timeout: Option<Duration>` field to `ProcessConfig`. `launch_agent` enforces it via `Arc<Mutex<Child>>` shared between the wait thread and a monitor thread. The monitor thread calls `child.kill()` through the shared handle, avoiding the PID-reuse race that raw `libc::kill` would have.
 
 ```rust
 // In ProcessConfig:
@@ -136,30 +220,26 @@ pub timeout: Option<Duration>,
 
 // In launch_agent, after spawning child:
 if let Some(timeout) = process.timeout {
-    let child_id = child.id();
+    let child = Arc::new(Mutex::new(child));
+    let child_for_timeout = Arc::clone(&child);
     std::thread::spawn(move || {
         std::thread::sleep(timeout);
-        // Kill via signal if still running
-        unsafe { libc::kill(child_id as i32, libc::SIGTERM); }
+        if let Ok(mut c) = child_for_timeout.lock() {
+            let _ = c.kill();
+        }
     });
+    let status = child.lock().expect("lock poisoned").wait()?;
+    // ...
 }
 ```
 
-`run_rebase_agent` sets a 30-minute timeout — rebase conflict resolution can involve many files and is real work. `run_debug_agent` sets a 5-minute timeout — push debugging is diagnostic, not heavy editing. Both prevent infinite hangs from stalling the wave run.
+Timeouts are set per call site:
+- Rebase agent: 30 minutes (conflict resolution can involve many files)
+- Debug agent: 5 minutes (diagnostic, not heavy editing)
 
-When the timeout fires, the error message includes what the agent was attempting:
+Both are configured via `BuiltinAgentOptions.timeout`, which `run_builtin_agent` passes through to `ProcessConfig`.
 
-```rust
-Err(anyhow!(
-    "agent timed out after {timeout:?} while attempting to resolve:\n\
-     {error_context}\n\
-     Worktree: {}\n\
-     The worktree may be in a partial state — check git status.",
-    worktree.display()
-))
-```
-
-### 4. Worktree reuse eager sync (already done)
+### 5. Worktree reuse eager sync (already done)
 
 `sync_existing_worktree` already does dual rebase on worktree reuse. The remaining gap: it uses bare `rebase()`, not `rebase_with_recovery`. Switching it to the shared `dual_rebase` (which uses `rebase_with_recovery`) closes this gap for free.
 
@@ -179,18 +259,22 @@ Err(anyhow!(
 
 **Debug agent for push failures, not more retries.** A push that fails after fetch+rebase indicates something the automation doesn't understand. An agent can read the error output and act on it. This is the same pattern as rebase recovery — escalate to an agent when git operations fail.
 
+**Shared `run_builtin_agent`, not duplicated agent launch code.** `run_rebase_agent` and push escalation both do the same thing: load a builtin step, gather context, launch headlessly. One public helper in `ops/agent.rs` eliminates the duplication. `run_rebase_agent` becomes a thin wrapper. Push escalation calls the helper directly with `step_name: "debug"`.
+
 **Shared `dual_rebase` helper, not two call sites.** `pre_step_sync` and `sync_existing_worktree` currently implement the same logic differently. One function, called from both, eliminates the drift.
 
 **`main_repo` parameter threading.** `pre_step_sync` needs the main repo path for `get_default_branch`. Threading it from the executor is a mechanical change — the executor already knows the repo path from `wave.repo`. The alternative (discovering it from the worktree path) is fragile.
 
-**Agent escalation is best-effort, not blocking.** If `rebase_with_recovery` or `run_debug_agent` fails (API down, rate limit, agent error), the `OpsError` propagates and the run fails — same as today's behavior. The design doesn't add retry loops around agent sessions. This means an API outage still kills runs, but it doesn't make things worse than the current hard-fail behavior.
+**Agent escalation is best-effort, not blocking.** If `rebase_with_recovery` or `run_builtin_agent` fails (API down, rate limit, agent error), the `OpsError` propagates and the run fails — same as today's behavior. The design doesn't add retry loops around agent sessions. This means an API outage still kills runs, but it doesn't make things worse than the current hard-fail behavior.
 
 ## Scope
 
 - In scope: `pre_step_sync`, `post_step_sync`, `sync_existing_worktree`, and a `TracingProgress` adapter
-- In scope: `run_debug_agent` helper (mirrors `run_rebase_agent`)
+- In scope: `run_builtin_agent` public helper in `ops/agent.rs` (replaces `run_rebase_agent` pattern)
+- In scope: `run_rebase_agent` becomes thin wrapper around `run_builtin_agent`
+- In scope: Push escalation calls `run_builtin_agent` with `"debug"` step directly (no `run_debug_agent`)
 - In scope: Upgrade `post_step_sync` retry rebase from bare to `rebase_with_recovery`
-- In scope: `timeout` field on `ProcessConfig`, enforced in `launch_agent`
+- In scope: `timeout` field on `ProcessConfig`, enforced in `launch_agent` via `Arc<Mutex<Child>>`
 - In scope: 30-min timeout for rebase agent, 5-min timeout for debug agent
 - In scope: Rich error messages on agent timeout/failure (original error + agent error + worktree path)
 - Out of scope: Concurrency limiting for listen fan-out (separate concern)

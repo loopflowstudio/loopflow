@@ -97,7 +97,7 @@ fn parse_provider(raw: &str) -> Result<Provider, ApiError> {
         .map_err(|_| api_error(StatusCode::NOT_FOUND, "provider not found"))
 }
 
-fn map_auth_error(err: AuthError) -> ApiError {
+pub(super) fn map_auth_error(err: AuthError) -> ApiError {
     match err {
         AuthError::UnsupportedProvider(_) => {
             api_error(StatusCode::NOT_FOUND, ApiMessage::Safe(err.to_string()))
@@ -148,6 +148,11 @@ mod tests {
         assert_eq!(parse_provider("gh").expect("gh"), Provider::GitHub);
         assert_eq!(parse_provider("claude").expect("claude"), Provider::Claude);
         assert_eq!(parse_provider("codex").expect("codex"), Provider::Codex);
+        assert_eq!(
+            parse_provider("opencodezen").expect("opencodezen"),
+            Provider::OpenCodeZen
+        );
+        assert_eq!(parse_provider("zen").expect("zen"), Provider::OpenCodeZen);
     }
 
     #[test]

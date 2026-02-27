@@ -6,6 +6,8 @@ from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
     CHORD_MINIMAL,
+    PROVIDER_INFO_FULL,
+    PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
     SESSION_FULL,
     SESSION_MINIMAL,
@@ -19,6 +21,9 @@ from loopflow.models import (
     AuthProviderStatus,
     Chord,
     CommitEntry,
+    CostRates,
+    ModelInfo,
+    ProviderInfo,
     Repo,
     Session,
     SessionEventEnvelope,
@@ -146,3 +151,29 @@ class TestRepoModel:
         assert repo.path == "/tmp/repo"
         assert repo.registered is True
         assert repo.added_at is not None
+
+
+class TestProviderModel:
+    def test_minimal_payload(self):
+        info = ProviderInfo.model_validate(PROVIDER_INFO_MINIMAL)
+        assert info.provider == "codex"
+        assert info.auth_status == "none"
+        assert info.billing == "subscription"
+        assert len(info.models) == 1
+        assert info.models[0].id == "gpt-5.1-codex"
+        assert info.models[0].cost_rates is None
+
+    def test_full_payload(self):
+        info = ProviderInfo.model_validate(PROVIDER_INFO_FULL)
+        assert info.provider == "opencodezen"
+        assert info.auth_status == "active"
+        assert info.login == "user@example.com"
+        assert info.models[0].provider == "opencodezen"
+        assert info.models[0].cost_rates is not None
+        assert info.models[0].cost_rates.output_per_mtok == 1.0
+
+    def test_nested_models_and_cost_rates(self):
+        model = ModelInfo.model_validate(PROVIDER_INFO_FULL["models"][0])
+        rates = CostRates.model_validate(model.cost_rates.model_dump())
+        assert model.display_name == "Kimi K2.5"
+        assert rates.input_per_mtok == 0.5

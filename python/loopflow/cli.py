@@ -52,6 +52,7 @@ def _provider_label(provider: str) -> str:
         "github": "GitHub",
         "claude": "Claude",
         "codex": "Codex",
+        "opencodezen": "OpenCode Zen",
     }
     return labels.get(provider.lower(), provider)
 

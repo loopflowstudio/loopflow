@@ -182,7 +182,7 @@ uv tool install loopflow
 lfq                  # status overview
 lfq list             # list waves
 lfq logs engbot      # tail agent output
-lfq auth status      # provider auth status (GitHub / Claude / Codex)
+lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen)
 lfq auth github      # connect GitHub in your browser
 lfq auth claude      # connect Claude in your browser
 lfq auth codex       # connect Codex in your browser

@@ -22,6 +22,9 @@ struct WaveContentParserTests {
         ### Not here
         Keep this subsection with vision.
 
+        ## Strategy
+        Start with the simplest flow that works.
+
         ## Goals
         - Launch design from Concerto
         - Show roadmap status
@@ -57,6 +60,7 @@ struct WaveContentParserTests {
 
         #expect(content?.vision?.contains("Build a delightful onboarding.") == true)
         #expect(content?.vision?.contains("### Not here") == true)
+        #expect(content?.strategy == "Start with the simplest flow that works.")
         #expect(content?.goals?.contains("Launch design from Concerto") == true)
         #expect(content?.risks == "- Parser drift")
         #expect(content?.metrics == "- Time to first wave")

@@ -1,6 +1,7 @@
 use std::env;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use loopflow::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use loopflow::engine::error::CoreError;
@@ -175,4 +176,38 @@ fn launch_streaming_mode() {
         launch_agent(&base_launch(), &process, &AgentCapabilities::default()).expect("launch");
     assert!(result.stdout.contains("first"));
     assert!(result.stdout.contains("second"));
+}
+
+#[test]
+fn launch_batch_times_out() {
+    let _env = PathGuard::new(&[("claude", "#!/bin/sh\nsleep 2\necho late\n")]);
+    let process = ProcessConfig {
+        auto: true,
+        stream: false,
+        timeout: Some(Duration::from_millis(100)),
+        ..Default::default()
+    };
+
+    let result = launch_agent(&base_launch(), &process, &AgentCapabilities::default());
+    assert!(
+        matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
+        "expected timeout error, got: {result:?}"
+    );
+}
+
+#[test]
+fn launch_streaming_times_out() {
+    let _env = PathGuard::new(&[("claude", "#!/bin/sh\nsleep 2\necho late\n")]);
+    let process = ProcessConfig {
+        auto: true,
+        stream: true,
+        timeout: Some(Duration::from_millis(100)),
+        ..Default::default()
+    };
+
+    let result = launch_agent(&base_launch(), &process, &AgentCapabilities::default());
+    assert!(
+        matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
+        "expected timeout error, got: {result:?}"
+    );
 }

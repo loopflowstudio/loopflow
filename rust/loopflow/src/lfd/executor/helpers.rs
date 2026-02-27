@@ -1,8 +1,9 @@
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
-use tracing::{debug, warn};
+use tracing::{debug, error, info, warn};
 
 use time::OffsetDateTime;
 
@@ -13,7 +14,7 @@ use crate::engine::flow::{
 };
 use crate::engine::git::{
     commit, create_branch, current_branch, fetch, get_default_branch, is_clean, push_with_upstream,
-    rebase, rev_parse, stage_all,
+    rev_parse, stage_all,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::write_prompt_log;
@@ -29,6 +30,9 @@ use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     AgentRun, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
     WaveStatus,
+};
+use crate::ops::{
+    rebase_with_recovery, run_builtin_agent, BuiltinAgentOptions, Progress, RebaseOptions,
 };
 
 /// Create a wave run using a per-run worktree for parallel execution.
@@ -513,25 +517,18 @@ pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result
 ///
 /// Used at step boundaries so concurrent runs pick up each other's work.
 /// Silently skips if the worktree has no git directory or no remote.
-pub(crate) fn pre_step_sync(worktree: &Path, branch: &str) -> Result<()> {
+pub(crate) fn pre_step_sync(main_repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
     if branch.is_empty() || !worktree.join(".git").exists() {
         return Ok(());
     }
-    let remote_ref = format!("origin/{branch}");
-    if fetch(worktree, "origin", branch).is_ok() && rev_parse(worktree, &remote_ref).is_ok() {
-        let result = rebase(worktree, &remote_ref, None)?;
-        if !result.success {
-            return Err(anyhow!(
-                "pre-step rebase onto {remote_ref} failed — aborting step"
-            ));
-        }
-    }
-    Ok(())
+
+    dual_rebase(main_repo, worktree, branch)
 }
 
 /// Post-step sync: stage, commit, and push changes after a successful step.
 ///
-/// On a non-fast-forward push, fetches and rebases then retries once.
+/// On a non-fast-forward push, fetches and rebases then retries. If the retry
+/// also fails, escalates to a debug agent session before giving up.
 /// Silently skips if the worktree has no git directory or no remote.
 pub(crate) fn post_step_sync(worktree: &Path, branch: &str, step_name: &str) -> Result<()> {
     if branch.is_empty() || !worktree.join(".git").exists() {
@@ -547,18 +544,61 @@ pub(crate) fn post_step_sync(worktree: &Path, branch: &str, step_name: &str) -> 
 
     match push_with_upstream(worktree, "origin", branch) {
         Ok(()) => Ok(()),
-        Err(_) => {
+        Err(push_err) => {
             debug!(branch = %branch, "push failed, retrying after fetch+rebase");
             let remote_ref = format!("origin/{branch}");
             fetch(worktree, "origin", branch)?;
-            let result = rebase(worktree, &remote_ref, None)?;
-            if !result.success {
-                return Err(anyhow!(
-                    "post-step rebase onto {remote_ref} failed after push rejection"
-                ));
+            rebase_with_recovery(
+                worktree,
+                &RebaseOptions {
+                    onto: remote_ref,
+                    push: false,
+                },
+                &TracingProgress,
+            )?;
+            match push_with_upstream(worktree, "origin", branch) {
+                Ok(()) => Ok(()),
+                Err(retry_err) => {
+                    warn!(branch = %branch, "push retry exhausted, escalating to debug agent");
+                    let error_context = format!(
+                        "git push to origin/{branch} failed after fetch+rebase retry.\n\
+                         Error: {retry_err}\n\
+                         Working directory: {}\n\
+                         Branch: {branch}",
+                        worktree.display()
+                    );
+                    let options = BuiltinAgentOptions {
+                        step_name: "debug".to_string(),
+                        suffix: error_context,
+                        timeout: Some(Duration::from_secs(5 * 60)),
+                    };
+
+                    match run_builtin_agent(worktree, &options, &TracingProgress) {
+                        Ok(()) => push_with_upstream(worktree, "origin", branch).map_err(|err| {
+                            anyhow!(
+                                "push failed after debug agent intervention.\n\
+                                 Original error: {push_err}\n\
+                                 Retry error: {retry_err}\n\
+                                 Post-agent error: {err}\n\
+                                 Worktree: {}\n\
+                                 Branch: {branch}\n\
+                                 Manual resolution may be needed.",
+                                worktree.display()
+                            )
+                        }),
+                        Err(agent_err) => Err(anyhow!(
+                            "push failed and debug agent could not resolve it.\n\
+                             Original error: {push_err}\n\
+                             Retry error: {retry_err}\n\
+                             Agent error: {agent_err}\n\
+                             Worktree: {}\n\
+                             Branch: {branch}\n\
+                             Manual resolution needed.",
+                            worktree.display()
+                        )),
+                    }
+                }
             }
-            push_with_upstream(worktree, "origin", branch)
-                .map_err(|err| anyhow!("post-step push failed after rebase: {err}"))
         }
     }
 }
@@ -586,33 +626,129 @@ fn sync_existing_worktree(main_repo: &Path, worktree: &Path, branch: &str) -> an
         return Ok(());
     }
 
-    if fetch(main_repo, "origin", branch).is_ok()
-        && rev_parse(main_repo, &format!("origin/{branch}")).is_ok()
-    {
-        let branch_rebase = rebase(worktree, &format!("origin/{branch}"), None)?;
-        if !branch_rebase.success {
-            return Err(anyhow!("failed to rebase worktree onto origin/{branch}"));
-        }
+    dual_rebase(main_repo, worktree, branch)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TracingProgress;
+
+impl Progress for TracingProgress {
+    fn status(&self, msg: &str) {
+        info!("{msg}");
     }
+
+    fn error(&self, msg: &str) {
+        error!("{msg}");
+    }
+
+    fn confirm(&self, _msg: &str) -> bool {
+        true
+    }
+}
+
+fn dual_rebase(main_repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
+    let progress = TracingProgress;
+    rebase_onto_if_available(main_repo, worktree, branch, &progress)?;
 
     let default_branch = get_default_branch(main_repo)?;
-    if fetch(main_repo, "origin", &default_branch).is_ok()
-        && rev_parse(main_repo, &format!("origin/{default_branch}")).is_ok()
-    {
-        let upstream_rebase = rebase(worktree, &format!("origin/{default_branch}"), None)?;
-        if !upstream_rebase.success {
-            return Err(anyhow!(
-                "failed to rebase worktree onto origin/{default_branch}"
-            ));
-        }
+    rebase_onto_if_available(main_repo, worktree, &default_branch, &progress)?;
+    Ok(())
+}
+
+fn rebase_onto_if_available(
+    main_repo: &Path,
+    worktree: &Path,
+    branch: &str,
+    progress: &impl Progress,
+) -> Result<()> {
+    if fetch(main_repo, "origin", branch).is_err() {
+        return Ok(());
     }
 
+    let remote_ref = format!("origin/{branch}");
+    if rev_parse(main_repo, &remote_ref).is_err() {
+        return Ok(());
+    }
+
+    rebase_with_recovery(
+        worktree,
+        &RebaseOptions {
+            onto: remote_ref,
+            push: false,
+        },
+        progress,
+    )?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_ephemeral_worktree_path;
+    use std::path::Path;
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
+    use super::{is_ephemeral_worktree_path, pre_step_sync};
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git command should run");
+        if !output.status.success() {
+            panic!(
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    fn run_git_status(dir: &Path, args: &[&str]) -> bool {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("git command should run")
+            .success()
+    }
+
+    fn write_file(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent directories");
+        }
+        std::fs::write(path, content).expect("write file");
+    }
+
+    fn setup_repo_with_remote() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let temp = TempDir::new().expect("temp dir");
+        let origin = temp.path().join("origin.git");
+        let main_repo = temp.path().join("main");
+        std::fs::create_dir_all(&main_repo).expect("create repo dir");
+
+        run_git(temp.path(), &["init", "--bare", "-b", "main", "origin.git"]);
+        run_git(&main_repo, &["init", "-b", "main"]);
+        run_git(&main_repo, &["config", "user.email", "test@example.com"]);
+        run_git(&main_repo, &["config", "user.name", "Test User"]);
+        write_file(&main_repo.join("README.md"), "initial\n");
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-m", "initial"]);
+        run_git(
+            &main_repo,
+            &["remote", "add", "origin", origin.to_str().unwrap_or("")],
+        );
+        run_git(&main_repo, &["push", "-u", "origin", "main"]);
+        run_git(
+            &main_repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        (temp, main_repo, origin)
+    }
 
     #[test]
     fn is_ephemeral_worktree_path_detects_numeric_fork_suffix() {
@@ -633,5 +769,112 @@ mod tests {
     #[test]
     fn is_ephemeral_worktree_path_ignores_non_fork_paths() {
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.main"));
+    }
+
+    #[test]
+    fn pre_step_sync_rebases_onto_wave_and_default_branch() {
+        let (_temp, main_repo, origin) = setup_repo_with_remote();
+
+        run_git(&main_repo, &["checkout", "-b", "wave"]);
+        write_file(&main_repo.join("wave-local.txt"), "local wave work\n");
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-m", "wave local"]);
+        run_git(&main_repo, &["push", "-u", "origin", "wave"]);
+
+        let collaborator = main_repo
+            .parent()
+            .expect("main repo parent")
+            .join("collaborator");
+        run_git(
+            main_repo.parent().expect("main repo parent"),
+            &[
+                "clone",
+                origin.to_str().unwrap_or(""),
+                collaborator.to_str().unwrap_or(""),
+            ],
+        );
+        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
+        run_git(&collaborator, &["config", "user.name", "Test User"]);
+        run_git(&collaborator, &["checkout", "wave"]);
+        write_file(&collaborator.join("wave-remote.txt"), "remote wave work\n");
+        run_git(&collaborator, &["add", "."]);
+        run_git(&collaborator, &["commit", "-m", "wave remote"]);
+        run_git(&collaborator, &["push"]);
+        run_git(&collaborator, &["checkout", "main"]);
+        write_file(&collaborator.join("main-remote.txt"), "remote main work\n");
+        run_git(&collaborator, &["add", "."]);
+        run_git(&collaborator, &["commit", "-m", "main remote"]);
+        run_git(&collaborator, &["push"]);
+
+        run_git(&main_repo, &["checkout", "main"]);
+        let worktree = main_repo
+            .parent()
+            .expect("main repo parent")
+            .join("wave-wt");
+        run_git(
+            &main_repo,
+            &["worktree", "add", worktree.to_str().unwrap_or(""), "wave"],
+        );
+
+        pre_step_sync(&main_repo, &worktree, "wave").expect("pre-step sync");
+
+        assert!(worktree.join("wave-remote.txt").exists());
+        assert!(worktree.join("main-remote.txt").exists());
+        assert!(run_git_status(
+            &worktree,
+            &["merge-base", "--is-ancestor", "origin/main", "HEAD"]
+        ));
+    }
+
+    #[test]
+    fn pre_step_sync_skips_missing_remote_branch_and_still_rebases_default() {
+        let (_temp, main_repo, origin) = setup_repo_with_remote();
+
+        run_git(&main_repo, &["checkout", "-b", "local-only"]);
+        write_file(&main_repo.join("local-only.txt"), "local branch\n");
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-m", "local only"]);
+
+        let collaborator = main_repo
+            .parent()
+            .expect("main repo parent")
+            .join("collaborator-default");
+        run_git(
+            main_repo.parent().expect("main repo parent"),
+            &[
+                "clone",
+                origin.to_str().unwrap_or(""),
+                collaborator.to_str().unwrap_or(""),
+            ],
+        );
+        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
+        run_git(&collaborator, &["config", "user.name", "Test User"]);
+        write_file(&collaborator.join("main-update.txt"), "updated main\n");
+        run_git(&collaborator, &["add", "."]);
+        run_git(&collaborator, &["commit", "-m", "main update"]);
+        run_git(&collaborator, &["push"]);
+
+        run_git(&main_repo, &["checkout", "main"]);
+        let worktree = main_repo
+            .parent()
+            .expect("main repo parent")
+            .join("local-only-wt");
+        run_git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                worktree.to_str().unwrap_or(""),
+                "local-only",
+            ],
+        );
+
+        pre_step_sync(&main_repo, &worktree, "local-only").expect("pre-step sync");
+
+        assert!(worktree.join("main-update.txt").exists());
+        assert!(run_git_status(
+            &worktree,
+            &["merge-base", "--is-ancestor", "origin/main", "HEAD"]
+        ));
     }
 }

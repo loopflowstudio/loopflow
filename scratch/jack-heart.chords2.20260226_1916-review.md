@@ -1,45 +1,66 @@
-# Gate Review: Git Sync Hardening Design
+# Gate Review: Git Sync Hardening
 
-## What this branch does
+## What was implemented
 
-Ingests wave item `036-git-sync-hardening` and produces a design doc (`scratch/harden.md`) for hardening the executor's git sync layer against concurrent push failures.
+Hardened the executor's git sync layer against concurrent push failures. Five changes across the sync functions in `helpers.rs`, a new `ops/agent.rs` module, and timeout support in `engine/agent.rs`.
 
-No code changes. This is a design-only branch.
+1. **Dual rebase in `pre_step_sync`.** Now rebases onto both `origin/{branch}` and `origin/{default_branch}` at every step boundary, matching what `sync_existing_worktree` already did for worktree creation. Extracted a shared `dual_rebase` helper used by both call sites.
 
-## Design doc assessment
+2. **Rebase conflict recovery.** All three bare `rebase()` call sites replaced with `rebase_with_recovery()`, routing conflicts through the rebase agent instead of aborting silently.
 
-**Verified against codebase.** Every function, type, trait, and file path referenced in the design doc exists and behaves as described. The gaps identified (pre_step_sync missing upstream rebase, bare rebase() calls, single-retry push failure) are real.
+3. **Shared `run_builtin_agent` helper.** New `ops/agent.rs` extracts the "load builtin step, gather context, launch headlessly" pattern from `run_rebase_agent`. Both rebase recovery and push escalation use it. `run_rebase_agent` is now a 5-line wrapper.
 
-**Well-scoped.** Four changes, all in `helpers.rs` plus one new helper (`run_debug_agent`). No new modules, no new abstractions beyond `TracingProgress` (6 lines) and `dual_rebase` (consolidation of existing logic).
+4. **Push failure escalation.** After the existing fetch+rebase+retry cycle fails, `post_step_sync` now escalates to a debug agent session instead of hard-failing. Rich error messages include original error, retry error, and agent error for diagnostics.
 
-**Clear implementation path.** Each section includes concrete code snippets that match the actual types and signatures in the codebase. An implementer can follow this mechanically.
+5. **Agent session timeouts.** `ProcessConfig` gains an optional `timeout` field. `launch_agent` enforces it via `child.try_wait()` polling (batch/interactive) or `recv_timeout` polling (streaming). `child.kill()` is called through the `Child` handle directly, avoiding the PID-reuse race the design review flagged. Rebase agent: 30 min. Debug agent: 5 min.
 
 ## Key choices
 
-| Decision | Rationale | Risk |
-|----------|-----------|------|
-| Agent escalation over retry loops | Structural failures need investigation, not retries | Agent API downtime still kills runs (same as today) |
-| Shared `dual_rebase` helper | Eliminates drift between `pre_step_sync` and `sync_existing_worktree` | Mechanical refactor, low risk |
-| `TracingProgress` over `NullProgress` | Executor sync is where visibility matters most | Adds 6 lines of code |
-| `timeout` on `ProcessConfig` | Prevents infinite agent hangs | See note below |
+| Decision | Why |
+|----------|-----|
+| `rebase_with_recovery` everywhere | Silent failures were the worst part of 03.5 — a step running on stale code wastes compute and produces commits that won't merge |
+| `dual_rebase` shared helper | `pre_step_sync` and `sync_existing_worktree` were drifting. One function, called from both, eliminates that |
+| `run_builtin_agent` in `ops/agent.rs` | Avoids duplicating the 40-line agent launch sequence between rebase and push escalation |
+| `TracingProgress` over `NullProgress` | Executor sync is the one place where visibility into rebase/agent activity matters most |
+| Poll-based timeout via `try_wait`/`recv_timeout` | Avoids `Arc<Mutex<Child>>` complexity. Clean: poll, kill if expired, drain remaining output |
+| `RebaseResult` removed | Return type was always `Ok(RebaseResult { success: true })` — the success field carried no information. Simplified to `OpsResult<()>` |
 
-## Implementation note: timeout mechanism
+## How it fits together
 
-The design proposes spawning a monitor thread with `unsafe { libc::kill() }`. This has a PID-reuse race: if the child exits before the timeout fires, the PID could be reassigned to another process. During implementation, prefer using the `Child` handle directly (e.g., `child.kill()` via a shared `Arc<Mutex<Child>>`, or a `tokio::time::timeout` wrapper if async context is available). The design intent (prevent infinite hangs) is correct; the mechanism should be refined during implementation.
+```
+Step boundary
+  → pre_step_sync(main_repo, worktree, branch)
+    → dual_rebase
+      → rebase_onto_if_available(wave branch)   [rebase_with_recovery]
+      → rebase_onto_if_available(default branch) [rebase_with_recovery]
+
+Step executes...
+
+  → post_step_sync(worktree, branch, step_name)
+    → commit + push
+    → on push failure: fetch + rebase_with_recovery + retry push
+    → on retry failure: run_builtin_agent("debug") + final push attempt
+```
+
+`run_builtin_agent` is the shared primitive. It loads a builtin step by name, gathers repo context, formats a headless prompt, and launches the configured agent with an optional timeout.
+
+## Risks and bottlenecks
+
+- **Agent API dependency.** Rebase recovery and push escalation both need agent API availability. An outage during sync fails the run — same as today's hard-fail, not worse.
+- **Latency at step boundaries.** Agent sessions add latency when conflicts occur (up to 30 min for rebase, 5 min for debug). This is intentional — resolving conflicts is real work that would otherwise require manual intervention.
+- **Double fetch.** `rebase_onto_if_available` fetches from `main_repo`, then `rebase_with_recovery` fetches again from `worktree`. Harmless since worktrees share the gitdir, but redundant.
 
 ## What's not included
 
-- No concurrency limiting for listen fan-out (separate concern, explicitly out of scope)
-- No changes to `rebase_with_recovery` itself
-- No agent rate limiting
-- No push retry backoff (agent escalation replaces this)
+- Concurrency limiting for listen fan-out (separate concern)
+- Push retry backoff (agent escalation replaces this)
+- Changes to `rebase_with_recovery` internals (works as-is)
+- Agent rate limiting
 
-## Risks
+## Test coverage
 
-- **Agent API dependency.** Both rebase recovery and push escalation depend on agent sessions. An API outage during sync means the run fails — but this is no worse than today's hard-fail behavior.
-- **Latency.** Agent sessions (especially 30-min rebase timeout) add latency to step boundaries when conflicts occur. This is intentional — resolving conflicts is real work.
-- **`main_repo` parameter threading.** Requires touching the executor call site to pass `wave.repo` into `pre_step_sync`. Mechanical but touches a hot path.
-
-## Verdict
-
-Design is ready for implementation. All claims verified. Scope is tight. One implementation detail (timeout mechanism) should be refined during the code phase.
+- `pre_step_sync_rebases_onto_wave_and_default_branch` — verifies dual rebase picks up both wave branch and default branch changes
+- `pre_step_sync_skips_missing_remote_branch_and_still_rebases_default` — verifies graceful handling when wave branch has no remote
+- `launch_batch_times_out` — verifies timeout kills batch agent and returns error
+- `launch_streaming_times_out` — verifies timeout kills streaming agent and returns error
+- All existing rebase tests updated for `OpsResult<()>` return type

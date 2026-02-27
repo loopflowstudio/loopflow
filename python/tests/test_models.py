@@ -149,6 +149,7 @@ class TestRepoModel:
     def test_minimal_payload(self):
         repo = Repo.model_validate(REPO_MINIMAL)
         assert repo.path == "/tmp/repo"
+        assert repo.repo_id == "loopflowstudio/repo"
         assert repo.registered is True
         assert repo.added_at is not None
 

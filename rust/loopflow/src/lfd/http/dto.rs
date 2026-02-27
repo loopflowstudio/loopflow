@@ -471,6 +471,7 @@ pub struct RepoDto {
     pub object: String,
     pub path: String,
     pub name: String,
+    pub repo_id: String,
     pub wave_count: u32,
     pub registered: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -12,7 +12,7 @@ from conftest import (
     WAVE_MINIMAL,
 )
 
-from loopflow.cli import _auth_status_table, _repo_table, _wave_table
+from loopflow.cli import _auth_status_table, _repo_table, _split_repo_slug, _wave_table
 from loopflow.models import AuthProviderStatus, Repo, Wave
 
 
@@ -70,6 +70,11 @@ def test_repo_table_shows_registration_columns() -> None:
     console.print(_repo_table([repo]))
     rendered = console.export_text()
 
+    assert "repo_id" in rendered
     assert "registered" in rendered
     assert "added_at" in rendered
     assert "yes" in rendered
+
+
+def test_split_repo_slug_parses_owner_repo() -> None:
+    assert _split_repo_slug("loopflowstudio/loopflow") == ("loopflowstudio", "loopflow")

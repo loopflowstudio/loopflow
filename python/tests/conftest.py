@@ -60,6 +60,7 @@ CHORD_MINIMAL = {
 REPO_MINIMAL = {
     "path": "/tmp/repo",
     "name": "repo",
+    "repo_id": "loopflowstudio/repo",
     "wave_count": 3,
     "registered": True,
     "added_at": "2026-02-24T12:00:00Z",

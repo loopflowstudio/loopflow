@@ -60,6 +60,7 @@ def _provider_label(provider: str) -> str:
 def _repo_table(repos: list[Repo]) -> Table:
     table = Table(show_header=True, header_style="bold")
     table.add_column("name")
+    table.add_column("repo_id")
     table.add_column("path")
     table.add_column("waves", justify="right")
     table.add_column("registered")
@@ -67,12 +68,20 @@ def _repo_table(repos: list[Repo]) -> Table:
     for repo in repos:
         table.add_row(
             repo.name,
+            repo.repo_id,
             repo.path,
             str(repo.wave_count),
             "yes" if repo.registered else "no",
             repo.added_at.isoformat() if repo.added_at else "-",
         )
     return table
+
+
+def _split_repo_slug(repo_id: str) -> tuple[str, str]:
+    owner, sep, repo = repo_id.partition("/")
+    if not sep or not owner or not repo or "/" in repo:
+        raise typer.BadParameter("repo must be in owner/repo format")
+    return owner, repo
 
 
 def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
@@ -303,3 +312,43 @@ def repos_add(path: str) -> None:
 @repos_app.command("rm", help="Unregister a repository path.")
 def repos_rm(path: str) -> None:
     api.remove_repo(path)
+
+
+@repos_app.command("children", help="List child repos for owner/repo.")
+def repos_children(repo: str, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
+    owner, repo_name = _split_repo_slug(repo)
+    repos = api.list_children(owner, repo_name)
+    if json_output:
+        typer.echo(json.dumps([entry.model_dump(mode="json") for entry in repos], indent=2))
+        return
+    if repos:
+        console.print(_repo_table(repos))
+    else:
+        console.print("no child repos")
+
+
+@repos_app.command("parents", help="List parent repos for owner/repo.")
+def repos_parents(repo: str, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
+    owner, repo_name = _split_repo_slug(repo)
+    repos = api.list_parents(owner, repo_name)
+    if json_output:
+        typer.echo(json.dumps([entry.model_dump(mode="json") for entry in repos], indent=2))
+        return
+    if repos:
+        console.print(_repo_table(repos))
+    else:
+        console.print("no parent repos")
+
+
+@repos_app.command("add-child", help="Add parent->child repo relationship.")
+def repos_add_child(parent: str, child: str) -> None:
+    parent_owner, parent_repo = _split_repo_slug(parent)
+    child_owner, child_repo = _split_repo_slug(child)
+    api.add_child(parent_owner, parent_repo, child_owner, child_repo)
+
+
+@repos_app.command("rm-child", help="Remove parent->child repo relationship.")
+def repos_rm_child(parent: str, child: str) -> None:
+    parent_owner, parent_repo = _split_repo_slug(parent)
+    child_owner, child_repo = _split_repo_slug(child)
+    api.remove_child(parent_owner, parent_repo, child_owner, child_repo)

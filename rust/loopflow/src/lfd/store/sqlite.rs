@@ -15,14 +15,14 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_repo_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix,
-    serialize_pr,
+    map_repo_edge_row, map_repo_row, map_stimulus_row, map_summary_row, map_wave_row,
+    map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
     LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
-    Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    RepoEdge, RepoId, Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -261,7 +261,8 @@ impl SqliteStore {
 
     pub fn list_repos(&self) -> StoreResult<Vec<Repo>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare("SELECT path, name, added_at FROM repos ORDER BY path ASC")?;
+        let mut stmt =
+            conn.prepare("SELECT path, repo_id, name, added_at FROM repos ORDER BY path ASC")?;
         let rows = stmt.query_map([], |row| Ok(map_repo_row(row)))?;
 
         let mut repos = Vec::new();
@@ -273,10 +274,21 @@ impl SqliteStore {
 
     pub fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt =
-            conn.prepare("SELECT path, name, added_at FROM repos WHERE path = ?1 LIMIT 1")?;
+        let mut stmt = conn
+            .prepare("SELECT path, repo_id, name, added_at FROM repos WHERE path = ?1 LIMIT 1")?;
         let row = stmt
             .query_row(params![path], |row| Ok(map_repo_row(row)))
+            .optional()?;
+        row.transpose()
+    }
+
+    pub fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT path, repo_id, name, added_at FROM repos WHERE repo_id = ?1 LIMIT 1",
+        )?;
+        let row = stmt
+            .query_row(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))
             .optional()?;
         row.transpose()
     }
@@ -284,18 +296,104 @@ impl SqliteStore {
     pub fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO repos (path, name, added_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(path) DO UPDATE SET name = excluded.name, added_at = excluded.added_at",
-            params![repo.path, repo.name, repo.added_at.unix_timestamp()],
+            "INSERT INTO repos (path, repo_id, name, added_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(path) DO UPDATE SET repo_id = excluded.repo_id, name = excluded.name, added_at = excluded.added_at",
+            params![
+                repo.path,
+                repo.repo_id.as_str(),
+                repo.name,
+                repo.added_at.unix_timestamp()
+            ],
         )?;
         Ok(())
     }
 
     pub fn delete_repo(&self, path: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let repo_id = conn
+            .query_row(
+                "SELECT repo_id FROM repos WHERE path = ?1 LIMIT 1",
+                params![path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        if let Some(repo_id) = repo_id {
+            conn.execute(
+                "DELETE FROM repo_edges WHERE parent_repo_id = ?1 OR child_repo_id = ?1",
+                params![repo_id],
+            )?;
+        }
+
         conn.execute("DELETE FROM repos WHERE path = ?1", params![path])?;
         Ok(())
+    }
+
+    pub fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT parent_repo_id, child_repo_id FROM repo_edges ORDER BY parent_repo_id, child_repo_id",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(map_repo_edge_row(row)))?;
+
+        let mut edges = Vec::new();
+        for row in rows {
+            edges.push(row??);
+        }
+        Ok(edges)
+    }
+
+    pub fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT OR IGNORE INTO repo_edges (parent_repo_id, child_repo_id) VALUES (?1, ?2)",
+            params![edge.parent_repo_id.as_str(), edge.child_repo_id.as_str()],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM repo_edges WHERE parent_repo_id = ?1 AND child_repo_id = ?2",
+            params![parent_id.as_str(), child_id.as_str()],
+        )?;
+        Ok(())
+    }
+
+    pub fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
+             FROM repo_edges
+             INNER JOIN repos ON repos.repo_id = repo_edges.child_repo_id
+             WHERE repo_edges.parent_repo_id = ?1
+             ORDER BY repos.path ASC",
+        )?;
+        let rows = stmt.query_map(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))?;
+        let mut repos = Vec::new();
+        for row in rows {
+            repos.push(row??);
+        }
+        Ok(repos)
+    }
+
+    pub fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
+             FROM repo_edges
+             INNER JOIN repos ON repos.repo_id = repo_edges.parent_repo_id
+             WHERE repo_edges.child_repo_id = ?1
+             ORDER BY repos.path ASC",
+        )?;
+        let rows = stmt.query_map(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))?;
+        let mut repos = Vec::new();
+        for row in rows {
+            repos.push(row??);
+        }
+        Ok(repos)
     }
 
     // -- Sessions ---------------------------------------------------------------

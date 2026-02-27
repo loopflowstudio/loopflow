@@ -110,6 +110,7 @@ class Chord(BaseModel):
 class Repo(BaseModel):
     path: str
     name: str
+    repo_id: str
     wave_count: int
     registered: bool
     added_at: Optional[datetime] = None

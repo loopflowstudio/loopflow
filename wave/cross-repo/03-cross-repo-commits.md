@@ -2,27 +2,27 @@
 
 ## What to build
 
-When a session modifies files across multiple repos (parent + children), detect which repo each file belongs to and produce separate commits per repo.
+When a session modifies files across multiple repos, detect which repo each file belongs to and produce separate commits per repo.
+
+## Key insight
+
+lf already doesn't prevent writing to other repos — if an area points at `/other/repo/src/`, the agent can edit files there. The missing piece is commit handling: today's commit logic assumes all changed files belong to one repo.
+
+This stage makes commits multi-repo-aware. No new access control — lf takes paths, lfd provides convenience, neither enforces write boundaries.
 
 ## Key functions
 
-- `classify_files(changed_paths, repo_roots) -> HashMap<RepoRoot, Vec<Path>>` — Given changed file paths and known repo roots (parent + children), group files by repo.
-- Extend commit logic to iterate over repos and commit in each.
-
-## Behavior
-
-1. After a session produces changes, lf scans all modified files.
-2. For each file, determine which repo root it falls under (parent or a child).
-3. Stage and commit in each repo separately.
-4. Commit messages can be shared or per-repo (start with shared, refine later).
+- `classify_files(changed_paths, repo_roots) -> HashMap<RepoRoot, Vec<Path>>` — Group changed files by repo root (most specific root wins).
+- Extend `commit_workflow` to iterate over repos and commit in each.
 
 ## Constraints
 
-- A file belongs to exactly one repo (the most specific repo root that contains it).
-- If a commit in one repo succeeds but another fails, don't roll back the first — just report the failure.
-- Worktree paths need to resolve correctly when determining repo ownership.
+- A file belongs to exactly one repo (most specific repo root).
+- No rollback across repos — if one commit succeeds and another fails, report the failure.
+- Worktree paths resolve correctly when determining repo ownership.
+- Single-repo sessions are completely unaffected.
 
 ## Done when
 
-- A session that modifies files in both parent and child produces separate commits in each repo
-- Single-repo sessions are unaffected
+- A session modifying files across multiple repos produces separate commits in each
+- Single-repo sessions behave identically to today

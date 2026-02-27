@@ -106,6 +106,22 @@ def remove_repo(path: str) -> None:
     _client().remove_repo(path)
 
 
+def add_child(owner: str, repo: str, child_owner: str, child_repo: str) -> None:
+    _client().add_child(owner, repo, child_owner, child_repo)
+
+
+def remove_child(owner: str, repo: str, child_owner: str, child_repo: str) -> None:
+    _client().remove_child(owner, repo, child_owner, child_repo)
+
+
+def list_children(owner: str, repo: str) -> list[Repo]:
+    return _client().list_children(owner, repo)
+
+
+def list_parents(owner: str, repo: str) -> list[Repo]:
+    return _client().list_parents(owner, repo)
+
+
 def create_chord(name: str) -> Chord:
     return _client().create_chord(name)
 
@@ -271,6 +287,10 @@ __all__ = [
     "list_repos",
     "add_repo",
     "remove_repo",
+    "add_child",
+    "remove_child",
+    "list_children",
+    "list_parents",
     "create_chord",
     "list_chords",
     "get_chord",

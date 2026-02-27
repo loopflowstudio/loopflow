@@ -57,6 +57,18 @@ pub fn router(state: HttpState) -> Router {
                 .delete(repos::remove_repo_handler),
         )
         .route(
+            "/repos/{owner}/{repo}/children/{child_owner}/{child_repo}",
+            post(repos::add_child_handler).delete(repos::remove_child_handler),
+        )
+        .route(
+            "/repos/{owner}/{repo}/children",
+            get(repos::list_children_handler),
+        )
+        .route(
+            "/repos/{owner}/{repo}/parents",
+            get(repos::list_parents_handler),
+        )
+        .route(
             "/chords",
             get(chords::list_chords_handler).post(chords::create_chord_handler),
         )

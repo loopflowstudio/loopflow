@@ -1,4 +1,4 @@
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, is_clean};
+use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::worktrees::{
     create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree, worktree_path,
 };
@@ -389,6 +389,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         is_main: bool,
         merged: bool,
         dirty: bool,
+        remote_gone: bool,
         diff_stat: String,
     }
 
@@ -407,7 +408,6 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 })
             };
             let is_current = wt.path == repo_root;
-            let dirty = !is_clean(&wt.path).unwrap_or(true);
             let diff_stat = if is_main {
                 String::new()
             } else {
@@ -418,7 +418,8 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 is_current,
                 is_main,
                 merged: wt.merged,
-                dirty,
+                dirty: wt.dirty,
+                remote_gone: wt.remote_gone,
                 diff_stat,
             }
         })
@@ -430,21 +431,26 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         let marker = if row.is_current { "*" } else { " " };
 
         let fresh = !row.is_main && !row.merged && row.diff_stat.is_empty() && !row.dirty;
+        let landed_dirty = row.merged && row.dirty;
         let name_color = if row.is_main || row.merged || fresh {
             c.dim
         } else {
             c.bold
         };
 
-        let status = if row.merged {
+        let status = if landed_dirty {
+            format!("{}landed-dirty{}", c.red, c.reset)
+        } else if row.merged {
             format!("{}merged{}", c.green, c.reset)
+        } else if row.remote_gone {
+            format!("{}remote-gone{}", c.yellow, c.reset)
         } else if fresh {
             format!("{}fresh{}", c.dim, c.reset)
         } else {
             format!("{}active{}", c.cyan, c.reset)
         };
 
-        let dirty_flag = if row.dirty {
+        let dirty_flag = if row.dirty && !landed_dirty {
             format!(" {}dirty{}", c.yellow, c.reset)
         } else {
             String::new()
@@ -500,7 +506,7 @@ fn wt_remove(name: &str, force: bool) -> Result<()> {
         return Err(anyhow!("cannot remove the main worktree"));
     }
 
-    if !force && !is_clean(&wt.path).unwrap_or(false) {
+    if !force && wt.dirty {
         return Err(anyhow!(
             "worktree has uncommitted changes (use --force to override)"
         ));
@@ -576,7 +582,7 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
         .into_iter()
         .filter(|wt| wt.prunable)
         .filter(|wt| wt.path != current_path)
-        .filter(|wt| is_clean(&wt.path).unwrap_or(false))
+        .filter(|wt| !wt.dirty)
         .collect::<Vec<_>>();
 
     if prunable.is_empty() {
@@ -585,7 +591,6 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
     }
 
     if force {
-        let default_branch = get_default_branch(&main_repo)?;
         for wt in prunable.drain(..) {
             crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
             if let Some(branch) = wt.branch {
@@ -601,10 +606,34 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
     if !dry_run {
         println!("Run with --force to remove prunable worktrees.");
     }
-    println!("Prunable worktrees:");
+
+    // Group by reason
+    let mut merged = Vec::new();
+    let mut remote_gone = Vec::new();
+    let mut empty = Vec::new();
     for wt in prunable {
-        let branch = wt.branch.unwrap_or_else(|| "detached".to_string());
-        println!("{}  {}", branch, wt.path.display());
+        let branch = wt.branch.clone().unwrap_or_else(|| "detached".to_string());
+        let entry = (branch, wt.path.display().to_string());
+        if wt.merged {
+            merged.push(entry);
+        } else if wt.remote_gone {
+            remote_gone.push(entry);
+        } else {
+            empty.push(entry);
+        }
+    }
+
+    for (label, group) in [
+        ("Merged", &merged),
+        ("Remote-gone", &remote_gone),
+        ("Empty", &empty),
+    ] {
+        if !group.is_empty() {
+            println!("{}:", label);
+            for (branch, path) in group {
+                println!("  {}  {}", branch, path);
+            }
+        }
     }
     Ok(())
 }

@@ -28,9 +28,9 @@ Aggressive. Warns at the top that it will delete worktrees. Cleanup tool, not sa
 
 Follows PROMPT_STYLE. Frontmatter with `requires:` and `produces:`. Headless-compatible — the step should work in both interactive and headless surfaces.
 
-## Depends on
+## What's available
 
-Sprint 01 (Rust improvements) — the step consumes `wt list --format json` with `dirty` and `remote_gone` fields.
+Sprint 01 shipped. `wt list --format json` now includes `dirty` (bool) and `remote_gone` (bool) on every `WorktreeState`. `wt prune --force` removes remote-gone clean worktrees alongside merged ones. `wt list` shows `landed-dirty` (red, `merged && dirty`) and `remote-gone` (yellow, `remote_gone && !merged`) as first-class states. The step can rely on all of this.
 
 ## Done when
 

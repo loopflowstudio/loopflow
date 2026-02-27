@@ -1,6 +1,6 @@
 # 03: Full Agent Rollout
 
-Extend sandbox executor to all harnesses and remove legacy Docker path.
+**Finish line:** All harnesses route through `SandboxExecutor`, `DockerExecutor` and Bollard dependency are deleted, and restart rehydration reattaches to running sandbox streams.
 
 ## What we're trying to learn
 

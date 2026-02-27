@@ -6,26 +6,16 @@ Replace Bollard-managed Docker containers with Docker Sandboxes microVMs for age
 
 ## Strategy
 
-Docker Sandboxes doesn't expose `create/exec/stop` — only `run`, `ls`, `inspect`, `rm`, `version`. So the execution model is `docker sandbox run -d` for lifecycle + `docker exec` for command execution. This gives us PID + stdio piping matching `LocalProcessExecutor` semantics.
+Lifecycle is `docker sandbox create` + `docker sandbox exec` + `docker sandbox rm`. Structurally closer to `LocalProcessExecutor` than `DockerExecutor` — shell out to CLI, capture PID + stdio, no Bollard.
 
 Two-level capability gating decides executor per run:
 
-1. **Platform capability (startup probe):** `docker sandbox version` → `run -d` → `docker exec -- true` → `rm`. If any step fails, disable sandbox path entirely.
+1. **Platform capability (startup probe):** `docker sandbox version` → `create` → `exec -- true` → `rm`. Any failure disables sandbox path for process lifetime.
 2. **Harness routing (per-run):** Claude and Gemini route to sandbox; everything else stays on `DockerExecutor`.
 
 Runtime fallback: if sandbox launch/exec/cleanup fails for Claude/Gemini, retry once through `DockerExecutor` before marking the run failed.
 
 `AdaptiveContainerExecutor` wraps both backends. `mode: container` resolves to `ExecutorType::Sandbox` (adaptive), keeping config simple.
-
-### Key bet
-
-Docker Sandboxes is usable today if treated as **lifecycle API + workspace sync**, with `docker exec` for generic command execution.
-
-### Phasing
-
-Phase 1: Claude + Gemini only, with full `DockerExecutor` fallback. No DinD guarantee, no stream reattach on restart.
-
-Phase 2+: Codex/OpenCode rollout, DinD support contract, restart rehydration, Bollard removal.
 
 ## Goals
 

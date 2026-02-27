@@ -1,6 +1,6 @@
 # 02: Integration and Validation
 
-Verify the sandbox executor works end-to-end across platforms and integration points.
+**Finish line:** Sandbox executor runs Claude end-to-end on macOS (self-hosted + Concerto), Gemini path passes automated smoke test, and cleanup works across all lifecycle events.
 
 ## What we're trying to learn
 

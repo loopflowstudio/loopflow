@@ -311,6 +311,21 @@ impl SqliteStore {
 
     pub fn delete_repo(&self, path: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let repo_id = conn
+            .query_row(
+                "SELECT repo_id FROM repos WHERE path = ?1 LIMIT 1",
+                params![path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        if let Some(repo_id) = repo_id {
+            conn.execute(
+                "DELETE FROM repo_edges WHERE parent_repo_id = ?1 OR child_repo_id = ?1",
+                params![repo_id],
+            )?;
+        }
+
         conn.execute("DELETE FROM repos WHERE path = ?1", params![path])?;
         Ok(())
     }

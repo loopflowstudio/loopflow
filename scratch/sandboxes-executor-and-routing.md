@@ -13,16 +13,15 @@ Wave goals this advances:
 
 ## Approach
 
-### Correcting the wave plan
+### Why `create` + `exec`, not `run`
 
-The wave plan states: "Docker Sandboxes doesn't expose `create/exec/stop` — only `run`, `ls`, `inspect`, `rm`, `version`."
+The Docker Sandbox CLI exposes `create`, `exec`, `stop`, `save`, `reset`, and `network` alongside `run`, `ls`, `inspect`, `rm`, `version`. Key constraints:
 
-**This is wrong.** The actual CLI surface includes `create`, `exec`, `stop`, `save`, `reset`, and `network` in addition to the ones listed. This changes the execution model fundamentally:
+- `docker sandbox run` has no `-d` (detach) flag — it blocks until the command exits
+- `docker sandbox exec` is a first-class command with `-e` (env vars), `-w` (workdir), `-d` (detach), `-i` (interactive)
+- Host `docker exec` cannot reach inside sandbox microVMs — only `docker sandbox exec` works
 
-- **Wave plan assumed:** `docker sandbox run -d` (detached) + `docker exec` (host Docker exec)
-- **Reality:** `docker sandbox run` has no `-d` flag. `docker sandbox exec` is a first-class command with `-e` (env vars), `-w` (workdir), `-d` (detach), `-i` (interactive).
-
-The correct lifecycle is `create` + `exec` + `rm`, not the `run -d` + host-`docker exec` hack.
+The correct lifecycle is `create` + `exec` + `rm`. The `create`/`exec` split gives control over credential injection (`-e` flags on exec), workspace setup timing, and clean stdout separation.
 
 ### SandboxExecutor
 
@@ -160,13 +159,11 @@ No stream rehydration in phase 1. If `lfd` restarts while a sandbox agent is run
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
 | `docker sandbox run` as subprocess (no `create`/`exec` split) | Simpler: one command handles sandbox + agent. But `run` couples sandbox lifecycle to agent execution — no way to inject env vars at exec time, no separation between sandbox setup and command execution. Stdout might mix sandbox setup noise with agent output. | Less control over credential injection and output streaming. The `create`/`exec` split is worth the extra command. |
-| `docker sandbox run -d` + `docker exec` (wave plan's approach) | Would match the wave plan. But `-d` doesn't exist on `docker sandbox run`, and `docker exec` (host Docker) can't reach inside a sandbox microVM. `docker sandbox exec` is the correct command. | Doesn't work. The wave plan was based on incorrect assumptions about the CLI surface. |
+| `docker sandbox run -d` + `docker exec` | Detach sandbox, exec from host. But `-d` doesn't exist on `docker sandbox run`, and `docker exec` (host Docker) can't reach inside a sandbox microVM. `docker sandbox exec` is the correct command. | Doesn't work. Host `docker exec` can't reach inside sandbox microVMs. |
 | Skip `AdaptiveContainerExecutor`, just add sandbox as separate config option | Users choose sandbox vs docker explicitly. Simpler code, no routing logic. | Breaks the "no user-visible behavior change" goal. Users shouldn't need to know whether their machine supports sandboxes. The probe + adaptive routing handles this transparently. |
 | Pool sandboxes per wave (reuse across agent runs) | Avoids per-run sandbox creation overhead. | Adds state management complexity (which sandboxes are idle, cleanup on stale state). Per-run is simpler and matches how `DockerExecutor` creates containers per run. Optimize later if creation latency is a problem. |
 
 ## Key decisions
-
-**`create` + `exec`, not `run`.** The `create`/`exec` split gives us control over credential injection (`-e` flags on exec), workspace setup timing, and clean stdout separation. `docker sandbox run` couples everything together.
 
 **Env var injection only, no credential mounts.** `LocalProcessExecutor` already works without mounts. Sandbox agents get tokens via env vars. This avoids the mount complexity in `DockerExecutor` and sidesteps questions about host home directory visibility in microVMs.
 

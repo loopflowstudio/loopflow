@@ -32,13 +32,18 @@ Verify `docker sandbox` commands work from inside the bundled lfd container with
 - **macOS (Concerto):** bundled daemon path with sandbox executor
 - **Linux:** smoke validation (experimental) — probe + single run + cleanup
 
+### Gemini template validation
+
+Phase 1 assumes Gemini CLI works inside the `claude` sandbox template. Validate this — if Gemini CLI isn't pre-installed, determine whether `docker sandbox exec` can install it or we need a custom template.
+
 ### Smoke test
 
-Gemini path covered by automated smoke test (no manual test required). Extend existing `cargo test -p loopflow docker_` or add `sandbox_` test module.
+Gemini path covered by automated smoke test (no manual test required). Add `sandbox_` test module alongside existing `docker_` tests.
 
 ## Done when
 
 - Context files readable inside sandboxed Claude runs
+- Gemini CLI confirmed working inside `claude` sandbox template (or custom template strategy documented)
 - Gemini path covered by automated smoke test
 - Sandbox cleanup works on completion, terminate, and startup janitor
 - macOS validated (self-hosted + Concerto path)

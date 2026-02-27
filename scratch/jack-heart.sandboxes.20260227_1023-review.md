@@ -10,9 +10,9 @@ Wave plan for microVM agent execution (`wave/sandboxes/`) and a design doc for p
 
 ## Key choices
 
-**Corrected the CLI model.** The original wave plan assumed `docker sandbox run -d` + host `docker exec`. Research showed `run` has no `-d` flag and host `docker exec` can't reach inside sandbox microVMs. The correct lifecycle is `create` + `exec` + `rm`, all under `docker sandbox`.
+**`create` + `exec` + `rm` lifecycle.** Research into the Docker Sandbox CLI revealed `run` has no `-d` flag and host `docker exec` can't reach inside microVMs. The `create`/`exec` split gives control over credential injection, workspace setup timing, and clean stdout separation.
 
-**Modeled after `LocalProcessExecutor`, not `DockerExecutor`.** `SandboxExecutor` shells out to CLI and captures PID + stdio — ~200 lines vs ~1600 for Bollard. This is the right call given sandbox's built-in workspace sync eliminates volumes, tar sync, and shared clones.
+**Modeled after `LocalProcessExecutor`, not `DockerExecutor`.** `SandboxExecutor` shells out to CLI and captures PID + stdio — ~200 lines vs ~1600 for Bollard. Sandbox's built-in workspace sync eliminates volumes, tar sync, and shared clones.
 
 **Adaptive routing over explicit config.** `AdaptiveContainerExecutor` probes at startup and routes transparently. Users don't need to know whether their machine supports sandboxes. Explicit `executor.type: docker` override is preserved.
 
@@ -25,7 +25,7 @@ Wave plan for microVM agent execution (`wave/sandboxes/`) and a design doc for p
 ## Risks and bottlenecks
 
 - **Sandbox CLI stability.** Young CLI surface. Breakage disables the sandbox path (mitigated by fallback).
-- **`claude` template for Gemini.** Untested assumption that Gemini CLI works inside the `claude` template. Needs validation in phase 2 item.
+- **`claude` template for Gemini.** Untested assumption that Gemini CLI works inside the `claude` template. Tracked explicitly in wave item 02's done-when criteria.
 - **Per-run sandbox creation latency.** No pooling in phase 1. If `create` is slow, every Claude/Gemini run pays the cost.
 
 ## What's not included

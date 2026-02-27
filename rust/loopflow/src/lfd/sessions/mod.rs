@@ -59,8 +59,6 @@ struct SessionRuntime {
     events_tx: broadcast::Sender<PersistedSessionEvent>,
     next_seq: AtomicI64,
     seeded_user_prompt: Option<String>,
-    /// Paths of injected skill directories for cleanup.
-    injected_skills: Mutex<Vec<PathBuf>>,
 }
 
 impl std::fmt::Debug for SessionRuntime {
@@ -171,7 +169,6 @@ impl SessionManager {
             events_tx,
             next_seq: AtomicI64::new(0),
             seeded_user_prompt,
-            injected_skills: Mutex::new(Vec::new()),
         });
 
         {
@@ -200,14 +197,11 @@ impl SessionManager {
             .await;
         self.spawn_harness_event_bridge(session.id.clone(), runtime.clone(), harness_events_rx);
         let auto_start = session.wave_run_id.is_some();
-        let repo_root = PathBuf::from(&session.config.repo_root);
         self.spawn_harness_startup(
             session.id.clone(),
             runtime.clone(),
             prepared_prompt,
             auto_start,
-            harness_name.clone(),
-            repo_root,
         );
 
         Ok(session)
@@ -357,19 +351,6 @@ impl SessionManager {
         } else {
             SessionStatus::Ended
         };
-
-        // Clean up injected skill files.
-        if let Some(ref runtime) = runtime {
-            let injected = runtime.injected_skills.lock().await;
-            if !injected.is_empty() {
-                crate::engine::skills::cleanup_injected_skills(&injected);
-                tracing::debug!(
-                    session_id = %session_id,
-                    count = injected.len(),
-                    "cleaned up injected skills"
-                );
-            }
-        }
 
         let has_runtime = runtime.is_some();
         self.set_status(
@@ -530,27 +511,9 @@ impl SessionManager {
         runtime: Arc<SessionRuntime>,
         launch: AgentConfig,
         auto_start: bool,
-        harness_name: String,
-        repo_root: PathBuf,
     ) {
         let manager = self.clone();
         tokio::spawn(async move {
-            // Inject steps and directions as .agents/skills/ for agent auto-discovery.
-            // repo_root: where to read .lf/steps/ and .lf/directions/.
-            // cwd: where to write .agents/skills/ (agents discover relative to cwd).
-            if let Some(cwd) = &launch.cwd {
-                let injected = crate::engine::skills::inject_skills(&repo_root, cwd);
-                if !injected.is_empty() {
-                    tracing::debug!(
-                        session_id = %session_id,
-                        harness = %harness_name,
-                        count = injected.len(),
-                        "injected skills into .agents/skills/"
-                    );
-                    *runtime.injected_skills.lock().await = injected;
-                }
-            }
-
             let result = {
                 let mut harness = runtime.harness.lock().await;
                 harness.start(&launch).await

@@ -820,15 +820,6 @@ impl WaveExecutor {
         .await?;
         let capabilities = build_agent_capabilities(&worktree);
         let agent = launch.agent.clone().unwrap_or_else(|| "claude".to_string());
-        let (harness, _) = parse_agent(&agent);
-
-        // Inject steps and directions as .agents/skills/ for Claude agents.
-        let injected_skills = if harness == "claude" {
-            let worktree_path = std::path::Path::new(&worktree);
-            crate::engine::skills::inject_skills(worktree_path, worktree_path)
-        } else {
-            Vec::new()
-        };
 
         info!(run_id = %run.id, step = %step.step.name, agent = %agent, "launching agent");
 
@@ -845,8 +836,6 @@ impl WaveExecutor {
                 output_prefix: None,
             })
             .await;
-
-        crate::engine::skills::cleanup_injected_skills(&injected_skills);
 
         let outcome = outcome?;
 

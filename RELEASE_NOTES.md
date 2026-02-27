@@ -11,7 +11,7 @@ Concerto ships on iOS, agents learn to remember across sessions, and Chords let 
 - **Quote-replies.** Select text in an assistant bubble to open a reply composer. Queue text replies and emoji reacts, then send as one structured message.
 - **Action buttons.** Agents surface suggested next actions as tappable buttons — macOS and iOS. Tap one to send it as your next message.
 - **Wave memory.** Agents read persistent memory from `wave/<wave>/MEMORY.md`. Memory appears in the prompt automatically for wave-scoped steps.
-- **Skill injection.** Built-in steps and directions appear as `/slash` commands in Claude Code. Enable with `inject_skills: true` in `.lf/config.yaml`; always on for `lfd` sessions.
+
 - **Surface-adaptive prompts.** Prompts now adapt to where they run — CLI, headless daemon, Concerto desktop, or Concerto iPhone. Replaces the old `run_mode` string.
 - **Composable direction groups.** `lf review -d infra` expands to security + performance + reliability + observability. Stack groups freely: `lf implement -d ux,clarity`.
 - **Auth broker.** `lfq auth github`, `lfq auth claude`, `lfq auth codex` — connect providers in your browser. `lfq auth status` shows what's connected.

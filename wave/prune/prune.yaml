@@ -1,0 +1,6 @@
+flow: build
+area:
+  - .lf/steps/
+direction:
+  - reliability
+  - simplicity

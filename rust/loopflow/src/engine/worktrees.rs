@@ -1,8 +1,8 @@
 use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    get_default_branch, has_commits_beyond, is_ancestor, is_squash_merged, rev_parse, worktree_add,
-    worktree_move, WorktreeBranch,
+    get_default_branch, has_commits_beyond, is_ancestor, is_clean, is_squash_merged, rev_parse,
+    worktree_add, worktree_move, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, wave_name_from_branch};
 use crate::lfd::security::sanitize_fs_component;
@@ -20,6 +20,8 @@ pub struct WorktreeState {
     pub base_branch: Option<String>,
     pub merged: bool,
     pub prunable: bool,
+    pub dirty: bool,
+    pub remote_gone: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -236,6 +238,28 @@ fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
     result
 }
 
+/// List all remote branch names via a single `git ls-remote --heads origin` call.
+/// Returns an empty set on failure (offline, no remote, etc.).
+fn list_remote_branches(repo: &Path) -> HashSet<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["ls-remote", "--heads", "origin"])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|line| {
+                line.split('\t')
+                    .nth(1)?
+                    .strip_prefix("refs/heads/")
+                    .map(|b| b.to_string())
+            })
+            .collect(),
+        _ => HashSet::new(),
+    }
+}
+
 pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     let default_branch = get_default_branch(repo)?;
     let merge_target = format!("origin/{default_branch}");
@@ -278,8 +302,12 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     let repo_for_pr = repo.to_path_buf();
     let pr_handle = thread::spawn(move || merged_pr_branches(&repo_for_pr, &pr_branches));
 
+    let repo_for_remote = repo.to_path_buf();
+    let remote_handle = thread::spawn(move || list_remote_branches(&repo_for_remote));
+
     let squash_merged = squash_handle.join().unwrap_or_default();
     let pr_merged = pr_handle.join().unwrap_or_default();
+    let remote_branches = remote_handle.join().unwrap_or_default();
 
     let mut results = Vec::new();
     for (path, branch) in items {
@@ -305,13 +333,24 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
         } else {
             false
         };
-        let prunable = !is_default && (merged || !has_commits);
+        let dirty = !is_clean(&path).unwrap_or(true);
+        let remote_gone = if is_default || remote_branches.is_empty() {
+            false
+        } else {
+            branch
+                .as_deref()
+                .map(|b| !remote_branches.contains(b))
+                .unwrap_or(false)
+        };
+        let prunable = !is_default && (merged || !has_commits || (remote_gone && !dirty));
         results.push(WorktreeState {
             branch,
             path,
             base_branch,
             merged,
             prunable,
+            dirty,
+            remote_gone,
         });
     }
 

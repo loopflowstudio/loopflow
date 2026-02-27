@@ -496,6 +496,7 @@ public final class RepoState {
     private func handleWaveEvent(_ event: WaveEvent) async {
         switch event.type {
         case .created, .updated, .started, .stopped, .waiting:
+            let previousStatus = waveStore.wave(for: event.waveId)?.status
             var refreshedWave: Wave?
             if let wave = event.wave {
                 waveStore.set(makeWaveViewModel(api: wave))
@@ -525,9 +526,18 @@ public final class RepoState {
                 }
             }
 
-            loadWaveContent(for: event.waveId)
-            // Update runs cache on run lifecycle events
-            if event.type == .started || event.type == .stopped || event.type == .updated {
+            let newStatus = refreshedWave?.status
+            let runCompleted = didRunComplete(oldStatus: previousStatus, newStatus: newStatus)
+            let waveIsActive = newStatus == .running || newStatus == .waiting
+
+            if event.type == .created || runCompleted {
+                loadWaveContent(for: event.waveId)
+            }
+
+            let shouldRefreshRuns = event.type == .started
+                || event.type == .stopped
+                || (event.type == .updated && (waveIsActive || runCompleted))
+            if shouldRefreshRuns {
                 loadRuns(for: event.waveId)
             }
             // New wave may adopt a worktree
@@ -547,6 +557,13 @@ public final class RepoState {
             await refreshWorktrees()
             await refreshFlowsAsync()
         }
+    }
+
+    private func didRunComplete(oldStatus: WaveStatus?, newStatus: WaveStatus?) -> Bool {
+        guard let oldStatus, let newStatus else { return false }
+        let wasActive = oldStatus == .running || oldStatus == .waiting
+        let isTerminal = newStatus == .idle || newStatus == .failed
+        return wasActive && isTerminal
     }
 
     // MARK: - Flows
@@ -604,8 +621,7 @@ public final class RepoState {
     }
 
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
-        loadWaveContent(for: wave.id)
-
+        // Note: loadWaveContent is handled by handleWaveEvent on run completion — not duplicated here.
         switch newStatus {
         case .waiting:
             let step = wave.recentSteps.first?.step ?? "step"

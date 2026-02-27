@@ -147,6 +147,10 @@ fn map_turn_usage(properties: &Value) -> Option<TurnUsage> {
             .pointer("/output_tokens")
             .and_then(Value::as_u64)
             .unwrap_or(0),
+        model: properties
+            .get("model")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         cost_usd: usage.get("cost").and_then(Value::as_f64),
         ..TurnUsage::default()
     })

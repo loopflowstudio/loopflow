@@ -2,15 +2,13 @@
 
 ## Vision
 
-Invert the ops layer. Today `lf ops <verb>` is the interface and steps are add-ons. Flip it: `lf <verb>` is the interface (composable in flows), `lf ops <verb>` is the API (mechanical, for agents).
+Invert the ops layer. Today `lf ops <verb>` is the interface and steps are add-ons. Flip it: `lf <verb>` is the interface (composable in flows), `lf ops <verb>` is the API (mechanical, for agents). Not new ops commands from scratch — surfacing existing ops as composable steps, using existing flow/wave infrastructure.
 
-Steps that don't need an agent on the happy path declare `fast-path` — a command that runs first. If it succeeds, done. If it fails, the agent session starts with failure context. No regression to agent speed for operations that usually just work.
+## Strategy
 
-### Not here
+`fast-path` is the architectural linchpin. Steps declare a shell command in frontmatter that runs before the agent. Exit 0 = done, no agent spun up. Non-zero = agent starts with failure output as context. This keeps ops speed on happy paths while preserving agent resilience for failures.
 
-- New ops commands from scratch — this is about surfacing existing ops as composable steps
-- Changing how flows/waves work — this uses existing infrastructure
-- Team-level features
+Sprints 01 and 04 depend on `fast-path` — sprint 01 builds it as a step runner feature, sprint 04 is the second consumer. Sprints 02 and 03 build on existing `lf ops release` infrastructure, decomposing it into finer-grained ops commands and wrapping them in a step that always uses an agent (release notes require LLM judgment).
 
 ## Goals
 

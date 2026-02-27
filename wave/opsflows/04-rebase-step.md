@@ -4,6 +4,8 @@
 
 ## What to build
 
+Depends on sprint 01's `fast-path` feature.
+
 **`lf rebase` step:**
 
 ```yaml

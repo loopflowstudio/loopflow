@@ -1,6 +1,6 @@
 [project]
 name = "loopflow"
-dynamic = ["version"]
+version = "0.9.4"
 description = "Run LLM coding agents from reusable prompt files"
 readme = "README.md"
 requires-python = ">=3.8"

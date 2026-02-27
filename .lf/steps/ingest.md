@@ -13,20 +13,20 @@ Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
 The wave's plan (`wave/<wave>/`) should be included in docs. If you can't find the wave's plan, note this in `scratch/questions.md`.
 
-## Staged wave plans
+## Sprints
 
-Wave plans may use numbered prefixes to indicate stages:
+Roadmaps are made up of sprints — numbered files with clear finish lines:
 
 ```
 wave/rust/
   README.md          # Strategic context (not a pickable item)
-  01-protocol.md     # Stage 1 items
-  02-core-engine.md  # Stage 2 items
+  01-protocol.md     # Sprint 1
+  02-core-engine.md  # Sprint 2
 ```
 
-**Stage ordering rules:**
-- Pick from the lowest-numbered stage first (01-* before 02-*)
-- Only move to the next stage when the current stage is complete
+**Sprint ordering rules:**
+- Pick from the lowest-numbered sprint first (01-* before 02-*)
+- Only move to the next sprint when the current sprint's finish line is crossed
 - README.md provides principles and success criteria—use it to evaluate priority, but don't pick it
 
 **Using README.md:**
@@ -36,13 +36,14 @@ wave/rust/
 - Read **Metrics** to understand what signals matter
 - Respect scope boundaries stated in Vision — don't pick items that conflict
 
-**Using the roadmap (`##-*.md` files):**
-- The roadmap is the numbered files alongside the README — their prefixes define sequencing
+**Using the roadmap (sprint files `##-*.md`):**
+- The roadmap is the numbered sprint files alongside the README — their prefixes define sequencing
+- Each sprint has a finish line at the top — use it to evaluate completeness
 - Read them to understand dependencies and what's been shipped
 
 ## Selection criteria
 
-Within a stage, evaluate each item:
+Within a sprint, evaluate each item:
 
 **Urgency.** Is something blocked on this? Is there a deadline?
 
@@ -59,9 +60,9 @@ If multiple items score similarly, prefer smaller scope—ship something.
 1. Get wave name from `<lf:wave>` in context
 2. Find `wave/<wave>/` in the docs
 3. Read README.md for strategic context (Vision, Goals, Risks, Metrics)
-   Read the roadmap (`##-*.md`) for sequencing and dependencies
-4. Identify the current stage (lowest numbered prefix with items)
-5. Pick the highest-priority item from that stage
+   Read the roadmap (sprint files `##-*.md`) for sequencing and dependencies
+4. Identify the current sprint (lowest numbered prefix with items)
+5. Pick the highest-priority item from that sprint
 6. Move it to `scratch/<wave>-<slug>.md`
 
 ## Output

@@ -1,0 +1,9 @@
+flow: ship-wave
+area:
+  - rust/loopflow/src/engine/prompt.rs
+  - rust/loopflow/src/engine/launch.rs
+  - rust/loopflow/src/lf/output.rs
+  - rust/loopflow/src/lfd/executor/wave/summary.rs
+  - python/loopflow/
+direction:
+  - clarity

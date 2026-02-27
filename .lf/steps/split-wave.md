@@ -10,7 +10,7 @@ Wave mitosis. The parent wave ceases to exist — its content is distributed acr
 
 The numeric argument controls how many children to create (default 2).
 
-Roadmap items move as-is — each one lands in exactly one child. But the README sections need rewriting, not slicing:
+Sprint files move as-is — each one lands in exactly one child. But the README sections need rewriting, not slicing:
 
 - **Vision**: written fresh for each child. Must be internally coherent, not a fragment of the parent's.
 - **Goals**: scoped to each child's slice of the work.
@@ -28,13 +28,13 @@ Roadmap items move as-is — each one lands in exactly one child. But the README
    - Aim for the requested count (default 2)
    - Each resulting wave should stand alone
 
-3. Allocate roadmap items
-   - Assign each item to exactly one child — no orphans
+3. Allocate sprints
+   - Assign each sprint to exactly one child — no orphans
 
 4. Create the new waves
    - `wave/<child>/README.md` — fresh Vision and Goals for each child; Risks and Metrics carried forward and adapted
    - `wave/<child>/<child>.yaml` — flow, area, optional direction/stimulus
-   - Numbered roadmap files from the allocated items
+   - Numbered sprint files from the allocated items, each with a clear finish line
    - Use `### Not here` under Vision to draw boundaries between siblings
 
 5. Remove the parent
@@ -42,7 +42,7 @@ Roadmap items move as-is — each one lands in exactly one child. But the README
    - Commit: `split-wave: <parent> → <child-a>, <child-b>`
 
 6. Verify
-   - Each child has a README, a matching YAML, and at least one roadmap file
+   - Each child has a README, a matching YAML, and at least one sprint file
    - No content from the parent is unaccounted for
 
 ## Guardrails

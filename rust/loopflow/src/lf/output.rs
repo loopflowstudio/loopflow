@@ -48,10 +48,11 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     let mut lines = Vec::new();
     let step_tokens = breakdown.source_tokens(DocumentSource::Step);
     let direction_tokens = breakdown.source_tokens(DocumentSource::Direction);
-    let diff_tokens = breakdown.source_tokens(DocumentSource::Diff);
-    let docs_tokens = breakdown.source_tokens(DocumentSource::RepoDoc)
-        + breakdown.source_tokens(DocumentSource::Wave)
+    let scratch_tokens = breakdown.source_tokens(DocumentSource::Scratch);
+    let wave_tokens = breakdown.source_tokens(DocumentSource::Wave)
         + breakdown.source_tokens(DocumentSource::Summary);
+    let diff_tokens = breakdown.source_tokens(DocumentSource::Diff);
+    let docs_tokens = breakdown.source_tokens(DocumentSource::RepoDoc);
     let wave_memory_tokens = breakdown.source_tokens(DocumentSource::WaveMemory);
     let area_tokens = breakdown.source_tokens(DocumentSource::Area);
     let clipboard_tokens = breakdown.source_tokens(DocumentSource::Clipboard);
@@ -65,31 +66,50 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
         "\u{2500}".repeat(bar_len)
     ));
 
-    // Step tokens
-    lines.push(format_row("step", step_tokens, ""));
+    if step_tokens > 0 {
+        lines.push(format_row("step", step_tokens, ""));
+    }
 
-    // Direction
-    let dir_detail = if breakdown.direction_names.is_empty() {
-        "\u{2014}".to_string()
-    } else {
-        breakdown.direction_names.join(", ")
-    };
-    lines.push(format_row("direction", direction_tokens, &dir_detail));
+    if direction_tokens > 0 {
+        let dir_detail = if breakdown.direction_names.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            breakdown.direction_names.join(", ")
+        };
+        lines.push(format_row("direction", direction_tokens, &dir_detail));
+    }
 
-    // System
-    lines.push(format_row("system", breakdown.system_tokens, "loopflow"));
+    if breakdown.system_tokens > 0 {
+        lines.push(format_row("system", breakdown.system_tokens, "loopflow"));
+    }
 
-    // Diff
-    let diff_detail = match breakdown.diff_tier {
-        DiffTier::UnifiedDiff => format!("unified ({} files)", breakdown.diff_file_count),
-        DiffTier::StatOnly => format!("stat ({} files)", breakdown.diff_file_count),
-        DiffTier::None => "\u{2014}".to_string(),
-    };
-    lines.push(format_row("diff", diff_tokens, &diff_detail));
+    if scratch_tokens > 0 {
+        lines.push(format_row(
+            "scratch",
+            scratch_tokens,
+            &format!("{} files", breakdown.source_count(DocumentSource::Scratch)),
+        ));
+    }
 
-    // Docs
-    if breakdown.doc_count > 0 {
-        let docs_detail = format!("{} files", breakdown.doc_count);
+    if wave_tokens > 0 {
+        lines.push(format_row(
+            "wave",
+            wave_tokens,
+            &format!("{} files", breakdown.source_count(DocumentSource::Wave)),
+        ));
+    }
+
+    if diff_tokens > 0 {
+        let diff_detail = match breakdown.diff_tier {
+            DiffTier::UnifiedDiff => format!("unified ({} files)", breakdown.diff_file_count),
+            DiffTier::StatOnly => format!("stat ({} files)", breakdown.diff_file_count),
+            DiffTier::None => "\u{2014}".to_string(),
+        };
+        lines.push(format_row("diff", diff_tokens, &diff_detail));
+    }
+
+    if docs_tokens > 0 {
+        let docs_detail = format!("{} files", breakdown.source_count(DocumentSource::RepoDoc));
         lines.push(format_row("docs", docs_tokens, &docs_detail));
     }
 
@@ -98,7 +118,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     }
 
     // Area
-    if breakdown.area_doc_count > 0 {
+    if area_tokens > 0 && breakdown.area_doc_count > 0 {
         let area_detail = match &breakdown.area_name {
             Some(name) => format!("{} ({} files)", name, breakdown.area_doc_count),
             None => format!("{} files", breakdown.area_doc_count),
@@ -108,11 +128,11 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
 
     // Wave
     if let Some(ref wave) = breakdown.wave_name {
-        lines.push(format_row("wave", 0, wave));
+        lines.push(format_row("scope", 0, wave));
     }
 
     // Clipboard
-    if breakdown.has_clipboard {
+    if breakdown.has_clipboard && clipboard_tokens > 0 {
         lines.push(format_row("clipboard", clipboard_tokens, ""));
     }
 
@@ -222,15 +242,41 @@ mod tests {
             direction_names: vec!["security".to_string()],
             diff_tier: DiffTier::UnifiedDiff,
             diff_file_count: 8,
-            doc_count: 3,
+            source_counts: std::collections::HashMap::from([(DocumentSource::RepoDoc, 1)]),
             ..Default::default()
         };
         let header = format_context_header(&breakdown, 75_000);
         assert!(header.contains("\u{2500}\u{2500} implement \u{2500}"));
         assert!(header.contains("security"));
         assert!(header.contains("unified (8 files)"));
-        assert!(header.contains("3 files"));
+        assert!(header.contains("1 files"));
         assert!(header.contains("15% of 75k"));
+    }
+
+    #[test]
+    fn format_context_header_splits_docs_rows() {
+        let breakdown = ContextBreakdown {
+            source_tokens: std::collections::HashMap::from([
+                (DocumentSource::Scratch, 600),
+                (DocumentSource::Wave, 700),
+                (DocumentSource::Summary, 100),
+                (DocumentSource::RepoDoc, 500),
+            ]),
+            source_counts: std::collections::HashMap::from([
+                (DocumentSource::Scratch, 2),
+                (DocumentSource::Wave, 3),
+                (DocumentSource::RepoDoc, 1),
+            ]),
+            ..Default::default()
+        };
+
+        let header = format_context_header(&breakdown, 75_000);
+        assert!(header.contains("scratch"));
+        assert!(header.contains("wave"));
+        assert!(header.contains("docs"));
+        assert!(header.contains("2 files"));
+        assert!(header.contains("3 files"));
+        assert!(header.contains("1 files"));
     }
 
     #[test]

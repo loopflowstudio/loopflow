@@ -22,13 +22,14 @@ use tracing::debug;
 pub enum DocumentSource {
     Step,
     Direction,
+    Diff,
+    RepoDoc,
+    Scratch,
     Wave,
     WaveMemory,
-    Area,
-    Diff,
-    Clipboard,
-    RepoDoc,
     Summary,
+    Area,
+    Clipboard,
 }
 
 /// A document included in context.
@@ -58,13 +59,13 @@ pub enum DiffTier {
 #[derive(Debug, Clone, Default)]
 pub struct ContextBreakdown {
     pub source_tokens: HashMap<DocumentSource, usize>,
+    pub source_counts: HashMap<DocumentSource, usize>,
     pub system_tokens: usize,
     /// Display metadata
     pub step_name: Option<String>,
     pub direction_names: Vec<String>,
     pub diff_tier: DiffTier,
     pub diff_file_count: usize,
-    pub doc_count: usize,
     pub area_name: Option<String>,
     pub area_doc_count: usize,
     pub has_clipboard: bool,
@@ -80,13 +81,26 @@ impl ContextBreakdown {
         self.source_tokens.get(&source).copied().unwrap_or(0)
     }
 
+    pub fn source_count(&self, source: DocumentSource) -> usize {
+        self.source_counts.get(&source).copied().unwrap_or(0)
+    }
+
     fn add_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
         *self.source_tokens.entry(source).or_insert(0) += tokens;
+    }
+
+    fn add_source_count(&mut self, source: DocumentSource, count: usize) {
+        *self.source_counts.entry(source).or_insert(0) += count;
     }
 
     fn subtract_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
         let entry = self.source_tokens.entry(source).or_insert(0);
         *entry = entry.saturating_sub(tokens);
+    }
+
+    fn subtract_source_count(&mut self, source: DocumentSource, count: usize) {
+        let entry = self.source_counts.entry(source).or_insert(0);
+        *entry = entry.saturating_sub(count);
     }
 
     fn set_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
@@ -457,8 +471,9 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     breakdown.add_source_tokens(DocumentSource::WaveMemory, wave_memory_tokens);
     for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
         breakdown.add_source_tokens(doc.source, tokens);
+        breakdown.add_source_count(doc.source, 1);
     }
-    breakdown.doc_count = components.docs.len() + components.summaries.len();
+    breakdown.add_source_count(DocumentSource::Wave, components.summaries.len());
 
     // Area
     let mut area_doc_tokens: Vec<usize> = components
@@ -501,7 +516,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
             if let Some(tokens) = summary_tokens.pop() {
                 breakdown.subtract_source_tokens(DocumentSource::Summary, tokens);
                 total = total.saturating_sub(tokens);
-                breakdown.doc_count = breakdown.doc_count.saturating_sub(1);
+                breakdown.subtract_source_count(DocumentSource::Wave, 1);
             }
         }
         while total > max_tokens && !components.docs.is_empty() {
@@ -509,9 +524,9 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
             if let Some(tokens) = doc_tokens.pop() {
                 if let Some(doc) = removed {
                     breakdown.subtract_source_tokens(doc.source, tokens);
+                    breakdown.subtract_source_count(doc.source, 1);
                 }
                 total = total.saturating_sub(tokens);
-                breakdown.doc_count = breakdown.doc_count.saturating_sub(1);
             }
         }
 
@@ -597,7 +612,9 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     let mut area_docs = Vec::new();
     for doc in gathered_docs {
         match doc.source {
-            DocumentSource::RepoDoc | DocumentSource::Wave => docs.push(doc),
+            DocumentSource::RepoDoc | DocumentSource::Scratch | DocumentSource::Wave => {
+                docs.push(doc)
+            }
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::WaveMemory => wave_memory = Some(doc),
             DocumentSource::Area => area_docs.push(doc),
@@ -696,7 +713,7 @@ fn gather_scratch_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
     let scratch_dir = repo_root.join("scratch");
     if scratch_dir.is_dir() {
-        gather_md_files(&scratch_dir, &mut docs, DocumentSource::RepoDoc)?;
+        gather_md_files(&scratch_dir, &mut docs, DocumentSource::Scratch)?;
     }
     Ok(docs)
 }
@@ -1823,6 +1840,43 @@ mod tests {
     }
 
     #[test]
+    fn trim_context_drops_repo_docs_before_scratch_docs() {
+        let scratch_content =
+            "Scratch design notes with enough detail to keep around for implementation decisions";
+        let repo_doc_content = "Repo docs that should be dropped before scratch docs";
+        let components = PromptComponents {
+            docs: vec![
+                Document {
+                    path: "scratch/plan.md".to_string(),
+                    content: scratch_content.to_string(),
+                    source: DocumentSource::Scratch,
+                },
+                Document {
+                    path: "README.md".to_string(),
+                    content: repo_doc_content.to_string(),
+                    source: DocumentSource::RepoDoc,
+                },
+            ],
+            step: Some(Step {
+                name: "test".to_string(),
+                content: Some("x".to_string()),
+                agent: None,
+                default_agent: None,
+                directions: vec![],
+                action_style: None,
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        let budget = count_tokens("x") + count_tokens(scratch_content) + 1;
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), budget);
+
+        assert_eq!(trimmed.components().docs.len(), 1);
+        assert_eq!(trimmed.components().docs[0].source, DocumentSource::Scratch);
+    }
+
+    #[test]
     fn trim_context_drops_diff_after_docs() {
         let components = PromptComponents {
             docs: vec![],
@@ -2429,10 +2483,22 @@ mod tests {
         let components = result.unwrap();
         assert!(!components.docs.is_empty());
 
-        // Should include README.md
         let readme = components.docs.iter().find(|d| d.path.contains("README"));
         assert!(readme.is_some());
-        assert!(readme.unwrap().content.contains("# Project"));
+        assert_eq!(
+            readme.expect("README should be gathered").source,
+            DocumentSource::RepoDoc
+        );
+
+        let scratch = components
+            .docs
+            .iter()
+            .find(|d| d.path.contains("scratch/plan.md"));
+        assert!(scratch.is_some());
+        assert_eq!(
+            scratch.expect("scratch doc should be gathered").source,
+            DocumentSource::Scratch
+        );
     }
 
     #[test]

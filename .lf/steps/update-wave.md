@@ -30,7 +30,7 @@ Single owner of `wave/<wave>/`. Creates, updates, and deletes wave state.
 When `scratch/` contains analysis or a proposal and no wave exists yet, create one:
 
 1. Write `wave/<wave>/README.md` — the anchor that survives when plans change.
-2. Write numbered item files (`01-name.md`, `02-name.md`, ...) for each phase or work item.
+2. Write numbered sprint files (`01-name.md`, `02-name.md`, ...) — the roadmap.
 
 ### README.md
 
@@ -48,28 +48,40 @@ Additional free sections are welcome — data models, tech direction, guardrails
 
 **README.md must not contain:**
 
-- Roadmap tables or phase lists — denormalized; the item files are the roadmap
+- Roadmap tables or phase lists — denormalized; the sprint files are the roadmap
 - Status indicators (shipped / in-progress / planned)
-- Retrospectives — context for remaining items gets folded into those items
+- Retrospectives — context for remaining sprints gets folded into those sprints
 
 If the README has any of these, delete them.
+
+### Sprints
+
+Roadmaps are made up of sprints. Each sprint is a numbered file (`01-*.md`, `02-*.md`, ...) with a clear finish line — a concrete deliverable you're racing to reach. Not a phase, not a layer, not a bucket of tasks.
+
+**Every sprint must open with a bold finish line.** What's true when this sprint is done that isn't true now? Make it specific enough that you know when you've crossed it.
+
+```markdown
+# 01: Audit Breakdown
+
+**Finish line:** `lf implement` shows separate token rows for scratch, wave, and docs.
+```
 
 ### Sequencing principles
 
 - **Frontload the risk.** Start with the thing you need to try to see if it works. Don't pre-build infrastructure before you've proven the core idea.
 - **Sequence by learning, not dependencies.** What are you most uncertain about? Build that first.
 - **Defer abstractions.** Build the concrete thing, then extract the pattern.
-- **Encode uncertainty.** Each item should state what you expect to learn and what might change.
+- **Encode uncertainty.** Each sprint should state what you expect to learn and what might change.
 
 ## What counts as "shipped"
 
-An item is shipped when the code is on main (or will be when this branch merges). Don't keep items around to admire — if the work is done, delete the file.
+A sprint is shipped when the code is on main (or will be when this branch merges) and its finish line has been crossed. Don't keep sprints around to admire — if the work is done, delete the file.
 
 ## Preserving context
 
-Shipped items often contain history that upcoming items build on — decisions made, alternatives rejected, patterns established. That context belongs in the remaining wave items as free text, not as standalone shipped-item files.
+Shipped sprints often contain history that upcoming sprints build on — decisions made, alternatives rejected, patterns established. That context belongs in the remaining sprint files as free text, not as standalone shipped files.
 
-If there are no remaining items, the context doesn't need a home. Git has the history.
+If there are no remaining sprints, the context doesn't need a home. Git has the history.
 
 ## Output
 

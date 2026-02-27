@@ -199,13 +199,14 @@ fn source_key(source: DocumentSource) -> String {
     match source {
         DocumentSource::Step => "step",
         DocumentSource::Direction => "direction",
+        DocumentSource::Diff => "diff",
+        DocumentSource::RepoDoc => "repo_doc",
+        DocumentSource::Scratch => "scratch",
         DocumentSource::Wave => "wave",
         DocumentSource::WaveMemory => "wave_memory",
-        DocumentSource::Area => "area",
-        DocumentSource::Diff => "diff",
-        DocumentSource::Clipboard => "clipboard",
-        DocumentSource::RepoDoc => "repo_doc",
         DocumentSource::Summary => "summary",
+        DocumentSource::Area => "area",
+        DocumentSource::Clipboard => "clipboard",
     }
     .to_string()
 }

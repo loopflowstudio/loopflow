@@ -7,18 +7,36 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$CURRENT_DIR/helpers.sh"
 
 # ---------------------------------------------------------------------------
+# Format application
+# ---------------------------------------------------------------------------
+
+# Apply @loopflow_status_format template with variable substitution.
+# Variables: #{status} (computed text), #{branch}, #{step}, #{waves}, #{wave}
+loopflow_apply_format() {
+    local status="$1" branch="$2" step="$3" waves="$4" wave="$5"
+    local fmt
+    fmt="$(loopflow_get_option "@loopflow_status_format" "[lf: #{status}]")"
+    fmt="${fmt//\#\{status\}/$status}"
+    fmt="${fmt//\#\{branch\}/$branch}"
+    fmt="${fmt//\#\{step\}/$step}"
+    fmt="${fmt//\#\{waves\}/$waves}"
+    fmt="${fmt//\#\{wave\}/$wave}"
+    echo "$fmt"
+}
+
+# ---------------------------------------------------------------------------
 # Status generation
 # ---------------------------------------------------------------------------
 
 generate_lf_status() {
-    local pane_path branch status_text
+    local pane_path branch
 
     # Get git branch from pane's cwd
     pane_path="$(loopflow_pane_path)"
     branch="$(git -C "$pane_path" rev-parse --abbrev-ref HEAD 2>/dev/null)"
 
     if [[ -z "$branch" ]]; then
-        echo "[lf]"
+        loopflow_apply_format "" "" "" "" ""
         return
     fi
 
@@ -33,18 +51,19 @@ generate_lf_status() {
         fi
     fi
 
+    local status_text
     if [[ -n "$active_step" ]]; then
         status_text="$branch ▶ $active_step"
     else
         status_text="$branch"
     fi
 
-    echo "[lf: $status_text]"
+    loopflow_apply_format "$status_text" "$branch" "$active_step" "" ""
 }
 
 generate_container_status() {
     if ! loopflow_has_cmd lfq; then
-        echo "[lf: --]"
+        loopflow_apply_format "--" "" "" "" ""
         return
     fi
 
@@ -72,9 +91,9 @@ generate_container_status() {
             fi
         fi
         if echo "$lfd_out" | grep -qiE 'starting|running'; then
-            echo "[lf: starting...]"
+            loopflow_apply_format "starting..." "" "" "" ""
         else
-            echo "[lf: ! offline]"
+            loopflow_apply_format "! offline" "" "" "" ""
         fi
         return
     fi
@@ -88,21 +107,23 @@ generate_container_status() {
     fi
 
     if [[ -z "$output" ]] || [[ "$output" == "null" ]]; then
-        echo "[lf: idle]"
+        loopflow_apply_format "idle" "" "" "0" ""
         return
     fi
 
     # Parse wave count and active wave (portable JSON — assumes top-level array of objects)
-    local wave_count active_wave
+    local wave_count active_wave status_text
     wave_count="$(echo "$output" | grep -c '"name"\s*:' 2>/dev/null || echo "0")"
     active_wave="$(echo "$output" | grep -o '"name":"[^"]*"' | head -1 | sed 's/"name":"//;s/"//' 2>/dev/null)"
 
     if [[ "$wave_count" -eq 0 ]]; then
-        echo "[lf: idle]"
+        loopflow_apply_format "idle" "" "" "0" ""
     elif [[ -n "$active_wave" ]]; then
-        echo "[lf: $wave_count waves | $active_wave]"
+        status_text="$wave_count waves | $active_wave"
+        loopflow_apply_format "$status_text" "" "" "$wave_count" "$active_wave"
     else
-        echo "[lf: $wave_count waves]"
+        status_text="$wave_count waves"
+        loopflow_apply_format "$status_text" "" "" "$wave_count" ""
     fi
 }
 
@@ -138,7 +159,7 @@ main() {
             status_text="${cached}~"
             source="cache"
         else
-            status_text="[lf]"
+            status_text="$(loopflow_apply_format "" "" "" "" "")"
             source="fallback"
         fi
     fi

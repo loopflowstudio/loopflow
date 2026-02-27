@@ -19,6 +19,7 @@ set_default() {
 
 set_default "@loopflow_mode" "auto"
 set_default "@loopflow_key_prefix" "l"
+set_default "@loopflow_status_format" "[lf: #{status}]"
 set_default "@loopflow_status_ttl_ms" "2000"
 set_default "@loopflow_status_timeout_ms" "250"
 

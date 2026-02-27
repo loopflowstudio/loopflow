@@ -48,8 +48,7 @@ jobs:
         working-directory: ${{ github.workspace }}
       - name: Upload DMG to R2
         run: |
-          uv pip install --system boto3
-          python3 - <<'SCRIPT'
+          uv run --with boto3 python3 - <<'SCRIPT'
           import boto3, os
           version = os.environ["GITHUB_REF_NAME"].lstrip("v")
           client = boto3.client(

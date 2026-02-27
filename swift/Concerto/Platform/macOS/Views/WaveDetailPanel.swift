@@ -882,7 +882,7 @@ struct WaveDetailPanel: View {
                 }
             } catch {
                 await MainActor.run {
-                    fileDiffs[path] = ""
+                    fileDiffs[path] = nil
                 }
             }
         }

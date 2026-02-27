@@ -1,0 +1,9 @@
+flow: build
+area:
+  - rust/loopflow/src/engine/worktrees.rs
+  - rust/loopflow/src/engine/worktree.rs
+  - rust/loopflow/src/lf/commands/ops/mod.rs
+  - .lf/steps/
+direction:
+  - reliability
+  - simplicity

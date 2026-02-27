@@ -190,6 +190,47 @@ pub enum AuthError {
     CredentialSocket { provider: Provider, message: String },
 }
 
+#[derive(Debug, Error)]
+pub enum TokenRefreshError {
+    #[error("{provider} refresh command unavailable: {command}")]
+    CommandUnavailable { provider: Provider, command: String },
+    #[error("{provider} refresh command failed: {message}")]
+    CommandFailed { provider: Provider, message: String },
+    #[error("{provider} refresh command IO failure: {source}")]
+    CommandIo {
+        provider: Provider,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{provider} token not found after refresh")]
+    MissingToken { provider: Provider },
+}
+
+#[async_trait]
+trait RefreshCommandRunner: Send + Sync {
+    async fn run(
+        &self,
+        program: &'static str,
+        args: &'static [&'static str],
+    ) -> Result<std::process::Output, std::io::Error>;
+}
+
+#[derive(Debug)]
+struct TokioRefreshCommandRunner;
+
+#[async_trait]
+impl RefreshCommandRunner for TokioRefreshCommandRunner {
+    async fn run(
+        &self,
+        program: &'static str,
+        args: &'static [&'static str],
+    ) -> Result<std::process::Output, std::io::Error> {
+        let mut command = Command::new(program);
+        command.args(args);
+        command.output().await
+    }
+}
+
 #[async_trait]
 pub trait AuthBroker: Send + Sync {
     fn provider(&self) -> Provider;
@@ -1300,6 +1341,112 @@ fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
         .map_err(|err| AuthError::Filesystem(format!("write {}: {err}", auth_path.display())))
 }
 
+pub async fn refresh_provider_token(
+    provider: Provider,
+) -> Result<ProviderToken, TokenRefreshError> {
+    refresh_provider_token_with_runner(provider, &home_dir_or_cwd(), &TokioRefreshCommandRunner)
+        .await
+}
+
+async fn refresh_provider_token_with_runner(
+    provider: Provider,
+    home_dir: &Path,
+    runner: &dyn RefreshCommandRunner,
+) -> Result<ProviderToken, TokenRefreshError> {
+    match provider {
+        Provider::GitHub => refresh_github_token(home_dir, runner).await,
+        Provider::Claude => refresh_claude_token(home_dir),
+        Provider::Codex => refresh_codex_token(home_dir, runner).await,
+        Provider::OpenCodeZen => {
+            extract_opencode_zen_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+                provider: Provider::OpenCodeZen,
+            })
+        }
+    }
+}
+
+async fn refresh_github_token(
+    home_dir: &Path,
+    runner: &dyn RefreshCommandRunner,
+) -> Result<ProviderToken, TokenRefreshError> {
+    run_refresh_command(
+        Provider::GitHub,
+        "gh",
+        &["auth", "refresh", "--hostname", "github.com"],
+        runner,
+        true,
+    )
+    .await?;
+
+    extract_github_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+        provider: Provider::GitHub,
+    })
+}
+
+fn refresh_claude_token(home_dir: &Path) -> Result<ProviderToken, TokenRefreshError> {
+    extract_claude_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+        provider: Provider::Claude,
+    })
+}
+
+async fn refresh_codex_token(
+    home_dir: &Path,
+    runner: &dyn RefreshCommandRunner,
+) -> Result<ProviderToken, TokenRefreshError> {
+    let _ = run_refresh_command(
+        Provider::Codex,
+        "codex",
+        &["login", "--refresh"],
+        runner,
+        false,
+    )
+    .await;
+
+    extract_codex_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+        provider: Provider::Codex,
+    })
+}
+
+async fn run_refresh_command(
+    provider: Provider,
+    program: &'static str,
+    args: &'static [&'static str],
+    runner: &dyn RefreshCommandRunner,
+    fail_on_command_error: bool,
+) -> Result<(), TokenRefreshError> {
+    match runner.run(program, args).await {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) if fail_on_command_error => Err(TokenRefreshError::CommandFailed {
+            provider,
+            message: summarize_command_output(&output),
+        }),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound && fail_on_command_error => {
+            Err(TokenRefreshError::CommandUnavailable {
+                provider,
+                command: program.to_string(),
+            })
+        }
+        Err(err) if fail_on_command_error => Err(TokenRefreshError::CommandIo {
+            provider,
+            source: err,
+        }),
+        Err(_) => Ok(()),
+    }
+}
+
+fn summarize_command_output(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+    if !stdout.is_empty() {
+        return stdout;
+    }
+    format!("exit status {}", output.status)
+}
+
 fn normalize_program_name(program: &str) -> String {
     std::path::Path::new(program)
         .file_name()
@@ -1374,12 +1521,56 @@ pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String,
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
+    use std::os::unix::process::ExitStatusExt;
+    use std::sync::Mutex as StdMutex;
     use std::thread;
 
     use super::*;
     use tempfile::tempdir;
+
+    #[derive(Debug)]
+    struct FakeRefreshRunner {
+        responses: StdMutex<VecDeque<Result<std::process::Output, std::io::Error>>>,
+    }
+
+    impl FakeRefreshRunner {
+        fn new(responses: Vec<Result<std::process::Output, std::io::Error>>) -> Self {
+            Self {
+                responses: StdMutex::new(VecDeque::from(responses)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RefreshCommandRunner for FakeRefreshRunner {
+        async fn run(
+            &self,
+            _program: &'static str,
+            _args: &'static [&'static str],
+        ) -> Result<std::process::Output, std::io::Error> {
+            self.responses
+                .lock()
+                .expect("runner mutex poisoned")
+                .pop_front()
+                .unwrap_or_else(|| {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "no queued command response",
+                    ))
+                })
+        }
+    }
+
+    fn command_output(status_code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(status_code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
 
     fn start_sequenced_socket_server(
         socket_path: PathBuf,
@@ -1766,5 +1957,69 @@ mod tests {
         assert!(env_vars
             .iter()
             .any(|(name, value)| name == "OPENCODE_API_KEY" && value == "opencode-key"));
+    }
+
+    #[tokio::test]
+    async fn refresh_codex_token_falls_back_to_file_when_command_missing() {
+        let tmp = tempdir().expect("tempdir");
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"access_token":"oauth-token"}"#,
+        )
+        .expect("write auth json");
+        let runner = FakeRefreshRunner::new(vec![Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "codex not installed",
+        ))]);
+
+        let token = refresh_provider_token_with_runner(Provider::Codex, tmp.path(), &runner).await;
+        let token = token.expect("fallback file refresh should succeed");
+        assert_eq!(token.provider, "codex");
+        assert_eq!(token.access_token, "oauth-token");
+    }
+
+    #[tokio::test]
+    async fn refresh_github_token_requires_successful_refresh_command() {
+        let tmp = tempdir().expect("tempdir");
+        let hosts = tmp.path().join(".config/gh");
+        fs::create_dir_all(&hosts).expect("hosts dir");
+        fs::write(
+            hosts.join("hosts.yml"),
+            "github.com:\n  user: jackdanger\n  oauth_token: refreshed\n",
+        )
+        .expect("write hosts");
+        let runner = FakeRefreshRunner::new(vec![Ok(command_output(1, "", "refresh failed"))]);
+
+        let result =
+            refresh_provider_token_with_runner(Provider::GitHub, tmp.path(), &runner).await;
+
+        assert!(matches!(
+            result,
+            Err(TokenRefreshError::CommandFailed {
+                provider: Provider::GitHub,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn refresh_github_token_extracts_updated_token_after_refresh() {
+        let tmp = tempdir().expect("tempdir");
+        let hosts = tmp.path().join(".config/gh");
+        fs::create_dir_all(&hosts).expect("hosts dir");
+        fs::write(
+            hosts.join("hosts.yml"),
+            "github.com:\n  user: jackdanger\n  oauth_token: refreshed-token\n",
+        )
+        .expect("write hosts");
+        let runner = FakeRefreshRunner::new(vec![Ok(command_output(0, "ok", ""))]);
+
+        let token = refresh_provider_token_with_runner(Provider::GitHub, tmp.path(), &runner).await;
+        let token = token.expect("github refresh should succeed");
+        assert_eq!(token.provider, "github");
+        assert_eq!(token.access_token, "refreshed-token");
+        assert_eq!(token.login, Some("jackdanger".to_string()));
     }
 }

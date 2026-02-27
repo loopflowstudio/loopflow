@@ -1,0 +1,1 @@
+- Assumption (2026-02-27): `provider_tokens.expires_at = None` is treated as "not known to be expired" for refresh-success checks. The proactive loop still skips these rows for due-refresh selection per design.

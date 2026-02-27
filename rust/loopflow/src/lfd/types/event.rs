@@ -50,6 +50,21 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
+    #[serde(rename = "auth.token_refreshed")]
+    AuthTokenRefreshed {
+        provider: Provider,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        login: Option<String>,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
+    #[serde(rename = "auth.refresh_failed")]
+    AuthRefreshFailed {
+        provider: Provider,
+        error: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
 
     // Wave lifecycle
     WaveCreated {
@@ -208,6 +223,22 @@ impl Event {
     pub fn auth_disconnected(provider: Provider) -> Self {
         Self::AuthDisconnected {
             provider,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn auth_token_refreshed(provider: Provider, login: Option<String>) -> Self {
+        Self::AuthTokenRefreshed {
+            provider,
+            login,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn auth_refresh_failed(provider: Provider, error: String) -> Self {
+        Self::AuthRefreshFailed {
+            provider,
+            error,
             timestamp: Self::now(),
         }
     }
@@ -429,6 +460,8 @@ mod tests {
             Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
             Event::agent_ended(id(), AgentStatus::Failed),
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
+            Event::auth_token_refreshed(Provider::GitHub, Some("jackdanger".to_string())),
+            Event::auth_refresh_failed(Provider::GitHub, "refresh failed".to_string()),
         ];
         for event in events {
             let json = serde_json::to_string(&event).unwrap();
@@ -445,6 +478,18 @@ mod tests {
         assert_eq!(json["type"], "auth.connected");
         assert_eq!(json["provider"], "github");
         assert_eq!(json["login"], "jackdanger");
+
+        let refreshed = Event::auth_token_refreshed(Provider::Claude, None);
+        let refreshed_json = serde_json::to_value(&refreshed).expect("serialize refreshed");
+        assert_eq!(refreshed_json["type"], "auth.token_refreshed");
+        assert_eq!(refreshed_json["provider"], "claude");
+        assert!(refreshed_json.get("login").is_none());
+
+        let failed = Event::auth_refresh_failed(Provider::Codex, "timed out".to_string());
+        let failed_json = serde_json::to_value(&failed).expect("serialize failure");
+        assert_eq!(failed_json["type"], "auth.refresh_failed");
+        assert_eq!(failed_json["provider"], "codex");
+        assert_eq!(failed_json["error"], "timed out");
     }
 
     #[test]

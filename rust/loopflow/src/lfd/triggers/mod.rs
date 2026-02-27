@@ -6,6 +6,7 @@ mod loop_ticker;
 mod queue_reconcile;
 mod recovery;
 mod summary_refresh;
+mod token_refresh;
 mod watch;
 
 pub use activation::{
@@ -19,4 +20,5 @@ pub use loop_ticker::spawn_loop_ticker;
 pub use queue_reconcile::spawn_queue_reconciler;
 pub use recovery::spawn_recovery_loop;
 pub use summary_refresh::spawn_summary_refresh;
+pub use token_refresh::spawn_token_refresh;
 pub use watch::spawn_watch_poller;

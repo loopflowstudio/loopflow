@@ -20,6 +20,14 @@ Token store (Phase 01) and credential injection (Phase 03) shipped — `provider
 - `lfd install` guides new users through provider auth in one shot
 - Existing installs with filesystem-based auth continue working (DB is primary, filesystem is fallback)
 
+## Phase boundaries
+
+- **01-token-store**: DB-backed persistence. Tokens captured at auth completion, status reads DB first, filesystem fallback preserved. **Shipped.**
+- **02-proactive-refresh**: Background task refreshes tokens before expiry. Event emission for success/failure. Graceful fallback when provider CLI doesn't support refresh. **In progress.**
+- **03-credential-injection**: Both local and Docker executors pull tokens from DB at agent launch. No host env dependency for API keys. **Shipped.**
+- **04-install-onboarding**: `lfd install` includes interactive provider auth setup. At least one agent provider + GitHub required to complete.
+
+
 ## Risks
 
 - **Provider refresh paths vary.** `gh auth refresh` exists. `claude auth refresh` may not. Must detect absent refresh commands and fall back to emitting an `auth.refresh_required` event.

@@ -281,11 +281,6 @@ pub struct Config {
     #[serde(default)]
     pub budgets: BudgetConfig,
 
-    /// Inject built-in steps and directions as agent skills (e.g. .agents/skills/).
-    /// Always on for lfd; opt-in for lf CLI.
-    #[serde(default)]
-    pub inject_skills: bool,
-
     /// Agent for RLM sub-agents (default: same as agent)
     #[serde(default)]
     pub rlm_agent: Option<String>,
@@ -348,7 +343,6 @@ impl Default for Config {
             test: None,
             autoprune: AutopruneConfig::default(),
             budgets: BudgetConfig::default(),
-            inject_skills: false,
             rlm_agent: None,
             release: ReleaseConfig::default(),
             rlm_max_parallel: default_rlm_max_parallel(),

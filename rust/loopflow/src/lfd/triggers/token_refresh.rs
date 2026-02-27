@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::lfd::events::EventHub;
 use crate::lfd::provider_auth::{refresh_provider_token, Provider};
+use crate::lfd::store::rows::now_unix;
 use crate::lfd::store::{ProviderToken, SharedStore};
 use crate::lfd::types::Event;
 
@@ -227,10 +228,6 @@ async fn refresh_provider_token_row(
                 .send(Event::auth_refresh_failed(provider, reason));
         }
     }
-}
-
-fn now_unix() -> i64 {
-    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 #[cfg(test)]

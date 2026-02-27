@@ -368,23 +368,6 @@ impl PostgresStore {
     pub async fn delete_repo(&self, path: &str) -> StoreResult<()> {
         let path = path.to_string();
         self.with_client(|client| async move {
-            let repo_id = client
-                .query_opt(
-                    "SELECT repo_id FROM repos WHERE path = $1 LIMIT 1",
-                    &[&path],
-                )
-                .await?
-                .map(|row| row.get::<_, String>(0));
-
-            if let Some(repo_id) = repo_id {
-                client
-                    .execute(
-                        "DELETE FROM repo_edges WHERE parent_repo_id = $1 OR child_repo_id = $1",
-                        &[&repo_id],
-                    )
-                    .await?;
-            }
-
             client
                 .execute("DELETE FROM repos WHERE path = $1", &[&path])
                 .await?;

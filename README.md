@@ -240,6 +240,7 @@ Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Keybindin
 | `p` | Open PR |
 | `n` | Next iteration |
 | `d` | Land PR |
+| `u` | Start/bootstrap |
 | `w` | Pick wave/worktree |
 | `L` | Pick layout |
 | `?` | Help |

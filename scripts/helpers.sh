@@ -271,6 +271,15 @@ loopflow_open_layout() {
 # Command dispatch
 # ---------------------------------------------------------------------------
 
+# Pick a wave and send an lfq command to the active pane.
+# loopflow_pick_wave already checks for lfq in container mode.
+_loopflow_container_wave_cmd() {
+    local cmd="$1"
+    local wave
+    wave="$(loopflow_pick_wave)" || return 1
+    tmux send-keys "lfq $cmd '$wave'" Enter
+}
+
 loopflow_dispatch() {
     local action="$1"
     local mode
@@ -279,13 +288,7 @@ loopflow_dispatch() {
     case "$action" in
         run)
             if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq run '$wave'" Enter
+                _loopflow_container_wave_cmd run
             else
                 if ! loopflow_has_cmd lf; then
                     loopflow_display "lf not found — install loopflow first"
@@ -296,27 +299,14 @@ loopflow_dispatch() {
             ;;
         stop)
             if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq stop '$wave'" Enter
+                _loopflow_container_wave_cmd stop
             else
-                # In lf mode, send C-c to current pane
                 tmux send-keys C-c
             fi
             ;;
         logs)
             if [[ "$mode" == "container" ]]; then
-                if ! loopflow_has_cmd lfq; then
-                    loopflow_display "lfq not found"
-                    return 1
-                fi
-                local wave
-                wave="$(loopflow_pick_wave)" || return 1
-                tmux send-keys "lfq logs '$wave'" Enter
+                _loopflow_container_wave_cmd logs
             else
                 loopflow_display "logs: use lf output in terminal"
             fi
@@ -328,23 +318,12 @@ loopflow_dispatch() {
                 loopflow_display "gh CLI not found"
             fi
             ;;
-        next)
+        next|land)
             if [[ "$mode" == "container" ]]; then
-                loopflow_display "next: not yet implemented for container mode"
+                _loopflow_container_wave_cmd land
             else
                 if loopflow_has_cmd lf; then
-                    tmux send-keys "lf ops next" Enter
-                else
-                    loopflow_display "lf not found"
-                fi
-            fi
-            ;;
-        land)
-            if [[ "$mode" == "container" ]]; then
-                loopflow_display "land: not yet implemented for container mode"
-            else
-                if loopflow_has_cmd lf; then
-                    tmux send-keys "lf ops land" Enter
+                    tmux send-keys "lf ops $action" Enter
                 else
                     loopflow_display "lf not found"
                 fi
@@ -362,6 +341,9 @@ loopflow_dispatch() {
             ;;
         layout-pick)
             loopflow_open_layout
+            ;;
+        up)
+            tmux send-keys "'$LOOPFLOW_DIR/scripts/lfd-up.sh'" Enter
             ;;
         help)
             loopflow_show_help
@@ -393,6 +375,7 @@ prefix+$prefix+o  open logs
 prefix+$prefix+p  open PR
 prefix+$prefix+n  next iteration
 prefix+$prefix+d  land PR
+prefix+$prefix+u  start/bootstrap
 prefix+$prefix+w  pick wave
 prefix+$prefix+L  pick layout
 prefix+$prefix+?  this help
@@ -400,8 +383,8 @@ EOF
 
     # Try display-popup (tmux 3.2+), fallback to display-message
     if loopflow_has_popup; then
-        tmux display-popup -w 40 -h 14 -E "cat '$help_file'; read -n 1"
+        tmux display-popup -w 40 -h 15 -E "cat '$help_file'; read -n 1"
     else
-        loopflow_display "prefix+$prefix+{r,s,o,p,n,d,w,L,?} — use ? in popup-capable tmux 3.2+"
+        loopflow_display "prefix+$prefix+{r,s,o,p,n,d,u,w,L,?} — use ? in popup-capable tmux 3.2+"
     fi
 }

@@ -11,6 +11,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
@@ -190,6 +191,47 @@ pub enum AuthError {
     CredentialSocket { provider: Provider, message: String },
 }
 
+#[derive(Debug, Error)]
+pub enum TokenRefreshError {
+    #[error("{provider} refresh command unavailable: {command}")]
+    CommandUnavailable { provider: Provider, command: String },
+    #[error("{provider} refresh command failed: {message}")]
+    CommandFailed { provider: Provider, message: String },
+    #[error("{provider} refresh command IO failure: {source}")]
+    CommandIo {
+        provider: Provider,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{provider} token not found after refresh")]
+    MissingToken { provider: Provider },
+}
+
+#[async_trait]
+trait RefreshCommandRunner: Send + Sync {
+    async fn run(
+        &self,
+        program: &'static str,
+        args: &'static [&'static str],
+    ) -> Result<std::process::Output, std::io::Error>;
+}
+
+#[derive(Debug)]
+struct TokioRefreshCommandRunner;
+
+#[async_trait]
+impl RefreshCommandRunner for TokioRefreshCommandRunner {
+    async fn run(
+        &self,
+        program: &'static str,
+        args: &'static [&'static str],
+    ) -> Result<std::process::Output, std::io::Error> {
+        let mut command = Command::new(program);
+        command.args(args);
+        command.output().await
+    }
+}
+
 #[async_trait]
 pub trait AuthBroker: Send + Sync {
     fn provider(&self) -> Provider;
@@ -250,9 +292,19 @@ impl AuthBroker for SocketAuthBroker {
             .get_credential(self.provider_name.as_str())
             .await
         {
-            Ok(credential) => Ok(AuthStatus::Active {
-                login: credential.login,
-            }),
+            Ok(credential) => {
+                if credential
+                    .expires_at
+                    .as_deref()
+                    .and_then(parse_expires_at)
+                    .is_some_and(|expires_at| expires_at <= now_unix())
+                {
+                    return Ok(AuthStatus::Expired);
+                }
+                Ok(AuthStatus::Active {
+                    login: credential.login,
+                })
+            }
             Err(CredentialSocketError::NotFound { .. }) => Ok(AuthStatus::None),
             Err(err) => Err(self.map_socket_error(err)),
         }
@@ -263,6 +315,22 @@ impl AuthBroker for SocketAuthBroker {
             .disconnect(self.provider_name.as_str())
             .await
             .map_err(|err| self.map_socket_error(err))
+    }
+
+    async fn extract_token(&self) -> Option<ProviderToken> {
+        let credential = self
+            .client
+            .get_credential(self.provider_name.as_str())
+            .await
+            .ok()?;
+        Some(ProviderToken {
+            provider: self.provider_name.as_str().to_string(),
+            access_token: credential.token,
+            refresh_token: None,
+            expires_at: credential.expires_at.as_deref().and_then(parse_expires_at),
+            login: credential.login,
+            updated_at: now_unix(),
+        })
     }
 }
 
@@ -1162,11 +1230,15 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
         .get("user")
         .and_then(serde_yaml_ng::Value::as_str)
         .map(String::from);
+    let expires_at = entry
+        .get("oauth_token_expires_at")
+        .or_else(|| entry.get("expires_at"))
+        .and_then(parse_expires_at_yaml_value);
     Some(ProviderToken {
         provider: "github".to_string(),
         access_token: token.to_string(),
         refresh_token: None,
-        expires_at: None,
+        expires_at,
         login,
         updated_at: now_unix(),
     })
@@ -1177,11 +1249,20 @@ fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
     let content = fs::read_to_string(cred_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     let token = json.get("accessToken")?.as_str()?;
+    let expires_at = read_json_expires_at(
+        &json,
+        &[
+            "expiresAt",
+            "expires_at",
+            "accessTokenExpiresAt",
+            "access_token_expires_at",
+        ],
+    );
     Some(ProviderToken {
         provider: "claude".to_string(),
         access_token: token.to_string(),
         refresh_token: None,
-        expires_at: None,
+        expires_at,
         login: None,
         updated_at: now_unix(),
     })
@@ -1194,11 +1275,20 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
     // Store OAuth access tokens only.
     // Never capture manual API keys from Codex auth state.
     let token = json.get("access_token").and_then(|v| v.as_str())?;
+    let expires_at = read_json_expires_at(
+        &json,
+        &[
+            "expires_at",
+            "expiresAt",
+            "accessTokenExpiresAt",
+            "access_token_expires_at",
+        ],
+    );
     Some(ProviderToken {
         provider: "codex".to_string(),
         access_token: token.to_string(),
         refresh_token: None,
-        expires_at: None,
+        expires_at,
         login: None,
         updated_at: now_unix(),
     })
@@ -1213,17 +1303,18 @@ fn opencode_auth_path(home_dir: &Path) -> PathBuf {
 }
 
 fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
-    let (access_token, login) = if let Some(key) = read_nonempty_env("OPENCODE_API_KEY") {
-        (key, None)
+    let (access_token, login, expires_at) = if let Some(key) = read_nonempty_env("OPENCODE_API_KEY")
+    {
+        (key, None, None)
     } else {
-        let (key, login) = read_opencode_credential(home_dir)?;
-        (key, login)
+        let (key, login, expires_at) = read_opencode_credential(home_dir)?;
+        (key, login, expires_at)
     };
     Some(ProviderToken {
         provider: Provider::OpenCodeZen.as_str().to_string(),
         access_token,
         refresh_token: None,
-        expires_at: None,
+        expires_at,
         login,
         updated_at: now_unix(),
     })
@@ -1241,8 +1332,8 @@ fn read_nonempty_env(name: &str) -> Option<String> {
 }
 
 /// Read OpenCode credential from `~/.local/share/opencode/auth.json`.
-/// Returns `(api_key, optional_login)`.
-fn read_opencode_credential(home_dir: &Path) -> Option<(String, Option<String>)> {
+/// Returns `(api_key, optional_login, optional_expires_at)`.
+fn read_opencode_credential(home_dir: &Path) -> Option<(String, Option<String>, Option<i64>)> {
     let auth_path = opencode_auth_path(home_dir);
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -1257,7 +1348,90 @@ fn read_opencode_credential(home_dir: &Path) -> Option<(String, Option<String>)>
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(String::from);
-    Some((key.to_string(), login))
+    let expires_at = entry
+        .get("expires_at")
+        .or_else(|| entry.get("expiresAt"))
+        .and_then(parse_expires_at_json_value);
+    Some((key.to_string(), login, expires_at))
+}
+
+fn parse_expiry_from_parts(
+    i: Option<i64>,
+    u: Option<u64>,
+    f: Option<f64>,
+    s: Option<&str>,
+) -> Option<i64> {
+    if let Some(seconds) = i.and_then(normalize_epoch_seconds) {
+        return Some(seconds);
+    }
+    if let Some(seconds) = u
+        .and_then(|raw| i64::try_from(raw).ok())
+        .and_then(normalize_epoch_seconds)
+    {
+        return Some(seconds);
+    }
+    if let Some(seconds) = f.and_then(normalize_epoch_seconds_f64) {
+        return Some(seconds);
+    }
+    s.and_then(parse_expires_at)
+}
+
+fn parse_expires_at_yaml_value(value: &serde_yaml_ng::Value) -> Option<i64> {
+    parse_expiry_from_parts(
+        value.as_i64(),
+        value.as_u64(),
+        value.as_f64(),
+        value.as_str(),
+    )
+}
+
+fn read_json_expires_at(json: &serde_json::Value, keys: &[&str]) -> Option<i64> {
+    let object = json.as_object()?;
+    keys.iter()
+        .filter_map(|key| object.get(*key))
+        .find_map(parse_expires_at_json_value)
+}
+
+fn parse_expires_at_json_value(value: &serde_json::Value) -> Option<i64> {
+    parse_expiry_from_parts(
+        value.as_i64(),
+        value.as_u64(),
+        value.as_f64(),
+        value.as_str(),
+    )
+}
+
+fn parse_expires_at(raw: &str) -> Option<i64> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(seconds) = trimmed.parse::<i64>() {
+        return normalize_epoch_seconds(seconds);
+    }
+    if let Ok(seconds) = trimmed.parse::<f64>() {
+        return normalize_epoch_seconds_f64(seconds);
+    }
+    time::OffsetDateTime::parse(trimmed, &Rfc3339)
+        .ok()
+        .map(|timestamp| timestamp.unix_timestamp())
+}
+
+fn normalize_epoch_seconds(seconds: i64) -> Option<i64> {
+    if seconds <= 0 {
+        return None;
+    }
+    if seconds > 100_000_000_000 {
+        return Some(seconds / 1000);
+    }
+    Some(seconds)
+}
+
+fn normalize_epoch_seconds_f64(seconds: f64) -> Option<i64> {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return None;
+    }
+    normalize_epoch_seconds(seconds.floor() as i64)
 }
 
 fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
@@ -1298,6 +1472,112 @@ fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
     })?;
     fs::write(&auth_path, rendered)
         .map_err(|err| AuthError::Filesystem(format!("write {}: {err}", auth_path.display())))
+}
+
+pub async fn refresh_provider_token(
+    provider: Provider,
+) -> Result<ProviderToken, TokenRefreshError> {
+    refresh_provider_token_with_runner(provider, &home_dir_or_cwd(), &TokioRefreshCommandRunner)
+        .await
+}
+
+async fn refresh_provider_token_with_runner(
+    provider: Provider,
+    home_dir: &Path,
+    runner: &dyn RefreshCommandRunner,
+) -> Result<ProviderToken, TokenRefreshError> {
+    match provider {
+        Provider::GitHub => refresh_github_token(home_dir, runner).await,
+        Provider::Claude => refresh_claude_token(home_dir),
+        Provider::Codex => refresh_codex_token(home_dir, runner).await,
+        Provider::OpenCodeZen => {
+            extract_opencode_zen_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+                provider: Provider::OpenCodeZen,
+            })
+        }
+    }
+}
+
+async fn refresh_github_token(
+    home_dir: &Path,
+    runner: &dyn RefreshCommandRunner,
+) -> Result<ProviderToken, TokenRefreshError> {
+    run_refresh_command(
+        Provider::GitHub,
+        "gh",
+        &["auth", "refresh", "--hostname", "github.com"],
+        runner,
+        true,
+    )
+    .await?;
+
+    extract_github_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+        provider: Provider::GitHub,
+    })
+}
+
+fn refresh_claude_token(home_dir: &Path) -> Result<ProviderToken, TokenRefreshError> {
+    extract_claude_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+        provider: Provider::Claude,
+    })
+}
+
+async fn refresh_codex_token(
+    home_dir: &Path,
+    runner: &dyn RefreshCommandRunner,
+) -> Result<ProviderToken, TokenRefreshError> {
+    let _ = run_refresh_command(
+        Provider::Codex,
+        "codex",
+        &["login", "--refresh"],
+        runner,
+        false,
+    )
+    .await;
+
+    extract_codex_token(home_dir).ok_or(TokenRefreshError::MissingToken {
+        provider: Provider::Codex,
+    })
+}
+
+async fn run_refresh_command(
+    provider: Provider,
+    program: &'static str,
+    args: &'static [&'static str],
+    runner: &dyn RefreshCommandRunner,
+    fail_on_command_error: bool,
+) -> Result<(), TokenRefreshError> {
+    match runner.run(program, args).await {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) if fail_on_command_error => Err(TokenRefreshError::CommandFailed {
+            provider,
+            message: summarize_command_output(&output),
+        }),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound && fail_on_command_error => {
+            Err(TokenRefreshError::CommandUnavailable {
+                provider,
+                command: program.to_string(),
+            })
+        }
+        Err(err) if fail_on_command_error => Err(TokenRefreshError::CommandIo {
+            provider,
+            source: err,
+        }),
+        Err(_) => Ok(()),
+    }
+}
+
+fn summarize_command_output(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+    if !stdout.is_empty() {
+        return stdout;
+    }
+    format!("exit status {}", output.status)
 }
 
 fn normalize_program_name(program: &str) -> String {
@@ -1374,12 +1654,56 @@ pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String,
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
+    use std::os::unix::process::ExitStatusExt;
+    use std::sync::Mutex as StdMutex;
     use std::thread;
 
     use super::*;
     use tempfile::tempdir;
+
+    #[derive(Debug)]
+    struct FakeRefreshRunner {
+        responses: StdMutex<VecDeque<Result<std::process::Output, std::io::Error>>>,
+    }
+
+    impl FakeRefreshRunner {
+        fn new(responses: Vec<Result<std::process::Output, std::io::Error>>) -> Self {
+            Self {
+                responses: StdMutex::new(VecDeque::from(responses)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RefreshCommandRunner for FakeRefreshRunner {
+        async fn run(
+            &self,
+            _program: &'static str,
+            _args: &'static [&'static str],
+        ) -> Result<std::process::Output, std::io::Error> {
+            self.responses
+                .lock()
+                .expect("runner mutex poisoned")
+                .pop_front()
+                .unwrap_or_else(|| {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "no queued command response",
+                    ))
+                })
+        }
+    }
+
+    fn command_output(status_code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(status_code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
 
     fn start_sequenced_socket_server(
         socket_path: PathBuf,
@@ -1410,6 +1734,26 @@ mod tests {
                     .write_all(response.as_bytes())
                     .expect("write HTTP response");
             }
+        })
+    }
+
+    fn start_socket_server_with_body(socket_path: PathBuf, body: &str) -> thread::JoinHandle<()> {
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
+        let response_body = body.to_string();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept unix connection");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write HTTP response");
         })
     }
 
@@ -1706,6 +2050,58 @@ mod tests {
     }
 
     #[test]
+    fn extract_codex_token_parses_rfc3339_expiry() {
+        let tmp = tempdir().expect("tempdir");
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"access_token":"oauth-access-token","expires_at":"2030-01-01T00:00:00Z"}"#,
+        )
+        .expect("write auth json");
+
+        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
+        assert_eq!(token.expires_at, Some(1_893_456_000));
+    }
+
+    #[test]
+    fn extract_claude_token_parses_epoch_millis_expiry() {
+        let tmp = tempdir().expect("tempdir");
+        let claude_dir = tmp.path().join(".claude");
+        fs::create_dir_all(&claude_dir).expect("create claude dir");
+        fs::write(
+            claude_dir.join(".credentials.json"),
+            r#"{"accessToken":"claude-token","expiresAt":"1893456000000"}"#,
+        )
+        .expect("write credentials");
+
+        let token = extract_claude_token(tmp.path()).expect("claude token should load");
+        assert_eq!(token.expires_at, Some(1_893_456_000));
+    }
+
+    #[tokio::test]
+    async fn socket_broker_extract_token_parses_expiry() {
+        let tmp = tempdir().expect("tempdir");
+        let socket_path = tmp.path().join("credentials.sock");
+        let server = start_socket_server_with_body(
+            socket_path.clone(),
+            r#"{"token":"abc123","login":"jack","expires_at":"2030-01-01T00:00:00Z"}"#,
+        );
+        let broker = SocketAuthBroker::new(
+            Provider::GitHub,
+            Arc::new(CredentialSocketClient::new(socket_path)),
+        );
+
+        let token = broker.extract_token().await.expect("token should extract");
+
+        assert_eq!(token.provider, "github");
+        assert_eq!(token.access_token, "abc123");
+        assert_eq!(token.login, Some("jack".to_string()));
+        assert_eq!(token.expires_at, Some(1_893_456_000));
+        server.join().expect("server join");
+    }
+
+    #[test]
     fn extract_opencode_zen_token_reads_auth_file() {
         let tmp = tempdir().expect("tempdir");
         let auth_path = tmp.path().join(".local/share/opencode/auth.json");
@@ -1766,5 +2162,69 @@ mod tests {
         assert!(env_vars
             .iter()
             .any(|(name, value)| name == "OPENCODE_API_KEY" && value == "opencode-key"));
+    }
+
+    #[tokio::test]
+    async fn refresh_codex_token_falls_back_to_file_when_command_missing() {
+        let tmp = tempdir().expect("tempdir");
+        let codex_dir = tmp.path().join(".codex");
+        fs::create_dir_all(&codex_dir).expect("create codex dir");
+        fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"access_token":"oauth-token"}"#,
+        )
+        .expect("write auth json");
+        let runner = FakeRefreshRunner::new(vec![Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "codex not installed",
+        ))]);
+
+        let token = refresh_provider_token_with_runner(Provider::Codex, tmp.path(), &runner).await;
+        let token = token.expect("fallback file refresh should succeed");
+        assert_eq!(token.provider, "codex");
+        assert_eq!(token.access_token, "oauth-token");
+    }
+
+    #[tokio::test]
+    async fn refresh_github_token_requires_successful_refresh_command() {
+        let tmp = tempdir().expect("tempdir");
+        let hosts = tmp.path().join(".config/gh");
+        fs::create_dir_all(&hosts).expect("hosts dir");
+        fs::write(
+            hosts.join("hosts.yml"),
+            "github.com:\n  user: jackdanger\n  oauth_token: refreshed\n",
+        )
+        .expect("write hosts");
+        let runner = FakeRefreshRunner::new(vec![Ok(command_output(1, "", "refresh failed"))]);
+
+        let result =
+            refresh_provider_token_with_runner(Provider::GitHub, tmp.path(), &runner).await;
+
+        assert!(matches!(
+            result,
+            Err(TokenRefreshError::CommandFailed {
+                provider: Provider::GitHub,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn refresh_github_token_extracts_updated_token_after_refresh() {
+        let tmp = tempdir().expect("tempdir");
+        let hosts = tmp.path().join(".config/gh");
+        fs::create_dir_all(&hosts).expect("hosts dir");
+        fs::write(
+            hosts.join("hosts.yml"),
+            "github.com:\n  user: jackdanger\n  oauth_token: refreshed-token\n",
+        )
+        .expect("write hosts");
+        let runner = FakeRefreshRunner::new(vec![Ok(command_output(0, "ok", ""))]);
+
+        let token = refresh_provider_token_with_runner(Provider::GitHub, tmp.path(), &runner).await;
+        let token = token.expect("github refresh should succeed");
+        assert_eq!(token.provider, "github");
+        assert_eq!(token.access_token, "refreshed-token");
+        assert_eq!(token.login, Some("jackdanger".to_string()));
     }
 }

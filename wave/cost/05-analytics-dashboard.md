@@ -1,6 +1,6 @@
 # 05: Analytics Dashboard
 
-New Concerto surface for strategic token analysis.
+**Finish line:** Opening the analytics tab shows token trends over time, groupable by wave/flow/step/model, with a separate prompt composition view.
 
 ## What to build
 
@@ -20,6 +20,3 @@ This phase also populates `CostRates` in the model registry (`provider_models.rs
 - `AgentRun` and `Session` are two parallel types for one concept (one agent invocation). `AgentRun` tracks process lifecycle, `Session` tracks conversation/usage. Unify or make the relationship explicit before building cross-session analytics.
 - `ContextSnapshot.budget` is not yet sourced from session-level configuration. If dynamic context budgeting lands, the prompt lens should reflect it.
 
-## Done when
-
-Opening the analytics tab shows token trends over time, groupable by wave/flow/step/model, with a separate prompt composition view.

@@ -12,8 +12,6 @@ The operator runs a fleet of agents across waves. Today they can see status, dif
 
 v0 = tokens, not dollars. Claude and Codex are subscription plans — there's no per-token cost. But token volume matters: it correlates with context quality, rate limits are real, and when the operator scales to a team (or OpenCode with API keys), the same data becomes a cost dashboard with no schema changes.
 
-The backend captures per-turn token data from all three harnesses (Claude, Codex, OpenCode) as persisted `SessionEvent` payloads (`TurnUsage`, `ContextSnapshot`). Three HTTP endpoints serve session/wave/summary aggregation with `group_by` and filters — pure Rust aggregation above the store layer, no new tables. A provider catalog (`GET /v0/providers`) exposes model metadata and rate structures. The next milestone brings this data into Concerto's UI.
-
 ## Goals
 
 - Capture per-turn token data from all three harnesses (Claude, Codex, OpenCode) with model and source metadata

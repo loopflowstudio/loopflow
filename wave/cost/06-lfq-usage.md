@@ -1,6 +1,6 @@
 # 06: lfq Usage
 
-CLI interface for usage and provider data.
+**Finish line:** `lfq usage --wave engbot` prints token summary to terminal. `lfq providers` lists providers with models and auth status.
 
 ## What to build
 
@@ -18,6 +18,3 @@ Reads from usage and providers APIs. Tabular terminal output, composable with ot
 
 `lfq providers` reads from `GET /v0/providers` (Phase 03). `lfq auth zen` connects OpenCode Zen — the broker is ready, just needs a CLI subcommand.
 
-## Done when
-
-`lfq usage --wave engbot` prints token summary to terminal. `lfq providers` lists providers with models and auth status.

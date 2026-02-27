@@ -8,9 +8,11 @@ Voice sections added to all interactive steps (except `explore`) and codified in
 
 2. **Voice sections added** to `design`, `review`, `refine`, and `review-design` (both `.lf/steps/` and `rust/.../builtins/` copies). Each tailored to the step's nature. `explore` skipped — it's deliberately reactive.
 
-3. **"Key bet" → "core decisions"** in `review-design` — more actionable, tells the agent to find the decisions everything else hinges on.
+3. **`review-design` sharpened** — "Key bet" → "core decisions" (more actionable). "The design doc is a bet —" sentence removed (redundant with "This is the last cheap moment to change it").
 
-4. **Quote-replies design doc** added to `scratch/mobile-quote-replies.md` as reference for future implementation. Wave backlog item preserved.
+4. **Golden prompt updated** — `tests/goldens/builtin_review.md` regenerated to include the new Voice section from the builtin review step.
+
+5. **Quote-replies design doc** added to `scratch/mobile-quote-replies.md` as reference for future implementation. Wave backlog item preserved.
 
 ## Key choices
 
@@ -23,6 +25,10 @@ Voice sections added to all interactive steps (except `explore`) and codified in
 ## Risks
 
 - **Prompt regression** — Voice sections could cause agents to over-index on novelty and skip substance. Mitigated by unchanged structural instructions ("Pick the lenses that matter most", phase ordering in design, etc.).
+
+## Pre-existing notes
+
+- **design.md body divergence** — `.lf/steps/design.md` and `rust/.../builtins/.../design.md` have pre-existing body differences (branch naming paragraph, "sprints" vs "staged wave items"). Not introduced by this branch. Out of scope here.
 
 ## What's not included
 

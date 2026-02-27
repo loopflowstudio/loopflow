@@ -12,8 +12,6 @@ The operator runs a fleet of agents across waves. Today they can see status, dif
 
 v0 = tokens, not dollars. Claude and Codex are subscription plans — there's no per-token cost. But token volume matters: it correlates with context quality, rate limits are real, and when the operator scales to a team (or OpenCode with API keys), the same data becomes a cost dashboard with no schema changes.
 
-Metering infrastructure (Phase 01) and usage aggregation endpoints (Phase 02) shipped — `TurnUsage` and `ContextSnapshot` as persisted `SessionEvent` payloads, harness-agnostic extraction from Claude/Codex/OpenCode, three HTTP endpoints for session/wave/summary aggregation with `group_by` and filters, pure Rust aggregation above the store layer with no new tables.
-
 ## Goals
 
 - Capture per-turn token data from all three harnesses (Claude, Codex, OpenCode) with model and source metadata

@@ -15,6 +15,7 @@ public enum WaveContentParser {
         let (scratchDoc, scratchDocPath) = parseScratchDoc(repoRoot: repoRoot, branch: branch)
 
         if readmeSections.vision == nil,
+           readmeSections.strategy == nil,
            readmeSections.goals == nil,
            readmeSections.risks == nil,
            readmeSections.metrics == nil,
@@ -25,6 +26,7 @@ public enum WaveContentParser {
 
         return WaveContent(
             vision: readmeSections.vision,
+            strategy: readmeSections.strategy,
             goals: readmeSections.goals,
             risks: readmeSections.risks,
             metrics: readmeSections.metrics,
@@ -36,6 +38,7 @@ public enum WaveContentParser {
 
     private struct ReadmeSections {
         var vision: String?
+        var strategy: String?
         var goals: String?
         var risks: String?
         var metrics: String?
@@ -43,6 +46,7 @@ public enum WaveContentParser {
 
     private enum ReadmeSection {
         case vision
+        case strategy
         case goals
         case risks
         case metrics
@@ -76,6 +80,7 @@ public enum WaveContentParser {
 
         return ReadmeSections(
             vision: normalizedSectionText(sectionBuffers[.vision]),
+            strategy: normalizedSectionText(sectionBuffers[.strategy]),
             goals: normalizedSectionText(sectionBuffers[.goals]),
             risks: normalizedSectionText(sectionBuffers[.risks]),
             metrics: normalizedSectionText(sectionBuffers[.metrics])
@@ -86,6 +91,8 @@ public enum WaveContentParser {
         switch header {
         case "## Vision":
             return .vision
+        case "## Strategy":
+            return .strategy
         case "## Goals":
             return .goals
         case "## Risks":

@@ -1,19 +1,20 @@
 # Voice Control
 
-Voice input for Concerto's WaveSessionView. Speak instead of type — faster, hands-free, flow-preserving.
-
 ## Vision
 
-Voice should be a first-class input modality in Concerto. Not a novelty mic button, but a primary way to interact with agents during high-capacity work. The bar: faster than typing for someone in flow.
+Voice input for Concerto's WaveSessionView. Speak instead of type — faster, hands-free, flow-preserving. Not text-to-speech, not voice commands ("next wave", "run tests"), not ambient always-listening beyond VAD, not custom wake words.
 
-The key insight: accuracy beats latency. A 0.5s delay you can trust is better than instant text you have to correct. On-device dictation engines (Apple Speech on latest OS, WhisperKit fallback on older OS) should prioritize trustworthy text over raw speed.
+The bar: faster than typing for someone in flow.
 
-### Not here
+## Strategy
 
-- Text-to-speech / agent reading responses aloud
-- Voice commands ("next wave", "run tests") — dictation only for now
-- Ambient always-listening mode beyond VAD start/stop
-- Custom wake words
+Accuracy beats latency. A 0.5s delay you can trust is better than instant text you have to correct.
+
+Apple-first with WhisperKit fallback: `SpeechAnalyzer` + `DictationTranscriber` on macOS 26+/iOS 26+, WhisperKit tiny model on older OS versions. Runtime engine selection via `defaultEngineFactory()`.
+
+Push-to-talk (Phase 01) and Apple engine foundation (Phase 02) shipped — `VoiceInputService` in LoopflowCore, `VoiceInputButton` with tap-to-toggle and press-and-hold, `AppleDictationVoiceInputEngine` with progressive dictation, `VoiceInputWarmup` for background asset preinstall, dictation-specific output options (punctuation/emoji/etiquette), and runtime fallback to WhisperKit.
+
+Custom language model (`SFSpeechLanguageModel` + `DictationTranscriber.ContentHint.customizedLanguage(...)` for loopflow terms) deferred until base Apple engine path is validated in production use.
 
 ## Goals
 
@@ -21,30 +22,6 @@ The key insight: accuracy beats latency. A 0.5s delay you can trust is better th
 - Graduate to hands-free via Voice Activity Detection — no button needed
 - Add auto-send on silence so the full loop (speak → transcribe → send) requires zero hand interaction
 - Prime the recognizer with contextual vocabulary (wave names, file paths, loopflow terms)
-
-## Priority roadmap (top)
-
-This is the current top of the roadmap, in order:
-
-1. **Apple-first engine (macOS 26+/iOS 26+).** Use `SpeechAnalyzer` + `DictationTranscriber` with progressive dictation for live editable output.
-2. **Background asset preinstall at app launch.** Use `AssetInventory.status(forModules:)` + installation request download so first mic press does not block on model setup.
-3. **Dictation-specific text options.** Enable punctuation/emoji/etiquette replacements for cleaner output by default.
-4. **WhisperKit fallback path.** Keep WhisperKit for macOS 15–25 / iOS 18–25 via runtime engine selection.
-5. **Custom language model (later).** Use `SFSpeechLanguageModel` + `DictationTranscriber.ContentHint.customizedLanguage(...)` for loopflow terms.
-
-## Tech direction: Apple-first with Whisper fallback
-
-- **Primary path (macOS 26+/iOS 26+):** Apple Speech stack (`SpeechAnalyzer` + `DictationTranscriber` + `AssetInventory`).
-- **Fallback path (macOS 15–25 / iOS 18–25):** [WhisperKit](https://github.com/argmaxinc/WhisperKit) tiny model.
-
-This gives us newer dictation behavior and asset management on latest OS versions without dropping support for existing targets.
-
-## Phase boundaries
-
-- **01-push-to-talk**: Mic button in composer, WhisperKit integration, streaming transcription, manual send. *Shipped on branch `jack-heart.voicecontrol.20260226_0925` with `VoiceInputService`, `VoiceInputButton`, inline partial/download/transcribing feedback, denied-permission notice, and unit coverage.*
-- **02-apple-engine-foundation**: Apple-first `SpeechAnalyzer` + `DictationTranscriber` engine, background asset preinstall, dictation options, runtime fallback. *Shipped on same branch — `AppleDictationVoiceInputEngine`, `VoiceInputWarmup`, runtime engine selection.*
-- **03-vad**: Voice Activity Detection replaces push-to-talk — speech starts/stops recording automatically. *Next.*
-- **04-auto-send**: Silence threshold triggers send. Confidence-based — high confidence auto-sends, low confidence highlights uncertain words. *Later.*
 
 ## Risks
 

@@ -20,6 +20,7 @@ use crate::engine::flow::{
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
+use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
 use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
@@ -45,6 +46,35 @@ use super::helpers::{
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, JanitorReport, StartupRecovery};
 use launch::AgentLaunchRequest;
+
+#[derive(Debug, Default)]
+struct GitStatePoller {
+    last_commit_shas: Option<Vec<String>>,
+    last_diff_stat: Option<String>,
+}
+
+impl GitStatePoller {
+    fn has_changed(&mut self, commit_shas: Vec<String>, diff_stat: Option<String>) -> bool {
+        let changed = match &self.last_commit_shas {
+            None => false,
+            Some(previous) => previous != &commit_shas || self.last_diff_stat != diff_stat,
+        };
+        self.last_commit_shas = Some(commit_shas);
+        self.last_diff_stat = diff_stat;
+        changed
+    }
+}
+
+#[derive(Debug)]
+struct GitStatePollerTask {
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for GitStatePollerTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
 
 #[derive(Clone)]
 pub struct WaveExecutor {
@@ -119,6 +149,49 @@ impl WaveExecutor {
 
     pub fn executor_type(&self) -> ExecutorType {
         self.executor_type
+    }
+
+    fn spawn_git_state_poller(
+        &self,
+        wave_id: LfdId,
+        wave_name: String,
+        worktree: String,
+    ) -> GitStatePollerTask {
+        let event_hub = self.event_hub.clone();
+        let handle = tokio::spawn(async move {
+            let mut poller = GitStatePoller::default();
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+
+                let worktree_path = std::path::PathBuf::from(&worktree);
+                let wave_name_for_lookup = wave_name.clone();
+                let state = match tokio::task::spawn_blocking(move || {
+                    infer_wave_git_state_for_worktree(&worktree_path, &wave_name_for_lookup)
+                })
+                .await
+                {
+                    Ok(state) => state,
+                    Err(err) => {
+                        warn!(
+                            wave_id = %wave_id,
+                            error = %err,
+                            "git state poller task join failure"
+                        );
+                        continue;
+                    }
+                };
+
+                let Some(state) = state else {
+                    continue;
+                };
+
+                let commit_shas = state.commits.into_iter().map(|entry| entry.sha).collect();
+                if poller.has_changed(commit_shas, state.diff_stat) {
+                    event_hub.send(Event::wave_updated(wave_id.clone()));
+                }
+            }
+        });
+        GitStatePollerTask { handle }
     }
 
     pub async fn recover_startup(&self) -> Result<StartupRecovery> {
@@ -294,6 +367,11 @@ impl WaveExecutor {
             .get_wave(&run.wave_id)
             .await?
             .ok_or_else(|| anyhow!("wave not found"))?;
+        let _git_state_poller = self.spawn_git_state_poller(
+            wave.id().clone(),
+            wave.name().clone(),
+            run.worktree.clone(),
+        );
         info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "loading flow");
         let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
         let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
@@ -1111,6 +1189,45 @@ mod tests {
             created_at: Some(OffsetDateTime::now_utc()),
             enabled: true,
         }
+    }
+
+    #[test]
+    fn git_state_poller_ignores_initial_snapshot() {
+        let mut poller = GitStatePoller::default();
+        assert!(!poller.has_changed(
+            vec!["abc123".to_string()],
+            Some("1 file changed".to_string())
+        ));
+    }
+
+    #[test]
+    fn git_state_poller_detects_commit_changes() {
+        let mut poller = GitStatePoller::default();
+        assert!(!poller.has_changed(
+            vec!["abc123".to_string()],
+            Some("1 file changed".to_string())
+        ));
+        assert!(!poller.has_changed(
+            vec!["abc123".to_string()],
+            Some("1 file changed".to_string())
+        ));
+        assert!(poller.has_changed(
+            vec!["def456".to_string(), "abc123".to_string()],
+            Some("2 files changed".to_string())
+        ));
+    }
+
+    #[test]
+    fn git_state_poller_detects_diff_stat_changes_without_new_commits() {
+        let mut poller = GitStatePoller::default();
+        assert!(!poller.has_changed(
+            vec!["abc123".to_string()],
+            Some("1 file changed".to_string())
+        ));
+        assert!(poller.has_changed(
+            vec!["abc123".to_string()],
+            Some("3 files changed".to_string())
+        ));
     }
 
     #[tokio::test]

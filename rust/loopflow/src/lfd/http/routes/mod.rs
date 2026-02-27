@@ -197,25 +197,32 @@ pub fn paginate<T>(
 }
 
 #[derive(Debug)]
-struct WaveGitState {
-    worktree: String,
-    branch: Option<String>,
-    commits: Vec<CommitEntryDto>,
-    diff_stat: Option<String>,
+pub(crate) struct WaveGitState {
+    pub(crate) worktree: String,
+    pub(crate) branch: Option<String>,
+    pub(crate) commits: Vec<CommitEntryDto>,
+    pub(crate) diff_stat: Option<String>,
 }
 
-fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
+pub(crate) fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
     let repo_path = std::path::Path::new(repo);
     let worktree = crate::engine::worktrees::worktree_path(repo_path, wave_name);
+    infer_wave_git_state_for_worktree(&worktree, wave_name)
+}
+
+pub(crate) fn infer_wave_git_state_for_worktree(
+    worktree: &std::path::Path,
+    wave_name: &str,
+) -> Option<WaveGitState> {
     if !worktree.exists() {
         return None;
     }
-    let branch = crate::engine::git::current_branch(&worktree).ok().flatten();
+    let branch = crate::engine::git::current_branch(worktree).ok().flatten();
 
-    let diff_ref = nearest_base_ref(&worktree, wave_name);
+    let diff_ref = nearest_base_ref(worktree, wave_name);
 
-    let commits = git_commit_log(&worktree, &diff_ref);
-    let diff_stat = git_diff_stat(&worktree, &diff_ref);
+    let commits = git_commit_log(worktree, &diff_ref);
+    let diff_stat = git_diff_stat(worktree, &diff_ref);
 
     Some(WaveGitState {
         worktree: worktree.to_string_lossy().to_string(),

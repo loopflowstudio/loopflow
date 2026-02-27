@@ -19,6 +19,7 @@ struct WaveDetailPanel: View {
     @Environment(\.palette) private var palette
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.screenshotTab) private var screenshotTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var actionError: String?
     @State private var showingActionError = false
@@ -31,6 +32,11 @@ struct WaveDetailPanel: View {
     @State private var expandedSections: Set<String> = []
     @State private var expandedDiffFiles: Set<String> = []
     @State private var fileDiffs: [String: String] = [:]
+    @State private var previousCommitSHAs: Set<String> = []
+    @State private var displayedCommits: [CommitEntry] = []
+    @State private var highlightedCommitSHAs: Set<String> = []
+    @State private var displayedDiffStat: String?
+    @State private var diffHeaderPulseActive = false
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
@@ -112,6 +118,10 @@ struct WaveDetailPanel: View {
             outputBuffer.startStreaming(waveId: wave.id)
             repoState.loadRuns(for: wave.id)
             repoState.loadWaveContent(for: wave.id)
+            previousCommitSHAs = Set(wave.commits.map(\.sha))
+            displayedCommits = wave.commits
+            displayedDiffStat = wave.diffStat
+            syncDiffHeaderPulse(for: wave.status)
             if !hasAppliedScreenshotTab, let tab = screenshotTab {
                 hasAppliedScreenshotTab = true
                 if let match = DetailTab.allCases.first(where: { $0.rawValue.lowercased() == tab.lowercased() }) {
@@ -127,9 +137,23 @@ struct WaveDetailPanel: View {
             outputBuffer.startStreaming(waveId: newId)
             repoState.loadRuns(for: newId)
             repoState.loadWaveContent(for: newId)
+            previousCommitSHAs = Set(wave.commits.map(\.sha))
+            displayedCommits = wave.commits
+            highlightedCommitSHAs.removeAll()
+            displayedDiffStat = wave.diffStat
+            fileDiffs.removeAll()
+            expandedDiffFiles.removeAll()
+            syncDiffHeaderPulse(for: wave.status)
         }
-        .onChange(of: wave.status) { _, _ in
+        .onChange(of: wave.commits) { _, newCommits in
+            applyCommitUpdate(newCommits)
+        }
+        .onChange(of: wave.diffStat) { _, newDiffStat in
+            applyDiffStatUpdate(newDiffStat)
+        }
+        .onChange(of: wave.status) { _, newStatus in
             repoState.loadWaveContent(for: wave.id)
+            syncDiffHeaderPulse(for: newStatus)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active, isSelectedWave else { return }
@@ -172,15 +196,15 @@ struct WaveDetailPanel: View {
 
                                 StepRunner(wave: wave)
 
-                                if !wave.commits.isEmpty {
+                                if !displayedCommits.isEmpty {
                                     commitLogSection
                                 }
 
-                                if let stat = wave.diffStat {
+                                if let stat = displayedDiffStat {
                                     diffStatSection(stat)
                                 }
 
-                                if !wave.commits.isEmpty || wave.prURL != nil {
+                                if !displayedCommits.isEmpty || wave.prURL != nil {
                                     opsActionsBar
                                 } else if wave.status == .idle && !wave.recentSteps.isEmpty {
                                     Divider()
@@ -679,11 +703,11 @@ struct WaveDetailPanel: View {
                 }
 
                 // Commits and diff while running
-                if !wave.commits.isEmpty {
+                if !displayedCommits.isEmpty {
                     commitLogSection
                 }
 
-                if let stat = wave.diffStat {
+                if let stat = displayedDiffStat {
                     diffStatSection(stat)
                 }
 
@@ -761,6 +785,70 @@ struct WaveDetailPanel: View {
 
     // MARK: - Git State Sections
 
+    private func applyCommitUpdate(_ newCommits: [CommitEntry]) {
+        let decision = evaluateCommitFeedUpdate(
+            previousCommitSHAs: previousCommitSHAs,
+            commits: newCommits,
+            isWaveRunning: wave.status == .running
+        )
+
+        if decision.shouldInvalidateDiffCache {
+            invalidateExpandedDiffCache()
+        }
+
+        if decision.shouldAnimateInsertion && !reduceMotion {
+            withAnimation(.easeOut(duration: 0.2)) {
+                displayedCommits = newCommits
+                highlightedCommitSHAs.formUnion(decision.newCommitSHAs)
+            }
+            let highlighted = decision.newCommitSHAs
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation(DesignAnimation.standard(reduceMotion)) {
+                    highlightedCommitSHAs.subtract(highlighted)
+                }
+            }
+        } else {
+            displayedCommits = newCommits
+            if reduceMotion {
+                highlightedCommitSHAs.removeAll()
+            }
+        }
+
+        previousCommitSHAs = decision.currentCommitSHAs
+    }
+
+    private func applyDiffStatUpdate(_ newDiffStat: String?) {
+        guard displayedDiffStat != newDiffStat else { return }
+        if wave.status == .running && !reduceMotion {
+            withAnimation(DesignAnimation.standard(reduceMotion)) {
+                displayedDiffStat = newDiffStat
+            }
+        } else {
+            displayedDiffStat = newDiffStat
+        }
+    }
+
+    private func invalidateExpandedDiffCache() {
+        fileDiffs.removeAll()
+        expandedDiffFiles.removeAll()
+    }
+
+    private func syncDiffHeaderPulse(for status: WaveStatus) {
+        guard status == .running else {
+            diffHeaderPulseActive = false
+            return
+        }
+        guard !reduceMotion else {
+            diffHeaderPulseActive = true
+            return
+        }
+        diffHeaderPulseActive = false
+        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+            diffHeaderPulseActive = true
+        }
+    }
+
     private var commitLogSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Commits")
@@ -769,7 +857,7 @@ struct WaveDetailPanel: View {
                 .foregroundStyle(palette.textSecondary)
 
             VStack(spacing: 0) {
-                ForEach(wave.commits) { entry in
+                ForEach(displayedCommits) { entry in
                     HStack(spacing: Spacing.sm) {
                         Text(entry.sha)
                             .font(Typography.code(11))
@@ -785,12 +873,26 @@ struct WaveDetailPanel: View {
                     }
                     .padding(.vertical, Spacing.xs)
                     .padding(.horizontal, Spacing.sm)
+                    .background(
+                        highlightedCommitSHAs.contains(entry.sha) ?
+                            Color.loopflowBurgundy.opacity(0.16) : Color.clear
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+                    .transition(
+                        reduceMotion
+                            ? .identity
+                            : .move(edge: .top).combined(with: .opacity)
+                    )
 
-                    if entry.sha != wave.commits.last?.sha {
+                    if entry.sha != displayedCommits.last?.sha {
                         Divider()
                     }
                 }
             }
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.2),
+                value: displayedCommits.map(\.sha)
+            )
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
         }
@@ -798,16 +900,29 @@ struct WaveDetailPanel: View {
 
     private func diffStatSection(_ stat: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Diff")
-                .font(Typography.caption())
-                .fontWeight(.medium)
-                .foregroundStyle(palette.textSecondary)
+            HStack(spacing: Spacing.xs) {
+                Text("Diff")
+                    .font(Typography.caption())
+                    .fontWeight(.medium)
+                    .foregroundStyle(palette.textSecondary)
+
+                if wave.status == .running {
+                    Circle()
+                        .fill(Color.loopflowBurgundy)
+                        .frame(width: 6, height: 6)
+                        .opacity(reduceMotion ? 1 : (diffHeaderPulseActive ? 1 : 0.35))
+                        .scaleEffect(reduceMotion ? 1 : (diffHeaderPulseActive ? 1.05 : 0.85))
+                        .accessibilityHidden(true)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(stat.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                     diffStatFileLine(line)
                 }
             }
+            .id(stat)
+            .transition(.opacity)
             .font(Typography.code(11))
             .textSelection(.enabled)
             .padding(Spacing.sm)
@@ -815,6 +930,8 @@ struct WaveDetailPanel: View {
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
         }
+        .animation(DesignAnimation.standard(reduceMotion), value: stat)
+        .animation(DesignAnimation.standard(reduceMotion), value: diffHeaderPulseActive)
     }
 
     @ViewBuilder
@@ -936,7 +1053,7 @@ struct WaveDetailPanel: View {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "point.3.filled.connected.trianglepath.dotted")
                     .foregroundStyle(palette.textSecondary)
-                Text("\(wave.commits.count) commit\(wave.commits.count == 1 ? "" : "s")")
+                Text("\(displayedCommits.count) commit\(displayedCommits.count == 1 ? "" : "s")")
                     .font(Typography.body())
                     .foregroundStyle(palette.textSecondary)
             }

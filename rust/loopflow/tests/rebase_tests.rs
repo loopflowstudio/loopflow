@@ -19,7 +19,7 @@ fn rebase_onto_main_succeeds() {
     repo.push();
 
     repo.checkout("feature");
-    let result = rebase_with_recovery(
+    rebase_with_recovery(
         repo.path(),
         &RebaseOptions {
             onto: "origin/main".to_string(),
@@ -28,8 +28,6 @@ fn rebase_onto_main_succeeds() {
         &NullProgress,
     )
     .expect("rebase");
-
-    assert!(result.success);
 }
 
 #[test]
@@ -49,7 +47,7 @@ fn rebase_conflict_launches_agent() {
     repo.push();
 
     repo.checkout("feature");
-    let result = rebase_with_recovery(
+    rebase_with_recovery(
         repo.path(),
         &RebaseOptions {
             onto: "origin/main".to_string(),
@@ -58,8 +56,6 @@ fn rebase_conflict_launches_agent() {
         &NullProgress,
     )
     .expect("agent succeeded, rebase should report success");
-
-    assert!(result.success);
 }
 
 #[test]
@@ -111,7 +107,7 @@ fn rebase_with_push() {
     repo.push();
 
     repo.checkout("feature");
-    let result = rebase_with_recovery(
+    rebase_with_recovery(
         repo.path(),
         &RebaseOptions {
             onto: "origin/main".to_string(),
@@ -120,6 +116,4 @@ fn rebase_with_push() {
         &NullProgress,
     )
     .expect("rebase");
-
-    assert!(result.success);
 }

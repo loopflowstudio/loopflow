@@ -3,12 +3,12 @@
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
 
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader, Read};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::engine::config::parse_agent;
 use crate::engine::error::CoreError;
@@ -97,6 +97,8 @@ pub struct ProcessConfig {
     pub context_file: Option<std::path::PathBuf>,
     /// How to display streaming output (Raw = dump JSON, Human = formatted).
     pub stream_format: StreamFormat,
+    /// Optional timeout for the subprocess.
+    pub timeout: Option<Duration>,
 }
 
 /// Agent capability flags.
@@ -504,13 +506,13 @@ pub fn launch_agent(
 
     if process.auto && process.stream {
         // Stream mode: capture stdout line by line
-        launch_streaming(&mut cmd, process.stream_format)
+        launch_streaming(&mut cmd, process.stream_format, process.timeout)
     } else if process.auto {
         // Batch mode: capture all output
-        launch_batch(&mut cmd)
+        launch_batch(&mut cmd, process.timeout)
     } else {
         // Interactive mode: inherit stdio
-        launch_interactive(&mut cmd)
+        launch_interactive(&mut cmd, process.timeout)
     }
 }
 
@@ -549,26 +551,69 @@ fn propagate_rlm_env(cmd: &mut Command) {
     }
 }
 
-fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
+fn launch_batch(cmd: &mut Command, timeout: Option<Duration>) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    let child = cmd.spawn()?;
+    let mut child = cmd.spawn()?;
     let _pid_guard = ChildPidGuard::new(child.id());
-    let output = child.wait_with_output()?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stdout".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stderr".to_string()))?;
+
+    let stdout_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
+        let mut reader = BufReader::new(stdout);
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    });
+    let stderr_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
+        let mut reader = BufReader::new(stderr);
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    });
+
+    let (status, timed_out) = wait_for_exit(&mut child, timeout)?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
     );
+
+    let stdout_bytes = stdout_handle
+        .join()
+        .map_err(|_| CoreError::ExecutionFailed("stdout reader thread panicked".to_string()))?
+        .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
+    let stderr_bytes = stderr_handle
+        .join()
+        .map_err(|_| CoreError::ExecutionFailed("stderr reader thread panicked".to_string()))?
+        .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
+
+    if timed_out {
+        return Err(CoreError::ExecutionFailed(format!(
+            "agent timed out after {}",
+            format_timeout(timeout)
+        )));
+    }
+
     Ok(LaunchResult {
-        exit_code: output.status.code().unwrap_or(1),
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        exit_code: status.code().unwrap_or(1),
+        stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
+        stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
     })
 }
 
-fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
+fn launch_interactive(
+    cmd: &mut Command,
+    timeout: Option<Duration>,
+) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     let mut child = cmd.spawn()?;
     let _pid_guard = ChildPidGuard::new(child.id());
@@ -576,11 +621,17 @@ fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
-    let status = child.wait()?;
+    let (status, timed_out) = wait_for_exit(&mut child, timeout)?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
     );
+    if timed_out {
+        return Err(CoreError::ExecutionFailed(format!(
+            "agent timed out after {}",
+            format_timeout(timeout)
+        )));
+    }
     Ok(LaunchResult {
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
@@ -591,6 +642,7 @@ fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
 fn launch_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
+    timeout: Option<Duration>,
 ) -> Result<LaunchResult, CoreError> {
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
@@ -645,47 +697,60 @@ fn launch_streaming(
         StreamFormat::Raw => None,
     };
 
-    for (stream, line) in rx {
-        if !logged_first_output {
-            tracing::info!(
-                elapsed_ms = start.elapsed().as_millis(),
-                "agent produced first output"
-            );
-            logged_first_output = true;
-        }
-        match stream {
-            StreamKind::Stdout => {
-                if let Some(color) = use_color {
-                    match parser.feed_line(&line) {
-                        ParseResult::Events(events) => {
-                            for event in &events {
-                                format_event(event, color);
+    let timeout_at = timeout.map(|value| Instant::now() + value);
+    let mut timed_out = false;
+    loop {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok((stream, line)) => {
+                if !logged_first_output {
+                    tracing::info!(
+                        elapsed_ms = start.elapsed().as_millis(),
+                        "agent produced first output"
+                    );
+                    logged_first_output = true;
+                }
+                match stream {
+                    StreamKind::Stdout => {
+                        if let Some(color) = use_color {
+                            match parser.feed_line(&line) {
+                                ParseResult::Events(events) => {
+                                    for event in &events {
+                                        format_event(event, color);
+                                    }
+                                }
+                                ParseResult::Skipped => {}
+                                ParseResult::Passthrough => println!("{line}"),
                             }
+                        } else {
+                            println!("{line}");
                         }
-                        ParseResult::Skipped => {}
-                        ParseResult::Passthrough => println!("{line}"),
+                        stdout_content.push_str(&line);
+                        stdout_content.push('\n');
                     }
-                } else {
-                    println!("{line}");
-                }
-                stdout_content.push_str(&line);
-                stdout_content.push('\n');
-            }
-            StreamKind::Stderr => {
-                if use_color.is_some() {
-                    // In Human mode, Claude --verbose duplicates stream-json
-                    // on stderr. Parse it and skip recognized events to avoid
-                    // printing raw JSON alongside formatted output.
-                    match parser.feed_line(&line) {
-                        ParseResult::Events(_) | ParseResult::Skipped => {}
-                        ParseResult::Passthrough => eprintln!("{line}"),
+                    StreamKind::Stderr => {
+                        if use_color.is_some() {
+                            // In Human mode, Claude --verbose duplicates stream-json
+                            // on stderr. Parse it and skip recognized events to avoid
+                            // printing raw JSON alongside formatted output.
+                            match parser.feed_line(&line) {
+                                ParseResult::Events(_) | ParseResult::Skipped => {}
+                                ParseResult::Passthrough => eprintln!("{line}"),
+                            }
+                        } else {
+                            eprintln!("{line}");
+                        }
+                        stderr_content.push_str(&line);
+                        stderr_content.push('\n');
                     }
-                } else {
-                    eprintln!("{line}");
                 }
-                stderr_content.push_str(&line);
-                stderr_content.push('\n');
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        if !timed_out && timeout_at.is_some_and(|value| Instant::now() >= value) {
+            let _ = child.kill();
+            timed_out = true;
         }
     }
 
@@ -698,11 +763,44 @@ fn launch_streaming(
     let _ = stdout_handle.join();
     let _ = stderr_handle.join();
 
+    if timed_out {
+        return Err(CoreError::ExecutionFailed(format!(
+            "agent timed out after {}",
+            format_timeout(timeout)
+        )));
+    }
+
     Ok(LaunchResult {
         exit_code: status.code().unwrap_or(1),
         stdout: stdout_content,
         stderr: stderr_content,
     })
+}
+
+fn wait_for_exit(
+    child: &mut Child,
+    timeout: Option<Duration>,
+) -> Result<(ExitStatus, bool), CoreError> {
+    let timeout_at = timeout.map(|value| Instant::now() + value);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok((status, false));
+        }
+
+        if timeout_at.is_some_and(|value| Instant::now() >= value) {
+            let _ = child.kill();
+            let status = child.wait()?;
+            return Ok((status, true));
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn format_timeout(timeout: Option<Duration>) -> String {
+    timeout
+        .map(|value| format!("{}ms", value.as_millis()))
+        .unwrap_or_else(|| "unknown duration".to_string())
 }
 
 /// Check if a CLI is available.

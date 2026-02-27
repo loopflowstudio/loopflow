@@ -387,7 +387,11 @@ impl WaveExecutor {
             match next_action(&plan, run.step_index as usize) {
                 FlowAction::RunStep { step } => {
                     // Pre-step sync: pick up sibling pushes.
-                    if let Err(err) = pre_step_sync(Path::new(&run.worktree), &run.branch) {
+                    if let Err(err) = pre_step_sync(
+                        Path::new(&run.snapshot.repo),
+                        Path::new(&run.worktree),
+                        &run.branch,
+                    ) {
                         warn!(run_id = %run.id, error = %err, "pre-step sync failed, continuing");
                     }
                     // Ensure area summary is fresh before each step
@@ -443,7 +447,11 @@ impl WaveExecutor {
                 }
                 FlowAction::Fork { fork } => {
                     // Pre-fork sync: pick up sibling pushes.
-                    if let Err(err) = pre_step_sync(Path::new(&run.worktree), &run.branch) {
+                    if let Err(err) = pre_step_sync(
+                        Path::new(&run.snapshot.repo),
+                        Path::new(&run.worktree),
+                        &run.branch,
+                    ) {
                         warn!(run_id = %run.id, error = %err, "pre-fork sync failed, continuing");
                     }
                     info!(

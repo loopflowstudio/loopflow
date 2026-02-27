@@ -128,7 +128,7 @@ fn rebase_current(onto: Option<&str>, progress: &impl Progress) -> Result<()> {
     let onto_ref = onto
         .map(|value| value.to_string())
         .unwrap_or_else(|| format!("origin/{base}"));
-    let _ = rebase_with_recovery(
+    rebase_with_recovery(
         &repo_root,
         &RebaseOptions {
             onto: onto_ref,

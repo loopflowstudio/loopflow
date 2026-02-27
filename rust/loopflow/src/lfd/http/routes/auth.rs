@@ -112,7 +112,8 @@ fn map_auth_error(err: AuthError) -> ApiError {
         | AuthError::CommandFailed { .. }
         | AuthError::CommandIo { .. }
         | AuthError::MissingVerificationUrl { .. }
-        | AuthError::Filesystem(_) => api_error(
+        | AuthError::Filesystem(_)
+        | AuthError::CredentialSocket { .. } => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiMessage::Untrusted(err.to_string()),
         ),

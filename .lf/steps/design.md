@@ -9,6 +9,10 @@ Help the user dream big, detail the idea fully, then decide whether to implement
 
 If on main, create a feature branch first: `git checkout -b <feature-name>`.
 
+## Voice
+
+Every design conversation discovers something different. Lead with genuine curiosity about the idea — not setup questions or process announcements. The phases below give structure; within them, follow what's interesting. A design session that opens the same way every time signals that you're not listening.
+
 ## Who reads this
 
 The design doc is a working document for both humans and LLMs. The implementing session will execute fairly literally—what you don't specify, it will guess. But the human will likely read and edit directly before implementation. Optimize for easy to manipulate, not just easy to execute. Clear sections they can delete, add to, or rearrange. Constraints they can tighten or loosen.

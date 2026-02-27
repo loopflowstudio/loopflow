@@ -1,34 +1,30 @@
-# Gate Review: review-design voice + wave cleanup
+# Gate Review: interactive step voice + PROMPT_STYLE dynamism
 
 ## What changed
 
-Three changes, one intent: sharpen the `review-design` step and clean up a consumed wave item.
+Voice sections added to all interactive steps (except `explore`) and codified in PROMPT_STYLE. The `review-design` lens naming was sharpened.
 
-1. **Voice section added to `review-design`** — New section instructs agents to vary structure, tone, and entry point across design reviews. Aims to prevent formulaic rubber-stamp reviews.
+1. **PROMPT_STYLE.md** — New "Dynamic, not formulaic" principle in the Voice section. Codifies that interactive prompts should vary across sessions.
 
-2. **"Key bet" → "core decisions"** — The lens label changed from "Intent and key bet" to "Intent and core decisions." "Core decisions" is more actionable — it tells the agent to identify the decisions other choices depend on, not just the riskiest single bet.
+2. **Voice sections added** to `design`, `review`, `refine`, and `review-design` (both `.lf/steps/` and `rust/.../builtins/` copies). Each tailored to the step's nature. `explore` skipped — it's deliberately reactive.
 
-3. **`wave/mobile/01-quote-replies.md` deleted** — The quote-replies wave item has been consumed (design doc exists at `scratch/mobile-quote-replies.md` via the loaded context). Removing it from the wave backlog reflects that it's now in-flight work, not a backlog item.
+3. **"Key bet" → "core decisions"** in `review-design` — more actionable, tells the agent to find the decisions everything else hinges on.
+
+4. **Quote-replies design doc** added to `scratch/mobile-quote-replies.md` as reference for future implementation. Wave backlog item preserved.
 
 ## Key choices
 
-- **Voice section is directive, not structural.** It tells agents *how to think* ("be genuinely curious, not procedural") rather than prescribing a format. This matches the PROMPT_STYLE principle of goals providing judgment over process.
+- **Voice sections are directive, not structural.** They tell agents *how to approach* the session, not what format to follow. Matches PROMPT_STYLE's principle of judgment over process.
 
-- **Both copies updated in sync.** `.lf/steps/review-design.md` and `rust/loopflow/src/engine/builtins/steps/interactive/review-design.md` have identical body content. Frontmatter correctly differs (builtin has `default_agent` and `action_style`).
+- **Both copies updated in sync.** `.lf/steps/` and `rust/.../builtins/steps/interactive/` have identical body content. Frontmatter correctly differs (builtins have `default_agent` and `action_style`).
 
-- **Removed "The design doc is a bet" framing.** The original sentence mixed metaphor ("bet") with instruction ("last cheap moment to change it"). The edit keeps the actionable part.
-
-## How it fits together
-
-The `review-design` step is used in `ship-roadmap` and interactively via `lf review-design`. The voice section and lens rename affect all future design reviews — both interactive and flow-driven. No runtime code changes; these are prompt-only edits embedded as Rust builtins and compiled into the `lf` binary.
+- **`explore` excluded.** Its purpose is to be a reactive tool — "the human is in charge" is the right posture. Adding dynamism instructions would fight its nature.
 
 ## Risks
 
-- **Prompt regression** — The voice section could cause agents to over-index on novelty and skip important lenses. Mitigated by the existing "Pick the lenses that matter most" instruction, which is unchanged.
-- **None** on the wave deletion — no references to `01-quote-replies.md` exist elsewhere.
+- **Prompt regression** — Voice sections could cause agents to over-index on novelty and skip substance. Mitigated by unchanged structural instructions ("Pick the lenses that matter most", phase ordering in design, etc.).
 
 ## What's not included
 
-- No changes to other steps or flows.
 - No runtime code changes.
-- The quote-replies implementation itself is separate work tracked by the design doc in context.
+- Quote-replies implementation is separate work tracked by `wave/mobile/01-quote-replies.md`.

@@ -84,7 +84,7 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 - `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
 - `Concerto/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveSessionView`)
 - `Concerto/Platform/macOS` — macOS-only views, services, and keyboard handling
-- `Concerto/Platform/iOS` — iOS-only views (`ConnectionSetupView`, `MobileWaveDetailView`, `MobileWaveListView`)
+- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `ConnectionSetupView`, `MobileWaveDetailView`, `MobileWaveListView`)
 - `Concerto/Platform/macOS/Services/Ghostty` — embedded terminal integration (macOS-only)
 
 ## Multiplatform Boundary Rules

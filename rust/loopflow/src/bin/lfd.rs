@@ -71,30 +71,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cancel = CancellationToken::new();
 
-    let is_loopback = http_addr.ip().is_loopback();
-    let (auth_provider, registration_client, registration_creds) =
-        if is_loopback && lfd_config.auth.provider == "local" {
-            // Loopback + local auth stays on startup session token behavior.
-            (loopflow::lfd::setup_local_auth(), None, None)
-        } else {
-            let (provider, client, creds) =
-                loopflow::lfd::setup_auth(&lfd_config, cancel.clone()).await;
-            if !is_loopback && matches!(provider, AuthProvider::Local { .. }) {
-                tracing::warn!(
-                    addr = %http_addr,
-                    "binding to non-loopback address with auth.provider=local; \
-                     remote requests require the session token"
-                );
-            }
-            (provider, client, creds)
-        };
-
     if matches!(&storage_config, StorageConfig::Postgres { .. }) {
         let version = migrate_store(&storage_config, false).await?;
         tracing::info!(schema_version = %version, "postgres schema up to date");
     }
 
     let store: SharedStore = Arc::new(open_store(&storage_config).await?);
+
+    let is_loopback = http_addr.ip().is_loopback();
+    let (auth_provider, registration_client, registration_creds) = if is_loopback
+        && lfd_config.auth.provider == "local"
+    {
+        // Loopback + local auth stays on startup session token behavior.
+        (loopflow::lfd::setup_local_auth(), None, None)
+    } else {
+        let (provider, client, creds) =
+            loopflow::lfd::setup_auth(&lfd_config, store.clone(), http_addr, cancel.clone()).await;
+        if !is_loopback && matches!(provider, AuthProvider::Local { .. }) {
+            tracing::warn!(
+                addr = %http_addr,
+                "binding to non-loopback address with auth.provider=local; \
+                 remote requests require the session token"
+            );
+        }
+        (provider, client, creds)
+    };
 
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());

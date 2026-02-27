@@ -1,46 +1,42 @@
 # Mobile
 
+Concerto on iPhone and iPad. Action-button-first interaction, shared session state, and direct connection to lfd.
+
 ## Vision
 
-Concerto on iPhone and iPad. Action-button-first interaction. Multi-client session continuity. Not an embedded terminal on iOS, not a step runner on phone, not offline mode, not App Store distribution yet.
+Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is not a shrunken desktop: it is a fast check-in surface where agents suggest next actions and users can act in a tap or two.
 
-Concerto becomes a single multiplatform app — Mac, iPad, iPhone. The mobile experience is not a shrunken desktop; it's a choose-your-own-adventure interface where agents surface next actions as tappable buttons. Chat is available but secondary. You start a wave on your Mac, check on it from your phone, tap "Land PR" from the couch.
+LoopflowCore holds shared state, models, and services. Platform shells stay thin and purpose-built (`Concerto/Platform/macOS`, `Concerto/Platform/iOS`).
 
-## Strategy
+## Core components
 
-LoopflowCore holds shared state, models, services, and reusable views. Both Concerto and Symphonia (separate repo) depend on it. iOS is remote-client only — no bundled local daemon on iPhone/iPad.
+- **LoopflowCore**: shared session/wave models, networking, and reusable UI primitives.
+- **iOS shell**: touch-first views for discovery, wave detail, output, and session interaction.
+- **lfd + studio discovery**: lfd publishes presence metadata (`url`, `repos`) to studio; mobile discovers and connects directly.
 
-Multiplatform (Phase 01), action buttons (Phase 02), and multi-client (Phase 03) shipped — state extracted to LoopflowCore, iOS got purpose-built views, action button pipeline (StructuredReply → ClientContext → LfTagParser → SessionEvent → ActionButtonsView), iOS suggested-action rail, concurrent-client backend coverage, iOS foreground reconnect, cross-client stale-action clearing.
+## Invariants
 
-Quote-replies (Phase 05) shipped macOS-first — demo panel, live WaveSessionView wiring, assembly tests. iOS selection gesture support, queue reorder/edit, and rich markdown selectable rendering remain follow-up.
+- Discovery is additive. Manual host/port connection remains available.
+- iOS is remote-client only; no bundled daemon on phone/tablet.
+- Shared core stays platform-agnostic; platform checks live in platform shells and app wiring.
+- lfd remains the source of truth for session and wave state; clients render and send intent.
 
-### Multiplatform guardrails
+## Differentiators
 
-- Keep `#if` footprint low: platform checks belong in app entry wiring and platform shell files only.
-- Keep shared state/views/models macro-free in `LoopflowCore`.
-- Put platform behavior behind injected capabilities, not inline platform checks.
-- Use file-structure boundaries: `Concerto/Platform/macOS` and `Concerto/Platform/iOS`.
-- Boundary enforcement: `check_swift_multiplatform_boundaries.py` blocks macOS-only imports in LoopflowCore.
+- Action buttons are the primary interaction path on mobile.
+- Discovery reduces setup friction without introducing a studio relay path.
+- Multi-client continuity: start on Mac, continue from iPhone/iPad against the same server-side state.
 
 ## Goals
 
-- One Concerto target, three form factors (Mac unchanged, iPad close to Mac, iPhone minimal)
-- LoopflowCore as shared library: models, services, and reusable views
-- Action buttons as the primary mobile interaction — agents suggest next actions, users tap
-- Multi-client: both devices connect to same lfd, session state is server-side
-- Zero-config discovery: lfd publishes to studio, mobile auto-discovers on login, connects via Tailscale
+- Keep Mac behavior stable while iOS/iPad UX evolves independently.
+- Keep shared models/services in LoopflowCore and avoid cross-platform drift in protocol behavior.
+- Make session feedback workflows (quote replies) work reliably on touch devices.
 
 ## Risks
 
-- iOS and macOS views diverging means feature work touches both platforms — more surface area per feature. Confirmed: real but manageable. Purpose-built views are simpler than forced sharing.
-- Action button quality depends on agent prompt engineering — bad suggestions = bad UX. Quality is only as good as the model's adherence to guidance.
-- SwiftUI multiplatform has rough edges (NavigationSplitView behaves differently on iOS)
-- Tailscale as prerequisite narrows the audience — users must install it on both devices
-- Studio discovery service is simple but is still new infrastructure to operate
-
-## Metrics
-
-- Can see wave list, tap into a wave, see live output on iPhone
-- Agent surfaces action buttons, tapping one sends the message — on both macOS and iOS
-- Same lfd instance serves both Mac and iOS Concerto simultaneously
-- Login on mobile → see running lfds → tap to connect (no manual IP/port entry)
+- iOS and macOS view divergence increases per-feature surface area.
+- Action quality depends on model prompt adherence.
+- SwiftUI multiplatform behavior still differs in navigation and selection APIs.
+- Tailscale remains a prerequisite for remote discovery-based connectivity.
+- Discovery introduces an additional lfd→studio validation hop during connect.

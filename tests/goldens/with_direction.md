@@ -51,8 +51,6 @@ for feedback. Be concise—bullets, short snippets, minimal back-and-forth.
 
 **Code**: The actual work. Tests, implementation, fixes.
 
-Don't modify `wave/` unless the step explicitly says to. It persists across PRs.
-
 ---
 
 ## Commits

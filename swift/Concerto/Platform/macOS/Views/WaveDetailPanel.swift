@@ -830,8 +830,11 @@ struct WaveDetailPanel: View {
     }
 
     private func invalidateExpandedDiffCache() {
+        let expandedPaths = expandedDiffFiles
         fileDiffs.removeAll()
-        expandedDiffFiles.removeAll()
+        for path in expandedPaths {
+            loadFileDiff(path: path)
+        }
     }
 
     private func syncDiffHeaderPulse(for status: WaveStatus) {

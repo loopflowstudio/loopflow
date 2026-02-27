@@ -6,8 +6,8 @@ use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, SessionStatus};
 use crate::lfd::types::{
     ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState,
-    LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent, Repo, Stimulus, Summary,
-    Wave, WaveRun, WaveRunStackStatus,
+    LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId,
+    Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -362,6 +362,30 @@ impl Store {
         RepoStore::delete_repo(self, path).await
     }
 
+    pub async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
+        RepoStore::get_repo_by_repo_id(self, repo_id).await
+    }
+
+    pub async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
+        RepoStore::list_edges(self).await
+    }
+
+    pub async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
+        RepoStore::add_edge(self, edge).await
+    }
+
+    pub async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
+        RepoStore::remove_edge(self, parent_id, child_id).await
+    }
+
+    pub async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        RepoStore::children(self, repo_id).await
+    }
+
+    pub async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        RepoStore::parents(self, repo_id).await
+    }
+
     pub async fn get_chord(&self, chord_id: &LfdId) -> StoreResult<Option<Chord>> {
         ChordStore::get_chord(self, chord_id).await
     }
@@ -648,6 +672,12 @@ pub trait RepoStore: Send + Sync {
     async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>>;
     async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()>;
     async fn delete_repo(&self, path: &str) -> StoreResult<()>;
+    async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>>;
+    async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>>;
+    async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()>;
+    async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()>;
+    async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>>;
+    async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>>;
 }
 
 #[async_trait::async_trait]
@@ -1314,6 +1344,64 @@ impl RepoStore for Store {
             StoreBackend::Postgres(store) => store.delete_repo(path).await,
         }
     }
+
+    async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let repo_id = repo_id.clone();
+                run_sqlite(store, move |store| store.get_repo_by_repo_id(&repo_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_repo_by_repo_id(repo_id).await,
+        }
+    }
+
+    async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_edges()).await,
+            StoreBackend::Postgres(store) => store.list_edges().await,
+        }
+    }
+
+    async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let edge = edge.clone();
+                run_sqlite(store, move |store| store.add_edge(&edge)).await
+            }
+            StoreBackend::Postgres(store) => store.add_edge(edge).await,
+        }
+    }
+
+    async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let parent_id = parent_id.clone();
+                let child_id = child_id.clone();
+                run_sqlite(store, move |store| store.remove_edge(&parent_id, &child_id)).await
+            }
+            StoreBackend::Postgres(store) => store.remove_edge(parent_id, child_id).await,
+        }
+    }
+
+    async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let repo_id = repo_id.clone();
+                run_sqlite(store, move |store| store.children(&repo_id)).await
+            }
+            StoreBackend::Postgres(store) => store.children(repo_id).await,
+        }
+    }
+
+    async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let repo_id = repo_id.clone();
+                run_sqlite(store, move |store| store.parents(&repo_id)).await
+            }
+            StoreBackend::Postgres(store) => store.parents(repo_id).await,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -1886,8 +1974,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
-        QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, Signal, Stimulus, Summary, Wave,
-        WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Signal, Stimulus,
+        Summary, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1960,6 +2048,7 @@ mod tests {
 
         let repo = Repo {
             path: "/tmp/repo".to_string(),
+            repo_id: RepoId::parse("loopflowstudio/repo").expect("repo id"),
             name: "repo".to_string(),
             added_at: OffsetDateTime::now_utc(),
         };
@@ -1987,6 +2076,62 @@ mod tests {
             .await
             .expect("repo removed")
             .is_none());
+
+        let parent = Repo {
+            path: "/tmp/parent".to_string(),
+            repo_id: RepoId::parse("loopflowstudio/parent").expect("parent repo id"),
+            name: "parent".to_string(),
+            added_at: OffsetDateTime::now_utc(),
+        };
+        let child = Repo {
+            path: "/tmp/child".to_string(),
+            repo_id: RepoId::parse("loopflowstudio/child").expect("child repo id"),
+            name: "child".to_string(),
+            added_at: OffsetDateTime::now_utc(),
+        };
+        store
+            .upsert_repo(&parent)
+            .await
+            .expect("upsert parent repo");
+        store.upsert_repo(&child).await.expect("upsert child repo");
+        assert!(store
+            .get_repo_by_repo_id(&parent.repo_id)
+            .await
+            .expect("get by repo id")
+            .is_some());
+        store
+            .add_edge(&RepoEdge {
+                parent_repo_id: parent.repo_id.clone(),
+                child_repo_id: child.repo_id.clone(),
+            })
+            .await
+            .expect("add edge");
+        assert_eq!(store.list_edges().await.expect("list edges").len(), 1);
+        assert_eq!(
+            store
+                .children(&parent.repo_id)
+                .await
+                .expect("list children")
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .parents(&child.repo_id)
+                .await
+                .expect("list parents")
+                .len(),
+            1
+        );
+        store
+            .delete_repo(&parent.path)
+            .await
+            .expect("delete parent repo");
+        assert!(store
+            .list_edges()
+            .await
+            .expect("list edges after delete")
+            .is_empty());
 
         let source_wave = make_wave("/repo");
         store

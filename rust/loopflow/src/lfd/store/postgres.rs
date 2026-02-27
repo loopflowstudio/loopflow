@@ -16,14 +16,14 @@ use crate::lfd::store::catalog::{
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_repo_row, map_stimulus_row, map_summary_row, map_wave_row, map_wave_run_row, now_unix,
-    serialize_pr,
+    map_repo_edge_row, map_repo_row, map_stimulus_row, map_summary_row, map_wave_row,
+    map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
     LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
-    Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    RepoEdge, RepoId, Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -306,7 +306,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT path, name, added_at FROM repos ORDER BY path ASC",
+                    "SELECT path, repo_id, name, added_at FROM repos ORDER BY path ASC",
                     &[],
                 )
                 .await?;
@@ -320,8 +320,22 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT path, name, added_at FROM repos WHERE path = $1 LIMIT 1",
+                    "SELECT path, repo_id, name, added_at FROM repos WHERE path = $1 LIMIT 1",
                     &[&path],
+                )
+                .await?;
+            row.as_ref().map(map_repo_row).transpose()
+        })
+        .await
+    }
+
+    pub async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
+        let repo_id = repo_id.to_string();
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "SELECT path, repo_id, name, added_at FROM repos WHERE repo_id = $1 LIMIT 1",
+                    &[&repo_id],
                 )
                 .await?;
             row.as_ref().map(map_repo_row).transpose()
@@ -332,12 +346,18 @@ impl PostgresStore {
     pub async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
         let repo = repo.clone();
         self.with_client(|client| async move {
+            let repo_id = repo.repo_id.to_string();
             client
                 .execute(
-                    "INSERT INTO repos (path, name, added_at)
-                     VALUES ($1, $2, $3)
-                     ON CONFLICT(path) DO UPDATE SET name = EXCLUDED.name, added_at = EXCLUDED.added_at",
-                    &[&repo.path, &repo.name, &repo.added_at.unix_timestamp()],
+                    "INSERT INTO repos (path, repo_id, name, added_at)
+                     VALUES ($1, $2, $3, $4)
+                     ON CONFLICT(path) DO UPDATE SET repo_id = EXCLUDED.repo_id, name = EXCLUDED.name, added_at = EXCLUDED.added_at",
+                    &[
+                        &repo.path,
+                        &repo_id,
+                        &repo.name,
+                        &repo.added_at.unix_timestamp(),
+                    ],
                 )
                 .await?;
             Ok(())
@@ -352,6 +372,87 @@ impl PostgresStore {
                 .execute("DELETE FROM repos WHERE path = $1", &[&path])
                 .await?;
             Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT parent_repo_id, child_repo_id FROM repo_edges ORDER BY parent_repo_id, child_repo_id",
+                    &[],
+                )
+                .await?;
+            rows.iter().map(map_repo_edge_row).collect()
+        })
+        .await
+    }
+
+    pub async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
+        let edge = edge.clone();
+        self.with_client(|client| async move {
+            let parent_repo_id = edge.parent_repo_id.to_string();
+            let child_repo_id = edge.child_repo_id.to_string();
+            client
+                .execute(
+                    "INSERT INTO repo_edges (parent_repo_id, child_repo_id) VALUES ($1, $2)
+                     ON CONFLICT (parent_repo_id, child_repo_id) DO NOTHING",
+                    &[&parent_repo_id, &child_repo_id],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
+        let parent_id = parent_id.to_string();
+        let child_id = child_id.to_string();
+        self.with_client(|client| async move {
+            client
+                .execute(
+                    "DELETE FROM repo_edges WHERE parent_repo_id = $1 AND child_repo_id = $2",
+                    &[&parent_id, &child_id],
+                )
+                .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        let repo_id = repo_id.to_string();
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
+                     FROM repo_edges
+                     INNER JOIN repos ON repos.repo_id = repo_edges.child_repo_id
+                     WHERE repo_edges.parent_repo_id = $1
+                     ORDER BY repos.path ASC",
+                    &[&repo_id],
+                )
+                .await?;
+            rows.iter().map(map_repo_row).collect()
+        })
+        .await
+    }
+
+    pub async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        let repo_id = repo_id.to_string();
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
+                     FROM repo_edges
+                     INNER JOIN repos ON repos.repo_id = repo_edges.parent_repo_id
+                     WHERE repo_edges.child_repo_id = $1
+                     ORDER BY repos.path ASC",
+                    &[&repo_id],
+                )
+                .await?;
+            rows.iter().map(map_repo_row).collect()
         })
         .await
     }

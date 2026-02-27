@@ -313,6 +313,31 @@ class TestClientResponses:
         assert requests[2][0:2] == ("DELETE", "/v0/repos")
         client.close()
 
+    def test_repo_child_routes(self):
+        requests = []
+
+        def handler(request):
+            requests.append((request.method, request.url.path))
+            if request.method == "GET":
+                return httpx.Response(200, json={"object": "list", "data": [REPO_MINIMAL]})
+            return httpx.Response(204)
+
+        client = _mock_client(handler)
+        client.add_child("loopflowstudio", "studio", "loopflowstudio", "loopflow")
+        children = client.list_children("loopflowstudio", "studio")
+        parents = client.list_parents("loopflowstudio", "loopflow")
+        client.remove_child("loopflowstudio", "studio", "loopflowstudio", "loopflow")
+
+        assert len(children) == 1
+        assert len(parents) == 1
+        assert requests == [
+            ("POST", "/v0/repos/loopflowstudio/studio/children/loopflowstudio/loopflow"),
+            ("GET", "/v0/repos/loopflowstudio/studio/children"),
+            ("GET", "/v0/repos/loopflowstudio/loopflow/parents"),
+            ("DELETE", "/v0/repos/loopflowstudio/studio/children/loopflowstudio/loopflow"),
+        ]
+        client.close()
+
     def test_list_chords_parses_list(self):
         def handler(request):
             return httpx.Response(200, json={"object": "list", "data": [CHORD_MINIMAL]})

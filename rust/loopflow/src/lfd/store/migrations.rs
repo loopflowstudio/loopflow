@@ -99,6 +99,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "020_repos",
         sql: include_str!("migrations/020_repos.sql"),
     },
+    Migration {
+        version: "021_repo_edges",
+        sql: include_str!("migrations/021_repo_edges.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

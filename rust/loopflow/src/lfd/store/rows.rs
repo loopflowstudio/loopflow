@@ -3,8 +3,8 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ActivationSource, AgentRun, AgentStatus, ChatMemoryBlock,
     ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo,
-    Signal, Stimulus, Summary, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
-    WaveStatus,
+    RepoEdge, RepoId, Signal, Stimulus, Summary, Wave, WaveRun, WaveRunSnapshot,
+    WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -137,12 +137,21 @@ pub fn map_chord_row(row: &impl StoreRow) -> StoreResult<Chord> {
     })
 }
 
-/// SELECT path, name, added_at
+/// SELECT path, repo_id, name, added_at
 pub fn map_repo_row(row: &impl StoreRow) -> StoreResult<Repo> {
     Ok(Repo {
         path: row.text(0)?,
-        name: row.text(1)?,
-        added_at: unix_to_datetime(row.bigint(2)?),
+        repo_id: RepoId::from_raw(row.text(1)?),
+        name: row.text(2)?,
+        added_at: unix_to_datetime(row.bigint(3)?),
+    })
+}
+
+/// SELECT parent_repo_id, child_repo_id
+pub fn map_repo_edge_row(row: &impl StoreRow) -> StoreResult<RepoEdge> {
+    Ok(RepoEdge {
+        parent_repo_id: RepoId::from_raw(row.text(0)?),
+        child_repo_id: RepoId::from_raw(row.text(1)?),
     })
 }
 

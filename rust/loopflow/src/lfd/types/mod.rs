@@ -18,7 +18,7 @@ pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
 pub use chord::Chord;
 pub use event::Event;
-pub use repo::Repo;
+pub use repo::{Repo, RepoEdge, RepoId};
 pub use stimulus::{
     ActivationLog, ActivationOutcome, ActivationSource, PendingActivation, Signal, Stimulus,
     CI_FIX_FLOW,

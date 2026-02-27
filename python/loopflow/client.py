@@ -182,6 +182,26 @@ class Client:
     def remove_repo(self, path: str) -> None:
         self._request_json("DELETE", "/v0/repos", json={"path": path})
 
+    def add_child(self, owner: str, repo: str, child_owner: str, child_repo: str) -> None:
+        self._request_json(
+            "POST",
+            f"/v0/repos/{owner}/{repo}/children/{child_owner}/{child_repo}",
+        )
+
+    def remove_child(self, owner: str, repo: str, child_owner: str, child_repo: str) -> None:
+        self._request_json(
+            "DELETE",
+            f"/v0/repos/{owner}/{repo}/children/{child_owner}/{child_repo}",
+        )
+
+    def list_children(self, owner: str, repo: str) -> list[Repo]:
+        payload = self._request_json("GET", f"/v0/repos/{owner}/{repo}/children")
+        return self._parse_model_list(payload, Repo)
+
+    def list_parents(self, owner: str, repo: str) -> list[Repo]:
+        payload = self._request_json("GET", f"/v0/repos/{owner}/{repo}/parents")
+        return self._parse_model_list(payload, Repo)
+
     def delete_chord(self, chord_id: str) -> None:
         self._request_json("DELETE", f"/v0/chords/{chord_id}")
 

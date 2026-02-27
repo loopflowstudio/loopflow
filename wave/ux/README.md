@@ -22,16 +22,6 @@ The session should feel alive. Streaming text, pulsing indicators, responsive ac
 - Build reusable components (diff rendering, code blocks, copy buttons) that compound across features
 - Keep linking to GitHub/Cursor for their full capability
 
-## Phase boundaries
-
-- **01-session-polish**: shipped on branch `jack-heart.ux.20260225_2145`. Session feels live (thinking indicator + streaming cursor), assistant code blocks render cleanly, copy affordances are in place, timestamps collapse intelligently, and `/` can focus the interactive composer.
-- **02-inline-glance**: in progress. G1 (file items show diffs) shipped — `DiffLinesView` + `synthesize_edit_diff()`. G2–G5 remain: wave diff stat expand, roadmap expansion, wave README, scratch doc glance.
-- **03-run-visibility**: sketch/backlog. Improve autonomous-run visibility once inline glanceability is in place.
-
-## Open follow-ups
-
-- Slash-focus scope: should `/` focus the composer only in interactive waiting sessions, or also in non-interactive Chat tab states?
-
 ## Risks
 
 - **Over-building the viewer.** The goal is glanceability, not a full document viewer. If we're adding scroll-to-line or search-in-diff, we've gone too far.

@@ -346,6 +346,28 @@ fn git_commit_log(worktree: &std::path::Path, diff_ref: &str) -> Vec<CommitEntry
         .collect()
 }
 
+fn git_file_diff(worktree: &std::path::Path, diff_ref: &str, file_path: &str) -> String {
+    let output = std::process::Command::new("git")
+        .args(["diff", diff_ref, "--", file_path])
+        .current_dir(worktree)
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return String::new(),
+    };
+    let diff = String::from_utf8_lossy(&output.stdout).to_string();
+
+    // Truncate at 500 lines for glanceability.
+    let lines: Vec<&str> = diff.lines().collect();
+    if lines.len() > 500 {
+        let truncated: String = lines[..500].join("\n");
+        let remaining = lines.len() - 500;
+        format!("{truncated}\n... (truncated, {remaining} more lines)")
+    } else {
+        diff
+    }
+}
+
 fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["diff", "--stat", diff_ref])

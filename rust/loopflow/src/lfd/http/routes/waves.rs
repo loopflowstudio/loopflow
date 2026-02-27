@@ -1316,6 +1316,51 @@ pub async fn combine_wave_handler(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct WaveDiffQuery {
+    path: String,
+}
+
+pub async fn get_wave_file_diff_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+    Query(query): Query<WaveDiffQuery>,
+) -> ApiResult<serde_json::Value> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let wave = state
+        .store
+        .get_wave(&wave_id)
+        .await
+        .map_err(map_store_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    let file_path = query.path;
+    if file_path.contains("..") {
+        return Err(api_error(StatusCode::BAD_REQUEST, "invalid file path"));
+    }
+
+    let repo = wave.repo().clone();
+    let wave_name = wave.name().clone();
+    let diff = tokio::task::spawn_blocking(move || {
+        let repo_path = std::path::Path::new(&repo);
+        let worktree = crate::engine::worktrees::worktree_path(repo_path, &wave_name);
+        if !worktree.exists() {
+            return String::new();
+        }
+        let diff_ref = super::nearest_base_ref(&worktree, &wave_name);
+        super::git_file_diff(&worktree, &diff_ref, &file_path)
+    })
+    .await
+    .map_err(|err| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiMessage::Untrusted(err.to_string()),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "diff": diff })))
+}
+
 fn wave_name_exists_error(name: &str) -> ApiError {
     api_error(
         StatusCode::CONFLICT,

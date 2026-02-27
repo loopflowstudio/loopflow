@@ -46,4 +46,5 @@ public protocol WaveServiceProtocol: Sendable {
     func addRepo(path: String) async throws -> RemoteRepo
     func removeRepo(path: String) async throws
     func checkConnection() async throws
+    func fileDiff(waveId: String, path: String) async throws -> String
 }

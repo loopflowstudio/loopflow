@@ -20,6 +20,14 @@ Commits animate into `commitLogSection` as they land during a run. Gives a sense
 
 Real-time file count during runs: "4 files changed so far" that updates as commits land. More informative than the static `--stat` string.
 
+## Prior art
+
+Inline glanceability (02) established patterns this can build on:
+
+- **Per-file diff endpoint**: `GET /waves/:id/diff?path=...` returns truncated unified diff from lfd. "Progress-aware diff stat" can extend this to stream updates during runs.
+- **`DiffLinesView`**: Shared component for colored inline diffs. Reusable for turn-by-turn file change summaries.
+- **Expand-on-tap pattern**: `expandedSections: Set<String>` on WaveDetailPanel for lazy content reveal. Same pattern applies to expanding run details.
+
 ## Open questions
 
 - How much run-time visibility is useful vs. distracting?

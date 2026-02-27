@@ -13,7 +13,7 @@ pub mod machine_id;
 pub mod obs;
 pub mod output;
 pub mod provider_auth;
-pub mod provider_models;
+pub mod providers;
 pub mod queue;
 pub mod redaction;
 pub mod registration;

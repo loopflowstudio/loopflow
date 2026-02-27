@@ -106,3 +106,36 @@ AUTH_FLOW = {
     "user_code": "ABCD-1234",
     "expires_in": 900,
 }
+
+PROVIDER_INFO_MINIMAL = {
+    "provider": "codex",
+    "auth_status": "none",
+    "billing": "subscription",
+    "models": [
+        {
+            "id": "gpt-5.1-codex",
+            "display_name": "GPT-5.1 Codex",
+            "provider": "codex",
+        }
+    ],
+}
+
+PROVIDER_INFO_FULL = {
+    "provider": "opencodezen",
+    "auth_status": "active",
+    "login": "user@example.com",
+    "billing": "per_token",
+    "models": [
+        {
+            "id": "opencode/kimi-k2.5",
+            "display_name": "Kimi K2.5",
+            "provider": "opencodezen",
+            "cost_rates": {
+                "input_per_mtok": 0.5,
+                "output_per_mtok": 1.0,
+                "cache_read_per_mtok": None,
+                "cache_write_per_mtok": None,
+            },
+        }
+    ],
+}

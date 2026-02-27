@@ -9,7 +9,10 @@ from .models import (
     AuthProviderStatus,
     Chord,
     CommitEntry,
+    CostRates,
+    ModelInfo,
     PullRequest,
+    ProviderInfo,
     Repo,
     Session,
     SessionConfig,
@@ -47,6 +50,10 @@ def start_auth(provider: str) -> AuthFlow:
 
 def disconnect_auth(provider: str) -> AuthProviderStatus:
     return _client().disconnect_auth(provider)
+
+
+def providers() -> list[ProviderInfo]:
+    return _client().providers()
 
 
 def waves(repo: Optional[str] = None) -> list[Wave]:
@@ -239,7 +246,10 @@ __all__ = [
     "AuthProviderStatus",
     "Chord",
     "CommitEntry",
+    "CostRates",
+    "ModelInfo",
     "PullRequest",
+    "ProviderInfo",
     "Repo",
     "Session",
     "SessionConfig",
@@ -252,6 +262,7 @@ __all__ = [
     "auth_status",
     "start_auth",
     "disconnect_auth",
+    "providers",
     "waves",
     "wave",
     "create_wave",

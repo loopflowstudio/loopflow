@@ -12,6 +12,8 @@ from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_NONE,
     CHORD_MINIMAL,
+    PROVIDER_INFO_FULL,
+    PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
     SESSION_MINIMAL,
     WAVE_MINIMAL,
@@ -179,6 +181,31 @@ class TestClientResponses:
         status = client.disconnect_auth("github")
         assert status.provider == "github"
         assert status.status == "none"
+        client.close()
+
+    def test_providers_parses_list(self):
+        def handler(request):
+            assert request.url.path == "/v0/providers"
+            return httpx.Response(
+                200,
+                json=[PROVIDER_INFO_MINIMAL, PROVIDER_INFO_FULL],
+            )
+
+        client = _mock_client(handler)
+        providers = client.providers()
+        assert len(providers) == 2
+        assert providers[0].provider == "codex"
+        assert providers[1].provider == "opencodezen"
+        assert providers[1].models[0].id == "opencode/kimi-k2.5"
+        client.close()
+
+    def test_providers_invalid_payload_raises_error(self):
+        def handler(request):
+            return httpx.Response(200, json={"providers": [PROVIDER_INFO_MINIMAL]})
+
+        client = _mock_client(handler)
+        with pytest.raises(LoopflowError, match="invalid providers response payload"):
+            client.providers()
         client.close()
 
     def test_waves_parses_list(self):

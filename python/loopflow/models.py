@@ -78,6 +78,28 @@ class AuthFlow(BaseModel):
     expires_in: Optional[int] = None
 
 
+class CostRates(BaseModel):
+    input_per_mtok: float
+    output_per_mtok: float
+    cache_read_per_mtok: Optional[float] = None
+    cache_write_per_mtok: Optional[float] = None
+
+
+class ModelInfo(BaseModel):
+    id: str
+    display_name: str
+    provider: str
+    cost_rates: Optional[CostRates] = None
+
+
+class ProviderInfo(BaseModel):
+    provider: str
+    auth_status: str
+    login: Optional[str] = None
+    billing: str
+    models: list[ModelInfo] = Field(default_factory=list)
+
+
 class Chord(BaseModel):
     id: str
     name: str

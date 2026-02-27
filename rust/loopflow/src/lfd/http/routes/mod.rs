@@ -2,6 +2,7 @@ pub mod auth;
 pub mod chords;
 pub mod flows;
 pub mod hooks;
+pub mod providers;
 pub mod repos;
 pub mod sessions;
 pub mod system;

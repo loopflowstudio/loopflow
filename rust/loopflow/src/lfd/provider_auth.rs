@@ -29,6 +29,9 @@ const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const SOCKET_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const SOCKET_AUTH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const SOCKET_AUTH_MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const OPENCODE_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const OPENCODE_AUTH_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const OPENCODE_AUTH_URL: &str = "https://opencode.ai/auth";
 
 static USER_CODE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b([A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+)\b").expect("user code regex"));
@@ -47,6 +50,7 @@ pub enum Provider {
     GitHub,
     Claude,
     Codex,
+    OpenCodeZen,
 }
 
 impl Provider {
@@ -55,11 +59,12 @@ impl Provider {
             Self::GitHub => "github",
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::OpenCodeZen => "opencodezen",
         }
     }
 
-    pub fn all() -> [Self; 3] {
-        [Self::GitHub, Self::Claude, Self::Codex]
+    pub fn all() -> [Self; 4] {
+        [Self::GitHub, Self::Claude, Self::Codex, Self::OpenCodeZen]
     }
 }
 
@@ -78,6 +83,7 @@ impl FromStr for Provider {
             "github" | "gh" => Ok(Self::GitHub),
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
+            "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
             }),
@@ -290,6 +296,7 @@ impl ProviderAuthService {
                             as Arc<dyn AuthBroker>,
                         Arc::new(SocketAuthBroker::new(Provider::Codex, client.clone()))
                             as Arc<dyn AuthBroker>,
+                        Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
                     ],
                     Some(store),
                 );
@@ -301,13 +308,14 @@ impl ProviderAuthService {
                 Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
                 Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
                 Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
+                Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
             ],
             Some(store),
         )
     }
 
     #[cfg(test)]
-    fn with_brokers(brokers: Vec<Arc<dyn AuthBroker>>) -> Self {
+    pub(crate) fn with_brokers(brokers: Vec<Arc<dyn AuthBroker>>) -> Self {
         Self::with_brokers_and_store(brokers, None)
     }
 
@@ -769,6 +777,73 @@ impl AuthBroker for CodexAuthBroker {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct OpenCodeZenBroker {
+    home_dir: PathBuf,
+}
+
+impl Default for OpenCodeZenBroker {
+    fn default() -> Self {
+        Self {
+            home_dir: home_dir_or_cwd(),
+        }
+    }
+}
+
+#[async_trait]
+impl AuthBroker for OpenCodeZenBroker {
+    fn provider(&self) -> Provider {
+        Provider::OpenCodeZen
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        let response = AuthFlowResponse {
+            provider: Provider::OpenCodeZen,
+            verification_uri: OPENCODE_AUTH_URL.to_string(),
+            verification_uri_complete: Some(OPENCODE_AUTH_URL.to_string()),
+            user_code: None,
+            expires_in: Some(OPENCODE_AUTH_TIMEOUT.as_secs()),
+        };
+        let home_dir = self.home_dir.clone();
+        let monitor = tokio::spawn(async move {
+            let started_at = Instant::now();
+            loop {
+                if extract_opencode_zen_token(&home_dir).is_some() {
+                    return Ok(());
+                }
+                if started_at.elapsed() >= OPENCODE_AUTH_TIMEOUT {
+                    return Err(AuthError::CommandFailed {
+                        provider: Provider::OpenCodeZen,
+                        message: format!(
+                            "timed out waiting for opencode auth at {OPENCODE_AUTH_URL}"
+                        ),
+                    });
+                }
+                tokio::time::sleep(OPENCODE_AUTH_POLL_INTERVAL).await;
+            }
+        });
+        Ok(AuthFlowHandle::new(response, monitor))
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        Ok(
+            if let Some(token) = extract_opencode_zen_token(&self.home_dir) {
+                AuthStatus::Active { login: token.login }
+            } else {
+                AuthStatus::None
+            },
+        )
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        remove_opencode_zen_auth_entry(&self.home_dir)
+    }
+
+    async fn extract_token(&self) -> Option<ProviderToken> {
+        extract_opencode_zen_token(&self.home_dir)
+    }
+}
+
 #[derive(Debug, Default)]
 struct AuthFlowBuilder {
     verification_uri: Option<String>,
@@ -1129,6 +1204,102 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
     })
 }
 
+/// Canonical key under which OpenCode stores credentials in auth.json.
+/// Schema: `{"opencode": {"type": "api", "key": "...", "email": "..."}}`
+const OPENCODE_AUTH_KEY: &str = "opencode";
+
+fn opencode_auth_path(home_dir: &Path) -> PathBuf {
+    home_dir.join(".local/share/opencode/auth.json")
+}
+
+fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
+    let (access_token, login) = if let Some(key) = read_nonempty_env("OPENCODE_API_KEY") {
+        (key, None)
+    } else {
+        let (key, login) = read_opencode_credential(home_dir)?;
+        (key, login)
+    };
+    Some(ProviderToken {
+        provider: Provider::OpenCodeZen.as_str().to_string(),
+        access_token,
+        refresh_token: None,
+        expires_at: None,
+        login,
+        updated_at: now_unix(),
+    })
+}
+
+fn read_nonempty_env(name: &str) -> Option<String> {
+    std::env::var(name).ok().and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+/// Read OpenCode credential from `~/.local/share/opencode/auth.json`.
+/// Returns `(api_key, optional_login)`.
+fn read_opencode_credential(home_dir: &Path) -> Option<(String, Option<String>)> {
+    let auth_path = opencode_auth_path(home_dir);
+    let content = fs::read_to_string(auth_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let entry = json.as_object()?.get(OPENCODE_AUTH_KEY)?.as_object()?;
+    let key = entry.get("key").and_then(|v| v.as_str())?.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let login = entry
+        .get("email")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    Some((key.to_string(), login))
+}
+
+fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
+    let auth_path = opencode_auth_path(home_dir);
+    if !auth_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&auth_path)
+        .map_err(|err| AuthError::Filesystem(format!("read {}: {err}", auth_path.display())))?;
+    let mut json: serde_json::Value = serde_json::from_str(&content).map_err(|err| {
+        AuthError::Filesystem(format!(
+            "parse {} as JSON for opencode credentials: {err}",
+            auth_path.display()
+        ))
+    })?;
+
+    let Some(object) = json.as_object_mut() else {
+        return Ok(());
+    };
+
+    if object.remove(OPENCODE_AUTH_KEY).is_none() {
+        return Ok(());
+    }
+
+    if object.is_empty() {
+        fs::remove_file(&auth_path).map_err(|err| {
+            AuthError::Filesystem(format!("remove {}: {err}", auth_path.display()))
+        })?;
+        return Ok(());
+    }
+
+    let rendered = serde_json::to_string_pretty(&json).map_err(|err| {
+        AuthError::Filesystem(format!(
+            "serialize {} after removing opencode auth: {err}",
+            auth_path.display()
+        ))
+    })?;
+    fs::write(&auth_path, rendered)
+        .map_err(|err| AuthError::Filesystem(format!("write {}: {err}", auth_path.display())))
+}
+
 fn normalize_program_name(program: &str) -> String {
     std::path::Path::new(program)
         .file_name()
@@ -1146,6 +1317,7 @@ pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     match env_name {
         "GH_TOKEN" => true,
         "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
+        "OPENCODE_API_KEY" => normalize_program_name(program) == "opencode",
         _ => false,
     }
 }
@@ -1193,6 +1365,7 @@ pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String,
             "claude" => vars.push(("CLAUDE_CODE_OAUTH_TOKEN".to_string(), token.access_token)),
             // Codex OAuth env injection intentionally unsupported for now; keep token in DB.
             "codex" => {}
+            "opencodezen" => vars.push(("OPENCODE_API_KEY".to_string(), token.access_token)),
             _ => continue,
         }
     }
@@ -1246,6 +1419,9 @@ mod tests {
         assert_eq!("gh".parse::<Provider>(), Ok(Provider::GitHub));
         assert_eq!("CLAUDE".parse::<Provider>(), Ok(Provider::Claude));
         assert_eq!("codex".parse::<Provider>(), Ok(Provider::Codex));
+        assert_eq!("opencodezen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
+        assert_eq!("zen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
+        assert_eq!("oc".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert!("gemini".parse::<Provider>().is_err());
     }
 
@@ -1484,9 +1660,17 @@ mod tests {
             "claude",
             "CLAUDE_CODE_OAUTH_TOKEN"
         ));
+        assert!(provider_env_allowed_for_program(
+            "opencode",
+            "OPENCODE_API_KEY"
+        ));
         assert!(!provider_env_allowed_for_program(
             "codex",
             "CLAUDE_CODE_OAUTH_TOKEN"
+        ));
+        assert!(!provider_env_allowed_for_program(
+            "claude",
+            "OPENCODE_API_KEY"
         ));
     }
 
@@ -1519,5 +1703,68 @@ mod tests {
         let token = extract_codex_token(tmp.path()).expect("oauth token should load");
         assert_eq!(token.provider, "codex");
         assert_eq!(token.access_token, "oauth-access-token");
+    }
+
+    #[test]
+    fn extract_opencode_zen_token_reads_auth_file() {
+        let tmp = tempdir().expect("tempdir");
+        let auth_path = tmp.path().join(".local/share/opencode/auth.json");
+        fs::create_dir_all(auth_path.parent().expect("auth parent")).expect("auth parent dir");
+        fs::write(
+            &auth_path,
+            r#"{"opencode":{"type":"api","key":"opencode-file-key","email":"user@example.com"}}"#,
+        )
+        .expect("write opencode auth json");
+
+        let token = extract_opencode_zen_token(tmp.path()).expect("file token should load");
+        assert_eq!(token.provider, "opencodezen");
+        assert_eq!(token.access_token, "opencode-file-key");
+        assert_eq!(token.login.as_deref(), Some("user@example.com"));
+    }
+
+    #[test]
+    fn remove_opencode_zen_auth_entry_deletes_provider_key() {
+        let tmp = tempdir().expect("tempdir");
+        let auth_path = tmp.path().join(".local/share/opencode/auth.json");
+        fs::create_dir_all(auth_path.parent().expect("auth parent")).expect("auth parent dir");
+        fs::write(
+            &auth_path,
+            r#"{"opencode":{"type":"api","key":"opencode-file-key"},"anthropic":{"type":"api","key":"anthropic-key"}}"#,
+        )
+        .expect("write opencode auth json");
+
+        remove_opencode_zen_auth_entry(tmp.path()).expect("remove zen auth entry");
+
+        let updated = fs::read_to_string(&auth_path).expect("read updated auth file");
+        let json: serde_json::Value = serde_json::from_str(&updated).expect("parse updated auth");
+        let object = json.as_object().expect("auth root object");
+        assert!(!object.contains_key("opencode"));
+        assert!(object.contains_key("anthropic"));
+    }
+
+    #[tokio::test]
+    async fn provider_env_vars_includes_opencode_zen_token_for_opencode_harness() {
+        let tmp = tempdir().expect("tempdir");
+        let store = crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+            tmp.path().join("lfd.db"),
+        ))
+        .await
+        .expect("open sqlite store");
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "opencodezen".to_string(),
+                access_token: "opencode-key".to_string(),
+                refresh_token: None,
+                expires_at: None,
+                login: Some("user@example.com".to_string()),
+                updated_at: now_unix(),
+            })
+            .await
+            .expect("upsert provider token");
+
+        let env_vars = provider_env_vars(&store).await;
+        assert!(env_vars
+            .iter()
+            .any(|(name, value)| name == "OPENCODE_API_KEY" && value == "opencode-key"));
     }
 }

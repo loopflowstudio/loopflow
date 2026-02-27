@@ -15,6 +15,7 @@ from .models import (
     AuthFlow,
     AuthProviderStatus,
     Chord,
+    ProviderInfo,
     Repo,
     Session,
     SessionConfig,
@@ -101,6 +102,12 @@ class Client:
     def disconnect_auth(self, provider: str) -> AuthProviderStatus:
         payload = self._request_json("DELETE", f"/v0/auth/{provider}")
         return AuthProviderStatus.model_validate(payload)
+
+    def providers(self) -> list[ProviderInfo]:
+        payload = self._request_json("GET", "/v0/providers")
+        if not isinstance(payload, list):
+            raise LoopflowError("invalid providers response payload")
+        return [ProviderInfo.model_validate(item) for item in payload]
 
     def waves(self, repo: Optional[str] = None) -> list[Wave]:
         params: dict[str, str] = {}

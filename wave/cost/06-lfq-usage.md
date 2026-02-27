@@ -1,6 +1,6 @@
 # 06: lfq Usage
 
-CLI interface for usage data.
+CLI interface for usage and provider data.
 
 ## What to build
 
@@ -11,10 +11,13 @@ lfq usage --model opus       # per-model
 lfq usage --step implement   # per-step
 lfq usage --prompt           # prompt composition view
 lfq usage --from 2026-02-01  # time-filtered
+lfq providers                # list providers with auth status and models
 ```
 
-Reads from the usage API. Tabular terminal output, composable with other shell tools.
+Reads from usage and providers APIs. Tabular terminal output, composable with other shell tools.
+
+`lfq providers` reads from `GET /v0/providers` (Phase 03). `lfq auth zen` connects OpenCode Zen — the broker is ready, just needs a CLI subcommand.
 
 ## Done when
 
-`lfq usage --wave engbot` prints token summary to terminal.
+`lfq usage --wave engbot` prints token summary to terminal. `lfq providers` lists providers with models and auth status.

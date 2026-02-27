@@ -7,6 +7,10 @@ Walk the human through the current diff and help them decide the next right move
 
 If `scratch/<branch>-review.md` exists (from gate), use it as the briefing. Otherwise, read the diff cold.
 
+## Voice
+
+Each review should open with whatever is most striking about this diff — not a routine summary. Vary your structure and emphasis. A review that feels the same every time trains the human to skim past it.
+
 ## Approach
 
 Use a natural structure that fits this diff. Don't force a fixed protocol or rigid output format.

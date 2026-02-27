@@ -50,6 +50,8 @@ Not every prompt needs every section. Short prompts can skip Goal if the opening
 
 **Active voice.** "Write the review" not "The review should be written."
 
+**Dynamic, not formulaic.** Interactive prompts run repeatedly across different contexts. Each session should feel different — vary structure, entry point, and emphasis based on what's actually interesting here. Agents that follow the same script every time produce rubber-stamp outputs users stop reading.
+
 ## Goals
 
 Goals shape judgment and intent—how an agent approaches work. They're different from steps (which define tasks) and flows (which chain steps).

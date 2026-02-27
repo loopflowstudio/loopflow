@@ -289,7 +289,7 @@ fn repo_id_from_segments(owner: &str, repo: &str) -> Result<RepoId, ApiError> {
 }
 
 fn repo_id_from_path_or_fallback(path: &Path) -> String {
-    github_repo_from_local(path).unwrap_or_else(|| path.to_string_lossy().to_string())
+    github_repo_from_local(path).unwrap_or_else(|| repo_name_from_path(path))
 }
 
 fn map_repo_upsert_error(err: StoreError, repo_id: &str) -> ApiError {
@@ -525,7 +525,7 @@ mod tests {
         assert!(repos[0].registered);
         assert!(repos[0].added_at.is_some());
         assert_eq!(repos[1].path, wave_only_path);
-        assert_eq!(repos[1].repo_id, repos[1].path);
+        assert_eq!(repos[1].repo_id, "repo-b");
         assert_eq!(repos[1].wave_count, 1);
         assert!(!repos[1].registered);
         assert!(repos[1].added_at.is_none());

@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS repos (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_repo_id ON repos(repo_id);
 
 CREATE TABLE IF NOT EXISTS repo_edges (
-    parent_repo_id TEXT NOT NULL,
-    child_repo_id TEXT NOT NULL,
+    parent_repo_id TEXT NOT NULL REFERENCES repos(repo_id) ON DELETE CASCADE,
+    child_repo_id TEXT NOT NULL REFERENCES repos(repo_id) ON DELETE CASCADE,
     PRIMARY KEY (parent_repo_id, child_repo_id)
 );

@@ -230,7 +230,18 @@ set -g @plugin 'loopflowstudio/loopflow.tmux'
 run '~/.tmux/plugins/tpm/tpm'
 ```
 
-Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Keybindings start with `prefix+l`:
+Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Customize the format:
+
+```bash
+# .tmux.conf
+set -g @loopflow_status_format '⚡#{status}'       # change wrapper
+set -g @loopflow_status_format '[#{branch}]'        # branch only
+set -g @loopflow_status_format '[lf: #{status}]'    # default
+```
+
+Variables: `#{status}` (computed text), `#{branch}`, `#{step}`, `#{waves}`, `#{wave}`.
+
+Keybindings start with `prefix+l`:
 
 | Key | Action |
 |-----|--------|

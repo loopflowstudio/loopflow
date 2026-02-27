@@ -1204,14 +1204,9 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
     })
 }
 
-/// Keys under which OpenCode Zen credentials may appear in auth.json.
-const OPENCODE_AUTH_JSON_KEYS: &[&str] = &["opencode", "opencodezen", "zen"];
-
-#[derive(Debug, Clone)]
-struct OpenCodeCredential {
-    key: String,
-    login: Option<String>,
-}
+/// Canonical key under which OpenCode stores credentials in auth.json.
+/// Schema: `{"opencode": {"type": "api", "key": "...", "email": "..."}}`
+const OPENCODE_AUTH_KEY: &str = "opencode";
 
 fn opencode_auth_path(home_dir: &Path) -> PathBuf {
     home_dir.join(".local/share/opencode/auth.json")
@@ -1221,8 +1216,8 @@ fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
     let (access_token, login) = if let Some(key) = read_nonempty_env("OPENCODE_API_KEY") {
         (key, None)
     } else {
-        let credential = read_opencode_credential(home_dir)?;
-        (credential.key, credential.login)
+        let (key, login) = read_opencode_credential(home_dir)?;
+        (key, login)
     };
     Some(ProviderToken {
         provider: Provider::OpenCodeZen.as_str().to_string(),
@@ -1245,79 +1240,24 @@ fn read_nonempty_env(name: &str) -> Option<String> {
     })
 }
 
-fn read_opencode_credential(home_dir: &Path) -> Option<OpenCodeCredential> {
+/// Read OpenCode credential from `~/.local/share/opencode/auth.json`.
+/// Returns `(api_key, optional_login)`.
+fn read_opencode_credential(home_dir: &Path) -> Option<(String, Option<String>)> {
     let auth_path = opencode_auth_path(home_dir);
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    extract_opencode_credential_from_json(&json)
-}
-
-fn extract_opencode_credential_from_json(json: &serde_json::Value) -> Option<OpenCodeCredential> {
-    if let Some(object) = json.as_object() {
-        for key in OPENCODE_AUTH_JSON_KEYS {
-            if let Some(credential) = object.get(*key).and_then(parse_opencode_credential_value) {
-                return Some(credential);
-            }
-        }
-        if let Some(providers) = object.get("providers").and_then(|value| value.as_object()) {
-            for key in OPENCODE_AUTH_JSON_KEYS {
-                if let Some(credential) = providers
-                    .get(*key)
-                    .and_then(parse_opencode_credential_value)
-                {
-                    return Some(credential);
-                }
-            }
-        }
+    let entry = json.as_object()?.get(OPENCODE_AUTH_KEY)?.as_object()?;
+    let key = entry.get("key").and_then(|v| v.as_str())?.trim();
+    if key.is_empty() {
+        return None;
     }
-    parse_opencode_credential_value(json)
-}
-
-fn parse_opencode_credential_value(value: &serde_json::Value) -> Option<OpenCodeCredential> {
-    match value {
-        serde_json::Value::String(raw_key) => {
-            let key = raw_key.trim();
-            if key.is_empty() {
-                None
-            } else {
-                Some(OpenCodeCredential {
-                    key: key.to_string(),
-                    login: None,
-                })
-            }
-        }
-        serde_json::Value::Object(object) => {
-            let key = find_string_value(
-                object,
-                &[
-                    "key",
-                    "api_key",
-                    "apiKey",
-                    "token",
-                    "access_token",
-                    "accessToken",
-                ],
-            )?;
-            let login = find_string_value(object, &["login", "email", "username", "user"]);
-            Some(OpenCodeCredential { key, login })
-        }
-        _ => None,
-    }
-}
-
-fn find_string_value(
-    object: &serde_json::Map<String, serde_json::Value>,
-    keys: &[&str],
-) -> Option<String> {
-    for key in keys {
-        if let Some(value) = object.get(*key).and_then(serde_json::Value::as_str) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
+    let login = entry
+        .get("email")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    Some((key.to_string(), login))
 }
 
 fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
@@ -1339,24 +1279,7 @@ fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
         return Ok(());
     };
 
-    let mut changed = false;
-    for key in OPENCODE_AUTH_JSON_KEYS {
-        changed |= object.remove(*key).is_some();
-    }
-    if let Some(providers) = object
-        .get_mut("providers")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        for key in OPENCODE_AUTH_JSON_KEYS {
-            changed |= providers.remove(*key).is_some();
-        }
-        if providers.is_empty() {
-            object.remove("providers");
-            changed = true;
-        }
-    }
-
-    if !changed {
+    if object.remove(OPENCODE_AUTH_KEY).is_none() {
         return Ok(());
     }
 

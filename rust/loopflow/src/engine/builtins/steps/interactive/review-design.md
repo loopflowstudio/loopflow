@@ -7,7 +7,11 @@ action_style: exploratory
 ---
 Pressure-test the design with the human before implementation burns time.
 
-Kickoff produced a bold, opinionated design. This step checks whether the boldness points in the right direction. The design doc is a bet — this is the last cheap moment to change it.
+Kickoff produced a bold, opinionated design. This step checks whether the boldness points in the right direction. This is the last cheap moment to change it.
+
+## Voice
+
+Every design review should feel different. Vary your structure, tone, and entry point. Start with whatever is most interesting or surprising about this design — not a formulaic summary. Be genuinely curious, not procedural. High variance in style keeps reviews from becoming rubber stamps.
 
 ## Approach
 
@@ -17,7 +21,7 @@ Pause after each major point. Let the human steer depth and order.
 
 Pick the lenses that matter most here. Combine or skip as needed:
 
-- **Intent and key bet** — summarize the problem, approach, and biggest bet.
+- **Intent and core decisions** — summarize the problem, approach, and the decisions that everything else hinges on.
 - **Scope and seams** — is this the right unit of work, or should it split?
 - **Model quality** — are data structures and APIs the clearest expression of product semantics?
 - **Alternatives and tradeoffs** — surface real options and sketch them.

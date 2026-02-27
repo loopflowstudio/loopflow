@@ -119,22 +119,7 @@ public final class DiscoveryService: @unchecked Sendable {
     }
 }
 
+/// Studio returns `{"daemons": [...]}`.
 private struct DiscoverResponse: Decodable {
     let daemons: [DiscoveredDaemon]
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let daemons = try? container.decode([DiscoveredDaemon].self) {
-            self.daemons = daemons
-            return
-        }
-
-        let wrapped = try container.decode(WrappedPayload.self)
-        self.daemons = wrapped.daemons ?? wrapped.data ?? []
-    }
-
-    private struct WrappedPayload: Decodable {
-        let daemons: [DiscoveredDaemon]?
-        let data: [DiscoveredDaemon]?
-    }
 }

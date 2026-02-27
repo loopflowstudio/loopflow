@@ -5,21 +5,15 @@ import LoopflowCore
 struct DiscoveryView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
+    @Environment(\.authService) private var authService
 
-    @State private var authService: AuthService
-    @State private var discoveryService: DiscoveryService
+    @State private var discoveryService: DiscoveryService?
     @State private var phase: DiscoveryPhase = .signedOut
     @State private var daemons: [DiscoveredDaemon] = []
     @State private var reachability: [String: ReachabilityState] = [:]
     @State private var errorMessage: String?
     @State private var probeGeneration = 0
     @State private var autoConnectAttempted = false
-
-    init() {
-        let auth = AuthService()
-        _authService = State(initialValue: auth)
-        _discoveryService = State(initialValue: DiscoveryService(authService: auth))
-    }
 
     var body: some View {
         NavigationStack {
@@ -209,6 +203,10 @@ struct DiscoveryView: View {
 
     @MainActor
     private func bootstrap() async {
+        if discoveryService == nil {
+            discoveryService = DiscoveryService(authService: authService)
+        }
+
         guard isAuthenticated else {
             phase = .signedOut
             return
@@ -258,7 +256,8 @@ struct DiscoveryView: View {
         autoConnectAttempted = false
 
         do {
-            let discovered = try await discoveryService.discoverDaemons()
+            guard let service = discoveryService else { return }
+            let discovered = try await service.discoverDaemons()
             daemons = discovered
             phase = .daemonList
             startReachabilityProbes(for: discovered)

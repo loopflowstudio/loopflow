@@ -9,24 +9,26 @@ final class DiscoveryServiceTests: XCTestCase {
         DiscoveryStubURLProtocol.handler = nil
     }
 
-    func testDiscoverDaemonsDecodesArrayPayload() async throws {
+    func testDiscoverDaemonsDecodesWrappedPayload() async throws {
         let auth = MockAuthTokenProvider(token: "jwt-token", expiry: Date().addingTimeInterval(3600))
         DiscoveryStubURLProtocol.handler = { request in
             XCTAssertEqual(request.url?.path, "/api/v1/daemons/discover")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer jwt-token")
 
             let body = """
-            [
-              {
-                "machine_id": "machine-1",
-                "machine_name": "jacks-macbook",
-                "url": "http://100.64.1.5:2486",
-                "capabilities": ["waves", "terminal"],
-                "repos": [{"name": "loopflow", "wave_count": 3}],
-                "connection_token": "conn-token",
-                "last_heartbeat": "2026-02-26T13:00:00Z"
-              }
-            ]
+            {
+              "daemons": [
+                {
+                  "machine_id": "machine-1",
+                  "machine_name": "jacks-macbook",
+                  "url": "http://100.64.1.5:2486",
+                  "capabilities": ["waves", "terminal"],
+                  "repos": [{"name": "loopflow", "wave_count": 3}],
+                  "connection_token": "conn-token",
+                  "last_heartbeat": "2026-02-26T13:00:00Z"
+                }
+              ]
+            }
             """
             return .json(statusCode: 200, body: body)
         }
@@ -51,7 +53,7 @@ final class DiscoveryServiceTests: XCTestCase {
         )
         DiscoveryStubURLProtocol.handler = { request in
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer new-token")
-            return .json(statusCode: 200, body: "[]")
+            return .json(statusCode: 200, body: "{\"daemons\": []}")
         }
 
         let service = DiscoveryService(
@@ -66,7 +68,7 @@ final class DiscoveryServiceTests: XCTestCase {
         XCTAssertEqual(auth.refreshCallCount, 1)
     }
 
-    func testDiscoverDaemonsDecodesWrappedPayload() async throws {
+    func testDiscoverDaemonsHandlesNumericTimestampAndNullFields() async throws {
         let auth = MockAuthTokenProvider(token: "jwt-token", expiry: Date().addingTimeInterval(3600))
         DiscoveryStubURLProtocol.handler = { _ in
             let body = """

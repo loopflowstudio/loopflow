@@ -4,6 +4,7 @@ import UIKit
 import LoopflowCore
 
 struct MobileRootView: View {
+    @State private var authService = AuthService()
     @State private var repoState = RepoState()
     @State private var outputBuffer = OutputBuffer()
     @State private var selectedWaveId: String?
@@ -45,6 +46,7 @@ struct MobileRootView: View {
         }
         .environment(repoState)
         .environment(outputBuffer)
+        .environment(\.authService, authService)
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active, !needsInitialSetup else { return }
             Task {

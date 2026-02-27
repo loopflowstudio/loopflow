@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# lf-up.sh — bootstrap loopflow: ensure daemon running, open layout
+# lfd-up.sh — bootstrap loopflow: ensure daemon running, open layout
 #
 # Usage:
-#   scripts/lf-up.sh [--detach]
+#   scripts/lfd-up.sh [--detach]
 #
 # Starts lfd if not running, waits for health, then opens lf-dev layout.
 # Works outside tmux too (skips layout, just starts daemon).

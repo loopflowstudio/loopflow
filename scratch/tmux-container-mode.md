@@ -12,12 +12,12 @@ Additionally, `lfq land` enables auto-merge but never verifies GitHub accepted i
 
 Four deliverables, each independently useful:
 
-### 1. `scripts/lf-up.sh` — one-command bootstrap
+### 1. `scripts/lfd-up.sh` — one-command bootstrap
 
 A shell script (callable from keybinding) that gets you from zero to working:
 
 ```bash
-scripts/lf-up.sh [--detach]
+scripts/lfd-up.sh [--detach]
 ```
 
 Behavior:
@@ -62,7 +62,7 @@ Also add a new action:
 
 | Action | Key | Behavior |
 |--------|-----|----------|
-| `up` | `u` | Run `scripts/lf-up.sh` |
+| `up` | `u` | Run `scripts/lfd-up.sh` |
 
 ### 3. Harden `lfq land` loop reliability
 
@@ -128,7 +128,7 @@ The CI states (`⏳ CI`, `✗ CI`) require `lfq list --json` to include per-wave
 
 ### In scope
 
-- `scripts/lf-up.sh` with daemon bootstrap, Docker check, health gate, layout idempotency
+- `scripts/lfd-up.sh` with daemon bootstrap, Docker check, health gate, layout idempotency
 - Container mode dispatch for `next` and `land` (both → `lfq land <wave>`)
 - New `up` action and `prefix+l+u` keybinding
 - Health-aware status bar (healthy/CI pending/CI failed/starting/offline states)
@@ -150,11 +150,11 @@ The CI states (`⏳ CI`, `✗ CI`) require `lfq list --json` to include per-wave
 
 ## Implementation plan
 
-### 1. `scripts/lf-up.sh` (~80 lines)
+### 1. `scripts/lfd-up.sh` (~80 lines)
 
 ```bash
 #!/usr/bin/env bash
-# lf-up.sh — bootstrap loopflow: ensure daemon running, open layout
+# lfd-up.sh — bootstrap loopflow: ensure daemon running, open layout
 
 source "$(dirname "$0")/helpers.sh"
 
@@ -254,7 +254,7 @@ land)
     ;;
 up)
     if _lf_up_in_tmux; then
-        tmux send-keys "'$LOOPFLOW_DIR/scripts/lf-up.sh'" Enter
+        tmux send-keys "'$LOOPFLOW_DIR/scripts/lfd-up.sh'" Enter
     else
         tmux display-message "up: only available inside tmux"
     fi
@@ -395,13 +395,13 @@ Add `prefix+$prefix+u  start/bootstrap` to the help text.
 
 ### 8. Test updates in `tmux-review.py` (~20 lines)
 
-- Verify `lf-up.sh` exists and is executable
+- Verify `lfd-up.sh` exists and is executable
 - Verify `u` keybinding registered in loopflow table (now expect 10 bindings)
 - Verify help overlay contains `u` binding
 
 ## Done when
 
-- `scripts/lf-up.sh` bootstraps daemon and opens layout: `./scripts/lf-up.sh` from a tmux session with Docker running starts `lfd`, waits for health, opens `lf-dev`
+- `scripts/lfd-up.sh` bootstraps daemon and opens layout: `./scripts/lfd-up.sh` from a tmux session with Docker running starts `lfd`, waits for health, opens `lf-dev`
 - `prefix+l+u` triggers bootstrap from a keybinding
 - `prefix+l+n` and `prefix+l+d` work in container mode (pick wave, run `lfq land`)
 - `lfq land` verifies auto-merge was accepted — returns error if GitHub rejected it

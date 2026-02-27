@@ -4,13 +4,13 @@
 
 Four tmux-plugin-side deliverables for container mode:
 
-1. **`scripts/lf-up.sh`** — one-command bootstrap that checks for `lfd` and Docker/Podman, starts the daemon if needed, polls for health (250ms intervals, 15s timeout), then opens the `lf-dev` layout. Works outside tmux (skips layout). Idempotent: focuses existing `lf-dev` window if present.
+1. **`scripts/lfd-up.sh`** — one-command bootstrap that checks for `lfd` and Docker/Podman, starts the daemon if needed, polls for health (250ms intervals, 15s timeout), then opens the `lf-dev` layout. Works outside tmux (skips layout). Idempotent: focuses existing `lf-dev` window if present.
 
 2. **Container mode dispatch** — `next` and `land` now pick a wave and run `lfq land` instead of showing "not yet implemented". Both map to `lfq land` because in wave mode, landing *is* advancing — the daemon decides whether to loop. A shared `_loopflow_container_wave_cmd` helper DRYs up the pick-wave-then-send pattern across `run`, `stop`, `logs`, `next`, and `land`.
 
 3. **Health-aware status bar** — `generate_container_status()` now checks daemon health before querying waves. Shows `[lf: starting...]` during startup, `[lf: ! offline]` when daemon is unreachable, `[lf: idle]` when healthy but no waves. Falls back gracefully at every step.
 
-4. **`prefix+l+u` keybinding** — sends `lf-up.sh` to the active pane. Help overlay updated to 10 bindings (was 9), popup height adjusted.
+4. **`prefix+l+u` keybinding** — sends `lfd-up.sh` to the active pane. Help overlay updated to 10 bindings (was 9), popup height adjusted.
 
 ## Key choices
 
@@ -20,13 +20,13 @@ Four tmux-plugin-side deliverables for container mode:
 | `next\|land` combined case | Both dispatch to `lfq land` in container mode, and both dispatch to `lf ops $action` in lf mode. Single case with `$action` variable covers both. |
 | ASCII status indicators (`!`, `...`) | Unicode (`⚠`, `...`) may not render in all terminal/font combinations. The status bar should never show garbage. |
 | Health check before wave list | Prevents hanging on `lfq list --json` when daemon is down. Separates "daemon unreachable" from "daemon healthy, no waves". |
-| `loopflow_has_cmd` guards | Consistent with existing patterns. `lf-up.sh` uses the helper from `helpers.sh` rather than inline `command -v`. |
-| No LOOPFLOW_DIR in lf-up.sh | Already set by `helpers.sh` which is sourced. Removed redundant assignment. |
+| `loopflow_has_cmd` guards | Consistent with existing patterns. `lfd-up.sh` uses the helper from `helpers.sh` rather than inline `command -v`. |
+| No LOOPFLOW_DIR in lfd-up.sh | Already set by `helpers.sh` which is sourced. Removed redundant assignment. |
 
 ## How it fits together
 
 ```
-keybinding (prefix+l+u) → dispatch "up" → tmux send-keys lf-up.sh
+keybinding (prefix+l+u) → dispatch "up" → tmux send-keys lfd-up.sh
                                                       ↓
                                               lfd check → docker check → lfd start → health poll → layout
 ```

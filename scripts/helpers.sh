@@ -343,7 +343,7 @@ loopflow_dispatch() {
             loopflow_open_layout
             ;;
         up)
-            tmux send-keys "'$LOOPFLOW_DIR/scripts/lf-up.sh'" Enter
+            tmux send-keys "'$LOOPFLOW_DIR/scripts/lfd-up.sh'" Enter
             ;;
         help)
             loopflow_show_help

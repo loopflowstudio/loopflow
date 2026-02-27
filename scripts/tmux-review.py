@@ -150,15 +150,15 @@ def check_layout_scripts() -> bool:
 
 
 def check_bootstrap_script() -> bool:
-    """Verify lf-up.sh exists and is executable."""
-    path = os.path.join(PLUGIN_DIR, "scripts", "lf-up.sh")
+    """Verify lfd-up.sh exists and is executable."""
+    path = os.path.join(PLUGIN_DIR, "scripts", "lfd-up.sh")
     if not os.path.isfile(path):
-        print("  FAIL: scripts/lf-up.sh missing")
+        print("  FAIL: scripts/lfd-up.sh missing")
         return False
     if not os.access(path, os.X_OK):
-        print("  FAIL: scripts/lf-up.sh not executable")
+        print("  FAIL: scripts/lfd-up.sh not executable")
         return False
-    print("  OK: lf-up.sh exists and is executable")
+    print("  OK: lfd-up.sh exists and is executable")
     return True
 
 
@@ -220,7 +220,7 @@ def print_checklist():
     print("6. [ ] Press prefix+l+w — wave picker appears")
     print("7. [ ] Press prefix+l+r — run action executes or shows message")
     print("8. [ ] Press prefix+l+p — PR action opens or shows 'gh not found'")
-    print("9. [ ] Press prefix+l+u — bootstrap starts or shows 'lfd not found'")
+    print("9. [ ] Press prefix+l+u — lfd-up starts or shows 'lfd not found'")
     print("10.[ ] Resize terminal to <120 cols, open layout — simplified 2-pane")
     print("11.[ ] Remove fzf from PATH, try picker — fallback works")
     print("12.[ ] Source plugin twice — no duplicate keybindings")

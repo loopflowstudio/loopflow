@@ -63,7 +63,15 @@ generate_container_status() {
 
     if [[ "$lfq_ok" != true ]]; then
         # Daemon not responding — check if it's starting or offline
-        if loopflow_has_cmd lfd && lfd status 2>/dev/null | grep -qiE 'starting|running'; then
+        local lfd_out=""
+        if loopflow_has_cmd lfd; then
+            if loopflow_has_cmd timeout; then
+                lfd_out="$(timeout "$timeout_s" lfd status 2>/dev/null)"
+            else
+                lfd_out="$(lfd status 2>/dev/null)"
+            fi
+        fi
+        if echo "$lfd_out" | grep -qiE 'starting|running'; then
             echo "[lf: starting...]"
         else
             echo "[lf: ! offline]"
@@ -84,9 +92,9 @@ generate_container_status() {
         return
     fi
 
-    # Parse wave count and active wave (portable JSON parsing)
+    # Parse wave count and active wave (portable JSON — assumes top-level array of objects)
     local wave_count active_wave
-    wave_count="$(echo "$output" | grep -c '"name"' 2>/dev/null || echo "0")"
+    wave_count="$(echo "$output" | grep -c '"name"\s*:' 2>/dev/null || echo "0")"
     active_wave="$(echo "$output" | grep -o '"name":"[^"]*"' | head -1 | sed 's/"name":"//;s/"//' 2>/dev/null)"
 
     if [[ "$wave_count" -eq 0 ]]; then

@@ -2,8 +2,8 @@
 //!
 //! Parses streaming JSON lines from Claude, Codex, Gemini, and OpenCode into
 //! structured events and renders them as human-readable output (tool use
-//! summaries, cost/duration, text fragments). Gracefully degrades: unrecognized
-//! lines pass through to the caller.
+//! summaries, cost/duration, text fragments). Protocol JSON with unrecognized
+//! types is suppressed; non-JSON lines pass through to the caller.
 
 use std::io::Write;
 
@@ -41,13 +41,18 @@ pub enum ParseResult {
 }
 
 /// How to display streaming output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamFormat {
-    /// Pass through raw JSON lines (current behavior).
-    #[default]
+    /// Pass through raw JSON lines.
     Raw,
     /// Human-readable summary. Bool controls ANSI color.
     Human(bool),
+}
+
+impl Default for StreamFormat {
+    fn default() -> Self {
+        Self::Human(false)
+    }
 }
 
 /// Stateful parser for stream-json lines.
@@ -65,9 +70,9 @@ impl StreamParser {
 
     /// Feed a single line of streaming output.
     ///
-    /// Returns `Events` for displayable events, `Skipped` for known-uninteresting
-    /// JSON events, and `Passthrough` for anything unrecognized (non-JSON, unknown
-    /// format, etc.) so the caller can print it raw.
+    /// Returns `Events` for displayable events, `Skipped` for protocol JSON we
+    /// don't need to display, and `Passthrough` for non-JSON lines (plain text,
+    /// malformed input) so the caller can print them raw.
     pub fn feed_line(&mut self, line: &str) -> ParseResult {
         let v = match serde_json::from_str::<serde_json::Value>(line) {
             Ok(v) => v,
@@ -91,7 +96,12 @@ impl StreamParser {
                     ParseResult::Events(events)
                 }
             }
-            "system" | "user" => ParseResult::Skipped,
+            "system"
+            | "user"
+            | "content_block_start"
+            | "content_block_delta"
+            | "content_block_stop"
+            | "rate_limit_event" => ParseResult::Skipped,
 
             // ── Codex ───────────────────────────────────────────────
             // Codex emits item.started/completed with nested item types.
@@ -147,7 +157,8 @@ impl StreamParser {
             // Both Codex and Gemini emit "error" events.
             "error" => ParseResult::Skipped,
 
-            _ => ParseResult::Passthrough,
+            // Unrecognized type — still protocol JSON, suppress it.
+            _ => ParseResult::Skipped,
         }
     }
 }
@@ -640,6 +651,34 @@ mod tests {
     }
 
     #[test]
+    fn claude_rate_limit_event_skipped() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1772157600},"uuid":"abc"}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
+    #[test]
+    fn claude_content_block_start_skipped() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash"}}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
+    #[test]
+    fn claude_content_block_delta_skipped() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":\"ls\"}"}}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
+    #[test]
+    fn claude_content_block_stop_skipped() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"content_block_stop","index":0}"#;
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
+    }
+
+    #[test]
     fn claude_result_success() {
         let mut parser = StreamParser::new();
         let line =
@@ -862,10 +901,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_opencode_unknown_passthrough() {
+    fn parse_opencode_unknown_skipped() {
         let mut parser = StreamParser::new();
         let line = r#"{"type":"tool_call","sessionID":"ses_abc","part":{"type":"tool-call","name":"edit"}}"#;
-        assert_eq!(parser.feed_line(line), ParseResult::Passthrough);
+        assert_eq!(parser.feed_line(line), ParseResult::Skipped);
     }
 
     #[test]
@@ -899,11 +938,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_json_type_passes_through() {
+    fn unknown_json_type_skipped() {
         let mut parser = StreamParser::new();
         assert_eq!(
             parser.feed_line(r#"{"type":"some_new_thing","data":123}"#),
-            ParseResult::Passthrough
+            ParseResult::Skipped
         );
     }
 

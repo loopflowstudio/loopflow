@@ -12,7 +12,7 @@ from rich.table import Table
 
 from loopflow import api
 from loopflow.errors import LoopflowError
-from loopflow.models import AuthProviderStatus, Repo, Wave
+from loopflow.models import AuthProviderStatus, ProviderInfo, Repo, UsageSummary, Wave
 
 app = typer.Typer(help="Query lfd and manage waves.")
 auth_app = typer.Typer(help="Manage provider authentication.")
@@ -184,6 +184,96 @@ def _connect_provider(provider: str) -> None:
     typer.echo("Authentication still pending. Complete auth in browser and run `lfq auth status`.")
 
 
+def _format_tokens(value: int) -> str:
+    if value == 0:
+        return "\u2014"
+    if value < 1000:
+        return str(value)
+    if value < 1_000_000:
+        return f"{value / 1000:.1f}k"
+    return f"{value / 1_000_000:.1f}M"
+
+
+_GROUP_BY_FOR_FILTER = {
+    "wave": "step",
+    "flow": "wave",
+    "step": "wave",
+    "model": "wave",
+}
+
+
+def _infer_group_by(
+    wave: Optional[str],
+    flow: Optional[str],
+    step: Optional[str],
+    model: Optional[str],
+    prompt: bool,
+    group_by: Optional[str],
+) -> str:
+    if group_by is not None:
+        return group_by
+    if prompt:
+        return "source"
+    filters = {
+        k: v
+        for k, v in {"wave": wave, "flow": flow, "step": step, "model": model}.items()
+        if v is not None
+    }
+    if len(filters) > 1:
+        typer.echo(
+            "Multiple filters require --group-by. Example: lfq usage --wave X --model Y --group-by step",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if len(filters) == 1:
+        filter_name = next(iter(filters))
+        return _GROUP_BY_FOR_FILTER[filter_name]
+    return "wave"
+
+
+def _usage_table(summary: UsageSummary) -> Table:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column(summary.group_by)
+    table.add_column("input", justify="right")
+    table.add_column("output", justify="right")
+    table.add_column("reasoning", justify="right")
+    table.add_column("cache_r", justify="right")
+    table.add_column("cache_w", justify="right")
+    table.add_column("sessions", justify="right")
+    table.add_column("turns", justify="right")
+
+    for group in summary.groups:
+        t = group.tokens
+        table.add_row(
+            group.key,
+            _format_tokens(t.input),
+            _format_tokens(t.output),
+            _format_tokens(t.reasoning),
+            _format_tokens(t.cache_read),
+            _format_tokens(t.cache_write),
+            str(group.sessions),
+            str(group.turns),
+        )
+    return table
+
+
+def _providers_table(providers: list[ProviderInfo]) -> Table:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("provider")
+    table.add_column("status")
+    table.add_column("billing")
+    table.add_column("models")
+
+    for p in providers:
+        if p.auth_status == "active":
+            status = "\u2713 active"
+        else:
+            status = f"\u2717 {p.auth_status}"
+        model_names = ", ".join(m.display_name for m in p.models)
+        table.add_row(_provider_label(p.provider), status, p.billing, model_names)
+    return table
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
     if ctx.invoked_subcommand is not None:
@@ -289,6 +379,53 @@ def logs_wave(name_or_id: str) -> None:
         raise typer.Exit(code=1) from exc
 
 
+@app.command("usage", help="Show token usage summary.")
+def usage(
+    wave: Optional[str] = typer.Option(None, "--wave", "-w"),
+    flow: Optional[str] = typer.Option(None, "--flow", "-f"),
+    step: Optional[str] = typer.Option(None, "--step", "-s"),
+    model: Optional[str] = typer.Option(None, "--model", "-m"),
+    prompt: bool = typer.Option(False, "--prompt", "-p"),
+    group_by: Optional[str] = typer.Option(None, "--group-by", "-g"),
+    from_time: Optional[str] = typer.Option(None, "--from"),
+    to_time: Optional[str] = typer.Option(None, "--to"),
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    resolved_group_by = _infer_group_by(wave, flow, step, model, prompt, group_by)
+    summary = api.usage_summary(
+        group_by=resolved_group_by,
+        wave=wave,
+        flow=flow,
+        step=step,
+        model=model,
+        from_=from_time,
+        to_=to_time,
+    )
+    if json_output:
+        typer.echo(json.dumps(summary.model_dump(mode="json", by_alias=True), indent=2))
+        return
+    if summary.groups:
+        console.print(_usage_table(summary))
+    else:
+        console.print("no usage data")
+
+
+@app.command("providers", help="List providers with auth status and models.")
+def providers_cmd(
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    provider_list = api.providers()
+    if json_output:
+        typer.echo(
+            json.dumps([p.model_dump(mode="json") for p in provider_list], indent=2)
+        )
+        return
+    if provider_list:
+        console.print(_providers_table(provider_list))
+    else:
+        console.print("no providers")
+
+
 @auth_app.command("status", help="Show authentication status for all providers.")
 def auth_status(
     provider: Optional[str] = None,
@@ -322,6 +459,11 @@ def auth_claude() -> None:
 @auth_app.command("codex", help="Start Codex authentication.")
 def auth_codex() -> None:
     _connect_provider("codex")
+
+
+@auth_app.command("zen", help="Start OpenCode Zen authentication.")
+def auth_zen() -> None:
+    _connect_provider("opencodezen")
 
 
 @auth_app.command("disconnect", help="Disconnect a provider.")

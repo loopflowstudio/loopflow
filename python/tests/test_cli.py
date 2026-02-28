@@ -2,22 +2,31 @@
 
 from __future__ import annotations
 
+import click
+import pytest
 from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
     AUTH_PROVIDER_NONE,
+    PROVIDER_INFO_FULL,
+    PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
+    USAGE_SUMMARY,
     WAVE_FULL,
     WAVE_MINIMAL,
 )
 from loopflow.cli import (
     _auth_status_table,
+    _format_tokens,
+    _infer_group_by,
+    _providers_table,
     _repo_table,
     _split_repo_slug,
     _status_details,
+    _usage_table,
     _wave_table,
 )
-from loopflow.models import AuthProviderStatus, Repo, Wave
+from loopflow.models import AuthProviderStatus, ProviderInfo, Repo, UsageSummary, Wave
 from rich.console import Console
 
 
@@ -115,3 +124,105 @@ def test_auth_status_no_refresh_when_no_next_refresh_at() -> None:
 
 def test_split_repo_slug_parses_owner_repo() -> None:
     assert _split_repo_slug("loopflowstudio/loopflow") == ("loopflowstudio", "loopflow")
+
+
+# Token formatting
+
+
+def test_format_tokens_zero_shows_dash() -> None:
+    assert _format_tokens(0) == "\u2014"
+
+
+def test_format_tokens_small_shows_raw() -> None:
+    assert _format_tokens(42) == "42"
+    assert _format_tokens(999) == "999"
+
+
+def test_format_tokens_thousands_shows_k() -> None:
+    assert _format_tokens(1000) == "1.0k"
+    assert _format_tokens(42100) == "42.1k"
+    assert _format_tokens(128300) == "128.3k"
+
+
+def test_format_tokens_millions_shows_m() -> None:
+    assert _format_tokens(1_000_000) == "1.0M"
+    assert _format_tokens(1_200_000) == "1.2M"
+
+
+# Usage table
+
+
+def test_usage_table_renders_groups() -> None:
+    summary = UsageSummary.model_validate(USAGE_SUMMARY)
+    console = Console(record=True, width=220)
+    console.print(_usage_table(summary))
+    rendered = console.export_text()
+
+    assert "engbot" in rendered
+    assert "infra" in rendered
+    assert "42.1k" in rendered
+    assert "128.3k" in rendered
+    assert "12.0k" in rendered
+    assert "45.0k" in rendered
+    assert "\u2014" in rendered
+
+
+def test_usage_table_column_header_matches_group_by() -> None:
+    payload = dict(USAGE_SUMMARY)
+    payload["group_by"] = "step"
+    summary = UsageSummary.model_validate(payload)
+    console = Console(record=True, width=220)
+    console.print(_usage_table(summary))
+    rendered = console.export_text()
+
+    assert "step" in rendered
+
+
+# Group-by inference
+
+
+def test_infer_group_by_wave_filter_gives_step() -> None:
+    assert _infer_group_by(wave="engbot", flow=None, step=None, model=None, prompt=False, group_by=None) == "step"
+
+
+def test_infer_group_by_flow_filter_gives_wave() -> None:
+    assert _infer_group_by(wave=None, flow="build", step=None, model=None, prompt=False, group_by=None) == "wave"
+
+
+def test_infer_group_by_prompt_overrides() -> None:
+    assert _infer_group_by(wave=None, flow=None, step=None, model=None, prompt=True, group_by=None) == "source"
+
+
+def test_infer_group_by_explicit_wins() -> None:
+    assert _infer_group_by(wave="x", flow=None, step=None, model=None, prompt=False, group_by="model") == "model"
+
+
+def test_infer_group_by_multiple_filters_requires_explicit() -> None:
+    with pytest.raises(click.exceptions.Exit):
+        _infer_group_by(wave="x", flow="y", step=None, model=None, prompt=False, group_by=None)
+
+
+def test_infer_group_by_no_filter_gives_wave() -> None:
+    assert _infer_group_by(wave=None, flow=None, step=None, model=None, prompt=False, group_by=None) == "wave"
+
+
+# Providers table
+
+
+def test_providers_table_renders_providers() -> None:
+    providers = [
+        ProviderInfo.model_validate(PROVIDER_INFO_MINIMAL),
+        ProviderInfo.model_validate(PROVIDER_INFO_FULL),
+    ]
+    console = Console(record=True, width=220)
+    console.print(_providers_table(providers))
+    rendered = console.export_text()
+
+    assert "Codex" in rendered
+    assert "OpenCode Zen" in rendered
+    assert "subscription" in rendered
+    assert "per_token" in rendered
+    assert "GPT-5.1 Codex" in rendered
+    assert "Kimi K2.5" in rendered
+    assert "\u2713 active" in rendered
+    assert "\u2717 none" in rendered

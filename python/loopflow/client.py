@@ -20,6 +20,7 @@ from .models import (
     Session,
     SessionConfig,
     SessionEventEnvelope,
+    UsageSummary,
     Wave,
     WaveRun,
 )
@@ -108,6 +109,35 @@ class Client:
         if not isinstance(payload, list):
             raise LoopflowError("invalid providers response payload")
         return [ProviderInfo.model_validate(item) for item in payload]
+
+    def usage_summary(
+        self,
+        group_by: str = "wave",
+        wave: Optional[str] = None,
+        flow: Optional[str] = None,
+        step: Optional[str] = None,
+        model: Optional[str] = None,
+        source: Optional[str] = None,
+        from_: Optional[str] = None,
+        to_: Optional[str] = None,
+    ) -> UsageSummary:
+        params: dict[str, str] = {"group_by": group_by}
+        if wave is not None:
+            params["wave"] = wave
+        if flow is not None:
+            params["flow"] = flow
+        if step is not None:
+            params["step"] = step
+        if model is not None:
+            params["model"] = model
+        if source is not None:
+            params["source"] = source
+        if from_ is not None:
+            params["from"] = from_
+        if to_ is not None:
+            params["to"] = to_
+        payload = self._request_json("GET", "/v0/usage/summary", params=params)
+        return UsageSummary.model_validate(payload)
 
     def waves(self, repo: Optional[str] = None) -> list[Wave]:
         params: dict[str, str] = {}

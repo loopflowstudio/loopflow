@@ -11,10 +11,27 @@ lfq usage --model opus       # per-model
 lfq usage --step implement   # per-step
 lfq usage --prompt           # prompt composition view
 lfq usage --from 2026-02-01  # time-filtered
+lfq usage --billing          # split by auth type (subscription vs apikey)
 lfq providers                # list providers with auth status and models
 ```
 
 Reads from usage and providers APIs. Tabular terminal output, composable with other shell tools.
 
 `lfq providers` reads from `GET /v0/providers` (Phase 03). `lfq auth zen` connects OpenCode Zen — the broker is ready, just needs a CLI subcommand.
+
+### Auth-type-aware billing
+
+When `--billing` is passed (or when any provider uses API key auth), split output into subscription and metered buckets:
+
+```
+Subscription (OAuth)          Metered (API key)
+─────────────────────         ──────────────────────
+Claude   142k tokens          Codex   89k tokens ~$4.20
+                              ─────────────────────────
+                              total metered: ~$4.20
+```
+
+Dollar estimates use `CostRates` from the model registry. Only shown for API-key sessions — subscription sessions show token volume only.
+
+Per-provider auth type comes from the auth wave's credential type field in the DB. The usage API includes `auth_type` per turn so cost computation is accurate even when a user switches mid-session.
 

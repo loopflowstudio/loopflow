@@ -14,22 +14,23 @@ The pivot: flatten `Wave` to a single struct, use join tables for grouping, and 
 
 - Waves are flat — a `Wave` is a single struct, no enum/tree/parent. A wave belongs to exactly one chord (including the default).
 - Chords are groups, not executors — no trigger ownership or child lifecycle management.
-- Signals are reactive — external events (Watch, Listen, Cron, CiFailure) that trigger flow overrides. Loop/Once are execution modes on the wave, not signals.
+- Signals are reactive — external events (Watch, Listen, CiFailure) that trigger flow overrides. Loop/Cron/Manual are execution modes on the wave, not signals.
 - Every wave gets default stimuli: Watch (flow: integrate) and CiFailure (flow: ci-fix).
 - Stimulus-based composition over tree structure — a wave can listen to any other wave regardless of chord membership.
 
 ### Signal model
 
-Phases 01–03.5 collapsed `WaveRunKind`/`StimulusKind` into a single `Signal` enum. Phase 04 splits further: execution modes (Loop, Once) move to `wave.mode`, leaving Signal as purely reactive triggers. Starting a wave dispatches directly — no "manual stimulus" concept.
+Phases 01–03.5 collapsed `WaveRunKind`/`StimulusKind` into a single `Signal` enum. Phase 04 splits further: all execution modes (Loop, Cron, Manual) move to `wave.mode`, leaving Signal as purely reactive triggers. Starting a wave dispatches directly — no "manual stimulus" concept.
 
 ```
-Signal (reactive, external events):    Watch | Listen | Cron | CiFailure
-Wave (execution behavior):             mode (Loop|Once), flow, loop_flow
+Signal (reactive, external events):    Watch | Listen | CiFailure
+WaveMode (execution behavior):         Loop | Cron | Manual
+Wave fields:                           mode, flow, loop_flow, cron
 ```
 
 CI fix is a normal stimulus activation (`Signal::CiFailure` + `flow: ci-fix`). Watch triggers the `integrate` flow (rebase + integrate-upstream). `stimulus.flow` override lets any stimulus select a flow at activation time.
 
-Starting a wave = running `wave.flow` (default: `ship`). The loop ticker runs `wave.loop_flow` (default: `ship-roadmap`). Callers can override flow at start time via the API.
+Starting a wave = running `wave.flow` (default: `ship`). The loop ticker runs `wave.loop_flow` (default: `ship-roadmap`). The cron ticker runs `wave.flow` on schedule. Callers can override flow at start time via the API.
 
 External API still uses `stimulus.kind` — coordinated rename to `stimulus.signal` deferred (requires Python client + Concerto + wave config schema update in lockstep).
 
@@ -40,14 +41,15 @@ struct Wave {
     id: LfdId,
     name: String,
     repo: String,
-    mode: WaveMode,        // Loop | Once
-    flow: String,          // default flow for manual starts ("ship")
+    mode: WaveMode,        // Loop | Cron | Manual
+    flow: String,          // default flow for manual/cron starts ("ship")
     loop_flow: String,     // flow for loop ticker ("ship-roadmap")
+    cron: Option<String>,  // cron expression, required when mode=Cron
     // flat fields, no type/parent/position
 }
 
 struct Stimulus {
-    signal: Signal,  // Watch | Listen | Cron | CiFailure
+    signal: Signal,  // Watch | Listen | CiFailure
     flow: Option<String>,  // override wave.flow for this activation
     source_wave_id: Option<LfdId>,  // for Listen stimuli
 }
@@ -95,7 +97,7 @@ CREATE TABLE chord_members (
 
 ## Goals
 
-- Signal cleanup: execution modes (Loop/Once) separated from reactive triggers (Watch/Listen/Cron/CiFailure)
+- Signal cleanup: execution modes (Loop/Cron/Manual) separated from reactive triggers (Watch/Listen/CiFailure)
 - WaveRun/FlowRun split: WaveRun is an iteration (branch, worktree, PR); FlowRun is one flow execution within it
 - Starting a wave = running a flow. No manual stimulus. `lfq run` accepts `--flow`.
 - Default stimuli on wave creation: Watch (flow: integrate) and CiFailure (flow: ci-fix)
@@ -121,5 +123,6 @@ CREATE TABLE chord_members (
 - Default stimuli present on every new wave (watch + ci-fix)
 - Integrate flow runs automatically when main advances
 - `lfq run <wave> --flow <flow>` starts a wave with the specified flow
+- Cron waves (`mode: cron, cron: "0 9 * * *"`) run on schedule
 - Reactive stimuli during an active iteration create triggered FlowRuns, not new WaveRuns
 - WaveRun history shows loop_flow_run and triggered_flows per iteration

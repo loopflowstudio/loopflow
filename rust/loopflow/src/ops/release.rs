@@ -29,6 +29,9 @@ struct MergedPr {
     title: String,
     body: Option<String>,
     files: Vec<String>,
+    additions: u64,
+    deletions: u64,
+    changed_files: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +42,12 @@ struct GhMergedPr {
     body: Option<String>,
     #[serde(default)]
     files: Vec<GhPrFile>,
+    #[serde(default)]
+    additions: u64,
+    #[serde(default)]
+    deletions: u64,
+    #[serde(default, rename = "changedFiles")]
+    changed_files: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +95,9 @@ impl From<GhMergedPr> for MergedPr {
                 .map(|file| file.filename)
                 .filter(|file| !file.is_empty())
                 .collect(),
+            additions: value.additions,
+            deletions: value.deletions,
+            changed_files: value.changed_files,
         }
     }
 }
@@ -787,9 +799,9 @@ fn list_merged_prs(
     include_files: bool,
 ) -> OpsResult<Vec<MergedPr>> {
     let fields = if include_files {
-        "number,title,body,files"
+        "number,title,body,files,additions,deletions,changedFiles"
     } else {
-        "number,title,body"
+        "number,title,body,additions,deletions,changedFiles"
     };
 
     let output = run_stdout(
@@ -934,8 +946,15 @@ fn generate_release_notes(
 
     let area_scope = display_area_scope(target);
 
+    let previous_notes = fs::read_to_string(repo.join("RELEASE_NOTES.md")).unwrap_or_default();
+    let previous_notes_section = if previous_notes.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n## Previous release notes\n\n{previous_notes}")
+    };
+
     let prompt = format!(
-        "{template}\n\n## Release context\n\n- Target version: v{version}\n- Previous tag: {prev_tag}\n- Release target: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Merged PRs\n\n{pr_summary}\n",
+        "{template}\n\n## Release context\n\n- Target version: v{version}\n- Previous tag: {prev_tag}\n- Release target: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Merged PRs\n\n{pr_summary}{previous_notes_section}\n",
         target.name,
         display_tag_prefix(target),
         area_scope
@@ -954,18 +973,14 @@ fn generate_release_notes(
 }
 
 fn format_pr_for_prompt(pr: &MergedPr) -> String {
-    let body = pr.body.as_deref().unwrap_or("").trim();
-    if body.is_empty() {
-        return format!("- #{} {}", pr.number, pr.title);
+    let header = format!(
+        "- #{} {} (+{} -{}, {} files)",
+        pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
+    );
+    match pr.body.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+        Some(body) => format!("{header}\n  Body: {body}"),
+        None => header,
     }
-
-    let max_chars = 400;
-    let mut clipped = body.chars().take(max_chars).collect::<String>();
-    if body.chars().count() > max_chars {
-        clipped.push('…');
-    }
-
-    format!("- #{} {}\n  - Body: {}", pr.number, pr.title, clipped)
 }
 
 fn write_release_notes(repo: &Path, notes: &str, version: &str) -> OpsResult<()> {

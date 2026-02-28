@@ -465,17 +465,18 @@ fn wt_list(format: Option<&str>) -> Result<()> {
             c.bold
         };
 
-        let status = if landed_dirty {
-            format!("{}landed-dirty{}", c.red, c.reset)
+        let (status_label, status_color) = if landed_dirty {
+            ("landed-dirty", c.red)
         } else if row.merged {
-            format!("{}merged{}", c.green, c.reset)
+            ("merged", c.green)
         } else if row.remote_gone {
-            format!("{}remote-gone{}", c.yellow, c.reset)
+            ("remote-gone", c.yellow)
         } else if fresh {
-            format!("{}fresh{}", c.dim, c.reset)
+            ("fresh", c.dim)
         } else {
-            format!("{}active{}", c.cyan, c.reset)
+            ("active", c.cyan)
         };
+        let status = format!("{status_color}{status_label}{}", c.reset);
 
         let dirty_flag = if row.dirty && !landed_dirty {
             format!(" {}dirty{}", c.yellow, c.reset)

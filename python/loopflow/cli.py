@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import webbrowser
 from datetime import datetime, timezone
@@ -147,15 +148,14 @@ def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
     for status in statuses:
         ct = status.credential_type or "oauth"
         if status.status == "active":
+            details = _status_details(status)
             if ct == "apikey":
                 icon = "⚠"
                 status_label = "apikey"
+                details = f"{details} · pay-per-token"
             else:
                 icon = "✓"
                 status_label = "oauth"
-            details = _status_details(status)
-            if ct == "apikey":
-                details = f"{details} · pay-per-token"
         elif status.status == "pending":
             icon = "…"
             status_label = "pending"
@@ -613,8 +613,6 @@ def auth_configure(
         }
         env_name = env_names.get(provider.lower())
         if env_name:
-            import os
-
             api_key = os.environ.get(env_name)
         if not api_key:
             typer.echo(

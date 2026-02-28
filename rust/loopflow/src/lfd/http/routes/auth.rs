@@ -8,7 +8,7 @@ use tracing::info;
 use crate::lfd::http::dto::format_datetime;
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, ApiMessage, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::provider_auth::{AuthError, AuthFlowResponse, Provider, ProviderAuthSnapshot};
 use crate::lfd::store::CredentialType;
 
@@ -144,12 +144,10 @@ pub async fn configure_credential_handler(
                 updated_at: crate::lfd::store::rows::now_unix(),
                 credential_type: CredentialType::ApiKey,
             };
-            store.upsert_provider_token(&token).await.map_err(|err| {
-                api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ApiMessage::Untrusted(err.to_string()),
-                )
-            })?;
+            store
+                .upsert_provider_token(&token)
+                .await
+                .map_err(map_store_error)?;
             info!(
                 provider = %provider,
                 "switched to API key (pay-per-token billing)"
@@ -160,22 +158,15 @@ pub async fn configure_credential_handler(
             let existing = store
                 .get_provider_token(provider.as_str())
                 .await
-                .map_err(|err| {
-                    api_error(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        ApiMessage::Untrusted(err.to_string()),
-                    )
-                })?;
+                .map_err(map_store_error)?;
             match existing {
                 Some(mut token) => {
                     token.credential_type = CredentialType::OAuth;
                     token.updated_at = crate::lfd::store::rows::now_unix();
-                    store.upsert_provider_token(&token).await.map_err(|err| {
-                        api_error(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            ApiMessage::Untrusted(err.to_string()),
-                        )
-                    })?;
+                    store
+                        .upsert_provider_token(&token)
+                        .await
+                        .map_err(map_store_error)?;
                     info!(
                         provider = %provider,
                         "switched to OAuth (subscription billing)"

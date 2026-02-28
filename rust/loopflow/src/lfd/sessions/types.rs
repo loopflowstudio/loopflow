@@ -346,6 +346,12 @@ pub struct SessionConfig {
     pub client_compact: Option<bool>,
 }
 
+/// Conversation and usage record for a single interactive agent session.
+///
+/// `Session` stores persisted chat/session lifecycle and token usage events.
+/// For process-level lifecycle (PID/container/run status), see `AgentRun`.
+/// When present, `wave_run_id` links this session back to the corresponding
+/// wave execution lineage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: LfdId,

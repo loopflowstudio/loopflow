@@ -70,11 +70,20 @@ struct MobileRootView: View {
             }
             .tag(0)
 
+            NavigationStack {
+                AnalyticsDashboardView()
+                    .navigationTitle("Analytics")
+            }
+            .tabItem {
+                Label("Analytics", systemImage: "chart.line.uptrend.xyaxis")
+            }
+            .tag(1)
+
             ConnectionSetupView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
-                .tag(1)
+                .tag(2)
         }
         .onChange(of: selectedWaveId) { _, newValue in
             guard newValue != nil else { return }
@@ -88,6 +97,15 @@ struct MobileRootView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
+                            repoState.showingAnalytics = true
+                            selectedWaveId = nil
+                        } label: {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                        }
+                        .accessibilityLabel("Analytics")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
                             showingSettings = true
                         } label: {
                             Image(systemName: "gearshape")
@@ -95,7 +113,9 @@ struct MobileRootView: View {
                     }
                 }
         } detail: {
-            if let selectedWaveId {
+            if repoState.showingAnalytics {
+                AnalyticsDashboardView()
+            } else if let selectedWaveId {
                 MobileWaveDetailView(waveId: selectedWaveId)
             } else {
                 ContentUnavailableView("Select a Wave", systemImage: "waveform.path.ecg")
@@ -103,6 +123,11 @@ struct MobileRootView: View {
         }
         .sheet(isPresented: $showingSettings) {
             ConnectionSetupView()
+        }
+        .onChange(of: selectedWaveId) { _, newValue in
+            if newValue != nil {
+                repoState.showingAnalytics = false
+            }
         }
     }
 }

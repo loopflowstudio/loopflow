@@ -5,7 +5,9 @@ use time::OffsetDateTime;
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::registration::{RegistrationPublicSummary, RegistrationState};
 use crate::lfd::sessions::types::ContextSnapshot;
-use crate::lfd::sessions::usage::{StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate};
+use crate::lfd::sessions::usage::{
+    StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
+};
 use crate::lfd::types::{
     ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Signal, Stimulus,
     WaveRun, WaveRunStatus,
@@ -331,6 +333,18 @@ pub struct UsageSummaryDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     pub groups: Vec<UsageSummaryGroupAggregate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageTimeseriesDto {
+    pub object: String,
+    pub bucket: String,
+    pub group_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    pub buckets: Vec<UsageTimeseriesBucketAggregate>,
 }
 
 pub fn signal_str(signal: Signal) -> &'static str {

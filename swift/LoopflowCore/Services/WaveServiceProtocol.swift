@@ -47,4 +47,13 @@ public protocol WaveServiceProtocol: Sendable {
     func removeRepo(path: String) async throws
     func checkConnection() async throws
     func fileDiff(waveId: String, path: String) async throws -> String
+    func usageSummary(
+        filters: UsageAnalyticsFilters,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageSummary
+    func usageTimeseries(
+        filters: UsageAnalyticsFilters,
+        bucket: UsageTimeBucket,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageTimeseries
 }

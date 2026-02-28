@@ -70,6 +70,7 @@ struct WaveSidebar: View {
         @Bindable var repoState = repoState
         VStack(alignment: .leading, spacing: 0) {
             header
+            analyticsRow
 
             if repoState.waves.isEmpty && !repoState.lfdConnected {
                 disconnectedState
@@ -185,6 +186,32 @@ struct WaveSidebar: View {
 
     private var createButtonDisabled: Bool {
         !repoState.isConnected || repoState.repoTarget == nil
+    }
+
+    private var analyticsRow: some View {
+        Button {
+            repoState.selectedWaveId = nil
+            repoState.showingAnalytics = true
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(Typography.caption())
+                Text("Analytics")
+                    .font(Typography.caption())
+                Spacer()
+            }
+            .foregroundStyle(repoState.showingAnalytics ? .white : .white.opacity(0.8))
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .fill(repoState.showingAnalytics ? .white.opacity(0.14) : .clear)
+            )
+            .padding(.horizontal, Spacing.sm)
+            .padding(.bottom, Spacing.xs)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar-analytics")
     }
 
     private var createButtonLabel: some View {
@@ -377,6 +404,7 @@ struct WaveSidebar: View {
     private func selectWave(_ waveId: String) {
         repoState.selectedWaveId = waveId
         keyboardFocusedId = waveId
+        repoState.showingAnalytics = false
     }
 
     private func upgradeWorktree(_ worktree: WorktreeInfo) {
@@ -404,6 +432,7 @@ struct WaveSidebar: View {
             return
         }
 
+        repoState.showingAnalytics = false
         repoState.selectedWaveId = nil
     }
 }
@@ -416,4 +445,3 @@ struct WaveSidebar: View {
         .environment(OutputBuffer())
         .frame(width: 280, height: 400)
 }
-

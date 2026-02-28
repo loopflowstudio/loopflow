@@ -8,7 +8,8 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::lfd::http::dto::{
-    format_datetime, SessionUsageDto, SessionUsageSessionDto, UsageSummaryDto, WaveUsageDto,
+    format_datetime, SessionUsageDto, SessionUsageSessionDto, UsageSummaryDto, UsageTimeseriesDto,
+    WaveUsageDto,
 };
 use crate::lfd::http::routes::{parse_lfd_id, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -16,12 +17,13 @@ use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::sessions::types::Session;
 use crate::lfd::sessions::usage::{
-    aggregate_session_events, aggregate_summary, aggregate_wave_usage, GroupBy, UsageSessionData,
+    aggregate_session_events, aggregate_summary, aggregate_timeseries, aggregate_wave_usage,
+    GroupBy, TimeBucket, UsageSessionData,
 };
 use crate::lfd::store::SessionFilters;
 
 #[derive(Debug, Deserialize)]
-pub struct UsageSummaryQuery {
+pub struct UsageQuery {
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub step: Option<String>,
@@ -29,6 +31,7 @@ pub struct UsageSummaryQuery {
     pub from: Option<String>,
     pub to: Option<String>,
     pub group_by: Option<String>,
+    pub bucket: Option<String>,
 }
 
 pub async fn get_session_usage_handler(
@@ -108,8 +111,66 @@ pub async fn get_wave_usage_handler(
 
 pub async fn get_usage_summary_handler(
     State(state): State<HttpState>,
-    Query(query): Query<UsageSummaryQuery>,
+    Query(query): Query<UsageQuery>,
 ) -> ApiResult<UsageSummaryDto> {
+    let validated = validate_usage_query(&state, &query).await?;
+    let usage_sessions = load_usage_session_data(&state, validated.sessions).await?;
+    let groups = aggregate_summary(validated.group_by, &usage_sessions, query.model.as_deref());
+
+    Ok(Json(UsageSummaryDto {
+        object: "usage_summary".to_string(),
+        group_by: validated.group_by.as_str().to_string(),
+        from: format_datetime(validated.from),
+        to: format_datetime(validated.to),
+        groups,
+    }))
+}
+
+pub async fn get_usage_timeseries_handler(
+    State(state): State<HttpState>,
+    Query(query): Query<UsageQuery>,
+) -> ApiResult<UsageTimeseriesDto> {
+    let bucket_raw = query
+        .bucket
+        .as_deref()
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "bucket is required"))?;
+    let bucket = bucket_raw.parse::<TimeBucket>().map_err(|_| {
+        api_error(
+            StatusCode::BAD_REQUEST,
+            ApiMessage::Safe(format!("invalid bucket: {bucket_raw}")),
+        )
+    })?;
+
+    let validated = validate_usage_query(&state, &query).await?;
+    let usage_sessions = load_usage_session_data(&state, validated.sessions).await?;
+    let buckets = aggregate_timeseries(
+        bucket,
+        validated.group_by,
+        usage_sessions,
+        query.model.as_deref(),
+    );
+
+    Ok(Json(UsageTimeseriesDto {
+        object: "usage_timeseries".to_string(),
+        bucket: bucket.as_str().to_string(),
+        group_by: validated.group_by.as_str().to_string(),
+        from: format_datetime(validated.from),
+        to: format_datetime(validated.to),
+        buckets,
+    }))
+}
+
+struct ValidatedUsageQuery {
+    group_by: GroupBy,
+    from: Option<OffsetDateTime>,
+    to: Option<OffsetDateTime>,
+    sessions: Vec<Session>,
+}
+
+async fn validate_usage_query(
+    state: &HttpState,
+    query: &UsageQuery,
+) -> Result<ValidatedUsageQuery, ApiError> {
     let group_by_raw = query
         .group_by
         .as_deref()
@@ -140,7 +201,7 @@ pub async fn get_usage_summary_handler(
     }
 
     let wave = if let Some(wave) = query.wave.as_deref() {
-        Some(resolve_wave_id(&state, wave).await?.to_string())
+        Some(resolve_wave_id(state, wave).await?.to_string())
     } else {
         None
     };
@@ -158,16 +219,12 @@ pub async fn get_usage_summary_handler(
         .await
         .map_err(map_store_error)?;
 
-    let usage_sessions = load_usage_session_data(&state, sessions).await?;
-    let groups = aggregate_summary(group_by, &usage_sessions, query.model.as_deref());
-
-    Ok(Json(UsageSummaryDto {
-        object: "usage_summary".to_string(),
-        group_by: group_by.as_str().to_string(),
-        from: format_datetime(from),
-        to: format_datetime(to),
-        groups,
-    }))
+    Ok(ValidatedUsageQuery {
+        group_by,
+        from,
+        to,
+        sessions,
+    })
 }
 
 async fn load_usage_session_data(
@@ -232,31 +289,6 @@ async fn load_wave_run_metadata(
     Ok(meta)
 }
 
-async fn resolve_session_wave_run_metadata(
-    state: &HttpState,
-    session: &Session,
-) -> Result<(Option<String>, Option<String>), ApiError> {
-    let Some(wave_run_id) = session.wave_run_id.as_deref() else {
-        return Ok((None, None));
-    };
-    let Ok(wave_run_id) = wave_run_id.parse() else {
-        return Ok((None, None));
-    };
-    let wave_run = state
-        .store
-        .get_wave_run(&wave_run_id)
-        .await
-        .map_err(map_store_error)?;
-    let Some(wave_run) = wave_run else {
-        return Ok((None, None));
-    };
-
-    Ok((
-        Some(wave_run.wave_id.to_string()),
-        Some(wave_run.snapshot.flow),
-    ))
-}
-
 async fn resolve_session_wave(
     state: &HttpState,
     session: &Session,
@@ -267,8 +299,19 @@ async fn resolve_session_wave(
         }
     }
 
-    let (wave_id, _) = resolve_session_wave_run_metadata(state, session).await?;
-    Ok(wave_id)
+    let wave_run_id = session
+        .wave_run_id
+        .as_deref()
+        .and_then(|id| id.parse::<LfdId>().ok());
+    let Some(wave_run_id) = wave_run_id else {
+        return Ok(None);
+    };
+    let wave_run = state
+        .store
+        .get_wave_run(&wave_run_id)
+        .await
+        .map_err(map_store_error)?;
+    Ok(wave_run.map(|r| r.wave_id.to_string()))
 }
 
 fn parse_datetime(value: Option<&str>, label: &str) -> Result<Option<OffsetDateTime>, ApiError> {
@@ -469,7 +512,7 @@ mod tests {
 
         let result = get_usage_summary_handler(
             State(state),
-            Query(UsageSummaryQuery {
+            Query(UsageQuery {
                 wave: None,
                 flow: None,
                 step: None,
@@ -477,6 +520,7 @@ mod tests {
                 from: None,
                 to: None,
                 group_by: Some("source".to_string()),
+                bucket: None,
             }),
         )
         .await;
@@ -552,7 +596,7 @@ mod tests {
 
         let Json(payload) = get_usage_summary_handler(
             State(state),
-            Query(UsageSummaryQuery {
+            Query(UsageQuery {
                 wave: Some(wave.name),
                 flow: Some("build".to_string()),
                 step: None,
@@ -560,6 +604,7 @@ mod tests {
                 from: Some(from),
                 to: Some(to),
                 group_by: Some("step".to_string()),
+                bucket: None,
             }),
         )
         .await
@@ -571,6 +616,121 @@ mod tests {
         assert_eq!(payload.groups[0].key, "implement");
         assert_eq!(payload.groups[0].tokens.input, 210);
         assert_eq!(payload.groups[0].turns, 1);
+    }
+
+    #[tokio::test]
+    async fn usage_timeseries_groups_by_day_and_wave() {
+        let (state, tmp) = test_http_state().await;
+        let wave = seed_wave(&state, "engbot", &tmp).await;
+        let run = seed_wave_run(&state, &wave, "build").await;
+
+        let first_day = parse_datetime(Some("2026-02-01T08:00:00Z"), "from")
+            .expect("parse")
+            .expect("date");
+        let second_day = parse_datetime(Some("2026-02-02T08:00:00Z"), "from")
+            .expect("parse")
+            .expect("date");
+
+        let session_a = seed_session_at(
+            &state,
+            SessionConfig {
+                step: "implement".to_string(),
+                repo_root: tmp.path().to_string_lossy().to_string(),
+                ..Default::default()
+            },
+            Some(run.id.to_string()),
+            first_day,
+        )
+        .await;
+        append_turn_usage(
+            &state,
+            &session_a.id,
+            0,
+            TurnUsage {
+                input_tokens: 140,
+                output_tokens: 20,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: Some("claude-sonnet-4".to_string()),
+                cost_usd: None,
+            },
+        )
+        .await;
+
+        let session_b = seed_session_at(
+            &state,
+            SessionConfig {
+                step: "implement".to_string(),
+                repo_root: tmp.path().to_string_lossy().to_string(),
+                ..Default::default()
+            },
+            Some(run.id.to_string()),
+            second_day,
+        )
+        .await;
+        append_turn_usage(
+            &state,
+            &session_b.id,
+            0,
+            TurnUsage {
+                input_tokens: 90,
+                output_tokens: 10,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: Some("claude-sonnet-4".to_string()),
+                cost_usd: None,
+            },
+        )
+        .await;
+
+        let Json(payload) = get_usage_timeseries_handler(
+            State(state),
+            Query(UsageQuery {
+                wave: Some(wave.name),
+                flow: Some("build".to_string()),
+                step: None,
+                model: None,
+                from: Some("2026-02-01T00:00:00Z".to_string()),
+                to: Some("2026-02-03T00:00:00Z".to_string()),
+                group_by: Some("wave".to_string()),
+                bucket: Some("day".to_string()),
+            }),
+        )
+        .await
+        .expect("timeseries response");
+
+        assert_eq!(payload.object, "usage_timeseries");
+        assert_eq!(payload.bucket, "day");
+        assert_eq!(payload.group_by, "wave");
+        assert_eq!(payload.buckets.len(), 2);
+        assert_eq!(payload.buckets[0].period, "2026-02-01");
+        assert_eq!(payload.buckets[1].period, "2026-02-02");
+        assert_eq!(payload.buckets[0].groups[0].tokens.input, 140);
+        assert_eq!(payload.buckets[1].groups[0].tokens.input, 90);
+    }
+
+    #[tokio::test]
+    async fn usage_timeseries_rejects_invalid_bucket() {
+        let (state, _) = test_http_state().await;
+
+        let result = get_usage_timeseries_handler(
+            State(state),
+            Query(UsageQuery {
+                wave: None,
+                flow: None,
+                step: None,
+                model: None,
+                from: None,
+                to: None,
+                group_by: Some("wave".to_string()),
+                bucket: Some("hour".to_string()),
+            }),
+        )
+        .await;
+
+        assert!(matches!(result, Err((StatusCode::BAD_REQUEST, _))));
     }
 
     async fn seed_wave(state: &HttpState, name: &str, tmp: &TempDir) -> Wave {
@@ -633,6 +793,15 @@ mod tests {
         config: SessionConfig,
         wave_run_id: Option<String>,
     ) -> Session {
+        seed_session_at(state, config, wave_run_id, OffsetDateTime::now_utc()).await
+    }
+
+    async fn seed_session_at(
+        state: &HttpState,
+        config: SessionConfig,
+        wave_run_id: Option<String>,
+        created_at: OffsetDateTime,
+    ) -> Session {
         let session = Session {
             id: LfdId::new(),
             harness: "claude".to_string(),
@@ -640,7 +809,7 @@ mod tests {
             wave_run_id,
             provider_session_id: None,
             config,
-            created_at: OffsetDateTime::now_utc(),
+            created_at,
             ended_at: Some(OffsetDateTime::now_utc()),
         };
         state

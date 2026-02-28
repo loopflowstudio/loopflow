@@ -556,6 +556,51 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return json?["diff"] as? String ?? ""
     }
 
+    public func usageSummary(
+        filters: UsageAnalyticsFilters,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageSummary {
+        var components = URLComponents(
+            url: apiBaseURL.appendingPathComponent("usage/summary"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = Self.usageQueryItems(
+            filters: filters,
+            groupBy: groupBy,
+            bucket: nil
+        )
+        guard let url = components?.url else {
+            throw WaveServiceError.commandFailed("Invalid usage summary URL")
+        }
+
+        let (data, response) = try await performGet(url)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(UsageSummary.self, from: data)
+    }
+
+    public func usageTimeseries(
+        filters: UsageAnalyticsFilters,
+        bucket: UsageTimeBucket,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageTimeseries {
+        var components = URLComponents(
+            url: apiBaseURL.appendingPathComponent("usage/timeseries"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = Self.usageQueryItems(
+            filters: filters,
+            groupBy: groupBy,
+            bucket: bucket
+        )
+        guard let url = components?.url else {
+            throw WaveServiceError.commandFailed("Invalid usage timeseries URL")
+        }
+
+        let (data, response) = try await performGet(url)
+        try requireOKStatus(response, data: data)
+        return try decodeResponse(UsageTimeseries.self, from: data)
+    }
+
     public func checkConnection() async throws {
         let url = baseURL.appendingPathComponent("status")
         let (_, response) = try await performGet(url)
@@ -1571,6 +1616,42 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             return date
         }
         return ISO8601DateFormatter().date(from: dateStr)
+    }
+
+    private static func usageQueryItems(
+        filters: UsageAnalyticsFilters,
+        groupBy: UsageGroupBy,
+        bucket: UsageTimeBucket?
+    ) -> [URLQueryItem] {
+        var items: [URLQueryItem] = [URLQueryItem(name: "group_by", value: groupBy.rawValue)]
+        if let bucket {
+            items.append(URLQueryItem(name: "bucket", value: bucket.rawValue))
+        }
+        if let wave = filters.wave {
+            items.append(URLQueryItem(name: "wave", value: wave))
+        }
+        if let flow = filters.flow {
+            items.append(URLQueryItem(name: "flow", value: flow))
+        }
+        if let step = filters.step {
+            items.append(URLQueryItem(name: "step", value: step))
+        }
+        if let model = filters.model {
+            items.append(URLQueryItem(name: "model", value: model))
+        }
+        if let from = filters.from {
+            items.append(URLQueryItem(name: "from", value: formatUsageDate(from)))
+        }
+        if let to = filters.to {
+            items.append(URLQueryItem(name: "to", value: formatUsageDate(to)))
+        }
+        return items
+    }
+
+    private static func formatUsageDate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private static func decodeStringArray(_ str: String?) -> [String] {

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use serde::Serialize;
+use time::{Date, Duration};
 
 use crate::lfd::sessions::types::{
     ContextSnapshot, PersistedSessionEvent, Session, SessionEvent, TurnUsage,
@@ -105,12 +106,71 @@ impl std::str::FromStr for GroupBy {
 #[derive(Debug)]
 pub struct InvalidGroupBy;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeBucket {
+    Day,
+    Week,
+    Month,
+}
+
+impl TimeBucket {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+        }
+    }
+
+    fn start_date(self, created_at: time::OffsetDateTime) -> Date {
+        let date = created_at.date();
+        match self {
+            Self::Day => date,
+            Self::Week => {
+                let days_from_monday = i64::from(date.weekday().number_days_from_monday());
+                date - Duration::days(days_from_monday)
+            }
+            Self::Month => Date::from_calendar_date(date.year(), date.month(), 1)
+                .expect("calendar month start should always be valid"),
+        }
+    }
+
+    fn format_period(self, date: Date) -> String {
+        match self {
+            Self::Day | Self::Week => date.to_string(),
+            Self::Month => format!("{}-{:02}", date.year(), date.month() as u8),
+        }
+    }
+}
+
+impl std::str::FromStr for TimeBucket {
+    type Err = InvalidTimeBucket;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "day" => Ok(Self::Day),
+            "week" => Ok(Self::Week),
+            "month" => Ok(Self::Month),
+            _ => Err(InvalidTimeBucket),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct InvalidTimeBucket;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UsageSummaryGroupAggregate {
     pub key: String,
     pub tokens: TokenTotals,
     pub sessions: u64,
     pub turns: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UsageTimeseriesBucketAggregate {
+    pub period: String,
+    pub groups: Vec<UsageSummaryGroupAggregate>,
 }
 
 pub fn aggregate_wave_usage(
@@ -157,6 +217,32 @@ pub fn aggregate_summary(
         GroupBy::Model => aggregate_summary_by_model(sessions, model_filter),
         GroupBy::Source => aggregate_summary_by_source(sessions),
     }
+}
+
+pub fn aggregate_timeseries(
+    bucket: TimeBucket,
+    group_by: GroupBy,
+    sessions: Vec<UsageSessionData>,
+    model_filter: Option<&str>,
+) -> Vec<UsageTimeseriesBucketAggregate> {
+    let mut sessions_by_period: BTreeMap<Date, Vec<UsageSessionData>> = BTreeMap::new();
+    for data in sessions {
+        let period_start = bucket.start_date(data.session.created_at);
+        sessions_by_period
+            .entry(period_start)
+            .or_default()
+            .push(data);
+    }
+
+    sessions_by_period
+        .into_iter()
+        .map(
+            |(period_start, grouped_sessions)| UsageTimeseriesBucketAggregate {
+                period: bucket.format_period(period_start),
+                groups: aggregate_summary(group_by, &grouped_sessions, model_filter),
+            },
+        )
+        .collect()
 }
 
 pub fn aggregate_session_events(
@@ -310,6 +396,7 @@ mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
     use crate::lfd::sessions::types::{SessionConfig, SessionStatus};
+    use time::format_description::well_known::Rfc3339;
     use time::OffsetDateTime;
 
     #[test]
@@ -472,7 +559,97 @@ mod tests {
         assert_eq!(diff.turns, 0);
     }
 
+    #[test]
+    fn aggregate_timeseries_groups_sessions_by_day() {
+        let created_a = parse_rfc3339("2026-02-01T09:00:00Z");
+        let created_b = parse_rfc3339("2026-02-02T11:00:00Z");
+        let records = vec![
+            UsageSessionData {
+                session: test_session_at("implement", created_a),
+                events: vec![turn_usage_event(TurnUsage {
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    reasoning_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    model: Some("claude-sonnet-4".to_string()),
+                    cost_usd: None,
+                })],
+                wave_id: Some("wave-alpha".to_string()),
+                flow: Some("build".to_string()),
+            },
+            UsageSessionData {
+                session: test_session_at("implement", created_b),
+                events: vec![turn_usage_event(TurnUsage {
+                    input_tokens: 40,
+                    output_tokens: 10,
+                    reasoning_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    model: Some("claude-sonnet-4".to_string()),
+                    cost_usd: None,
+                })],
+                wave_id: Some("wave-alpha".to_string()),
+                flow: Some("build".to_string()),
+            },
+        ];
+
+        let buckets = aggregate_timeseries(TimeBucket::Day, GroupBy::Wave, records, None);
+        assert_eq!(buckets.len(), 2);
+        assert_eq!(buckets[0].period, "2026-02-01");
+        assert_eq!(buckets[1].period, "2026-02-02");
+        assert_eq!(buckets[0].groups[0].key, "wave-alpha");
+        assert_eq!(buckets[0].groups[0].tokens.input, 100);
+        assert_eq!(buckets[1].groups[0].tokens.input, 40);
+    }
+
+    #[test]
+    fn aggregate_timeseries_week_bucket_uses_monday_start() {
+        let monday = parse_rfc3339("2026-02-02T08:00:00Z");
+        let wednesday = parse_rfc3339("2026-02-04T12:00:00Z");
+        let records = vec![
+            UsageSessionData {
+                session: test_session_at("implement", monday),
+                events: vec![turn_usage_event(TurnUsage {
+                    input_tokens: 60,
+                    output_tokens: 10,
+                    reasoning_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    model: Some("claude-sonnet-4".to_string()),
+                    cost_usd: None,
+                })],
+                wave_id: Some("wave-alpha".to_string()),
+                flow: Some("build".to_string()),
+            },
+            UsageSessionData {
+                session: test_session_at("implement", wednesday),
+                events: vec![turn_usage_event(TurnUsage {
+                    input_tokens: 90,
+                    output_tokens: 12,
+                    reasoning_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    model: Some("claude-sonnet-4".to_string()),
+                    cost_usd: None,
+                })],
+                wave_id: Some("wave-alpha".to_string()),
+                flow: Some("build".to_string()),
+            },
+        ];
+
+        let buckets = aggregate_timeseries(TimeBucket::Week, GroupBy::Wave, records, None);
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].period, "2026-02-02");
+        assert_eq!(buckets[0].groups[0].tokens.input, 150);
+        assert_eq!(buckets[0].groups[0].turns, 2);
+    }
+
     fn test_session(step: &str) -> Session {
+        test_session_at(step, OffsetDateTime::now_utc())
+    }
+
+    fn test_session_at(step: &str, created_at: OffsetDateTime) -> Session {
         Session {
             id: LfdId::new(),
             harness: "claude".to_string(),
@@ -484,9 +661,13 @@ mod tests {
                 repo_root: "/tmp/repo".to_string(),
                 ..Default::default()
             },
-            created_at: OffsetDateTime::now_utc(),
+            created_at,
             ended_at: None,
         }
+    }
+
+    fn parse_rfc3339(value: &str) -> OffsetDateTime {
+        OffsetDateTime::parse(value, &Rfc3339).expect("parse timestamp")
     }
 
     fn context_event(sources: HashMap<String, u64>) -> PersistedSessionEvent {

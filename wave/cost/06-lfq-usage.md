@@ -15,7 +15,9 @@ lfq usage --billing          # split by auth type (subscription vs apikey)
 lfq providers                # list providers with auth status and models
 ```
 
-Reads from usage and providers APIs. Tabular terminal output, composable with other shell tools.
+Reads from the usage APIs. Tabular terminal output, composable with other shell tools.
+
+Backend is ready: `GET /v0/usage/summary` returns flat aggregates (group_by wave/flow/step/model), `GET /v0/usage/timeseries` returns time-bucketed groups (day/week/month). Both share a `ValidatedUsageQuery` pipeline. `cost_usd` is populated on TurnUsage for OpenCode sessions at ingestion time.
 
 `lfq providers` reads from `GET /v0/providers` (Phase 03). `lfq auth zen` connects OpenCode Zen — the broker is ready, just needs a CLI subcommand.
 

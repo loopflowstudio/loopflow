@@ -22,6 +22,8 @@ pub struct Step {
     pub interactive: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_path: Option<String>,
 }
 
 impl Step {
@@ -34,6 +36,7 @@ impl Step {
             action_style: None,
             interactive: None,
             content: None,
+            fast_path: None,
         }
     }
 }
@@ -182,6 +185,7 @@ struct StepFrontmatter {
     directions: Vec<String>,
     action_style: Option<String>,
     interactive: Option<bool>,
+    fast_path: Option<String>,
 }
 
 fn parse_step_frontmatter(content: &str) -> Result<(StepFrontmatter, String), LoadError> {
@@ -204,6 +208,7 @@ fn step_from_content(name: &str, content: &str) -> Result<Step, LoadError> {
         action_style: frontmatter.action_style,
         interactive: frontmatter.interactive,
         content: Some(body),
+        fast_path: frontmatter.fast_path,
     })
 }
 
@@ -229,6 +234,9 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
     let default_agent = parse_optional_string(map, "default_agent");
     let action_style = parse_optional_string(map, "action_style");
     let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
+    // Accept both kebab-case "fast-path" and snake_case "fast_path" in YAML.
+    let fast_path =
+        parse_optional_string(map, "fast-path").or_else(|| parse_optional_string(map, "fast_path"));
 
     StepFrontmatter {
         agent,
@@ -236,6 +244,7 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
         directions: parse_directions_field(map),
         action_style,
         interactive,
+        fast_path,
     }
 }
 
@@ -472,6 +481,7 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
                 action_style,
                 interactive,
                 content: None,
+                fast_path: None,
             })
         }
         _ => Err(LoadError::InvalidFlow(
@@ -1064,6 +1074,7 @@ Be careful.
                 action_style: None,
                 interactive: Some(true),
                 content: None,
+                fast_path: None,
             })],
         };
 

@@ -1,0 +1,9 @@
+flow: ship-wave
+area:
+  - rust/loopflow/src/ops/
+  - rust/loopflow/src/engine/builtins/ops/
+  - rust/loopflow/src/lfd/triggers/
+  - swift/
+direction:
+  - alive
+  - simplicity

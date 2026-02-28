@@ -32,7 +32,8 @@ use crate::lfd::types::{
     WaveStatus,
 };
 use crate::ops::{
-    rebase_with_recovery, run_builtin_agent, BuiltinAgentOptions, Progress, RebaseOptions,
+    commit_workflow, rebase_with_recovery, run_builtin_agent, BuiltinAgentOptions, CommitOptions,
+    NullProgress, Progress, RebaseOptions,
 };
 
 /// Create a wave run using a per-run worktree for parallel execution.
@@ -535,12 +536,16 @@ pub(crate) fn post_step_sync(worktree: &Path, branch: &str, step_name: &str) -> 
         return Ok(());
     }
 
-    if is_clean(worktree)? {
+    let options = CommitOptions {
+        add: true,
+        message: Some(format!("lf commit: {step_name}")),
+        ..CommitOptions::for_task(step_name)
+    };
+    let committed = commit_workflow(worktree, &options, &NullProgress)
+        .map_err(|err| anyhow!("commit_workflow failed for step {step_name}: {err}"))?;
+    if !committed {
         return Ok(());
     }
-    stage_all(worktree)?;
-    let message = format!("lf commit: {step_name}");
-    commit(worktree, &message)?;
 
     match push_with_upstream(worktree, "origin", branch) {
         Ok(()) => Ok(()),

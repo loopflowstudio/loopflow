@@ -1,3 +1,4 @@
+use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
     check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
     seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextBreakdown,
@@ -23,7 +24,36 @@ use tracing::{debug, info, instrument, trace};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(step = ?step, has_message = message.is_some()))]
 pub fn run(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
-    let built = build_prompt(step, message, cli)?;
+    let mut built = build_prompt(step, message, cli)?;
+
+    // Try fast-path: run the command before spinning up an agent.
+    if let Some(ref cmd) = built.fast_path {
+        info!(cmd = cmd, "trying fast-path");
+        match try_fast_path(cmd, &built.repo_root) {
+            Ok(FastPathResult::Success) => {
+                info!("fast-path succeeded, skipping agent");
+                return Ok(());
+            }
+            Ok(FastPathResult::Failed {
+                exit_code,
+                stdout,
+                stderr,
+            }) => {
+                info!(exit_code, "fast-path failed, falling back to agent");
+                let ctx = FailureContext {
+                    cmd,
+                    exit_code,
+                    stdout: &stdout,
+                    stderr: &stderr,
+                };
+                built.agent_config.task_prompt = format!("{ctx}{}", built.agent_config.task_prompt);
+            }
+            Err(err) => {
+                info!(error = %err, "fast-path execution error, falling back to agent");
+            }
+        }
+    }
+
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
 }
@@ -40,6 +70,7 @@ struct PromptBuild {
     harness: String,
     step_name: Option<String>,
     log_name: String,
+    fast_path: Option<String>,
 }
 
 fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
@@ -142,6 +173,8 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
+    let fast_path = discovered_step.as_ref().and_then(|s| s.fast_path.clone());
+
     Ok(PromptBuild {
         repo_root,
         config,
@@ -154,6 +187,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         harness,
         step_name,
         log_name,
+        fast_path,
     })
 }
 

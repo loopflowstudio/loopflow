@@ -342,7 +342,19 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
                 .map(|b| !remote_branches.contains(b))
                 .unwrap_or(false)
         };
-        let prunable = !is_default && (merged || !has_commits || (remote_gone && !dirty));
+        let mut prunable = !is_default && (merged || !has_commits || (remote_gone && !dirty));
+
+        // Protect shortname worktrees from pruning. A shortname (no dot in the
+        // wave name) is an active wave worktree that shouldn't be removed.
+        if prunable {
+            let is_shortname = wave_name_from_worktree_and_main(&path, repo)
+                .map(|name| !name.contains('.'))
+                .unwrap_or(false);
+            if is_shortname {
+                prunable = false;
+            }
+        }
+
         results.push(WorktreeState {
             branch,
             path,

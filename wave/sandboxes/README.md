@@ -33,8 +33,7 @@ Runtime fallback: if sandbox launch/exec/cleanup fails for Claude/Gemini, retry 
 
 ## Metrics
 
-- Sandbox executor launches, runs, and cleans up Claude agents identically to DockerExecutor
-- Gemini path passes automated smoke test
-- Fallback to Docker triggers correctly on sandbox failure
-- Startup probe gates sandbox on/off without affecting other executor paths
-- macOS validated (self-hosted + Concerto), Linux smoke-validated
+- Sandbox launch latency: seconds from run start to agent process running (target: <5s, compare vs DockerExecutor)
+- Sandbox cleanup success rate: % of runs where sandbox is fully removed after completion (target: 100%)
+- Fallback trigger rate: % of sandbox failures that successfully fall back to DockerExecutor (target: 100%)
+- Startup probe pass rate across platforms: macOS and Linux (target: 100% on supported Docker versions)

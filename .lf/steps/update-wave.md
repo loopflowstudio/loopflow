@@ -54,7 +54,7 @@ The README anchors the wave's identity. Concerto parses specific sections for th
 - **`## Strategy`.** Why this approach and not the alternatives. Invariants, architecture, decisions, open questions. Sub-sections are free. Each wave reads differently.
 - **`## Goals`.** What success looks like.
 - **`## Risks`.** What could go wrong.
-- **`## Metrics`.** How we know it works.
+- **`## Metrics`.** Numeric measurements — percentages, counts, durations, rates. Not qualitative indicators or behavioral descriptions. If you can't put a number on it, it's a goal, not a metric.
 
 Additional free sections are welcome — data models, tech direction, guardrails. The wave's own voice lives here.
 

@@ -32,8 +32,7 @@ Start with visibility (audit breakdown) so we can see the impact of everything e
 
 ## Metrics
 
-- Audit header shows separate token counts for scratch/, wave/, repo docs
-- `lf implement -a rust/` includes descendant READMEs from `rust/**/*.md`
-- `lf implement` in this repo picks up default directions from config without `-d`
-- `lfq direction create` works for personal direction aliases
-- Concerto session view shows per-source token breakdown
+- Token count per context source (scratch/, wave/, repo docs, area docs) visible in audit header and Concerto
+- Number of descendant READMEs included per area vs total available (coverage ratio)
+- % of sessions using default directions from config vs explicit `-d` flags (adoption rate)
+- Context token budget utilization: % of budget consumed by area docs (track to detect bloat)

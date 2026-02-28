@@ -34,7 +34,7 @@ Keep ownership crisp: changes to HTTP/JWT/registration contracts must land with 
 
 ## Metrics
 
-- Concerto connects to remote lfd and shows wave list, live output, and chat identically to local
-- Remote wave run completes end-to-end: start on Concerto, agent executes on remote, PR lands
-- SSE/WS streaming through TLS proxy is reliable with reconnect recovery
-- `lfd install` on a remote host provisions a working daemon reachable from Concerto
+- Remote connection setup time: seconds from Concerto connect to wave list visible (target: <3s)
+- SSE/WS reconnect success rate after network interruption (target: >99%)
+- End-to-end remote run completion rate: % of remote runs that produce a PR without manual intervention (target: >95%)
+- Event stream latency: p99 delay between lfd event emission and Concerto render (target: <500ms)

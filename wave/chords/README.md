@@ -115,11 +115,7 @@ CREATE TABLE chord_members (
 
 ## Metrics
 
-- Chord CRUD works end-to-end from Python client and HTTP API
-- Listen stimulus fires reliably when source wave completes (including edge cases: source fails, source is stopped)
-- Concerto UI shows chord grouping with progressive disclosure (flat when one chord, sections when multiple)
-- Default stimuli present on every new wave (watch + ci-fix)
-- Integrate flow runs automatically when main advances
-- `lfq run <wave> --flow <flow>` starts a wave with the specified flow
-- Reactive stimuli during an active iteration create triggered FlowRuns, not new WaveRuns
-- WaveRun history shows loop_flow_run and triggered_flows per iteration
+- Listen stimulus latency: seconds from source wave completion to triggered run start (target: <5s)
+- % of CI failures that auto-trigger ci-fix flow without manual intervention (target: 100%)
+- Number of orphaned FlowRuns per week (triggered but never completed) (target: 0)
+- Integrate flow no-op rate: % of Watch triggers where upstream changes are irrelevant to the wave (track to calibrate filtering)

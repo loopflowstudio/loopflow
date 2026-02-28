@@ -61,7 +61,7 @@ pub enum Event {
     #[serde(rename = "auth.refresh_failed")]
     AuthRefreshFailed {
         provider: Provider,
-        error: String,
+        reason: String,
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
@@ -242,10 +242,10 @@ impl Event {
         }
     }
 
-    pub fn auth_refresh_failed(provider: Provider, error: String) -> Self {
+    pub fn auth_refresh_failed(provider: Provider, reason: String) -> Self {
         Self::AuthRefreshFailed {
             provider,
-            error,
+            reason,
             timestamp: Self::now(),
         }
     }
@@ -505,7 +505,7 @@ mod tests {
         let failed_json = serde_json::to_value(&failed).expect("serialize failure");
         assert_eq!(failed_json["type"], "auth.refresh_failed");
         assert_eq!(failed_json["provider"], "codex");
-        assert_eq!(failed_json["error"], "timed out");
+        assert_eq!(failed_json["reason"], "timed out");
 
         let required =
             Event::auth_refresh_required(Provider::Claude, "user must re-authenticate".into());

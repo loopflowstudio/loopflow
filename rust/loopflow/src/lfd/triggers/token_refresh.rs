@@ -427,10 +427,10 @@ mod tests {
         let event = collect_event(&mut rx).await;
         match event {
             Event::AuthRefreshFailed {
-                provider, error, ..
+                provider, reason, ..
             } => {
                 assert_eq!(provider, Provider::GitHub);
-                assert!(error.contains("timed out"));
+                assert!(reason.contains("timed out"));
             }
             other => panic!("unexpected event: {other:?}"),
         }
@@ -490,10 +490,10 @@ mod tests {
         for event in [first, second] {
             match event {
                 Event::AuthRefreshFailed {
-                    provider, error, ..
+                    provider, reason, ..
                 } => {
                     if provider == Provider::GitHub {
-                        assert_eq!(error, "refresh failed");
+                        assert_eq!(reason, "refresh failed");
                         saw_failure = true;
                     }
                 }
@@ -658,10 +658,10 @@ mod tests {
         let event = collect_event(&mut rx).await;
         match event {
             Event::AuthRefreshFailed {
-                provider, error, ..
+                provider, reason, ..
             } => {
                 assert_eq!(provider, Provider::GitHub);
-                assert_eq!(error, "gh auth refresh failed");
+                assert_eq!(reason, "gh auth refresh failed");
             }
             other => panic!("expected AuthRefreshFailed, got {other:?}"),
         }

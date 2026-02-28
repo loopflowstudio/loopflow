@@ -1,5 +1,9 @@
 # MicroVM Agent Execution
 
+## Status (2026-02-28)
+
+Exploratory only, off the production path. Container mode defaults to Docker; sandbox is opt-in (`executor.sandbox: true`) for validation and future rollout work.
+
 ## Vision
 
 Replace Bollard-managed Docker containers with Docker Sandboxes microVMs for agent execution. Stronger kernel isolation, simpler executor lifecycle, same user-facing modes (native and container). Container mode internals change; everything above stays the same.
@@ -15,7 +19,7 @@ Two-level capability gating decides executor per run:
 
 Runtime fallback: if sandbox launch/exec/cleanup fails for Claude, retry once through `DockerExecutor` before marking the run failed.
 
-`AdaptiveContainerExecutor` wraps both backends. `mode: container` resolves to `ExecutorType::Sandbox` (adaptive), keeping config simple.
+`AdaptiveContainerExecutor` wraps both backends. `mode: container` defaults to `ExecutorType::Docker`; set `executor.sandbox: true` to opt into sandbox routing.
 
 ### Validation approach
 

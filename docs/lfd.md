@@ -207,6 +207,7 @@ auth:
   token: your-static-token # required when provider=static
   base_url: https://auth.loopflow.studio # used by loopflow.studio provider
 executor:
+  sandbox: false # default in container mode; set true to opt into experimental sandbox executor
   image: loopflow/agent:latest # base image for generated .lf/Dockerfile
   agent_timeout: 45m # max runtime per agent step (process or container)
   limits:

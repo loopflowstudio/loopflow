@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use serde_json::Value;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
@@ -99,51 +98,33 @@ impl SandboxExecutor {
             return Err(anyhow!("docker sandbox ls failed: {stderr}"));
         }
 
-        let mut sandboxes = Vec::new();
         let stdout = String::from_utf8_lossy(&output.stdout);
-        for raw_line in stdout.lines() {
-            let sandbox_ref = raw_line.trim();
-            if sandbox_ref.is_empty() {
-                continue;
-            }
-
-            match Self::inspect_sandbox_name(sandbox_ref).await {
-                Ok(Some(name)) if name.starts_with("lf-") => {
-                    sandboxes.push(sandbox_ref.to_string());
-                }
-                Ok(_) => {}
-                Err(err) => {
-                    warn!(sandbox_ref, error = %err, "sandbox inspect failed during recovery");
-                }
-            }
-        }
-
-        Ok(sandboxes)
+        Ok(stdout
+            .lines()
+            .map(str::trim)
+            .filter(|name| !name.is_empty() && name.starts_with("lf-"))
+            .map(ToOwned::to_owned)
+            .collect())
     }
 
-    async fn inspect_sandbox_name(sandbox_ref: &str) -> Result<Option<String>> {
-        let output = Self::run_docker(&["inspect", sandbox_ref]).await?;
+    async fn sandbox_exec_uses_legacy_separator() -> Result<bool> {
+        let output = Self::run_docker(&["exec", "--help"]).await?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(anyhow!("docker sandbox inspect failed: {stderr}"));
+            return Err(anyhow!("docker sandbox exec --help failed: {stderr}"));
         }
 
-        let parsed: Value = match serde_json::from_slice(&output.stdout) {
-            Ok(value) => value,
-            Err(_) => return Ok(None),
-        };
+        let help = String::from_utf8_lossy(&output.stdout);
+        if help.contains("SANDBOX COMMAND [ARG...]") {
+            return Ok(false);
+        }
+        if help.contains("SANDBOX -- COMMAND") {
+            return Ok(true);
+        }
 
-        let read_name = |v: &Value| {
-            v.get("Name")
-                .or_else(|| v.get("name"))
-                .and_then(Value::as_str)
-                .map(|n| n.trim_start_matches('/').to_string())
-        };
-
-        Ok(match parsed {
-            Value::Array(ref list) => list.first().and_then(read_name),
-            _ => read_name(&parsed),
-        })
+        Err(anyhow!(
+            "unsupported docker sandbox exec usage; expected direct or legacy syntax"
+        ))
     }
 
     async fn collect_exec_env(&self, program: &str) -> Vec<(String, String)> {
@@ -189,6 +170,7 @@ impl AgentExecutor for SandboxExecutor {
         let output_context: OutputContext = context.into();
         let program = cmd[0].as_str();
         let env = self.collect_exec_env(program).await;
+        let legacy_exec_separator = Self::sandbox_exec_uses_legacy_separator().await?;
 
         let mut command = Command::new("docker");
         command.arg("sandbox").arg("exec");
@@ -196,7 +178,10 @@ impl AgentExecutor for SandboxExecutor {
             command.arg("-e").arg(format!("{key}={value}"));
         }
         command.arg("-w").arg(cwd);
-        command.arg(&sandbox_id).arg("--");
+        command.arg(&sandbox_id);
+        if legacy_exec_separator {
+            command.arg("--");
+        }
         command.args(&cmd);
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
@@ -382,6 +367,11 @@ case "$subcmd" in
     exit 0
     ;;
   exec)
+    if [ "${1:-}" = "--help" ]; then
+      echo "Usage: docker sandbox exec [OPTIONS] SANDBOX COMMAND [ARG...]"
+      exit 0
+    fi
+    sandbox_seen=0
     while [ "$#" -gt 0 ]; do
       case "$1" in
         -e|-w)
@@ -392,7 +382,12 @@ case "$subcmd" in
           break
           ;;
         *)
-          shift
+          if [ "$sandbox_seen" -eq 0 ]; then
+            sandbox_seen=1
+            shift
+          else
+            break
+          fi
           ;;
       esac
     done
@@ -402,15 +397,8 @@ case "$subcmd" in
     exit 0
     ;;
   ls)
-    echo "sbx-managed"
-    echo "sbx-unmanaged"
-    ;;
-  inspect)
-    if [ "${1:-}" = "sbx-managed" ]; then
-      echo '{"Name":"lf-managed"}'
-    else
-      echo '{"Name":"manual-sandbox"}'
-    fi
+    echo "lf-managed"
+    echo "manual-sandbox"
     ;;
   *)
     echo "unknown sandbox subcommand: $subcmd" >&2
@@ -551,7 +539,7 @@ esac
 
         assert_eq!(recovery.orphaned_containers_removed, 1);
         let docker_log = std::fs::read_to_string(log_path).expect("docker log exists");
-        assert!(docker_log.contains("sandbox rm sbx-managed"));
-        assert!(!docker_log.contains("sandbox rm sbx-unmanaged"));
+        assert!(docker_log.contains("sandbox rm lf-managed"));
+        assert!(!docker_log.contains("sandbox rm manual-sandbox"));
     }
 }

@@ -1,5 +1,7 @@
 # 01: Integration and Validation
 
+**Status (2026-02-28):** Experimental track. Host validation passes on Docker Sandbox CLI v0.12.0, but DinD validation is blocked because the bundled lfd image lacks the sandbox CLI plugin.
+
 **Finish line:** Sandbox executor runs Claude end-to-end on macOS (self-hosted + Concerto), and cleanup works across all lifecycle events.
 
 ## What we're trying to learn
@@ -17,9 +19,9 @@ Validation infrastructure is shipped. Three layers:
 
 ## What's blocked
 
-Real-environment validation requires a Docker Sandbox plugin version that exposes `create` and `exec`. Local host has v0.6.0 which only advertises `run/ls/inspect/rm/version`. The platform script and DinD command fail fast with clear diagnostics.
+Concerto DinD validation remains blocked because the bundled lfd container does not have a sandbox-capable Docker CLI (`docker sandbox` is not recognized).
 
-CI `sandbox-smoke` job will skip on ubuntu-latest (no sandbox plugin). Correct but untested — first real activation will be when sandbox lands on CI runners.
+CI `sandbox-smoke` remains probe-gated. It activates only when runners expose required sandbox capabilities (`create`, `exec`, `rm`, `ls`, and `claude` template support).
 
 ## Remaining scope
 
@@ -41,7 +43,7 @@ No stream rehydration in phase 1.
 
 Verify `docker sandbox` commands work from inside the bundled lfd container with `/var/run/docker.sock` mounted. Confirm the lfd Docker image includes the sandbox CLI plugin.
 
-DinD probe rerun on 2026-02-28 with Docker daemon available; command failed with `No such container: lfd-container`. Re-run after starting the bundled lfd container.
+DinD probe rerun on 2026-02-28 against a running test container; command failed with `docker: 'sandbox' is not a docker command`. Re-run after sandbox plugin distribution is solved for Linux containers.
 
 ### Platform validation
 
@@ -51,6 +53,6 @@ DinD probe rerun on 2026-02-28 with Docker daemon available; command failed with
 
 ## Done when
 
-- Platform validation script passes on macOS (blocked on sandbox CLI compatibility)
+- Platform validation script passes on macOS
 - Context file sync verified via platform script
 - Concerto DinD path validated or documented as blocked with evidence

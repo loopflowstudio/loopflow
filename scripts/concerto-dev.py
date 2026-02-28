@@ -771,7 +771,7 @@ def cmd_agent_image() -> int:
     ).returncode
 
 
-def cmd_sandbox_dind(container: str = "lfd-container") -> int:
+def cmd_sandbox_dind(container: str = "lfd-container", workspace: str | None = None) -> int:
     """Validate sandbox CLI lifecycle from inside the bundled lfd container."""
 
     def run_probe(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -791,8 +791,38 @@ def cmd_sandbox_dind(container: str = "lfd-container") -> int:
     if version.returncode != 0:
         return version.returncode
 
+    cli_help = run_probe(["docker", "exec", container, "docker", "sandbox", "--help"])
+    if cli_help.returncode != 0:
+        return cli_help.returncode
+    help_text = f"{cli_help.stdout}\n{cli_help.stderr}"
+    missing = [
+        command for command in ("create", "exec", "rm", "ls") if command not in help_text.split()
+    ]
+    if missing:
+        print(f"Sandbox CLI missing required commands: {', '.join(missing)}")
+        return 1
+
+    workspace_path = workspace
+    if not workspace_path:
+        pwd_result = run_probe(["docker", "exec", container, "pwd"])
+        if pwd_result.returncode != 0:
+            return pwd_result.returncode
+        workspace_path = pwd_result.stdout.strip() or "/workspace"
+    print(f"Using workspace path inside container: {workspace_path}")
+
     create = run_probe(
-        ["docker", "exec", container, "docker", "sandbox", "create", "--name", sandbox_name, "claude", "/tmp"]
+        [
+            "docker",
+            "exec",
+            container,
+            "docker",
+            "sandbox",
+            "create",
+            "--name",
+            sandbox_name,
+            "claude",
+            workspace_path,
+        ]
     )
     if create.returncode != 0:
         return create.returncode
@@ -800,10 +830,39 @@ def cmd_sandbox_dind(container: str = "lfd-container") -> int:
 
     try:
         execute = run_probe(
-            ["docker", "exec", container, "docker", "sandbox", "exec", sandbox_name, "--", "echo", "dind works"]
+            [
+                "docker",
+                "exec",
+                container,
+                "docker",
+                "sandbox",
+                "exec",
+                sandbox_name,
+                "echo",
+                "dind works",
+            ]
         )
-        if execute.returncode != 0:
-            return execute.returncode
+        if execute.returncode == 0:
+            print("Detected direct sandbox exec syntax inside container.")
+        else:
+            legacy_execute = run_probe(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    "docker",
+                    "sandbox",
+                    "exec",
+                    sandbox_name,
+                    "--",
+                    "echo",
+                    "dind works",
+                ]
+            )
+            if legacy_execute.returncode == 0:
+                print("Detected legacy sandbox exec syntax inside container (-- separator).")
+            else:
+                return execute.returncode
     finally:
         if created:
             run_probe(["docker", "exec", container, "docker", "sandbox", "rm", sandbox_name])
@@ -1187,6 +1246,10 @@ def main() -> int:
                 default="lfd-container",
                 help="Container name running bundled lfd (default: lfd-container)",
             )
+            sub.add_argument(
+                "--workspace",
+                help="Workspace path to mount in sandbox (defaults to container working directory)",
+            )
 
     args = parser.parse_args()
 
@@ -1205,7 +1268,7 @@ def main() -> int:
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
     if args.command == "sandbox-dind":
-        return func(container=args.container)
+        return func(container=args.container, workspace=args.workspace)
     return func()
 
 

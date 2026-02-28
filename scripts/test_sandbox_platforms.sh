@@ -8,6 +8,8 @@ set -euo pipefail
 
 CLEANUP_IDS=()
 WORKSPACE=""
+PROBE_WORKSPACE=""
+SANDBOX_EXEC_LEGACY=false
 RUN_SUFFIX="${USER:-lf}-$$"
 
 cleanup() {
@@ -20,6 +22,9 @@ cleanup() {
   if [ -n "$WORKSPACE" ] && [ -d "$WORKSPACE" ]; then
     rm -rf "$WORKSPACE"
   fi
+  if [ -n "$PROBE_WORKSPACE" ] && [ -d "$PROBE_WORKSPACE" ]; then
+    rm -rf "$PROBE_WORKSPACE"
+  fi
 }
 trap cleanup EXIT
 
@@ -27,33 +32,79 @@ section() { printf '\n=== %s ===\n' "$1"; }
 pass()    { printf '  PASS: %s\n' "$1"; }
 fail()    { printf '  FAIL: %s\n' "$1"; exit 1; }
 
+untrack_sandbox() {
+  target="$1"
+  for idx in "${!CLEANUP_IDS[@]}"; do
+    if [ "${CLEANUP_IDS[$idx]}" = "$target" ]; then
+      CLEANUP_IDS[$idx]=""
+    fi
+  done
+}
+
+run_sandbox_exec() {
+  local sandbox_id="$1"
+  shift
+  if [ "$SANDBOX_EXEC_LEGACY" = "true" ]; then
+    docker sandbox exec "$sandbox_id" -- "$@"
+  else
+    docker sandbox exec "$sandbox_id" "$@"
+  fi
+}
+
 require_sandbox_cli_compatibility() {
-  help_output=$(docker sandbox --help 2>&1 || true)
+  sandbox_help=$(docker sandbox --help 2>&1 || true)
   missing=()
   for command in create exec rm ls; do
-    if ! printf '%s\n' "$help_output" | grep -Eq "(^|[[:space:]])${command}([[:space:]]|$)"; then
+    if ! printf '%s\n' "$sandbox_help" | grep -Eq "(^|[[:space:]])${command}([[:space:]]|$)"; then
       missing+=("$command")
     fi
   done
 
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "  Detected sandbox help output:"
-    printf '%s\n' "$help_output" | sed 's/^/    /'
+    printf '%s\n' "$sandbox_help" | sed 's/^/    /'
     fail "sandbox plugin missing required commands: ${missing[*]}"
   fi
+
+  create_help=$(docker sandbox create --help 2>&1 || true)
+  if ! printf '%s\n' "$create_help" | grep -Eq "(^|[[:space:]])claude([[:space:]]|$)"; then
+    echo "  Detected sandbox create help output:"
+    printf '%s\n' "$create_help" | sed 's/^/    /'
+    fail "sandbox create command missing claude agent support"
+  fi
+
+  exec_help=$(docker sandbox exec --help 2>&1 || true)
+  if printf '%s\n' "$exec_help" | grep -q "SANDBOX COMMAND \[ARG...\]"; then
+    pass "sandbox exec supports direct command syntax"
+    SANDBOX_EXEC_LEGACY=false
+  elif printf '%s\n' "$exec_help" | grep -q "SANDBOX -- COMMAND"; then
+    pass "sandbox exec uses legacy -- command separator syntax"
+    SANDBOX_EXEC_LEGACY=true
+  else
+    echo "  Detected sandbox exec help output:"
+    printf '%s\n' "$exec_help" | sed 's/^/    /'
+    fail "sandbox exec usage not recognized"
+  fi
+}
+
+create_local_workspace() {
+  local prefix="$1"
+  local template="${PWD}/.${prefix}.XXXXXX"
+  mktemp -d "$template"
 }
 
 # ── Platform info ──
 
 section "Platform"
 echo "  OS:      $(uname -s) $(uname -m)"
-echo "  Docker:  $(docker version --format '{{.Client.Version}}' 2>/dev/null || echo 'NOT AVAILABLE')"
+echo "  Docker:  client=$(docker version --format '{{.Client.Version}}' 2>/dev/null || echo 'NOT AVAILABLE') server=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'NOT AVAILABLE')"
 
 if ! sandbox_version=$(docker sandbox version 2>&1); then
   echo "  Sandbox: NOT AVAILABLE"
   fail "docker sandbox plugin not available"
 fi
-echo "  Sandbox: $sandbox_version"
+echo "  Sandbox:"
+printf '%s\n' "$sandbox_version" | sed 's/^/    /'
 
 require_sandbox_cli_compatibility
 
@@ -65,10 +116,11 @@ fi
 
 section "Startup Probe"
 platform_id="lf-platform-test-$RUN_SUFFIX"
-docker sandbox create --name "$platform_id" claude /tmp
+PROBE_WORKSPACE=$(create_local_workspace "lf-sandbox-probe")
+docker sandbox create --name "$platform_id" claude "$PROBE_WORKSPACE"
 CLEANUP_IDS+=("$platform_id")
 
-result=$(docker sandbox exec "$platform_id" -- echo "probe-ok" 2>&1)
+result=$(run_sandbox_exec "$platform_id" echo "probe-ok" 2>&1)
 if [ "$result" = "probe-ok" ]; then
   pass "create + exec lifecycle works"
 else
@@ -76,19 +128,21 @@ else
 fi
 
 docker sandbox rm "$platform_id"
+untrack_sandbox "$platform_id"
 
 # ── Context file sync ──
 
 section "Context File Sync"
-WORKSPACE=$(mktemp -d)
+WORKSPACE=$(create_local_workspace "lf-sandbox-context")
 mkdir -p "$WORKSPACE/.lf/logs"
 echo "test-context-content" > "$WORKSPACE/.lf/logs/test.context.md"
+ctx_file_path="$WORKSPACE/.lf/logs/test.context.md"
 
 ctx_id="lf-ctx-test-$RUN_SUFFIX"
 docker sandbox create --name "$ctx_id" claude "$WORKSPACE"
 CLEANUP_IDS+=("$ctx_id")
 
-ctx_result=$(docker sandbox exec "$ctx_id" -- cat .lf/logs/test.context.md 2>&1 || true)
+ctx_result=$(run_sandbox_exec "$ctx_id" cat "$ctx_file_path" 2>&1 || true)
 if [ "$ctx_result" = "test-context-content" ]; then
   pass "context files visible inside sandbox"
 else
@@ -96,6 +150,7 @@ else
 fi
 
 docker sandbox rm "$ctx_id"
+untrack_sandbox "$ctx_id"
 
 # ── Cleanup verification ──
 

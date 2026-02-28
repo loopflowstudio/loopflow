@@ -1,39 +1,91 @@
-# 06: lfq Usage
+# 06: lfq Usage & Providers
 
-**Finish line:** `lfq usage --wave engbot` prints token summary to terminal. `lfq providers` lists providers with models and auth status.
+**Finish line:** `lfq usage --wave engbot` prints a token summary table. `lfq providers` lists providers with auth status and billing model. `lfq auth zen` connects OpenCode Zen.
 
 ## What to build
 
+Two CLI commands backed by thin client methods hitting existing HTTP endpoints. No backend changes.
+
+### `lfq usage`
+
+Calls `GET /v0/usage/summary`. Renders a Rich table.
+
+```
+$ lfq usage --wave engbot
+engbot usage
+         input    output  reasoning  cache_read  cache_write  sessions  turns
+implement  42.1k    18.3k      2.1k       31.0k        8.2k         3     47
+gate        8.4k     3.1k      0.5k        6.2k        1.8k         2     12
+compress    5.2k     2.0k      0.3k        4.0k        1.1k         1      8
+─────────────────────────────────────────────────────────────────────────────
+total      55.7k    23.4k      2.9k       41.2k       11.1k         6     67
+```
+
+Flags:
+
+| Flag | API param | group_by |
+|------|-----------|----------|
+| `--wave NAME` | `wave=NAME` | `step` |
+| `--model NAME` | `model=NAME` | `model` |
+| `--step NAME` | `step=NAME` | `wave` |
+| `--from DATE` | `from=DATE` | (default) |
+| `--to DATE` | `to=DATE` | (default) |
+| `--group-by X` | `group_by=X` | explicit |
+| `--prompt` | `group_by=source` | `source` |
+| `--json` / `-j` | — | raw JSON |
+
+Default `group_by` when no flag implies one: `wave`.
+
+`--prompt` is sugar for `--group-by source` — shows where input tokens come from (step, diff, wave docs, area, etc.).
+
+### `lfq providers`
+
+Calls `GET /v0/providers`. Client method already exists. Table with provider, auth status, billing model, models.
+
+### `lfq auth zen`
+
+New subcommand under `auth_app`. Same pattern as `auth_github` — calls `_connect_provider("opencodezen")`.
+
+## Key decisions
+
+- **No `--billing` in v0.** `auth_type` is not yet on TurnUsage. Ship `usage` and `providers` first; `--billing` is a fast follow once the backend surfaces `auth_type` per turn.
+- **Client-side token formatting.** `42.1k` for display. Raw values via `--json`.
+- **`--prompt` as sugar.** Prompt composition is just `--group-by source`. No separate command.
+
+## Scope
+
+In:
+- `lfq usage` with all flags above
+- `lfq providers` with `--json`
+- `lfq auth zen`
+- Python client `usage_summary()` method
+- Pydantic models for usage response types
+- Tests for client, CLI output, token formatting
+
+Out:
+- `--billing` (needs backend `auth_type` per turn)
+- Timeseries / `--bucket` display
+- Cost estimation in CLI output
+- Backend/Rust changes
+
+## Implementation
+
+1. **Models** (`python/loopflow/models.py`): `UsageSummaryGroup`, `UsageSummary` pydantic models matching `UsageSummaryDto`.
+2. **Client** (`python/loopflow/client.py`): `usage_summary()` calling `GET /v0/usage/summary`.
+3. **API** (`python/loopflow/api.py`): `usage_summary()` thin wrapper.
+4. **CLI** (`python/loopflow/cli.py`): `_format_tokens()`, `_usage_table()`, `usage` command, `providers` command, `auth zen` subcommand.
+5. **Tests**: token formatting, CLI commands with mocked API, provider table rendering.
+
+## Done when
+
 ```bash
-lfq usage                    # global summary
-lfq usage --wave engbot      # per-wave
-lfq usage --model opus       # per-model
-lfq usage --step implement   # per-step
-lfq usage --prompt           # prompt composition view
-lfq usage --from 2026-02-01  # time-filtered
-lfq usage --billing          # split by auth type (subscription vs apikey)
-lfq providers                # list providers with auth status and models
+lfq usage
+lfq usage --wave engbot
+lfq usage --prompt
+lfq usage --json
+lfq providers
+lfq providers --json
+lfq auth zen
+uv run pytest python/tests/ -v -k usage
+uv run pytest python/tests/ -v -k provider
 ```
-
-Reads from the usage APIs. Tabular terminal output, composable with other shell tools.
-
-Backend is ready: `GET /v0/usage/summary` returns flat aggregates (group_by wave/flow/step/model), `GET /v0/usage/timeseries` returns time-bucketed groups (day/week/month). Both share a `ValidatedUsageQuery` pipeline. `cost_usd` is populated on TurnUsage for OpenCode sessions at ingestion time.
-
-`lfq providers` reads from `GET /v0/providers` (Phase 03). `lfq auth zen` connects OpenCode Zen — the broker is ready, just needs a CLI subcommand.
-
-### Auth-type-aware billing
-
-When `--billing` is passed (or when any provider uses API key auth), split output into subscription and metered buckets:
-
-```
-Subscription (OAuth)          Metered (API key)
-─────────────────────         ──────────────────────
-Claude   142k tokens          Codex   89k tokens ~$4.20
-                              ─────────────────────────
-                              total metered: ~$4.20
-```
-
-Dollar estimates use `CostRates` from the model registry. Only shown for API-key sessions — subscription sessions show token volume only.
-
-Per-provider auth type comes from the auth wave's credential type field in the DB. The usage API includes `auth_type` per turn so cost computation is accurate even when a user switches mid-session.
-

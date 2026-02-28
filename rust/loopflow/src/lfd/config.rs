@@ -312,7 +312,7 @@ impl RawLfdConfig {
             bail!("`executor.type` is managed by `mode`; remove this key");
         }
 
-        let profile = ModeProfile::for_mode(self.mode);
+        let profile = ModeProfile::for_mode(self.mode, self.executor.sandbox);
         self.executor.limits.validate()?;
 
         Ok(LfdConfig {
@@ -344,7 +344,7 @@ struct ModeProfile {
 }
 
 impl ModeProfile {
-    fn for_mode(mode: Mode) -> Self {
+    fn for_mode(mode: Mode, sandbox_enabled: bool) -> Self {
         match mode {
             Mode::Native => Self {
                 service_manager: ServiceManager::default_for_os(),
@@ -356,7 +356,11 @@ impl ModeProfile {
                 service_manager: ServiceManager::default_for_os(),
                 runtime_backend: RuntimeBackend::Compose,
                 storage: StorageType::Postgres,
-                executor_type: ExecutorType::Docker,
+                executor_type: if sandbox_enabled {
+                    ExecutorType::Sandbox
+                } else {
+                    ExecutorType::Docker
+                },
             },
         }
     }
@@ -558,10 +562,12 @@ pub enum StorageType {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ExecutorType {
     #[default]
     Local,
     Docker,
+    Sandbox,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -657,6 +663,8 @@ impl Default for ExecutorLimitsConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct RawExecutorConfig {
     r#type: Option<ExecutorType>,
+    #[serde(default = "default_executor_sandbox_enabled")]
+    sandbox: bool,
     #[serde(default = "default_executor_image")]
     image: String,
     #[serde(default)]
@@ -674,6 +682,7 @@ impl Default for RawExecutorConfig {
     fn default() -> Self {
         Self {
             r#type: None,
+            sandbox: default_executor_sandbox_enabled(),
             image: default_executor_image(),
             credentials: ExecutorCredentialsConfig::default(),
             agent_timeout: default_agent_timeout(),
@@ -684,6 +693,10 @@ impl Default for RawExecutorConfig {
 
 fn default_executor_image() -> String {
     DEFAULT_EXECUTOR_IMAGE.to_string()
+}
+
+fn default_executor_sandbox_enabled() -> bool {
+    true
 }
 
 fn default_agent_timeout() -> Duration {
@@ -855,6 +868,18 @@ mod tests {
         assert_eq!(resolved.mode, Mode::Container);
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
+        assert_eq!(resolved.executor.r#type, ExecutorType::Sandbox);
+    }
+
+    #[test]
+    fn mode_container_with_sandbox_disabled_uses_docker_executor() {
+        let raw = r#"
+mode: container
+executor:
+  sandbox: false
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let resolved = config.resolve().expect("container resolves");
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
     }
 
@@ -957,7 +982,7 @@ executor:
 
         assert_eq!(resolved.mode, Mode::Container);
         assert_eq!(resolved.storage, StorageType::Postgres);
-        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+        assert_eq!(resolved.executor.r#type, ExecutorType::Sandbox);
         assert_eq!(
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())

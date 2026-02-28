@@ -1,46 +1,77 @@
-# Review: Sandbox Executor Design + Wave Plan
+# Review: Sandbox Executor and Adaptive Routing
 
 ## What was implemented
 
-Wave plan for microVM agent execution (`wave/sandboxes/`) and a design doc for phase 1 (`scratch/sandboxes-executor-and-routing.md`).
+Full implementation of wave item 01 — `SandboxExecutor`, `AdaptiveContainerExecutor`, startup probe, config changes, and recovery. Plus the wave plan (`wave/sandboxes/`) and design doc (`scratch/sandboxes-executor-and-routing.md`).
 
-- **Wave README:** Vision, strategy, phasing, goals, risks, metrics for replacing Bollard with Docker Sandboxes.
-- **Wave items 01/02/03:** Phased delivery — executor+routing, integration+validation, full rollout+Bollard removal.
-- **Design doc:** Detailed implementation plan for item 01 — `SandboxExecutor`, `AdaptiveContainerExecutor`, startup probe, config, recovery.
+### New files
+
+- **`executor/sandbox.rs`** (~310 lines with tests): `SandboxExecutor` implementing `AgentExecutor` trait. Shells out to `docker sandbox create/exec/rm` via `tokio::process::Command`. Credentials injected via `-e` flags on exec. Recovery lists managed sandboxes via `docker sandbox ls` + `inspect`, removes orphans matching `lf-*` prefix.
+
+- **`executor/adaptive.rs`** (~480 lines with tests): `AdaptiveContainerExecutor` wrapping `SandboxExecutor` + `DockerExecutor`. Routes Claude/Gemini to sandbox when available, everything else to Docker. Background probe at startup stores result in `Arc<OnceLock<bool>>`. Runtime fallback to Docker on sandbox failure.
+
+### Modified files
+
+- **`config.rs`**: Added `ExecutorType::Sandbox` variant with `#[non_exhaustive]`. Added `executor.sandbox` bool (default `true`) to `RawExecutorConfig`. `ModeProfile::for_mode()` resolves `mode: container` to `Sandbox` (adaptive) or `Docker` based on the flag.
+
+- **`executor/mod.rs`**: Added `pub(crate) mod adaptive;` and `pub(crate) mod sandbox;`.
+
+- **`executor/wave/mod.rs`**: Added `ExecutorType::Sandbox` arm — constructs `AdaptiveContainerExecutor`.
+
+- **`service/compose.rs`**: Compose file validation accepts `ExecutorType::Sandbox` alongside `Docker`.
+
+### Documentation
+
+- **Wave plan**: README + 3 phased items (executor+routing → integration+validation → full rollout).
+- **Design doc**: Updated to reflect implementation decisions (async probe, `OnceLock`, `executor.sandbox` opt-out).
 
 ## Key choices
 
-**`create` + `exec` + `rm` lifecycle.** Research into the Docker Sandbox CLI revealed `run` has no `-d` flag and host `docker exec` can't reach inside microVMs. The `create`/`exec` split gives control over credential injection, workspace setup timing, and clean stdout separation.
+**`create` + `exec` + `rm` lifecycle.** `docker sandbox run` has no `-d` flag; host `docker exec` can't reach inside microVMs. The split gives control over credential injection, workspace setup timing, and clean stdout separation.
 
-**Modeled after `LocalProcessExecutor`, not `DockerExecutor`.** `SandboxExecutor` shells out to CLI and captures PID + stdio — ~200 lines vs ~1600 for Bollard. Sandbox's built-in workspace sync eliminates volumes, tar sync, and shared clones.
+**Modeled after `LocalProcessExecutor`.** SandboxExecutor spawns `docker sandbox exec` as a subprocess, captures PID + stdio, enforces timeout, kills on terminate. ~200 lines of production code vs ~1600 for Bollard. Sandbox's built-in workspace sync eliminates volumes, tar sync, and shared clones.
 
-**Adaptive routing over explicit config.** `AdaptiveContainerExecutor` probes at startup and routes transparently. Users don't need to know whether their machine supports sandboxes. Explicit `executor.type: docker` override is preserved.
+**Non-blocking probe.** `Arc<OnceLock<bool>>` set by a background task. Before probe completes, Claude/Gemini fall through to Docker (same as probe failure). Logs elapsed time and failure step.
 
-**Env vars only for credentials.** No credential mounts. Matches `LocalProcessExecutor` pattern and sidesteps microVM filesystem visibility questions.
+**`executor.sandbox: false` opt-out.** Keeps the "mode manages executor.type" invariant intact. Explicit `executor.type` in YAML is still rejected. The opt-out flag gives operators a narrow escape hatch without breaking the config model.
+
+**Env vars only for credentials.** No credential mounts. Same approach as `LocalProcessExecutor`. Sidesteps questions about home directory visibility inside microVMs.
 
 ## How it fits together
 
-`mode: container` resolves to `ExecutorType::Sandbox` (adaptive). At `lfd` startup, a probe creates a throwaway sandbox to verify the CLI works. If it does, Claude/Gemini runs go through `SandboxExecutor`; everything else through `DockerExecutor`. If a sandbox run fails at runtime, it falls back to Docker once before marking the run failed.
+```
+lfd.yaml: mode: container
+    → ModeProfile: ExecutorType::Sandbox (if executor.sandbox != false)
+    → WaveExecutor builds AdaptiveContainerExecutor
+    → Background probe: docker sandbox version → create → exec → rm
+    → Per run:
+        if probe passed && (claude || gemini):
+            SandboxExecutor.run()  → fallback to DockerExecutor on error
+        else:
+            DockerExecutor.run()
+```
+
+Cleanup delegation: `cleanup_ephemeral_worktree` and `cleanup_wave_workspace` always go through `DockerExecutor`, which gracefully handles missing Docker volumes (early-return when volume doesn't exist). Recovery merges reports from both backends.
 
 ## Risks and bottlenecks
 
-- **Sandbox CLI stability.** Young CLI surface. Breakage disables the sandbox path (mitigated by fallback).
-- **`claude` template for Gemini.** Untested assumption that Gemini CLI works inside the `claude` template. Tracked explicitly in wave item 02's done-when criteria.
+- **Sandbox CLI stability.** Young CLI surface. Breakage disables the sandbox path (mitigated by fallback + probe).
+- **CLI command assumptions.** `scratch/questions.md` notes that `docker sandbox create/exec/stop` may not exist on current CLI versions. The probe catches this at startup.
 - **Per-run sandbox creation latency.** No pooling in phase 1. If `create` is slow, every Claude/Gemini run pays the cost.
+- **`claude` template for Gemini.** Untested assumption. Tracked in wave item 02.
 
 ## What's not included
 
-- No code changes — this is the design + wave plan only.
-- Codex/OpenCode routing (phase 2+).
+- Codex/OpenCode sandbox routing (phase 2+).
 - DinD support, stream reattach, Bollard removal (phase 2-3).
 - Custom template strategy (phase 2+).
+- Credential proxy (phase 2+).
 
-## Wave alignment
+## Test coverage
 
-The design doc advances all four wave goals:
-- Kernel isolation via microVM sandbox.
-- Cleaner lifecycle: 3 CLI commands vs ~1600 lines of Bollard orchestration.
-- Incremental adoption: Claude/Gemini first, Docker fallback always available.
-- No user-visible behavior change: streaming, context files, cleanup all preserved.
-
-Wave risks (CLI instability, DinD, Linux experimental, credential injection) are acknowledged and scoped appropriately — phase 1 defers DinD and Linux to validation, uses env vars for credentials with proxy as future work.
+| Area | Tests |
+|------|-------|
+| SandboxExecutor | run + stream output, timeout + cleanup, recovery (managed vs unmanaged sandboxes) |
+| AdaptiveContainerExecutor | route claude → sandbox, fallback on failure, route codex → docker, probe pending → docker, terminate dispatch, recovery merge |
+| Config | container → Sandbox, sandbox disabled → Docker, explicit type rejected |
+| Compose | accepts Sandbox executor type |

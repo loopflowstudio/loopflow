@@ -1,10 +1,14 @@
-# 02: Integration and Validation
+# 01: Integration and Validation
 
 **Finish line:** Sandbox executor runs Claude end-to-end on macOS (self-hosted + Concerto), Gemini path passes automated smoke test, and cleanup works across all lifecycle events.
 
 ## What we're trying to learn
 
 Does sandbox mode work transparently — same streaming, same context files, same cleanup — across macOS local, macOS Concerto, and Linux? Where does it break?
+
+## Known risk: CLI compatibility
+
+The implementation assumes `docker sandbox create`, `docker sandbox exec`, and `docker sandbox stop` exist. On this machine (February 27, 2026), `docker sandbox --help` only advertises `run/ls/inspect/rm/version`. The startup probe catches missing subcommands, but we need to confirm the minimum Docker Sandbox plugin version that supports the full lifecycle — or adapt the command strategy if `create`/`exec` don't land.
 
 ## Scope
 
@@ -42,6 +46,7 @@ Gemini path covered by automated smoke test (no manual test required). Add `sand
 
 ## Done when
 
+- CLI compatibility confirmed: minimum Docker Sandbox plugin version identified, or command strategy adapted
 - Context files readable inside sandboxed Claude runs
 - Gemini CLI confirmed working inside `claude` sandbox template (or custom template strategy documented)
 - Gemini path covered by automated smoke test

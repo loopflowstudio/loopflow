@@ -49,7 +49,8 @@ struct SandboxState {
 
 2. **Exec agent command:** `docker sandbox exec -e KEY=VALUE ... -w {cwd} lf-{agent_id} -- {cmd...}`
    - Spawned as subprocess; capture PID + stdout + stderr
-   - Credentials injected via `-e` flags (same resolution as `LocalProcessExecutor.collect_env`)
+   - Credentials injected via `-e` flags — `provider_auth::api_key_env_names()` filtering + `provider_auth::provider_env_vars()` injection, same as `LocalProcessExecutor`
+   - `store.update_agent_status(agent_id, Running, Some(pid), None)` after spawn
    - stdout/stderr piped through existing `read_stream` infrastructure
    - PID stored in active map for timeout/kill
 
@@ -73,7 +74,7 @@ Wrapper that routes by harness and sandbox availability.
 pub struct AdaptiveContainerExecutor {
     sandbox: SandboxExecutor,
     docker: DockerExecutor,
-    sandbox_available: bool,
+    sandbox_available: Arc<OnceCell<bool>>,  // set by background probe task
     active_backend: Arc<Mutex<HashMap<String, Backend>>>,
 }
 
@@ -87,7 +88,7 @@ enum Backend {
 **Routing logic in `run()`:**
 
 ```
-if sandbox_available && is_sandbox_harness(cmd[0]):
+if sandbox_available.get() == Some(true) && is_sandbox_harness(cmd[0]):
     try sandbox.run()
     on error:
         log warning with error
@@ -98,15 +99,17 @@ else:
     docker.run()
 ```
 
+If the probe hasn't completed yet (`sandbox_available.get() == None`), runs fall through to Docker. Once the probe result lands, subsequent runs use it.
+
 `is_sandbox_harness` returns true for `"claude"` and `"gemini"`. This is a simple string match on `cmd[0]`, which is always the harness binary name (set by `build_model_command` in `engine/agent.rs`).
 
 **Terminate:** dispatches to whichever backend the active map says owns the agent.
 
-**Other trait methods:** `write_to_workspace`, `remove_from_workspace`, `cleanup_ephemeral_worktree`, `recover_startup`, `ensure_wave_workspace`, `cleanup_wave_workspace` — all delegate based on backend. For sandbox runs, workspace ops are no-ops (sync is automatic). For Docker runs, delegate to `DockerExecutor`.
+**Other trait methods:** All delegate based on backend. For sandbox runs: `write_to_workspace` and `remove_from_workspace` use the default trait impls (write to host filesystem; sandbox sync propagates automatically). `ensure_wave_workspace` delegates to `ensure_wave_worktree` (same as `LocalProcessExecutor` — the worktree must exist on the host for sandbox to sync it). `cleanup_ephemeral_worktree` uses the default impl. `recover_startup` calls both backends' recovery. For Docker runs, delegate everything to `DockerExecutor`.
 
 ### Startup probe
 
-Runs once at `lfd` startup, caches result for process lifetime.
+Runs once at `lfd` startup in a background task, non-blocking. Result stored in an `Arc<OnceCell<bool>>` that `AdaptiveContainerExecutor` checks on each run. Before the probe completes, Claude/Gemini runs fall through to `DockerExecutor` (same as if the probe failed).
 
 ```rust
 async fn probe_sandbox_support() -> bool {
@@ -127,7 +130,7 @@ async fn probe_sandbox_support() -> bool {
 }
 ```
 
-Log the probe result at info level. If the probe fails, log the specific step that failed at warn level so operators can diagnose.
+Log the probe result at info level with elapsed time. If the probe fails, log the specific step that failed at warn level so operators can diagnose. The async approach avoids blocking `lfd` startup — sandbox capability becomes available whenever the probe finishes.
 
 ### Config
 
@@ -143,7 +146,16 @@ pub enum ExecutorType {
 }
 ```
 
-`mode: container` in `ModeProfile::for_mode()` resolves to `ExecutorType::Sandbox`. Users who explicitly set `executor.type: docker` get the old `DockerExecutor` directly — no sandbox, no probe, no routing.
+`mode: container` in `ModeProfile::for_mode()` resolves to `ExecutorType::Sandbox`. `executor.type` remains managed by mode (explicit override is rejected). A separate opt-out flag disables sandbox routing:
+
+```yaml
+# lfd.yaml
+mode: container
+executor:
+  sandbox: false   # disable sandbox routing, use DockerExecutor directly
+```
+
+`executor.sandbox` defaults to `true`. When `false` and mode is `container`, `ModeProfile` resolves to `ExecutorType::Docker` instead of `Sandbox`. This keeps the "mode manages executor.type" invariant intact while giving operators a narrow escape hatch.
 
 ### Recovery
 
@@ -200,7 +212,7 @@ No stream rehydration in phase 1. If `lfd` restarts while a sandbox agent is run
 | `rust/loopflow/src/lfd/executor/mod.rs` | Add `pub(crate) mod sandbox;` |
 | `rust/loopflow/src/lfd/executor/sandbox.rs` | New: `SandboxExecutor` (~200 lines) |
 | `rust/loopflow/src/lfd/executor/adaptive.rs` | New: `AdaptiveContainerExecutor` (~200 lines) |
-| `rust/loopflow/src/lfd/config.rs` | Add `Sandbox` variant to `ExecutorType`, update `ModeProfile::for_mode()` |
+| `rust/loopflow/src/lfd/config.rs` | Add `Sandbox` variant to `ExecutorType`, add `executor.sandbox` bool (default `true`), update `ModeProfile::for_mode()` to resolve `Sandbox` vs `Docker` based on the flag, update `explicit_executor_type_in_yaml_is_rejected` test |
 | `rust/loopflow/src/lfd/executor/wave/mod.rs` | Update executor construction to build `AdaptiveContainerExecutor` when type is `Sandbox` |
 
 ## Done when
@@ -209,8 +221,8 @@ No stream rehydration in phase 1. If `lfd` restarts while a sandbox agent is run
 - `cargo clippy -- -D warnings` clean
 - `SandboxExecutor` implements full `AgentExecutor` trait via `docker sandbox create/exec/rm`
 - `AdaptiveContainerExecutor` routes claude/gemini to sandbox, others to docker
-- Startup probe gates sandbox path, logs result
+- Startup probe runs async (non-blocking), gates sandbox path, logs result with elapsed time
 - Runtime fallback to Docker on sandbox failure with logged reason
 - `mode: container` resolves to `ExecutorType::Sandbox`
-- `ExecutorType::Docker` still works as explicit override (no sandbox, no probe)
+- `executor.sandbox: false` opts out to `ExecutorType::Docker` (no sandbox, no probe)
 - Orphan cleanup on startup via `docker sandbox ls` + `rm`

@@ -181,8 +181,11 @@ fn render_compose_file(config: &LfdConfig) -> Result<String> {
     if config.storage != StorageType::Postgres {
         bail!("container mode requires postgres storage")
     }
-    if config.executor.r#type != ExecutorType::Docker {
-        bail!("container mode requires docker executor")
+    if !matches!(
+        config.executor.r#type,
+        ExecutorType::Docker | ExecutorType::Sandbox
+    ) {
+        bail!("container mode requires docker or sandbox executor")
     }
 
     let mut credential_mounts = Vec::new();
@@ -359,5 +362,13 @@ mod tests {
         let home = dirs::home_dir().expect("home dir");
         let expected = format!("{}/.config/gh:/root/.config/gh", home.display());
         assert!(content.contains(&expected));
+    }
+
+    #[test]
+    fn compose_accepts_sandbox_executor_type() {
+        let mut config = container_config();
+        config.executor.r#type = ExecutorType::Sandbox;
+        let content = render_compose_file(&config).expect("render compose file");
+        assert!(content.contains("services:"));
     }
 }

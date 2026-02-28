@@ -5,7 +5,7 @@ import LoopflowCore
 
 enum QuoteAction {
     case quoteReply(String)
-    case emoji(String, String)
+    case emojiReact(selected: String, emoji: String)
 }
 
 struct SelectableAssistantTextView: UIViewRepresentable {
@@ -59,7 +59,7 @@ final class SelectableTextView: UITextView {
     }
 
     override var intrinsicContentSize: CGSize {
-        let width = bounds.width > 0 ? bounds.width : UIScreen.main.bounds.width - 32
+        let width = bounds.width > 0 ? bounds.width : (window?.screen?.bounds.width ?? 320) - 32
         let size = sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         return CGSize(width: UIView.noIntrinsicMetric, height: ceil(size.height))
     }
@@ -94,7 +94,7 @@ final class SelectableTextView: UITextView {
 
     private func handleEmoji(_ emoji: String) {
         guard let selected = selectedText else { return }
-        coordinator?.onQuoteAction(.emoji(selected, emoji))
+        coordinator?.onQuoteAction(.emojiReact(selected: selected, emoji: emoji))
     }
 
     private var selectedText: String? {

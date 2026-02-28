@@ -244,7 +244,7 @@ struct MessageRow: View {
         switch action {
         case .quoteReply(let selected):
             composerQuote = selected
-        case .emoji(let selected, let emoji):
+        case .emojiReact(let selected, let emoji):
             onQueueEntry(.emojiReact(quoted: selected, emoji: emoji))
         }
     }

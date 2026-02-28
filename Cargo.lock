@@ -1466,7 +1466,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "loopflow"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "loopflow-test-support"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "tempfile",
 ]

@@ -41,8 +41,8 @@ Design docs for already-shipped work and other purely historical content can be 
 
 When `scratch/` contains analysis or a proposal and no wave exists yet, create one:
 
-1. Write `wave/<wave>/README.md` — the anchor that survives when plans change.
-2. Write numbered sprint files (`01-name.md`, `02-name.md`, ...) — the roadmap.
+1. Write `wave/<wave>/README.md` — the anchor that survives when plans change. Vision, strategy, goals, risks, metrics. **No roadmap tables or phase lists** — the sprint files are the roadmap.
+2. Write numbered sprint files (`01-name.md`, `02-name.md`, ...) — the roadmap. **Create every sprint file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
 
 ### README.md
 

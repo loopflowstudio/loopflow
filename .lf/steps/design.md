@@ -78,7 +78,7 @@ This is the natural session exit point. The user's answer determines what to run
    - `area`: inferred from the files/directories discussed (default `["."]`)
    - `direction`: inferred from conversation perspective (optional)
    - `stimulus`: ask if needed; omit for manual runs
-5. Write sprint files as `wave/<name>/01-*.md`, `02-*.md`, ... — each opens with a **Finish line** statement
+5. Write sprint files as `wave/<name>/01-*.md`, `02-*.md`, ... — each opens with a **Finish line** statement. **Create every sprint file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
 6. The first sprint becomes the design doc for this branch (`scratch/<branch>.md`)
 7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
 8. End session and tell the user what to run next:

@@ -344,6 +344,7 @@ async fn create_running_wave_and_run(
         area: vec![],
         status: WaveStatus::Running,
         iteration: 0,
+        cycle_start_iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
         serialized: false,
     };
@@ -584,6 +585,7 @@ async fn docker_startup_lost_agent_does_not_flip_terminal_run_wave_status() {
         area: vec![],
         status: WaveStatus::Idle,
         iteration: 0,
+        cycle_start_iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
         serialized: false,
     };

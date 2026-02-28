@@ -99,15 +99,16 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-///        created_at, serialized
+///        cycle_start_iteration, created_at, serialized
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
     let direction = parse_json_vec(&row.text(4)?)?;
     let area = parse_json_vec(&row.text(5)?)?;
     let paused = row.int(6)? != 0;
     let status_value = row.int(7)?;
     let iteration = row.int(8)? as u32;
-    let created_at = unix_to_datetime(row.bigint(9)?);
-    let serialized = row.int(10)? != 0;
+    let cycle_start_iteration = row.int(9)? as u32;
+    let created_at = unix_to_datetime(row.bigint(10)?);
+    let serialized = row.int(11)? != 0;
     let mut status = WaveStatus::from_i32(status_value);
     if paused {
         status = WaveStatus::Paused;
@@ -122,6 +123,7 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         area,
         status,
         iteration,
+        cycle_start_iteration,
         created_at: Some(created_at),
         serialized,
     })
@@ -227,7 +229,7 @@ pub fn map_live_pr_state_row(row: &impl StoreRow) -> StoreResult<LivePullRequest
 }
 
 /// SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at,
-///        enabled, source_wave_id
+///        enabled, source_wave_id, max_iterations
 pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
     let created_at = unix_to_datetime(row.bigint(7)?);
 
@@ -242,6 +244,7 @@ pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
         created_at: Some(created_at),
         enabled: row.int(8)? != 0,
         source_wave_id: row.opt_text(9)?.map(LfdId::from_raw),
+        max_iterations: row.opt_int(10)?.map(|v| v as u32),
     })
 }
 

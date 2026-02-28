@@ -126,6 +126,7 @@ impl PostgresStore {
                         &paused,
                         &(wave.status().as_i32()),
                         &(wave.iteration() as i32),
+                        &(wave.cycle_start_iteration() as i32),
                         &created_at,
                         &serialized,
                     ],
@@ -927,7 +928,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.created_at, w.serialized
+                    "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized
                      FROM waves w
                      INNER JOIN chord_members cm ON cm.wave_id = w.id
                      WHERE cm.chord_id = $1
@@ -1340,6 +1341,7 @@ impl PostgresStore {
                         &created_at,
                         &enabled,
                         &stimulus.source_wave_id,
+                        &stimulus.max_iterations.map(|v| v as i32),
                     ],
                 )
                 .await?;
@@ -1362,6 +1364,7 @@ impl PostgresStore {
                         &stimulus.last_triggered_at,
                         &enabled,
                         &stimulus.source_wave_id,
+                        &stimulus.max_iterations.map(|v| v as i32),
                         &stimulus.id,
                     ],
                 )

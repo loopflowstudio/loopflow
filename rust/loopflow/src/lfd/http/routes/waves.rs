@@ -136,6 +136,7 @@ pub struct AddStimulusRequest {
     flow: Option<String>,
     cron: Option<String>,
     source_wave_id: Option<String>,
+    max_iterations: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +237,7 @@ pub async fn create_wave_handler(
         area,
         status: WaveStatus::Idle,
         iteration: 0,
+        cycle_start_iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
         serialized,
     };
@@ -806,6 +808,7 @@ async fn ensure_manual_stimulus(state: &HttpState, wave_id: &LfdId) -> Result<Lf
         last_triggered_at: None,
         created_at: Some(OffsetDateTime::now_utc()),
         enabled: true,
+        max_iterations: None,
     };
     state
         .store
@@ -904,6 +907,7 @@ pub async fn add_stimulus_handler(
         last_triggered_at: None,
         created_at: Some(OffsetDateTime::now_utc()),
         enabled: true,
+        max_iterations: payload.max_iterations,
     };
 
     state
@@ -1633,6 +1637,7 @@ mod tests {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };
@@ -1645,6 +1650,7 @@ mod tests {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };
@@ -1716,6 +1722,7 @@ mod tests {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };

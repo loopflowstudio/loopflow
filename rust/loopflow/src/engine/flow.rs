@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -47,6 +47,21 @@ pub enum FlowItem {
     Step(Step),
     Fork { branches: Vec<FlowItem> },
     FlowRef(String),
+    Branch(BranchDef),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BranchDef {
+    pub paths: HashMap<String, BranchPath>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BranchPath {
+    pub flow: Option<String>,
+    pub step: Option<String>,
+    pub description: String,
+    #[serde(default)]
+    pub direction: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +69,7 @@ pub enum FlowAction {
     RunStep { step: ConcreteStep },
     WaitInteractive { step: ConcreteStep },
     Fork { fork: ConcreteFork },
+    Branch { branch: ConcreteBranch },
     Complete,
 }
 
@@ -98,9 +114,16 @@ pub struct ConcreteFork {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteBranch {
+    pub paths: HashMap<String, BranchPath>,
+    pub flow_parents: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConcreteItem {
     Step(ConcreteStep),
     Fork(ConcreteFork),
+    Branch(ConcreteBranch),
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +147,7 @@ pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
             }
         }
         ConcreteItem::Fork(fork) => FlowAction::Fork { fork },
+        ConcreteItem::Branch(branch) => FlowAction::Branch { branch },
     }
 }
 
@@ -451,8 +475,11 @@ fn parse_flow_mapping(map: &serde_yaml_ng::Mapping) -> Result<FlowItem, LoadErro
     if let Some(fork_value) = map.get(key("fork")) {
         return parse_fork_value(fork_value);
     }
+    if let Some(branch_value) = map.get(key("branch")) {
+        return parse_branch_value(branch_value);
+    }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, flow, or fork".to_string(),
+        "flow item mapping must include step, flow, fork, or branch".to_string(),
     ))
 }
 
@@ -596,6 +623,100 @@ fn parse_fork_branch_item(value: &Value) -> Result<FlowItem, LoadError> {
     }
 }
 
+fn parse_branch_value(value: &Value) -> Result<FlowItem, LoadError> {
+    let map = value
+        .as_mapping()
+        .ok_or_else(|| LoadError::InvalidFlow("branch must be mapping".to_string()))?;
+
+    let paths_value = map
+        .get(key("paths"))
+        .ok_or_else(|| LoadError::InvalidFlow("branch must have paths".to_string()))?;
+    let paths_map = paths_value
+        .as_mapping()
+        .ok_or_else(|| LoadError::InvalidFlow("branch paths must be mapping".to_string()))?;
+
+    if paths_map.is_empty() {
+        return Err(LoadError::InvalidFlow(
+            "branch must have at least one path".to_string(),
+        ));
+    }
+
+    let mut paths = HashMap::new();
+    for (path_key, path_value) in paths_map {
+        let key_str = path_key
+            .as_str()
+            .ok_or_else(|| LoadError::InvalidFlow("branch path key must be string".to_string()))?;
+        let path_map = path_value.as_mapping().ok_or_else(|| {
+            LoadError::InvalidFlow(format!("branch path '{key_str}' must be mapping"))
+        })?;
+
+        let flow = parse_optional_string(path_map, "flow");
+        let step = parse_optional_string(path_map, "step");
+
+        match (&flow, &step) {
+            (None, None) => {
+                return Err(LoadError::InvalidFlow(format!(
+                    "branch path '{key_str}' must have flow or step"
+                )))
+            }
+            (Some(_), Some(_)) => {
+                return Err(LoadError::InvalidFlow(format!(
+                    "branch path '{key_str}' cannot have both flow and step"
+                )))
+            }
+            _ => {}
+        }
+
+        let description = parse_optional_string(path_map, "description").ok_or_else(|| {
+            LoadError::InvalidFlow(format!("branch path '{key_str}' must have description"))
+        })?;
+
+        let direction = parse_directions_field(path_map);
+
+        paths.insert(
+            key_str.to_string(),
+            BranchPath {
+                flow,
+                step,
+                description,
+                direction,
+            },
+        );
+    }
+
+    Ok(FlowItem::Branch(BranchDef { paths }))
+}
+
+/// Validate that flows referenced by branch paths contain only steps.
+/// Forks and nested branches inside branch sub-flows are not supported.
+fn validate_branch_paths(branch_def: &BranchDef, repo: &Path) -> Result<(), LoadError> {
+    for (key, path) in &branch_def.paths {
+        let Some(ref flow_name) = path.flow else {
+            continue;
+        };
+        let flow = load_flow(flow_name, repo)?;
+        let items = expand_flow(&flow, repo)?;
+        for item in &items {
+            match item {
+                ConcreteItem::Step(_) => {}
+                ConcreteItem::Fork(_) => {
+                    return Err(LoadError::InvalidFlow(format!(
+                        "branch path '{key}' references flow '{flow_name}' which contains a fork; \
+                         branch sub-flows must contain only steps"
+                    )));
+                }
+                ConcreteItem::Branch(_) => {
+                    return Err(LoadError::InvalidFlow(format!(
+                        "branch path '{key}' references flow '{flow_name}' which contains a nested branch; \
+                         branch sub-flows must contain only steps"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
     let name = value
         .as_str()
@@ -704,6 +825,13 @@ fn expand_with_chain(
                 let fork = expand_fork(branches, repo, &chain, depth)?;
                 items.push(ConcreteItem::Fork(fork));
             }
+            FlowItem::Branch(branch_def) => {
+                validate_branch_paths(branch_def, repo)?;
+                items.push(ConcreteItem::Branch(ConcreteBranch {
+                    paths: branch_def.paths.clone(),
+                    flow_parents: chain.clone(),
+                }));
+            }
         }
     }
 
@@ -757,6 +885,9 @@ fn expand_fork_branch(
         FlowItem::FlowRef(name) => expand_flow_ref_branch(name, &[], repo, chain, depth),
         FlowItem::Fork { .. } => Err(LoadError::InvalidFlow(
             "fork branches cannot contain nested forks".to_string(),
+        )),
+        FlowItem::Branch(_) => Err(LoadError::InvalidFlow(
+            "fork branches cannot contain branch constructs".to_string(),
         )),
     }
 }
@@ -824,6 +955,11 @@ fn extract_fork_branch_steps(
             ConcreteItem::Fork(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "fork branch flow ref '{flow_name}' contains a nested fork"
+                )))
+            }
+            ConcreteItem::Branch(_) => {
+                return Err(LoadError::InvalidFlow(format!(
+                    "fork branch flow ref '{flow_name}' contains a branch construct"
                 )))
             }
         }
@@ -1177,6 +1313,18 @@ Be careful.
                                     name,
                                     step.step.name,
                                     result.err()
+                                );
+                            }
+                        }
+                    }
+                    ConcreteItem::Branch(branch) => {
+                        for (path_key, path) in &branch.paths {
+                            if let Some(ref flow_name) = path.flow {
+                                let result = load_flow(flow_name, tmp.path());
+                                assert!(
+                                    result.is_ok(),
+                                    "builtin flow '{}' branch path '{}' references missing flow '{}': {:?}",
+                                    name, path_key, flow_name, result.err()
                                 );
                             }
                         }
@@ -1558,5 +1706,228 @@ Be careful.
             err.contains("nested fork"),
             "expected nested fork error, got: {err}"
         );
+    }
+
+    #[test]
+    fn parse_branch_with_flow_paths() {
+        let yaml = r#"
+- qa
+- triage
+- branch:
+    paths:
+      fix:
+        flow: qa-fix
+        description: "Blocking issues found, fix before deploy"
+      deploy:
+        flow: deploy
+        description: "Clean enough to ship"
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 3);
+
+        match &items[2] {
+            FlowItem::Branch(branch) => {
+                assert_eq!(branch.paths.len(), 2);
+                let fix = &branch.paths["fix"];
+                assert_eq!(fix.flow.as_deref(), Some("qa-fix"));
+                assert!(fix.step.is_none());
+                assert_eq!(fix.description, "Blocking issues found, fix before deploy");
+                let deploy = &branch.paths["deploy"];
+                assert_eq!(deploy.flow.as_deref(), Some("deploy"));
+                assert_eq!(deploy.description, "Clean enough to ship");
+            }
+            other => panic!("expected Branch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_branch_with_step_path() {
+        let yaml = r#"
+- branch:
+    paths:
+      skip:
+        step: gate
+        description: "Just run gate"
+      full:
+        flow: build
+        description: "Full build"
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            FlowItem::Branch(branch) => {
+                let skip = &branch.paths["skip"];
+                assert_eq!(skip.step.as_deref(), Some("gate"));
+                assert!(skip.flow.is_none());
+                let full = &branch.paths["full"];
+                assert_eq!(full.flow.as_deref(), Some("build"));
+                assert!(full.step.is_none());
+            }
+            other => panic!("expected Branch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_branch_with_direction_override() {
+        let yaml = r#"
+- branch:
+    paths:
+      careful:
+        flow: build
+        description: "Build carefully"
+        direction: [care, clarity]
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+
+        match &items[0] {
+            FlowItem::Branch(branch) => {
+                let careful = &branch.paths["careful"];
+                assert_eq!(careful.direction, vec!["care", "clarity"]);
+            }
+            other => panic!("expected Branch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_branch_rejects_both_flow_and_step() {
+        let yaml = r#"
+- branch:
+    paths:
+      bad:
+        flow: build
+        step: gate
+        description: "invalid"
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let result = parse_flow_items(&value);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("flow") && err.contains("step"),
+            "expected error about both flow and step, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_branch_rejects_missing_flow_and_step() {
+        let yaml = r#"
+- branch:
+    paths:
+      bad:
+        description: "no target"
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let result = parse_flow_items(&value);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_branch_rejects_missing_description() {
+        let yaml = r#"
+- branch:
+    paths:
+      bad:
+        flow: build
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let result = parse_flow_items(&value);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("description"),
+            "expected error about missing description, got: {err}"
+        );
+    }
+
+    #[test]
+    fn expand_branch_keeps_concrete_branch() {
+        let tmp = TempDir::new().unwrap();
+        let flow = Flow {
+            name: "test-branch".to_string(),
+            items: vec![
+                FlowItem::Step(Step::named("gate")),
+                FlowItem::Branch(BranchDef {
+                    paths: {
+                        let mut m = HashMap::new();
+                        m.insert(
+                            "fix".to_string(),
+                            BranchPath {
+                                flow: Some("build".to_string()),
+                                step: None,
+                                description: "Fix it".to_string(),
+                                direction: Vec::new(),
+                            },
+                        );
+                        m
+                    },
+                }),
+            ],
+        };
+
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(matches!(&items[0], ConcreteItem::Step(_)));
+        assert!(matches!(&items[1], ConcreteItem::Branch(_)));
+
+        if let ConcreteItem::Branch(branch) = &items[1] {
+            assert_eq!(branch.paths.len(), 1);
+            assert_eq!(branch.paths["fix"].description, "Fix it");
+        }
+    }
+
+    #[test]
+    fn next_action_returns_branch_action() {
+        let items = vec![ConcreteItem::Branch(ConcreteBranch {
+            paths: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "a".to_string(),
+                    BranchPath {
+                        flow: Some("build".to_string()),
+                        step: None,
+                        description: "Path A".to_string(),
+                        direction: Vec::new(),
+                    },
+                );
+                m
+            },
+            flow_parents: Vec::new(),
+        })];
+
+        let action = next_action(&items, 0);
+        assert!(
+            matches!(action, FlowAction::Branch { .. }),
+            "expected Branch action, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn qa_deploy_flow_parses_and_expands() {
+        let tmp = TempDir::new().unwrap();
+        let flow = load_flow("qa-deploy", tmp.path()).unwrap();
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        // qa, triage, branch
+        assert_eq!(items.len(), 3);
+        assert!(matches!(&items[2], ConcreteItem::Branch(_)));
+    }
+
+    #[test]
+    fn qa_fix_flow_parses_and_expands() {
+        let tmp = TempDir::new().unwrap();
+        let flow = load_flow("qa-fix", tmp.path()).unwrap();
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        assert_eq!(items.len(), 4); // implement, compress, lint, gate
+    }
+
+    #[test]
+    fn deploy_flow_parses_and_expands() {
+        let tmp = TempDir::new().unwrap();
+        let flow = load_flow("deploy", tmp.path()).unwrap();
+        let items = expand_flow(&flow, tmp.path()).unwrap();
+        assert_eq!(items.len(), 2); // gate, update-wave
     }
 }

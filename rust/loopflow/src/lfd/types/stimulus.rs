@@ -120,6 +120,10 @@ pub struct Stimulus {
     pub created_at: Option<OffsetDateTime>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Maximum iterations per cycle. When a wave's iteration count reaches this
+    /// value, the loop ticker pauses the wave instead of re-triggering.
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
 }
 
 fn default_enabled() -> bool {
@@ -139,6 +143,7 @@ impl Stimulus {
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
             enabled: true,
+            max_iterations: None,
         }
     }
 }

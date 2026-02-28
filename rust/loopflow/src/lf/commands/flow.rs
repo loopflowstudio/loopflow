@@ -31,6 +31,7 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
         .map(|item| match item {
             ConcreteItem::Step(s) => s.step.name.as_str(),
             ConcreteItem::Fork(_) => "[fork]",
+            ConcreteItem::Branch(_) => "[branch]",
         })
         .collect();
 
@@ -74,6 +75,18 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
             FlowAction::Fork { fork } => {
                 run_fork(&fork, message, cli, repo)?;
                 commit_step_work(repo, "fork")?;
+            }
+            FlowAction::Branch { .. } => {
+                // Branch routing requires the daemon executor; skip in CLI flow runner.
+                let colors = Colors::new();
+                eprintln!(
+                    "{dim}[{current}/{total}]{reset} {bold}[branch]{reset} (requires lfd)",
+                    dim = colors.dim,
+                    reset = colors.reset,
+                    bold = colors.bold,
+                    current = index + 1,
+                    total = total,
+                );
             }
             FlowAction::Complete => break,
         }

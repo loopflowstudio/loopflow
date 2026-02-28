@@ -494,6 +494,7 @@ mod tests {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };
@@ -513,6 +514,7 @@ mod tests {
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
             enabled: true,
+            max_iterations: None,
         };
         store
             .create_stimulus(&stimulus)

@@ -94,6 +94,10 @@ pub async fn create_parallel_wave_run(
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
+        // New cycle: record the starting iteration for max_iterations safety valve.
+        if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
+            wave.cycle_start_iteration = iteration;
+        }
         wave.status = WaveStatus::Running;
         wave.iteration = iteration;
         if let Err(err) = store.update_wave(&wave).await {
@@ -174,6 +178,9 @@ pub async fn create_wave_run_with_id(
     };
     store.create_wave_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
+        if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
+            wave.cycle_start_iteration = iteration;
+        }
         wave.status = WaveStatus::Running;
         wave.iteration = iteration;
         if let Err(err) = store.update_wave(&wave).await {
@@ -308,6 +315,7 @@ pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) ->
     match items.get(step_index as usize) {
         Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
         Some(ConcreteItem::Fork(fork)) => fork.flow_parents.clone(),
+        Some(ConcreteItem::Branch(branch)) => branch.flow_parents.clone(),
         None => Vec::new(),
     }
 }

@@ -11,6 +11,7 @@ class Stimulus(BaseModel):
     kind: str
     source_wave_id: Optional[str] = None
     cron: Optional[str] = None
+    max_iterations: Optional[int] = None
 
 
 class PullRequest(BaseModel):

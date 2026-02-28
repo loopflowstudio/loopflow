@@ -20,3 +20,5 @@ Signal cleanup (01) should land first — it establishes WaveMode on the wave st
 - Listen stimulus indicator (which wave listens to which)
 - Chord CRUD from the UI: create chord, delete chord, add/remove wave from chord
 - Clean display for ungrouped waves alongside chord groups
+- Branch flow visualization — show which path was taken, routing verdict, cycle status for QA→fix→deploy loops
+- Human-in-the-loop branch selection — allow manual path override from the UI

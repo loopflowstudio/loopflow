@@ -34,6 +34,7 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         area: vec![],
         status: WaveStatus::Idle,
         iteration: 0,
+        cycle_start_iteration: 0,
         created_at: None,
         serialized: false,
     }

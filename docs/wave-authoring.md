@@ -172,6 +172,8 @@ The loop terminates when: the backlog is empty, `max_iterations` is reached, or 
 
 When an item ships, `update-wave` doesn't just delete it. Context from the shipped work — what was learned, what changed, what downstream items should know — folds forward into the remaining items. Nothing is lost.
 
+When the backlog empties, the wave is complete. The wave directory persists — the README stays as documentation of what was built.
+
 ---
 
 ## Running and Monitoring
@@ -185,12 +187,10 @@ Visual wave dashboard — create waves, watch progress, review PRs, stop and res
 Same `lfd` backend, terminal interface:
 
 ```bash
-lfq create mywave .         # create a wave
 lfq run mywave              # start running
 lfq list                    # show all waves
 lfq logs mywave             # tail agent output
 lfq stop mywave             # stop a wave
-lfq delete mywave           # remove wave and history
 ```
 
 ### Python API
@@ -198,7 +198,6 @@ lfq delete mywave           # remove wave and history
 ```python
 import loopflow.api as loopflow
 
-loopflow.create_wave("mywave", repo=".", flow="build", direction=["clarity"])
 loopflow.run_wave("mywave")
 loopflow.waves()             # list all waves
 ```
@@ -229,18 +228,6 @@ loopflow.add_stimulus("mywave", kind="listen", source_wave_id="infra")
 
 ---
 
-## Wave Lifecycle
-
-```
-Create → Active (items consumed) → Complete (backlog empty)
-```
-
-As the wave runs, items move from `wave/<name>/` to `scratch/`, get built into PRs, and are removed by `update-wave`. When no items remain, the wave is complete.
-
-The wave directory itself persists — the README stays as documentation of what was built. Delete the directory manually when you're done with it, or let `update-wave` clean up.
-
----
-
 ## Worked Example
 
 The `wave/infra/` directory in the loopflow repo:
@@ -261,16 +248,6 @@ The `wave/infra/` directory in the loopflow repo:
 04-daemon-coverage.md    → Test coverage for trigger loops
 05-security.md           → Webhook auth, safe defaults
 06-code-cleanup.md       → Dead code removal, pattern consistency
-```
-
-**Config** (`infra.yaml`) would set:
-```yaml
-flow: ship-wave
-area:
-  - rust/loopflow/src/lfd/
-direction:
-  - security
-  - reliability
 ```
 
 When run, the wave ingests `01-daemon-integrity.md` first, builds a PR for transactional migrations and resource bounds, then moves to `03-golden-tests.md`, and so on until the backlog is empty.

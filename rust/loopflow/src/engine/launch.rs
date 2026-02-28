@@ -8,8 +8,8 @@ use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     default_gather_sources, drop_native_instruction_docs, format_context_prompt, format_prompt,
     format_task_prompt, gather_context, trim_context_with_breakdown, ContextBreakdown, Document,
-    DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, Surface,
-    DEFAULT_CONTEXT_BUDGET,
+    DocumentSource, GatherContextOpts, PromptComponents, PromptFormatMode, RelatedRepoContext,
+    Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
@@ -42,6 +42,8 @@ pub struct LaunchPromptInput {
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
     pub client_context: ClientContext,
+    /// Related repos resolved from the edge graph.
+    pub related_repos: Vec<RelatedRepoContext>,
 }
 
 /// Canonical launch-prep output.
@@ -76,6 +78,7 @@ pub fn prepare_launch_prompt(
         source_overrides,
         summary,
         client_context,
+        related_repos,
     } = input;
 
     if let Some(step) = resolved_step.as_ref() {
@@ -112,6 +115,7 @@ pub fn prepare_launch_prompt(
         sources: default_gather_sources(lfdocs, diff_files || diff, clipboard),
         area,
         wave,
+        related_repos,
     };
 
     let mut gathered = gather_context(&opts)?;

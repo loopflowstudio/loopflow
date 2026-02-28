@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         sources: default_gather_sources(args.lfdocs, args.diff_files || args.diff, args.clipboard),
         area: args.area,
         wave: args.wave,
+        related_repos: Vec::new(),
     };
 
     let gathered = gather_context(&opts)?;

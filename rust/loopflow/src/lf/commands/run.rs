@@ -146,6 +146,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             },
             summary: None,
             client_context: Default::default(),
+            related_repos: Vec::new(),
         },
     )?;
     debug!(

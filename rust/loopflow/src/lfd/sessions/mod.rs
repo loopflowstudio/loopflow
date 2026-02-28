@@ -14,7 +14,7 @@ use crate::engine::agent::AgentConfig;
 use crate::engine::config::load_config_or_default;
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
 use crate::engine::prompt::ContextBreakdown;
-use crate::engine::prompt::{write_prompt_log, Surface};
+use crate::engine::prompt::{write_prompt_log, RelatedRepoContext, Surface};
 use crate::engine::structured_reply::ClientContext;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
@@ -23,7 +23,8 @@ use crate::lfd::sessions::types::{
     ContextSnapshot, CreateSessionParams, PersistedSessionEvent, Session, SessionConfig,
     SessionEvent, SessionItem, SessionStatus,
 };
-use crate::lfd::store::{SharedStore, StoreError};
+use crate::lfd::store::{SharedStore, Store, StoreError};
+use crate::lfd::types::RepoId;
 
 const LIVE_EVENT_BUFFER: usize = 256;
 
@@ -52,6 +53,41 @@ pub enum SessionManagerError {
     TurnAlreadyInProgress,
     #[error("harness error: {0}")]
     Harness(String),
+}
+
+/// Resolve related repos (parents + children) for a session repo.
+///
+/// Queries the store for edges, validates paths exist on disk,
+/// and deduplicates by path.
+async fn resolve_related_repos(
+    store: &Store,
+    repo_id: &RepoId,
+) -> Result<Vec<RelatedRepoContext>, StoreError> {
+    let mut seen_paths = std::collections::HashSet::new();
+    let mut related = Vec::new();
+
+    let parents = store.parents(repo_id).await?;
+    let children = store.children(repo_id).await?;
+
+    for repo in parents.into_iter().chain(children) {
+        let path = PathBuf::from(&repo.path);
+        if !path.is_dir() {
+            tracing::warn!(
+                repo_id = %repo.repo_id,
+                path = %repo.path,
+                "related repo missing from disk, skipping"
+            );
+            continue;
+        }
+        if seen_paths.insert(repo.path.clone()) {
+            related.push(RelatedRepoContext {
+                repo_id: repo.repo_id,
+                path,
+            });
+        }
+    }
+
+    Ok(related)
 }
 
 struct SessionRuntime {
@@ -226,6 +262,13 @@ impl SessionManager {
         // Sessions are primarily a Concerto feature; default to macOS surface.
         let surface = config.surface.unwrap_or(Surface::ConcertoMac);
 
+        // Resolve related repos from the edge graph.
+        let repo_root_str = repo_root.to_string_lossy().to_string();
+        let related_repos = match self.inner.store.get_repo(&repo_root_str).await? {
+            Some(repo) => resolve_related_repos(&self.inner.store, &repo.repo_id).await?,
+            None => Vec::new(),
+        };
+
         let file_config = load_config_or_default(Some(&repo_root));
         let prepared = prepare_launch_prompt(
             &file_config,
@@ -250,6 +293,7 @@ impl SessionManager {
                     has_ui: config.client_has_ui.unwrap_or(false),
                     compact: config.client_compact.unwrap_or(false),
                 },
+                related_repos,
             },
         )
         .map_err(|err| SessionManagerError::InvalidConfig(err.to_string()))?;

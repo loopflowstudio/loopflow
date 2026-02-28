@@ -590,8 +590,7 @@ mod tests {
             name: "queue-wave".to_string(),
             repo: repo.to_string(),
             mode: WaveMode::Loop,
-            flow: "build".to_string(),
-            loop_flow: "ship-roadmap".to_string(),
+            primary_flow: "ship-roadmap".to_string(),
             cron: None,
             direction: Vec::new(),
             area: Vec::new(),
@@ -609,7 +608,7 @@ mod tests {
             wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
-                flow: wave.flow().clone(),
+                flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
                 pr: Some(PullRequest {

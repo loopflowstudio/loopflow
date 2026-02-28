@@ -24,12 +24,12 @@ Phases 01–03.5 collapsed `WaveRunKind`/`StimulusKind` into a single `Signal` e
 
 ```
 Signal (reactive, external events):    Watch | Listen | CiFailure
-Wave (execution behavior):             mode (Loop|Cron|Manual), flow, loop_flow
+Wave (execution behavior):             mode (Loop|Cron|Manual), primary_flow
 ```
 
 CI fix is a normal stimulus activation (`Signal::CiFailure` + `flow: ci-fix`). Watch triggers the `integrate` flow (rebase + integrate-upstream). `stimulus.flow` override lets any stimulus select a flow at activation time.
 
-Starting a wave = running `wave.flow` (default: `ship`). The loop ticker runs `wave.loop_flow` (default: `ship-roadmap`). Callers can override flow at start time via the API.
+Starting a wave runs `wave.primary_flow` (default: `ship-roadmap`). Callers can override flow at start time via the API — the override is ephemeral, not saved on the wave.
 
 External API still uses `stimulus.kind` — coordinated rename to `stimulus.signal` deferred (requires Python client + Concerto + wave config schema update in lockstep).
 
@@ -41,8 +41,7 @@ struct Wave {
     name: String,
     repo: String,
     mode: WaveMode,        // Loop | Cron | Manual
-    flow: String,          // default flow for manual starts ("ship")
-    loop_flow: String,     // flow for loop ticker ("ship-roadmap")
+    primary_flow: String,  // the wave's flow ("ship-roadmap")
     cron: Option<String>,  // cron expression, required when mode=Cron
     // flat fields, no type/parent/position
 }
@@ -62,7 +61,7 @@ struct WaveRun {
     branch: String,
     worktree: String,
     pr: Option<PullRequest>,
-    loop_flow_run: FlowRun,           // primary flow execution
+    primary_flow_run: FlowRun,        // primary flow execution
     triggered_flows: Vec<FlowRun>,    // reactive: integrate, ci-fix, etc.
 }
 

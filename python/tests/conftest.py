@@ -6,7 +6,7 @@ WAVE_MINIMAL = {
     "id": "abc-123",
     "name": "reduce",
     "repo": "/tmp/repo",
-    "flow": "reduce",
+    "primary_flow": "reduce",
     "direction": ["infra"],
     "area": [],
     "status": "running",

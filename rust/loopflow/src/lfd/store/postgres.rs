@@ -114,7 +114,7 @@ impl PostgresStore {
 
             let serialized: i32 = if wave.serialized { 1 } else { 0 };
             let mode = wave.mode().as_str();
-            let loop_flow = wave.loop_flow();
+            let primary_flow = wave.primary_flow();
             let cron = wave.cron.as_deref();
             client
                 .execute(
@@ -123,7 +123,6 @@ impl PostgresStore {
                         &wave.id().as_str(),
                         &wave.name().as_str(),
                         &wave.repo().as_str(),
-                        &wave.flow().as_str(),
                         &direction_json.as_str(),
                         &area_json.as_str(),
                         &paused,
@@ -133,7 +132,7 @@ impl PostgresStore {
                         &created_at,
                         &serialized,
                         &mode,
-                        &loop_flow.as_str(),
+                        &primary_flow.as_str(),
                         &cron,
                     ],
                 )
@@ -952,7 +951,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized, w.mode, w.loop_flow, w.cron
+                    "SELECT w.id, w.name, w.repo, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized, w.mode, w.primary_flow, w.cron
                      FROM waves w
                      INNER JOIN chord_members cm ON cm.wave_id = w.id
                      WHERE cm.chord_id = $1

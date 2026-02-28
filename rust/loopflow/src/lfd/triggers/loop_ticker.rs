@@ -119,7 +119,7 @@ async fn tick_loop_waves(
                 scheduler,
                 event_hub,
                 &wave,
-                Some(wave.loop_flow().to_string()),
+                Some(wave.primary_flow().to_string()),
                 envelope,
             )
             .await;

@@ -43,7 +43,7 @@ def _wave_table(waves: list[Wave]) -> Table:
         table.add_row(
             wave.name,
             wave.status,
-            wave.flow,
+            wave.primary_flow,
             str(wave.iteration),
             wave.repo,
             local_worktree,

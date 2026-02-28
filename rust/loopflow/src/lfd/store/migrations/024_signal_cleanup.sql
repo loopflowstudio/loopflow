@@ -1,7 +1,11 @@
 -- Add execution mode fields to waves.
 ALTER TABLE waves ADD COLUMN mode TEXT NOT NULL DEFAULT 'loop';
-ALTER TABLE waves ADD COLUMN loop_flow TEXT NOT NULL DEFAULT 'ship-roadmap';
+ALTER TABLE waves ADD COLUMN primary_flow TEXT NOT NULL DEFAULT 'ship-roadmap';
 ALTER TABLE waves ADD COLUMN cron TEXT;
+
+-- Migrate existing flow values into primary_flow, then drop flow.
+UPDATE waves SET primary_flow = flow WHERE flow != '' AND flow IS NOT NULL;
+ALTER TABLE waves DROP COLUMN flow;
 
 -- Make stimulus_id nullable in pending_activations and activation_log.
 -- SQLite doesn't support ALTER COLUMN, so we recreate the tables.

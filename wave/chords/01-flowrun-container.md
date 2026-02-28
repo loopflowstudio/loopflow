@@ -12,6 +12,9 @@ Key decisions that carry forward:
 - **`ActivationEnvelope.stimulus_id` is already `Option<LfdId>`.** No further activation-layer changes needed.
 - **Cron `last_triggered_at` tracking lost.** The old code tracked this on the stimulus. Currently cron waves attempt activation on every 30-second tick, relying on dedup to coalesce. Correct but noisy — add `last_cron_triggered_at` to the wave as part of this sprint.
 - **No cron active-run check.** Unlike the loop ticker (which checks for active runs before dispatching), the cron ticker always dispatches. Address alongside FlowRun or accept the noise.
+- **API field asymmetry.** Input APIs (`CreateWaveRequest`, `UpdateWaveRequest`) accept `flow`. Output (`WaveDto`) returns `primary_flow`. Intentional but the DTO layer should be consistent — decide whether to rename input to `primary_flow` or keep the asymmetry and document it.
+- **Python API doesn't expose `mode`/`cron` yet.** The Python model deserializes them, but `create_wave`/`update_wave` don't accept them as parameters. Add when building FlowRun Python models.
+- **Signal discriminant stability.** Removed Signal variants (Once, Loop, Cron) map to `Unspecified` via `from_i32`. Test `removed_discriminants_map_to_unspecified` guards this. New discriminant values must not reuse old slots.
 
 ## What to build
 
@@ -31,7 +34,7 @@ CREATE TABLE flow_runs (
     area TEXT NOT NULL DEFAULT '[]',
     flow_parents TEXT NOT NULL DEFAULT '[]',
     activation_log_id TEXT,
-    is_loop_flow INTEGER NOT NULL DEFAULT 0,
+    is_primary_flow INTEGER NOT NULL DEFAULT 0,
     status INTEGER NOT NULL,
     started_at TEXT,
     ended_at TEXT,
@@ -47,12 +50,12 @@ CREATE TABLE flow_runs (
 - `FlowRunStatus` — reuse `WaveRunStatus` variants (Running, Completed, Failed, Stopped)
 - Delete `WaveRunSnapshot`; move `repo` and `pr` to WaveRun top-level
 - Strip `flow`, `step_index`, `direction`, `area`, `flow_parents`, `activation_log_id` from WaveRun
-- Add `loop_flow_run: Option<FlowRun>` and `triggered_flows: Vec<FlowRun>` to WaveRun (in-memory, populated from DB)
+- Add `primary_flow_run: Option<FlowRun>` and `triggered_flows: Vec<FlowRun>` to WaveRun (in-memory, populated from DB)
 
 ### Store layer
 
 - `map_flow_run_row`, `create_flow_run`, `update_flow_run`, `list_flow_runs(wave_run_id)`, `get_active_flow_run(wave_run_id)`
-- `map_wave_run_row`: drop snapshot, read `repo`/`pr` directly, populate `loop_flow_run`/`triggered_flows` via join or separate query
+- `map_wave_run_row`: drop snapshot, read `repo`/`pr` directly, populate `primary_flow_run`/`triggered_flows` via join or separate query
 - `create_wave_run`: also create initial FlowRun
 - FlowRun trait methods + SharedStore delegation
 - Both sqlite.rs and postgres.rs
@@ -72,14 +75,14 @@ Simple FIFO between steps. No mid-step interruption, no suspend/resume.
 ### Reactive stimulus → triggered flow
 
 When Watch/CiFailure/Listen fires and a WaveRun is active:
-1. Create a FlowRun with `is_loop_flow = 0`, `status = Pending`
-2. The executor picks it up between steps of the loop_flow_run
+1. Create a FlowRun with `is_primary_flow = 0`, `status = Pending`
+2. The executor picks it up between steps of the primary_flow_run
 
 When no WaveRun is active: drop the event. The wave picks up changes on next start (rebase happens naturally).
 
 ### DTO + Python
 
-- `WaveRunDto`: add `loop_flow_run: Option<FlowRunDto>`, `triggered_flows: Vec<FlowRunDto>`
+- `WaveRunDto`: add `primary_flow_run: Option<FlowRunDto>`, `triggered_flows: Vec<FlowRunDto>`
 - Python models: FlowRun model, update WaveRun model
 - Cron ticker: use `last_cron_triggered_at` to skip redundant activations
 
@@ -91,7 +94,7 @@ uv run pytest python/tests/
 cargo clippy -- -D warnings
 ```
 
-- WaveRun history shows FlowRuns (loop_flow_run + triggered_flows)
+- WaveRun history shows FlowRuns (primary_flow_run + triggered_flows)
 - Watch/CiFailure during an active run creates a triggered FlowRun on the same iteration
 - Executor operates on FlowRun, not WaveRun fields
 - `WaveRunSnapshot` deleted

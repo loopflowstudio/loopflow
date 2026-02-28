@@ -156,27 +156,27 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, primary_flow, cron\n             FROM waves\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, primary_flow, cron\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, repo, flow, direction, area, paused, status, iteration, cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14}, {p15})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                flow = excluded.flow,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                cycle_start_iteration = excluded.cycle_start_iteration,\n                created_at = excluded.created_at,\n                serialized = excluded.serialized,\n                mode = excluded.mode,\n                loop_flow = excluded.loop_flow,\n                cron = excluded.cron",
+        template: "INSERT INTO waves (\n                id, name, repo, direction, area, paused, status, iteration, cycle_start_iteration, created_at, serialized, mode, primary_flow, cron\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                cycle_start_iteration = excluded.cycle_start_iteration,\n                created_at = excluded.created_at,\n                serialized = excluded.serialized,\n                mode = excluded.mode,\n                primary_flow = excluded.primary_flow,\n                cron = excluded.cron",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, primary_flow, cron\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE name = {p1}",
+        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, primary_flow, cron\n             FROM waves\n             WHERE name = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -452,13 +452,13 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     // ListLoopableWaves
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE mode = 'loop' AND status != 4\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, primary_flow, cron\n             FROM waves\n             WHERE mode = 'loop' AND status != 4\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     // ListCronWaves
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE mode = 'cron' AND status != 4\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, primary_flow, cron\n             FROM waves\n             WHERE mode = 'cron' AND status != 4\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },

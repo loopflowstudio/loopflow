@@ -77,7 +77,7 @@ pub async fn build_wave_dto(
     let queue_views = build_wave_queue_views(store, wave.id(), &live_snapshot).await?;
     let repo = wave.repo().clone();
     let name = wave.name().clone();
-    let flow_name = wave.flow().clone();
+    let flow_name = wave.primary_flow().clone();
     let flow_repo = wave.repo().clone();
     let (git_state, flow_steps) = tokio::join!(
         async {
@@ -129,8 +129,7 @@ pub async fn build_wave_dto(
         name: wave.name().clone(),
         repo: wave.repo().clone(),
         mode: wave.mode().as_str().to_string(),
-        flow: wave.flow().clone(),
-        loop_flow: wave.loop_flow().to_string(),
+        primary_flow: wave.primary_flow().to_string(),
         cron: wave.cron.clone(),
         direction: wave.direction().clone(),
         area: wave.area().clone(),
@@ -462,8 +461,7 @@ mod tests {
             name: "wave-live-pr".to_string(),
             repo: repo.to_string(),
             mode: WaveMode::Loop,
-            flow: "build".to_string(),
-            loop_flow: "ship-roadmap".to_string(),
+            primary_flow: "ship-roadmap".to_string(),
             cron: None,
             direction: vec![],
             area: vec![],
@@ -481,7 +479,7 @@ mod tests {
             wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
-                flow: wave.flow().clone(),
+                flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
                 pr: Some(PullRequest {

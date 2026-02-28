@@ -82,7 +82,7 @@ async fn check_cron_waves(
                     scheduler,
                     event_hub,
                     &wave,
-                    Some(wave.flow().to_string()),
+                    Some(wave.primary_flow().to_string()),
                     envelope,
                 )
                 .await;

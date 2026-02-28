@@ -220,8 +220,7 @@ pub struct Wave {
     pub name: String,
     pub repo: String,
     pub mode: WaveMode,
-    pub flow: String,
-    pub loop_flow: String,
+    pub primary_flow: String,
     pub cron: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
@@ -248,8 +247,7 @@ impl Wave {
             name,
             repo,
             mode: WaveMode::Loop,
-            flow: String::new(),
-            loop_flow: "ship-roadmap".to_string(),
+            primary_flow: "ship-roadmap".to_string(),
             cron: None,
             direction: Vec::new(),
             area: Vec::new(),
@@ -277,12 +275,8 @@ impl Wave {
         self.mode
     }
 
-    pub fn flow(&self) -> &String {
-        &self.flow
-    }
-
-    pub fn loop_flow(&self) -> &String {
-        &self.loop_flow
+    pub fn primary_flow(&self) -> &String {
+        &self.primary_flow
     }
 
     pub fn direction(&self) -> &Vec<String> {

@@ -89,8 +89,7 @@ pub struct WaveDto {
     pub name: String,
     pub repo: String,
     pub mode: String,
-    pub flow: String,
-    pub loop_flow: String,
+    pub primary_flow: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron: Option<String>,
     pub direction: Vec<String>,

@@ -206,9 +206,6 @@ pub async fn create_wave_handler(
         .and_then(|config| config.stimulus.as_ref())
         .map(parse_stimulus)
         .transpose()?;
-    let flow = flow
-        .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
-        .unwrap_or_else(|| "build".to_string());
     let direction = direction
         .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
         .unwrap_or_default();
@@ -231,9 +228,9 @@ pub async fn create_wave_handler(
         .and_then(|c| c.mode.as_deref())
         .and_then(|m| m.parse::<WaveMode>().ok())
         .unwrap_or_default();
-    let loop_flow = wave_config
-        .as_ref()
-        .and_then(|c| c.loop_flow.clone())
+    let primary_flow = flow
+        .or_else(|| wave_config.as_ref().and_then(|c| c.primary_flow.clone()))
+        .or_else(|| wave_config.as_ref().and_then(|c| c.flow.clone()))
         .unwrap_or_else(|| "ship-roadmap".to_string());
     let cron_field = wave_config.as_ref().and_then(|c| c.cron.clone());
 
@@ -242,8 +239,7 @@ pub async fn create_wave_handler(
         name,
         repo,
         mode,
-        flow,
-        loop_flow,
+        primary_flow,
         cron: cron_field,
         direction,
         area,
@@ -573,7 +569,7 @@ pub async fn update_wave_handler(
     }
 
     if let Some(flow) = payload.flow {
-        wave.flow = flow;
+        wave.primary_flow = flow;
     }
     if let Some(direction) = payload.direction {
         wave.direction = direction;
@@ -715,10 +711,9 @@ async fn start_wave_run(
         }
     }
 
+    let mut flow_override = None;
     if let Some(overrides) = overrides {
-        if let Some(flow) = overrides.flow {
-            wave.flow = flow;
-        }
+        flow_override = overrides.flow;
         if let Some(direction) = overrides.direction {
             wave.direction = direction;
         }
@@ -779,7 +774,7 @@ async fn start_wave_run(
             &state.scheduler,
             &state.event_hub,
             wave,
-            None,
+            flow_override,
             envelope,
         )
         .await)
@@ -1552,8 +1547,7 @@ mod tests {
             name: "infra".to_string(),
             repo: repo_a.to_string(),
             mode: WaveMode::Loop,
-            flow: "build".to_string(),
-            loop_flow: "ship-roadmap".to_string(),
+            primary_flow: "ship-roadmap".to_string(),
             cron: None,
             direction: Vec::new(),
             area: Vec::new(),
@@ -1568,8 +1562,7 @@ mod tests {
             name: "infra".to_string(),
             repo: repo_b.to_string(),
             mode: WaveMode::Loop,
-            flow: "build".to_string(),
-            loop_flow: "ship-roadmap".to_string(),
+            primary_flow: "ship-roadmap".to_string(),
             cron: None,
             direction: Vec::new(),
             area: Vec::new(),
@@ -1643,8 +1636,7 @@ mod tests {
             name: "infra".to_string(),
             repo: "/tmp/source-repo".to_string(),
             mode: WaveMode::Loop,
-            flow: "build".to_string(),
-            loop_flow: "ship-roadmap".to_string(),
+            primary_flow: "ship-roadmap".to_string(),
             cron: None,
             direction: Vec::new(),
             area: Vec::new(),

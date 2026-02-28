@@ -2016,8 +2016,7 @@ mod tests {
             name: format!("wave-{id}"),
             repo: repo.to_string(),
             mode: WaveMode::Loop,
-            flow: "default".to_string(),
-            loop_flow: "ship-roadmap".to_string(),
+            primary_flow: "ship-roadmap".to_string(),
             cron: None,
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
@@ -2035,7 +2034,7 @@ mod tests {
             wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
-                flow: wave.flow().clone(),
+                flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
                 pr: None,
@@ -2610,7 +2609,7 @@ mod tests {
                     wave_id: wave.id().clone(),
                     snapshot: WaveRunSnapshot {
                         repo: wave.repo().clone(),
-                        flow: wave.flow().clone(),
+                        flow: wave.primary_flow().clone(),
                         direction: wave.direction().clone(),
                         area: wave.area().clone(),
                         pr: Some(PullRequest {

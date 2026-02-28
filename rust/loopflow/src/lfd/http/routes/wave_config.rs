@@ -17,7 +17,7 @@ pub(crate) struct StimulusDef {
 pub(crate) struct WaveConfig {
     pub flow: Option<String>,
     pub mode: Option<String>,
-    pub loop_flow: Option<String>,
+    pub primary_flow: Option<String>,
     pub cron: Option<String>,
     pub area: Option<Vec<String>>,
     pub stimulus: Option<StimulusDef>,

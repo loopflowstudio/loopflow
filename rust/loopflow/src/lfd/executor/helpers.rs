@@ -69,7 +69,7 @@ pub async fn create_parallel_wave_run(
         wave_id: wave.id().clone(),
         snapshot: WaveRunSnapshot {
             repo: wave.repo().clone(),
-            flow: wave.flow().clone(),
+            flow: wave.primary_flow().clone(),
             direction: wave.direction().clone(),
             area: wave.area().clone(),
             pr: None,
@@ -153,7 +153,7 @@ pub async fn create_wave_run_with_id(
         wave_id: wave.id().clone(),
         snapshot: WaveRunSnapshot {
             repo: wave.repo().clone(),
-            flow: wave.flow().clone(),
+            flow: wave.primary_flow().clone(),
             direction: wave.direction().clone(),
             area: wave.area().clone(),
             pr: None,

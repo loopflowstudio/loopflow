@@ -47,8 +47,7 @@ class Wave(BaseModel):
     name: str
     repo: str
     mode: str = "loop"
-    flow: str
-    loop_flow: str = "ship-roadmap"
+    primary_flow: str = "ship-roadmap"
     cron: Optional[str] = None
     direction: list[str]
     area: list[str]

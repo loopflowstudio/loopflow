@@ -230,27 +230,27 @@ loopflow.add_stimulus("mywave", kind="listen", source_wave_id="infra")
 
 ## Worked Example
 
-The `wave/infra/` directory in the loopflow repo:
+A `wave/billing/` directory for a billing rewrite:
 
 **README.md** sets the vision:
-> Close the gaps between "works on my machine" and "production-grade."
+> Replace the legacy billing system with a metered usage model.
 
 **Goals** are concrete:
-- Long-running lfd daemons don't accumulate unbounded resources
-- CI gives feedback in minutes, not 15+
-- Every background trigger loop has at least one test
+- Usage events are recorded within 5 seconds of occurrence
+- Invoices generate correctly for all plan types
+- Legacy API endpoints return the same responses during migration
 
 **Items** are scoped to one PR each:
 
 ```
-01-daemon-integrity.md   → Transactional migrations, resource bounds
-03-golden-tests.md       → Prompt parity and golden test coverage
-04-daemon-coverage.md    → Test coverage for trigger loops
-05-security.md           → Webhook auth, safe defaults
-06-code-cleanup.md       → Dead code removal, pattern consistency
+01-usage-events.md       → Event capture and storage
+01-metering-api.md       → Public metering endpoint
+03-invoice-generation.md → Monthly invoice calculation
+04-migration-shim.md     → Legacy API compatibility layer
+05-cleanup.md            → Remove old billing code
 ```
 
-When run, the wave ingests `01-daemon-integrity.md` first, builds a PR for transactional migrations and resource bounds, then moves to `03-golden-tests.md`, and so on until the backlog is empty.
+The two `01-*` items run in the same stage (parallel-safe). When both ship, `03-invoice-generation.md` starts. The wave loops until the backlog is empty.
 
 ---
 

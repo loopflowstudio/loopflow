@@ -8,6 +8,7 @@ header_pages:
   - index.md
   - getting-started.md
   - wave-authoring.md
+  - waves.md
   - lf.md
   - lfops.md
   - lfd.md

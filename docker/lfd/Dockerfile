@@ -1,6 +1,19 @@
 FROM rust:1.88-bookworm AS builder
 WORKDIR /build
+
+# --- Dependency layer (cached unless Cargo.lock changes) ---
 COPY Cargo.toml Cargo.lock ./
+COPY rust/loopflow/Cargo.toml rust/loopflow/Cargo.toml
+COPY rust/loopflow-test-support/Cargo.toml rust/loopflow-test-support/Cargo.toml
+RUN mkdir -p rust/loopflow/src/bin rust/loopflow-test-support/src \
+    && touch rust/loopflow/src/lib.rs \
+    && echo "fn main() {}" > rust/loopflow/src/bin/lf.rs \
+    && echo "fn main() {}" > rust/loopflow/src/bin/lfd.rs \
+    && echo "fn main() {}" > rust/loopflow/src/bin/lf-prompt.rs \
+    && touch rust/loopflow-test-support/src/lib.rs
+RUN cargo build -p loopflow --release
+
+# --- Source layer (only your code recompiles) ---
 COPY rust ./rust
 RUN cargo build -p loopflow --release
 

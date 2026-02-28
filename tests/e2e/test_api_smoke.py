@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import pytest
-
 from loopflow.client import Client
+
 from scripts.lib.api_harness import ApiClient
 from scripts.lib.lfd_runtime import LfdRuntime
 from scripts.lib.wave_scenarios import (
@@ -14,9 +14,9 @@ from scripts.lib.wave_scenarios import (
     get_wave_missing_error,
     list_waves_auth_error,
     list_waves_happy,
+    update_wave_agent_overrides_happy,
     update_wave_happy,
     update_wave_invalid_status_error,
-    update_wave_agent_overrides_happy,
 )
 
 pytestmark = pytest.mark.e2e

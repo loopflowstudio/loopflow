@@ -9,8 +9,8 @@ import sys
 from lib.fork_scenarios import (
     build_lfd,
     cleanup_wave_artifacts,
-    create_test_wave_name,
     create_and_run_wave,
+    create_test_wave_name,
     ensure_agent_image,
     ensure_postgres,
     has_claude_credentials,

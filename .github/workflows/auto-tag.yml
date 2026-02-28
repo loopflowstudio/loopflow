@@ -32,5 +32,12 @@ jobs:
             exit 1
           fi
 
+          # Verify pyproject.toml version matches before tagging
+          pypi_version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          if [ "$pypi_version" != "$expected" ]; then
+            echo "::error::Version mismatch: RELEASE_NOTES.md says $version but pyproject.toml has $pypi_version"
+            exit 1
+          fi
+
           git tag "$version"
           git push origin "$version"

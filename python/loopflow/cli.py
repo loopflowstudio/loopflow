@@ -14,7 +14,6 @@ from loopflow import api
 from loopflow.errors import LoopflowError
 from loopflow.models import AuthProviderStatus, Repo, Wave
 
-
 app = typer.Typer(help="Query lfd and manage waves.")
 auth_app = typer.Typer(help="Manage provider authentication.")
 repos_app = typer.Typer(help="Manage registered repositories.")
@@ -35,7 +34,12 @@ def _wave_table(waves: list[Wave]) -> Table:
     for wave in waves:
         run = wave.active_run
         local_worktree = (run.local_worktree if run else None) or wave.local_worktree or "-"
-        remote_branch = (run.remote_branch if run else None) or wave.remote_branch or wave.branch or "-"
+        remote_branch = (
+            (run.remote_branch if run else None)
+            or wave.remote_branch
+            or wave.branch
+            or "-"
+        )
         table.add_row(
             wave.name,
             wave.status,
@@ -188,7 +192,8 @@ def main(ctx: typer.Context, json_output: bool = typer.Option(False, "--json", "
     status = api.status()
     waves = api.waves()
     if json_output:
-        typer.echo(json.dumps({"status": status, "waves": [w.model_dump(mode="json") for w in waves]}, indent=2))
+        data = {"status": status, "waves": [w.model_dump(mode="json") for w in waves]}
+        typer.echo(json.dumps(data, indent=2))
         return
 
     console.print(
@@ -221,7 +226,8 @@ def list_waves(
 def show_wave(name_or_id: str, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
     wave = api.wave(name_or_id)
     if wave is None:
-        typer.echo(f"wave not found: {name_or_id}. Run `lfq list` to see available waves.", err=True)
+        msg = f"wave not found: {name_or_id}. Run `lfq list` to see available waves."
+        typer.echo(msg, err=True)
         raise typer.Exit(code=1)
     if json_output:
         typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))

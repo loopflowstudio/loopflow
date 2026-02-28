@@ -19,7 +19,6 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx
-
 from lib.lfd_runtime import LfdRuntime
 
 try:
@@ -36,7 +35,10 @@ PROVIDER_CREDENTIAL_ROOTS = {
 }
 PROVIDER_AUTH_COMMANDS = {
     "github": (
-        ["gh", "auth", "login", "--web", "--hostname", "github.com", "--git-protocol", "https", "--skip-ssh-key"],
+        [
+            "gh", "auth", "login", "--web", "--hostname", "github.com",
+            "--git-protocol", "https", "--skip-ssh-key",
+        ],
         {"GH_BROWSER": "echo"},
     ),
     "claude": (
@@ -191,7 +193,9 @@ async def run_provider_contract(
     ws_url = ws_url_for(base_url, "/ws")
     connect_kwargs = websocket_connect_kwargs(token, event_timeout_seconds)
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=http_timeout_seconds, headers=headers) as client:
+    async with httpx.AsyncClient(
+        base_url=base_url, timeout=http_timeout_seconds, headers=headers,
+    ) as client:
         result["status_before"] = await fetch_auth_status(client, provider)
         _write_json(evidence_dir / "status-before.json", result["status_before"])
 
@@ -217,7 +221,9 @@ async def run_provider_contract(
                     result["reason"] = start_error
                     return result
 
-                pending_samples = await poll_provider_status(client, provider, pending_timeout_seconds)
+                pending_samples = await poll_provider_status(
+                    client, provider, pending_timeout_seconds,
+                )
                 result["status_samples"] = pending_samples
                 _write_json(evidence_dir / "status-samples.json", pending_samples)
                 saw_pending = any(sample.get("status") == "pending" for sample in pending_samples)
@@ -246,7 +252,8 @@ async def run_provider_contract(
                     result["reason"] = "missing auth.flow_started event"
                     return result
 
-                if flow_started.get("verification_uri") != result["start_payload"].get("verification_uri"):
+                start_uri = result["start_payload"].get("verification_uri")
+                if flow_started.get("verification_uri") != start_uri:
                     result["reason"] = "auth.flow_started verification_uri mismatch"
                     return result
 
@@ -354,7 +361,8 @@ async def fetch_auth_status(client: httpx.AsyncClient, provider: str) -> dict[st
 
 def validate_start_payload(provider: str, payload: dict[str, Any]) -> str | None:
     if payload.get("provider") != provider:
-        return f"start payload provider mismatch: expected {provider!r}, got {payload.get('provider')!r}"
+        got = payload.get("provider")
+        return f"start payload provider mismatch: expected {provider!r}, got {got!r}"
 
     verification_uri = payload.get("verification_uri")
     if not isinstance(verification_uri, str) or not verification_uri.startswith(("http://", "https://")):
@@ -362,7 +370,10 @@ def validate_start_payload(provider: str, payload: dict[str, Any]) -> str | None
 
     verification_uri_complete = payload.get("verification_uri_complete")
     if verification_uri_complete is not None and not isinstance(verification_uri_complete, str):
-        return f"verification_uri_complete must be string when present, got {verification_uri_complete!r}"
+        return (
+            f"verification_uri_complete must be string when present, "
+            f"got {verification_uri_complete!r}"
+        )
 
     if verification_uri_complete is not None and not verification_uri_complete.startswith(
         ("http://", "https://")

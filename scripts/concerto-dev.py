@@ -35,8 +35,8 @@ Streaming logs (long-running commands):
 
 import argparse
 import os
-import signal
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1072,7 +1072,7 @@ COMMANDS = {
     "build": (cmd_build, "Build the app"),
     "test": (cmd_test, "Build and run tests"),
     "run": (cmd_run, "Build and launch the app"),
-    "run-debug": (cmd_run_debug, "Build and run with stdout visible (default uses bundled lfd in Concerto)"),
+    "run-debug": (cmd_run_debug, "Build and run with stdout visible (bundled lfd default)"),
     "run-ios": (cmd_run_ios, "Build and launch in iOS Simulator"),
     "release": (cmd_release, "Build release .app and .dmg"),
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
@@ -1101,7 +1101,7 @@ def main() -> int:
                 "-k",
                 "--kill",
                 action="store_true",
-                help="Aggressive preflight kill before starting (default behavior also kills port 2486 listeners)",
+                help="Aggressive preflight kill (default also kills port 2486 listeners)",
             )
         if name == "run-debug":
             mode_group = sub.add_mutually_exclusive_group()
@@ -1125,7 +1125,7 @@ def main() -> int:
                 "--device",
                 type=str,
                 default=None,
-                help='Simulator device name (default: first available iPhone, e.g. "iPad Pro 13-inch (M4)")',
+                help='Simulator device name (default: first iPhone, e.g. "iPad Pro 13-inch (M4)")',
             )
         if name == "setup":
             sub.add_argument(

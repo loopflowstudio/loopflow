@@ -16,7 +16,6 @@ from conftest import (
     WAVE_MINIMAL,
     WAVE_RUN_MINIMAL,
 )
-
 from loopflow.models import (
     AuthFlow,
     AuthProviderStatus,

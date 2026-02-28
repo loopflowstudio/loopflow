@@ -6,9 +6,9 @@ from __future__ import annotations
 import os
 import re
 import select
+import shutil
 import signal
 import subprocess
-import shutil
 import time
 import uuid
 from pathlib import Path
@@ -333,7 +333,9 @@ def wait_for_fork_launch(
     return False, "".join(lines) + "\n[TIMEOUT]"
 
 
-def _run(cmd: list[str], capture_output: bool = False, **kwargs) -> subprocess.CompletedProcess[str]:
+def _run(
+    cmd: list[str], capture_output: bool = False, **kwargs,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=capture_output, text=True, **kwargs)
 
 

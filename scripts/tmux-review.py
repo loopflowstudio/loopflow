@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 
 SOCKET = "loopflow-review"
@@ -64,7 +63,8 @@ def check_idempotent_source() -> bool:
 def check_options_set() -> bool:
     """Verify tmux options are set."""
     ok = True
-    for opt in ["@loopflow_mode", "@loopflow_key_prefix", "@loopflow_status_format", "@loopflow_dir"]:
+    opts = ["@loopflow_mode", "@loopflow_key_prefix", "@loopflow_status_format", "@loopflow_dir"]
+    for opt in opts:
         result = run_tmux("show-option", "-gqv", opt, check=False)
         value = result.stdout.strip()
         if not value:
@@ -108,7 +108,7 @@ def check_prefix_binding() -> bool:
     keys = result.stdout.strip()
     key_prefix_result = run_tmux("show-option", "-gqv", "@loopflow_key_prefix", check=False)
     key_prefix = key_prefix_result.stdout.strip() or "l"
-    if f"switch-client -T loopflow" in keys:
+    if "switch-client -T loopflow" in keys:
         print(f"  OK: prefix+{key_prefix} enters loopflow key table")
         return True
     print(f"  FAIL: prefix+{key_prefix} binding not found")
@@ -140,10 +140,12 @@ def check_custom_status_format() -> bool:
     cache_file = f"/tmp/loopflow-status-{os.environ.get('USER', 'unknown')}.json"
     if os.path.exists(cache_file):
         os.remove(cache_file)
+    tmux_socket = run_tmux(
+        "display-message", "-p", "#{socket_path}", check=False,
+    ).stdout.strip()
     result = subprocess.run(
         [script], capture_output=True, text=True, check=False, timeout=5,
-        env={**os.environ, "TMUX": run_tmux("display-message", "-p", "#{socket_path}", check=False).stdout.strip(),
-             "LOOPFLOW_DIR": PLUGIN_DIR},
+        env={**os.environ, "TMUX": tmux_socket, "LOOPFLOW_DIR": PLUGIN_DIR},
     )
     output = result.stdout.strip()
     # Restore default format

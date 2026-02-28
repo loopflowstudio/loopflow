@@ -237,6 +237,7 @@ pub async fn create_wave_handler(
         area,
         status: WaveStatus::Idle,
         iteration: 0,
+        cycle_start_iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
         serialized,
     };
@@ -1636,6 +1637,7 @@ mod tests {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };
@@ -1648,6 +1650,7 @@ mod tests {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };
@@ -1719,6 +1722,7 @@ mod tests {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };

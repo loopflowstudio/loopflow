@@ -1,0 +1,1 @@
+ALTER TABLE waves ADD COLUMN cycle_start_iteration INTEGER NOT NULL DEFAULT 0;

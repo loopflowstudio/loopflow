@@ -107,6 +107,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "022_stimulus_max_iterations",
         sql: include_str!("migrations/022_stimulus_max_iterations.sql"),
     },
+    Migration {
+        version: "023_wave_cycle_start_iteration",
+        sql: include_str!("migrations/023_wave_cycle_start_iteration.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

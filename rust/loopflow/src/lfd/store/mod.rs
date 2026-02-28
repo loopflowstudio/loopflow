@@ -1991,6 +1991,7 @@ mod tests {
             area: vec!["src".to_string()],
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         }

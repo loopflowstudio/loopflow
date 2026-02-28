@@ -533,8 +533,8 @@ impl WaveExecutor {
                     let routing_step = ConcreteStep {
                         step: Step {
                             name: "branch-route".to_string(),
-                            agent: Some("claude:sonnet".to_string()),
-                            default_agent: None,
+                            agent: None,
+                            default_agent: Some("claude:sonnet".to_string()),
                             directions: Vec::new(),
                             action_style: None,
                             interactive: None,
@@ -592,7 +592,14 @@ impl WaveExecutor {
                     for sub_item in &sub_items {
                         let sub_step = match sub_item {
                             ConcreteItem::Step(step) => step,
-                            _ => continue,
+                            other => {
+                                warn!(
+                                    run_id = %run.id,
+                                    item = ?other,
+                                    "branch sub-flow contains non-step item, skipping"
+                                );
+                                continue;
+                            }
                         };
 
                         // Pre-step sync for each sub-step.
@@ -1335,6 +1342,7 @@ mod tests {
             area: vec![],
             status: WaveStatus::Running,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         };
@@ -1388,6 +1396,7 @@ mod tests {
             area: vec![],
             status,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         }
@@ -1572,6 +1581,7 @@ mod tests {
             area: vec![],
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: true,
         };

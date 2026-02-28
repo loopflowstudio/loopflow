@@ -687,6 +687,36 @@ fn parse_branch_value(value: &Value) -> Result<FlowItem, LoadError> {
     Ok(FlowItem::Branch(BranchDef { paths }))
 }
 
+/// Validate that flows referenced by branch paths contain only steps.
+/// Forks and nested branches inside branch sub-flows are not supported.
+fn validate_branch_paths(branch_def: &BranchDef, repo: &Path) -> Result<(), LoadError> {
+    for (key, path) in &branch_def.paths {
+        let Some(ref flow_name) = path.flow else {
+            continue;
+        };
+        let flow = load_flow(flow_name, repo)?;
+        let items = expand_flow(&flow, repo)?;
+        for item in &items {
+            match item {
+                ConcreteItem::Step(_) => {}
+                ConcreteItem::Fork(_) => {
+                    return Err(LoadError::InvalidFlow(format!(
+                        "branch path '{key}' references flow '{flow_name}' which contains a fork; \
+                         branch sub-flows must contain only steps"
+                    )));
+                }
+                ConcreteItem::Branch(_) => {
+                    return Err(LoadError::InvalidFlow(format!(
+                        "branch path '{key}' references flow '{flow_name}' which contains a nested branch; \
+                         branch sub-flows must contain only steps"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
     let name = value
         .as_str()
@@ -796,6 +826,7 @@ fn expand_with_chain(
                 items.push(ConcreteItem::Fork(fork));
             }
             FlowItem::Branch(branch_def) => {
+                validate_branch_paths(branch_def, repo)?;
                 items.push(ConcreteItem::Branch(ConcreteBranch {
                     paths: branch_def.paths.clone(),
                     flow_parents: chain.clone(),

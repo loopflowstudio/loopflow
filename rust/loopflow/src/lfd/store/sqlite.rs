@@ -100,6 +100,7 @@ impl SqliteStore {
                 },
                 wave.status().as_i32() as i64,
                 wave.iteration() as i64,
+                wave.cycle_start_iteration() as i64,
                 created_at,
                 if wave.serialized { 1i64 } else { 0i64 },
             ],
@@ -792,7 +793,7 @@ impl SqliteStore {
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.created_at, w.serialized
+            "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized
              FROM waves w
              INNER JOIN chord_members cm ON cm.wave_id = w.id
              WHERE cm.chord_id = ?1

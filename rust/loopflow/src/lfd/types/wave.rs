@@ -191,6 +191,11 @@ pub struct Wave {
     pub area: Vec<String>,
     pub status: WaveStatus,
     pub iteration: u32,
+    /// First iteration of the current cycle. Used with `max_iterations` to
+    /// bound re-triggers within a single cycle rather than across the wave's
+    /// lifetime.
+    #[serde(default)]
+    pub cycle_start_iteration: u32,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
     /// When true, only one run at a time — activations queue and dispatch
@@ -212,6 +217,7 @@ impl Wave {
             area: Vec::new(),
             status: WaveStatus::Idle,
             iteration: 0,
+            cycle_start_iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
             serialized: false,
         }
@@ -247,6 +253,10 @@ impl Wave {
 
     pub fn iteration(&self) -> u32 {
         self.iteration
+    }
+
+    pub fn cycle_start_iteration(&self) -> u32 {
+        self.cycle_start_iteration
     }
 
     pub fn created_at(&self) -> Option<OffsetDateTime> {

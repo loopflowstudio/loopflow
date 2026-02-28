@@ -162,5 +162,9 @@ fn should_pause_for_max_iterations(stimulus: &Stimulus, wave: &Wave) -> bool {
     let Some(max) = stimulus.max_iterations else {
         return false;
     };
-    max > 0 && wave.iteration() >= max
+    let cycle_iterations = wave
+        .iteration()
+        .saturating_sub(wave.cycle_start_iteration())
+        + 1;
+    max > 0 && cycle_iterations >= max
 }

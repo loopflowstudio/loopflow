@@ -1,15 +1,9 @@
 # 03: Iteration Counter Reset
 
+**Status:** Done (this branch)
+
 **Finish line:** `max_iterations` counts per-cycle, not per-wave-lifetime. A cron wave that completes one QA cycle and starts another gets a fresh counter.
 
-## Context
+## Solution
 
-The branch construct uses `max_iterations` as a safety valve for QA→fix→deploy loops. Today `wave.iteration` increments monotonically — the counter never resets between cron cycles. This means the safety valve fires based on total lifetime iterations rather than iterations within the current cycle.
-
-Low urgency: `max_iterations` defaults to `None` and won't bite until someone configures it and runs multiple cycles. But it's a correctness issue that should be fixed before QA waves are used in production.
-
-## What to build
-
-- Reset `wave.iteration` when a cron cycle completes (wave state cleared by deploy flow's `update-wave`)
-- Or: reset on next cron tick when starting a new cycle
-- Either approach works. The key invariant: `max_iterations` bounds iterations within a single cycle, not across the wave's lifetime
+Added `cycle_start_iteration` to the Wave struct. When a wave transitions from idle/paused to running, `cycle_start_iteration` is set to the current iteration number. The safety valve (`should_pause_for_max_iterations`) compares cycle-relative iteration count against `max_iterations` instead of the lifetime counter.

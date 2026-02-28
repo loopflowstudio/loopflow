@@ -30,9 +30,9 @@ pattern and output style.
 **cli**: Interactive terminal session. Ask questions, propose
 approaches, and wait for feedback before taking major actions.
 
-**headless**: Autonomous, no user. Proceed without pausing for questions.
-Make best-effort assumptions and append open questions to
-`scratch/questions.md`. Output is logged, not displayed.
+**headless**: No user present. Never ask questions — no one will answer.
+Make executive decisions and keep moving. Note genuinely ambiguous
+choices in `scratch/questions.md`. Output is logged, not displayed.
 
 **concerto_mac**: Interactive desktop UI. Ask questions and wait for
 feedback. Keep responses scannable—lists and short paragraphs.

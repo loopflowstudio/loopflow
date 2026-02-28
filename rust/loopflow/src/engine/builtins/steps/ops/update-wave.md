@@ -41,10 +41,8 @@ Design docs for already-shipped work and other purely historical content can be 
 
 When `scratch/` contains analysis or a proposal and no wave exists yet, create one:
 
-1. Write `wave/<wave>/README.md` with vision, goals, and risks. The README is the anchor — when items change and plans shift, this stays.
-2. Write numbered item files (`01-name.md`, `02-name.md`, ...) for each phase or work item.
-
-Don't put a roadmap table in the README. The files are the roadmap.
+1. Write `wave/<wave>/README.md` with vision, goals, and risks. The README is the anchor — when items change and plans shift, this stays. **No roadmap tables or phase lists** — the item files are the roadmap.
+2. Write numbered item files (`01-name.md`, `02-name.md`, ...) for each phase or work item. **Create every item file**, even sketches (title + finish line + one paragraph) — `ingest` needs them to exist.
 
 ### Vision first
 

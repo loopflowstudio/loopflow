@@ -246,6 +246,12 @@ pub enum OpsCommand {
     Lint,
     /// Run configured test checks
     Test,
+    /// Pick next wave item and move to scratch/
+    Ingest {
+        /// Wave name (auto-detected from worktree or branch if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

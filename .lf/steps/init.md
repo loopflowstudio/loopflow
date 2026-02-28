@@ -1,213 +1,142 @@
 ---
 interactive: true
-produces: installed dependencies, .lf/config.yaml
+produces: .lf/config.yaml
 ---
 Guide the user through setting up loopflow in this repository.
 
-## Prerequisites
+## Phase 1: Environment check
 
-This prompt assumes loopflow is already installed globally via `uv tool install loopflow`. It handles everything after that: installing Claude Code, configuring the repo, and optional extras.
-
-## Phase 1: Check environment
-
-First, verify this is macOS:
+Run these checks:
 ```bash
+git rev-parse --show-toplevel
 uname -s
-```
-
-If not Darwin, stop and explain: "Loopflow requires macOS. The Homebrew-based installation won't work on other platforms."
-
-Run these checks and report status:
-```bash
-which brew    # Homebrew (needed for installs)
-which npm     # Node.js (needed for coding agents)
-which claude  # Claude Code
-which codex   # Codex CLI
-which gemini  # Gemini CLI
+command -v claude
+command -v codex
+command -v opencode
 test -f .lf/config.yaml && echo "config exists"
-test -d ~/.superpowers && echo "superpowers exists"
 ```
+
+Use `command -v` (POSIX builtin) — not `which`.
 
 Print a summary:
 ```
 Checking environment...
-✓ Homebrew
-✓ Node.js
-✓ Claude Code (coding agent)
-- superpowers (optional)
+✓ git repo: /path/to/repo
+✓ Claude Code
+✓ OpenCode
+- Codex (not installed)
 
+Platform: Linux
 Config: not initialized
 ```
 
-At least one coding agent (Claude Code, Codex, or Gemini CLI) is required. If any one of them is installed, that requirement is satisfied.
+## Phase 2: Agent guidance
 
-If everything required is installed and config exists, say "You're all set! Try: lf debug -v" and offer to install optional extras.
+**Multiple agents found:** Report all, ask which to default to.
 
-## Phase 2: Install missing required dependencies
+**One agent found:** Default to it, report the choice.
 
-If Homebrew is missing, stop: "Install Homebrew first: https://brew.sh"
-
-If Node.js is missing:
-- Ask: "Node.js is required for coding agents. Install via Homebrew?"
-- Yes: `brew install node`
-- No: explain they need to install it manually
-
-If no coding agent is installed (none of claude, codex, or gemini found):
-- Ask: "At least one coding agent is required. Install Claude Code? (recommended)"
-- Yes: `npm install -g @anthropic-ai/claude-code`
-- No: offer alternatives:
-  - Codex CLI: `npm install -g @openai/codex`
-  - Gemini CLI: `npm install -g @google/gemini-cli`
-  - Skip: explain they need to install one manually before using loopflow
-
-## Phase 3: Configure repository
-
-Check if we're in a git repo:
-```bash
-git rev-parse --show-toplevel
+**None found:** Show install instructions and stop:
+```
+No coding agent found. Install one:
+  Claude Code:  npm install -g @anthropic-ai/claude-code
+  OpenCode:     go install github.com/anomalyco/opencode@latest
+  Codex CLI:    npm install -g @openai/codex
+Then run `lf init` again.
 ```
 
-If not a git repo, explain: "Run this from inside a git repository."
+Do not run package managers. Init detects — it never installs.
 
-If no `.lf/config.yaml`:
+## Phase 3: Create or update config
+
+**No `.lf/config.yaml`:**
 - Ask: "Initialize loopflow in this repo? This creates .lf/config.yaml"
-- Yes: create the config file (see template below)
-- No: skip
+- Create the config with detected agent as default
 
-If no `.lf/flows/README.md`:
-- Ask: "Create flow README? This documents flow syntax in .lf/flows/README.md"
-- Yes: create the README from the template below
-- No: skip
+**Existing `.lf/config.yaml`:**
+- Compare `supported_harnesses` against detected agents
+- If new agents detected that aren't listed, offer to add them
+- If current `agent:` value isn't installed, offer to switch the default
+- If everything matches, report "Config is up to date" and move on
+- Never overwrite custom `exclude` patterns or other user-tuned fields
 
 Config template:
 ```yaml
 # Loopflow configuration
+agent: <detected-default>
 
-# Agent to use (harness or harness:model)
-agent: claude:opus
+supported_harnesses:
+  - <detected-agents>
 
-# Context: files/directories to include by default
 context: "."
 
-# Exclude: patterns to ignore
 exclude:
   - "*.lock"
   - node_modules
   - .venv
 
-# Skip permissions (only use in trusted repos)
 yolo: false
-
-# Push commits to origin automatically
 push: false
 
-# SkillRegistry (remote skill directory)
 skill_registry:
   enabled: false
 ```
 
-Flows README template:
-```markdown
-# Flows
+Use the agent name without model suffix: `agent: claude` not `agent: claude:opus`.
 
-Define flows as Python files. Each flow returns a `Flow` with steps.
-
-## Example
-
-```python
-# .lf/flows/ship.py
-def flow():
-    return Flow("design", "implement", "polish")
-```
-
-Run with `lf flow ship`.
-
-## Parallel Branches
-
-```python
-def flow():
-    return Flow(
-        Step("design"),
-        Step("impl-api", after="design"),
-        Step("impl-ui", after="design"),
-        Step("integrate", after=["impl-api", "impl-ui"]),
-    )
-```
-
-## Fork with Synthesis
-
-```python
-def flow():
-    return Flow(
-        Fork(
-            {"direction": "infra"},
-            {"direction": "ux"},
-            step="implement",
-        ),
-    )
-```
-
-See docs for more: https://loopflow.dev/docs/flows
-```
+Init creates `.lf/config.yaml` and nothing else — no flows README, no IDE config.
 
 ## Phase 4: Optional extras
 
-Ask about each category. Let the user pick multiple.
-
-**Additional coding agents:**
-Check which agents are already installed. Only offer ones that aren't installed yet.
-"Want to install additional coding agents?"
-- Claude Code: `npm install -g @anthropic-ai/claude-code` (if not installed)
-- Codex CLI: `npm install -g @openai/codex` (if not installed)
-- Gemini CLI: `npm install -g @google/gemini-cli` (if not installed)
-- None (skip)
-
-**Skill libraries:**
-Check if ~/.superpowers exists. If not:
+**superpowers:** If `~/.superpowers` doesn't exist, offer:
 "Install superpowers skill library? Adds community prompts via `lf sp:` commands"
 - Yes: `git clone https://github.com/obra/superpowers ~/.superpowers`
 - No: skip
 
-Offer SkillRegistry (remote directory, no install):
+**SkillRegistry:** Offer to enable in config:
 "Enable SkillRegistry? Adds remote skills via `lf sr:` commands"
-- Yes: update `.lf/config.yaml` with:
-  ```yaml
-  skill_registry:
-    enabled: true
-  ```
+- Yes: set `skill_registry.enabled: true` in `.lf/config.yaml`
 - No: skip
 
-**IDE preferences:**
-"Which tools do you use? (Select all that apply)"
-- Warp terminal
-- Cursor editor
-- Other/skip
+## Phase 5: Next steps
 
-If they select Warp or Cursor, note this for the summary but don't modify config (IDE config is optional).
+Platform-aware guidance:
 
-## Phase 5: Summary
-
-Print what was done. List each item that was checked or installed:
+**macOS:**
 ```
 Setup complete!
 
-✓ Node.js (already installed)
-✓ Claude Code (coding agent)
+✓ Claude Code (default agent)
 ✓ .lf/config.yaml created
-✓ superpowers installed
 
-Ready! Try these commands:
-  lf debug -v     # paste an error, watch it fix
-  lf review       # review code on this branch
-  lf --list       # see all available tasks
+Next:
+  lf design              # interactive design session
+  lf debug -c            # paste an error, fix it
+  lf --list              # see all steps and flows
+
+  Download Concerto for visual wave management
+  Run `lfd install` to set up the daemon for autonomous waves
 ```
 
-Adapt the summary to reflect what was actually done. Show which coding agent(s) are available.
+**Linux:**
+```
+Setup complete!
+
+✓ OpenCode (default agent)
+✓ .lf/config.yaml created
+
+Next:
+  lf design              # interactive design session
+  lf debug -c            # paste an error, fix it
+  lf --list              # see all steps and flows
+
+  Set up tmux integration: lf ops shell install
+  Run `lfd install` to set up the daemon for autonomous waves
+```
 
 ## Conversation style
 
 - Short, clear prompts
 - One question at a time
-- Default to "yes" for required dependencies
 - Let users skip optional things without judgment
 - If something fails, explain what went wrong and how to retry manually

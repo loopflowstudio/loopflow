@@ -20,7 +20,19 @@ Install the Python CLI/API (lfq + loopflow) separately:
 uv tool install loopflow
 ```
 
-Requires macOS and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), or [OpenCode](https://github.com/anomalyco/opencode).
+Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode).
+
+---
+
+## Setup Paths
+
+| I want to... | Start here |
+|---|---|
+| Try loopflow from terminal | `lf init` |
+| Run autonomous waves | `lf init` → `lfd install` |
+| Use the visual app (macOS) | Download Concerto (handles the rest) |
+| Connect from iPhone | Concerto iOS → discovers your lfd |
+| Set up remote dev server | `lfd install --container` on server |
 
 ---
 

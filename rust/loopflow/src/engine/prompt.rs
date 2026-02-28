@@ -2012,7 +2012,7 @@ mod tests {
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("Run mode is auto"));
+        assert!(prompt.contains("Run mode is headless"));
         assert!(prompt.contains("headless"));
         assert!(prompt.contains("scratch/questions.md"));
         assert!(prompt.contains("Output is logged, not displayed"));
@@ -2354,7 +2354,7 @@ mod tests {
 
         // Verify order: loopflow -> surface block -> wave -> docs -> diff -> direction -> clipboard -> step
         let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
-        let auto_pos = prompt.find("Run mode is auto").unwrap();
+        let auto_pos = prompt.find("Run mode is headless").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:docs>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
@@ -2375,7 +2375,7 @@ mod tests {
     fn format_prompt_default_components_has_headless_surface() {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("Run mode is auto"));
+        assert!(prompt.contains("Run mode is headless"));
     }
 
     #[test]
@@ -2880,7 +2880,7 @@ directions:
         assert!(!context.contains("<lf:step:implement>"));
         assert!(!context.contains("Implement the feature."));
         // Should include surface instructions
-        assert!(context.contains("Run mode is auto"));
+        assert!(context.contains("Run mode is headless"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 **Both:**
 - Mock side effects, but don't test mock wiring or reshape production code for tests
 - Design docs go under `scratch/`; `lf ops pr land` removes `scratch/*` contents
-- Auto runs are headless: make best-effort assumptions and append open questions to `scratch/questions.md`
+- Auto runs are headless: make executive decisions and keep moving, note genuinely ambiguous choices in `scratch/questions.md`
 
 ## File-Type Guidelines
 

@@ -65,7 +65,7 @@ def test_auth_status_table_shows_active_and_none_states() -> None:
     assert "not connected" in rendered
 
 
-def test_auth_status_table_shows_expiry_and_refresh_details() -> None:
+def test_auth_status_table_shows_expiry_details() -> None:
     statuses = [AuthProviderStatus.model_validate(AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS)]
     console = Console(record=True, width=220)
     console.print(_auth_status_table(statuses))
@@ -74,7 +74,7 @@ def test_auth_status_table_shows_expiry_and_refresh_details() -> None:
     assert "Claude" in rendered
     assert "jack@anthropic.com" in rendered
     assert "expires" in rendered
-    assert "refresh in" in rendered
+    assert "refresh in" not in rendered
 
 
 def test_repo_table_shows_registration_columns() -> None:

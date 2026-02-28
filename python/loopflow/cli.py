@@ -115,16 +115,6 @@ def _status_details(status: AuthProviderStatus) -> str:
         else:
             details = f"{details} · expires {_format_relative_delta(delta)}"
 
-    if status.next_refresh_at is not None:
-        refresh_at = status.next_refresh_at
-        if refresh_at.tzinfo is None:
-            refresh_at = refresh_at.replace(tzinfo=timezone.utc)
-        delta = (refresh_at - now).total_seconds()
-        if delta <= 0:
-            details = f"{details} · refresh overdue"
-        else:
-            details = f"{details} · refresh in {_format_relative_delta(delta)}"
-
     return details
 
 

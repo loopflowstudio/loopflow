@@ -22,6 +22,7 @@ const BOOL_FLAGS: &[&str] = &[
     "--list",
     "-c",
     "--clipboard",
+    "--no-direction",
     "--yolo",
     "-i",
     "--interactive",
@@ -246,6 +247,17 @@ mod tests {
         ];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-i", "-c", "-m", "claude", "implement"]);
+    }
+
+    #[test]
+    fn reorder_args_no_direction_flag_after_step() {
+        let args = vec![
+            "lf".to_string(),
+            "implement".to_string(),
+            "--no-direction".to_string(),
+        ];
+        let result = reorder_args(args);
+        assert_eq!(result, vec!["lf", "--no-direction", "implement"]);
     }
 
     #[test]

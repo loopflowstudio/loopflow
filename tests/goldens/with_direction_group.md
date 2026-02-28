@@ -231,17 +231,6 @@ Code demonstrates its own correctness. If a feature exists, a test proves it wor
 - One source of truth per concept
 
 </lf:direction:clarity>
-<lf:direction:scale>
-Build for growth. Prefer horizontal scaling, stateless design, async patterns.
-
-Avoid premature optimization but design for 10x current load.
-
-- Caching, sharding, queues, idempotency — reach for these before inventing
-- Stateless where possible; explicit state where necessary
-- Design for 10x, not 100x — you'll rewrite before you get there
-- Measure first, scale second
-
-</lf:direction:scale>
 <lf:direction:simplicity>
 Every line of code earns its place. Readable, not terse — but recognize that lines can be net-negative.
 

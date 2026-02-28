@@ -43,7 +43,7 @@ After:
 
 **Simple triggered flow execution.** Between steps of the loop_flow_run, the executor checks for pending triggered FlowRuns. If one exists, it runs the entire triggered flow to completion, then resumes the loop flow. No mid-step interruption, no complex suspend/resume. FIFO order.
 
-**Hard reset migration.** No users yet. Consolidate all migrations into a single `001_baseline.sql` with the full target schema. Delete the 21 existing migration files. Existing local DBs get wiped.
+**Hard reset migration.** No users yet. Consolidate all migrations into a single `001_baseline.sql` with the full target schema. Delete the 22 existing migration files. Existing local DBs get wiped.
 
 **`ship-roadmap` as loop_flow default.** Confirmed as builtin flow (`flows/code/ship-roadmap.yaml`). Correct default for autonomous waves.
 
@@ -183,6 +183,8 @@ Flow comes from request body (`--flow` flag), falls back to `wave.flow`.
 Remove `"loop"`, `"once"`, and `"cron"` from `parse_stimulus`. Delete `is_auto_stimulus` — all remaining signals are reactive (auto by definition).
 
 ### 6. Executor refactor
+
+**Riskiest step.** This and step 7 change how the core execution loop works. The FlowRun interleaving logic (check pending between steps, run to completion, resume) needs careful testing.
 
 The executor loop changes from operating on `run.step_index` / `run.snapshot.flow` to:
 

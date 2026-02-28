@@ -6,8 +6,9 @@ plugins:
 
 header_pages:
   - index.md
-  - agents.md
   - getting-started.md
+  - wave-authoring.md
+  - waves.md
   - lf.md
   - lfops.md
   - lfd.md

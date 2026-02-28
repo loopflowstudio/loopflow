@@ -68,6 +68,13 @@ impl Provider {
     pub fn all() -> [Self; 4] {
         [Self::GitHub, Self::Claude, Self::Codex, Self::OpenCodeZen]
     }
+
+    /// Whether this provider supports CLI-based token refresh.
+    /// Providers that only re-read files (Claude, OpenCodeZen) can't self-heal
+    /// and require user re-authentication when tokens expire.
+    pub fn supports_cli_refresh(self) -> bool {
+        matches!(self, Self::GitHub | Self::Codex)
+    }
 }
 
 impl std::fmt::Display for Provider {

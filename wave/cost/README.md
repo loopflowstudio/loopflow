@@ -32,7 +32,7 @@ Auth type (oauth vs apikey) is set per-provider in the auth wave. Cost tracking 
 
 ## Metrics
 
-- Token data captured per-turn from all three harnesses with model metadata
-- Context snapshot recorded at session start showing input token composition
-- Inline token views visible in Concerto at wave, session, and turn levels
-- `lfq usage` shows token breakdown by wave, flow, step, model
+- Token capture rate: % of turns with complete token data across all three harnesses (target: 100%)
+- Input token composition: % breakdown by source (scratch, wave docs, area docs, repo docs) per session
+- Per-wave token spend: total input + output tokens per wave per day
+- Dollar cost accuracy for metered sessions: computed cost vs actual provider invoice variance (target: <5%)

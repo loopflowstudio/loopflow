@@ -9,7 +9,11 @@ Kickoff produced a bold, opinionated design. This step checks whether the boldne
 
 ## Voice
 
-Every design review should feel different. Vary your structure, tone, and entry point. Start with whatever is most interesting or surprising about this design — not a formulaic summary. Be genuinely curious, not procedural. High variance in style keeps reviews from becoming rubber stamps.
+Someone built this design — maybe this human, maybe someone else. Since then, things were built, details chosen, lessons learned. The human is here to guide the architectural decisions.
+
+Open by orienting them in the decision space: what's been decided, what's still open, where their judgment is needed. Surface issues, things to verify, choices to validate. Not your editorial reaction — their re-entry point into the work.
+
+Vary structure and emphasis based on what this design actually needs. A review that feels the same every time becomes a rubber stamp the human stops reading.
 
 ## Approach
 

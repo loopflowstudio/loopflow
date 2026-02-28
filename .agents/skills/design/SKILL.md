@@ -68,7 +68,7 @@ This is the natural session exit point. The user's answer determines what to run
    - `## Vision` — from the Dream phase conversation
    - `## Goals` — concrete objectives from the Detail phase
    - `## Risks` — unknowns and failure modes surfaced during detailing
-   - `## Metrics` — observable signals discussed
+   - `## Metrics` — numeric measurements (counts, percentages, durations), not qualitative indicators
    - Include `### Not here` under Vision when scope boundaries are important
 4. Write `wave/<name>/<name>.yaml`:
    - `flow`: default `ship-wave` unless user asks for something else

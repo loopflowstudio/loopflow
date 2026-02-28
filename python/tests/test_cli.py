@@ -13,7 +13,7 @@ from conftest import (
     WAVE_MINIMAL,
 )
 
-from loopflow.cli import _auth_status_table, _repo_table, _split_repo_slug, _wave_table
+from loopflow.cli import _auth_status_table, _repo_table, _split_repo_slug, _status_details, _wave_table
 from loopflow.models import AuthProviderStatus, Repo, Wave
 
 
@@ -74,7 +74,7 @@ def test_auth_status_table_shows_expiry_details() -> None:
     assert "Claude" in rendered
     assert "jack@anthropic.com" in rendered
     assert "expires" in rendered
-    assert "refresh in" not in rendered
+    assert "refresh in" in rendered
 
 
 def test_repo_table_shows_registration_columns() -> None:
@@ -87,6 +87,26 @@ def test_repo_table_shows_registration_columns() -> None:
     assert "registered" in rendered
     assert "added_at" in rendered
     assert "yes" in rendered
+
+
+def test_auth_status_shows_refreshing_soon_when_past_refresh_time() -> None:
+    status = AuthProviderStatus.model_validate(
+        {
+            "provider": "claude",
+            "status": "active",
+            "login": "jack@anthropic.com",
+            "expires_at": "2030-01-01T04:00:00Z",
+            "next_refresh_at": "2020-01-01T00:00:00Z",
+        }
+    )
+    details = _status_details(status)
+    assert "refreshing soon" in details
+
+
+def test_auth_status_no_refresh_when_no_next_refresh_at() -> None:
+    status = AuthProviderStatus.model_validate(AUTH_PROVIDER_ACTIVE)
+    details = _status_details(status)
+    assert "refresh" not in details
 
 
 def test_split_repo_slug_parses_owner_repo() -> None:

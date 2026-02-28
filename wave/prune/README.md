@@ -42,6 +42,7 @@ Two layers, sequenced so the agent has less to do over time:
 
 ## Metrics
 
-- `cargo test --all` and `cargo clippy -- -D warnings` pass
-- `wt list` shows the new states with correct coloring
-- `lf prune` successfully identifies and removes done worktrees in a real repo
+- Number of worktrees pruned per run (deterministic vs agent-assisted breakdown)
+- False positive rate: worktrees removed that shouldn't have been (target: 0)
+- % of done worktrees caught by deterministic Rust logic vs requiring agent (target: increasing over time)
+- Orphan worktree accumulation: count of stale worktrees >7 days old (target: 0)

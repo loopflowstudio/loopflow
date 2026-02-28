@@ -27,5 +27,7 @@ Remaining sprints: 03 decomposes `lf ops release` into finer-grained ops command
 
 ## Metrics
 
-- `lf rebase` with no conflicts completes at the same speed as `lf ops rebase` (no agent overhead)
-- Release notes for a 10+ PR release read as narrative, not bullet list
+- Fast-path rebase latency: seconds for `lf rebase` with no conflicts (target: within 1s of `lf ops rebase`)
+- % of rebases resolved by fast-path without agent (target: >80%)
+- Release notes quality: user satisfaction score on a 1–5 scale per release (target: 4+)
+- Release automation rate: % of releases triggered by cron vs manual (target: >90% after stabilization)

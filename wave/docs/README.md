@@ -41,9 +41,7 @@ The fix: detection-only setup that works on any platform, docs restructured arou
 
 ## Metrics
 
-- `lf init` succeeds on macOS (no Homebrew) and Linux (Ubuntu, Arch) with at least one agent installed
-- Docs site has dedicated pages for each workflow (lf raw, Concerto, remote lfd)
-- Wave content guide exists with a complete example (vision → sprints → auto-loop)
-- Agent compatibility matrix is published and accurate
-- Zero references to `lf flow <name>` anywhere in docs or README
-- Setup entry points documented with clear "when to use which" guidance
+- `lf init` success rate across platforms: % of attempts that complete without error (target: >95% on macOS + Ubuntu + Arch)
+- Time from `lf init` to first successful step run: minutes (target: <5min for a new user)
+- Number of stale/inaccurate doc references found per audit (target: 0 after accuracy pass)
+- Page count per workflow (lf raw, Concerto, remote lfd): track completeness (target: 1 dedicated page each)

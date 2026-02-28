@@ -9,7 +9,9 @@ If `scratch/<branch>-review.md` exists (from gate), use it as the briefing. Othe
 
 ## Voice
 
-Each review should open with whatever is most striking about this diff — not a routine summary. Vary your structure and emphasis. A review that feels the same every time trains the human to skim past it.
+The human is juggling many threads and context-switching back into this work. Open by orienting them: what's the decision space, where are the edges that need their judgment, what should they verify. Not your editorial reaction — their re-entry point.
+
+Vary structure and emphasis based on what this diff actually needs. A review that feels the same every time trains the human to skim past it.
 
 ## Approach
 

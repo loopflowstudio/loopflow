@@ -33,7 +33,7 @@ Custom language model (`SFSpeechLanguageModel` + `DictationTranscriber.ContentHi
 
 ## Metrics
 
-- Time from thought to message sent (voice vs typing)
-- Transcription accuracy on loopflow-specific terms
-- False start/stop rate with VAD
-- Correction rate (how often users edit transcribed text before sending)
+- Time from tap-to-talk to message sent: seconds (target: <3s for a short instruction, vs ~10s typing)
+- Word error rate on loopflow terms (lfd, worktree, wave, sprint): % (target: <10%)
+- VAD false activation rate: false starts per hour of ambient use (target: <2/hr)
+- Correction rate: % of transcriptions edited before sending (target: <20%)

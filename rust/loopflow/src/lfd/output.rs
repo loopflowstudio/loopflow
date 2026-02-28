@@ -9,6 +9,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use tokio::sync::broadcast;
 use tracing::warn;
@@ -65,6 +66,10 @@ impl Writers {
         };
         let _ = writeln!(file, "{line}");
     }
+
+    fn close(&mut self, wave_run_id: &str) {
+        self.files.remove(wave_run_id);
+    }
 }
 
 #[derive(Clone)]
@@ -119,9 +124,44 @@ impl OutputHub {
         Some((lines, size))
     }
 
+    /// Drop the file handle for a completed/failed wave run.
+    pub fn close_writer(&self, wave_run_id: &str) {
+        if let Ok(mut w) = self.writers.lock() {
+            w.close(wave_run_id);
+        }
+    }
+
     /// Output directory path.
     pub fn output_dir(&self) -> &Path {
         &self.output_dir
+    }
+}
+
+/// Delete output log files older than `max_age` based on filesystem mtime.
+pub fn prune_output_logs(dir: &Path, max_age: Duration) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    let now = SystemTime::now();
+    let mut pruned = 0u32;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("log") {
+            continue;
+        }
+        let mtime = match entry.metadata().and_then(|m| m.modified()) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if now.duration_since(mtime).unwrap_or(Duration::ZERO) > max_age
+            && fs::remove_file(&path).is_ok()
+        {
+            pruned += 1;
+        }
+    }
+    if pruned > 0 {
+        tracing::info!(count = pruned, dir = %dir.display(), "pruned old output logs");
     }
 }
 

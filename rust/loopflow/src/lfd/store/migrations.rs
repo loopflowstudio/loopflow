@@ -79,6 +79,9 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "016_provider_tokens",
         sql: include_str!("migrations/016_provider_tokens.sql"),
     },
+    // Two migrations share the 016_ numeric prefix. The version strings stored
+    // in schema_migrations are the full names, so they're distinct rows. No
+    // renumbering — that would require a corrective migration.
     Migration {
         version: "016_rename_sidecar_kind_to_ci_fix_kind",
         sql: include_str!("migrations/016_rename_sidecar_kind_to_ci_fix_kind.sql"),
@@ -140,11 +143,20 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
         if applied.contains(migration.version) {
             continue;
         }
-        conn.execute_batch(migration.sql)?;
-        conn.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-            rusqlite::params![migration.version, now_unix()],
-        )?;
+        conn.execute_batch("BEGIN EXCLUSIVE")?;
+        match conn.execute_batch(migration.sql) {
+            Ok(()) => {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                    rusqlite::params![migration.version, now_unix()],
+                )?;
+                conn.execute_batch("COMMIT")?;
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(e.into());
+            }
+        }
     }
 
     Ok(())
@@ -175,8 +187,8 @@ pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String>
 
 // -- Postgres ----------------------------------------------------------------
 
-pub async fn apply_postgres(transaction: &tokio_postgres::Transaction<'_>) -> StoreResult<()> {
-    transaction
+pub async fn apply_postgres(client: &mut tokio_postgres::Client) -> StoreResult<()> {
+    client
         .batch_execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations (
                 version TEXT PRIMARY KEY,
@@ -185,12 +197,13 @@ pub async fn apply_postgres(transaction: &tokio_postgres::Transaction<'_>) -> St
         )
         .await?;
 
-    let applied = applied_versions_postgres(transaction).await?;
+    let applied = applied_versions_postgres(client).await?;
 
     for migration in migrations() {
         if applied.contains(migration.version) {
             continue;
         }
+        let transaction = client.transaction().await?;
         transaction.batch_execute(migration.sql).await?;
         transaction
             .execute(
@@ -198,13 +211,14 @@ pub async fn apply_postgres(transaction: &tokio_postgres::Transaction<'_>) -> St
                 &[&migration.version, &now_unix()],
             )
             .await?;
+        transaction.commit().await?;
     }
 
     Ok(())
 }
 
 async fn applied_versions_postgres(
-    client: &tokio_postgres::Transaction<'_>,
+    client: &tokio_postgres::Client,
 ) -> StoreResult<HashSet<String>> {
     // Check if table exists
     let exists: bool = client
@@ -276,4 +290,52 @@ fn latest_applied_version(applied: &HashSet<String>) -> String {
         .find(|m| applied.contains(m.version))
         .map(|m| m.version.to_string())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_migrations_apply_to_fresh_sqlite() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_sqlite(&conn).unwrap();
+
+        // All migration versions recorded
+        let applied = applied_versions_sqlite(&conn).unwrap();
+        let expected_count = migrations().len();
+        assert_eq!(
+            applied.len(),
+            expected_count,
+            "expected {expected_count} migrations, got {}",
+            applied.len()
+        );
+        for migration in migrations() {
+            assert!(
+                applied.contains(migration.version),
+                "migration {} not found in schema_migrations",
+                migration.version
+            );
+        }
+
+        // Key tables exist
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for expected in ["waves", "sessions", "repos", "stimuli", "wave_runs"] {
+            assert!(
+                tables.iter().any(|t| t == expected),
+                "expected table {expected} not found; tables: {tables:?}"
+            );
+        }
+
+        // Re-application is idempotent
+        apply_sqlite(&conn).unwrap();
+        let applied_again = applied_versions_sqlite(&conn).unwrap();
+        assert_eq!(applied, applied_again);
+    }
 }

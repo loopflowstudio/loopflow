@@ -56,7 +56,7 @@ fn default_base_url() -> String {
     DEFAULT_AUTH_BASE_URL.to_string()
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct LfdConfig {
     pub mode: Mode,
     pub service_manager: ServiceManager,
@@ -67,6 +67,24 @@ pub struct LfdConfig {
     pub executor: ExecutorConfig,
     pub github: GitHubConfig,
     pub http_security: HttpSecurityConfig,
+    pub output_log_retention_days: u32,
+}
+
+impl Default for LfdConfig {
+    fn default() -> Self {
+        Self {
+            mode: Mode::default(),
+            service_manager: ServiceManager::default(),
+            runtime_backend: RuntimeBackend::default(),
+            storage: StorageType::default(),
+            credential_socket: None,
+            auth: AuthConfig::default(),
+            executor: ExecutorConfig::default(),
+            github: GitHubConfig::default(),
+            http_security: HttpSecurityConfig::default(),
+            output_log_retention_days: DEFAULT_OUTPUT_LOG_RETENTION_DAYS,
+        }
+    }
 }
 
 impl LfdConfig {
@@ -91,6 +109,8 @@ impl LfdConfig {
     }
 }
 
+const DEFAULT_OUTPUT_LOG_RETENTION_DAYS: u32 = 7;
+
 #[derive(Debug, Clone, Default, Deserialize)]
 struct RawLfdConfig {
     #[serde(default)]
@@ -108,6 +128,12 @@ struct RawLfdConfig {
     github: GitHubConfig,
     #[serde(default)]
     http_security: RawHttpSecurityConfig,
+    #[serde(default = "default_output_log_retention_days")]
+    output_log_retention_days: u32,
+}
+
+fn default_output_log_retention_days() -> u32 {
+    DEFAULT_OUTPUT_LOG_RETENTION_DAYS
 }
 
 impl RawLfdConfig {
@@ -331,6 +357,7 @@ impl RawLfdConfig {
             },
             github: self.github,
             http_security: self.http_security.resolve()?,
+            output_log_retention_days: self.output_log_retention_days,
         })
     }
 }

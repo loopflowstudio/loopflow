@@ -180,7 +180,7 @@ abc1234  loop       src/ [ship] [clarity]           running    12    ~/repo
 
 ## Next
 
-[Get Started →](getting-started.md)
+[Wave Authoring →](wave-authoring.md) · [Get Started →](getting-started.md)
 
 ## Reference
 

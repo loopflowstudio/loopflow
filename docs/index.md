@@ -43,6 +43,17 @@ loopflow.run_wave("engbot")
 
 ---
 
+## The Journey
+
+| Where you are | What to read |
+|---|---|
+| Just installed, want to try it | [Try It](#try-it) above, then [Get Started](getting-started.md) |
+| Building features with steps and flows | [Get Started → Build Features](getting-started.md#build-features) |
+| Ready to automate with waves | [Wave Authoring](wave-authoring.md) |
+| Running agents on a server | [Get Started → Go Remote](getting-started.md#go-remote) |
+
+---
+
 ## Why Flows?
 
 Steps are atomic. Flows are how work actually gets done.
@@ -233,7 +244,7 @@ Every step sees: `README.md`, `STYLE.md`, `CLAUDE.md`, `scratch/`, `wave/`, and 
 
 ## Next
 
-[Waves →](waves.md)
+[Get Started →](getting-started.md) · [Wave Authoring →](wave-authoring.md) · [Waves →](waves.md)
 
 ## Reference
 

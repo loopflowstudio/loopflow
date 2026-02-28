@@ -35,10 +35,7 @@ def _wave_table(waves: list[Wave]) -> Table:
         run = wave.active_run
         local_worktree = (run.local_worktree if run else None) or wave.local_worktree or "-"
         remote_branch = (
-            (run.remote_branch if run else None)
-            or wave.remote_branch
-            or wave.branch
-            or "-"
+            (run.remote_branch if run else None) or wave.remote_branch or wave.branch or "-"
         )
         table.add_row(
             wave.name,
@@ -221,7 +218,8 @@ def _infer_group_by(
     }
     if len(filters) > 1:
         typer.echo(
-            "Multiple filters require --group-by. Example: lfq usage --wave X --model Y --group-by step",
+            "Multiple filters require --group-by. "
+            "Example: lfq usage --wave X --model Y --group-by step",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -416,9 +414,7 @@ def providers_cmd(
 ) -> None:
     provider_list = api.providers()
     if json_output:
-        typer.echo(
-            json.dumps([p.model_dump(mode="json") for p in provider_list], indent=2)
-        )
+        typer.echo(json.dumps([p.model_dump(mode="json") for p in provider_list], indent=2))
         return
     if provider_list:
         console.print(_providers_table(provider_list))

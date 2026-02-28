@@ -182,28 +182,75 @@ def test_usage_table_column_header_matches_group_by() -> None:
 
 
 def test_infer_group_by_wave_filter_gives_step() -> None:
-    assert _infer_group_by(wave="engbot", flow=None, step=None, model=None, prompt=False, group_by=None) == "step"
+    result = _infer_group_by(
+        wave="engbot",
+        flow=None,
+        step=None,
+        model=None,
+        prompt=False,
+        group_by=None,
+    )
+    assert result == "step"
 
 
 def test_infer_group_by_flow_filter_gives_wave() -> None:
-    assert _infer_group_by(wave=None, flow="build", step=None, model=None, prompt=False, group_by=None) == "wave"
+    result = _infer_group_by(
+        wave=None,
+        flow="build",
+        step=None,
+        model=None,
+        prompt=False,
+        group_by=None,
+    )
+    assert result == "wave"
 
 
 def test_infer_group_by_prompt_overrides() -> None:
-    assert _infer_group_by(wave=None, flow=None, step=None, model=None, prompt=True, group_by=None) == "source"
+    result = _infer_group_by(
+        wave=None,
+        flow=None,
+        step=None,
+        model=None,
+        prompt=True,
+        group_by=None,
+    )
+    assert result == "source"
 
 
 def test_infer_group_by_explicit_wins() -> None:
-    assert _infer_group_by(wave="x", flow=None, step=None, model=None, prompt=False, group_by="model") == "model"
+    result = _infer_group_by(
+        wave="x",
+        flow=None,
+        step=None,
+        model=None,
+        prompt=False,
+        group_by="model",
+    )
+    assert result == "model"
 
 
 def test_infer_group_by_multiple_filters_requires_explicit() -> None:
     with pytest.raises(typer.Exit):
-        _infer_group_by(wave="x", flow="y", step=None, model=None, prompt=False, group_by=None)
+        _infer_group_by(
+            wave="x",
+            flow="y",
+            step=None,
+            model=None,
+            prompt=False,
+            group_by=None,
+        )
 
 
 def test_infer_group_by_no_filter_gives_wave() -> None:
-    assert _infer_group_by(wave=None, flow=None, step=None, model=None, prompt=False, group_by=None) == "wave"
+    result = _infer_group_by(
+        wave=None,
+        flow=None,
+        step=None,
+        model=None,
+        prompt=False,
+        group_by=None,
+    )
+    assert result == "wave"
 
 
 # Providers table

@@ -16,7 +16,6 @@ Custom language model (`SFSpeechLanguageModel` + `DictationTranscriber.ContentHi
 
 ## Goals
 
-- Graduate to hands-free via Voice Activity Detection — no button needed
 - Add auto-send on silence so the full loop (speak → transcribe → send) requires zero hand interaction
 - Prime the recognizer with contextual vocabulary (wave names, file paths, loopflow terms)
 

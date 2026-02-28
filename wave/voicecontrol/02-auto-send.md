@@ -30,3 +30,4 @@ Add a "Continuous" toggle accessible from the voice button's menu. When active, 
 - Auto-send must be cancellable — any user interaction interrupts
 - The cancel window must be visually obvious (not color-only — use underline or bold for confidence highlighting)
 - Never auto-send an empty or whitespace-only message
+- Apple engine VAD currently uses partial-transcript inactivity timing (not energy-based onset/offset). Silence detection for auto-send triggering may behave differently across engines — test both paths

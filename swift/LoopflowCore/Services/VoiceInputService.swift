@@ -30,6 +30,93 @@ public enum VoiceInputServiceError: LocalizedError, Equatable {
     }
 }
 
+public enum InputMode: Equatable, Sendable {
+    case pushToTalk
+    case voiceActivityDetection
+}
+
+public enum VADSensitivity: String, CaseIterable, Sendable {
+    case quiet
+    case normal
+    case noisy
+}
+
+public enum VADEvent: Sendable {
+    case speechStarted
+    case partial(String)
+    case utteranceComplete(String)
+}
+
+private struct VADConfiguration {
+    let energyThreshold: Float
+    let silenceDuration: TimeInterval
+}
+
+private extension VADSensitivity {
+    var configuration: VADConfiguration {
+        switch self {
+        case .quiet:
+            return VADConfiguration(energyThreshold: 0.08, silenceDuration: 2.0)
+        case .normal:
+            return VADConfiguration(energyThreshold: 0.15, silenceDuration: 1.5)
+        case .noisy:
+            return VADConfiguration(energyThreshold: 0.30, silenceDuration: 1.0)
+        }
+    }
+}
+
+private actor VADActivityTracker {
+    private var hasSpeech = false
+    private var lastSpeechAt: Date?
+
+    func markSpeechDetected() -> Bool {
+        let isFirstSpeech = !hasSpeech
+        hasSpeech = true
+        lastSpeechAt = Date()
+        return isFirstSpeech
+    }
+
+    func shouldFinalize(after silenceDuration: TimeInterval) -> Bool {
+        guard hasSpeech, let lastSpeechAt else { return false }
+        return Date().timeIntervalSince(lastSpeechAt) >= silenceDuration
+    }
+
+    func reset() {
+        hasSpeech = false
+        lastSpeechAt = nil
+    }
+}
+
+private func makeVADMonitorTask(
+    tracker: VADActivityTracker,
+    silenceDuration: TimeInterval,
+    onEvent: @escaping @Sendable (VADEvent) -> Void,
+    finalize: @escaping @Sendable () async throws -> String,
+    restart: @escaping @Sendable () async throws -> Void
+) -> Task<Void, Never> {
+    Task {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard await tracker.shouldFinalize(after: silenceDuration) else { continue }
+
+            let transcript = (try? await finalize())?
+                .cleanedVoiceTranscript() ?? ""
+            await tracker.reset()
+
+            guard !Task.isCancelled else { return }
+            if !transcript.isEmpty {
+                onEvent(.utteranceComplete(transcript))
+            }
+
+            do {
+                try await restart()
+            } catch {
+                return
+            }
+        }
+    }
+}
+
 @MainActor
 protocol VoiceInputPermissionClient {
     func authorizationStatus() async -> VoiceInputService.PermissionStatus
@@ -64,6 +151,22 @@ protocol VoiceInputEngine: Sendable {
     func startStreaming(onPartial: @escaping @Sendable (String) -> Void) async throws
     func stopStreamingAndFinalizeTranscript() async throws -> String
     func cancelStreaming() async
+    func startVADSession(
+        sensitivity: VADSensitivity,
+        onEvent: @escaping @Sendable (VADEvent) -> Void
+    ) async throws
+    func stopVADSession() async
+}
+
+extension VoiceInputEngine {
+    func startVADSession(
+        sensitivity _: VADSensitivity,
+        onEvent _: @escaping @Sendable (VADEvent) -> Void
+    ) async throws {
+        throw VoiceInputServiceError.transcriptionUnavailable
+    }
+
+    func stopVADSession() async {}
 }
 
 // Safety: all access is serialized through the @MainActor VoiceInputService.
@@ -76,6 +179,7 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     private var whisperKit: WhisperKit?
     private var streamTranscriber: AudioStreamTranscriber?
     private var streamTask: Task<Void, Error>?
+    private var vadMonitorTask: Task<Void, Never>?
     private var cachedModelFolder: URL?
 
     init(modelDownloadBase: URL = WhisperKitVoiceInputEngine.defaultModelDownloadBase()) {
@@ -98,30 +202,10 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     }
 
     func startStreaming(onPartial: @escaping @Sendable (String) -> Void) async throws {
-        guard streamTask == nil else { return }
-        guard let whisperKit else {
-            throw VoiceInputServiceError.transcriptionUnavailable
-        }
-        guard let tokenizer = whisperKit.tokenizer else {
-            throw VoiceInputServiceError.transcriptionUnavailable
-        }
+        await stopVADSession()
 
-        let transcriber = AudioStreamTranscriber(
-            audioEncoder: whisperKit.audioEncoder,
-            featureExtractor: whisperKit.featureExtractor,
-            segmentSeeker: whisperKit.segmentSeeker,
-            textDecoder: whisperKit.textDecoder,
-            tokenizer: tokenizer,
-            audioProcessor: whisperKit.audioProcessor,
-            decodingOptions: Self.decodingOptions,
-            useVAD: false
-        ) { _, newState in
+        try await beginStreaming(useVAD: false, silenceThreshold: 0.3) { _, newState in
             onPartial(Self.partialText(from: newState))
-        }
-
-        streamTranscriber = transcriber
-        streamTask = Task {
-            try await transcriber.startStreamTranscription()
         }
     }
 
@@ -131,8 +215,99 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     }
 
     func cancelStreaming() async {
-        await stopStreaming(cancelTask: true)
+        await stopVADSession()
         whisperKit?.audioProcessor.stopRecording()
+    }
+
+    func startVADSession(
+        sensitivity: VADSensitivity,
+        onEvent: @escaping @Sendable (VADEvent) -> Void
+    ) async throws {
+        guard vadMonitorTask == nil else { return }
+
+        let configuration = sensitivity.configuration
+        let tracker = VADActivityTracker()
+        let stateHandler: @Sendable (AudioStreamTranscriber.State, AudioStreamTranscriber.State) -> Void = { _, newState in
+            let partial = Self.partialText(from: newState)
+            let latestEnergy = newState.bufferEnergy.last ?? 0
+
+            if latestEnergy >= configuration.energyThreshold {
+                Task {
+                    let shouldEmitSpeechStart = await tracker.markSpeechDetected()
+                    if shouldEmitSpeechStart {
+                        onEvent(.speechStarted)
+                    }
+                }
+            }
+
+            guard !partial.isEmpty else { return }
+            Task {
+                let shouldEmitSpeechStart = await tracker.markSpeechDetected()
+                if shouldEmitSpeechStart {
+                    onEvent(.speechStarted)
+                }
+                onEvent(.partial(partial))
+            }
+        }
+
+        try await beginStreaming(
+            useVAD: true,
+            silenceThreshold: configuration.energyThreshold,
+            onStateChange: stateHandler
+        )
+
+        vadMonitorTask = makeVADMonitorTask(
+            tracker: tracker,
+            silenceDuration: configuration.silenceDuration,
+            onEvent: onEvent,
+            finalize: { [weak self] in try await self?.stopStreamingAndFinalizeTranscript() ?? "" },
+            restart: { [weak self] in
+                try await self?.beginStreaming(
+                    useVAD: true,
+                    silenceThreshold: configuration.energyThreshold,
+                    onStateChange: stateHandler
+                )
+            }
+        )
+    }
+
+    func stopVADSession() async {
+        vadMonitorTask?.cancel()
+        vadMonitorTask = nil
+        await stopStreaming(cancelTask: true)
+    }
+
+    private func beginStreaming(
+        useVAD: Bool,
+        silenceThreshold: Float,
+        onStateChange: @escaping @Sendable (AudioStreamTranscriber.State, AudioStreamTranscriber.State) -> Void
+    ) async throws {
+        guard let whisperKit else {
+            throw VoiceInputServiceError.transcriptionUnavailable
+        }
+        guard let tokenizer = whisperKit.tokenizer else {
+            throw VoiceInputServiceError.transcriptionUnavailable
+        }
+
+        await stopStreaming(cancelTask: true)
+
+        let transcriber = AudioStreamTranscriber(
+            audioEncoder: whisperKit.audioEncoder,
+            featureExtractor: whisperKit.featureExtractor,
+            segmentSeeker: whisperKit.segmentSeeker,
+            textDecoder: whisperKit.textDecoder,
+            tokenizer: tokenizer,
+            audioProcessor: whisperKit.audioProcessor,
+            decodingOptions: Self.decodingOptions,
+            silenceThreshold: silenceThreshold,
+            useVAD: useVAD,
+            stateChangeCallback: onStateChange
+        )
+
+        streamTranscriber = transcriber
+        streamTask = Task {
+            try await transcriber.startStreamTranscription()
+        }
     }
 
     private func resolveModelFolder(onProgress: @escaping @Sendable (Double?) -> Void) async throws -> URL {
@@ -298,6 +473,7 @@ final class AppleDictationVoiceInputEngine: VoiceInputEngine, @unchecked Sendabl
     private var inputContinuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation?
     private var analyzerTask: Task<Void, Error>?
     private var resultsTask: Task<Void, Error>?
+    private var vadMonitorTask: Task<Void, Never>?
     private var isModelPrepared = false
 
     init(locale: Locale = .autoupdatingCurrent) {
@@ -337,6 +513,47 @@ final class AppleDictationVoiceInputEngine: VoiceInputEngine, @unchecked Sendabl
     }
 
     func startStreaming(onPartial: @escaping @Sendable (String) -> Void) async throws {
+        await stopVADSession()
+        try await beginStreaming(onPartial: onPartial)
+    }
+
+    func startVADSession(
+        sensitivity: VADSensitivity,
+        onEvent: @escaping @Sendable (VADEvent) -> Void
+    ) async throws {
+        guard vadMonitorTask == nil else { return }
+
+        let configuration = sensitivity.configuration
+        let tracker = VADActivityTracker()
+        let partialHandler: @Sendable (String) -> Void = { partial in
+            guard !partial.isEmpty else { return }
+            Task {
+                let shouldEmitSpeechStart = await tracker.markSpeechDetected()
+                if shouldEmitSpeechStart {
+                    onEvent(.speechStarted)
+                }
+                onEvent(.partial(partial))
+            }
+        }
+
+        try await beginStreaming(onPartial: partialHandler)
+
+        vadMonitorTask = makeVADMonitorTask(
+            tracker: tracker,
+            silenceDuration: configuration.silenceDuration,
+            onEvent: onEvent,
+            finalize: { [weak self] in try await self?.stopStreamingAndFinalizeTranscript() ?? "" },
+            restart: { [weak self] in try await self?.beginStreaming(onPartial: partialHandler) }
+        )
+    }
+
+    func stopVADSession() async {
+        vadMonitorTask?.cancel()
+        vadMonitorTask = nil
+        await cancelStreaming()
+    }
+
+    private func beginStreaming(onPartial: @escaping @Sendable (String) -> Void) async throws {
         guard analyzerTask == nil, resultsTask == nil else { return }
         guard let analyzer, let transcriber else {
             throw VoiceInputServiceError.transcriptionUnavailable
@@ -389,6 +606,8 @@ final class AppleDictationVoiceInputEngine: VoiceInputEngine, @unchecked Sendabl
     }
 
     func cancelStreaming() async {
+        vadMonitorTask?.cancel()
+        vadMonitorTask = nil
         await stopAudioCapture()
         await transcriptBuffer.clear()
 
@@ -508,6 +727,7 @@ public final class VoiceInputService {
 
     public enum State: Equatable {
         case idle
+        case listening
         case recording
         case transcribing
     }
@@ -519,6 +739,8 @@ public final class VoiceInputService {
     }
 
     public private(set) var state: State = .idle
+    public private(set) var inputMode: InputMode = .pushToTalk
+    public private(set) var vadSensitivity: VADSensitivity = .normal
     public private(set) var partialTranscript: String = ""
     public private(set) var permissionStatus: PermissionStatus = .notDetermined
     public private(set) var modelDownloadProgress: Double?
@@ -532,6 +754,9 @@ public final class VoiceInputService {
     private var isModelPrepared = false
     private var lastModelProgressBucket: Int?
     private var operationID = UUID()
+    private var isListeningPaused = false
+    private var dropNextVADUtterance = false
+    @ObservationIgnored private var transcriptHandler: ((String) -> Void)?
 
     public init() {
         permissionClient = SystemVoiceInputPermissionClient()
@@ -572,15 +797,147 @@ public final class VoiceInputService {
         }
     }
 
+    public func setTranscriptHandler(_ handler: ((String) -> Void)?) {
+        transcriptHandler = handler
+    }
+
+    public func startListening() async throws {
+        if inputMode == .voiceActivityDetection, state == .listening, !isListeningPaused {
+            return
+        }
+
+        errorMessage = nil
+        lastModelProgressBucket = nil
+        inputMode = .voiceActivityDetection
+        isListeningPaused = false
+        dropNextVADUtterance = false
+        logVoice("VAD start requested")
+
+        try await ensurePermission()
+
+        let currentOperationID = UUID()
+        operationID = currentOperationID
+        partialTranscript = ""
+        state = .transcribing
+        modelStatusText = "Preparing speech model…"
+        modelDownloadProgress = nil
+
+        do {
+            let engine = resolveEngine()
+            try await ensureModelPrepared(for: currentOperationID)
+
+            guard operationID == currentOperationID else {
+                throw VoiceInputServiceError.cancelled
+            }
+
+            modelStatusText = nil
+            modelDownloadProgress = nil
+
+            try await engine.startVADSession(
+                sensitivity: vadSensitivity,
+                onEvent: makeVADEventHandler(operationID: currentOperationID)
+            )
+
+            guard operationID == currentOperationID else {
+                throw VoiceInputServiceError.cancelled
+            }
+
+            state = .listening
+            logVoice("VAD listening started")
+        } catch {
+            if case VoiceInputServiceError.cancelled = error {
+                logVoice("VAD start cancelled")
+                return
+            }
+            inputMode = .pushToTalk
+            resetPresentationState()
+            errorMessage = error.localizedDescription
+            logVoice("VAD start failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    public func stopListening() {
+        guard inputMode == .voiceActivityDetection else { return }
+
+        operationID = UUID()
+        inputMode = .pushToTalk
+        isListeningPaused = false
+        dropNextVADUtterance = false
+        resetPresentationState()
+        logVoice("VAD stop requested")
+
+        guard let engine else { return }
+        Task {
+            await engine.stopVADSession()
+        }
+    }
+
+    public func setVADSensitivity(_ sensitivity: VADSensitivity) {
+        guard vadSensitivity != sensitivity else { return }
+        vadSensitivity = sensitivity
+        logVoice("VAD sensitivity set: \(sensitivity.rawValue)")
+
+        guard inputMode == .voiceActivityDetection, !isListeningPaused else { return }
+        guard let engine else { return }
+        let currentOperationID = operationID
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard self.inputMode == .voiceActivityDetection else { return }
+            guard self.operationID == currentOperationID else { return }
+
+            await engine.stopVADSession()
+
+            do {
+                try await engine.startVADSession(
+                    sensitivity: sensitivity,
+                    onEvent: self.makeVADEventHandler(operationID: currentOperationID)
+                )
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    public func pauseListening() {
+        guard inputMode == .voiceActivityDetection else { return }
+        isListeningPaused = true
+
+        if state == .recording || state == .transcribing {
+            dropNextVADUtterance = true
+        }
+
+        partialTranscript = ""
+        state = .listening
+        logVoice("VAD paused")
+    }
+
+    public func resumeListening() async throws {
+        guard inputMode == .voiceActivityDetection else { return }
+        guard isListeningPaused else { return }
+        isListeningPaused = false
+        state = .listening
+        logVoice("VAD resumed")
+    }
+
+    public func cancelCurrentUtterance() {
+        guard inputMode == .voiceActivityDetection else { return }
+        guard state == .recording || state == .transcribing else { return }
+
+        dropNextVADUtterance = true
+        partialTranscript = ""
+        state = .listening
+        logVoice("VAD utterance cancelled")
+    }
+
     public func startRecording() async throws {
         guard state == .idle else { return }
+        guard inputMode == .pushToTalk else { return }
         errorMessage = nil
         lastModelProgressBucket = nil
         logVoice("start requested")
-
-        if let engine {
-            await engine.cancelStreaming()
-        }
+        dropNextVADUtterance = false
 
         if let engine {
             await engine.cancelStreaming()
@@ -635,6 +992,7 @@ public final class VoiceInputService {
     }
 
     public func stopRecording() async -> String {
+        guard inputMode == .pushToTalk else { return "" }
         guard state == .recording || state == .transcribing else { return "" }
         logVoice("stop requested")
 
@@ -688,12 +1046,71 @@ public final class VoiceInputService {
 
     public func cancel() {
         operationID = UUID()
+        inputMode = .pushToTalk
+        isListeningPaused = false
+        dropNextVADUtterance = false
         resetPresentationState()
         logVoice("cancel requested")
 
         guard let engine else { return }
         Task {
+            await engine.stopVADSession()
             await engine.cancelStreaming()
+        }
+    }
+
+    private func makeVADEventHandler(
+        operationID expectedID: UUID
+    ) -> @Sendable (VADEvent) -> Void {
+        { [weak self] event in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.operationID == expectedID else { return }
+                guard self.inputMode == .voiceActivityDetection else { return }
+                if self.isListeningPaused {
+                    self.handlePausedVADEvent(event)
+                    return
+                }
+                self.handleVADEvent(event)
+            }
+        }
+    }
+
+    private func handleVADEvent(_ event: VADEvent) {
+        switch event {
+        case .speechStarted:
+            state = .recording
+            partialTranscript = ""
+
+        case .partial(let partial):
+            guard !dropNextVADUtterance else { return }
+            let cleaned = partial.cleanedVoiceTranscript()
+            guard !cleaned.isEmpty else { return }
+            if state == .listening {
+                state = .recording
+            }
+            partialTranscript = cleaned
+
+        case .utteranceComplete(let transcript):
+            state = .transcribing
+            if !dropNextVADUtterance {
+                let cleaned = transcript.cleanedVoiceTranscript()
+                if !cleaned.isEmpty {
+                    transcriptHandler?(cleaned)
+                }
+            }
+            dropNextVADUtterance = false
+            partialTranscript = ""
+            state = .listening
+        }
+    }
+
+    private func handlePausedVADEvent(_ event: VADEvent) {
+        guard dropNextVADUtterance else { return }
+        if case .utteranceComplete = event {
+            dropNextVADUtterance = false
+            partialTranscript = ""
+            state = .listening
         }
     }
 

@@ -108,11 +108,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output_dir = loopflow::lfd::default_output_dir();
-    let retention_days = lfd_config.output_log_retention_days;
-    loopflow::lfd::output::prune_output_logs(
-        &output_dir,
-        std::time::Duration::from_secs(u64::from(retention_days) * 86400),
+    let max_age = std::time::Duration::from_secs(
+        u64::from(lfd_config.output_log_retention_days) * 86400,
     );
+    loopflow::lfd::output::prune_output_logs(&output_dir, max_age);
     let output = OutputHub::new(2048, output_dir.clone());
     let event_hub = EventHub::new(1024);
     let session_manager = SessionManager::new_with_scheduler(store.clone(), scheduler.clone());
@@ -205,7 +204,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let prune_dir = output_dir;
         let prune_cancel = cancel.clone();
-        let max_age = std::time::Duration::from_secs(u64::from(retention_days) * 86400);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
             interval.tick().await; // skip immediate tick (startup prune already ran)

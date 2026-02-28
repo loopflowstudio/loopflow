@@ -33,6 +33,7 @@ const SOCKET_AUTH_MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const OPENCODE_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const OPENCODE_AUTH_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const OPENCODE_AUTH_URL: &str = "https://opencode.ai/auth";
+const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b([A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+)\b").expect("user code regex"));
@@ -137,6 +138,8 @@ pub struct AuthFlowResponse {
 pub struct ProviderAuthSnapshot {
     pub provider: Provider,
     pub status: AuthStatus,
+    pub expires_at: Option<i64>,
+    pub next_refresh_at: Option<i64>,
 }
 
 pub struct AuthFlowHandle {
@@ -412,11 +415,12 @@ impl ProviderAuthService {
                 snapshots.push(ProviderAuthSnapshot {
                     provider,
                     status: AuthStatus::Pending,
+                    expires_at: None,
+                    next_refresh_at: None,
                 });
                 continue;
             }
-            let status = self.resolve_status(provider).await?;
-            snapshots.push(ProviderAuthSnapshot { provider, status });
+            snapshots.push(self.resolve_snapshot(provider).await?);
         }
 
         Ok(snapshots)
@@ -428,25 +432,38 @@ impl ProviderAuthService {
             return Ok(ProviderAuthSnapshot {
                 provider,
                 status: AuthStatus::Pending,
+                expires_at: None,
+                next_refresh_at: None,
             });
         }
 
-        let status = self.resolve_status(provider).await?;
-        Ok(ProviderAuthSnapshot { provider, status })
+        self.resolve_snapshot(provider).await
     }
 
-    /// Check DB first; if a token row exists use it, otherwise fall back to broker.
-    async fn resolve_status(&self, provider: Provider) -> Result<AuthStatus, AuthError> {
+    async fn resolve_snapshot(
+        &self,
+        provider: Provider,
+    ) -> Result<ProviderAuthSnapshot, AuthError> {
         if let Some(store) = &self.store {
             match store.get_provider_token(provider.as_str()).await {
                 Ok(Some(token)) => {
-                    if token
+                    let status = if token
                         .expires_at
                         .is_some_and(|expires_at| expires_at <= now_unix())
                     {
-                        return Ok(AuthStatus::Expired);
-                    }
-                    return Ok(AuthStatus::Active { login: token.login });
+                        AuthStatus::Expired
+                    } else {
+                        AuthStatus::Active { login: token.login }
+                    };
+                    let expires_at = token.expires_at;
+                    let next_refresh_at =
+                        expires_at.map(|value| value - TOKEN_REFRESH_LEAD_SECONDS);
+                    return Ok(ProviderAuthSnapshot {
+                        provider,
+                        status,
+                        expires_at,
+                        next_refresh_at,
+                    });
                 }
                 Ok(None) => {}
                 Err(err) => {
@@ -454,7 +471,14 @@ impl ProviderAuthService {
                 }
             }
         }
-        self.broker(provider)?.check_status().await
+
+        let status = self.broker(provider)?.check_status().await?;
+        Ok(ProviderAuthSnapshot {
+            provider,
+            status,
+            expires_at: None,
+            next_refresh_at: None,
+        })
     }
 
     pub async fn start_auth(

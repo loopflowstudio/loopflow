@@ -24,7 +24,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args: Vec<String> = std::env::args().collect();
     if let Some(command) = args.get(1).map(String::as_str) {
-        let force = args[2..].iter().any(|arg| arg == "--force");
+        let command_args = &args[2..];
+        let force = has_flag(command_args, "--force");
+        let no_interactive = has_flag(command_args, "--no-interactive");
         match command {
             "migrate" => {
                 let status_only = args[2..].iter().any(|arg| arg == "--status");
@@ -38,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            "install" => return loopflow::lfd::service::install(force),
+            "install" => return loopflow::lfd::service::install(force, no_interactive),
             "uninstall" => return loopflow::lfd::service::uninstall(),
             "start" => return loopflow::lfd::service::start(force),
             "stop" => return loopflow::lfd::service::stop(),
@@ -329,11 +331,15 @@ fn format_token_rotation_output(token: &str) -> String {
     )
 }
 
+fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|arg| arg == flag)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        format_token_rotation_output, storage_config_from_config, LfdConfig, StorageConfig,
-        StorageType,
+        format_token_rotation_output, has_flag, storage_config_from_config, LfdConfig,
+        StorageConfig, StorageType,
     };
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
@@ -471,5 +477,17 @@ mod tests {
         assert!(output.contains("update LFD_AUTH_TOKEN"));
         assert!(output.contains("restart lfd"));
         assert!(output.contains("verify old token is rejected and new token is accepted"));
+    }
+
+    #[test]
+    fn has_flag_matches_exact_flag() {
+        let args = vec![
+            "--force".to_string(),
+            "--no-interactive".to_string(),
+            "value".to_string(),
+        ];
+        assert!(has_flag(&args, "--force"));
+        assert!(has_flag(&args, "--no-interactive"));
+        assert!(!has_flag(&args, "--missing"));
     }
 }

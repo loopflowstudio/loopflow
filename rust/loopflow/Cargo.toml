@@ -64,7 +64,7 @@ git2 = "0.20"
 hmac = "0.12"
 humantime = "2"
 ipnet = "2"
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { version = "0.13", features = ["blocking", "json"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
+    AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
     CHORD_MINIMAL,
     PROVIDER_INFO_FULL,
     PROVIDER_INFO_MINIMAL,
@@ -123,6 +124,13 @@ class TestAuthModels:
         assert status.provider == "github"
         assert status.status == "active"
         assert status.login == "jackdanger"
+        assert status.expires_at is None
+        assert status.next_refresh_at is None
+
+    def test_auth_provider_status_with_timestamps(self):
+        status = AuthProviderStatus.model_validate(AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS)
+        assert status.expires_at is not None
+        assert status.next_refresh_at is not None
 
     def test_auth_flow(self):
         flow = AuthFlow.model_validate(AUTH_FLOW)

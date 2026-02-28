@@ -210,6 +210,15 @@ pub fn publish_release(
 
     let prev_tag = latest_tag(&main_repo, &target)?;
     let version = resolve_version(&prev_tag, &options.version_input, &target)?;
+
+    // Check for a release that's prepared (notes + manifests) but not yet tagged,
+    // or already tagged but with a failed workflow. Resume instead of starting fresh.
+    if let Some(result) =
+        try_resume_release(&main_repo, &version, &target, options.dry_run, progress)?
+    {
+        return Ok(result);
+    }
+
     let wt_name = if target.name == "default" {
         format!("release-v{version}")
     } else {
@@ -264,6 +273,101 @@ pub fn publish_release(
         target: target.name,
         bootstrapped: false,
     })
+}
+
+/// Check if a release for `version` is already prepared or tagged, and resume it.
+///
+/// Returns `Some(result)` if the release was resumed (or already complete).
+/// Returns `None` to fall through to the fresh workflow.
+fn try_resume_release(
+    repo: &Path,
+    version: &str,
+    target: &ReleaseTarget,
+    dry_run: bool,
+    progress: &impl Progress,
+) -> OpsResult<Option<PublishResult>> {
+    let notes_version = read_release_notes_version(repo);
+    if notes_version.as_deref() != Some(version) {
+        return Ok(None);
+    }
+
+    if !manifests_at_version(repo, target, version) {
+        return Ok(None);
+    }
+
+    let tag = target_tag(target, version);
+    let remote_tag = tag_exists_remote(repo, &tag)?;
+
+    if remote_tag {
+        // Tag exists on remote — check workflow/release status.
+        let release_exists = github_release_exists(repo, &tag)?;
+        let workflow = find_workflow_run(repo, &tag, target)?;
+
+        let workflow_ok = workflow
+            .as_ref()
+            .is_some_and(|r| r.conclusion.as_deref() == Some("success"));
+
+        if release_exists && workflow_ok {
+            progress.status(&format!("{tag} already released."));
+            return Ok(Some(PublishResult {
+                version: Some(version.to_string()),
+                target: target.name.clone(),
+                bootstrapped: false,
+            }));
+        }
+
+        if dry_run {
+            progress.status(&format!(
+                "Would resume {tag} (tag exists, monitoring workflow)"
+            ));
+            return Ok(Some(PublishResult {
+                version: Some(version.to_string()),
+                target: target.name.clone(),
+                bootstrapped: false,
+            }));
+        }
+
+        // Tag pushed but workflow incomplete or failed — monitor/diagnose.
+        progress.status(&format!(
+            "Resuming {tag} (tag exists, checking workflow)..."
+        ));
+        monitor_release_workflow(repo, &tag, target, progress)?;
+
+        progress.status(&format!("{tag} published."));
+        return Ok(Some(PublishResult {
+            version: Some(version.to_string()),
+            target: target.name.clone(),
+            bootstrapped: false,
+        }));
+    }
+
+    // Notes + manifests ready but no remote tag — sync, tag, and push.
+    if dry_run {
+        progress.status(&format!(
+            "Would resume {tag} (notes and manifests ready, tagging)"
+        ));
+        return Ok(Some(PublishResult {
+            version: Some(version.to_string()),
+            target: target.name.clone(),
+            bootstrapped: false,
+        }));
+    }
+
+    progress.status(&format!(
+        "Resuming {tag} (notes and manifests ready, tagging)..."
+    ));
+    let main_branch = get_default_branch(repo)?;
+    sync_main(repo, &main_branch)?;
+
+    let pushed_tag = tag_and_push(repo, version, target)?;
+    monitor_release_workflow(repo, &pushed_tag, target, progress)?;
+
+    progress.status(&format!("{tag} published."));
+    Ok(Some(PublishResult {
+        version: Some(version.to_string()),
+        target: target.name.clone(),
+        bootstrapped: false,
+    }))
 }
 
 pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseStatusResult> {
@@ -577,6 +681,57 @@ fn tag_glob(target: &ReleaseTarget) -> String {
     format!("{}v*", target.tag_prefix)
 }
 
+/// Read the version from the first line of RELEASE_NOTES.md (`# v{X.Y.Z}`).
+fn read_release_notes_version(repo: &Path) -> Option<String> {
+    let path = repo.join("RELEASE_NOTES.md");
+    let content = fs::read_to_string(path).ok()?;
+    let first_line = content.lines().next()?.trim();
+    let version = first_line.strip_prefix("# v")?;
+    if version.split('.').count() == 3 {
+        Some(version.to_string())
+    } else {
+        None
+    }
+}
+
+/// Check whether all manifests in the target already have the given version.
+fn manifests_at_version(repo: &Path, target: &ReleaseTarget, version: &str) -> bool {
+    if target.manifests.is_empty() {
+        return false;
+    }
+
+    target.manifests.iter().all(|manifest| {
+        let path = repo.join(manifest);
+        let Ok(content) = fs::read_to_string(&path) else {
+            return false;
+        };
+        match manifest.file_name().and_then(|n| n.to_str()) {
+            Some("Cargo.toml") => toml_has_version(&content, version),
+            Some("package.json") => json_has_version(&content, version),
+            Some("pyproject.toml") => toml_has_version(&content, version),
+            _ => false,
+        }
+    })
+}
+
+fn toml_has_version(content: &str, version: &str) -> bool {
+    let target = format!("version = \"{version}\"");
+    content.lines().any(|line| line.trim() == target)
+}
+
+fn json_has_version(content: &str, version: &str) -> bool {
+    let target = format!("\"version\": \"{version}\"");
+    content
+        .lines()
+        .any(|line| line.replace(' ', "").contains(&target.replace(' ', "")))
+}
+
+/// Check if a tag exists on the remote.
+fn tag_exists_remote(repo: &Path, tag: &str) -> OpsResult<bool> {
+    let output = run_stdout(repo, "git", &["ls-remote", "--tags", "origin", tag])?;
+    Ok(!output.trim().is_empty())
+}
+
 fn merged_prs_since(repo: &Path, tag: &str, target: &ReleaseTarget) -> OpsResult<Vec<MergedPr>> {
     let tagged_at = run_stdout(repo, "git", &["log", "-1", "--format=%aI", tag])?;
     if tagged_at.is_empty() {
@@ -840,6 +995,9 @@ fn bump_manifest_versions(
         return Ok(());
     }
 
+    let mut bumped_cargo = false;
+    let mut bumped_pyproject = false;
+
     for manifest in &target.manifests {
         let manifest_path = repo.join(manifest);
         if !manifest_path.exists() {
@@ -850,7 +1008,8 @@ fn bump_manifest_versions(
         }
 
         let original = fs::read_to_string(&manifest_path)?;
-        let updated = match manifest_path.file_name().and_then(|name| name.to_str()) {
+        let name = manifest_path.file_name().and_then(|name| name.to_str());
+        let updated = match name {
             Some("Cargo.toml") => bump_cargo_toml(&original, version)?,
             Some("package.json") => bump_package_json(&original, version)?,
             Some("pyproject.toml") => bump_pyproject_toml(&original, version)?,
@@ -860,7 +1019,23 @@ fn bump_manifest_versions(
         if updated != original {
             fs::write(&manifest_path, updated)?;
             progress.status(&format!("Bumped version in {}", manifest_path.display()));
+            match name {
+                Some("Cargo.toml") => bumped_cargo = true,
+                Some("pyproject.toml") => bumped_pyproject = true,
+                _ => {}
+            }
         }
+    }
+
+    // Update lock files so they stay in sync with manifest versions.
+    if bumped_cargo && repo.join("Cargo.lock").exists() {
+        let _ = Command::new("cargo")
+            .args(["update", "--workspace"])
+            .current_dir(repo)
+            .output();
+    }
+    if bumped_pyproject && repo.join("uv.lock").exists() {
+        let _ = Command::new("uv").arg("lock").current_dir(repo).output();
     }
 
     Ok(())
@@ -1737,5 +1912,142 @@ version = "2.0.0"
             workflow: None,
         };
         assert_eq!(target_tag(&target, "2.0.0"), "cli/v2.0.0");
+    }
+
+    // ======================================================================
+    // read_release_notes_version
+    // ======================================================================
+
+    #[test]
+    fn release_notes_version_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("RELEASE_NOTES.md"), "# v0.9.5\n\nNotes.").unwrap();
+        assert_eq!(
+            read_release_notes_version(dir.path()),
+            Some("0.9.5".to_string())
+        );
+    }
+
+    #[test]
+    fn release_notes_version_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_release_notes_version(dir.path()), None);
+    }
+
+    #[test]
+    fn release_notes_version_no_header() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("RELEASE_NOTES.md"), "Just some text.").unwrap();
+        assert_eq!(read_release_notes_version(dir.path()), None);
+    }
+
+    #[test]
+    fn release_notes_version_invalid_format() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("RELEASE_NOTES.md"),
+            "# v1.0\n\nOnly two parts.",
+        )
+        .unwrap();
+        assert_eq!(read_release_notes_version(dir.path()), None);
+    }
+
+    // ======================================================================
+    // manifests_at_version
+    // ======================================================================
+
+    #[test]
+    fn manifests_match_cargo_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[workspace.package]\nversion = \"1.2.3\"\n",
+        )
+        .unwrap();
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: vec![],
+            tag_prefix: String::new(),
+            manifests: vec![PathBuf::from("Cargo.toml")],
+            workflow: None,
+        };
+        assert!(manifests_at_version(dir.path(), &target, "1.2.3"));
+        assert!(!manifests_at_version(dir.path(), &target, "1.2.4"));
+    }
+
+    #[test]
+    fn manifests_match_pyproject_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nversion = \"0.5.0\"\n",
+        )
+        .unwrap();
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: vec![],
+            tag_prefix: String::new(),
+            manifests: vec![PathBuf::from("pyproject.toml")],
+            workflow: None,
+        };
+        assert!(manifests_at_version(dir.path(), &target, "0.5.0"));
+        assert!(!manifests_at_version(dir.path(), &target, "0.6.0"));
+    }
+
+    #[test]
+    fn manifests_empty_returns_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: vec![],
+            tag_prefix: String::new(),
+            manifests: vec![],
+            workflow: None,
+        };
+        assert!(!manifests_at_version(dir.path(), &target, "1.0.0"));
+    }
+
+    #[test]
+    fn manifests_partial_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nversion = \"0.9.0\"\n",
+        )
+        .unwrap();
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: vec![],
+            tag_prefix: String::new(),
+            manifests: vec![PathBuf::from("Cargo.toml"), PathBuf::from("pyproject.toml")],
+            workflow: None,
+        };
+        // Both must match for true
+        assert!(!manifests_at_version(dir.path(), &target, "1.0.0"));
+    }
+
+    // ======================================================================
+    // toml_has_version / json_has_version
+    // ======================================================================
+
+    #[test]
+    fn toml_version_check() {
+        assert!(toml_has_version("version = \"1.0.0\"\n", "1.0.0"));
+        assert!(!toml_has_version("version = \"1.0.0\"\n", "2.0.0"));
+        assert!(toml_has_version(
+            "[package]\nversion = \"1.0.0\"\nedition = \"2021\"\n",
+            "1.0.0"
+        ));
+    }
+
+    #[test]
+    fn json_version_check() {
+        assert!(json_has_version("{\n  \"version\": \"1.0.0\"\n}", "1.0.0"));
+        assert!(!json_has_version("{\n  \"version\": \"1.0.0\"\n}", "2.0.0"));
     }
 }

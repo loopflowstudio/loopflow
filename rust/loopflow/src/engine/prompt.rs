@@ -1615,11 +1615,7 @@ pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> Re
         PromptFormatMode::Full => {
             let mut parts = format_reference_sections(components);
 
-            // Task sections: step, directions, clipboard, message
-            if let Some(ref step) = components.step {
-                parts.push(format!("The step.\n\n{}", format_step_tag(step)));
-            }
-
+            // Context sections: directions, clipboard
             if !components.directions.is_empty() {
                 let label = if components.directions.len() == 1 {
                     "Direction"
@@ -1640,6 +1636,11 @@ pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> Re
                 ));
             }
 
+            // Task sections: step, message
+            if let Some(ref step) = components.step {
+                parts.push(format!("The step.\n\n{}", format_step_tag(step)));
+            }
+
             if let Some(ref message) = components.message {
                 parts.push(format!(
                     "Additional instructions from user.\n\n\
@@ -1653,6 +1654,10 @@ pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> Re
         PromptFormatMode::Context => {
             let mut parts = format_reference_sections(components);
 
+            if !components.directions.is_empty() {
+                parts.push(format_direction_tags(&components.directions));
+            }
+
             if let Some(ref clipboard) = components.clipboard {
                 parts.push(format!(
                     "Content from clipboard.\n\n\
@@ -1665,10 +1670,6 @@ pub fn format_prompt(mode: PromptFormatMode, components: &BudgetedContext) -> Re
         }
         PromptFormatMode::Task => {
             let mut parts = Vec::new();
-
-            if !components.directions.is_empty() {
-                parts.push(format_direction_tags(&components.directions));
-            }
 
             if let Some(ref step) = components.step {
                 parts.push(format_step_tag(step));
@@ -1689,7 +1690,7 @@ pub fn format_context_prompt(components: &BudgetedContext) -> String {
     format_prompt(PromptFormatMode::Context, components).into_string()
 }
 
-/// Format task prompt for user message (directions + step + free text).
+/// Format task prompt for user message (step + free text).
 pub fn format_task_prompt(components: &BudgetedContext) -> String {
     format_prompt(PromptFormatMode::Task, components).into_string()
 }
@@ -2351,23 +2352,23 @@ mod tests {
 
         let prompt = render_full_prompt(components);
 
-        // Verify order: loopflow -> surface block -> wave -> docs -> diff -> step -> direction -> clipboard
+        // Verify order: loopflow -> surface block -> wave -> docs -> diff -> direction -> clipboard -> step
         let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
         let auto_pos = prompt.find("Run mode is auto").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:docs>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
-        let step_pos = prompt.find("<lf:step:implement>").unwrap();
         let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
+        let step_pos = prompt.find("<lf:step:implement>").unwrap();
 
         assert!(loopflow_pos < auto_pos);
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
         assert!(docs_pos < diff_pos);
-        assert!(diff_pos < step_pos);
-        assert!(step_pos < direction_pos);
+        assert!(diff_pos < direction_pos);
         assert!(direction_pos < clipboard_pos);
+        assert!(clipboard_pos < step_pos);
     }
 
     #[test]
@@ -2916,10 +2917,12 @@ directions:
         assert!(context.contains("<lf:docs>"));
         assert!(context.contains("# Project"));
         assert!(context.contains("<lf:clipboard>"));
-        // Should NOT include step or directions (both go in task prompt)
+        // Should include directions (context, not task)
+        assert!(context.contains("<lf:direction:concise>"));
+        assert!(context.contains("Be concise."));
+        // Should NOT include step (goes in task prompt)
         assert!(!context.contains("<lf:step:debug>"));
         assert!(!context.contains("Fix the error."));
-        assert!(!context.contains("<lf:direction:concise>"));
     }
 
     #[test]

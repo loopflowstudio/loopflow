@@ -198,16 +198,16 @@ Run mode is auto (headless). Proceed without pausing for questions. If you need 
 
 No rendering environment. Output is logged, not displayed. Optimize for structured, parseable output over human readability.
 
-The step.
-
-<lf:step:test>
-Test step content with direction.
-
-</lf:step:test>
-
 Direction for this work.
 
 <lf:direction:thorough>
 Be thorough.
 
 </lf:direction:thorough>
+
+The step.
+
+<lf:step:test>
+Test step content with direction.
+
+</lf:step:test>

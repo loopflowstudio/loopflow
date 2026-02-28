@@ -198,13 +198,6 @@ Run mode is auto (headless). Proceed without pausing for questions. If you need 
 
 No rendering environment. Output is logged, not displayed. Optimize for structured, parseable output over human readability.
 
-The step.
-
-<lf:step:test>
-Test step content with builtin direction group.
-
-</lf:step:test>
-
 Directions for this work.
 
 <lf:directions>
@@ -243,3 +236,10 @@ Start with minimal data structures and APIs. If the core is right, trimming exce
 
 </lf:direction:simplicity>
 </lf:directions>
+
+The step.
+
+<lf:step:test>
+Test step content with builtin direction group.
+
+</lf:step:test>

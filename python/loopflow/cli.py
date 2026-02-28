@@ -12,7 +12,16 @@ from rich.table import Table
 
 from loopflow import api
 from loopflow.errors import LoopflowError
-from loopflow.models import AuthProviderStatus, ProviderInfo, Repo, UsageSummary, Wave
+from loopflow.models import (
+    AuthProviderStatus,
+    CostRates,
+    ProviderInfo,
+    Repo,
+    TokenTotals,
+    UsageSummary,
+    UsageSummaryGroup,
+    Wave,
+)
 
 app = typer.Typer(help="Query lfd and manage waves.")
 auth_app = typer.Typer(help="Manage provider authentication.")
@@ -196,6 +205,7 @@ _GROUP_BY_FOR_FILTER = {
     "flow": "wave",
     "step": "wave",
     "model": "wave",
+    "source": "wave",
 }
 
 
@@ -204,6 +214,7 @@ def _infer_group_by(
     flow: Optional[str],
     step: Optional[str],
     model: Optional[str],
+    source: Optional[str],
     prompt: bool,
     group_by: Optional[str],
 ) -> str:
@@ -213,7 +224,13 @@ def _infer_group_by(
         return "source"
     filters = {
         k: v
-        for k, v in {"wave": wave, "flow": flow, "step": step, "model": model}.items()
+        for k, v in {
+            "wave": wave,
+            "flow": flow,
+            "step": step,
+            "model": model,
+            "source": source,
+        }.items()
         if v is not None
     }
     if len(filters) > 1:
@@ -270,6 +287,86 @@ def _providers_table(providers: list[ProviderInfo]) -> Table:
         model_names = ", ".join(m.display_name for m in p.models)
         table.add_row(_provider_label(p.provider), status, p.billing, model_names)
     return table
+
+
+def _estimate_cost(tokens: TokenTotals, rates: CostRates) -> float:
+    cost = tokens.input * rates.input_per_mtok / 1_000_000
+    cost += tokens.output * rates.output_per_mtok / 1_000_000
+    if rates.cache_read_per_mtok:
+        cost += tokens.cache_read * rates.cache_read_per_mtok / 1_000_000
+    if rates.cache_write_per_mtok:
+        cost += tokens.cache_write * rates.cache_write_per_mtok / 1_000_000
+    return cost
+
+
+def _format_cost(cost: float) -> str:
+    if cost < 0.01:
+        return "<$0.01"
+    return f"~${cost:.2f}"
+
+
+def _billing_tables(
+    summary: UsageSummary, providers: list[ProviderInfo]
+) -> tuple[list[Table], Optional[str]]:
+    model_billing: dict[str, tuple[str, Optional[CostRates]]] = {}
+    for p in providers:
+        for m in p.models:
+            model_billing[m.id] = (p.billing, m.cost_rates)
+
+    sub_groups: list[UsageSummaryGroup] = []
+    metered_groups: list[tuple[UsageSummaryGroup, Optional[CostRates]]] = []
+    for group in summary.groups:
+        billing, rates = model_billing.get(group.key, ("subscription", None))
+        if billing == "per_token":
+            metered_groups.append((group, rates))
+        else:
+            sub_groups.append(group)
+
+    tables: list[Table] = []
+
+    if sub_groups:
+        table = Table(title="Subscription", show_header=True, header_style="bold")
+        table.add_column("model")
+        table.add_column("input", justify="right")
+        table.add_column("output", justify="right")
+        table.add_column("sessions", justify="right")
+        table.add_column("turns", justify="right")
+        for group in sub_groups:
+            t = group.tokens
+            table.add_row(
+                group.key,
+                _format_tokens(t.input),
+                _format_tokens(t.output),
+                str(group.sessions),
+                str(group.turns),
+            )
+        tables.append(table)
+
+    total_cost = 0.0
+    if metered_groups:
+        table = Table(title="Metered", show_header=True, header_style="bold")
+        table.add_column("model")
+        table.add_column("input", justify="right")
+        table.add_column("output", justify="right")
+        table.add_column("sessions", justify="right")
+        table.add_column("turns", justify="right")
+        table.add_column("est. cost", justify="right")
+        for group, rates in metered_groups:
+            t = group.tokens
+            cost = _estimate_cost(t, rates) if rates else 0.0
+            total_cost += cost
+            table.add_row(
+                group.key,
+                _format_tokens(t.input),
+                _format_tokens(t.output),
+                str(group.sessions),
+                str(group.turns),
+                _format_cost(cost) if rates else "\u2014",
+            )
+        tables.append(table)
+
+    total_line = f"total metered: {_format_cost(total_cost)}" if total_cost > 0 else None
+    return tables, total_line
 
 
 @app.callback(invoke_without_command=True)
@@ -383,24 +480,40 @@ def usage(
     flow: Optional[str] = typer.Option(None, "--flow", "-f"),
     step: Optional[str] = typer.Option(None, "--step", "-s"),
     model: Optional[str] = typer.Option(None, "--model", "-m"),
+    source: Optional[str] = typer.Option(None, "--source"),
     prompt: bool = typer.Option(False, "--prompt", "-p"),
+    billing: bool = typer.Option(False, "--billing", "-b"),
     group_by: Optional[str] = typer.Option(None, "--group-by", "-g"),
     from_time: Optional[str] = typer.Option(None, "--from"),
     to_time: Optional[str] = typer.Option(None, "--to"),
     json_output: bool = typer.Option(False, "--json", "-j"),
 ) -> None:
-    resolved_group_by = _infer_group_by(wave, flow, step, model, prompt, group_by)
+    resolved_group_by = (
+        "model" if billing else _infer_group_by(wave, flow, step, model, source, prompt, group_by)
+    )
     summary = api.usage_summary(
         group_by=resolved_group_by,
         wave=wave,
         flow=flow,
         step=step,
         model=model,
+        source=source,
         from_=from_time,
         to_=to_time,
     )
     if json_output:
         typer.echo(json.dumps(summary.model_dump(mode="json", by_alias=True), indent=2))
+        return
+    if billing:
+        provider_list = api.providers()
+        tables, total_line = _billing_tables(summary, provider_list)
+        if not tables:
+            console.print("no usage data")
+            return
+        for table in tables:
+            console.print(table)
+        if total_line:
+            console.print(total_line)
         return
     if summary.groups:
         console.print(_usage_table(summary))

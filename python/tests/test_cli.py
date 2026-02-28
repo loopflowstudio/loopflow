@@ -12,11 +12,15 @@ from conftest import (
     PROVIDER_INFO_MINIMAL,
     REPO_MINIMAL,
     USAGE_SUMMARY,
+    USAGE_SUMMARY_BY_MODEL,
     WAVE_FULL,
     WAVE_MINIMAL,
 )
 from loopflow.cli import (
     _auth_status_table,
+    _billing_tables,
+    _estimate_cost,
+    _format_cost,
     _format_tokens,
     _infer_group_by,
     _providers_table,
@@ -26,7 +30,15 @@ from loopflow.cli import (
     _usage_table,
     _wave_table,
 )
-from loopflow.models import AuthProviderStatus, ProviderInfo, Repo, UsageSummary, Wave
+from loopflow.models import (
+    AuthProviderStatus,
+    CostRates,
+    ProviderInfo,
+    Repo,
+    TokenTotals,
+    UsageSummary,
+    Wave,
+)
 from rich.console import Console
 
 
@@ -187,6 +199,7 @@ def test_infer_group_by_wave_filter_gives_step() -> None:
         flow=None,
         step=None,
         model=None,
+        source=None,
         prompt=False,
         group_by=None,
     )
@@ -199,6 +212,20 @@ def test_infer_group_by_flow_filter_gives_wave() -> None:
         flow="build",
         step=None,
         model=None,
+        source=None,
+        prompt=False,
+        group_by=None,
+    )
+    assert result == "wave"
+
+
+def test_infer_group_by_source_filter_gives_wave() -> None:
+    result = _infer_group_by(
+        wave=None,
+        flow=None,
+        step=None,
+        model=None,
+        source="scratch",
         prompt=False,
         group_by=None,
     )
@@ -211,6 +238,7 @@ def test_infer_group_by_prompt_overrides() -> None:
         flow=None,
         step=None,
         model=None,
+        source=None,
         prompt=True,
         group_by=None,
     )
@@ -223,6 +251,7 @@ def test_infer_group_by_explicit_wins() -> None:
         flow=None,
         step=None,
         model=None,
+        source=None,
         prompt=False,
         group_by="model",
     )
@@ -236,6 +265,7 @@ def test_infer_group_by_multiple_filters_requires_explicit() -> None:
             flow="y",
             step=None,
             model=None,
+            source=None,
             prompt=False,
             group_by=None,
         )
@@ -247,6 +277,7 @@ def test_infer_group_by_no_filter_gives_wave() -> None:
         flow=None,
         step=None,
         model=None,
+        source=None,
         prompt=False,
         group_by=None,
     )
@@ -273,3 +304,81 @@ def test_providers_table_renders_providers() -> None:
     assert "Kimi K2.5" in rendered
     assert "\u2713 active" in rendered
     assert "\u2717 none" in rendered
+
+
+# Cost estimation
+
+
+def test_estimate_cost_input_and_output() -> None:
+    tokens = TokenTotals(input=1_000_000, output=500_000)
+    rates = CostRates(input_per_mtok=3.0, output_per_mtok=15.0)
+    assert _estimate_cost(tokens, rates) == pytest.approx(10.5)
+
+
+def test_estimate_cost_includes_cache() -> None:
+    tokens = TokenTotals(cache_read=1_000_000, cache_write=1_000_000)
+    rates = CostRates(
+        input_per_mtok=3.0,
+        output_per_mtok=15.0,
+        cache_read_per_mtok=0.3,
+        cache_write_per_mtok=3.75,
+    )
+    assert _estimate_cost(tokens, rates) == pytest.approx(4.05)
+
+
+def test_format_cost_below_penny() -> None:
+    assert _format_cost(0.001) == "<$0.01"
+
+
+def test_format_cost_normal() -> None:
+    assert _format_cost(4.20) == "~$4.20"
+
+
+# Billing tables
+
+
+def test_billing_tables_splits_by_billing_type() -> None:
+    summary = UsageSummary.model_validate(USAGE_SUMMARY_BY_MODEL)
+    providers = [
+        ProviderInfo.model_validate(PROVIDER_INFO_MINIMAL),
+        ProviderInfo.model_validate(PROVIDER_INFO_FULL),
+    ]
+    tables, total_line = _billing_tables(summary, providers)
+    assert len(tables) == 2
+
+    console = Console(record=True, width=220)
+    for t in tables:
+        console.print(t)
+    rendered = console.export_text()
+
+    assert "Subscription" in rendered
+    assert "Metered" in rendered
+    assert "gpt-5.1-codex" in rendered
+    assert "opencode/kimi-k2.5" in rendered
+    assert "est. cost" in rendered
+    assert total_line is not None
+    assert "~$1.00" in total_line
+
+
+def test_billing_tables_subscription_only() -> None:
+    summary = UsageSummary.model_validate(USAGE_SUMMARY_BY_MODEL)
+    # Only subscription provider — metered model won't match
+    providers = [ProviderInfo.model_validate(PROVIDER_INFO_MINIMAL)]
+    tables, total_line = _billing_tables(summary, providers)
+
+    # Both groups fall into subscription (unmatched defaults to subscription)
+    assert len(tables) == 1
+    assert total_line is None
+
+    console = Console(record=True, width=220)
+    console.print(tables[0])
+    rendered = console.export_text()
+    assert "Subscription" in rendered
+
+
+def test_billing_tables_empty_groups() -> None:
+    summary = UsageSummary(group_by="model", groups=[])
+    providers = [ProviderInfo.model_validate(PROVIDER_INFO_MINIMAL)]
+    tables, total_line = _billing_tables(summary, providers)
+    assert tables == []
+    assert total_line is None

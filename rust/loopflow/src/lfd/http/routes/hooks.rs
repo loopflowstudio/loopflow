@@ -204,7 +204,7 @@ async fn enqueue_watch_for_repo(
             event_hub,
             ActivationEnvelope::new(
                 &stimulus.wave_id,
-                &stimulus.id,
+                Some(&stimulus.id),
                 ActivationSource::Push,
                 reason.clone(),
                 from_sha,
@@ -662,8 +662,8 @@ mod tests {
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
-        ActivationSource, PullRequest, Signal, Stimulus, Wave, WaveRunSnapshot, WaveRunStatus,
-        WaveStatus,
+        ActivationSource, PullRequest, Signal, Stimulus, Wave, WaveMode, WaveRunSnapshot,
+        WaveRunStatus, WaveStatus,
     };
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -795,7 +795,9 @@ mod tests {
             id: LfdId::new(),
             name: "watch-wave".to_string(),
             repo: repo_dir.path().to_string_lossy().to_string(),
-            flow: "build".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

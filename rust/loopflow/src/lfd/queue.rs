@@ -524,7 +524,8 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        PullRequest, QueueBlockReason, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+        PullRequest, QueueBlockReason, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStatus,
+        WaveStatus,
     };
 
     #[derive(Debug, Default)]
@@ -588,7 +589,9 @@ mod tests {
             id: LfdId::new(),
             name: "queue-wave".to_string(),
             repo: repo.to_string(),
-            flow: "build".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,
@@ -605,7 +608,7 @@ mod tests {
             wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
-                flow: wave.flow().clone(),
+                flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
                 pr: Some(PullRequest {

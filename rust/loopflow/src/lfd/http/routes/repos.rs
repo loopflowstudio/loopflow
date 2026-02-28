@@ -415,7 +415,7 @@ mod tests {
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{RepoId, WaveStatus};
+    use crate::lfd::types::{RepoId, WaveMode, WaveStatus};
     use std::process::Command;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -473,7 +473,9 @@ mod tests {
             id: LfdId::new(),
             name: name.to_string(),
             repo,
-            flow: "build".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

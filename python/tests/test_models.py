@@ -45,7 +45,7 @@ class TestWaveModel:
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)
-        assert wave.stimuli[0].kind == "loop"
+        assert wave.stimuli[0].kind == "watch"
         assert wave.active_run.status == "running"
         assert wave.active_run.pr.number == 1
         assert wave.created_at is not None

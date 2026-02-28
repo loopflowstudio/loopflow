@@ -64,7 +64,7 @@ def update_wave_happy(client: Client, state: dict[str, str]) -> None:
         status="paused",
     )
     _expect_wave(wave)
-    assert wave.flow == "grind"
+    assert wave.primary_flow == "grind"
     assert wave.direction == ["ux"]
     assert wave.area == ["docs/"]
     assert wave.status == "paused"
@@ -137,7 +137,7 @@ def _create_wave_raw(raw: ApiClient, runtime: LfdRuntime, name: str) -> dict[str
     )
     ApiAssertions.expect_status(response, 200)
     payload = ApiAssertions.expect_json_object(response)
-    required = {"id", "object", "name", "repo", "flow", "direction", "area", "status"}
+    required = {"id", "object", "name", "repo", "primary_flow", "direction", "area", "status"}
     missing = required - payload.keys()
     if missing:
         raise AssertionError(f"missing fields: {sorted(missing)}; payload={payload}")

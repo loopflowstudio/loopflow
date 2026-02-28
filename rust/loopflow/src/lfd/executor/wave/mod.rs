@@ -35,7 +35,7 @@ use crate::lfd::triggers::{
     spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Wave, WaveRun,
+    ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Wave, WaveMode, WaveRun,
     WaveRunStatus, WaveStatus,
 };
 
@@ -656,16 +656,7 @@ impl WaveExecutor {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
 
-                    let is_recurring = self
-                        .store
-                        .list_stimuli(Some(wave.id()))
-                        .await
-                        .map(|stimuli| {
-                            stimuli.iter().any(|s| {
-                                matches!(s.signal, Signal::Loop | Signal::Watch | Signal::Cron)
-                            })
-                        })
-                        .unwrap_or(false);
+                    let is_recurring = matches!(wave.mode(), WaveMode::Loop | WaveMode::Cron);
 
                     // Auto-create PR as draft; queue reconciliation promotes the queue head.
                     // Activations targeting "main" produce new branches and PRs.
@@ -833,7 +824,7 @@ impl WaveExecutor {
             );
             let envelope = ActivationEnvelope::new(
                 listener_wave.id(),
-                &stimulus.id,
+                Some(&stimulus.id),
                 ActivationSource::Listen,
                 reason,
                 "",
@@ -1337,7 +1328,9 @@ mod tests {
             id: wave_id.clone(),
             name: "fork-wave".to_string(),
             repo: repo.to_string_lossy().to_string(),
-            flow: flow_name.to_string(),
+            mode: WaveMode::Manual,
+            primary_flow: flow_name.to_string(),
+            cron: None,
             direction: vec![],
             area: vec![],
             status: WaveStatus::Running,
@@ -1391,7 +1384,9 @@ mod tests {
             id: LfdId::new(),
             name: name.to_string(),
             repo: repo.to_string_lossy().to_string(),
-            flow: flow.to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: flow.to_string(),
+            cron: None,
             direction: vec![],
             area: vec![],
             status,
@@ -1408,7 +1403,7 @@ mod tests {
             wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
-                flow: wave.flow().clone(),
+                flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
                 pr: None,
@@ -1576,7 +1571,9 @@ mod tests {
             id: LfdId::new(),
             name: "target-wave".to_string(),
             repo: repo.path().to_string_lossy().to_string(),
-            flow: "test-flow".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "test-flow".to_string(),
+            cron: None,
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,
@@ -1696,7 +1693,7 @@ mod tests {
             .expect("source run should complete");
 
         let pending = store
-            .get_pending_for_stimulus(listener_wave.id(), &stimulus.id)
+            .get_pending_for_stimulus(listener_wave.id(), Some(&stimulus.id))
             .await
             .expect("pending activation lookup should succeed");
         assert!(
@@ -1766,7 +1763,7 @@ mod tests {
             .expect("source run should complete");
 
         let pending = store
-            .get_pending_for_stimulus(listener_wave.id(), &stimulus.id)
+            .get_pending_for_stimulus(listener_wave.id(), Some(&stimulus.id))
             .await
             .expect("pending activation lookup should succeed");
         assert!(

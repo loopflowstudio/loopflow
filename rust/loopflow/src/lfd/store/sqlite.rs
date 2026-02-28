@@ -90,7 +90,6 @@ impl SqliteStore {
                 wave.id(),
                 wave.name(),
                 wave.repo(),
-                wave.flow(),
                 direction_json,
                 area_json,
                 if wave.status() == WaveStatus::Paused {
@@ -103,6 +102,9 @@ impl SqliteStore {
                 wave.cycle_start_iteration() as i64,
                 created_at,
                 if wave.serialized { 1i64 } else { 0i64 },
+                wave.mode().as_str(),
+                wave.primary_flow(),
+                wave.cron.as_deref(),
             ],
         )?;
         Ok(())
@@ -679,6 +681,28 @@ impl SqliteStore {
         self.read_waves(repo)
     }
 
+    pub fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListLoopableWaves))?;
+        let rows = stmt.query_map([], |row| Ok(map_wave_row(row)))?;
+        let mut waves = Vec::new();
+        for wave in rows {
+            waves.push(wave??);
+        }
+        Ok(waves)
+    }
+
+    pub fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListCronWaves))?;
+        let rows = stmt.query_map([], |row| Ok(map_wave_row(row)))?;
+        let mut waves = Vec::new();
+        for wave in rows {
+            waves.push(wave??);
+        }
+        Ok(waves)
+    }
+
     pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetWaveById))?;
@@ -793,7 +817,7 @@ impl SqliteStore {
 
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized
+            "SELECT w.id, w.name, w.repo, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized, w.mode, w.primary_flow, w.cron
              FROM waves w
              INNER JOIN chord_members cm ON cm.wave_id = w.id
              WHERE cm.chord_id = ?1
@@ -1273,16 +1297,27 @@ impl SqliteStore {
     pub fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
-        stimulus_id: &LfdId,
+        stimulus_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetPendingActivationForStimulus))?;
-        let activation = stmt
-            .query_row(params![wave_id, stimulus_id], |row| {
-                Ok(map_pending_activation_row(row))
-            })
-            .optional()?;
-        activation.transpose()
+        match stimulus_id {
+            Some(sid) => {
+                let mut stmt = conn.prepare(Self::sql(Query::GetPendingActivationForStimulus))?;
+                let activation = stmt
+                    .query_row(params![wave_id, sid], |row| {
+                        Ok(map_pending_activation_row(row))
+                    })
+                    .optional()?;
+                activation.transpose()
+            }
+            None => {
+                let mut stmt = conn.prepare(Self::sql(Query::GetPendingActivationForWave))?;
+                let activation = stmt
+                    .query_row(params![wave_id], |row| Ok(map_pending_activation_row(row)))
+                    .optional()?;
+                activation.transpose()
+            }
+        }
     }
 
     pub fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {

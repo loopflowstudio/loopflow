@@ -6,7 +6,7 @@ WAVE_MINIMAL = {
     "id": "abc-123",
     "name": "reduce",
     "repo": "/tmp/repo",
-    "flow": "reduce",
+    "primary_flow": "reduce",
     "direction": ["infra"],
     "area": [],
     "status": "running",
@@ -15,7 +15,7 @@ WAVE_MINIMAL = {
 
 WAVE_FULL = {
     **WAVE_MINIMAL,
-    "stimuli": [{"id": "stim-1", "kind": "loop"}],
+    "stimuli": [{"id": "stim-1", "kind": "watch"}],
     "created_at": "2026-02-08T01:56:54Z",
     "flow_steps": ["review", "iterate", "build", "gate"],
     "commits": [

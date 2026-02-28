@@ -147,6 +147,14 @@ impl Store {
         WaveStateStore::list_waves(self, repo).await
     }
 
+    pub async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
+        WaveStateStore::list_loopable_waves(self).await
+    }
+
+    pub async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
+        WaveStateStore::list_cron_waves(self).await
+    }
+
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         WaveStateStore::get_wave(self, wave_id).await
     }
@@ -287,7 +295,7 @@ impl Store {
     pub async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
-        stimulus_id: &LfdId,
+        stimulus_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
         WaveStateStore::get_pending_for_stimulus(self, wave_id, stimulus_id).await
     }
@@ -596,6 +604,8 @@ impl Store {
 #[async_trait::async_trait]
 pub trait WaveStateStore: Send + Sync {
     async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
+    async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>>;
+    async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>>;
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
@@ -642,7 +652,7 @@ pub trait WaveStateStore: Send + Sync {
     async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
-        stimulus_id: &LfdId,
+        stimulus_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>>;
     async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()>;
     async fn list_activation_log(
@@ -811,6 +821,24 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.list_waves(repo.as_deref())).await
             }
             StoreBackend::Postgres(store) => store.list_waves(repo).await,
+        }
+    }
+
+    async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, move |store| store.list_loopable_waves()).await
+            }
+            StoreBackend::Postgres(store) => store.list_loopable_waves().await,
+        }
+    }
+
+    async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, move |store| store.list_cron_waves()).await
+            }
+            StoreBackend::Postgres(store) => store.list_cron_waves().await,
         }
     }
 
@@ -1171,14 +1199,14 @@ impl WaveStateStore for Store {
     async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
-        stimulus_id: &LfdId,
+        stimulus_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
-                let stimulus_id = stimulus_id.clone();
+                let stimulus_id = stimulus_id.cloned();
                 run_sqlite(store, move |store| {
-                    store.get_pending_for_stimulus(&wave_id, &stimulus_id)
+                    store.get_pending_for_stimulus(&wave_id, stimulus_id.as_ref())
                 })
                 .await
             }
@@ -1975,7 +2003,8 @@ mod tests {
     use crate::lfd::types::{
         AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
         QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Signal, Stimulus,
-        Summary, Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Summary, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
+        WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1986,7 +2015,9 @@ mod tests {
             id: id.clone(),
             name: format!("wave-{id}"),
             repo: repo.to_string(),
-            flow: "default".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
             status: WaveStatus::Idle,
@@ -2003,7 +2034,7 @@ mod tests {
             wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
-                flow: wave.flow().clone(),
+                flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
                 pr: None,
@@ -2578,7 +2609,7 @@ mod tests {
                     wave_id: wave.id().clone(),
                     snapshot: WaveRunSnapshot {
                         repo: wave.repo().clone(),
-                        flow: wave.flow().clone(),
+                        flow: wave.primary_flow().clone(),
                         direction: wave.direction().clone(),
                         area: wave.area().clone(),
                         pr: Some(PullRequest {

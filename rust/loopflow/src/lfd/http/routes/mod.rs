@@ -77,7 +77,7 @@ pub async fn build_wave_dto(
     let queue_views = build_wave_queue_views(store, wave.id(), &live_snapshot).await?;
     let repo = wave.repo().clone();
     let name = wave.name().clone();
-    let flow_name = wave.flow().clone();
+    let flow_name = wave.primary_flow().clone();
     let flow_repo = wave.repo().clone();
     let (git_state, flow_steps) = tokio::join!(
         async {
@@ -128,7 +128,9 @@ pub async fn build_wave_dto(
         object: "wave".to_string(),
         name: wave.name().clone(),
         repo: wave.repo().clone(),
-        flow: wave.flow().clone(),
+        mode: wave.mode().as_str().to_string(),
+        primary_flow: wave.primary_flow().to_string(),
+        cron: wave.cron.clone(),
         direction: wave.direction().clone(),
         area: wave.area().clone(),
         agent: wave_config.as_ref().and_then(|config| config.agent.clone()),
@@ -399,7 +401,7 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunSnapshot,
+        LivePrState, LivePullRequestState, PullRequest, Wave, WaveMode, WaveRun, WaveRunSnapshot,
         WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
@@ -458,7 +460,9 @@ mod tests {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
             repo: repo.to_string(),
-            flow: "build".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,
@@ -475,7 +479,7 @@ mod tests {
             wave_id: wave.id().clone(),
             snapshot: WaveRunSnapshot {
                 repo: wave.repo().clone(),
-                flow: wave.flow().clone(),
+                flow: wave.primary_flow().clone(),
                 direction: wave.direction().clone(),
                 area: wave.area().clone(),
                 pr: Some(PullRequest {

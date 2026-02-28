@@ -9,8 +9,8 @@ use crate::lfd::sessions::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
 };
 use crate::lfd::types::{
-    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Signal, Stimulus,
-    WaveRun, WaveRunStatus,
+    ActivationLog, ChatMemoryBlock, ChatMessage, Chord, LivePullRequestState, Stimulus, WaveRun,
+    WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -88,7 +88,10 @@ pub struct WaveDto {
     pub object: String,
     pub name: String,
     pub repo: String,
-    pub flow: String,
+    pub mode: String,
+    pub primary_flow: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,7 +212,8 @@ pub struct ActivationLogDto {
     pub id: String,
     pub object: String,
     pub wave_id: String,
-    pub stimulus_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stimulus_id: Option<String>,
     pub source: String,
     pub reason: String,
     pub outcome: String,
@@ -347,18 +351,6 @@ pub struct UsageTimeseriesDto {
     pub buckets: Vec<UsageTimeseriesBucketAggregate>,
 }
 
-pub fn signal_str(signal: Signal) -> &'static str {
-    match signal {
-        Signal::Loop => "loop",
-        Signal::Watch => "watch",
-        Signal::Cron => "cron",
-        Signal::Once => "once",
-        Signal::Listen => "listen",
-        Signal::CiFailure => "ci_failure",
-        Signal::Unspecified => "unspecified",
-    }
-}
-
 pub fn chord_dto(chord: Chord) -> ChordDto {
     ChordDto {
         id: chord.id.to_string(),
@@ -424,7 +416,7 @@ pub fn wave_run_dto(
 pub fn stimulus_dto(s: Stimulus) -> StimulusDto {
     StimulusDto {
         id: s.id.to_string(),
-        kind: signal_str(s.signal).to_string(),
+        kind: s.signal.as_str().to_string(),
         enabled: s.enabled,
         flow: s.flow,
         source_wave_id: s.source_wave_id.map(|value| value.to_string()),
@@ -440,7 +432,7 @@ pub fn activation_log_dto(log: ActivationLog) -> ActivationLogDto {
         id: log.id.to_string(),
         object: "activation_log".to_string(),
         wave_id: log.wave_id.to_string(),
-        stimulus_id: log.stimulus_id.to_string(),
+        stimulus_id: log.stimulus_id.map(|id| id.to_string()),
         source: log.source.as_str().to_string(),
         reason: log.reason,
         outcome: log.outcome.as_str().to_string(),

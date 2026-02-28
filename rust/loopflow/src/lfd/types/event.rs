@@ -125,7 +125,7 @@ pub enum Event {
     },
     ActivationQueued {
         wave_id: LfdId,
-        stimulus_id: LfdId,
+        stimulus_id: Option<LfdId>,
         source: ActivationSource,
         reason: String,
         queue_depth: u32,
@@ -134,7 +134,7 @@ pub enum Event {
     },
     ActivationCoalesced {
         wave_id: LfdId,
-        stimulus_id: LfdId,
+        stimulus_id: Option<LfdId>,
         source: ActivationSource,
         reason: String,
         queue_depth: u32,
@@ -143,7 +143,7 @@ pub enum Event {
     },
     ActivationDropped {
         wave_id: LfdId,
-        stimulus_id: LfdId,
+        stimulus_id: Option<LfdId>,
         source: ActivationSource,
         reason: String,
         queue_depth: u32,
@@ -336,7 +336,7 @@ impl Event {
 
     pub fn activation_queued(
         wave_id: LfdId,
-        stimulus_id: LfdId,
+        stimulus_id: Option<LfdId>,
         source: ActivationSource,
         reason: String,
         queue_depth: u32,
@@ -353,7 +353,7 @@ impl Event {
 
     pub fn activation_coalesced(
         wave_id: LfdId,
-        stimulus_id: LfdId,
+        stimulus_id: Option<LfdId>,
         source: ActivationSource,
         reason: String,
         queue_depth: u32,
@@ -370,7 +370,7 @@ impl Event {
 
     pub fn activation_dropped(
         wave_id: LfdId,
-        stimulus_id: LfdId,
+        stimulus_id: Option<LfdId>,
         source: ActivationSource,
         reason: String,
         queue_depth: u32,
@@ -555,7 +555,7 @@ mod tests {
     fn activation_event_serializes_source_and_depth() {
         let event = Event::activation_queued(
             test_id("wave-1"),
-            test_id("stimulus-1"),
+            Some(test_id("stimulus-1")),
             ActivationSource::Push,
             "refs/heads/main advanced abc..def".to_string(),
             2,

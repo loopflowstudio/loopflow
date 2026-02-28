@@ -12,7 +12,7 @@ use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::ActivationSource;
-use crate::lfd::types::{Signal, Stimulus, Wave, WaveStatus};
+use crate::lfd::types::{Stimulus, Wave, WaveStatus};
 
 pub fn spawn_loop_ticker(
     scheduler: Arc<Scheduler>,
@@ -43,53 +43,26 @@ async fn tick_loop_waves(
     store: &SharedStore,
     event_hub: &EventHub,
 ) {
-    // Collect stimuli that can trigger re-runs: Loop and Cron.
-    let mut stimuli = match store.list_stimuli_by_signal(Signal::Loop.as_i32()).await {
-        Ok(stimuli) => stimuli,
+    let waves = match store.list_loopable_waves().await {
+        Ok(waves) => waves,
         Err(err) => {
-            tracing::error!(error = %err, "failed to list loop stimuli");
+            tracing::error!(error = %err, "failed to list loopable waves");
             return;
         }
     };
 
-    // Cron waves with active wave state should also loop within a cycle.
-    match store.list_stimuli_by_signal(Signal::Cron.as_i32()).await {
-        Ok(cron_stimuli) => stimuli.extend(cron_stimuli),
-        Err(err) => {
-            tracing::error!(error = %err, "failed to list cron stimuli");
-        }
-    }
-
-    for stimulus in stimuli {
-        if !stimulus.enabled {
-            continue;
-        }
-
-        let wave = match store.get_wave(&stimulus.wave_id).await {
-            Ok(Some(wave)) => wave,
-            Ok(None) => continue,
-            Err(err) => {
-                tracing::error!(wave_id = %stimulus.wave_id, error = %err, "failed to load wave");
-                continue;
-            }
-        };
-
-        if wave.status() == WaveStatus::Paused {
-            continue;
-        }
-
+    for wave in waves {
         if scheduler.has_active_session(wave.id().as_str()) {
             continue;
         }
 
-        // For serialized waves, skip if there's already an active run or pending activation.
-        // For non-serialized waves, the loop ticker still checks for idle state — a loop
-        // stimulus means "keep running whenever idle", so we only re-trigger when no runs
-        // are active.
-        if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id).await {
+        // Skip if there's already an active run or pending activation.
+        // Loop mode means "keep running whenever idle", so we only re-trigger
+        // when no runs are active.
+        if let Ok(Some(_)) = store.get_active_wave_run(wave.id()).await {
             continue;
         }
-        if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id).await {
+        if let Ok(pending) = store.list_pending_activations(wave.id()).await {
             if !pending.is_empty() {
                 continue;
             }
@@ -98,43 +71,39 @@ async fn tick_loop_waves(
         let worktree = worktree_path(Path::new(wave.repo()), wave.name());
         let wave_dir = worktree.join("wave").join(wave.name());
 
-        // For Loop stimuli: skip if wave dir was removed (cycle complete).
-        // For Cron stimuli: only re-trigger if wave dir still exists (mid-cycle).
-        if stimulus.signal == Signal::Loop {
-            if worktree.exists() && !wave_dir.exists() {
-                tracing::info!(wave = %wave.name(), "wave dir removed, skipping loop tick");
-                continue;
-            }
-        } else if stimulus.signal == Signal::Cron {
-            // Cron stimuli only loop within a cycle — wave state presence is the signal.
-            if !wave_dir.exists() {
-                continue;
-            }
+        // Skip if wave dir was removed (cycle complete).
+        if worktree.exists() && !wave_dir.exists() {
+            tracing::info!(wave = %wave.name(), "wave dir removed, skipping loop tick");
+            continue;
         }
 
-        // Safety valve: check max_iterations before re-triggering.
-        if should_pause_for_max_iterations(&stimulus, &wave) {
-            tracing::warn!(
-                wave = %wave.name(),
-                iteration = wave.iteration(),
-                max = stimulus.max_iterations.unwrap_or(0),
-                "max iterations exceeded, pausing wave"
-            );
-            let mut paused_wave = wave.clone();
-            paused_wave.status = WaveStatus::Paused;
-            if let Err(err) = store.update_wave(&paused_wave).await {
-                tracing::error!(
-                    wave_id = %paused_wave.id,
-                    error = %err,
-                    "failed to pause wave after max iterations"
-                );
+        // Safety valve: check max_iterations on any stimulus for this wave.
+        if let Ok(stimuli) = store.list_stimuli(Some(wave.id())).await {
+            if let Some(stimulus) = stimuli.iter().find(|s| s.max_iterations.is_some()) {
+                if should_pause_for_max_iterations(stimulus, &wave) {
+                    tracing::warn!(
+                        wave = %wave.name(),
+                        iteration = wave.iteration(),
+                        max = stimulus.max_iterations.unwrap_or(0),
+                        "max iterations exceeded, pausing wave"
+                    );
+                    let mut paused_wave = wave.clone();
+                    paused_wave.status = WaveStatus::Paused;
+                    if let Err(err) = store.update_wave(&paused_wave).await {
+                        tracing::error!(
+                            wave_id = %paused_wave.id,
+                            error = %err,
+                            "failed to pause wave after max iterations"
+                        );
+                    }
+                    continue;
+                }
             }
-            continue;
         }
 
         let envelope = ActivationEnvelope::new(
             wave.id(),
-            &stimulus.id,
+            None,
             ActivationSource::Poll,
             "loop ticker observed idle wave",
             "",
@@ -150,7 +119,7 @@ async fn tick_loop_waves(
                 scheduler,
                 event_hub,
                 &wave,
-                stimulus.flow.clone(),
+                Some(wave.primary_flow().to_string()),
                 envelope,
             )
             .await;

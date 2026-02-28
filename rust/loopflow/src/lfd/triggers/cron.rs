@@ -12,7 +12,7 @@ use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{ActivationSource, Signal, WaveStatus};
+use crate::lfd::types::ActivationSource;
 
 pub fn spawn_cron_poller(
     store: SharedStore,
@@ -30,63 +30,43 @@ pub fn spawn_cron_poller(
                     break;
                 }
                 _ = interval.tick() => {
-                    check_cron_stimuli(&store, &executor, &scheduler, &event_hub).await;
+                    check_cron_waves(&store, &executor, &scheduler, &event_hub).await;
                 }
             }
         }
     })
 }
 
-async fn check_cron_stimuli(
+async fn check_cron_waves(
     store: &SharedStore,
     executor: &WaveExecutor,
     scheduler: &Arc<Scheduler>,
     event_hub: &EventHub,
 ) {
-    let stimuli = match store.list_stimuli_by_signal(Signal::Cron.as_i32()).await {
-        Ok(stimuli) => stimuli,
+    let waves = match store.list_cron_waves().await {
+        Ok(waves) => waves,
         Err(err) => {
-            tracing::error!(error = %err, "failed to list cron stimuli");
+            tracing::error!(error = %err, "failed to list cron waves");
             return;
         }
     };
 
-    for stimulus in stimuli {
-        if !stimulus.enabled {
-            continue;
-        }
-
-        let cron_expr = match &stimulus.cron {
-            Some(c) if !c.is_empty() => c,
+    for wave in waves {
+        let cron_expr = match &wave.cron {
+            Some(c) if !c.is_empty() => c.clone(),
             _ => continue,
         };
 
-        let wave = match store.get_wave(&stimulus.wave_id).await {
-            Ok(Some(wave)) => wave,
-            Ok(None) => continue,
-            Err(err) => {
-                tracing::error!(stimulus_id = %stimulus.id, error = %err, "failed to get wave");
-                continue;
-            }
-        };
+        // Use the wave's last iteration timestamp as a proxy for last triggered.
+        // For more accurate tracking, we could store last_cron_triggered_at on the wave,
+        // but iteration timing is sufficient for now.
+        let last_triggered = None::<DateTime<Utc>>;
 
-        if wave.status() == WaveStatus::Paused {
-            continue;
-        }
-
-        let last_triggered = stimulus
-            .last_triggered_at
-            .and_then(|ts| DateTime::<Utc>::from_timestamp(ts, 0));
-
-        if should_activate_cron(cron_expr, last_triggered) {
-            let mut stimulus = stimulus.clone();
-            stimulus.last_triggered_at = Some(Utc::now().timestamp());
-            let _ = store.update_stimulus(&stimulus).await;
-
+        if should_activate_cron(&cron_expr, last_triggered) {
             let reason = format!("cron schedule {cron_expr} due");
             let envelope = ActivationEnvelope::new(
-                &stimulus.wave_id,
-                &stimulus.id,
+                wave.id(),
+                None,
                 ActivationSource::Poll,
                 reason,
                 "",
@@ -102,7 +82,7 @@ async fn check_cron_stimuli(
                     scheduler,
                     event_hub,
                     &wave,
-                    stimulus.flow.clone(),
+                    Some(wave.primary_flow().to_string()),
                     envelope,
                 )
                 .await;

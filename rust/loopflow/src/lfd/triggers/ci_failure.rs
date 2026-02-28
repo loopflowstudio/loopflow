@@ -87,7 +87,7 @@ async fn handle_ci_failure_event(
     );
     let envelope = ActivationEnvelope::new(
         &activation.wave_id,
-        &stimulus.id,
+        Some(&stimulus.id),
         ActivationSource::Push,
         reason,
         &activation.commit_sha,
@@ -171,7 +171,7 @@ mod tests {
     use super::*;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Wave, WaveStatus};
+    use crate::lfd::types::{Wave, WaveMode, WaveStatus};
     use std::sync::Arc;
 
     async fn create_store() -> SharedStore {
@@ -187,7 +187,9 @@ mod tests {
             id: LfdId::new(),
             name: "ci-wave".to_string(),
             repo: ".".to_string(),
-            flow: "build".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,
@@ -258,7 +260,9 @@ mod tests {
             id: LfdId::new(),
             name: "ci-wave-serialized".to_string(),
             repo: ".".to_string(),
-            flow: "build".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,
@@ -333,7 +337,7 @@ mod tests {
             .await
             .expect("list pending");
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].stimulus_id, stimulus.id);
+        assert_eq!(pending[0].stimulus_id, Some(stimulus.id));
         assert_eq!(pending[0].source, ActivationSource::Push);
         assert_eq!(pending[0].from_sha, "abc123");
         assert_eq!(pending[0].to_sha, "abc123");

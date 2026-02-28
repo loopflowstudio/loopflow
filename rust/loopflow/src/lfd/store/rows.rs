@@ -3,7 +3,7 @@ use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ActivationSource, AgentRun, AgentStatus, ChatMemoryBlock,
     ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo,
-    RepoEdge, RepoId, Signal, Stimulus, Summary, Wave, WaveRun, WaveRunSnapshot,
+    RepoEdge, RepoId, Signal, Stimulus, Summary, Wave, WaveMode, WaveRun, WaveRunSnapshot,
     WaveRunStackStatus, WaveRunStatus, WaveStatus,
 };
 
@@ -98,17 +98,21 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 
 // -- Shared row mappers ------------------------------------------------------
 
-/// SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-///        cycle_start_iteration, created_at, serialized
+/// SELECT id, name, repo, direction, area, paused, status, iteration,
+///        cycle_start_iteration, created_at, serialized, mode, primary_flow, cron
 pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
-    let direction = parse_json_vec(&row.text(4)?)?;
-    let area = parse_json_vec(&row.text(5)?)?;
-    let paused = row.int(6)? != 0;
-    let status_value = row.int(7)?;
-    let iteration = row.int(8)? as u32;
-    let cycle_start_iteration = row.int(9)? as u32;
-    let created_at = unix_to_datetime(row.bigint(10)?);
-    let serialized = row.int(11)? != 0;
+    let direction = parse_json_vec(&row.text(3)?)?;
+    let area = parse_json_vec(&row.text(4)?)?;
+    let paused = row.int(5)? != 0;
+    let status_value = row.int(6)?;
+    let iteration = row.int(7)? as u32;
+    let cycle_start_iteration = row.int(8)? as u32;
+    let created_at = unix_to_datetime(row.bigint(9)?);
+    let serialized = row.int(10)? != 0;
+    let mode_str = row.text(11)?;
+    let mode = mode_str.parse::<WaveMode>().unwrap_or_default();
+    let primary_flow = row.text(12)?;
+    let cron = row.opt_text(13)?;
     let mut status = WaveStatus::from_i32(status_value);
     if paused {
         status = WaveStatus::Paused;
@@ -118,7 +122,9 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         id: LfdId::from_raw(row.text(0)?),
         name: row.text(1)?,
         repo: row.text(2)?,
-        flow: row.text(3)?,
+        mode,
+        primary_flow,
+        cron,
         direction,
         area,
         status,
@@ -253,7 +259,7 @@ pub fn map_pending_activation_row(row: &impl StoreRow) -> StoreResult<PendingAct
     Ok(PendingActivation {
         id: LfdId::from_raw(row.text(0)?),
         wave_id: LfdId::from_raw(row.text(1)?),
-        stimulus_id: LfdId::from_raw(row.text(2)?),
+        stimulus_id: row.opt_text(2)?.map(LfdId::from_raw),
         source: ActivationSource::from_i32(row.int(3)?),
         reason: row.text(4)?,
         from_sha: row.text(5)?,
@@ -271,7 +277,7 @@ pub fn map_activation_log_row(row: &impl StoreRow) -> StoreResult<ActivationLog>
     Ok(ActivationLog {
         id: LfdId::from_raw(row.text(0)?),
         wave_id: LfdId::from_raw(row.text(1)?),
-        stimulus_id: LfdId::from_raw(row.text(2)?),
+        stimulus_id: row.opt_text(2)?.map(LfdId::from_raw),
         source: ActivationSource::from_i32(row.int(3)?),
         reason: row.text(4)?,
         outcome,

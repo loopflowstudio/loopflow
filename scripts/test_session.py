@@ -128,7 +128,9 @@ def make_client() -> Client:
 # ---------------------------------------------------------------------------
 
 
-def wait_for_session_status(client: Client, session_id: str, expected: str, timeout_s: float = 20) -> bool:
+def wait_for_session_status(
+    client: Client, session_id: str, expected: str, timeout_s: float = 20,
+) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         session = client.session(session_id)
@@ -331,7 +333,7 @@ def test_reconnect_replay(client: Client) -> bool:
     log(f"    replay after_seq={midpoint}: {partial_count} events")
 
     if partial_count >= replay_count:
-        log(f"    FAIL: partial replay should return fewer events")
+        log("    FAIL: partial replay should return fewer events")
         return False
 
     # Clean up

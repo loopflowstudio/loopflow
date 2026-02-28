@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 import json
-from pathlib import Path
-from urllib.parse import urlparse
+import os
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, Optional, TypeVar
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel

@@ -235,20 +235,6 @@ When using the Agent tool, environment variables don't propagate — track depth
 
 ---
 
-## Choosing Your Mechanism
-
-| Environment | Mechanism | Why |
-|-------------|-----------|-----|
-| Claude Code | Agent tool | Native sub-agent spawning. No disk I/O. Parallel. |
-| Codex | `lf -b` via shell | No Agent tool. Shell commands work. |
-| OpenCode | `lf -b` via shell | No Agent tool. Shell commands work. |
-| Gemini CLI | `lf -b` via shell | No Agent tool. Shell commands work. |
-| Terminal / lfd | `lf -b` via shell | Direct invocation. |
-
-If unsure which tools you have, check: can you spawn a sub-agent directly? Use that. Otherwise, fall back to shell.
-
----
-
 ## Tips
 
 - **Cheap models for sub-agents.** Use `haiku` or `sonnet` — chunk processing is mechanical, not creative.

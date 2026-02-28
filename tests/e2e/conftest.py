@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
-
 from loopflow.client import Client
+
 from scripts.lib.api_harness import ApiClient
 from scripts.lib.lfd_runtime import LfdRuntime
 

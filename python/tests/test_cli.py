@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from rich.console import Console
-
 from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
@@ -15,6 +13,7 @@ from conftest import (
 
 from loopflow.cli import _auth_status_table, _repo_table, _split_repo_slug, _status_details, _wave_table
 from loopflow.models import AuthProviderStatus, Repo, Wave
+from rich.console import Console
 
 
 def _render_table(wave: Wave) -> str:

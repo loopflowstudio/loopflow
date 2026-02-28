@@ -6,7 +6,6 @@ import json
 
 import httpx
 import pytest
-
 from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
@@ -20,7 +19,6 @@ from conftest import (
     WAVE_MINIMAL,
     WAVE_RUN_MINIMAL,
 )
-
 from loopflow.client import Client, _extract_error_message, _resolve_base_url, _resolve_token
 from loopflow.errors import LoopflowError, WaveAlreadyRunning
 from loopflow.models import SessionConfig

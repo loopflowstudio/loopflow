@@ -7,13 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 CHECKLIST = [
     "1) Open chat and start a new session. Confirm session creation succeeds.",
     "2) Inspect request payload: create-session uses `harness` (not `provider`).",
-    "3) Inspect response payload: session includes `harness` and `provider_session_id` when available.",
-    "4) Exercise a bad harness name (for example: `nonexistent`). Expect HTTP 400 with `unsupported harness`.",
-    "5) Run two Claude turns and confirm resume continuity still works (`provider_session_id` persists).",
+    "3) Inspect response payload: session includes `harness` and `provider_session_id`.",
+    "4) Exercise a bad harness name (e.g. `nonexistent`). Expect HTTP 400.",
+    "5) Run two Claude turns and confirm resume continuity (`provider_session_id` persists).",
 ]
 
 

@@ -12,6 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Run cargo fmt check
         run: cargo fmt --all -- --check
       - name: Run cargo clippy
@@ -24,6 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
+      - name: Run ruff lint check
+        run: uv run ruff check
       - name: Run Python tests
         run: uv run pytest python/tests/
 
@@ -32,6 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v4
       - name: Run E2E smoke test
         run: tests/e2e/test_smoke.sh
@@ -43,6 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Verify Docker is available
         run: docker version
       - name: Run Docker executor smoke tests

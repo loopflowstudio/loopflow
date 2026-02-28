@@ -150,7 +150,8 @@ class LfdRuntime:
             if self._process is not None and self._process.poll() is not None:
                 logs = self.logs()
                 raise RuntimeError(
-                    f"lfd exited before writing session token (exit={self._process.returncode})\n{logs}"
+                    f"lfd exited before writing session token "
+                    f"(exit={self._process.returncode})\n{logs}"
                 )
 
             if token_path.exists():

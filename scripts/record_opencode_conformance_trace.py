@@ -146,7 +146,9 @@ def _record_scenario(
 
     session_id = session_create_body.get("id")
     if not isinstance(session_id, str) or not session_id:
-        raise RuntimeError(f"OpenCode /session response missing canonical id: {session_create_body}")
+        raise RuntimeError(
+            f"OpenCode /session response missing canonical id: {session_create_body}"
+        )
 
     stream_url = f"{base_url}/event"
     message_url = f"{base_url}/session/{session_id}/message"

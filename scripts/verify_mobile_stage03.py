@@ -45,7 +45,7 @@ def _find_default_iphone_simulator() -> str:
 
 
 def build_ios(device: str) -> int:
-    print(f"Generating Xcode project...")
+    print("Generating Xcode project...")
     result = run(["xcodegen", "generate"], cwd=SWIFT_DIR)
     if result.returncode != 0:
         print("xcodegen failed. Install with: brew install xcodegen")

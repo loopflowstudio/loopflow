@@ -23,5 +23,14 @@ jobs:
             echo "Tag $version already exists"
             exit 0
           fi
+
+          # Verify Cargo.toml version matches before tagging
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          expected="${version#v}"
+          if [ "$cargo_version" != "$expected" ]; then
+            echo "::error::Version mismatch: RELEASE_NOTES.md says $version but Cargo.toml has $cargo_version"
+            exit 1
+          fi
+
           git tag "$version"
           git push origin "$version"

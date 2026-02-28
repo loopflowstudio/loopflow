@@ -108,9 +108,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output_dir = loopflow::lfd::default_output_dir();
-    let max_age = std::time::Duration::from_secs(
-        u64::from(lfd_config.output_log_retention_days) * 86400,
-    );
+    let max_age =
+        std::time::Duration::from_secs(u64::from(lfd_config.output_log_retention_days) * 86400);
     loopflow::lfd::output::prune_output_logs(&output_dir, max_age);
     let output = OutputHub::new(2048, output_dir.clone());
     let event_hub = EventHub::new(1024);

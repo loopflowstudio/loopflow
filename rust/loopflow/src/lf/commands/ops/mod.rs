@@ -6,9 +6,10 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, publish_release,
-    rebase_with_recovery, release_status, AbandonOptions, CommitOptions, LandOptions, NextOptions,
-    PrOptions, Progress, PublishOptions, RebaseOptions, RotationResult,
+    abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
+    publish_release, rebase_with_recovery, release_status, AbandonOptions, CommitOptions,
+    IngestOptions, LandOptions, NextOptions, PrOptions, Progress, PublishOptions, RebaseOptions,
+    RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, Write};
@@ -71,6 +72,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Lint => run_check("lint"),
         OpsCommand::Test => run_check("test"),
+        OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),
     }
 }
 
@@ -244,6 +246,19 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
         },
         progress,
     )?;
+    Ok(())
+}
+
+fn ingest_cmd(wave: Option<&str>, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let result = ingest(
+        &repo_root,
+        &IngestOptions {
+            wave: wave.map(str::to_string),
+        },
+        progress,
+    )?;
+    println!("{}", result.dest.display());
     Ok(())
 }
 

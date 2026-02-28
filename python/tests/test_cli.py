@@ -10,8 +10,13 @@ from conftest import (
     WAVE_FULL,
     WAVE_MINIMAL,
 )
-
-from loopflow.cli import _auth_status_table, _repo_table, _split_repo_slug, _status_details, _wave_table
+from loopflow.cli import (
+    _auth_status_table,
+    _repo_table,
+    _split_repo_slug,
+    _status_details,
+    _wave_table,
+)
 from loopflow.models import AuthProviderStatus, Repo, Wave
 from rich.console import Console
 

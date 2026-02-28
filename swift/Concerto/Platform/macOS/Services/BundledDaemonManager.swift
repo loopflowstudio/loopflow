@@ -108,8 +108,14 @@ final class BundledDaemonManager {
 
             if Self.prefersNativeMode {
                 try startNativeDaemon(token: token, port: port)
+            } else if try await dockerAvailable() {
+                do {
+                    try await startContainerDaemon(token: token, port: port)
+                } catch {
+                    try startNativeDaemon(token: token, port: port)
+                }
             } else {
-                try await startContainerDaemon(token: token, port: port)
+                try startNativeDaemon(token: token, port: port)
             }
 
             self.token = token

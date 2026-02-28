@@ -10,16 +10,12 @@ The bar: faster than typing for someone in flow.
 
 Accuracy beats latency. A 0.5s delay you can trust is better than instant text you have to correct.
 
-Apple-first with WhisperKit fallback: `SpeechAnalyzer` + `DictationTranscriber` on macOS 26+/iOS 26+, WhisperKit tiny model on older OS versions. Runtime engine selection via `defaultEngineFactory()`.
-
-Push-to-talk (Phase 01) and Apple engine foundation (Phase 02) shipped — `VoiceInputService` in LoopflowCore, `VoiceInputButton` with tap-to-toggle and press-and-hold, `AppleDictationVoiceInputEngine` with progressive dictation, `VoiceInputWarmup` for background asset preinstall, dictation-specific output options (punctuation/emoji/etiquette), and runtime fallback to WhisperKit.
+Apple-first with WhisperKit fallback: `SpeechAnalyzer` + `DictationTranscriber` on macOS 26+/iOS 26+, WhisperKit tiny model on older OS versions. Runtime engine selection via `defaultEngineFactory()` and a protocol-based `VoiceInputEngine`.
 
 Custom language model (`SFSpeechLanguageModel` + `DictationTranscriber.ContentHint.customizedLanguage(...)` for loopflow terms) deferred until base Apple engine path is validated in production use.
 
 ## Goals
 
-- Ship push-to-talk voice input with streaming transcription into the composer
-- Graduate to hands-free via Voice Activity Detection — no button needed
 - Add auto-send on silence so the full loop (speak → transcribe → send) requires zero hand interaction
 - Prime the recognizer with contextual vocabulary (wave names, file paths, loopflow terms)
 

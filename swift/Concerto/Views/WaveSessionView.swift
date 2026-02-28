@@ -138,6 +138,9 @@ struct WaveSessionView: View {
             guard managesLifecycle else { return }
             state.configureClientContext(compact: value == .compact)
         }
+        .onChange(of: state.turnState, initial: true) { _, newState in
+            handleTurnStateChange(newState)
+        }
         .onChange(of: voiceService.state) { _, newState in
             handleVoiceStateChange(newState)
         }
@@ -279,12 +282,25 @@ struct WaveSessionView: View {
 
     private func handleVoiceStateChange(_ newState: VoiceInputService.State) {
         switch newState {
+        case .listening, .idle:
+            voiceComposerBaseline = nil
         case .recording:
             beginVoiceComposerSessionIfNeeded()
         case .transcribing:
             break
-        case .idle:
-            voiceComposerBaseline = nil
+        }
+    }
+
+    private func handleTurnStateChange(_ newState: TurnState) {
+        switch newState {
+        case .running:
+            voiceService.pauseListening()
+        case .completed, .idle:
+            Task {
+                try? await voiceService.resumeListening()
+            }
+        case .failed:
+            break
         }
     }
 

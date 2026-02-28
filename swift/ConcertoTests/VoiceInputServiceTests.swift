@@ -32,6 +32,45 @@ struct VoiceInputServiceTests {
     }
 
     @MainActor
+    @Test("startListening enters VAD mode and emits utterance transcripts")
+    func startListeningEmitsUtterances() async {
+        let engine = MockVoiceInputEngine(partials: [], finalTranscript: "")
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
+            engineFactory: { engine }
+        )
+
+        var transcripts: [String] = []
+        service.setTranscriptHandler { transcript in
+            transcripts.append(transcript)
+        }
+
+        do {
+            try await service.startListening()
+        } catch {
+            Issue.record("Expected startListening to succeed: \(error)")
+            return
+        }
+
+        #expect(service.inputMode == .voiceActivityDetection)
+        #expect(service.state == .listening)
+
+        await engine.emitVAD(.speechStarted)
+        #expect(service.state == .recording)
+
+        await engine.emitVAD(.partial("hello"))
+        #expect(service.partialTranscript == "hello")
+
+        await engine.emitVAD(.utteranceComplete("hello world"))
+        await waitUntil {
+            transcripts == ["hello world"]
+        }
+
+        #expect(service.state == .listening)
+        #expect(service.partialTranscript.isEmpty)
+    }
+
+    @MainActor
     @Test("denied microphone permission fails start")
     func deniedMicrophonePermission() async {
         let service = VoiceInputService(
@@ -103,6 +142,100 @@ struct VoiceInputServiceTests {
     }
 
     @MainActor
+    @Test("pause and resume listening ignore VAD events while paused")
+    func pauseAndResumeListening() async {
+        let engine = MockVoiceInputEngine(partials: [], finalTranscript: "")
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
+            engineFactory: { engine }
+        )
+
+        var transcripts: [String] = []
+        service.setTranscriptHandler { transcript in
+            transcripts.append(transcript)
+        }
+
+        do {
+            try await service.startListening()
+        } catch {
+            Issue.record("Expected startListening to succeed: \(error)")
+            return
+        }
+
+        service.pauseListening()
+        await engine.emitVAD(.speechStarted)
+        await engine.emitVAD(.partial("ignored"))
+        await engine.emitVAD(.utteranceComplete("ignored"))
+
+        #expect(service.state == .listening)
+        #expect(service.partialTranscript.isEmpty)
+        #expect(transcripts.isEmpty)
+
+        do {
+            try await service.resumeListening()
+        } catch {
+            Issue.record("Expected resumeListening to succeed: \(error)")
+            return
+        }
+
+        await engine.emitVAD(.speechStarted)
+        await engine.emitVAD(.partial("accepted"))
+        await engine.emitVAD(.utteranceComplete("accepted"))
+        await waitUntil {
+            transcripts == ["accepted"]
+        }
+    }
+
+    @MainActor
+    @Test("setVADSensitivity updates active VAD session")
+    func setVADSensitivityRestartsSession() async {
+        let engine = MockVoiceInputEngine(partials: [], finalTranscript: "")
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
+            engineFactory: { engine }
+        )
+
+        do {
+            try await service.startListening()
+        } catch {
+            Issue.record("Expected startListening to succeed: \(error)")
+            return
+        }
+
+        service.setVADSensitivity(.noisy)
+        await waitUntil {
+            engine.lastVADSensitivity() == .noisy
+        }
+
+        #expect(service.vadSensitivity == .noisy)
+    }
+
+    @MainActor
+    @Test("stopListening exits VAD mode")
+    func stopListeningExitsVADMode() async {
+        let engine = MockVoiceInputEngine(partials: [], finalTranscript: "")
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
+            engineFactory: { engine }
+        )
+
+        do {
+            try await service.startListening()
+        } catch {
+            Issue.record("Expected startListening to succeed: \(error)")
+            return
+        }
+
+        service.stopListening()
+        await waitUntil {
+            engine.stopVADCallCount() == 1
+        }
+
+        #expect(service.inputMode == .pushToTalk)
+        #expect(service.state == .idle)
+    }
+
+    @MainActor
     @Test("stop falls back to partial transcript when final transcript is empty")
     func stopFallsBackToPartialTranscript() async {
         let engine = MockVoiceInputEngine(partials: ["hello world"], finalTranscript: "")
@@ -164,6 +297,36 @@ struct VoiceInputServiceTests {
 
         let transcript = await service.stopRecording()
         #expect(transcript == "hello there")
+    }
+
+    @MainActor
+    @Test("cancelCurrentUtterance drops current VAD transcript and keeps listening")
+    func cancelCurrentUtteranceDropsTranscript() async {
+        let engine = MockVoiceInputEngine(partials: [], finalTranscript: "")
+        let service = VoiceInputService(
+            permissionClient: MockVoicePermissionClient(status: .granted, requestAccessResult: true),
+            engineFactory: { engine }
+        )
+
+        var transcripts: [String] = []
+        service.setTranscriptHandler { transcript in
+            transcripts.append(transcript)
+        }
+
+        do {
+            try await service.startListening()
+        } catch {
+            Issue.record("Expected startListening to succeed: \(error)")
+            return
+        }
+
+        await engine.emitVAD(.speechStarted)
+        await engine.emitVAD(.partial("draft"))
+        service.cancelCurrentUtterance()
+        await engine.emitVAD(.utteranceComplete("draft should drop"))
+
+        #expect(transcripts.isEmpty)
+        #expect(service.state == .listening)
     }
 
     @MainActor
@@ -273,6 +436,9 @@ private final class MockVoiceInputEngine: VoiceInputEngine, @unchecked Sendable 
     private let prepareDelayNanos: UInt64
     private var prepareCount = 0
     private var cancelCount = 0
+    private var stopVADCount = 0
+    private var vadHandler: (@Sendable (VADEvent) -> Void)?
+    private var latestVADSensitivity: VADSensitivity?
 
     init(
         partials: [String],
@@ -307,12 +473,37 @@ private final class MockVoiceInputEngine: VoiceInputEngine, @unchecked Sendable 
         cancelCount += 1
     }
 
+    func startVADSession(
+        sensitivity: VADSensitivity,
+        onEvent: @escaping @Sendable (VADEvent) -> Void
+    ) async throws {
+        latestVADSensitivity = sensitivity
+        vadHandler = onEvent
+    }
+
+    func stopVADSession() async {
+        stopVADCount += 1
+        vadHandler = nil
+    }
+
     func cancelCallCount() -> Int {
         cancelCount
     }
 
     func prepareCallCount() -> Int {
         prepareCount
+    }
+
+    func emitVAD(_ event: VADEvent) async {
+        vadHandler?(event)
+    }
+
+    func stopVADCallCount() -> Int {
+        stopVADCount
+    }
+
+    func lastVADSensitivity() -> VADSensitivity? {
+        latestVADSensitivity
     }
 }
 

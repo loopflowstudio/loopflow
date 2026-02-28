@@ -8,10 +8,9 @@ struct VoiceInputButton: View {
     @Bindable var voiceService: VoiceInputService
     let onTranscript: (String) -> Void
 
-    @State private var holdTask: Task<Void, Never>?
-    @State private var isPressing = false
-    @State private var isHoldRecording = false
+    @State private var ignoreNextTap = false
     @State private var isPulsing = false
+    @State private var isBreathing = false
 
     private var buttonSize: CGFloat { platformVoiceButtonSize }
 
@@ -19,6 +18,8 @@ struct VoiceInputButton: View {
         switch voiceService.state {
         case .idle:
             return "mic"
+        case .listening:
+            return "mic.badge.waveform"
         case .recording:
             return "mic.fill"
         case .transcribing:
@@ -28,7 +29,7 @@ struct VoiceInputButton: View {
 
     private var iconColor: Color {
         switch voiceService.state {
-        case .idle:
+        case .idle, .listening:
             return palette.textSecondary
         case .recording:
             return palette.accent
@@ -39,7 +40,7 @@ struct VoiceInputButton: View {
 
     private var backgroundColor: Color {
         switch voiceService.state {
-        case .idle:
+        case .idle, .listening:
             return palette.surfaceMuted
         case .recording:
             return palette.accent.opacity(0.15)
@@ -51,88 +52,154 @@ struct VoiceInputButton: View {
     private var accessibilityHint: String {
         switch voiceService.state {
         case .idle:
-            return "Tap to start recording, or press and hold to record while held."
+            return "Tap to start recording. Long press to start hands-free listening."
+        case .listening:
+            return "Tap to stop hands-free listening."
         case .recording:
+            if voiceService.inputMode == .voiceActivityDetection {
+                return "Tap to cancel this utterance and continue listening."
+            }
             return "Tap to stop recording."
         case .transcribing:
             return "Transcribing your audio."
         }
     }
 
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(backgroundColor)
+    private var scaleEffectValue: CGFloat {
+        guard !reduceMotion else { return 1 }
 
-            Image(systemName: iconName)
-                .font(Typography.body())
-                .foregroundStyle(iconColor)
+        switch voiceService.state {
+        case .recording:
+            return isPulsing ? 1.08 : 1
+        case .listening:
+            return isBreathing ? 1.04 : 1
+        case .idle, .transcribing:
+            return 1
         }
-        .frame(width: buttonSize, height: buttonSize)
-        .scaleEffect(voiceService.state == .recording && !reduceMotion ? (isPulsing ? 1.08 : 1) : 1)
+    }
+
+    var body: some View {
+        Group {
+            if voiceService.inputMode == .voiceActivityDetection {
+                button
+                    .contextMenu {
+                        sensitivityActions
+
+                        Divider()
+
+                        Button("Stop listening") {
+                            voiceService.stopListening()
+                        }
+                    }
+            } else {
+                button
+            }
+        }
+        .onAppear {
+            voiceService.setTranscriptHandler(onTranscript)
+        }
+        .onDisappear {
+            voiceService.setTranscriptHandler(nil)
+        }
+        .onChange(of: voiceService.state, initial: true) { _, _ in
+            updateAnimationState()
+        }
+    }
+
+    private var button: some View {
+        Button(action: handleTap) {
+            ZStack {
+                Circle()
+                    .fill(backgroundColor)
+
+                symbol
+            }
+            .frame(width: buttonSize, height: buttonSize)
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(scaleEffectValue)
         .animation(DesignAnimation.standard(reduceMotion), value: voiceService.state)
         .animation(DesignAnimation.standard(reduceMotion), value: isPulsing)
+        .animation(DesignAnimation.standard(reduceMotion), value: isBreathing)
         .contentShape(Circle())
-        .gesture(pressGesture)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45)
+                .onEnded { _ in
+                    handleLongPress()
+                }
+        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Voice input")
         .accessibilityHint(accessibilityHint)
         .accessibilityAddTraits(.isButton)
-        .onChange(of: voiceService.state, initial: true) { _, _ in
-            updatePulseAnimation()
+    }
+
+    @ViewBuilder
+    private var symbol: some View {
+        if voiceService.state == .listening {
+            Image(systemName: iconName)
+                .font(Typography.body())
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(palette.textSecondary, palette.accent)
+        } else {
+            Image(systemName: iconName)
+                .font(Typography.body())
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(iconColor)
         }
     }
 
-    private var pressGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { _ in
-                guard !isPressing else { return }
-                isPressing = true
-                scheduleHoldRecording()
-            }
-            .onEnded { _ in
-                isPressing = false
-                let wasHoldRecording = isHoldRecording
-                holdTask?.cancel()
-                holdTask = nil
-
-                if wasHoldRecording {
-                    isHoldRecording = false
-                    stopAndInsertTranscript()
-                } else {
-                    toggleTapRecording()
+    @ViewBuilder
+    private var sensitivityActions: some View {
+        ForEach(VADSensitivity.allCases, id: \.self) { sensitivity in
+            Button {
+                voiceService.setVADSensitivity(sensitivity)
+            } label: {
+                HStack {
+                    Text(sensitivity.title)
+                    if voiceService.vadSensitivity == sensitivity {
+                        Image(systemName: "checkmark")
+                    }
                 }
             }
-    }
-
-    private func scheduleHoldRecording() {
-        guard voiceService.state == .idle else { return }
-
-        holdTask?.cancel()
-        holdTask = Task {
-            try? await Task.sleep(for: .milliseconds(220))
-            guard !Task.isCancelled else { return }
-            guard isPressing else { return }
-
-            isHoldRecording = true
-            do {
-                try await voiceService.startRecording()
-            } catch {
-                isHoldRecording = false
-            }
         }
     }
 
-    private func toggleTapRecording() {
+    private func handleTap() {
+        if ignoreNextTap {
+            ignoreNextTap = false
+            return
+        }
+
         switch voiceService.state {
         case .idle:
             Task {
                 try? await voiceService.startRecording()
             }
+
+        case .listening:
+            voiceService.stopListening()
+
         case .recording:
-            stopAndInsertTranscript()
+            if voiceService.inputMode == .voiceActivityDetection {
+                voiceService.cancelCurrentUtterance()
+            } else {
+                stopAndInsertTranscript()
+            }
+
         case .transcribing:
-            break
+            if voiceService.inputMode == .voiceActivityDetection {
+                voiceService.cancelCurrentUtterance()
+            }
+        }
+    }
+
+    private func handleLongPress() {
+        guard voiceService.state == .idle else { return }
+        ignoreNextTap = true
+
+        Task {
+            try? await voiceService.startListening()
         }
     }
 
@@ -144,15 +211,36 @@ struct VoiceInputButton: View {
         }
     }
 
-    private func updatePulseAnimation() {
-        guard voiceService.state == .recording, !reduceMotion else {
+    private func updateAnimationState() {
+        if voiceService.state == .recording, !reduceMotion {
             isPulsing = false
-            return
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                isPulsing = true
+            }
+        } else {
+            isPulsing = false
         }
 
-        isPulsing = false
-        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-            isPulsing = true
+        if voiceService.state == .listening, !reduceMotion {
+            isBreathing = false
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                isBreathing = true
+            }
+        } else {
+            isBreathing = false
+        }
+    }
+}
+
+private extension VADSensitivity {
+    var title: String {
+        switch self {
+        case .quiet:
+            return "Quiet room"
+        case .normal:
+            return "Normal"
+        case .noisy:
+            return "Noisy"
         }
     }
 }

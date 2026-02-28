@@ -141,7 +141,10 @@ impl OutputHub {
 pub fn prune_output_logs(dir: &Path, max_age: Duration) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(_) => return,
+        Err(err) => {
+            tracing::debug!(dir = %dir.display(), error = %err, "skipping output log pruning");
+            return;
+        }
     };
     let now = SystemTime::now();
     let mut pruned = 0u32;

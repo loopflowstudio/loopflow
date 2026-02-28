@@ -148,3 +148,69 @@ PROVIDER_INFO_FULL = {
         }
     ],
 }
+
+USAGE_SUMMARY_BY_MODEL = {
+    "object": "usage_summary",
+    "group_by": "model",
+    "from": None,
+    "to": None,
+    "groups": [
+        {
+            "key": "gpt-5.1-codex",
+            "tokens": {
+                "input": 42100,
+                "output": 8500,
+                "reasoning": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+            },
+            "sessions": 3,
+            "turns": 45,
+        },
+        {
+            "key": "opencode/kimi-k2.5",
+            "tokens": {
+                "input": 1_000_000,
+                "output": 500_000,
+                "reasoning": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+            },
+            "sessions": 8,
+            "turns": 120,
+        },
+    ],
+}
+
+USAGE_SUMMARY = {
+    "object": "usage_summary",
+    "group_by": "wave",
+    "from": None,
+    "to": None,
+    "groups": [
+        {
+            "key": "engbot",
+            "tokens": {
+                "input": 42100,
+                "output": 8500,
+                "reasoning": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+            },
+            "sessions": 3,
+            "turns": 45,
+        },
+        {
+            "key": "infra",
+            "tokens": {
+                "input": 128300,
+                "output": 24100,
+                "reasoning": 12000,
+                "cache_read": 45000,
+                "cache_write": 3200,
+            },
+            "sessions": 8,
+            "turns": 120,
+        },
+    ],
+}

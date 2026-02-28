@@ -18,6 +18,9 @@ from .models import (
     SessionConfig,
     SessionEventEnvelope,
     Stimulus,
+    TokenTotals,
+    UsageSummary,
+    UsageSummaryGroup,
     Wave,
     WaveRun,
 )
@@ -54,6 +57,28 @@ def disconnect_auth(provider: str) -> AuthProviderStatus:
 
 def providers() -> list[ProviderInfo]:
     return _client().providers()
+
+
+def usage_summary(
+    group_by: str = "wave",
+    wave: Optional[str] = None,
+    flow: Optional[str] = None,
+    step: Optional[str] = None,
+    model: Optional[str] = None,
+    source: Optional[str] = None,
+    from_: Optional[str] = None,
+    to_: Optional[str] = None,
+) -> UsageSummary:
+    return _client().usage_summary(
+        group_by=group_by,
+        wave=wave,
+        flow=flow,
+        step=step,
+        model=model,
+        source=source,
+        from_=from_,
+        to_=to_,
+    )
 
 
 def waves(repo: Optional[str] = None) -> list[Wave]:
@@ -273,6 +298,9 @@ __all__ = [
     "SessionConfig",
     "SessionEventEnvelope",
     "Stimulus",
+    "TokenTotals",
+    "UsageSummary",
+    "UsageSummaryGroup",
     "Wave",
     "WaveRun",
     "health",
@@ -281,6 +309,7 @@ __all__ = [
     "start_auth",
     "disconnect_auth",
     "providers",
+    "usage_summary",
     "waves",
     "wave",
     "create_wave",

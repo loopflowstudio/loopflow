@@ -20,6 +20,7 @@ from .models import (
     Session,
     SessionConfig,
     SessionEventEnvelope,
+    UsageSummary,
     Wave,
     WaveRun,
 )
@@ -71,7 +72,9 @@ class Client:
         if resolved_token:
             headers["Authorization"] = f"Bearer {resolved_token}"
         self._client = httpx.Client(
-            base_url=resolved, timeout=timeout, headers=headers,
+            base_url=resolved,
+            timeout=timeout,
+            headers=headers,
         )
 
     def close(self) -> None:
@@ -108,6 +111,30 @@ class Client:
         if not isinstance(payload, list):
             raise LoopflowError("invalid providers response payload")
         return [ProviderInfo.model_validate(item) for item in payload]
+
+    def usage_summary(
+        self,
+        group_by: str = "wave",
+        wave: Optional[str] = None,
+        flow: Optional[str] = None,
+        step: Optional[str] = None,
+        model: Optional[str] = None,
+        source: Optional[str] = None,
+        from_: Optional[str] = None,
+        to_: Optional[str] = None,
+    ) -> UsageSummary:
+        optional = {
+            "wave": wave,
+            "flow": flow,
+            "step": step,
+            "model": model,
+            "source": source,
+            "from": from_,
+            "to": to_,
+        }
+        params = {"group_by": group_by, **{k: v for k, v in optional.items() if v is not None}}
+        payload = self._request_json("GET", "/v0/usage/summary", params=params)
+        return UsageSummary.model_validate(payload)
 
     def waves(self, repo: Optional[str] = None) -> list[Wave]:
         params: dict[str, str] = {}
@@ -260,9 +287,7 @@ class Client:
         return self._request_json("POST", f"/v0/waves/{name_or_id}/stimulus", json=body)
 
     def remove_stimulus(self, name_or_id: str, stimulus_id: str) -> dict[str, Any]:
-        return self._request_json(
-            "DELETE", f"/v0/waves/{name_or_id}/stimulus/{stimulus_id}"
-        )
+        return self._request_json("DELETE", f"/v0/waves/{name_or_id}/stimulus/{stimulus_id}")
 
     def stop_wave(self, name_or_id: str) -> dict[str, Any]:
         return self._request_json("POST", f"/v0/waves/{name_or_id}/stop")
@@ -441,9 +466,7 @@ class Client:
 
         return [model_type.model_validate(item) for item in data]
 
-    def _request_optional_model(
-        self, path: str, model_type: type[ModelT]
-    ) -> Optional[ModelT]:
+    def _request_optional_model(self, path: str, model_type: type[ModelT]) -> Optional[ModelT]:
         payload = self._request_json("GET", path, allow_not_found=True)
         if payload is None:
             return None

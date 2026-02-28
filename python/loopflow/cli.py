@@ -12,7 +12,16 @@ from rich.table import Table
 
 from loopflow import api
 from loopflow.errors import LoopflowError
-from loopflow.models import AuthProviderStatus, Repo, Wave
+from loopflow.models import (
+    AuthProviderStatus,
+    CostRates,
+    ProviderInfo,
+    Repo,
+    TokenTotals,
+    UsageSummary,
+    UsageSummaryGroup,
+    Wave,
+)
 
 app = typer.Typer(help="Query lfd and manage waves.")
 auth_app = typer.Typer(help="Manage provider authentication.")
@@ -35,10 +44,7 @@ def _wave_table(waves: list[Wave]) -> Table:
         run = wave.active_run
         local_worktree = (run.local_worktree if run else None) or wave.local_worktree or "-"
         remote_branch = (
-            (run.remote_branch if run else None)
-            or wave.remote_branch
-            or wave.branch
-            or "-"
+            (run.remote_branch if run else None) or wave.remote_branch or wave.branch or "-"
         )
         table.add_row(
             wave.name,
@@ -184,6 +190,185 @@ def _connect_provider(provider: str) -> None:
     typer.echo("Authentication still pending. Complete auth in browser and run `lfq auth status`.")
 
 
+def _format_tokens(value: int) -> str:
+    if value == 0:
+        return "\u2014"
+    if value < 1000:
+        return str(value)
+    if value < 1_000_000:
+        return f"{value / 1000:.1f}k"
+    return f"{value / 1_000_000:.1f}M"
+
+
+_GROUP_BY_FOR_FILTER = {
+    "wave": "step",
+    "flow": "wave",
+    "step": "wave",
+    "model": "wave",
+    "source": "wave",
+}
+
+
+def _infer_group_by(
+    wave: Optional[str],
+    flow: Optional[str],
+    step: Optional[str],
+    model: Optional[str],
+    source: Optional[str],
+    prompt: bool,
+    group_by: Optional[str],
+) -> str:
+    if group_by is not None:
+        return group_by
+    if prompt:
+        return "source"
+    filters = {
+        k: v
+        for k, v in {
+            "wave": wave,
+            "flow": flow,
+            "step": step,
+            "model": model,
+            "source": source,
+        }.items()
+        if v is not None
+    }
+    if len(filters) > 1:
+        typer.echo(
+            "Multiple filters require --group-by. "
+            "Example: lfq usage --wave X --model Y --group-by step",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if len(filters) == 1:
+        filter_name = next(iter(filters))
+        return _GROUP_BY_FOR_FILTER[filter_name]
+    return "wave"
+
+
+def _usage_table(summary: UsageSummary) -> Table:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column(summary.group_by)
+    table.add_column("input", justify="right")
+    table.add_column("output", justify="right")
+    table.add_column("reasoning", justify="right")
+    table.add_column("cache_r", justify="right")
+    table.add_column("cache_w", justify="right")
+    table.add_column("sessions", justify="right")
+    table.add_column("turns", justify="right")
+
+    for group in summary.groups:
+        t = group.tokens
+        table.add_row(
+            group.key,
+            _format_tokens(t.input),
+            _format_tokens(t.output),
+            _format_tokens(t.reasoning),
+            _format_tokens(t.cache_read),
+            _format_tokens(t.cache_write),
+            str(group.sessions),
+            str(group.turns),
+        )
+    return table
+
+
+def _providers_table(providers: list[ProviderInfo]) -> Table:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("provider")
+    table.add_column("status")
+    table.add_column("billing")
+    table.add_column("models")
+
+    for p in providers:
+        if p.auth_status == "active":
+            status = "\u2713 active"
+        else:
+            status = f"\u2717 {p.auth_status}"
+        model_names = ", ".join(m.display_name for m in p.models)
+        table.add_row(_provider_label(p.provider), status, p.billing, model_names)
+    return table
+
+
+def _estimate_cost(tokens: TokenTotals, rates: CostRates) -> float:
+    cost = tokens.input * rates.input_per_mtok / 1_000_000
+    cost += tokens.output * rates.output_per_mtok / 1_000_000
+    if rates.cache_read_per_mtok:
+        cost += tokens.cache_read * rates.cache_read_per_mtok / 1_000_000
+    if rates.cache_write_per_mtok:
+        cost += tokens.cache_write * rates.cache_write_per_mtok / 1_000_000
+    return cost
+
+
+def _format_cost(cost: float) -> str:
+    if cost < 0.01:
+        return "<$0.01"
+    return f"~${cost:.2f}"
+
+
+def _billing_tables(
+    summary: UsageSummary, providers: list[ProviderInfo]
+) -> tuple[list[Table], Optional[str]]:
+    model_billing: dict[str, tuple[str, Optional[CostRates]]] = {}
+    for p in providers:
+        for m in p.models:
+            model_billing[m.id] = (p.billing, m.cost_rates)
+
+    sub_groups: list[UsageSummaryGroup] = []
+    metered_groups: list[tuple[UsageSummaryGroup, Optional[CostRates]]] = []
+    for group in summary.groups:
+        billing, rates = model_billing.get(group.key, ("subscription", None))
+        if billing == "per_token":
+            metered_groups.append((group, rates))
+        else:
+            sub_groups.append(group)
+
+    tables: list[Table] = []
+
+    if sub_groups:
+        table = Table(title="Subscription", show_header=True, header_style="bold")
+        table.add_column("model")
+        table.add_column("input", justify="right")
+        table.add_column("output", justify="right")
+        table.add_column("sessions", justify="right")
+        table.add_column("turns", justify="right")
+        for group in sub_groups:
+            t = group.tokens
+            table.add_row(
+                group.key,
+                _format_tokens(t.input),
+                _format_tokens(t.output),
+                str(group.sessions),
+                str(group.turns),
+            )
+        tables.append(table)
+
+    total_cost = 0.0
+    if metered_groups:
+        table = Table(title="Metered", show_header=True, header_style="bold")
+        table.add_column("model")
+        table.add_column("input", justify="right")
+        table.add_column("output", justify="right")
+        table.add_column("sessions", justify="right")
+        table.add_column("turns", justify="right")
+        table.add_column("est. cost", justify="right")
+        for group, rates in metered_groups:
+            t = group.tokens
+            cost = _estimate_cost(t, rates) if rates else 0.0
+            total_cost += cost
+            table.add_row(
+                group.key,
+                _format_tokens(t.input),
+                _format_tokens(t.output),
+                str(group.sessions),
+                str(group.turns),
+                _format_cost(cost) if rates else "\u2014",
+            )
+        tables.append(table)
+
+    total_line = f"total metered: {_format_cost(total_cost)}" if total_cost > 0 else None
+    return tables, total_line
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
     if ctx.invoked_subcommand is not None:
@@ -289,6 +474,67 @@ def logs_wave(name_or_id: str) -> None:
         raise typer.Exit(code=1) from exc
 
 
+@app.command("usage", help="Show token usage summary.")
+def usage(
+    wave: Optional[str] = typer.Option(None, "--wave", "-w"),
+    flow: Optional[str] = typer.Option(None, "--flow", "-f"),
+    step: Optional[str] = typer.Option(None, "--step", "-s"),
+    model: Optional[str] = typer.Option(None, "--model", "-m"),
+    source: Optional[str] = typer.Option(None, "--source"),
+    prompt: bool = typer.Option(False, "--prompt", "-p"),
+    billing: bool = typer.Option(False, "--billing", "-b"),
+    group_by: Optional[str] = typer.Option(None, "--group-by", "-g"),
+    from_time: Optional[str] = typer.Option(None, "--from"),
+    to_time: Optional[str] = typer.Option(None, "--to"),
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    resolved_group_by = (
+        "model" if billing else _infer_group_by(wave, flow, step, model, source, prompt, group_by)
+    )
+    summary = api.usage_summary(
+        group_by=resolved_group_by,
+        wave=wave,
+        flow=flow,
+        step=step,
+        model=model,
+        source=source,
+        from_=from_time,
+        to_=to_time,
+    )
+    if json_output:
+        typer.echo(json.dumps(summary.model_dump(mode="json", by_alias=True), indent=2))
+        return
+    if billing:
+        provider_list = api.providers()
+        tables, total_line = _billing_tables(summary, provider_list)
+        if not tables:
+            console.print("no usage data")
+            return
+        for table in tables:
+            console.print(table)
+        if total_line:
+            console.print(total_line)
+        return
+    if summary.groups:
+        console.print(_usage_table(summary))
+    else:
+        console.print("no usage data")
+
+
+@app.command("providers", help="List providers with auth status and models.")
+def providers_cmd(
+    json_output: bool = typer.Option(False, "--json", "-j"),
+) -> None:
+    provider_list = api.providers()
+    if json_output:
+        typer.echo(json.dumps([p.model_dump(mode="json") for p in provider_list], indent=2))
+        return
+    if provider_list:
+        console.print(_providers_table(provider_list))
+    else:
+        console.print("no providers")
+
+
 @auth_app.command("status", help="Show authentication status for all providers.")
 def auth_status(
     provider: Optional[str] = None,
@@ -322,6 +568,11 @@ def auth_claude() -> None:
 @auth_app.command("codex", help="Start Codex authentication.")
 def auth_codex() -> None:
     _connect_provider("codex")
+
+
+@auth_app.command("zen", help="Start OpenCode Zen authentication.")
+def auth_zen() -> None:
+    _connect_provider("opencodezen")
 
 
 @auth_app.command("disconnect", help="Disconnect a provider.")

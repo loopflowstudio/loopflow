@@ -144,3 +144,26 @@ class Session(BaseModel):
 class SessionEventEnvelope(BaseModel):
     seq: Optional[int] = None
     event: dict[str, Any]
+
+
+class TokenTotals(BaseModel):
+    input: int = 0
+    output: int = 0
+    reasoning: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+
+
+class UsageSummaryGroup(BaseModel):
+    key: str
+    tokens: TokenTotals = Field(default_factory=TokenTotals)
+    sessions: int = 0
+    turns: int = 0
+
+
+class UsageSummary(BaseModel):
+    object: str = "usage_summary"
+    group_by: str
+    from_time: Optional[str] = Field(None, alias="from")
+    to_time: Optional[str] = Field(None, alias="to")
+    groups: list[UsageSummaryGroup] = Field(default_factory=list)

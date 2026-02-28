@@ -1,8 +1,0 @@
-{
-  "worktree": "/Users/alice/repos/myproject.feature-auth",
-  "step": "design",
-  "step_run_id": "sr_xyz789",
-  "prompt_file": "/Users/alice/repos/myproject.feature-auth/.lf/steps/design.md",
-  "flow_run_id": "fr_def456",
-  "step_index": 0
-}

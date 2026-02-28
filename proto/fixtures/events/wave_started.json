@@ -1,7 +1,0 @@
-{
-  "event": "wave.started",
-  "timestamp": "2026-01-27T10:01:00Z",
-  "wave_started": {
-    "wave_id": "wave_xyz789"
-  }
-}

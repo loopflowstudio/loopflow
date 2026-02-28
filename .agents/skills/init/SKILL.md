@@ -121,7 +121,7 @@ def flow():
     return Flow("design", "implement", "polish")
 ```
 
-Run with `lf flow ship`.
+Run with `lf ship`.
 
 ## Parallel Branches
 

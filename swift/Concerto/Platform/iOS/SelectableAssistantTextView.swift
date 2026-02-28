@@ -35,12 +35,7 @@ final class SelectableTextView: UITextView {
     weak var coordinator: SelectableAssistantTextView.Coordinator?
     var lastText: String = ""
 
-    private static let emojiActions: [(emoji: String, selector: Selector)] = [
-        ("👍", #selector(emojiThumbsUp)),
-        ("👎", #selector(emojiThumbsDown)),
-        ("✏️", #selector(emojiEdit)),
-        ("❓", #selector(emojiQuestion)),
-    ]
+    private static let emojis = ["👍", "👎", "✏️", "❓"]
 
     init() {
         super.init(frame: .zero, textContainer: nil)
@@ -83,9 +78,9 @@ final class SelectableTextView: UITextView {
         let quoteMenu = UIMenu(title: "", options: .displayInline, children: [quoteReplyAction])
         builder.insertChild(quoteMenu, atStartOfMenu: .standardEdit)
 
-        let emojiChildren = Self.emojiActions.map { pair in
-            UIAction(title: pair.emoji) { [weak self] _ in
-                self?.handleEmoji(pair.emoji)
+        let emojiChildren = Self.emojis.map { emoji in
+            UIAction(title: emoji) { [weak self] _ in
+                self?.handleEmoji(emoji)
             }
         }
         let emojiMenu = UIMenu(title: "", options: .displayInline, children: emojiChildren)
@@ -109,12 +104,6 @@ final class SelectableTextView: UITextView {
         let cleaned = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? nil : cleaned
     }
-
-    // Selector-based targets required for UIAction fallback on older menu paths
-    @objc private func emojiThumbsUp() { handleEmoji("👍") }
-    @objc private func emojiThumbsDown() { handleEmoji("👎") }
-    @objc private func emojiEdit() { handleEmoji("✏️") }
-    @objc private func emojiQuestion() { handleEmoji("❓") }
 
     static func styledAttributedString(from markdown: String) -> NSAttributedString {
         let baseFont = UIFont(name: Typography.sansFamily, size: 14) ?? .systemFont(ofSize: 14)

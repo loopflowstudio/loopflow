@@ -464,27 +464,6 @@ private struct SessionEmptyStateView: View {
     }
 }
 
-struct AssistantTextSegment: View {
-    @Environment(\.palette) private var palette
-
-    let text: String
-
-    var body: some View {
-        if let markdown = try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            Text(markdown)
-                .font(Typography.body())
-                .foregroundStyle(palette.text)
-        } else {
-            Text(text)
-                .font(Typography.body())
-                .foregroundStyle(palette.text)
-        }
-    }
-}
-
 struct StreamingCursorView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 

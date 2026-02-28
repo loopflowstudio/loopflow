@@ -84,6 +84,7 @@ fn gather_context_with_step() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -108,6 +109,7 @@ fn gather_context_with_inline_prompt() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -136,6 +138,7 @@ fn gather_context_with_directions() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -160,6 +163,7 @@ fn gather_context_expands_builtin_direction_group() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -194,6 +198,7 @@ fn gather_context_expands_user_direction_group() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -232,6 +237,7 @@ fn gather_context_includes_readme() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -269,6 +275,7 @@ fn gather_context_includes_scratch_docs() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -306,6 +313,7 @@ fn gather_context_with_wave() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("auth".to_string()),
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -334,6 +342,7 @@ fn gather_context_preserves_surface() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -347,6 +356,7 @@ fn gather_context_preserves_surface() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -377,6 +387,7 @@ fn format_prompt_includes_step_content() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -403,6 +414,7 @@ fn format_prompt_includes_auto_mode_header() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -430,6 +442,7 @@ fn format_prompt_includes_directions() {
         sources: vec![],
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -462,6 +475,7 @@ fn format_prompt_includes_wave_context() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("payments".to_string()),
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -529,6 +543,7 @@ fn wave_filtering_includes_only_specified_wave() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("auth".to_string()),
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -583,6 +598,7 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: None, // No wave specified
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -628,6 +644,7 @@ fn wave_filtering_handles_nonexistent_wave() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("nonexistent".to_string()),
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -691,6 +708,7 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
         sources: vec![DocumentSource::RepoDoc, DocumentSource::Wave],
         area: None,
         wave: Some("features".to_string()),
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -741,6 +759,7 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         sources: vec![DocumentSource::RepoDoc],
         area: None,
         wave: Some("living".to_string()),
+        related_repos: Vec::new(),
     })
     .unwrap();
 
@@ -790,6 +809,7 @@ fn loopflow_doc_always_included() {
         sources: vec![], // Even with lfdocs=false
         area: None,
         wave: None,
+        related_repos: Vec::new(),
     })
     .unwrap();
 

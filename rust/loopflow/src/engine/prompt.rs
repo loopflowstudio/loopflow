@@ -12,10 +12,11 @@ use std::time::Instant;
 
 use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
+use crate::lfd::types::RepoId;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Source of a context document or context token bucket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,6 +31,13 @@ pub enum DocumentSource {
     Summary,
     Area,
     Clipboard,
+}
+
+/// A related repo resolved from the edge graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatedRepoContext {
+    pub repo_id: RepoId,
+    pub path: PathBuf,
 }
 
 /// A document included in context.
@@ -119,6 +127,8 @@ pub struct GatherSpec {
     pub area: Option<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
+    /// Related repos resolved from the edge graph.
+    pub related_repos: Vec<RelatedRepoContext>,
 }
 
 impl GatherSpec {
@@ -182,6 +192,8 @@ pub struct GatherContextOpts {
     pub area: Option<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
+    /// Related repos resolved from the edge graph.
+    pub related_repos: Vec<RelatedRepoContext>,
 }
 
 impl GatherContextOpts {
@@ -192,6 +204,7 @@ impl GatherContextOpts {
             files: self.files.clone(),
             area: self.area.clone(),
             wave: self.wave.clone(),
+            related_repos: self.related_repos.clone(),
         }
     }
 }
@@ -698,7 +711,35 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
 
     if spec.includes(DocumentSource::Area) {
         if let Some(ref area) = spec.area {
-            docs.extend(gather_area_docs(&spec.repo_root, area));
+            match resolve_area(area, &spec.related_repos) {
+                ResolvedArea::Local { area } => {
+                    docs.extend(gather_area_docs(&spec.repo_root, area));
+                }
+                ResolvedArea::CrossRepo { related, area } => {
+                    // Pull in the related repo's root docs alongside its area docs.
+                    match gather_repo_root_docs(&related.path) {
+                        Ok(related_docs) => {
+                            for mut doc in related_docs {
+                                doc.path = format!("[{}] {}", related.repo_id, doc.path);
+                                docs.push(doc);
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                repo_id = %related.repo_id,
+                                path = %related.path.display(),
+                                error = %err,
+                                "failed to gather related repo root docs"
+                            );
+                        }
+                    }
+                    let area_docs = gather_area_docs(&related.path, area);
+                    for mut doc in area_docs {
+                        doc.path = format!("[{}] {}", related.repo_id, doc.path);
+                        docs.push(doc);
+                    }
+                }
+            }
         }
     }
 
@@ -817,6 +858,55 @@ fn gather_repo_root_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
         }
     }
     Ok(docs)
+}
+
+enum ResolvedArea<'a> {
+    Local {
+        area: &'a str,
+    },
+    CrossRepo {
+        related: &'a RelatedRepoContext,
+        area: &'a str,
+    },
+}
+
+/// Parse an area string for cross-repo syntax (`repo_name:path`).
+///
+/// Returns `ResolvedArea::CrossRepo` if the area contains `:` and the repo name
+/// matches a related repo. Returns `ResolvedArea::Local` otherwise.
+fn resolve_area<'a>(area: &'a str, related_repos: &'a [RelatedRepoContext]) -> ResolvedArea<'a> {
+    if let Some((repo_name, area_path)) = area.split_once(':') {
+        if !repo_name.is_empty() {
+            let matches: Vec<_> = related_repos
+                .iter()
+                .filter(|r| r.repo_id.name() == repo_name)
+                .collect();
+            match matches.len() {
+                1 => {
+                    // "studio:" means the whole repo; "studio:swift" means a subdirectory.
+                    let resolved_area = if area_path.is_empty() { "." } else { area_path };
+                    return ResolvedArea::CrossRepo {
+                        related: matches[0],
+                        area: resolved_area,
+                    };
+                }
+                0 => {
+                    warn!(
+                        repo_name = repo_name,
+                        "no related repo named '{}', treating as local area", repo_name
+                    );
+                }
+                _ => {
+                    warn!(
+                        repo_name = repo_name,
+                        "ambiguous: multiple related repos named '{}', treating as local area",
+                        repo_name
+                    );
+                }
+            }
+        }
+    }
+    ResolvedArea::Local { area }
 }
 
 /// Gather .md docs from area ancestors and descendants.
@@ -3138,5 +3228,293 @@ directions:
         assert_eq!(tier, DiffTier::UnifiedDiff);
         assert_eq!(count, 1);
         assert!(diff.unwrap().contains("fn committed()"));
+    }
+
+    // ── Cross-repo context loading ──────────────────────────────────────
+
+    #[test]
+    fn gather_documents_cross_repo_area_includes_root_docs() {
+        let session_repo = init_repo();
+        write_file(session_repo.path(), "CLAUDE.md", "session claude");
+
+        let related_repo = tempfile::tempdir().expect("related tempdir");
+        std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
+        std::fs::write(related_repo.path().join("STYLE.md"), "related style").unwrap();
+        std::fs::create_dir_all(related_repo.path().join("src")).unwrap();
+        std::fs::write(related_repo.path().join("src/README.md"), "src area doc").unwrap();
+
+        let related = RelatedRepoContext {
+            repo_id: RepoId::parse("acme/widgets").unwrap(),
+            path: related_repo.path().to_path_buf(),
+        };
+
+        let spec = GatherSpec {
+            sources: vec![DocumentSource::RepoDoc, DocumentSource::Area],
+            repo_root: session_repo.path().to_path_buf(),
+            area: Some("widgets:src".to_string()),
+            related_repos: vec![related],
+            ..Default::default()
+        };
+        let docs = gather_documents(&spec).unwrap();
+
+        // Session repo docs still present
+        assert!(docs
+            .iter()
+            .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
+
+        // Related repo root docs loaded because area targets that repo
+        assert!(docs
+            .iter()
+            .any(|d| d.path == "[acme/widgets] CLAUDE.md" && d.content == "related claude"));
+        assert!(docs
+            .iter()
+            .any(|d| d.path == "[acme/widgets] STYLE.md" && d.content == "related style"));
+
+        // Related repo area doc
+        assert!(docs
+            .iter()
+            .any(|d| d.path.contains("[acme/widgets]") && d.content == "src area doc"));
+    }
+
+    #[test]
+    fn gather_documents_related_repo_docs_not_loaded_without_area() {
+        let session_repo = init_repo();
+        write_file(session_repo.path(), "CLAUDE.md", "session claude");
+
+        let related_repo = tempfile::tempdir().expect("related tempdir");
+        std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
+
+        let related = RelatedRepoContext {
+            repo_id: RepoId::parse("acme/widgets").unwrap(),
+            path: related_repo.path().to_path_buf(),
+        };
+
+        let spec = GatherSpec {
+            sources: vec![DocumentSource::RepoDoc],
+            repo_root: session_repo.path().to_path_buf(),
+            related_repos: vec![related],
+            ..Default::default()
+        };
+        let docs = gather_documents(&spec).unwrap();
+
+        // Session docs present
+        assert!(docs
+            .iter()
+            .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
+
+        // Related repo docs NOT loaded — no area targeting that repo
+        assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));
+    }
+
+    #[test]
+    fn gather_documents_no_related_repos_unchanged() {
+        let repo = init_repo();
+        write_file(repo.path(), "README.md", "hello");
+
+        let spec = GatherSpec {
+            sources: vec![DocumentSource::RepoDoc],
+            repo_root: repo.path().to_path_buf(),
+            ..Default::default()
+        };
+        let docs = gather_documents(&spec).unwrap();
+        let repo_docs: Vec<_> = docs
+            .iter()
+            .filter(|d| d.source == DocumentSource::RepoDoc)
+            .collect();
+        assert!(repo_docs.iter().any(|d| d.path == "README.md"));
+        // No prefixed docs
+        assert!(!repo_docs.iter().any(|d| d.path.starts_with('[')));
+    }
+
+    #[test]
+    fn gather_documents_related_repo_missing_from_disk() {
+        let repo = init_repo();
+        write_file(repo.path(), "README.md", "hello");
+
+        let related = RelatedRepoContext {
+            repo_id: RepoId::parse("acme/gone").unwrap(),
+            path: PathBuf::from("/nonexistent/path/that/does/not/exist"),
+        };
+
+        let spec = GatherSpec {
+            sources: vec![DocumentSource::Area],
+            repo_root: repo.path().to_path_buf(),
+            area: Some("gone:src".to_string()),
+            related_repos: vec![related],
+            ..Default::default()
+        };
+        // Should not error, just warn and skip
+        let docs = gather_documents(&spec).unwrap();
+        assert!(!docs.iter().any(|d| d.path.contains("[acme/gone]")));
+    }
+
+    #[test]
+    fn gather_documents_cross_repo_area() {
+        let session_repo = init_repo();
+
+        let related_repo = tempfile::tempdir().expect("related tempdir");
+        std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
+        std::fs::create_dir_all(related_repo.path().join("swift")).unwrap();
+        std::fs::write(
+            related_repo.path().join("swift/README.md"),
+            "swift area doc",
+        )
+        .unwrap();
+
+        let related = RelatedRepoContext {
+            repo_id: RepoId::parse("acme/studio").unwrap(),
+            path: related_repo.path().to_path_buf(),
+        };
+
+        let spec = GatherSpec {
+            sources: vec![DocumentSource::Area],
+            repo_root: session_repo.path().to_path_buf(),
+            area: Some("studio:swift".to_string()),
+            related_repos: vec![related],
+            ..Default::default()
+        };
+        let docs = gather_documents(&spec).unwrap();
+
+        // Root docs from the related repo
+        assert!(
+            docs.iter()
+                .any(|d| d.path == "[acme/studio] CLAUDE.md" && d.content == "studio claude"),
+            "expected related repo root doc, got: {:?}",
+            docs.iter().map(|d| &d.path).collect::<Vec<_>>()
+        );
+
+        // Area docs from the related repo
+        assert!(
+            docs.iter()
+                .any(|d| d.path.contains("[acme/studio]") && d.content == "swift area doc"),
+            "expected cross-repo area doc, got: {:?}",
+            docs.iter().map(|d| &d.path).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn gather_documents_bare_repo_name_loads_whole_repo() {
+        let session_repo = init_repo();
+
+        let related_repo = tempfile::tempdir().expect("related tempdir");
+        std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
+        std::fs::write(related_repo.path().join("README.md"), "studio readme").unwrap();
+
+        let related = RelatedRepoContext {
+            repo_id: RepoId::parse("acme/studio").unwrap(),
+            path: related_repo.path().to_path_buf(),
+        };
+
+        let spec = GatherSpec {
+            sources: vec![DocumentSource::Area],
+            repo_root: session_repo.path().to_path_buf(),
+            area: Some("studio:".to_string()),
+            related_repos: vec![related],
+            ..Default::default()
+        };
+        let docs = gather_documents(&spec).unwrap();
+
+        // Root docs loaded
+        assert!(docs
+            .iter()
+            .any(|d| d.path == "[acme/studio] CLAUDE.md" && d.content == "studio claude"));
+
+        // Top-level area docs loaded (README.md is a descendant of ".")
+        assert!(docs
+            .iter()
+            .any(|d| d.path.contains("[acme/studio]") && d.content == "studio readme"));
+    }
+
+    #[test]
+    fn gather_documents_local_area_unchanged() {
+        let repo = init_repo();
+        std::fs::create_dir_all(repo.path().join("docs")).unwrap();
+        write_file(repo.path(), "docs/README.md", "local area doc");
+
+        let spec = GatherSpec {
+            sources: vec![DocumentSource::Area],
+            repo_root: repo.path().to_path_buf(),
+            area: Some("docs".to_string()),
+            ..Default::default()
+        };
+        let docs = gather_documents(&spec).unwrap();
+        assert!(docs.iter().any(|d| d.content == "local area doc"));
+        // No prefixed docs
+        assert!(!docs.iter().any(|d| d.path.starts_with('[')));
+    }
+
+    #[test]
+    fn resolve_area_local_without_colon() {
+        let result = resolve_area("docs", &[]);
+        assert!(matches!(result, ResolvedArea::Local { area: "docs" }));
+    }
+
+    #[test]
+    fn resolve_area_cross_repo_match() {
+        let related = vec![RelatedRepoContext {
+            repo_id: RepoId::parse("acme/studio").unwrap(),
+            path: PathBuf::from("/repos/studio"),
+        }];
+        let result = resolve_area("studio:swift", &related);
+        match result {
+            ResolvedArea::CrossRepo { related: r, area } => {
+                assert_eq!(r.repo_id.name(), "studio");
+                assert_eq!(area, "swift");
+            }
+            _ => panic!("expected CrossRepo"),
+        }
+    }
+
+    #[test]
+    fn resolve_area_unknown_repo_falls_back_to_local() {
+        let related = vec![RelatedRepoContext {
+            repo_id: RepoId::parse("acme/studio").unwrap(),
+            path: PathBuf::from("/repos/studio"),
+        }];
+        let result = resolve_area("unknown:swift", &related);
+        assert!(matches!(
+            result,
+            ResolvedArea::Local {
+                area: "unknown:swift"
+            }
+        ));
+    }
+
+    #[test]
+    fn resolve_area_ambiguous_repo_falls_back_to_local() {
+        let related = vec![
+            RelatedRepoContext {
+                repo_id: RepoId::parse("acme/studio").unwrap(),
+                path: PathBuf::from("/repos/studio1"),
+            },
+            RelatedRepoContext {
+                repo_id: RepoId::parse("other/studio").unwrap(),
+                path: PathBuf::from("/repos/studio2"),
+            },
+        ];
+        let result = resolve_area("studio:swift", &related);
+        assert!(matches!(result, ResolvedArea::Local { .. }));
+    }
+
+    #[test]
+    fn resolve_area_empty_repo_name_treated_as_local() {
+        let result = resolve_area(":swift", &[]);
+        assert!(matches!(result, ResolvedArea::Local { area: ":swift" }));
+    }
+
+    #[test]
+    fn resolve_area_bare_repo_name_resolves_to_root() {
+        let related = vec![RelatedRepoContext {
+            repo_id: RepoId::parse("acme/studio").unwrap(),
+            path: PathBuf::from("/repos/studio"),
+        }];
+        let result = resolve_area("studio:", &related);
+        match result {
+            ResolvedArea::CrossRepo { related: r, area } => {
+                assert_eq!(r.repo_id.name(), "studio");
+                assert_eq!(area, ".");
+            }
+            _ => panic!("expected CrossRepo, got Local"),
+        }
     }
 }

@@ -378,6 +378,7 @@ pub(crate) async fn build_step_prompt(
             source_overrides: Default::default(),
             summary,
             client_context: ClientContext::default(),
+            related_repos: Vec::new(),
         },
     )?;
 

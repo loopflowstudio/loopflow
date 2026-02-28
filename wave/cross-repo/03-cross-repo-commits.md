@@ -10,9 +10,13 @@ lf already doesn't prevent writing to other repos — if an area points at `/oth
 
 This stage makes commits multi-repo-aware. No new access control — lf takes paths, lfd provides convenience, neither enforces write boundaries.
 
+## Context from prior sprints
+
+`resolve_related_repos(store, repo_id)` returns `Vec<RelatedRepoContext>` with `repo_id: RepoId` and `path: PathBuf` for each related repo. This provides the repo roots needed for file classification.
+
 ## Key functions
 
-- `classify_files(changed_paths, repo_roots) -> HashMap<RepoRoot, Vec<Path>>` — Group changed files by repo root (most specific root wins).
+- `classify_files(changed_paths, repo_roots) -> HashMap<RepoRoot, Vec<Path>>` — Group changed files by repo root (most specific root wins). Repo roots come from `RelatedRepoContext.path`.
 - Extend `commit_workflow` to iterate over repos and commit in each.
 
 ## Constraints

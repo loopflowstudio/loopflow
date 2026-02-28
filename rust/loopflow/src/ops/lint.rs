@@ -61,6 +61,7 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
         ),
         area: config.area,
         wave: None,
+        related_repos: Vec::new(),
     };
 
     let gathered = gather_context(&opts)?;

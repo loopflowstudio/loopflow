@@ -14,9 +14,9 @@ Concerto's portfolio view shows parent→child edges between repo cards. Wave co
 - Access direction visible: parent (RW) vs child (R) indicated on edges.
 
 ### Wave configuration
-- **Area picker**: Shows paths from related repos, namespaced by repo name — `loopflow:rust/loopflow/src/engine/` alongside local paths.
+- **Area picker**: Shows paths from related repos using the established `repo_name:path` colon syntax — `loopflow:rust/loopflow/src/engine/` alongside local paths. The engine resolves this via `resolve_area()` matching against `RelatedRepoContext` entries.
 - **Stimulus targets**: When configuring listen, offer waves from related repos as targets. Uses `RepoId` instead of filesystem paths.
-- **Context indicator**: Show which related repos contribute docs to the current session.
+- **Context indicator**: Show which related repos contribute docs to the current session. Related-repo docs use `[owner/repo]` prefix in paths for disambiguation.
 
 ### Wave detail
 - When a wave's session has touched files in related repos, show which repos are involved.

@@ -43,6 +43,7 @@ pub fn run_builtin_agent(
         ),
         area: config.area,
         wave: None,
+        related_repos: Vec::new(),
     };
     let gathered = gather_context(&opts)?;
     let budgeted = trim_context_with_breakdown(gathered, DEFAULT_CONTEXT_BUDGET);

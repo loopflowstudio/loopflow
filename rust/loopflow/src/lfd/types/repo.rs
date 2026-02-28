@@ -33,6 +33,14 @@ impl RepoId {
         &self.0
     }
 
+    /// Returns the repo name portion (after the `/`).
+    pub fn name(&self) -> &str {
+        self.0
+            .split_once('/')
+            .map(|(_, name)| name)
+            .unwrap_or(&self.0)
+    }
+
     pub(crate) fn from_raw(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -70,4 +78,27 @@ pub struct Repo {
 pub struct RepoEdge {
     pub parent_repo_id: RepoId,
     pub child_repo_id: RepoId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_id_name_returns_repo_portion() {
+        let id = RepoId::parse("loopflowstudio/loopflow").unwrap();
+        assert_eq!(id.name(), "loopflow");
+    }
+
+    #[test]
+    fn repo_id_name_with_different_owner() {
+        let id = RepoId::parse("acme/widgets").unwrap();
+        assert_eq!(id.name(), "widgets");
+    }
+
+    #[test]
+    fn repo_id_name_raw_without_slash() {
+        let id = RepoId::from_raw("bare");
+        assert_eq!(id.name(), "bare");
+    }
 }

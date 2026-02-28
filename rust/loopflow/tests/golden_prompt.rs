@@ -71,6 +71,7 @@ fn golden_prompts_match_python() {
             ),
             area: case.area.clone(),
             wave: case.wave.clone(),
+            related_repos: Vec::new(),
         };
 
         let gathered = gather_context(&opts).expect("gather context");

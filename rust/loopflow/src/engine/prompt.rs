@@ -267,7 +267,7 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
-    /// Docs gathered from area parent directories
+    /// Docs gathered from area ancestor and descendant directories
     pub area_docs: Vec<Document>,
     /// Area path for display
     pub area: Option<String>,
@@ -819,14 +819,16 @@ fn gather_repo_root_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
     Ok(docs)
 }
 
-/// Gather .md docs from the area directory and its ancestors.
+/// Gather .md docs from area ancestors and descendants.
 ///
 /// For area "src/api/handlers", collects .md files from:
 /// - src/ (e.g., src/README.md)
 /// - src/api/ (e.g., src/api/README.md)
 /// - src/api/handlers/ (e.g., src/api/handlers/README.md)
+/// - src/api/handlers/** (descendants under the area, recursively)
 ///
-/// Does NOT include the repo root (already gathered by `gather_repo_root_docs`).
+/// Does NOT include repo root docs (already gathered by `gather_repo_root_docs`)
+/// and does NOT include sibling directories.
 fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
     let area_path = Path::new(area);
     let mut ancestors = Vec::new();
@@ -891,7 +893,73 @@ fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
         }
     }
 
+    // Gather descendants recursively. The `seen` set already contains the area
+    // directory's own .md files from the ancestor walk, so they won't be
+    // double-counted.
+    let area_abs = repo_root.join(area_path);
+    if area_abs.is_dir() {
+        let mut descendant_docs = Vec::new();
+        gather_area_descendants(&area_abs, repo_root, &mut descendant_docs, &mut seen);
+
+        // Prefer shallower descendant docs. Trimming pops from the end, so
+        // deepest docs are removed first when over budget.
+        descendant_docs.sort_by(|a, b| {
+            let depth_a = a.path.matches('/').count();
+            let depth_b = b.path.matches('/').count();
+            depth_a.cmp(&depth_b).then_with(|| a.path.cmp(&b.path))
+        });
+
+        // Safety cap for large monorepos.
+        descendant_docs.truncate(100);
+        docs.extend(descendant_docs);
+    }
+
     docs
+}
+
+fn gather_area_descendants(
+    dir: &Path,
+    repo_root: &Path,
+    docs: &mut Vec<Document>,
+    seen: &mut HashSet<String>,
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+    sorted.sort_by_key(|entry| entry.path());
+
+    for entry in sorted {
+        let path = entry.path();
+        if path.is_dir() {
+            gather_area_descendants(&path, repo_root, docs, seen);
+            continue;
+        }
+
+        if !path.extension().map(|ext| ext == "md").unwrap_or(false) {
+            continue;
+        }
+
+        let rel_path = path
+            .strip_prefix(repo_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+        if seen.contains(&rel_path) {
+            continue;
+        }
+
+        if let Ok(content) = fs::read_to_string(&path) {
+            seen.insert(rel_path.clone());
+            docs.push(Document {
+                path: rel_path,
+                content,
+                source: DocumentSource::Area,
+            });
+        }
+    }
 }
 
 /// Recursively gather .md files from a directory.
@@ -1483,7 +1551,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Area docs (parent directory READMEs when -a is set)
+    // Area docs (ancestor + descendant docs when -a is set)
     if !components.area_docs.is_empty() {
         let area_label = components.area.as_deref().unwrap_or("area");
         let area_parts: Vec<String> = components
@@ -1499,7 +1567,7 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
             .collect();
         let area_body = area_parts.join("\n\n");
         parts.push(format!(
-            "Area docs for `{}`. Architectural context from parent directories.\n\n\
+            "Area docs for `{}`. Architectural context from ancestor and descendant directories.\n\n\
              <lf:area>\n{}\n</lf:area>",
             area_label, area_body
         ));
@@ -2227,6 +2295,22 @@ mod tests {
     }
 
     #[test]
+    fn format_prompt_with_area_docs_uses_ancestor_descendant_label() {
+        let components = PromptComponents {
+            area: Some("src/api".to_string()),
+            area_docs: vec![Document {
+                path: "src/api/README.md".to_string(),
+                content: "# API".to_string(),
+                source: DocumentSource::Area,
+            }],
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(prompt.contains("ancestor and descendant directories"));
+    }
+
+    #[test]
     fn format_prompt_full_assembly() {
         // Test a complete prompt with all sections
         let components = PromptComponents {
@@ -2291,6 +2375,69 @@ mod tests {
             .parse::<Surface>()
             .expect("surface parsing is infallible");
         assert_eq!(parsed, Surface::Headless);
+    }
+
+    // ==========================================================================
+    // area docs gathering tests
+    // ==========================================================================
+
+    #[test]
+    fn gather_area_docs_includes_ancestors_and_descendants() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/README.md", "# src");
+        write_file(repo.path(), "src/api/README.md", "# api");
+        write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
+        write_file(repo.path(), "src/api/handlers/v1/README.md", "# v1");
+
+        let docs = gather_area_docs(repo.path(), "src/api");
+        let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
+
+        assert!(paths.contains(&"src/README.md"));
+        assert!(paths.contains(&"src/api/README.md"));
+        assert!(paths.contains(&"src/api/handlers/README.md"));
+        assert!(paths.contains(&"src/api/handlers/v1/README.md"));
+
+        let area_doc_count = docs
+            .iter()
+            .filter(|doc| doc.path == "src/api/README.md")
+            .count();
+        assert_eq!(area_doc_count, 1);
+    }
+
+    #[test]
+    fn gather_area_docs_excludes_sibling_directories() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/README.md", "# src");
+        write_file(repo.path(), "src/api/README.md", "# api");
+        write_file(repo.path(), "src/api/handlers/README.md", "# handlers");
+        write_file(repo.path(), "src/web/README.md", "# web");
+
+        let docs = gather_area_docs(repo.path(), "src/api");
+        let paths: Vec<&str> = docs.iter().map(|doc| doc.path.as_str()).collect();
+
+        assert!(paths.contains(&"src/api/handlers/README.md"));
+        assert!(!paths.contains(&"src/web/README.md"));
+    }
+
+    #[test]
+    fn gather_area_docs_caps_descendants_at_100() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/api/README.md", "# api");
+        for i in 0..120 {
+            write_file(
+                repo.path(),
+                &format!("src/api/handlers/doc-{i:03}.md"),
+                "# handler doc",
+            );
+        }
+
+        let docs = gather_area_docs(repo.path(), "src/api");
+        let descendant_count = docs
+            .iter()
+            .filter(|doc| doc.path.starts_with("src/api/handlers/"))
+            .count();
+
+        assert_eq!(descendant_count, 100);
     }
 
     // ==========================================================================

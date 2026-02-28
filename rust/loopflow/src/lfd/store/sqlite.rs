@@ -1186,6 +1186,7 @@ impl SqliteStore {
                 created_at,
                 stimulus.enabled as i64,
                 stimulus.source_wave_id,
+                stimulus.max_iterations.map(|v| v as i64),
             ],
         )?;
         Ok(())
@@ -1203,6 +1204,7 @@ impl SqliteStore {
                 stimulus.last_triggered_at,
                 stimulus.enabled as i64,
                 stimulus.source_wave_id,
+                stimulus.max_iterations.map(|v| v as i64),
                 stimulus.id,
             ],
         )?;

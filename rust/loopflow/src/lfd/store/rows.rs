@@ -227,7 +227,7 @@ pub fn map_live_pr_state_row(row: &impl StoreRow) -> StoreResult<LivePullRequest
 }
 
 /// SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at,
-///        enabled, source_wave_id
+///        enabled, source_wave_id, max_iterations
 pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
     let created_at = unix_to_datetime(row.bigint(7)?);
 
@@ -242,6 +242,7 @@ pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
         created_at: Some(created_at),
         enabled: row.int(8)? != 0,
         source_wave_id: row.opt_text(9)?.map(LfdId::from_raw),
+        max_iterations: row.opt_int(10)?.map(|v| v as u32),
     })
 }
 

@@ -1,0 +1,10 @@
+- qa
+- triage
+- branch:
+    paths:
+      fix:
+        flow: qa-fix
+        description: "Blocking issues found, fix before deploy"
+      deploy:
+        flow: deploy
+        description: "Clean enough to ship"

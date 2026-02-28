@@ -248,12 +248,15 @@ class Client:
         kind: str,
         cron: Optional[str] = None,
         source_wave_id: Optional[str] = None,
+        max_iterations: Optional[int] = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"kind": kind}
         if cron is not None:
             body["cron"] = cron
         if source_wave_id is not None:
             body["source_wave_id"] = source_wave_id
+        if max_iterations is not None:
+            body["max_iterations"] = max_iterations
         return self._request_json("POST", f"/v0/waves/{name_or_id}/stimulus", json=body)
 
     def remove_stimulus(self, name_or_id: str, stimulus_id: str) -> dict[str, Any]:

@@ -59,6 +59,8 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `implement` | Build from a design doc |
 | `compress` | Simplify touched code |
 | `gate` | Ship-ready code and reviewer-friendly docs |
+| `qa` | Thorough quality assessment of the current branch |
+| `triage` | Assess QA findings, separate blocking from polish |
 
 ### Interactive steps (`interactive/`)
 
@@ -110,6 +112,9 @@ Steps chain into flows. Flows feed into waves.
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |
 | `ship-roadmap` | ingest → kickoff → review-design → build → review |
+| `qa-deploy` | qa → triage → branch(fix: qa-fix, deploy: deploy) |
+| `qa-fix` | implement → compress → lint → gate |
+| `deploy` | gate → update-wave |
 
 ### Plan flows (`plan/`)
 
@@ -134,6 +139,26 @@ lf flow wave-reduce    # runs reduce 3x with different perspectives
 ```
 
 `wave-reduce` forks `reduce` across infra, ux, and ceo directions, then reconciles results with `update-wave`.
+
+### Branches
+
+Branches route a flow based on an agent's assessment of the current state.
+
+```yaml
+# flow: qa-deploy
+- qa
+- triage
+- branch:
+    paths:
+      fix:
+        flow: qa-fix
+        description: "Blocking issues found, fix before deploy"
+      deploy:
+        flow: deploy
+        description: "Clean enough to ship"
+```
+
+The branch construct runs a routing agent that reads scratch/ and chooses a path. The selected sub-flow runs inline. Combined with cron scheduling and loop iteration, this enables cycles like daily QA → fix → deploy.
 
 ## Playing in the Waves
 

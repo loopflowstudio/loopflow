@@ -250,32 +250,32 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id\n             FROM stimuli ORDER BY created_at",
+        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli ORDER BY created_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id\n             FROM stimuli WHERE wave_id = {p1} ORDER BY created_at",
+        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli WHERE wave_id = {p1} ORDER BY created_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id\n             FROM stimuli WHERE signal = {p1} ORDER BY created_at",
+        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli WHERE signal = {p1} ORDER BY created_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id\n             FROM stimuli WHERE id = {p1}",
+        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO stimuli (id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10})",
+        template: "INSERT INTO stimuli (id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11})",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "UPDATE stimuli SET\n                signal = {p1}, flow = {p2}, cron = {p3}, last_main_sha = {p4},\n                last_triggered_at = {p5}, enabled = {p6}, source_wave_id = {p7}\n             WHERE id = {p8}",
+        template: "UPDATE stimuli SET\n                signal = {p1}, flow = {p2}, cron = {p3}, last_main_sha = {p4},\n                last_triggered_at = {p5}, enabled = {p6}, source_wave_id = {p7},\n                max_iterations = {p8}\n             WHERE id = {p9}",
         sqlite_override: None,
         postgres_override: None,
     },

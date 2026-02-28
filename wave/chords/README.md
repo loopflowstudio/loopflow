@@ -112,6 +112,8 @@ CREATE TABLE chord_members (
 - **Concurrent CI stimulus creation.** CI failure trigger resolves-then-creates `Signal::CiFailure` stimuli. Serialized today by one event loop; needs uniqueness guard if parallelized.
 - **Run worktree accumulation.** Parallel runs create per-run worktrees cleaned up on completion. Daemon crash mid-run leaves orphans until janitor sweep.
 - **Integrate-upstream false positives.** Watch triggers on any main advance, even when upstream changes are irrelevant to the wave. The integrate-upstream step should no-op quickly in that case, but it still costs an agent invocation.
+- **Iteration counter cumulative across cycles.** `wave.iteration` increments with every WaveRun and never resets between cron cycles. If `max_iterations` is 5, the safety valve fires on the 6th total WaveRun — not the 6th within a single daily cycle. Needs a reset mechanism on cycle completion or cron re-start. Low urgency since `max_iterations` defaults to `None`.
+- **Branch sub-flow items silently skipped.** The branch executor only handles Step items — forks or nested branches in a branch path's flow are silently ignored. Fork-in-branch is prevented at parse time, but a branch path pointing to a flow containing a fork would skip it.
 
 ## Metrics
 

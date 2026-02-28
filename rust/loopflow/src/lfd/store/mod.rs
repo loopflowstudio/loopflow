@@ -2150,6 +2150,7 @@ mod tests {
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
             enabled: true,
+            max_iterations: None,
         };
         store
             .create_stimulus(&stimulus)

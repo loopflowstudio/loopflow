@@ -16,7 +16,8 @@ use crate::engine::agent::build_agent_command;
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::flow::{
-    expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
+    expand_flow, load_flow, load_step, next_action, BranchPath, ConcreteBranch, ConcreteItem,
+    ConcreteStep, FlowAction, Step,
 };
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
@@ -510,6 +511,140 @@ impl WaveExecutor {
                         return Ok(());
                     }
                 }
+                FlowAction::Branch { branch } => {
+                    // Pre-branch sync: pick up sibling pushes.
+                    if let Err(err) = pre_step_sync(
+                        Path::new(&run.snapshot.repo),
+                        Path::new(&run.worktree),
+                        &run.branch,
+                    ) {
+                        warn!(run_id = %run.id, error = %err, "pre-branch sync failed, continuing");
+                    }
+
+                    info!(
+                        run_id = %run.id,
+                        paths = branch.paths.len(),
+                        step_index = run.step_index,
+                        "running branch routing"
+                    );
+
+                    // Build routing prompt and run as a synthetic step.
+                    let routing_prompt = build_branch_routing_prompt(&branch);
+                    let routing_step = ConcreteStep {
+                        step: Step {
+                            name: "branch-route".to_string(),
+                            agent: Some("claude:sonnet".to_string()),
+                            default_agent: None,
+                            directions: Vec::new(),
+                            action_style: None,
+                            interactive: None,
+                            content: Some(routing_prompt),
+                            fast_path: None,
+                        },
+                        flow_parents: branch.flow_parents.clone(),
+                    };
+
+                    let exit_code = self.run_step(&wave, &mut run, &routing_step).await?;
+                    if exit_code != 0 {
+                        self.fail_run(&mut run, &wave, "branch routing step failed".to_string())
+                            .await?;
+                        return Ok(());
+                    }
+
+                    // Post-routing sync: commit the verdict.
+                    if let Err(err) =
+                        post_step_sync(Path::new(&run.worktree), &run.branch, "branch-route")
+                    {
+                        self.fail_run(
+                            &mut run,
+                            &wave,
+                            format!("post-branch-route sync failed: {err}"),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+
+                    // Read the verdict from scratch/route-branch.md.
+                    let verdict_path = Path::new(&run.worktree).join("scratch/route-branch.md");
+                    let selected_path = match read_branch_verdict(&verdict_path, &branch) {
+                        Ok(path) => path,
+                        Err(err) => {
+                            self.fail_run(&mut run, &wave, err).await?;
+                            return Ok(());
+                        }
+                    };
+
+                    info!(
+                        run_id = %run.id,
+                        selected = %selected_path,
+                        "branch routed"
+                    );
+
+                    // Load and execute the selected sub-flow inline.
+                    let branch_path = branch
+                        .paths
+                        .get(&selected_path)
+                        .expect("selected path validated by read_branch_verdict");
+
+                    let sub_items =
+                        load_branch_path_items(branch_path, Path::new(&run.snapshot.repo))?;
+
+                    for sub_item in &sub_items {
+                        let sub_step = match sub_item {
+                            ConcreteItem::Step(step) => step,
+                            _ => continue,
+                        };
+
+                        // Pre-step sync for each sub-step.
+                        if let Err(err) = pre_step_sync(
+                            Path::new(&run.snapshot.repo),
+                            Path::new(&run.worktree),
+                            &run.branch,
+                        ) {
+                            warn!(run_id = %run.id, error = %err, "pre-step sync failed in branch sub-step, continuing");
+                        }
+
+                        if let Err(err) = self.ensure_summary_fresh(&wave, &run).await {
+                            warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");
+                        }
+
+                        info!(
+                            run_id = %run.id,
+                            step = %sub_step.step.name,
+                            "running branch sub-step"
+                        );
+
+                        let exit_code = self.run_step(&wave, &mut run, sub_step).await?;
+                        if exit_code != 0 {
+                            self.fail_run(
+                                &mut run,
+                                &wave,
+                                format!("branch sub-step {} failed", sub_step.step.name),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
+
+                        if let Err(err) = post_step_sync(
+                            Path::new(&run.worktree),
+                            &run.branch,
+                            &sub_step.step.name,
+                        ) {
+                            self.fail_run(
+                                &mut run,
+                                &wave,
+                                format!(
+                                    "post-step sync failed for branch sub-step {}: {err}",
+                                    sub_step.step.name
+                                ),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
+                    }
+
+                    self.advance_run_step(&mut run, &plan, wave.id()).await?;
+                }
                 FlowAction::Complete => {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
@@ -1002,6 +1137,78 @@ fn interactive_session_config(
     }
 }
 
+// -----------------------------------------------------------------------------
+// Branch helpers
+// -----------------------------------------------------------------------------
+
+fn build_branch_routing_prompt(branch: &ConcreteBranch) -> String {
+    let mut prompt = String::from(
+        "Read the current state of this branch: scratch/ contents, recent commits, \
+         and PR status. Choose which path to take next.\n\n\
+         Available paths:\n\n",
+    );
+    let mut keys: Vec<&String> = branch.paths.keys().collect();
+    keys.sort();
+    for key in &keys {
+        let path = &branch.paths[*key];
+        prompt.push_str(&format!("- {key}: {}\n", path.description));
+    }
+    prompt.push_str(
+        "\nWrite your choice to scratch/route-branch.md.\n\
+         First line must be: path: <key>\n\
+         Then explain your reasoning.\n",
+    );
+    prompt
+}
+
+fn read_branch_verdict(verdict_path: &Path, branch: &ConcreteBranch) -> Result<String, String> {
+    let content = std::fs::read_to_string(verdict_path).map_err(|err| {
+        format!(
+            "branch verdict not found at {}: {err}",
+            verdict_path.display()
+        )
+    })?;
+
+    let first_line = content
+        .lines()
+        .next()
+        .ok_or_else(|| "branch verdict file is empty".to_string())?;
+
+    let selected = first_line
+        .strip_prefix("path:")
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| {
+            format!("branch verdict first line must start with 'path:', got: {first_line}")
+        })?;
+
+    if !branch.paths.contains_key(&selected) {
+        let valid_keys: Vec<&String> = branch.paths.keys().collect();
+        return Err(format!(
+            "unknown branch path: {selected}, expected one of: {valid_keys:?}"
+        ));
+    }
+
+    Ok(selected)
+}
+
+fn load_branch_path_items(branch_path: &BranchPath, repo: &Path) -> Result<Vec<ConcreteItem>> {
+    if let Some(ref flow_name) = branch_path.flow {
+        let flow = load_flow(flow_name, repo)?;
+        let items = expand_flow(&flow, repo)?;
+        return Ok(items);
+    }
+
+    if let Some(ref step_name) = branch_path.step {
+        let step = load_step(step_name, repo)?;
+        return Ok(vec![ConcreteItem::Step(ConcreteStep {
+            step,
+            flow_parents: Vec::new(),
+        })]);
+    }
+
+    Err(anyhow!("branch path has neither flow nor step"))
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct OrphanedForkCleanup {
     cleaned_runs: u32,
@@ -1234,6 +1441,7 @@ mod tests {
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
             enabled: true,
+            max_iterations: None,
         }
     }
 

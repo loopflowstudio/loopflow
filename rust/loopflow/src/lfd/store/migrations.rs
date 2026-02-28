@@ -103,6 +103,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "021_repo_edges",
         sql: include_str!("migrations/021_repo_edges.sql"),
     },
+    Migration {
+        version: "022_stimulus_max_iterations",
+        sql: include_str!("migrations/022_stimulus_max_iterations.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

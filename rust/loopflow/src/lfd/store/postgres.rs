@@ -1340,6 +1340,7 @@ impl PostgresStore {
                         &created_at,
                         &enabled,
                         &stimulus.source_wave_id,
+                        &stimulus.max_iterations.map(|v| v as i32),
                     ],
                 )
                 .await?;
@@ -1362,6 +1363,7 @@ impl PostgresStore {
                         &stimulus.last_triggered_at,
                         &enabled,
                         &stimulus.source_wave_id,
+                        &stimulus.max_iterations.map(|v| v as i32),
                         &stimulus.id,
                     ],
                 )

@@ -157,6 +157,7 @@ async fn resolve_ci_failure_stimulus(
         last_triggered_at: Some(OffsetDateTime::now_utc().unix_timestamp()),
         created_at: Some(OffsetDateTime::now_utc()),
         enabled: true,
+        max_iterations: None,
     };
     store
         .create_stimulus(&stimulus)
@@ -210,6 +211,7 @@ mod tests {
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
             enabled: true,
+            max_iterations: None,
         };
         store
             .create_stimulus(&stimulus)

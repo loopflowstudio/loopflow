@@ -308,6 +308,7 @@ pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) ->
     match items.get(step_index as usize) {
         Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
         Some(ConcreteItem::Fork(fork)) => fork.flow_parents.clone(),
+        Some(ConcreteItem::Branch(branch)) => branch.flow_parents.clone(),
         None => Vec::new(),
     }
 }

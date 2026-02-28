@@ -132,6 +132,9 @@ fn extract_step_names(items: &[crate::engine::flow::ConcreteItem]) -> Vec<String
                     }
                 }
             }
+            crate::engine::flow::ConcreteItem::Branch(_) => {
+                names.push("[branch]".to_string());
+            }
         }
     }
     names

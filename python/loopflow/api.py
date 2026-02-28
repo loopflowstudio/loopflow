@@ -173,12 +173,14 @@ def add_stimulus(
     kind: str,
     cron: Optional[str] = None,
     source_wave_id: Optional[str] = None,
+    max_iterations: Optional[int] = None,
 ) -> dict[str, Any]:
     return _client().add_stimulus(
         name_or_id,
         kind,
         cron=cron,
         source_wave_id=source_wave_id,
+        max_iterations=max_iterations,
     )
 
 

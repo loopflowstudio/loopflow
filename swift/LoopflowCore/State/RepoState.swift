@@ -99,7 +99,13 @@ public final class RepoState {
     public var waveGroups: WaveGroups { waveStore.groups }
 
     // Selection — ID-based, derived from store
-    public var selectedWaveId: String?
+    public var selectedWaveId: String? {
+        didSet {
+            if selectedWaveId != nil { showingAnalytics = false }
+        }
+    }
+
+    public var showingAnalytics = false
 
     public var selectedWave: WaveViewModel? {
         get { selectedWaveId.flatMap { waveStore.wave(for: $0) } }
@@ -1176,6 +1182,21 @@ public final class RepoState {
 
     public func fileDiff(waveId: String, path: String) async throws -> String {
         try await waveService.fileDiff(waveId: waveId, path: path)
+    }
+
+    public func usageSummary(
+        filters: UsageAnalyticsFilters,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageSummary {
+        try await waveService.usageSummary(filters: filters, groupBy: groupBy)
+    }
+
+    public func usageTimeseries(
+        filters: UsageAnalyticsFilters,
+        bucket: UsageTimeBucket,
+        groupBy: UsageGroupBy
+    ) async throws -> UsageTimeseries {
+        try await waveService.usageTimeseries(filters: filters, bucket: bucket, groupBy: groupBy)
     }
 
     private func makeWaveViewModel(api wave: Wave) -> WaveViewModel {

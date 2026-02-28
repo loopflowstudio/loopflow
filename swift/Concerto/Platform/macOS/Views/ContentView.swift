@@ -14,7 +14,6 @@ struct ContentView: View {
     @State private var noWaveToast: String?
     @State private var lastNoWaveToastAt = Date.distantPast
     @State private var toastDismissTask: Task<Void, Never>?
-
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -362,7 +361,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        if let wave = repoState.selectedWave {
+        if repoState.showingAnalytics {
+            AnalyticsDashboardView()
+        } else if let wave = repoState.selectedWave {
             WaveDetailPanel(wave: wave)
                 .id(wave.id)
         } else {

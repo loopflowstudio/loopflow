@@ -17,6 +17,7 @@ use crate::engine::prompt::ContextBreakdown;
 use crate::engine::prompt::{write_prompt_log, RelatedRepoContext, Surface};
 use crate::engine::structured_reply::ClientContext;
 use crate::lfd::id::LfdId;
+use crate::lfd::providers::{lookup_cost_rates, CostRates};
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::sessions::harness::{is_terminal_harness_error, CreateHarnessFn, Harness};
 use crate::lfd::sessions::types::{
@@ -91,6 +92,7 @@ async fn resolve_related_repos(
 }
 
 struct SessionRuntime {
+    harness_name: String,
     harness: Mutex<Box<dyn Harness>>,
     events_tx: broadcast::Sender<PersistedSessionEvent>,
     next_seq: AtomicI64,
@@ -201,6 +203,7 @@ impl SessionManager {
         let (events_tx, _) = broadcast::channel(LIVE_EVENT_BUFFER);
         let seeded_user_prompt = normalized_seeded_user_prompt(&prepared_prompt.task_prompt);
         let runtime = Arc::new(SessionRuntime {
+            harness_name,
             harness: Mutex::new(harness),
             events_tx,
             next_seq: AtomicI64::new(0),
@@ -776,8 +779,10 @@ impl SessionManager {
         &self,
         session_id: &LfdId,
         runtime: &Arc<SessionRuntime>,
-        event: SessionEvent,
+        mut event: SessionEvent,
     ) -> Result<(), SessionManagerError> {
+        populate_turn_usage_cost(&runtime.harness_name, &mut event);
+
         let now = time::OffsetDateTime::now_utc();
         let seq = runtime.next_seq.fetch_add(1, Ordering::Relaxed);
 
@@ -981,12 +986,38 @@ fn normalized_seeded_user_prompt(prompt: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+fn populate_turn_usage_cost(harness: &str, event: &mut SessionEvent) {
+    let SessionEvent::TurnUsage { usage, .. } = event else {
+        return;
+    };
+    if usage.cost_usd.is_some() {
+        return;
+    }
+    let Some(model) = usage.model.as_deref() else {
+        return;
+    };
+    let Some(rates) = lookup_cost_rates(harness, model) else {
+        return;
+    };
+    usage.cost_usd = Some(compute_usage_cost(usage, rates));
+}
+
+fn compute_usage_cost(usage: &crate::lfd::sessions::types::TurnUsage, rates: CostRates) -> f64 {
+    let mtok = |tokens: u64| tokens as f64 / 1_000_000.0;
+    mtok(usage.input_tokens) * rates.input_per_mtok
+        + mtok(usage.output_tokens) * rates.output_per_mtok
+        + mtok(usage.cache_read_tokens.unwrap_or(0)) * rates.cache_read_per_mtok
+        + mtok(usage.cache_write_tokens.unwrap_or(0)) * rates.cache_write_per_mtok
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::harness::{Harness, HarnessError};
-    use crate::lfd::sessions::types::{SessionConfig, SessionEvent, SessionItem, TurnStatus};
+    use crate::lfd::sessions::types::{
+        SessionConfig, SessionEvent, SessionItem, TurnStatus, TurnUsage,
+    };
     use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{Wave, WaveRun};
     use anyhow::Result;
@@ -1034,6 +1065,53 @@ mod tests {
         event_tx: mpsc::UnboundedSender<SessionEvent>,
     ) -> Result<Box<dyn Harness>> {
         Ok(Box::new(FakeHarness { tx: event_tx }))
+    }
+
+    #[derive(Debug)]
+    struct UsageHarness {
+        tx: mpsc::UnboundedSender<SessionEvent>,
+    }
+
+    #[async_trait]
+    impl Harness for UsageHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> Result<()> {
+            let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+            let _ = self.tx.send(SessionEvent::TurnStarted {
+                turn_id: turn_id.clone(),
+            });
+            let _ = self.tx.send(SessionEvent::TurnCompleted {
+                turn_id: turn_id.clone(),
+                status: TurnStatus::Completed,
+            });
+            let _ = self.tx.send(SessionEvent::TurnUsage {
+                turn_id,
+                usage: TurnUsage {
+                    input_tokens: 1_000_000,
+                    output_tokens: 2_000_000,
+                    reasoning_tokens: None,
+                    cache_read_tokens: Some(500_000),
+                    cache_write_tokens: Some(250_000),
+                    model: Some("kimi-k2".to_string()),
+                    cost_usd: None,
+                },
+            });
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn usage_create_harness(
+        _harness: &str,
+        event_tx: mpsc::UnboundedSender<SessionEvent>,
+    ) -> Result<Box<dyn Harness>> {
+        Ok(Box::new(UsageHarness { tx: event_tx }))
     }
 
     #[derive(Debug)]
@@ -1194,6 +1272,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn populate_turn_usage_cost_applies_opencode_model_rates() {
+        let mut event = SessionEvent::TurnUsage {
+            turn_id: "turn_1".to_string(),
+            usage: TurnUsage {
+                input_tokens: 1_000_000,
+                output_tokens: 2_000_000,
+                reasoning_tokens: None,
+                cache_read_tokens: Some(500_000),
+                cache_write_tokens: Some(250_000),
+                model: Some("kimi-k2".to_string()),
+                cost_usd: None,
+            },
+        };
+
+        populate_turn_usage_cost("opencode", &mut event);
+
+        let SessionEvent::TurnUsage { usage, .. } = event else {
+            panic!("expected turn usage event");
+        };
+        let cost = usage.cost_usd.expect("cost should be populated");
+        assert!((cost - 5.825).abs() < 1e-9);
+    }
+
+    #[test]
+    fn populate_turn_usage_cost_does_not_override_existing_value() {
+        let mut event = SessionEvent::TurnUsage {
+            turn_id: "turn_1".to_string(),
+            usage: TurnUsage {
+                input_tokens: 1_000_000,
+                output_tokens: 1_000_000,
+                reasoning_tokens: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                model: Some("kimi-k2".to_string()),
+                cost_usd: Some(0.42),
+            },
+        };
+
+        populate_turn_usage_cost("opencode", &mut event);
+
+        let SessionEvent::TurnUsage { usage, .. } = event else {
+            panic!("expected turn usage event");
+        };
+        assert_eq!(usage.cost_usd, Some(0.42));
+    }
+
     #[tokio::test]
     async fn prepare_session_prompt_uses_surface_from_config() {
         let tmp = tempdir().expect("tempdir");
@@ -1260,6 +1385,52 @@ mod tests {
         let snapshot = snapshot.expect("context snapshot event");
         assert!(snapshot.total > 0);
         assert!(snapshot.sources.contains_key("step"));
+    }
+
+    #[tokio::test]
+    async fn opencode_turn_usage_events_include_computed_cost() {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+
+        std::fs::create_dir_all(tmp.path().join(".lf/steps")).expect("create .lf/steps");
+        std::fs::write(tmp.path().join(".lf/steps/design.md"), "Design the system.")
+            .expect("write step");
+
+        let manager = SessionManager::with_create_harness(store, usage_create_harness);
+        let created = manager
+            .create_session(CreateSessionParams {
+                harness: "opencode".to_string(),
+                wave_run_id: Some("run_cost".to_string()),
+                config: SessionConfig {
+                    step: "design".to_string(),
+                    repo_root: tmp.path().to_string_lossy().to_string(),
+                    ..Default::default()
+                },
+            })
+            .await
+            .expect("create session");
+        let _ = wait_for_status(&manager, &created.id, SessionStatus::Active).await;
+
+        manager
+            .send_input(&created.id, "go")
+            .await
+            .expect("send input");
+
+        let events = manager
+            .list_events(&created.id, None)
+            .await
+            .expect("list events");
+        let cost = events.iter().find_map(|event| match &event.event {
+            SessionEvent::TurnUsage { usage, .. } => usage.cost_usd,
+            _ => None,
+        });
+        let cost = cost.expect("turn usage event with computed cost");
+        assert!((cost - 5.825).abs() < 1e-9);
     }
 
     #[tokio::test]

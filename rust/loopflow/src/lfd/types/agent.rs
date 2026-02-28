@@ -43,6 +43,11 @@ impl AgentStatus {
     }
 }
 
+/// Process lifecycle record for an agent invocation.
+///
+/// `AgentRun` tracks execution state (running/waiting/completed), process IDs,
+/// and container metadata. Usage and conversation events live in `Session`.
+/// The two are linked through shared wave execution lineage (`wave_run_id`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRun {
     pub id: LfdId,

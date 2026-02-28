@@ -15,3 +15,5 @@
 **Concerto cleanup.** Guard `ReplyDemoView` and `TerminalTestWindow` behind `#if DEBUG`. Remove or expose the `deepWine` palette. Fix `WaitingStateCard.extractOwnerRepo` to use async instead of blocking main thread.
 
 **Python cleanup.** Bump `requires-python` to `>=3.10`. Collapse `wave_logs` error handling into `_raise_for_error`. Resolve the dual version source (`pyproject.toml` static + `hatch-vcs`).
+
+**Config env override.** `output_log_retention_days` only supports YAML config — no `LFD_*` env override like other config fields. Add `LFD_OUTPUT_LOG_RETENTION_DAYS` for consistency.

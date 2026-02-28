@@ -58,9 +58,7 @@ impl PostgresStore {
         let connection_task = tokio::spawn(async move {
             let _ = connection.await;
         });
-        let transaction = client.transaction().await?;
-        super::migrations::apply_postgres(&transaction).await?;
-        transaction.commit().await?;
+        super::migrations::apply_postgres(&mut client).await?;
         let version = super::migrations::latest_version_postgres_client(&client).await?;
         connection_task.abort();
         Ok(version)

@@ -745,6 +745,7 @@ impl WaveExecutor {
                     }
 
                     self.store.update_wave_run(&run).await?;
+                    self.output.close_writer(&run.id.to_string());
                     self.trigger_listeners_on_completion(wave.id(), &run.branch)
                         .await;
                     if should_manage_pr && run.snapshot.pr.is_some() {
@@ -887,6 +888,7 @@ impl WaveExecutor {
         run.ended_at = Some(OffsetDateTime::now_utc());
         run.error = Some(error);
         self.store.update_wave_run(run).await?;
+        self.output.close_writer(&run.id.to_string());
 
         // Clean up run-scoped worktrees.
         let wt = Path::new(&run.worktree);

@@ -181,6 +181,11 @@ pub async fn reconcile_wave_queue(
     reconcile_wave_queue_with_ops(store, github_config, wave_id, trigger, &RealQueueOps).await
 }
 
+pub async fn remove_reconcile_lock(wave_id: &LfdId) {
+    let mut locks = QUEUE_RECONCILE_LOCKS.lock().await;
+    locks.remove(&wave_id.to_string());
+}
+
 async fn acquire_reconcile_lock(wave_id: &LfdId) -> OwnedMutexGuard<()> {
     let wave_key = wave_id.to_string();
     let lock = {

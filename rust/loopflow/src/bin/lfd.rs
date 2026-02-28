@@ -99,8 +99,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         (provider, client, creds)
     };
 
+    if lfd_config.github.webhook_secret.trim().is_empty() {
+        tracing::warn!(
+            "GitHub webhook secret is not configured — webhook endpoint will reject all requests. \
+             Set LFD_GITHUB_WEBHOOK_SECRET or github.webhook_secret in config."
+        );
+    }
+
     let scheduler = Arc::new(Scheduler::new(max_slots));
-    let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
+    let output_dir = loopflow::lfd::default_output_dir();
+    let max_age =
+        std::time::Duration::from_secs(u64::from(lfd_config.output_log_retention_days) * 86400);
+    loopflow::lfd::output::prune_output_logs(&output_dir, max_age);
+    let output = OutputHub::new(2048, output_dir.clone());
     let event_hub = EventHub::new(1024);
     let session_manager = SessionManager::new_with_scheduler(store.clone(), scheduler.clone());
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
@@ -187,6 +198,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         lfd_config.github.clone(),
         cancel.clone(),
     );
+
+    // Hourly output log pruning.
+    {
+        let prune_dir = output_dir;
+        let prune_cancel = cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            interval.tick().await; // skip immediate tick (startup prune already ran)
+            loop {
+                tokio::select! {
+                    _ = prune_cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        loopflow::lfd::output::prune_output_logs(&prune_dir, max_age);
+                    }
+                }
+            }
+        });
+    }
 
     let repo_roots = store
         .list_waves(None)

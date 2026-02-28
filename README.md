@@ -55,6 +55,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 |------|--------------|
 | `debug` | Fix an error |
 | `ci-fix` | Fix failing CI checks for the current PR |
+| `integrate-upstream` | Adapt wave code after rebasing onto main |
 | `implement` | Build from a design doc |
 | `compress` | Simplify touched code |
 | `gate` | Ship-ready code and reviewer-friendly docs |
@@ -104,6 +105,7 @@ Steps chain into flows. Flows feed into waves.
 | `ship` | design → build → review |
 | `pair` | design → build |
 | `grind` | research → iterate → build → gate |
+| `integrate` | rebase → integrate-upstream |
 | `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |

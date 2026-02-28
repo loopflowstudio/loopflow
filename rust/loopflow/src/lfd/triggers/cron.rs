@@ -57,10 +57,13 @@ async fn check_cron_waves(
             _ => continue,
         };
 
-        // Use the wave's last iteration timestamp as a proxy for last triggered.
-        // For more accurate tracking, we could store last_cron_triggered_at on the wave,
-        // but iteration timing is sufficient for now.
-        let last_triggered = None::<DateTime<Utc>>;
+        // Use the most recent activation log entry as a proxy for last triggered.
+        let last_triggered = store
+            .list_activation_log(wave.id(), 1)
+            .await
+            .ok()
+            .and_then(|logs| logs.into_iter().next())
+            .and_then(|log| DateTime::<Utc>::from_timestamp(log.created_at, 0));
 
         if should_activate_cron(&cron_expr, last_triggered) {
             let reason = format!("cron schedule {cron_expr} due");

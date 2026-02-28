@@ -212,7 +212,7 @@ private struct ReplyInteractionOptionCard: View {
                 )
 
             if emojiVariant == .fixed {
-                ForEach(["👍", "👎", "✏️", "❓"], id: \.self) { emoji in
+                ForEach(reactionEmojis.map(\.emoji), id: \.self) { emoji in
                     Text(emoji)
                 }
             } else {

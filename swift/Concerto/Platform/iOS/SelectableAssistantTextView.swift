@@ -35,7 +35,7 @@ final class SelectableTextView: UITextView {
     weak var coordinator: SelectableAssistantTextView.Coordinator?
     var lastText: String = ""
 
-    private static let emojis = ["👍", "👎", "✏️", "❓"]
+    private static let emojis = reactionEmojis.map(\.emoji)
 
     init() {
         super.init(frame: .zero, textContainer: nil)

@@ -132,7 +132,7 @@ struct ReplyComposerContent: View {
                 .lineLimit(1...4)
 
             HStack(spacing: Spacing.xs) {
-                ForEach(Array(zip(["👍", "👎", "✏️", "❓"], ["Thumbs up", "Thumbs down", "Edit", "Question"])), id: \.0) { emoji, label in
+                ForEach(reactionEmojis, id: \.emoji) { emoji, label in
                     Button(emoji) {
                         onEmoji(emoji)
                     }

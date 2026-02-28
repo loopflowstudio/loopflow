@@ -1,6 +1,15 @@
 import Foundation
 import Observation
 
+// MARK: - Reaction Emojis
+
+let reactionEmojis: [(emoji: String, label: String)] = [
+    ("👍", "Thumbs up"),
+    ("👎", "Thumbs down"),
+    ("✏️", "Edit"),
+    ("❓", "Question"),
+]
+
 // MARK: - Reply Entry
 
 enum ReplyEntry: Identifiable, Equatable {

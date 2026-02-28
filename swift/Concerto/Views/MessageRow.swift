@@ -148,10 +148,14 @@ import LoopflowCore
 
 struct MessageRow: View {
     @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let message: SessionMessage
     let timestampLabel: String?
     let showStreamingCursor: Bool
     let onQueueEntry: (ReplyEntry) -> Void
+
+    @State private var composerQuote: String?
+    @State private var replyDraft = ""
 
     var body: some View {
         if message.role == .system {
@@ -192,7 +196,9 @@ struct MessageRow: View {
                 ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                     switch segment {
                     case .text(let text):
-                        AssistantTextSegment(text: text)
+                        SelectableAssistantTextView(text: text) { action in
+                            handleQuoteAction(action)
+                        }
                     case .code(let language, let codeContent):
                         CodeBlockView(language: language, content: codeContent)
                     }
@@ -202,6 +208,13 @@ struct MessageRow: View {
                     StreamingCursorView()
                 }
             }
+            .modifier(ReplyComposerPresentation(
+                composerQuote: $composerQuote,
+                replyDraft: $replyDraft,
+                isCompact: horizontalSizeClass == .compact,
+                onSubmitText: queueDraftReply,
+                onEmoji: queueEmojiReply
+            ))
         } else {
             Text(message.content)
                 .font(Typography.body())
@@ -224,6 +237,77 @@ struct MessageRow: View {
         case .assistant: return palette.textSecondary.opacity(0.4)
         case .error: return .statusError
         case .system: return .clear
+        }
+    }
+
+    private func handleQuoteAction(_ action: QuoteAction) {
+        switch action {
+        case .quoteReply(let selected):
+            composerQuote = selected
+        case .emoji(let selected, let emoji):
+            onQueueEntry(.emojiReact(quoted: selected, emoji: emoji))
+        }
+    }
+
+    private func queueDraftReply() {
+        guard let quoted = composerQuote else { return }
+        let reply = replyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return }
+        onQueueEntry(.quoteReply(quoted: quoted, reply: reply))
+        closeComposer()
+    }
+
+    private func queueEmojiReply(_ emoji: String) {
+        guard let quoted = composerQuote else { return }
+        onQueueEntry(.emojiReact(quoted: quoted, emoji: emoji))
+        closeComposer()
+    }
+
+    private func closeComposer() {
+        composerQuote = nil
+        replyDraft = ""
+    }
+}
+
+private struct ReplyComposerPresentation: ViewModifier {
+    @Binding var composerQuote: String?
+    @Binding var replyDraft: String
+    let isCompact: Bool
+    let onSubmitText: () -> Void
+    let onEmoji: (String) -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { composerQuote != nil },
+            set: { if !$0 { composerQuote = nil; replyDraft = "" } }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        if isCompact {
+            content.sheet(isPresented: isPresented) {
+                if let quoted = composerQuote {
+                    ReplyComposerContent(
+                        quoted: quoted,
+                        replyDraft: $replyDraft,
+                        onSubmitText: onSubmitText,
+                        onEmoji: onEmoji
+                    )
+                    .presentationDetents([.medium])
+                }
+            }
+        } else {
+            content.popover(isPresented: isPresented, arrowEdge: .top) {
+                if let quoted = composerQuote {
+                    ReplyComposerContent(
+                        quoted: quoted,
+                        replyDraft: $replyDraft,
+                        onSubmitText: onSubmitText,
+                        onEmoji: onEmoji
+                    )
+                    .frame(width: 320)
+                }
+            }
         }
     }
 }

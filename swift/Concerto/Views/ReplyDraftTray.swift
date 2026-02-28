@@ -105,9 +105,9 @@ private struct ReplyDraftEntryRow: View {
     }
 }
 
-// MARK: - Reply Composer Popover
+// MARK: - Reply Composer Content (shared across platforms)
 
-struct ReplyComposerPopover: View {
+struct ReplyComposerContent: View {
     @Environment(\.palette) private var palette
 
     let quoted: String
@@ -151,6 +151,25 @@ struct ReplyComposerPopover: View {
             }
         }
         .padding(Spacing.md)
+    }
+}
+
+// MARK: - Platform Presentation Wrappers
+
+struct ReplyComposerPopover: View {
+    let quoted: String
+    @Binding var replyDraft: String
+
+    let onSubmitText: () -> Void
+    let onEmoji: (String) -> Void
+
+    var body: some View {
+        ReplyComposerContent(
+            quoted: quoted,
+            replyDraft: $replyDraft,
+            onSubmitText: onSubmitText,
+            onEmoji: onEmoji
+        )
         .frame(width: 320)
     }
 }

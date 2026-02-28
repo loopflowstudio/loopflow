@@ -26,7 +26,6 @@ Detailed sub-reports for each subsystem live in `.lf/rlm/results/`.
 
 ## Risks
 
-- SQLite migration transaction wrapping could break if any migration relies on implicit auto-commit behavior
 - Adding CI caching introduces cache invalidation bugs (stale artifacts)
 - Test coverage sprints could produce tests that test implementation rather than behavior
 

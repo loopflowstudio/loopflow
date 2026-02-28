@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import click
 import pytest
+import typer
 from conftest import (
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
@@ -198,7 +198,7 @@ def test_infer_group_by_explicit_wins() -> None:
 
 
 def test_infer_group_by_multiple_filters_requires_explicit() -> None:
-    with pytest.raises(click.exceptions.Exit):
+    with pytest.raises(typer.Exit):
         _infer_group_by(wave="x", flow="y", step=None, model=None, prompt=False, group_by=None)
 
 

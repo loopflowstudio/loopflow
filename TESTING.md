@@ -97,6 +97,8 @@ uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 bounda
 uv run python scripts/test_session.py               # session API smoke test (starts lfd)
 uv run python scripts/test_auth_live_contract.py --providers github,claude,codex  # live provider-auth contract + evidence capture
 uv run python scripts/test_remote_smoke.py --url https://lfd.example.com --token "$LFD_AUTH_TOKEN" --repo /remote/repo/path  # remote TLS smoke (repo required on fresh hosts)
+uv run python scripts/concerto-dev.py sandbox-dind --container lfd-container  # bundled lfd DinD sandbox probe
+scripts/test_sandbox_platforms.sh                   # sandbox lifecycle + context sync + Gemini probe
 ```
 
 When adding features that need manual verification, write or extend a script in `scripts/` rather than documenting a list of commands. One command to run, one environment to verify in.

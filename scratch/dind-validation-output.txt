@@ -1,0 +1,4 @@
+$ uv run python scripts/concerto-dev.py sandbox-dind --container lfd-container
+Validating sandbox lifecycle inside container: lfd-container
+$ docker exec lfd-container docker sandbox version
+Cannot connect to the Docker daemon at unix:///Users/jack/.orbstack/run/docker.sock. Is the docker daemon running?

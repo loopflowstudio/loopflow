@@ -23,6 +23,7 @@ Commands:
     lfd -k          Aggressive preflight kill before starting lfd
     lfd --docker    Run lfd with Docker executor (postgres in container)
     agent-image     Build the Docker agent image
+    sandbox-dind    Validate Docker Sandbox lifecycle from inside bundled lfd container
 
     screenshots     Generate app screenshots
     ghostty-build   Build GhosttyKit xcframework locally
@@ -770,6 +771,47 @@ def cmd_agent_image() -> int:
     ).returncode
 
 
+def cmd_sandbox_dind(container: str = "lfd-container") -> int:
+    """Validate sandbox CLI lifecycle from inside the bundled lfd container."""
+
+    def run_probe(cmd: list[str]) -> subprocess.CompletedProcess:
+        print(f"$ {' '.join(cmd)}")
+        result = run_capture(cmd)
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="")
+        return result
+
+    sandbox_name = f"lf-dind-test-{int(time.time())}"
+    created = False
+
+    print(f"Validating sandbox lifecycle inside container: {container}")
+    version = run_probe(["docker", "exec", container, "docker", "sandbox", "version"])
+    if version.returncode != 0:
+        return version.returncode
+
+    create = run_probe(
+        ["docker", "exec", container, "docker", "sandbox", "create", "--name", sandbox_name, "claude", "/tmp"]
+    )
+    if create.returncode != 0:
+        return create.returncode
+    created = True
+
+    try:
+        execute = run_probe(
+            ["docker", "exec", container, "docker", "sandbox", "exec", sandbox_name, "--", "echo", "dind works"]
+        )
+        if execute.returncode != 0:
+            return execute.returncode
+    finally:
+        if created:
+            run_probe(["docker", "exec", container, "docker", "sandbox", "rm", sandbox_name])
+
+    print("DinD sandbox validation passed.")
+    return 0
+
+
 def _stop_docker_on_port(port: int) -> None:
     """Stop any Docker containers bound to the given port."""
     result = run_capture(["docker", "ps", "--filter", f"publish={port}", "-q"])
@@ -1080,6 +1122,7 @@ COMMANDS = {
     "logs": (cmd_logs, "Tail the app logs"),
     "lfd": (cmd_lfd, "Stop local lfd and run from this branch (--docker or -k)"),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
+    "sandbox-dind": (cmd_sandbox_dind, "Validate Docker Sandbox lifecycle inside lfd-container"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
     "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
     "ghostty-update": (cmd_ghostty_update, "Build, upload to R2, update Package.swift"),
@@ -1138,6 +1181,12 @@ def main() -> int:
                 action="store_true",
                 help="print what would be installed",
             )
+        if name == "sandbox-dind":
+            sub.add_argument(
+                "--container",
+                default="lfd-container",
+                help="Container name running bundled lfd (default: lfd-container)",
+            )
 
     args = parser.parse_args()
 
@@ -1155,6 +1204,8 @@ def main() -> int:
         return func(device=args.device)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
+    if args.command == "sandbox-dind":
+        return func(container=args.container)
     return func()
 
 

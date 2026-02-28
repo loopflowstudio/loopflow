@@ -83,7 +83,7 @@ This is the natural session exit point. The user's answer determines what to run
 7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`
 8. End session and tell the user what to run next:
    - `lf implement` (for sprint 1)
-   - `lf flow ship-wave`
+   - `lf ship-wave`
 
 Once breaking things up, be aggressive about commit boundaries—each sprint should be independently shippable.
 

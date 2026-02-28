@@ -91,7 +91,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
 ```bash
 lf design && lf implement && lf gate    # chain steps manually
-lf flow build                           # or use a named flow
+lf build                                # or use a named flow
 ```
 
 Steps chain into flows. Flows feed into waves.
@@ -130,7 +130,7 @@ Steps chain into flows. Flows feed into waves.
 Forks run a step in parallel with different directions, then synthesize the results.
 
 ```bash
-lf flow wave-reduce    # runs reduce 3x with different perspectives
+lf wave-reduce    # runs reduce 3x with different perspectives
 ```
 
 `wave-reduce` forks `reduce` across infra, ux, and ceo directions, then reconciles results with `update-wave`.

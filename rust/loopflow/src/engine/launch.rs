@@ -377,6 +377,35 @@ Test step body.
     }
 
     #[test]
+    fn prepare_launch_prompt_omits_config_directions_when_disabled() {
+        let tmp = create_repo_fixture();
+        let config = Config {
+            direction: Some(vec!["config".to_string()]),
+            ..default_test_config()
+        };
+
+        let prepared = prepare_launch_prompt(
+            &config,
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                surface: Surface::Headless,
+                directions: vec!["thorough".to_string()],
+                include_config_directions: false,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        let names: Vec<String> = prepared
+            .components
+            .directions
+            .iter()
+            .map(|direction| direction.name.clone())
+            .collect();
+        assert_eq!(names, vec!["thorough".to_string()]);
+    }
+
+    #[test]
     fn prepare_launch_prompt_uses_config_area_when_enabled() {
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");

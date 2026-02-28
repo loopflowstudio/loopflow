@@ -26,6 +26,10 @@ pub struct Cli {
     )]
     pub direction: Vec<String>,
 
+    /// Exclude config default directions
+    #[arg(long = "no-direction")]
+    pub no_direction: bool,
+
     /// Area scope (paths to include in context)
     #[arg(short = 'a', long = "area", short_alias = 'A')]
     pub area: Vec<PathBuf>,

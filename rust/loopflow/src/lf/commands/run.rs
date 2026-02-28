@@ -136,7 +136,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             cwd: Some(repo_root.clone()),
             max_turns: None,
             yolo_mode: cli.yolo || config.yolo,
-            include_config_directions: true,
+            include_config_directions: !cli.no_direction,
             include_config_area: true,
             source_overrides: ContextSourceOverrides {
                 lfdocs: cli.lfdocs_setting(),

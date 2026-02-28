@@ -37,6 +37,7 @@ fn main() {
         "BUILTIN_DIRECTIONS",
         &out_dir.join("builtin_directions.rs"),
     );
+    assert_unique_direction_node_names(&builtins_dir.join("directions"));
     generate_direction_groups(
         &builtins_dir.join("directions"),
         &out_dir.join("builtin_direction_groups.rs"),
@@ -232,6 +233,61 @@ fn generate_direction_groups(directions_dir: &Path, out_path: &Path) {
     writeln!(code, "}});").expect("write to String");
 
     fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+}
+
+fn assert_unique_direction_node_names(directions_dir: &Path) {
+    let mut leaves: Vec<(String, PathBuf)> = Vec::new();
+    collect_files(directions_dir, "md", &mut leaves);
+
+    let mut groups = Vec::new();
+    if let Ok(entries) = fs::read_dir(directions_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .expect("group dir has no name")
+                .to_string_lossy()
+                .to_string();
+            groups.push((name, path));
+        }
+    }
+
+    let mut origins: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    for (name, path) in groups {
+        origins
+            .entry(name)
+            .or_default()
+            .push(format!("group {}", path.display()));
+    }
+    for (name, path) in leaves {
+        origins
+            .entry(name)
+            .or_default()
+            .push(format!("direction {}", path.display()));
+    }
+
+    let collisions: Vec<String> = origins
+        .into_iter()
+        .filter_map(|(name, paths)| {
+            if paths.len() > 1 {
+                Some(format!("{name}: {}", paths.join(", ")))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if !collisions.is_empty() {
+        panic!(
+            "duplicate builtin direction node names detected (groups + leaves share one namespace):\n{}",
+            collisions.join("\n")
+        );
+    }
 }
 
 fn title_case(s: &str) -> String {

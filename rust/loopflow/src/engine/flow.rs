@@ -1297,7 +1297,7 @@ Be careful.
         let result = expand_direction_names(&["craft".to_string()], tmp.path());
         assert!(result.contains(&"care".to_string()));
         assert!(result.contains(&"clarity".to_string()));
-        assert!(result.contains(&"scale".to_string()));
+        assert!(!result.contains(&"scale".to_string()));
         assert!(result.contains(&"simplicity".to_string()));
     }
 

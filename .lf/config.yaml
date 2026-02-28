@@ -1,4 +1,6 @@
 agent: claude:opus
+direction:
+  - craft
 yolo: true
 chrome: false
 

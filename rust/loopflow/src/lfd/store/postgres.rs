@@ -221,18 +221,22 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at
+                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type
                      FROM provider_tokens WHERE provider = $1",
                     &[&provider],
                 )
                 .await?;
-            Ok(row.map(|r| super::ProviderToken {
-                provider: r.get(0),
-                access_token: r.get(1),
-                refresh_token: r.get(2),
-                expires_at: r.get(3),
-                login: r.get(4),
-                updated_at: r.get(5),
+            Ok(row.map(|r| {
+                let ct: String = r.get(6);
+                super::ProviderToken {
+                    provider: r.get(0),
+                    access_token: r.get(1),
+                    refresh_token: r.get(2),
+                    expires_at: r.get(3),
+                    login: r.get(4),
+                    updated_at: r.get(5),
+                    credential_type: super::CredentialType::from_db(&ct),
+                }
             }))
         })
         .await
@@ -243,14 +247,15 @@ impl PostgresStore {
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6)
+                    "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
                      ON CONFLICT(provider) DO UPDATE SET
                         access_token = excluded.access_token,
                         refresh_token = excluded.refresh_token,
                         expires_at = excluded.expires_at,
                         login = excluded.login,
-                        updated_at = excluded.updated_at",
+                        updated_at = excluded.updated_at,
+                        credential_type = excluded.credential_type",
                     &[
                         &token.provider,
                         &token.access_token,
@@ -258,6 +263,7 @@ impl PostgresStore {
                         &token.expires_at,
                         &token.login,
                         &token.updated_at,
+                        &token.credential_type.as_str(),
                     ],
                 )
                 .await?;
@@ -284,20 +290,24 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at
+                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type
                      FROM provider_tokens ORDER BY provider",
                     &[],
                 )
                 .await?;
             Ok(rows
                 .iter()
-                .map(|r| super::ProviderToken {
-                    provider: r.get(0),
-                    access_token: r.get(1),
-                    refresh_token: r.get(2),
-                    expires_at: r.get(3),
-                    login: r.get(4),
-                    updated_at: r.get(5),
+                .map(|r| {
+                    let ct: String = r.get(6);
+                    super::ProviderToken {
+                        provider: r.get(0),
+                        access_token: r.get(1),
+                        refresh_token: r.get(2),
+                        expires_at: r.get(3),
+                        login: r.get(4),
+                        updated_at: r.get(5),
+                        credential_type: super::CredentialType::from_db(&ct),
+                    }
                 })
                 .collect())
         })

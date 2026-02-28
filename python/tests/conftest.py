@@ -93,6 +93,7 @@ AUTH_PROVIDER_ACTIVE = {
     "provider": "github",
     "status": "active",
     "login": "jackdanger",
+    "credential_type": "oauth",
 }
 
 AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS = {
@@ -101,10 +102,17 @@ AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS = {
     "login": "jack@anthropic.com",
     "expires_at": "2030-01-01T04:00:00Z",
     "next_refresh_at": "2030-01-01T03:40:00Z",
+    "credential_type": "oauth",
+}
+
+AUTH_PROVIDER_APIKEY = {
+    "provider": "codex",
+    "status": "active",
+    "credential_type": "apikey",
 }
 
 AUTH_PROVIDER_NONE = {
-    "provider": "codex",
+    "provider": "opencodezen",
     "status": "none",
 }
 

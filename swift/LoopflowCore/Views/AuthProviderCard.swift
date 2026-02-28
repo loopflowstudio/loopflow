@@ -190,7 +190,7 @@ public struct AuthProviderCard: View {
     private var statusColor: Color {
         switch status.status {
         case .active:
-            Color.statusSuccess
+            status.credentialType == .apikey ? Color.statusWarning : Color.statusSuccess
         case .pending:
             Color.statusWarning
         case .none, .expired:
@@ -201,7 +201,11 @@ public struct AuthProviderCard: View {
     private var statusLabel: String {
         switch status.status {
         case .active:
-            "Connected"
+            if status.credentialType == .apikey {
+                "API Key"
+            } else {
+                "OAuth"
+            }
         case .pending:
             "Pending"
         case .none:

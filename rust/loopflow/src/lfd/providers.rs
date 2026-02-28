@@ -237,6 +237,7 @@ mod tests {
             },
             expires_at: None,
             next_refresh_at: None,
+            credential_type: None,
         }];
 
         let merged = merge_auth(PROVIDER_CATALOG, &snapshots);

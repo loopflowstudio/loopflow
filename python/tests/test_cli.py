@@ -86,7 +86,7 @@ def test_auth_status_table_shows_active_and_none_states() -> None:
 
     assert "GitHub" in rendered
     assert "@jackdanger" in rendered
-    assert "Codex" in rendered
+    assert "OpenCode Zen" in rendered
     assert "not connected" in rendered
 
 

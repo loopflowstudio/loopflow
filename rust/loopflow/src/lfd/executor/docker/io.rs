@@ -121,20 +121,34 @@ impl DockerExecutor {
         }
 
         // Inject provider tokens cached during executor initialization.
-        for (provider, env_var) in [
-            ("github", "GH_TOKEN"),
-            ("claude", "ANTHROPIC_API_KEY"),
-            ("codex", "OPENAI_API_KEY"),
-        ] {
+        // Use credential_type from the DB to determine the correct env var;
+        // fall back to OAuth-style vars if no DB token exists.
+        for provider in ["github", "claude", "codex"] {
+            let Some(credential) = self.cached_credentials.get(provider) else {
+                continue;
+            };
+            let env_var = match self.store.get_provider_token(provider).await {
+                Ok(Some(token)) => match (provider, token.credential_type) {
+                    ("github", _) => "GH_TOKEN",
+                    ("claude", crate::lfd::store::CredentialType::ApiKey) => "ANTHROPIC_API_KEY",
+                    ("claude", _) => "CLAUDE_CODE_OAUTH_TOKEN",
+                    ("codex", crate::lfd::store::CredentialType::ApiKey) => "OPENAI_API_KEY",
+                    _ => continue,
+                },
+                _ => match provider {
+                    "github" => "GH_TOKEN",
+                    "claude" => "CLAUDE_CODE_OAUTH_TOKEN",
+                    "codex" => continue,
+                    _ => continue,
+                },
+            };
             if env
                 .iter()
                 .any(|entry| entry.starts_with(&format!("{env_var}=")))
             {
                 continue;
             }
-            if let Some(credential) = self.cached_credentials.get(provider) {
-                env.push(format!("{env_var}={}", credential.token));
-            }
+            env.push(format!("{env_var}={}", credential.token));
         }
 
         // When SSH credentials are mounted, build a GIT_SSH_COMMAND that:

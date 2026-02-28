@@ -145,20 +145,31 @@ def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
     table.add_column("details")
 
     for status in statuses:
+        ct = status.credential_type or "oauth"
         if status.status == "active":
-            icon = "✓"
+            if ct == "apikey":
+                icon = "⚠"
+                status_label = "apikey"
+            else:
+                icon = "✓"
+                status_label = "oauth"
             details = _status_details(status)
+            if ct == "apikey":
+                details = f"{details} · pay-per-token"
         elif status.status == "pending":
             icon = "…"
+            status_label = "pending"
             details = "waiting for browser confirmation"
         elif status.status == "expired":
             icon = "!"
+            status_label = "expired"
             details = "expired"
         else:
             icon = "✗"
+            status_label = "none"
             details = "not connected"
 
-        table.add_row(_provider_label(status.provider), f"{icon} {status.status}", details)
+        table.add_row(_provider_label(status.provider), f"{icon} {status_label}", details)
 
     return table
 
@@ -582,6 +593,41 @@ def auth_disconnect(provider: str) -> None:
         typer.echo(f"Disconnected {_provider_label(status.provider)}")
     else:
         typer.echo(f"Updated {_provider_label(status.provider)} status to {status.status}")
+
+
+@auth_app.command("configure", help="Switch credential type for a provider.")
+def auth_configure(
+    provider: str,
+    credential: str = typer.Option(..., "--credential", "-c", help="oauth or apikey"),
+) -> None:
+    if credential not in ("oauth", "apikey"):
+        typer.echo("Error: --credential must be 'oauth' or 'apikey'", err=True)
+        raise typer.Exit(1)
+
+    api_key = None
+    if credential == "apikey":
+        env_names = {
+            "claude": "ANTHROPIC_API_KEY",
+            "codex": "OPENAI_API_KEY",
+            "opencodezen": "OPENCODE_API_KEY",
+        }
+        env_name = env_names.get(provider.lower())
+        if env_name:
+            import os
+
+            api_key = os.environ.get(env_name)
+        if not api_key:
+            typer.echo(
+                f"Error: set {env_name or 'the API key env var'} in your environment first",
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(f"⚠ API key auth bills per token. OAuth uses your existing subscription.")
+
+    status = api.configure_credential(provider, credential, api_key=api_key)
+    label = _provider_label(status.provider)
+    ct = status.credential_type or credential
+    typer.echo(f"{label} credential type set to {ct}")
 
 
 @repos_app.callback(invoke_without_command=True)

@@ -22,7 +22,7 @@ use crate::lfd::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
 use crate::lfd::events::EventHub;
-use crate::lfd::store::{ProviderToken, SharedStore};
+use crate::lfd::store::{CredentialType, ProviderToken, SharedStore};
 use crate::lfd::types::Event;
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
@@ -147,6 +147,7 @@ pub struct ProviderAuthSnapshot {
     pub status: AuthStatus,
     pub expires_at: Option<i64>,
     pub next_refresh_at: Option<i64>,
+    pub credential_type: Option<CredentialType>,
 }
 
 pub struct AuthFlowHandle {
@@ -340,6 +341,7 @@ impl AuthBroker for SocketAuthBroker {
             expires_at: credential.expires_at.as_deref().and_then(parse_expires_at),
             login: credential.login,
             updated_at: now_unix(),
+            credential_type: CredentialType::OAuth,
         })
     }
 }
@@ -424,6 +426,7 @@ impl ProviderAuthService {
                     status: AuthStatus::Pending,
                     expires_at: None,
                     next_refresh_at: None,
+                    credential_type: None,
                 });
                 continue;
             }
@@ -441,6 +444,7 @@ impl ProviderAuthService {
                 status: AuthStatus::Pending,
                 expires_at: None,
                 next_refresh_at: None,
+                credential_type: None,
             });
         }
 
@@ -470,6 +474,7 @@ impl ProviderAuthService {
                         status,
                         expires_at,
                         next_refresh_at,
+                        credential_type: Some(token.credential_type),
                     });
                 }
                 Ok(None) => {}
@@ -485,6 +490,7 @@ impl ProviderAuthService {
             status,
             expires_at: None,
             next_refresh_at: None,
+            credential_type: None,
         })
     }
 
@@ -524,8 +530,19 @@ impl ProviderAuthService {
             match monitor_result {
                 Ok(()) => match broker_for_task.check_status().await {
                     Ok(AuthStatus::Active { login }) => {
-                        // Extract and persist the token
+                        // Extract and persist the token (always as OAuth)
                         if let Some(store) = &store_for_task {
+                            // Check if switching from apikey to oauth
+                            if let Ok(Some(existing)) =
+                                store.get_provider_token(provider.as_str()).await
+                            {
+                                if existing.credential_type == CredentialType::ApiKey {
+                                    tracing::info!(
+                                        provider = %provider,
+                                        "switched from API key to OAuth (subscription billing)"
+                                    );
+                                }
+                            }
                             if let Some(token) = broker_for_task.extract_token().await {
                                 if let Err(err) = store.upsert_provider_token(&token).await {
                                     warn!(provider = %provider, error = %err, "failed to persist provider token");
@@ -1272,6 +1289,7 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
         expires_at,
         login,
         updated_at: now_unix(),
+        credential_type: CredentialType::OAuth,
     })
 }
 
@@ -1296,6 +1314,7 @@ fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
         expires_at,
         login: None,
         updated_at: now_unix(),
+        credential_type: CredentialType::OAuth,
     })
 }
 
@@ -1322,6 +1341,7 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
         expires_at,
         login: None,
         updated_at: now_unix(),
+        credential_type: CredentialType::OAuth,
     })
 }
 
@@ -1348,6 +1368,7 @@ fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
         expires_at,
         login,
         updated_at: now_unix(),
+        credential_type: CredentialType::OAuth,
     })
 }
 
@@ -1628,6 +1649,8 @@ pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     match env_name {
         "GH_TOKEN" => true,
         "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
+        "ANTHROPIC_API_KEY" => normalize_program_name(program) == "claude",
+        "OPENAI_API_KEY" => normalize_program_name(program) == "codex",
         "OPENCODE_API_KEY" => normalize_program_name(program) == "opencode",
         _ => false,
     }
@@ -1662,8 +1685,30 @@ pub fn api_key_env_names() -> &'static [&'static str] {
     API_KEY_ENV_NAMES
 }
 
+/// Return the env var name and value for a given provider token, based on its
+/// credential_type. This is the single decision point for executors.
+fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
+    match (token.provider.as_str(), token.credential_type) {
+        ("github", _) => Some(("GH_TOKEN".to_string(), token.access_token.clone())),
+        ("claude", CredentialType::OAuth) => Some((
+            "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+            token.access_token.clone(),
+        )),
+        ("claude", CredentialType::ApiKey) => {
+            Some(("ANTHROPIC_API_KEY".to_string(), token.access_token.clone()))
+        }
+        ("codex", CredentialType::OAuth) => None, // Codex OAuth env injection unsupported
+        ("codex", CredentialType::ApiKey) => {
+            Some(("OPENAI_API_KEY".to_string(), token.access_token.clone()))
+        }
+        ("opencodezen", _) => Some(("OPENCODE_API_KEY".to_string(), token.access_token.clone())),
+        _ => None,
+    }
+}
+
 /// Build env vars for all stored provider tokens. Used by executors to inject
-/// credentials into agent processes.
+/// credentials into agent processes. The env var chosen depends on the token's
+/// credential_type (oauth vs apikey).
 pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String, String)> {
     let tokens = match store.list_provider_tokens().await {
         Ok(tokens) => tokens,
@@ -1671,13 +1716,8 @@ pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String,
     };
     let mut vars = Vec::new();
     for token in tokens {
-        match token.provider.as_str() {
-            "github" => vars.push(("GH_TOKEN".to_string(), token.access_token)),
-            "claude" => vars.push(("CLAUDE_CODE_OAUTH_TOKEN".to_string(), token.access_token)),
-            // Codex OAuth env injection intentionally unsupported for now; keep token in DB.
-            "codex" => {}
-            "opencodezen" => vars.push(("OPENCODE_API_KEY".to_string(), token.access_token)),
-            _ => continue,
+        if let Some(pair) = env_var_for_token(&token) {
+            vars.push(pair);
         }
     }
     vars
@@ -2185,6 +2225,7 @@ mod tests {
                 expires_at: None,
                 login: Some("user@example.com".to_string()),
                 updated_at: now_unix(),
+                credential_type: CredentialType::OAuth,
             })
             .await
             .expect("upsert provider token");
@@ -2257,5 +2298,97 @@ mod tests {
         assert_eq!(token.provider, "github");
         assert_eq!(token.access_token, "refreshed-token");
         assert_eq!(token.login, Some("jackdanger".to_string()));
+    }
+
+    fn make_token(provider: &str, credential_type: CredentialType) -> ProviderToken {
+        ProviderToken {
+            provider: provider.to_string(),
+            access_token: "test-token".to_string(),
+            refresh_token: None,
+            expires_at: None,
+            login: None,
+            updated_at: now_unix(),
+            credential_type,
+        }
+    }
+
+    #[test]
+    fn env_var_for_token_claude_oauth_returns_oauth_token() {
+        let token = make_token("claude", CredentialType::OAuth);
+        let (name, _) = env_var_for_token(&token).expect("should produce env var");
+        assert_eq!(name, "CLAUDE_CODE_OAUTH_TOKEN");
+    }
+
+    #[test]
+    fn env_var_for_token_claude_apikey_returns_api_key() {
+        let token = make_token("claude", CredentialType::ApiKey);
+        let (name, _) = env_var_for_token(&token).expect("should produce env var");
+        assert_eq!(name, "ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn env_var_for_token_codex_oauth_returns_none() {
+        let token = make_token("codex", CredentialType::OAuth);
+        assert!(env_var_for_token(&token).is_none());
+    }
+
+    #[test]
+    fn env_var_for_token_codex_apikey_returns_openai_key() {
+        let token = make_token("codex", CredentialType::ApiKey);
+        let (name, _) = env_var_for_token(&token).expect("should produce env var");
+        assert_eq!(name, "OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn env_var_for_token_github_always_returns_gh_token() {
+        for ct in [CredentialType::OAuth, CredentialType::ApiKey] {
+            let token = make_token("github", ct);
+            let (name, _) = env_var_for_token(&token).expect("should produce env var");
+            assert_eq!(name, "GH_TOKEN");
+        }
+    }
+
+    #[test]
+    fn env_var_for_token_opencodezen_always_returns_opencode_key() {
+        for ct in [CredentialType::OAuth, CredentialType::ApiKey] {
+            let token = make_token("opencodezen", ct);
+            let (name, _) = env_var_for_token(&token).expect("should produce env var");
+            assert_eq!(name, "OPENCODE_API_KEY");
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_env_vars_returns_correct_vars_for_mixed_credential_types() {
+        let tmp = tempdir().expect("tempdir");
+        let store = crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+            tmp.path().join("lfd.db"),
+        ))
+        .await
+        .expect("open sqlite store");
+
+        // Claude with API key
+        store
+            .upsert_provider_token(&make_token("claude", CredentialType::ApiKey))
+            .await
+            .expect("upsert claude apikey");
+
+        // GitHub with OAuth
+        store
+            .upsert_provider_token(&make_token("github", CredentialType::OAuth))
+            .await
+            .expect("upsert github oauth");
+
+        // Codex with OAuth (should produce no env var)
+        store
+            .upsert_provider_token(&make_token("codex", CredentialType::OAuth))
+            .await
+            .expect("upsert codex oauth");
+
+        let vars = provider_env_vars(&store).await;
+
+        assert!(vars.iter().any(|(n, _)| n == "ANTHROPIC_API_KEY"));
+        assert!(vars.iter().any(|(n, _)| n == "GH_TOKEN"));
+        assert!(!vars.iter().any(|(n, _)| n == "CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(!vars.iter().any(|(n, _)| n == "OPENAI_API_KEY"));
     }
 }

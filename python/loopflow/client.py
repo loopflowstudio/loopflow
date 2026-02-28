@@ -106,6 +106,18 @@ class Client:
         payload = self._request_json("DELETE", f"/v0/auth/{provider}")
         return AuthProviderStatus.model_validate(payload)
 
+    def configure_credential(
+        self,
+        provider: str,
+        credential_type: str,
+        api_key: Optional[str] = None,
+    ) -> AuthProviderStatus:
+        body: dict[str, Any] = {"credential_type": credential_type}
+        if api_key is not None:
+            body["api_key"] = api_key
+        payload = self._request_json("PUT", f"/v0/auth/{provider}/credential", json=body)
+        return AuthProviderStatus.model_validate(payload)
+
     def providers(self) -> list[ProviderInfo]:
         payload = self._request_json("GET", "/v0/providers")
         if not isinstance(payload, list):

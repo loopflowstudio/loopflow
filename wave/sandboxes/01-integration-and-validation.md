@@ -6,7 +6,22 @@
 
 Does sandbox mode work transparently — same streaming, same context files, same cleanup — across macOS local, macOS Concerto, and Linux? Where does it break?
 
-## Scope
+## What's built
+
+Validation infrastructure is shipped. Three layers:
+
+- **Rust unit tests** (`sandbox_` module in `rust/loopflow/src/lfd/executor/sandbox.rs`) — command shape, streaming, cleanup on timeout, orphan recovery. Uses fake docker scripts via PATH interception (not trait extraction — keeps production code simple).
+- **Platform script** (`scripts/test_sandbox_platforms.sh`) — full sandbox lifecycle on real hosts. Startup probe, context file sync, Gemini CLI probe, cleanup verification. Fails fast when required CLI commands aren't available.
+- **DinD command** (`scripts/concerto-dev.py sandbox-dind`) — probes sandbox lifecycle inside bundled lfd container.
+- **CI job** (`sandbox-smoke` in `.github/workflows/ci.yml`) — probe-gate pattern: skips when sandbox plugin unavailable, activates automatically when it lands on CI runners.
+
+## What's blocked
+
+Real-environment validation requires a Docker Sandbox plugin version that exposes `create` and `exec`. Local host has v0.6.0 which only advertises `run/ls/inspect/rm/version`. The platform script and DinD command fail fast with clear diagnostics.
+
+CI `sandbox-smoke` job will skip on ubuntu-latest (no sandbox plugin). Correct but untested — first real activation will be when sandbox lands on CI runners.
+
+## Remaining scope
 
 ### Context and workspace sync
 
@@ -26,6 +41,8 @@ No stream rehydration in phase 1.
 
 Verify `docker sandbox` commands work from inside the bundled lfd container with `/var/run/docker.sock` mounted. Confirm the lfd Docker image includes the sandbox CLI plugin.
 
+DinD probe blocked on 2026-02-28 — host Docker daemon not reachable. Re-run after Docker daemon is available.
+
 ### Platform validation
 
 - **macOS (self-hosted):** full validation — probe, run, stream, cleanup, fallback
@@ -36,11 +53,11 @@ Verify `docker sandbox` commands work from inside the bundled lfd container with
 
 Phase 1 assumes Gemini CLI works inside the `claude` sandbox template. Validate this — if Gemini CLI isn't pre-installed, determine whether `docker sandbox exec` can install it or we need a custom template.
 
+Gemini probe blocked on 2026-02-28 — sandbox CLI missing `create`/`exec`. Re-run once CLI compatible.
+
 ## Done when
 
-- Sandbox cleanup works on completion, terminate, and startup janitor
-- Context files readable inside sandboxed Claude runs
-- macOS validated (self-hosted + Concerto path)
-- Linux smoke validated (experimental)
-- Concerto bundled daemon path validated with sandbox executor (or documented as blocked with evidence)
-- Gemini CLI confirmed working inside `claude` sandbox template (or custom template strategy documented)
+- Platform validation script passes on macOS (blocked on sandbox CLI compatibility)
+- Context file sync verified via platform script
+- Concerto DinD path validated or documented as blocked with evidence
+- Gemini CLI outcome confirmed

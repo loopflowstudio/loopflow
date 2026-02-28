@@ -17,6 +17,10 @@ Runtime fallback: if sandbox launch/exec/cleanup fails for Claude/Gemini, retry 
 
 `AdaptiveContainerExecutor` wraps both backends. `mode: container` resolves to `ExecutorType::Sandbox` (adaptive), keeping config simple.
 
+### Validation approach
+
+Hybrid: Rust unit tests for executor logic (command shape, cleanup, orphan recovery via fake docker scripts), shell scripts for real-environment validation across deployment surfaces. Probe-gate CI pattern — sandbox tests skip when plugin unavailable, activate automatically when it lands.
+
 ## Goals
 
 - Kernel isolation boundary for agent runs
@@ -26,8 +30,8 @@ Runtime fallback: if sandbox launch/exec/cleanup fails for Claude/Gemini, retry 
 
 ## Risks
 
-- **Docker Sandbox CLI instability.** The CLI surface is young. Breakage on updates could disable the sandbox path entirely (mitigated by fallback to DockerExecutor).
-- **Concerto DinD.** Bundled lfd container needs `docker sandbox` CLI plugin available. Unvalidated.
+- **Docker Sandbox CLI compatibility.** v0.6.0 only exposes `run/ls/inspect/rm/version` — missing `create` and `exec`. The startup probe and platform script fail fast, but real-environment validation is blocked until a compatible plugin version ships.
+- **Concerto DinD.** Bundled lfd container needs `docker sandbox` CLI plugin available. Probe blocked (Docker daemon unreachable on 2026-02-28). Decision pending between adding plugin to Dockerfile vs falling back to DockerExecutor.
 - **Linux experimental.** Sandbox behavior on self-hosted Linux is experimental and unvalidated under load.
 - **Credential injection.** Phase 1 uses env var injection. Credential proxy coverage for Claude/Gemini is an open question.
 

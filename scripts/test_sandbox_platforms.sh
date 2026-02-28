@@ -28,17 +28,6 @@ pass()    { printf '  PASS: %s\n' "$1"; }
 fail()    { printf '  FAIL: %s\n' "$1"; exit 1; }
 skip()    { printf '  SKIP: %s\n' "$1"; }
 
-remove_cleanup_id() {
-  target="$1"
-  filtered=()
-  for id in "${CLEANUP_IDS[@]}"; do
-    if [ "$id" != "$target" ]; then
-      filtered+=("$id")
-    fi
-  done
-  CLEANUP_IDS=("${filtered[@]}")
-}
-
 require_sandbox_cli_compatibility() {
   help_output=$(docker sandbox --help 2>&1 || true)
   missing=()
@@ -59,18 +48,13 @@ require_sandbox_cli_compatibility() {
 
 section "Platform"
 echo "  OS:      $(uname -s) $(uname -m)"
-docker_client_version=$(docker version --format '{{.Client.Version}}' 2>/dev/null || true)
-if [ -z "$docker_client_version" ]; then
-  docker_client_version="NOT AVAILABLE"
-fi
-echo "  Docker:  $docker_client_version"
+echo "  Docker:  $(docker version --format '{{.Client.Version}}' 2>/dev/null || echo 'NOT AVAILABLE')"
 
-sandbox_version=$(docker sandbox version 2>&1 || true)
-echo "  Sandbox: ${sandbox_version:-NOT AVAILABLE}"
-
-if ! docker sandbox version >/dev/null 2>&1; then
+if ! sandbox_version=$(docker sandbox version 2>&1); then
+  echo "  Sandbox: NOT AVAILABLE"
   fail "docker sandbox plugin not available"
 fi
+echo "  Sandbox: $sandbox_version"
 
 require_sandbox_cli_compatibility
 
@@ -93,7 +77,6 @@ else
 fi
 
 docker sandbox rm "$platform_id"
-remove_cleanup_id "$platform_id"
 
 # ── Context file sync ──
 
@@ -114,7 +97,6 @@ else
 fi
 
 docker sandbox rm "$ctx_id"
-remove_cleanup_id "$ctx_id"
 
 # ── Gemini template probe ──
 
@@ -142,7 +124,6 @@ else
 fi
 
 docker sandbox rm "$gemini_id"
-remove_cleanup_id "$gemini_id"
 
 # ── Cleanup verification ──
 

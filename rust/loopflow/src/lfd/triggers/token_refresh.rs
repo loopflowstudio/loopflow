@@ -183,13 +183,11 @@ async fn refresh_provider_token_row(
             match result {
                 Ok(result) => result,
                 Err(_) => {
-                    deps.event_hub.send(Event::auth_refresh_failed(
-                        provider,
-                        format!(
-                            "token refresh timed out after {} seconds",
-                            deps.refresh_timeout.as_secs()
-                        ),
-                    ));
+                    let reason = format!(
+                        "token refresh timed out after {} seconds",
+                        deps.refresh_timeout.as_secs()
+                    );
+                    emit_refresh_failure(&deps.event_hub, provider, reason);
                     return;
                 }
             }
@@ -202,10 +200,11 @@ async fn refresh_provider_token_row(
                 .expires_at
                 .is_some_and(|expires_at| expires_at <= now_unix())
             {
-                deps.event_hub.send(Event::auth_refresh_failed(
+                emit_refresh_failure(
+                    &deps.event_hub,
                     provider,
                     "refreshed token is already expired".to_string(),
-                ));
+                );
                 return;
             }
 
@@ -215,8 +214,7 @@ async fn refresh_provider_token_row(
             let login = refreshed_token.login.clone();
 
             if let Err(err) = deps.store.upsert_provider_token(&refreshed_token).await {
-                deps.event_hub
-                    .send(Event::auth_refresh_failed(provider, err.to_string()));
+                emit_refresh_failure(&deps.event_hub, provider, err.to_string());
                 return;
             }
 
@@ -224,9 +222,20 @@ async fn refresh_provider_token_row(
                 .send(Event::auth_token_refreshed(provider, login));
         }
         Err(reason) => {
-            deps.event_hub
-                .send(Event::auth_refresh_failed(provider, reason));
+            emit_refresh_failure(&deps.event_hub, provider, reason);
         }
+    }
+}
+
+/// Emit the appropriate failure event based on provider identity.
+/// Providers that can't self-refresh (Claude, OpenCodeZen) get `auth.refresh_required`
+/// because user re-authentication is the only path forward. Providers with CLI refresh
+/// (GitHub, Codex) get `auth.refresh_failed` since the next scheduled attempt may succeed.
+fn emit_refresh_failure(event_hub: &EventHub, provider: Provider, reason: String) {
+    if provider.supports_cli_refresh() {
+        event_hub.send(Event::auth_refresh_failed(provider, reason));
+    } else {
+        event_hub.send(Event::auth_refresh_required(provider, reason));
     }
 }
 
@@ -574,5 +583,87 @@ mod tests {
             .expect("load github token")
             .expect("github token should exist");
         assert_eq!(stored.access_token, "github-new");
+    }
+
+    #[tokio::test]
+    async fn non_refreshable_provider_failure_emits_refresh_required() {
+        let store = create_store().await;
+        upsert_expiring_token(&store, Provider::Claude, Some("user@example.com")).await;
+
+        let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
+            Provider::Claude,
+            vec![RefreshPlan::Failure {
+                reason: "token file not found".to_string(),
+                delay: Duration::ZERO,
+            }],
+        )])));
+        let event_hub = EventHub::new(16);
+        let mut rx = event_hub.subscribe();
+
+        let handles = schedule_due_refreshes(
+            store.clone(),
+            event_hub,
+            CancellationToken::new(),
+            refresher,
+            Arc::new(provider_refresh_locks()),
+            Duration::from_secs(20 * 60),
+            Duration::from_secs(5),
+        )
+        .await;
+        for handle in handles {
+            handle.await.expect("refresh task join");
+        }
+
+        let event = collect_event(&mut rx).await;
+        match event {
+            Event::AuthRefreshRequired {
+                provider, reason, ..
+            } => {
+                assert_eq!(provider, Provider::Claude);
+                assert_eq!(reason, "token file not found");
+            }
+            other => panic!("expected AuthRefreshRequired, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn refreshable_provider_failure_emits_refresh_failed() {
+        let store = create_store().await;
+        upsert_expiring_token(&store, Provider::GitHub, None).await;
+
+        let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
+            Provider::GitHub,
+            vec![RefreshPlan::Failure {
+                reason: "gh auth refresh failed".to_string(),
+                delay: Duration::ZERO,
+            }],
+        )])));
+        let event_hub = EventHub::new(16);
+        let mut rx = event_hub.subscribe();
+
+        let handles = schedule_due_refreshes(
+            store.clone(),
+            event_hub,
+            CancellationToken::new(),
+            refresher,
+            Arc::new(provider_refresh_locks()),
+            Duration::from_secs(20 * 60),
+            Duration::from_secs(5),
+        )
+        .await;
+        for handle in handles {
+            handle.await.expect("refresh task join");
+        }
+
+        let event = collect_event(&mut rx).await;
+        match event {
+            Event::AuthRefreshFailed {
+                provider, error, ..
+            } => {
+                assert_eq!(provider, Provider::GitHub);
+                assert_eq!(error, "gh auth refresh failed");
+            }
+            other => panic!("expected AuthRefreshFailed, got {other:?}"),
+        }
     }
 }

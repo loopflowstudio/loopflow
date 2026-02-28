@@ -65,6 +65,13 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
+    #[serde(rename = "auth.refresh_required")]
+    AuthRefreshRequired {
+        provider: Provider,
+        reason: String,
+        #[serde(with = "time::serde::rfc3339")]
+        timestamp: OffsetDateTime,
+    },
 
     // Wave lifecycle
     WaveCreated {
@@ -239,6 +246,14 @@ impl Event {
         Self::AuthRefreshFailed {
             provider,
             error,
+            timestamp: Self::now(),
+        }
+    }
+
+    pub fn auth_refresh_required(provider: Provider, reason: String) -> Self {
+        Self::AuthRefreshRequired {
+            provider,
+            reason,
             timestamp: Self::now(),
         }
     }
@@ -462,6 +477,7 @@ mod tests {
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
             Event::auth_token_refreshed(Provider::GitHub, Some("jackdanger".to_string())),
             Event::auth_refresh_failed(Provider::GitHub, "refresh failed".to_string()),
+            Event::auth_refresh_required(Provider::Claude, "user must re-authenticate".to_string()),
         ];
         for event in events {
             let json = serde_json::to_string(&event).unwrap();
@@ -490,6 +506,13 @@ mod tests {
         assert_eq!(failed_json["type"], "auth.refresh_failed");
         assert_eq!(failed_json["provider"], "codex");
         assert_eq!(failed_json["error"], "timed out");
+
+        let required =
+            Event::auth_refresh_required(Provider::Claude, "user must re-authenticate".into());
+        let required_json = serde_json::to_value(&required).expect("serialize required");
+        assert_eq!(required_json["type"], "auth.refresh_required");
+        assert_eq!(required_json["provider"], "claude");
+        assert_eq!(required_json["reason"], "user must re-authenticate");
     }
 
     #[test]

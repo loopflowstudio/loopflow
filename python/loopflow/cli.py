@@ -85,6 +85,12 @@ def _split_repo_slug(repo_id: str) -> tuple[str, str]:
     return owner, repo
 
 
+def _seconds_from_now(dt: datetime, now: datetime) -> float:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (dt - now).total_seconds()
+
+
 def _format_relative_delta(seconds: float) -> str:
     total_seconds = max(0, int(seconds))
     if total_seconds < 60:
@@ -106,14 +112,18 @@ def _status_details(status: AuthProviderStatus) -> str:
 
     now = datetime.now(timezone.utc)
     if status.expires_at is not None:
-        expires_at = status.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        delta = (expires_at - now).total_seconds()
+        delta = _seconds_from_now(status.expires_at, now)
         if delta <= 0:
             details = f"{details} · expired"
         else:
             details = f"{details} · expires {_format_relative_delta(delta)}"
+
+    if status.next_refresh_at is not None:
+        refresh_delta = _seconds_from_now(status.next_refresh_at, now)
+        if refresh_delta <= 0:
+            details = f"{details} · refreshing soon"
+        else:
+            details = f"{details} · refresh in {_format_relative_delta(refresh_delta)}"
 
     return details
 

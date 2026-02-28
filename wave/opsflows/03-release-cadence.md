@@ -4,34 +4,17 @@
 
 ## What to build
 
-**Ops decomposition** — split today's monolithic `lf ops release` into focused commands:
-
-- `lf ops release-notes <version>` — generate notes (LLM-powered)
-- `lf ops release-bump <version>` — bump version in manifests
-- `lf ops release-tag <version>` — tag and push
-- `lf ops release-status` — check CI/publish status
-- `lf ops release-check` — check if PRs merged since last tag (exit 1 if empty)
-
-**`lf release` step** (no fast-path — always needs LLM):
-
-```yaml
----
-requires: none
-produces: tagged release
----
-```
-
-Step prompt lists the API and guides the agent:
+**Ops decomposition** — split today's monolithic `lf ops release` into focused commands that the step prompt exposes as its API:
 
 ```
-## API
-
 lf ops release-check                              # exit 0 if PRs merged since last tag
-lf ops release-notes <version> [--prev-tag TAG]   # generate notes
+lf ops release-notes <version> [--prev-tag TAG]   # generate notes (LLM-powered)
 lf ops release-bump <version>                      # bump manifests
 lf ops release-tag <version>                       # tag and push
 lf ops release-status                              # check CI status
 ```
+
+**`lf release` step** (no fast-path — always needs LLM).
 
 Agent judgment:
 1. `lf ops release-check` — skip if nothing merged
@@ -56,7 +39,7 @@ stimulus:
   cron: "0 2 1 * *"
 ```
 
-Cron = floor. Manual `lf release` anytime on top.
+Cron = floor. Manual `lf release` anytime on top. Set up in the loopflow repo as the first consumer.
 
 **Concerto:**
 1. Release config (per-repo) — set cadence, toggle on/off

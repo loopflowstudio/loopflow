@@ -22,7 +22,7 @@ Sprints 01 and 04 depend on `fast-path` — sprint 01 builds it as a step runner
 
 ## Risks
 
-- **Worktree rename while cwd is inside it.** Need to handle gracefully.
+- **Worktree rename while cwd is inside it.** `lf` uses `write_shell_directive` to move user's shell. `lfd` renames post-run.
 - **Release notes quality is subjective.** Plan to iterate on the prompt after seeing real output.
 - **Ops decomposition scope.** Splitting `lf ops release` into sub-commands is the biggest Rust change. Keep the existing monolithic command working during transition.
 
@@ -31,4 +31,3 @@ Sprints 01 and 04 depend on `fast-path` — sprint 01 builds it as a step runner
 - `lf rebase` with no conflicts completes at the same speed as `lf ops rebase` (no agent overhead)
 - `lf land` in a shortname worktree rotates and advances without manual steps
 - Release notes for a 10+ PR release read as narrative, not bullet list
-- Cron-triggered release fires and completes unattended

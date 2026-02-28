@@ -9,7 +9,6 @@
 - Remove 400-char truncation on PR bodies. Full bodies.
 - Add diff stats per PR (files changed, +/- lines).
 - Feed previous RELEASE_NOTES.md for voice continuity.
-- If total context exceeds model limits, summarize per-PR with sub-agents, then synthesize.
 
 **Better prompt** — rewrite `release_notes.md` builtin:
 
@@ -29,18 +28,13 @@ Prompt guidance:
 ## What changes
 
 ```rust
-// Remove truncation
-// Before: body.chars().take(400).collect()
-// After: full body
-
-// Add previous notes to context
 fn generate_release_notes(
     repo: &Path,
     prs: &[MergedPr],
     version: &str,
     prev_tag: &str,
     target: &ReleaseTarget,
-    previous_notes: &str,  // NEW
+    previous_notes: &str,
 ) -> OpsResult<String>
 ```
 

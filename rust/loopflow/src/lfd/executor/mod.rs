@@ -1,6 +1,8 @@
+pub(crate) mod adaptive;
 pub(crate) mod docker;
 pub(crate) mod helpers;
 pub(crate) mod local;
+pub(crate) mod sandbox;
 mod wave;
 
 use std::path::Path;

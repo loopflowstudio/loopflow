@@ -45,6 +45,16 @@ Cron = floor. Manual `lf release` anytime on top. Set up in the loopflow repo as
 1. Release config (per-repo) — set cadence, toggle on/off
 2. Release now — button with patch/minor/major picker
 
+## Context from sprint 02
+
+Sprint 02 shipped narrative release notes within the existing `lf ops release` path. Key decisions that affect this sprint:
+
+- **`MergedPr` now carries diff stats** (`additions`, `deletions`, `changed_files`) from `gh pr list --json`. The decomposed `lf ops release-notes` command inherits this.
+- **Full PR bodies, no truncation.** The 400-char limit was removed. If prolific releases (50+ PRs) cause prompt size issues, that's a release frequency problem — which this sprint's cron cadence directly addresses.
+- **Previous `RELEASE_NOTES.md` is fed as context.** As notes accumulate over many releases, may need truncation to last N releases to avoid prompt bloat.
+- **Prompt quality is empirical.** The narrative template reads well but hasn't been tested on a real multi-PR release yet. This sprint's first cron-triggered release will be the real test.
+- **No tests for `format_pr_for_prompt()`.** Acceptable for sprint 02's scope, but as this sprint decomposes release into sub-commands, consider testing the formatting pipeline.
+
 ## Done when
 
 ```bash

@@ -8,7 +8,9 @@ Invert the ops layer. Today `lf ops <verb>` is the interface and steps are add-o
 
 `fast-path` is built — steps declare a shell command in frontmatter that runs before the agent. Exit 0 = done, no agent spun up. Non-zero = agent starts with failure output as context. `lf land` is the first consumer; sprint 04 (`lf rebase`) is the second.
 
-Remaining sprints: 02 improves release note quality within the existing `lf ops release` path — richer PR context, narrative prompt, no new commands. Sprint 03 decomposes `lf ops release` into finer-grained ops commands and wraps them in a `lf release` step with cron cadence. Sprint 04 is just a step file that consumes the fast-path infrastructure.
+Sprint 02 shipped narrative release notes — diff stats, full PR bodies, previous notes for voice continuity, and a narrative-first prompt template. The release agent now gets rich context and researches diffs selectively for large PRs.
+
+Remaining sprints: 03 decomposes `lf ops release` into finer-grained ops commands and wraps them in a `lf release` step with cron cadence. Sprint 04 is just a step file that consumes the fast-path infrastructure.
 
 ## Goals
 

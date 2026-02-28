@@ -251,19 +251,28 @@ pub async fn create_wave_handler(
         return Err(err);
     }
 
+    // Collect stimuli: config-provided first, then defaults.
+    let mut stimuli: Vec<Stimulus> = Vec::new();
+
     if let Some(parsed) = config_stimulus {
-        let stimulus = Stimulus {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            source_wave_id: listen_source_wave_id.clone(),
-            signal: parsed.signal,
-            flow: parsed.flow,
-            cron: parsed.cron,
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-        };
+        let mut s = Stimulus::new(LfdId::new(), wave.id().clone(), parsed.signal);
+        s.source_wave_id = listen_source_wave_id.clone();
+        s.flow = parsed.flow;
+        s.cron = parsed.cron;
+        stimuli.push(s);
+    }
+
+    // Every wave gets watch (rebase on main) and ci-fix unless config already covers them.
+    for (signal, flow) in [(Signal::Watch, "integrate"), (Signal::CiFailure, "ci-fix")] {
+        if stimuli.iter().any(|s| s.signal == signal) {
+            continue;
+        }
+        let mut s = Stimulus::new(LfdId::new(), wave.id().clone(), signal);
+        s.flow = Some(flow.to_string());
+        stimuli.push(s);
+    }
+
+    for stimulus in stimuli {
         if let Err(err) = state.store.create_stimulus(&stimulus).await {
             let wave_id = wave.id().clone();
             let _ = state.store.delete_wave(&wave_id).await;

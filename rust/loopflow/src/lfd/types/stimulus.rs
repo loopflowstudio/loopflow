@@ -127,7 +127,6 @@ fn default_enabled() -> bool {
 }
 
 impl Stimulus {
-    #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, wave_id: LfdId, signal: Signal) -> Self {
         Self {
             id,

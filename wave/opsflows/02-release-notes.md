@@ -1,52 +1,54 @@
 # 02: Release notes that tell a story
 
-**Finish line:** `lf ops release` produces narrative release notes with thematic sections and prose. The LLM gets full PR context and researches actual diffs for major changes.
+**Finish line:** `lf ops release patch` produces narrative release notes with thematic sections, prose connecting related changes, and voice consistent with previous notes. Not a bullet list.
 
-## What to build
+## Verified design
 
-**Richer input** — in `generate_release_notes()` (Rust):
+All claims confirmed against the codebase. Ready for `lf implement`.
 
-- Remove 400-char truncation on PR bodies. Full bodies.
-- Add diff stats per PR (files changed, +/- lines).
-- Feed previous RELEASE_NOTES.md for voice continuity.
+### 5 touchpoints
 
-**Better prompt** — rewrite `release_notes.md` builtin:
+All in `rust/loopflow/src/ops/release.rs` and `rust/loopflow/src/engine/builtins/ops/release_notes.md`. ~100-150 LOC.
 
-Output format:
-1. Narrative opening — 2-3 sentences. Why upgrade?
-2. Thematic sections — named after actual themes, not generic categories. Prose paragraph per theme.
-3. Detail bullets under each theme — for scanners.
+1. **`MergedPr` / `GhMergedPr` structs** — add `additions: u64`, `deletions: u64`, `changed_files: u64` fields
+2. **`list_merged_prs()`** — add `additions,deletions,changedFiles` to the `--json` field list
+3. **`format_pr_for_prompt()`** — remove the `max_chars = 400` body truncation, include diff stats in output (`+45 -12, 3 files`)
+4. **`generate_release_notes()`** — read `RELEASE_NOTES.md` from `repo` path (if exists), append as "Previous release notes" section in prompt. No signature change needed — `repo: &Path` already available.
+5. **`release_notes.md` builtin** — rewrite with narrative-first guidance: find the story, use release-specific theme names (not "Improvements"/"Bug fixes"), prose paragraphs per theme, detail bullets for scanners, opening that answers "why upgrade?"
 
-Prompt guidance:
-- "What's the story of this release?"
-- PR summaries are a table of contents — dig deeper into big changes
-- Read diffs and code to understand implications
-- Find connections between PRs that are part of the same story
-- Theme names specific to this release
-- Match voice/style of previous release notes
+### Key decisions
 
-## What changes
+- **Full bodies, no truncation.** PR bodies are typically 0-1000 chars. Simpler than raising the limit. If prolific releases (50+ PRs) cause issues, that's a release frequency problem.
+- **Diff stats from `gh pr list`**, not `git diff --stat`. `additions`/`deletions`/`changedFiles` are first-class `gh pr list --json` fields. No extra API calls.
+- **Previous notes from disk.** `repo: &Path` is already available. One `fs::read_to_string`. No signature change, no caller changes.
+- **Agent reads diffs selectively.** Prompt instructs `git diff` for 100+ line PRs rather than feeding all diffs upfront. Selective reading gives context without flooding tokens.
+- **Theme names from changes, not a template.** Prompt says "not 'Improvements' or 'Bug fixes'" and gives examples like "Sandbox execution", "Release workflow".
 
-```rust
-fn generate_release_notes(
-    repo: &Path,
-    prs: &[MergedPr],
-    version: &str,
-    prev_tag: &str,
-    target: &ReleaseTarget,
-    previous_notes: &str,
-) -> OpsResult<String>
-```
+### Prompt structure
 
-Rewrite `rust/loopflow/src/engine/builtins/ops/release_notes.md` with narrative-first guidance.
+The rewritten `release_notes.md` builtin instructs the agent to:
+1. Read PR list, note which are large (high diff stats) vs small
+2. Find connections — PRs that are part of the same theme
+3. For large changes (100+ lines), `git diff` to understand what really happened
+4. Write: opening (2-3 sentences) → thematic sections (prose + bullets) → small changes grouped at end
+
+Rust appends after the template: previous release notes (if any), release context (version, prev tag, target), and formatted PR list with full bodies and diff stats.
+
+## Risks
+
+- **Prompt quality is empirical.** The template reads well but output quality depends on the agent. Ship it, evaluate on the next real release, iterate.
+- **Large PR bodies in prolific releases.** 50+ PRs with full bodies could push prompt size. Acceptable risk — release frequency is the real fix.
 
 ## Done when
 
 ```bash
 lf ops release patch
 # RELEASE_NOTES.md has:
-# - Narrative opening (not just listing changes)
-# - Thematic sections with specific names
-# - Prose connecting related changes
-# - Detail bullets for scanners
+# - Narrative opening (2-3 sentences, not a list)
+# - Thematic sections with release-specific names
+# - Prose paragraphs connecting related changes
+# - Detail bullets under each theme for scanners
+# - Voice consistent with previous release notes
 ```
+
+Rust tests pass (`cargo test --all`). `cargo fmt` and `cargo clippy -- -D warnings` clean.

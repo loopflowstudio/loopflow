@@ -10,10 +10,10 @@ Lifecycle is `docker sandbox create` + `docker sandbox exec` + `docker sandbox r
 
 Two-level capability gating decides executor per run:
 
-1. **Platform capability (startup probe):** `docker sandbox version` → `create` → `exec -- true` → `rm`. Any failure disables sandbox path for process lifetime.
-2. **Harness routing (per-run):** Claude and Gemini route to sandbox; everything else stays on `DockerExecutor`.
+1. **Platform capability (startup probe):** `docker sandbox version` → `create` → `exec` (direct or legacy separator syntax) → `rm`. Any failure disables sandbox path for process lifetime.
+2. **Harness routing (per-run):** Claude routes to sandbox; everything else stays on `DockerExecutor`.
 
-Runtime fallback: if sandbox launch/exec/cleanup fails for Claude/Gemini, retry once through `DockerExecutor` before marking the run failed.
+Runtime fallback: if sandbox launch/exec/cleanup fails for Claude, retry once through `DockerExecutor` before marking the run failed.
 
 `AdaptiveContainerExecutor` wraps both backends. `mode: container` resolves to `ExecutorType::Sandbox` (adaptive), keeping config simple.
 
@@ -25,19 +25,19 @@ Hybrid: Rust unit tests for executor logic (command shape, cleanup, orphan recov
 
 - Kernel isolation boundary for agent runs
 - Cleaner lifecycle than volume/tar-sync path
-- Incremental adoption: Claude/Gemini first, fallback always available
+- Incremental adoption: Claude first, fallback always available
 - No user-visible behavior change — streaming, context files, cleanup all work the same
 
 ## Risks
 
-- **Docker Sandbox CLI compatibility.** v0.6.0 only exposes `run/ls/inspect/rm/version` — missing `create` and `exec`. The startup probe and platform script fail fast, but real-environment validation is blocked until a compatible plugin version ships.
-- **Concerto DinD.** Bundled lfd container needs `docker sandbox` CLI plugin available. Probe blocked (Docker daemon unreachable on 2026-02-28). Decision pending between adding plugin to Dockerfile vs falling back to DockerExecutor.
+- **Docker Sandbox CLI drift.** Command surface changes across versions (`exec` syntax, `inspect` availability). Capability probes now gate on required commands and fail fast with explicit diagnostics.
+- **Concerto DinD.** Bundled lfd container needs `docker sandbox` CLI plugin available. Current `loopflow/lfd` image has Docker CLI but no sandbox plugin (`docker sandbox` not recognized), so DinD validation is blocked until plugin distribution is solved.
 - **Linux experimental.** Sandbox behavior on self-hosted Linux is experimental and unvalidated under load.
-- **Credential injection.** Phase 1 uses env var injection. Credential proxy coverage for Claude/Gemini is an open question.
+- **Credential injection.** Phase 1 uses env var injection. Credential proxy coverage for additional harnesses is an open question.
 
 ## Metrics
 
-- Sandbox launch latency: seconds from run start to agent process running (target: <5s, compare vs DockerExecutor)
-- Sandbox cleanup success rate: % of runs where sandbox is fully removed after completion (target: 100%)
-- Fallback trigger rate: % of sandbox failures that successfully fall back to DockerExecutor (target: 100%)
-- Startup probe pass rate across platforms: macOS and Linux (target: 100% on supported Docker versions)
+- Sandbox executor launches, runs, and cleans up Claude agents identically to DockerExecutor
+- Fallback to Docker triggers correctly on sandbox failure
+- Startup probe gates sandbox on/off without affecting other executor paths
+- macOS validated (self-hosted + Concerto), Linux smoke-validated

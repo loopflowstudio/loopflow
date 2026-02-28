@@ -26,7 +26,6 @@ trap cleanup EXIT
 section() { printf '\n=== %s ===\n' "$1"; }
 pass()    { printf '  PASS: %s\n' "$1"; }
 fail()    { printf '  FAIL: %s\n' "$1"; exit 1; }
-skip()    { printf '  SKIP: %s\n' "$1"; }
 
 require_sandbox_cli_compatibility() {
   help_output=$(docker sandbox --help 2>&1 || true)
@@ -97,33 +96,6 @@ else
 fi
 
 docker sandbox rm "$ctx_id"
-
-# ── Gemini template probe ──
-
-section "Gemini Template Probe"
-gemini_id="lf-gemini-test-$RUN_SUFFIX"
-docker sandbox create --name "$gemini_id" claude /tmp
-CLEANUP_IDS+=("$gemini_id")
-
-gemini_path=$(docker sandbox exec "$gemini_id" -- which gemini 2>/dev/null || true)
-if [ -n "$gemini_path" ]; then
-  gemini_ver=$(docker sandbox exec "$gemini_id" -- gemini --version 2>/dev/null || echo "unknown")
-  pass "gemini CLI found at $gemini_path (version: $gemini_ver)"
-else
-  echo "  NOT FOUND: gemini CLI not in claude sandbox template"
-  echo "  Next step: install via 'npm install -g @google/gemini-cli' or custom template"
-
-  # Try npm install path
-  install_result=$(docker sandbox exec "$gemini_id" -- npm install -g @google/gemini-cli 2>&1 || true)
-  gemini_check=$(docker sandbox exec "$gemini_id" -- which gemini 2>/dev/null || true)
-  if [ -n "$gemini_check" ]; then
-    pass "gemini CLI installable via npm inside sandbox"
-  else
-    skip "gemini CLI not installable (npm output: ${install_result:0:200})"
-  fi
-fi
-
-docker sandbox rm "$gemini_id"
 
 # ── Cleanup verification ──
 

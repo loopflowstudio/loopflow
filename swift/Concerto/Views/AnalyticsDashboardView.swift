@@ -24,8 +24,7 @@ private struct WorkPoint: Identifiable {
     let date: Date
     let group: String
     let totals: TokenTotals
-
-    var total: Int { totals.total }
+    let cost: CostEstimate
 }
 
 private struct PromptSegment: Identifiable {
@@ -81,7 +80,7 @@ struct AnalyticsDashboardView: View {
             Text("Analytics")
                 .font(Typography.sectionTitle(24))
                 .foregroundStyle(palette.text)
-            Text("Token trends and prompt composition across your waves")
+            Text("Estimated cost and prompt composition across your waves")
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
         }
@@ -143,6 +142,8 @@ struct AnalyticsDashboardView: View {
         }
     }
 
+    // MARK: - Work lens
+
     @ViewBuilder
     private var workChart: some View {
         if workPoints.isEmpty {
@@ -151,42 +152,89 @@ struct AnalyticsDashboardView: View {
             Chart(workPoints) { point in
                 LineMark(
                     x: .value("Date", point.date),
-                    y: .value("Tokens", point.total)
+                    y: .value("Cost", point.cost.total)
                 )
                 .foregroundStyle(by: .value("Group", point.group))
 
                 PointMark(
                     x: .value("Date", point.date),
-                    y: .value("Tokens", point.total)
+                    y: .value("Cost", point.cost.total)
                 )
                 .foregroundStyle(by: .value("Group", point.group))
             }
             .frame(minHeight: 280)
             .chartLegend(position: .bottom)
             .chartXSelection(value: $selectedWorkDate)
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let cost = value.as(Double.self) {
+                            Text(formatCost(cost))
+                                .font(Typography.code(10))
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
 
-            if let selectedWorkDate {
-                let dailyPoints = points(for: selectedWorkDate)
-                if !dailyPoints.isEmpty {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
+            workBreakdown
+        }
+    }
+
+    @ViewBuilder
+    private var workBreakdown: some View {
+        if let selectedWorkDate {
+            let dailyPoints = points(for: selectedWorkDate)
+            if !dailyPoints.isEmpty {
+                let anyEstimate = dailyPoints.contains { $0.cost.isEstimate }
+
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    HStack(spacing: Spacing.xs) {
                         Text("Breakdown · \(displayDateFormatter.string(from: selectedWorkDate))")
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
-                        ForEach(dailyPoints, id: \.group) { point in
-                            HStack {
-                                Text(point.group)
-                                    .font(Typography.caption())
-                                Spacer()
-                                Text(point.total.formatted())
-                                    .font(Typography.code(12))
-                            }
-                            .foregroundStyle(palette.text)
+                        if anyEstimate {
+                            Text("~ estimated")
+                                .font(Typography.code(10))
+                                .foregroundStyle(palette.textSecondary)
                         }
+                    }
+
+                    ForEach(dailyPoints, id: \.group) { point in
+                        HStack(alignment: .top) {
+                            Text(point.group)
+                                .font(Typography.caption())
+                                .frame(minWidth: 80, alignment: .leading)
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(formatCost(point.cost.total))
+                                    .font(Typography.code(12))
+                                    .monospacedDigit()
+                                HStack(spacing: Spacing.sm) {
+                                    costLabel("non-cached", point.cost.nonCached)
+                                    costLabel("cached", point.cost.cached)
+                                }
+                            }
+                        }
+                        .foregroundStyle(palette.text)
                     }
                 }
             }
         }
     }
+
+    private func costLabel(_ label: String, _ value: Double) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+            Text(formatCost(value))
+                .monospacedDigit()
+        }
+        .font(Typography.code(10))
+        .foregroundStyle(palette.textSecondary)
+    }
+
+    // MARK: - Prompt lens
 
     @ViewBuilder
     private var promptChart: some View {
@@ -204,6 +252,8 @@ struct AnalyticsDashboardView: View {
             .chartLegend(position: .bottom)
         }
     }
+
+    // MARK: - Data loading
 
     private var reloadKey: String {
         [
@@ -313,10 +363,12 @@ struct AnalyticsDashboardView: View {
         timeseries.buckets.flatMap { bucket in
             guard let date = parsePeriodDate(bucket.period) else { return [WorkPoint]() }
             return bucket.groups.map { group in
-                WorkPoint(
+                let model = workGroupBy == .model ? group.key : nil
+                return WorkPoint(
                     date: date,
                     group: group.key,
-                    totals: group.tokens
+                    totals: group.tokens,
+                    cost: CostEstimator.estimateCost(group.tokens, model: model)
                 )
             }
         }
@@ -348,8 +400,15 @@ struct AnalyticsDashboardView: View {
     private func points(for date: Date) -> [WorkPoint] {
         workPoints
             .filter { Calendar.current.isDate($0.date, inSameDayAs: date) }
-            .sorted { $0.total > $1.total }
+            .sorted { $0.cost.total > $1.cost.total }
     }
+}
+
+// MARK: - Formatting
+
+private func formatCost(_ value: Double) -> String {
+    if value < 0.005 { return "<$0.01" }
+    return String(format: "$%.2f", value)
 }
 
 private func posixFormatter(_ format: String) -> DateFormatter {

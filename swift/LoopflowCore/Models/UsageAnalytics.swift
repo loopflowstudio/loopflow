@@ -54,9 +54,9 @@ public struct TokenTotals: Sendable, Decodable {
         case cacheWrite = "cache_write"
     }
 
-    public var total: Int {
-        input + output + reasoning + cacheRead + cacheWrite
-    }
+    public var nonCached: Int { input + output + reasoning }
+    public var cached: Int { cacheRead + cacheWrite }
+    public var total: Int { nonCached + cached }
 }
 
 public struct UsageSummaryGroup: Sendable, Decodable, Identifiable {

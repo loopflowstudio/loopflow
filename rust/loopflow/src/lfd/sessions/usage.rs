@@ -222,7 +222,7 @@ pub fn aggregate_summary(
 pub fn aggregate_timeseries(
     bucket: TimeBucket,
     group_by: GroupBy,
-    sessions: &[UsageSessionData],
+    sessions: Vec<UsageSessionData>,
     model_filter: Option<&str>,
 ) -> Vec<UsageTimeseriesBucketAggregate> {
     let mut sessions_by_period: BTreeMap<Date, Vec<UsageSessionData>> = BTreeMap::new();
@@ -231,7 +231,7 @@ pub fn aggregate_timeseries(
         sessions_by_period
             .entry(period_start)
             .or_default()
-            .push(data.clone());
+            .push(data);
     }
 
     sessions_by_period
@@ -594,7 +594,7 @@ mod tests {
             },
         ];
 
-        let buckets = aggregate_timeseries(TimeBucket::Day, GroupBy::Wave, &records, None);
+        let buckets = aggregate_timeseries(TimeBucket::Day, GroupBy::Wave, records, None);
         assert_eq!(buckets.len(), 2);
         assert_eq!(buckets[0].period, "2026-02-01");
         assert_eq!(buckets[1].period, "2026-02-02");
@@ -638,7 +638,7 @@ mod tests {
             },
         ];
 
-        let buckets = aggregate_timeseries(TimeBucket::Week, GroupBy::Wave, &records, None);
+        let buckets = aggregate_timeseries(TimeBucket::Week, GroupBy::Wave, records, None);
         assert_eq!(buckets.len(), 1);
         assert_eq!(buckets[0].period, "2026-02-02");
         assert_eq!(buckets[0].groups[0].tokens.input, 150);

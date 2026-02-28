@@ -146,7 +146,7 @@ pub async fn get_usage_timeseries_handler(
     let buckets = aggregate_timeseries(
         bucket,
         validated.group_by,
-        &usage_sessions,
+        usage_sessions,
         query.model.as_deref(),
     );
 

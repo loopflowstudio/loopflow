@@ -113,7 +113,7 @@ pub fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
     Ok(output.status.success())
 }
 
-fn list_porcelain(repo: &Path) -> Result<Vec<(PathBuf, Option<String>)>, GitError> {
+pub(crate) fn list_porcelain(repo: &Path) -> Result<Vec<(PathBuf, Option<String>)>, GitError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -260,12 +260,20 @@ fn list_remote_branches(repo: &Path) -> HashSet<String> {
     }
 }
 
-pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
+/// List worktrees using only local git operations. No network calls.
+///
+/// Returns `(default_branch, states)` so callers can forward the resolved
+/// default branch to `enrich_worktrees_network` without a redundant git call.
+///
+/// `merged` reflects local detection only (fast-forward ancestor check and
+/// squash-merge patch-id comparison). `remote_gone` is always `false`.
+/// `prunable` is conservative — network enrichment may mark additional
+/// worktrees as prunable.
+pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>), GitError> {
     let default_branch = get_default_branch(repo)?;
     let merge_target = format!("origin/{default_branch}");
     let items = list_porcelain(repo)?;
 
-    // Collect branches that need merge checks (skip default branch and detached)
     let branches_to_check: Vec<String> = items
         .iter()
         .filter_map(|(_, branch)| branch.as_ref())
@@ -273,12 +281,11 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
         .cloned()
         .collect();
 
-    // Run squash-merge checks (per-branch threads) and PR check (single GraphQL call) in parallel
-    let squash_branches = branches_to_check.clone();
+    // Squash-merge checks: local git operations, one thread per branch
     let repo_for_squash = repo.to_path_buf();
     let target_for_squash = merge_target.clone();
     let squash_handle = thread::spawn(move || {
-        let handles: Vec<_> = squash_branches
+        let handles: Vec<_> = branches_to_check
             .into_iter()
             .map(|branch| {
                 let r = repo_for_squash.clone();
@@ -298,16 +305,7 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
             .collect::<HashSet<String>>()
     });
 
-    let pr_branches = branches_to_check;
-    let repo_for_pr = repo.to_path_buf();
-    let pr_handle = thread::spawn(move || merged_pr_branches(&repo_for_pr, &pr_branches));
-
-    let repo_for_remote = repo.to_path_buf();
-    let remote_handle = thread::spawn(move || list_remote_branches(&repo_for_remote));
-
     let squash_merged = squash_handle.join().unwrap_or_default();
-    let pr_merged = pr_handle.join().unwrap_or_default();
-    let remote_branches = remote_handle.join().unwrap_or_default();
 
     let mut results = Vec::new();
     for (path, branch) in items {
@@ -322,27 +320,14 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
                 .map(|b| has_commits_beyond(repo, b, &merge_target).unwrap_or(true))
                 .unwrap_or(false)
         };
-        let merged = if let Some(branch) = &branch {
-            if is_default || !has_commits {
-                false
-            } else {
-                is_ancestor(repo, branch, &merge_target).unwrap_or(false)
-                    || squash_merged.contains(branch)
-                    || pr_merged.contains(branch)
-            }
-        } else {
-            false
-        };
+        let merged = branch.as_deref().is_some_and(|b| {
+            !is_default
+                && has_commits
+                && (is_ancestor(repo, b, &merge_target).unwrap_or(false)
+                    || squash_merged.contains(b))
+        });
         let dirty = !is_clean(&path).unwrap_or(true);
-        let remote_gone = if is_default || remote_branches.is_empty() {
-            false
-        } else {
-            branch
-                .as_deref()
-                .map(|b| !remote_branches.contains(b))
-                .unwrap_or(false)
-        };
-        let mut prunable = !is_default && (merged || !has_commits || (remote_gone && !dirty));
+        let mut prunable = !is_default && (merged || !has_commits);
 
         // Protect shortname worktrees from pruning. A shortname (no dot in the
         // wave name) is an active wave worktree that shouldn't be removed.
@@ -354,7 +339,6 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
                 prunable = false;
             }
         }
-
         results.push(WorktreeState {
             branch,
             path,
@@ -362,11 +346,81 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
             merged,
             prunable,
             dirty,
-            remote_gone,
+            remote_gone: false,
         });
     }
 
-    Ok(results)
+    Ok((default_branch, results))
+}
+
+/// Enrich worktree states with network-dependent checks.
+///
+/// Queries GitHub for merged PRs and `git ls-remote` for remote branch
+/// existence. Updates `merged`, `remote_gone`, and `prunable` fields.
+/// Silently skips enrichment on network failure.
+///
+/// `default_branch` should match what `list_worktrees_local` used
+/// (typically from `get_default_branch`).
+pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut [WorktreeState]) {
+    let branches: Vec<String> = states
+        .iter()
+        .filter_map(|wt| wt.branch.as_ref())
+        .filter(|b| b.as_str() != default_branch)
+        .cloned()
+        .collect();
+
+    if branches.is_empty() {
+        return;
+    }
+
+    let repo_for_pr = repo.to_path_buf();
+    let pr_branches = branches;
+    let pr_handle = thread::spawn(move || merged_pr_branches(&repo_for_pr, &pr_branches));
+
+    let repo_for_remote = repo.to_path_buf();
+    let remote_handle = thread::spawn(move || list_remote_branches(&repo_for_remote));
+
+    let pr_merged = pr_handle.join().unwrap_or_default();
+    let remote_branches = remote_handle.join().unwrap_or_default();
+
+    for state in states.iter_mut() {
+        let is_default = state.branch.as_deref() == Some(default_branch);
+        if is_default {
+            continue;
+        }
+
+        if !state.merged
+            && state
+                .branch
+                .as_deref()
+                .is_some_and(|b| pr_merged.contains(b))
+        {
+            state.merged = true;
+        }
+
+        if !remote_branches.is_empty() {
+            state.remote_gone = state
+                .branch
+                .as_deref()
+                .is_some_and(|b| !remote_branches.contains(b));
+        }
+
+        if !state.prunable && (state.merged || (state.remote_gone && !state.dirty)) {
+            let is_shortname = wave_name_from_worktree_and_main(&state.path, repo)
+                .map(|name| !name.contains('.'))
+                .unwrap_or(false);
+            if !is_shortname {
+                state.prunable = true;
+            }
+        }
+    }
+}
+
+/// Full worktree listing with all checks (local + network).
+pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
+    let (default_branch, mut states) = list_worktrees_local(repo)?;
+    enrich_worktrees_network(repo, &default_branch, &mut states);
+    Ok(states)
 }
 
 pub fn create_with_schema(
@@ -391,9 +445,9 @@ pub fn create_with_schema(
         });
     }
 
-    if list_worktrees(repo)?
+    if list_porcelain(repo)?
         .into_iter()
-        .filter_map(|wt| wt.branch)
+        .filter_map(|(_, branch)| branch)
         .any(|branch| branch == branch_name)
     {
         return Err(GitError::CommandFailed {

@@ -85,7 +85,7 @@ async fn check_watch_stimuli(
                 );
                 let envelope = ActivationEnvelope::new(
                     &stimulus.wave_id,
-                    &stimulus.id,
+                    Some(&stimulus.id),
                     ActivationSource::Poll,
                     reason,
                     &result.from_sha,

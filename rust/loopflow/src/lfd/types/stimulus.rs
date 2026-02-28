@@ -14,10 +14,7 @@ pub const CI_FIX_FLOW: &str = "ci-fix";
 pub enum Signal {
     #[default]
     Unspecified = 0,
-    Once = 1,
-    Loop = 2,
     Watch = 3,
-    Cron = 4,
     Listen = 5,
     CiFailure = 6,
 }
@@ -25,10 +22,7 @@ pub enum Signal {
 impl Signal {
     pub fn from_i32(value: i32) -> Self {
         match value {
-            1 => Self::Once,
-            2 => Self::Loop,
             3 => Self::Watch,
-            4 => Self::Cron,
             5 => Self::Listen,
             6 => Self::CiFailure,
             _ => Self::Unspecified,
@@ -37,6 +31,15 @@ impl Signal {
 
     pub fn as_i32(&self) -> i32 {
         *self as i32
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Watch => "watch",
+            Self::Listen => "listen",
+            Self::CiFailure => "ci_failure",
+            Self::Unspecified => "unspecified",
+        }
     }
 }
 
@@ -152,7 +155,7 @@ impl Stimulus {
 pub struct PendingActivation {
     pub id: LfdId,
     pub wave_id: LfdId,
-    pub stimulus_id: LfdId,
+    pub stimulus_id: Option<LfdId>,
     pub source: ActivationSource,
     pub reason: String,
     pub from_sha: String,
@@ -166,28 +169,11 @@ fn default_target_branch() -> String {
     "main".to_string()
 }
 
-impl PendingActivation {
-    #[allow(dead_code)] // Convenience constructor for tests and future use.
-    pub fn new(id: LfdId, wave_id: LfdId, stimulus_id: LfdId) -> Self {
-        Self {
-            id,
-            wave_id,
-            stimulus_id,
-            source: ActivationSource::Poll,
-            reason: String::new(),
-            from_sha: String::new(),
-            to_sha: String::new(),
-            queued_at: OffsetDateTime::now_utc().unix_timestamp(),
-            target_branch: "main".to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivationLog {
     pub id: LfdId,
     pub wave_id: LfdId,
-    pub stimulus_id: LfdId,
+    pub stimulus_id: Option<LfdId>,
     pub source: ActivationSource,
     pub reason: String,
     pub outcome: ActivationOutcome,
@@ -195,10 +181,9 @@ pub struct ActivationLog {
 }
 
 impl ActivationLog {
-    #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(
         wave_id: LfdId,
-        stimulus_id: LfdId,
+        stimulus_id: Option<LfdId>,
         source: ActivationSource,
         reason: String,
         outcome: ActivationOutcome,
@@ -220,6 +205,12 @@ mod tests {
     use super::{ActivationSource, Signal};
 
     #[test]
+    fn watch_signal_storage_value_is_stable() {
+        assert_eq!(Signal::Watch.as_i32(), 3);
+        assert_eq!(Signal::from_i32(3), Signal::Watch);
+    }
+
+    #[test]
     fn listen_signal_storage_value_is_stable() {
         assert_eq!(Signal::Listen.as_i32(), 5);
         assert_eq!(Signal::from_i32(5), Signal::Listen);
@@ -229,6 +220,13 @@ mod tests {
     fn ci_failure_signal_storage_value_is_stable() {
         assert_eq!(Signal::CiFailure.as_i32(), 6);
         assert_eq!(Signal::from_i32(6), Signal::CiFailure);
+    }
+
+    #[test]
+    fn removed_discriminants_map_to_unspecified() {
+        assert_eq!(Signal::from_i32(1), Signal::Unspecified); // was Once
+        assert_eq!(Signal::from_i32(2), Signal::Unspecified); // was Loop
+        assert_eq!(Signal::from_i32(4), Signal::Unspecified); // was Cron
     }
 
     #[test]

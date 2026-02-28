@@ -68,6 +68,9 @@ pub(crate) enum Query {
     ListChatMemoryBlocks,
     UpsertChatMemoryBlock,
     DeleteChatMemoryBlock,
+    ListLoopableWaves,
+    ListCronWaves,
+    GetPendingActivationForWave,
 }
 
 impl Query {
@@ -131,10 +134,13 @@ impl Query {
         Self::ListChatMemoryBlocks,
         Self::UpsertChatMemoryBlock,
         Self::DeleteChatMemoryBlock,
+        Self::ListLoopableWaves,
+        Self::ListCronWaves,
+        Self::GetPendingActivationForWave,
     ];
 }
 
-const QUERY_COUNT: usize = Query::DeleteChatMemoryBlock as usize + 1;
+const QUERY_COUNT: usize = Query::GetPendingActivationForWave as usize + 1;
 
 #[derive(Debug, Clone, Copy)]
 struct QueryDef {
@@ -150,27 +156,27 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized\n             FROM waves\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, repo, flow, direction, area, paused, status, iteration, cycle_start_iteration, created_at, serialized\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                flow = excluded.flow,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                cycle_start_iteration = excluded.cycle_start_iteration,\n                created_at = excluded.created_at,\n                serialized = excluded.serialized",
+        template: "INSERT INTO waves (\n                id, name, repo, flow, direction, area, paused, status, iteration, cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14}, {p15})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                repo = excluded.repo,\n                flow = excluded.flow,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                cycle_start_iteration = excluded.cycle_start_iteration,\n                created_at = excluded.created_at,\n                serialized = excluded.serialized,\n                mode = excluded.mode,\n                loop_flow = excluded.loop_flow,\n                cron = excluded.cron",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized\n             FROM waves\n             WHERE name = {p1}",
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE name = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -441,6 +447,24 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     },
     QueryDef {
         template: "DELETE FROM chat_memory_blocks WHERE wave_id = {p1} AND name = {p2}",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // ListLoopableWaves
+    QueryDef {
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE mode = 'loop' AND status != 4\n             ORDER BY created_at DESC",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // ListCronWaves
+    QueryDef {
+        template: "SELECT id, name, repo, flow, direction, area, paused, status, iteration,\n                    cycle_start_iteration, created_at, serialized, mode, loop_flow, cron\n             FROM waves\n             WHERE mode = 'cron' AND status != 4\n             ORDER BY created_at DESC",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // GetPendingActivationForWave — match by wave_id where stimulus_id IS NULL
+    QueryDef {
+        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} AND stimulus_id IS NULL",
         sqlite_override: None,
         postgres_override: None,
     },

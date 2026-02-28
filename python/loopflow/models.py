@@ -46,7 +46,10 @@ class Wave(BaseModel):
     id: str
     name: str
     repo: str
+    mode: str = "loop"
     flow: str
+    loop_flow: str = "ship-roadmap"
+    cron: Optional[str] = None
     direction: list[str]
     area: list[str]
     stimuli: list[Stimulus] = Field(default_factory=list)

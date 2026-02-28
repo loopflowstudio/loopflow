@@ -128,7 +128,10 @@ pub async fn build_wave_dto(
         object: "wave".to_string(),
         name: wave.name().clone(),
         repo: wave.repo().clone(),
+        mode: wave.mode().as_str().to_string(),
         flow: wave.flow().clone(),
+        loop_flow: wave.loop_flow().to_string(),
+        cron: wave.cron.clone(),
         direction: wave.direction().clone(),
         area: wave.area().clone(),
         agent: wave_config.as_ref().and_then(|config| config.agent.clone()),
@@ -399,7 +402,7 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Wave, WaveRun, WaveRunSnapshot,
+        LivePrState, LivePullRequestState, PullRequest, Wave, WaveMode, WaveRun, WaveRunSnapshot,
         WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::{HashMap, HashSet};
@@ -458,7 +461,10 @@ mod tests {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
             repo: repo.to_string(),
+            mode: WaveMode::Loop,
             flow: "build".to_string(),
+            loop_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: vec![],
             area: vec![],
             status: WaveStatus::Idle,

@@ -344,7 +344,7 @@ mod tests {
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
-        Wave, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
+        Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -738,7 +738,10 @@ mod tests {
             id: LfdId::new(),
             name: name.to_string(),
             repo: tmp.path().to_string_lossy().to_string(),
+            mode: WaveMode::Loop,
             flow: "build".to_string(),
+            loop_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

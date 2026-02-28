@@ -161,7 +161,7 @@ mod tests {
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{Wave, WaveStatus};
+    use crate::lfd::types::{Wave, WaveMode, WaveStatus};
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -173,7 +173,10 @@ mod tests {
             id: id.clone(),
             name: format!("wave-{id}"),
             repo: repo.to_string(),
+            mode: WaveMode::Loop,
             flow: "build".to_string(),
+            loop_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,

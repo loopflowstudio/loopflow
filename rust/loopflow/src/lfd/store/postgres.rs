@@ -113,6 +113,9 @@ impl PostgresStore {
             let created_at = wave.created_at().map(|dt| dt.unix_timestamp()).unwrap_or(0);
 
             let serialized: i32 = if wave.serialized { 1 } else { 0 };
+            let mode = wave.mode().as_str();
+            let loop_flow = wave.loop_flow();
+            let cron = wave.cron.as_deref();
             client
                 .execute(
                     Self::sql(Query::UpsertWave),
@@ -129,6 +132,9 @@ impl PostgresStore {
                         &(wave.cycle_start_iteration() as i32),
                         &created_at,
                         &serialized,
+                        &mode,
+                        &loop_flow.as_str(),
+                        &cron,
                     ],
                 )
                 .await?;
@@ -781,6 +787,24 @@ impl PostgresStore {
         self.read_waves(repo).await
     }
 
+    pub async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(Self::sql(Query::ListLoopableWaves), &[])
+                .await?;
+            rows.iter().map(map_wave_row).collect()
+        })
+        .await
+    }
+
+    pub async fn list_cron_waves(&self) -> StoreResult<Vec<Wave>> {
+        self.with_client(|client| async move {
+            let rows = client.query(Self::sql(Query::ListCronWaves), &[]).await?;
+            rows.iter().map(map_wave_row).collect()
+        })
+        .await
+    }
+
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         self.with_client(|client| async move {
             let row = client
@@ -928,7 +952,7 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized
+                    "SELECT w.id, w.name, w.repo, w.flow, w.direction, w.area, w.paused, w.status, w.iteration, w.cycle_start_iteration, w.created_at, w.serialized, w.mode, w.loop_flow, w.cron
                      FROM waves w
                      INNER JOIN chord_members cm ON cm.wave_id = w.id
                      WHERE cm.chord_id = $1
@@ -1455,15 +1479,24 @@ impl PostgresStore {
     pub async fn get_pending_for_stimulus(
         &self,
         wave_id: &LfdId,
-        stimulus_id: &LfdId,
+        stimulus_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
         self.with_client(|client| async move {
-            let row = client
-                .query_opt(
-                    Self::sql(Query::GetPendingActivationForStimulus),
-                    &[&wave_id, &stimulus_id],
-                )
-                .await?;
+            let row = match stimulus_id {
+                Some(sid) => {
+                    client
+                        .query_opt(
+                            Self::sql(Query::GetPendingActivationForStimulus),
+                            &[&wave_id, &sid],
+                        )
+                        .await?
+                }
+                None => {
+                    client
+                        .query_opt(Self::sql(Query::GetPendingActivationForWave), &[&wave_id])
+                        .await?
+                }
+            };
             row.as_ref().map(map_pending_activation_row).transpose()
         })
         .await

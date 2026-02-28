@@ -52,7 +52,7 @@ impl std::str::FromStr for WaveStatus {
             "running" => Ok(Self::Running),
             "waiting" => Ok(Self::Waiting),
             "paused" => Ok(Self::Paused),
-            "failed" | "error" => Ok(Self::Failed),
+            "failed" => Ok(Self::Failed),
             _ => Err(()),
         }
     }
@@ -144,6 +144,39 @@ impl LivePrState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum WaveMode {
+    #[default]
+    Loop,
+    Cron,
+    Manual,
+}
+
+impl WaveMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Loop => "loop",
+            Self::Cron => "cron",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+impl std::str::FromStr for WaveMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "loop" => Ok(Self::Loop),
+            "cron" => Ok(Self::Cron),
+            "manual" => Ok(Self::Manual),
+            _ => Err(format!("unknown wave mode: {value}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueBlockReason {
@@ -186,7 +219,10 @@ pub struct Wave {
     pub id: LfdId,
     pub name: String,
     pub repo: String,
+    pub mode: WaveMode,
     pub flow: String,
+    pub loop_flow: String,
+    pub cron: Option<String>,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     pub status: WaveStatus,
@@ -206,13 +242,15 @@ pub struct Wave {
 }
 
 impl Wave {
-    #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, name: String, repo: String) -> Self {
         Self {
             id,
             name,
             repo,
+            mode: WaveMode::Loop,
             flow: String::new(),
+            loop_flow: "ship-roadmap".to_string(),
+            cron: None,
             direction: Vec::new(),
             area: Vec::new(),
             status: WaveStatus::Idle,
@@ -235,8 +273,16 @@ impl Wave {
         &self.repo
     }
 
+    pub fn mode(&self) -> WaveMode {
+        self.mode
+    }
+
     pub fn flow(&self) -> &String {
         &self.flow
+    }
+
+    pub fn loop_flow(&self) -> &String {
+        &self.loop_flow
     }
 
     pub fn direction(&self) -> &Vec<String> {
@@ -356,7 +402,6 @@ pub struct QueueMergeEvent {
 }
 
 impl WaveRun {
-    #[allow(dead_code)] // Convenience constructor for tests and future use.
     pub fn new(id: LfdId, wave_id: LfdId) -> Self {
         let stack_group_id = wave_id.to_string();
         Self {

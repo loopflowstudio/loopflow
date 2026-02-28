@@ -144,18 +144,18 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
             continue;
         }
         conn.execute_batch("BEGIN EXCLUSIVE")?;
-        match conn.execute_batch(migration.sql) {
-            Ok(()) => {
-                conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-                    rusqlite::params![migration.version, now_unix()],
-                )?;
-                conn.execute_batch("COMMIT")?;
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK");
-                return Err(e.into());
-            }
+        let result = (|| -> StoreResult<()> {
+            conn.execute_batch(migration.sql)?;
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+                rusqlite::params![migration.version, now_unix()],
+            )?;
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        })();
+        if let Err(e) = result {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(e);
         }
     }
 

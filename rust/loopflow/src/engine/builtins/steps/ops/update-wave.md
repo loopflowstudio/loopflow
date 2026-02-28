@@ -1,6 +1,6 @@
 ---
 requires: diff vs main | scratch/ analysis | both
-produces: wave/<wave>/ (updated or deleted), scratch/ (promoted files removed)
+produces: wave/<wave>/ (updated or deleted), scratch/ (folded files removed)
 ---
 Single owner of `wave/<wave>/`. Creates, updates, and deletes wave state.
 
@@ -10,18 +10,30 @@ Single owner of `wave/<wave>/`. Creates, updates, and deletes wave state.
 
 - Shipped items are deleted, not marked as complete
 - Context that upcoming items need is folded into those items before deletion
-- New work from `scratch/` is promoted as numbered item files
+- New work from `scratch/` is folded into wave items or becomes new sprint files
 - When nothing remains, the wave directory is deleted
+
+## Bias: fold, don't drop
+
+`scratch/` is cleared on land. Anything left there is lost. Anything folded into `wave/` survives. **Dropping content is a worse failure mode than duplicating it.**
+
+Every scratch file with planned work or future-relevant analysis must be folded into wave:
+- Proposals, open questions, analysis of upcoming work → fold into existing sprint items or create new ones
+- Reviews with forward-looking recommendations → fold into relevant sprint items
+- Questions about future work → fold into sprint items or wave README risks/strategy
+- If content overlaps with what's already in wave, merge it — don't skip it
+
+Design docs for already-shipped work and other purely historical content can be left for git history. The test: does this content inform future work? If yes, fold it. If it only describes what was already built, let it go.
 
 ## Workflow
 
 1. Read the diff (if any) to understand what was actually built.
 2. Read `wave/<wave>/` — README and item files — to understand current state.
-3. Read `scratch/` for analysis, proposals, or unfinished artifacts.
+3. Read `scratch/` — every file, completely.
 4. Delete shipped items. Before deleting, fold context that remaining items need into those items.
-5. Promote actionable work from `scratch/` into `wave/<wave>/` as numbered item files.
-6. If destination files already exist, merge/dedupe content intentionally.
-7. Remove scratch files that were promoted.
+5. Fold scratch content into `wave/<wave>/`. Merge into existing sprint items where there's a clear match. Create new sprint items for content that doesn't fit existing ones. Skip only purely historical content (shipped design docs with nothing forward-looking).
+6. If destination files already exist, merge/dedupe — but keep both sides' content. When in doubt, include it.
+7. Remove scratch files after their content has been folded into wave.
 8. If `wave/<wave>/MEMORY.md` exists, fold useful observations into remaining items and trim.
 9. If the wave directory has no remaining work items, delete the entire `wave/<wave>/` directory.
 
@@ -68,8 +80,8 @@ If there are no remaining items, the context doesn't need a home. Git has the hi
 
 ## Output
 
-Updated `wave/<wave>/` (fewer files, not more) plus cleanup of promoted `scratch/` files.
+Updated `wave/<wave>/` plus cleanup of `scratch/` files whose content has been folded in.
 
-If the wave is fully shipped: delete `wave/<wave>/`. Commit message: `wave: complete <wave>`.
+If the wave is fully shipped and scratch is empty: delete `wave/<wave>/`. Commit message: `wave: complete <wave>`.
 
-If no wave changes are needed: `wave: reviewed, no changes needed`.
+**"No changes needed" is only valid when scratch/ is empty.** If scratch has files, something must move into wave.

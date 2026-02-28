@@ -95,6 +95,14 @@ AUTH_PROVIDER_ACTIVE = {
     "login": "jackdanger",
 }
 
+AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS = {
+    "provider": "claude",
+    "status": "active",
+    "login": "jack@anthropic.com",
+    "expires_at": "2030-01-01T04:00:00Z",
+    "next_refresh_at": "2030-01-01T03:40:00Z",
+}
+
 AUTH_PROVIDER_NONE = {
     "provider": "codex",
     "status": "none",

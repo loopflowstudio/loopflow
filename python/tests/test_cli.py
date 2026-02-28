@@ -6,6 +6,7 @@ from rich.console import Console
 
 from conftest import (
     AUTH_PROVIDER_ACTIVE,
+    AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
     AUTH_PROVIDER_NONE,
     REPO_MINIMAL,
     WAVE_FULL,
@@ -62,6 +63,18 @@ def test_auth_status_table_shows_active_and_none_states() -> None:
     assert "@jackdanger" in rendered
     assert "Codex" in rendered
     assert "not connected" in rendered
+
+
+def test_auth_status_table_shows_expiry_details() -> None:
+    statuses = [AuthProviderStatus.model_validate(AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS)]
+    console = Console(record=True, width=220)
+    console.print(_auth_status_table(statuses))
+    rendered = console.export_text()
+
+    assert "Claude" in rendered
+    assert "jack@anthropic.com" in rendered
+    assert "expires" in rendered
+    assert "refresh in" not in rendered
 
 
 def test_repo_table_shows_registration_columns() -> None:

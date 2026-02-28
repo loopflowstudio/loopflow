@@ -10,6 +10,7 @@ import pytest
 from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
+    AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
     AUTH_PROVIDER_NONE,
     CHORD_MINIMAL,
     PROVIDER_INFO_FULL,
@@ -157,6 +158,17 @@ class TestClientResponses:
         status = client.auth_status("github")
         assert status.provider == "github"
         assert status.status == "active"
+        client.close()
+
+    def test_auth_status_parses_provider_timestamps(self):
+        def handler(request):
+            assert request.url.path == "/v0/auth/claude"
+            return httpx.Response(200, json=AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS)
+
+        client = _mock_client(handler)
+        status = client.auth_status("claude")
+        assert status.expires_at is not None
+        assert status.next_refresh_at is not None
         client.close()
 
     def test_start_auth_parses_flow_response(self):

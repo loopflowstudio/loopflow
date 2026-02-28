@@ -24,6 +24,7 @@ which npm     # Node.js (needed for coding agents)
 which claude  # Claude Code
 which codex   # Codex CLI
 which gemini  # Gemini CLI
+which gh      # GitHub CLI
 test -f .lf/config.yaml && echo "config exists"
 test -d ~/.superpowers && echo "superpowers exists"
 ```
@@ -33,7 +34,9 @@ Print a summary:
 Checking environment...
 ✓ Homebrew
 ✓ Node.js
-✓ Claude Code (coding agent)
+✓ Claude Code (logged in)
+✓ GitHub CLI (logged in as @jackdoe)
+- Codex (not installed)
 - superpowers (optional)
 
 Config: not initialized
@@ -59,6 +62,39 @@ If no coding agent is installed (none of claude, codex, or gemini found):
   - Codex CLI: `npm install -g @openai/codex`
   - Gemini CLI: `npm install -g @google/gemini-cli`
   - Skip: explain they need to install one manually before using loopflow
+
+## Phase 2b: Check auth for installed agents
+
+For each installed coding agent, check auth status and help the user log in if needed.
+
+**Claude Code:**
+```bash
+claude auth status 2>&1
+```
+If not authenticated: "Claude Code is installed but not logged in. Run `claude login` to authenticate."
+- Offer to run it now. Wait for it to complete.
+
+**GitHub CLI (gh):**
+```bash
+gh auth status 2>&1
+```
+If not authenticated: "GitHub CLI is not logged in. You'll need this for PRs and git operations."
+- Offer to run `gh auth login`. Wait for it to complete.
+
+**Codex CLI:**
+```bash
+codex auth status 2>&1
+```
+If not authenticated and Codex is installed: "Codex is installed but not logged in."
+- Offer to run `codex login` or equivalent auth command.
+
+**Gemini CLI:**
+```bash
+gemini auth status 2>&1
+```
+If not authenticated and Gemini is installed: offer to help log in.
+
+Skip agents that aren't installed. Don't force auth for optional agents — just flag the status and offer to help. The summary in Phase 5 should show auth status alongside install status.
 
 ## Phase 3: Configure repository
 
@@ -196,7 +232,8 @@ Print what was done. List each item that was checked or installed:
 Setup complete!
 
 ✓ Node.js (already installed)
-✓ Claude Code (coding agent)
+✓ Claude Code (logged in)
+✓ GitHub CLI (logged in as @jackdoe)
 ✓ .lf/config.yaml created
 ✓ superpowers installed
 
@@ -206,7 +243,7 @@ Ready! Try these commands:
   lf --list       # see all available tasks
 ```
 
-Adapt the summary to reflect what was actually done. Show which coding agent(s) are available.
+Adapt the summary to reflect what was actually done. Show auth status alongside install status for each agent.
 
 ## Conversation style
 

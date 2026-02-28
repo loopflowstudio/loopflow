@@ -235,6 +235,8 @@ mod tests {
             status: AuthStatus::Active {
                 login: Some("jack".to_string()),
             },
+            expires_at: None,
+            next_refresh_at: None,
         }];
 
         let merged = merge_auth(PROVIDER_CATALOG, &snapshots);

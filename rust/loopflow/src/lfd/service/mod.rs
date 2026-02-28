@@ -3,12 +3,15 @@ mod compose;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+mod onboarding;
 
 use crate::lfd::config::{LfdConfig, ServiceManager};
 
-pub fn install(force: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn install(force: bool, no_interactive: bool) -> Result<(), Box<dyn std::error::Error>> {
     let config = LfdConfig::load()?;
-    dispatch(&config, force, Action::Install)
+    dispatch(&config, force, Action::Install)?;
+    onboarding::run_install_onboarding(no_interactive)?;
+    Ok(())
 }
 
 pub fn uninstall() -> Result<(), Box<dyn std::error::Error>> {

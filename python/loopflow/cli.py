@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import webbrowser
+from datetime import datetime, timezone
 from typing import Optional
 
 import typer
@@ -84,6 +85,39 @@ def _split_repo_slug(repo_id: str) -> tuple[str, str]:
     return owner, repo
 
 
+def _format_relative_delta(seconds: float) -> str:
+    total_seconds = max(0, int(seconds))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    if total_seconds < 3600:
+        return f"{total_seconds // 60}m"
+    if total_seconds < 86400:
+        return f"{total_seconds // 3600}h"
+    return f"{total_seconds // 86400}d"
+
+
+def _status_details(status: AuthProviderStatus) -> str:
+    if status.provider == "github" and status.login:
+        details = f"@{status.login}"
+    elif status.login:
+        details = status.login
+    else:
+        details = "authenticated"
+
+    now = datetime.now(timezone.utc)
+    if status.expires_at is not None:
+        expires_at = status.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        delta = (expires_at - now).total_seconds()
+        if delta <= 0:
+            details = f"{details} · expired"
+        else:
+            details = f"{details} · expires {_format_relative_delta(delta)}"
+
+    return details
+
+
 def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
     table = Table(show_header=True, header_style="bold")
     table.add_column("provider")
@@ -93,10 +127,7 @@ def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
     for status in statuses:
         if status.status == "active":
             icon = "✓"
-            if status.provider == "github" and status.login:
-                details = f"@{status.login}"
-            else:
-                details = "authenticated"
+            details = _status_details(status)
         elif status.status == "pending":
             icon = "…"
             details = "waiting for browser confirmation"

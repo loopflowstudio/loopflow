@@ -2,7 +2,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Serialize;
+use time::OffsetDateTime;
 
+use crate::lfd::http::dto::format_datetime;
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
@@ -19,6 +21,10 @@ pub struct AuthProviderStatusDto {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_refresh_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -125,7 +131,15 @@ fn status_dto(snapshot: ProviderAuthSnapshot) -> AuthProviderStatusDto {
         provider: snapshot.provider.as_str().to_string(),
         status: snapshot.status.as_str().to_string(),
         login: snapshot.status.login(),
+        expires_at: format_unix_timestamp(snapshot.expires_at),
+        next_refresh_at: format_unix_timestamp(snapshot.next_refresh_at),
     }
+}
+
+fn format_unix_timestamp(timestamp: Option<i64>) -> Option<String> {
+    let timestamp = timestamp?;
+    let datetime = OffsetDateTime::from_unix_timestamp(timestamp).ok()?;
+    format_datetime(Some(datetime))
 }
 
 fn flow_dto(response: AuthFlowResponse) -> AuthFlowResponseDto {
@@ -187,10 +201,17 @@ mod tests {
             status: crate::lfd::provider_auth::AuthStatus::Active {
                 login: Some("jackdanger".to_string()),
             },
+            expires_at: Some(1_893_456_000),
+            next_refresh_at: Some(1_893_454_800),
         });
 
         assert_eq!(dto.provider, "github");
         assert_eq!(dto.status, "active");
         assert_eq!(dto.login, Some("jackdanger".to_string()));
+        assert_eq!(dto.expires_at, Some("2030-01-01T00:00:00Z".to_string()));
+        assert_eq!(
+            dto.next_refresh_at,
+            Some("2029-12-31T23:40:00Z".to_string())
+        );
     }
 }

@@ -68,6 +68,8 @@ class AuthProviderStatus(BaseModel):
     provider: str
     status: str
     login: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    next_refresh_at: Optional[datetime] = None
 
 
 class AuthFlow(BaseModel):

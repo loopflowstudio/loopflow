@@ -262,11 +262,14 @@ fn list_remote_branches(repo: &Path) -> HashSet<String> {
 
 /// List worktrees using only local git operations. No network calls.
 ///
+/// Returns `(default_branch, states)` so callers can forward the resolved
+/// default branch to `enrich_worktrees_network` without a redundant git call.
+///
 /// `merged` reflects local detection only (fast-forward ancestor check and
 /// squash-merge patch-id comparison). `remote_gone` is always `false`.
 /// `prunable` is conservative — network enrichment may mark additional
 /// worktrees as prunable.
-pub fn list_worktrees_local(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
+pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>), GitError> {
     let default_branch = get_default_branch(repo)?;
     let merge_target = format!("origin/{default_branch}");
     let items = list_porcelain(repo)?;
@@ -347,7 +350,7 @@ pub fn list_worktrees_local(repo: &Path) -> Result<Vec<WorktreeState>, GitError>
         });
     }
 
-    Ok(results)
+    Ok((default_branch, results))
 }
 
 /// Enrich worktree states with network-dependent checks.
@@ -355,12 +358,10 @@ pub fn list_worktrees_local(repo: &Path) -> Result<Vec<WorktreeState>, GitError>
 /// Queries GitHub for merged PRs and `git ls-remote` for remote branch
 /// existence. Updates `merged`, `remote_gone`, and `prunable` fields.
 /// Silently skips enrichment on network failure.
-pub fn enrich_worktrees_network(repo: &Path, states: &mut [WorktreeState]) {
-    let default_branch = match get_default_branch(repo) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-
+///
+/// `default_branch` should match what `list_worktrees_local` used
+/// (typically from `get_default_branch`).
+pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut [WorktreeState]) {
     let branches: Vec<String> = states
         .iter()
         .filter_map(|wt| wt.branch.as_ref())
@@ -383,7 +384,7 @@ pub fn enrich_worktrees_network(repo: &Path, states: &mut [WorktreeState]) {
     let remote_branches = remote_handle.join().unwrap_or_default();
 
     for state in states.iter_mut() {
-        let is_default = state.branch.as_deref() == Some(default_branch.as_str());
+        let is_default = state.branch.as_deref() == Some(default_branch);
         if is_default {
             continue;
         }
@@ -417,8 +418,8 @@ pub fn enrich_worktrees_network(repo: &Path, states: &mut [WorktreeState]) {
 
 /// Full worktree listing with all checks (local + network).
 pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
-    let mut states = list_worktrees_local(repo)?;
-    enrich_worktrees_network(repo, &mut states);
+    let (default_branch, mut states) = list_worktrees_local(repo)?;
+    enrich_worktrees_network(repo, &default_branch, &mut states);
     Ok(states)
 }
 

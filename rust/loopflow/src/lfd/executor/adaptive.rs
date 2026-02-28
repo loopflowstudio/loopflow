@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
@@ -103,12 +103,18 @@ impl AdaptiveContainerExecutor {
 
     async fn probe_sandbox_support() -> Result<()> {
         let probe_id = format!("lf-probe-{}", std::process::id());
+        let probe_workspace = Self::create_probe_workspace()?;
+        let workspace = probe_workspace.path().to_string_lossy().into_owned();
+
+        Self::probe_cli_capabilities().await?;
 
         Self::run_probe_step("version", &["sandbox", "version"]).await?;
 
         if let Err(err) = Self::run_probe_step(
             "create",
-            &["sandbox", "create", "--name", &probe_id, "claude", "/tmp"],
+            &[
+                "sandbox", "create", "--name", &probe_id, "claude", &workspace,
+            ],
         )
         .await
         {
@@ -117,9 +123,83 @@ impl AdaptiveContainerExecutor {
         }
 
         let exec_result =
-            Self::run_probe_step("exec", &["sandbox", "exec", &probe_id, "--", "true"]).await;
+            match Self::run_probe_step("exec", &["sandbox", "exec", &probe_id, "true"]).await {
+                Ok(()) => Ok(()),
+                Err(direct_err) => Self::run_probe_step(
+                    "exec-legacy",
+                    &["sandbox", "exec", &probe_id, "--", "true"],
+                )
+                .await
+                .map_err(|legacy_err| {
+                    anyhow!("{direct_err}; legacy exec syntax also failed: {legacy_err}")
+                }),
+            };
         let _ = Self::run_probe_step("cleanup", &["sandbox", "rm", &probe_id]).await;
         exec_result
+    }
+
+    fn create_probe_workspace() -> Result<tempfile::TempDir> {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            candidates.push(home);
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            candidates.push(cwd);
+        }
+
+        for base in candidates {
+            if !base.is_dir() {
+                continue;
+            }
+            if let Ok(tmp) = tempfile::Builder::new()
+                .prefix("lf-sandbox-probe-")
+                .tempdir_in(&base)
+            {
+                return Ok(tmp);
+            }
+        }
+
+        Err(anyhow!(
+            "sandbox probe could not create a workspace under HOME or current directory"
+        ))
+    }
+
+    async fn probe_cli_capabilities() -> Result<()> {
+        let output = Command::new("docker")
+            .args(["sandbox", "--help"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|err| anyhow!("sandbox probe capabilities failed to start: {err}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(anyhow!("sandbox probe capabilities failed: {stderr}"));
+        }
+
+        let help = String::from_utf8_lossy(&output.stdout);
+        let missing: Vec<&str> = ["create", "exec", "rm", "ls"]
+            .iter()
+            .copied()
+            .filter(|command| !Self::help_includes_command(&help, command))
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        Err(anyhow!(
+            "sandbox probe missing required commands: {}",
+            missing.join(", ")
+        ))
+    }
+
+    fn help_includes_command(help: &str, command: &str) -> bool {
+        help.split_whitespace()
+            .map(|token| {
+                token.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_')
+            })
+            .any(|token| token == command)
     }
 
     async fn run_probe_step(step: &str, args: &[&str]) -> Result<()> {
@@ -175,7 +255,7 @@ impl AdaptiveContainerExecutor {
 }
 
 fn is_sandbox_harness(program: Option<&str>) -> bool {
-    matches!(program, Some("claude") | Some("gemini"))
+    matches!(program, Some("claude"))
 }
 
 #[async_trait]

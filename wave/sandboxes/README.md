@@ -1,5 +1,9 @@
 # MicroVM Agent Execution
 
+## Status (2026-02-28)
+
+Exploratory only, off the production path. Container mode defaults to Docker; sandbox is opt-in (`executor.sandbox: true`) for validation and future rollout work.
+
 ## Vision
 
 Replace Bollard-managed Docker containers with Docker Sandboxes microVMs for agent execution. Stronger kernel isolation, simpler executor lifecycle, same user-facing modes (native and container). Container mode internals change; everything above stays the same.
@@ -10,30 +14,34 @@ Lifecycle is `docker sandbox create` + `docker sandbox exec` + `docker sandbox r
 
 Two-level capability gating decides executor per run:
 
-1. **Platform capability (startup probe):** `docker sandbox version` → `create` → `exec -- true` → `rm`. Any failure disables sandbox path for process lifetime.
-2. **Harness routing (per-run):** Claude and Gemini route to sandbox; everything else stays on `DockerExecutor`.
+1. **Platform capability (startup probe):** `docker sandbox version` → `create` → `exec` (direct or legacy separator syntax) → `rm`. Any failure disables sandbox path for process lifetime.
+2. **Harness routing (per-run):** Claude routes to sandbox; everything else stays on `DockerExecutor`.
 
-Runtime fallback: if sandbox launch/exec/cleanup fails for Claude/Gemini, retry once through `DockerExecutor` before marking the run failed.
+Runtime fallback: if sandbox launch/exec/cleanup fails for Claude, retry once through `DockerExecutor` before marking the run failed.
 
-`AdaptiveContainerExecutor` wraps both backends. `mode: container` resolves to `ExecutorType::Sandbox` (adaptive), keeping config simple.
+`AdaptiveContainerExecutor` wraps both backends. `mode: container` defaults to `ExecutorType::Docker`; set `executor.sandbox: true` to opt into sandbox routing.
+
+### Validation approach
+
+Hybrid: Rust unit tests for executor logic (command shape, cleanup, orphan recovery via fake docker scripts), shell scripts for real-environment validation across deployment surfaces. Probe-gate CI pattern — sandbox tests skip when plugin unavailable, activate automatically when it lands.
 
 ## Goals
 
 - Kernel isolation boundary for agent runs
 - Cleaner lifecycle than volume/tar-sync path
-- Incremental adoption: Claude/Gemini first, fallback always available
+- Incremental adoption: Claude first, fallback always available
 - No user-visible behavior change — streaming, context files, cleanup all work the same
 
 ## Risks
 
-- **Docker Sandbox CLI instability.** The CLI surface is young. Breakage on updates could disable the sandbox path entirely (mitigated by fallback to DockerExecutor).
-- **Concerto DinD.** Bundled lfd container needs `docker sandbox` CLI plugin available. Unvalidated.
+- **Docker Sandbox CLI drift.** Command surface changes across versions (`exec` syntax, `inspect` availability). Capability probes now gate on required commands and fail fast with explicit diagnostics.
+- **Concerto DinD.** Bundled lfd container needs `docker sandbox` CLI plugin available. Current `loopflow/lfd` image has Docker CLI but no sandbox plugin (`docker sandbox` not recognized), so DinD validation is blocked until plugin distribution is solved.
 - **Linux experimental.** Sandbox behavior on self-hosted Linux is experimental and unvalidated under load.
-- **Credential injection.** Phase 1 uses env var injection. Credential proxy coverage for Claude/Gemini is an open question.
+- **Credential injection.** Phase 1 uses env var injection. Credential proxy coverage for additional harnesses is an open question.
 
 ## Metrics
 
-- Sandbox launch latency: seconds from run start to agent process running (target: <5s, compare vs DockerExecutor)
-- Sandbox cleanup success rate: % of runs where sandbox is fully removed after completion (target: 100%)
-- Fallback trigger rate: % of sandbox failures that successfully fall back to DockerExecutor (target: 100%)
-- Startup probe pass rate across platforms: macOS and Linux (target: 100% on supported Docker versions)
+- Sandbox executor launches, runs, and cleans up Claude agents identically to DockerExecutor
+- Fallback to Docker triggers correctly on sandbox failure
+- Startup probe gates sandbox on/off without affecting other executor paths
+- macOS validated (self-hosted + Concerto), Linux smoke-validated

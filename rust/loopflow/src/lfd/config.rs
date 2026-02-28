@@ -696,7 +696,7 @@ fn default_executor_image() -> String {
 }
 
 fn default_executor_sandbox_enabled() -> bool {
-    true
+    false
 }
 
 fn default_agent_timeout() -> Duration {
@@ -861,13 +861,25 @@ mod tests {
     }
 
     #[test]
-    fn mode_container_sets_container_profile() {
+    fn mode_container_defaults_to_docker_profile() {
         let config: RawLfdConfig = serde_yaml_ng::from_str("mode: container").expect("yaml parses");
         let resolved = config.resolve().expect("container resolves");
 
         assert_eq!(resolved.mode, Mode::Container);
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
+        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+    }
+
+    #[test]
+    fn mode_container_with_sandbox_enabled_uses_sandbox_executor() {
+        let raw = r#"
+mode: container
+executor:
+  sandbox: true
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let resolved = config.resolve().expect("container resolves");
         assert_eq!(resolved.executor.r#type, ExecutorType::Sandbox);
     }
 
@@ -982,7 +994,7 @@ executor:
 
         assert_eq!(resolved.mode, Mode::Container);
         assert_eq!(resolved.storage, StorageType::Postgres);
-        assert_eq!(resolved.executor.r#type, ExecutorType::Sandbox);
+        assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
         assert_eq!(
             resolved.credential_socket,
             Some("/tmp/concerto-auth.sock".to_string())

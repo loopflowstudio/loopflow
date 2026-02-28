@@ -19,7 +19,7 @@ pub use agent::{run_builtin_agent, BuiltinAgentOptions};
 pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use error::{OpsError, OpsResult};
-pub use land::{land, mark_ready, LandOptions, LandResult};
+pub use land::{land, mark_ready, LandOptions, LandResult, RotationResult};
 pub use lint::ensure_lint_passes;
 pub use messages::{generate_commit_message, generate_pr_message, Message};
 pub use next::{next_branch, NextOptions, NextResult};

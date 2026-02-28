@@ -1,54 +1,65 @@
-# Opsflows Wave Plan — Review
+# Sprint 01: fast-path + `lf land` + worktree rotation
 
 ## What was implemented
 
-New wave `opsflows` with 4 sprint items, a README, and wave config. Sprint 01 (land + rotation) has been ingested into `scratch/opsflows-land-rotation.md` with a detailed design doc covering fast-path, worktree rotation, step prompt, and prune protection.
+Three features shipped as one unit:
 
-No code changes — this is a wave plan branch.
+1. **`fast-path` step runner** — New `fast_path` field in step frontmatter. Both CLI (`lf`) and daemon (`lfd`) try the command before spinning up an agent. Exit 0 skips the agent entirely. Non-zero injects failure output into the prompt and falls through to agent.
+
+2. **Worktree rotation in `lf ops land`** — After landing a PR, `rotate_worktree()` preserves the current worktree (appending `.{unix_ts}`), checks for remaining wave items, and creates a fresh shortname worktree if items remain. CLI emits a shell directive to `cd` into the new worktree.
+
+3. **`lf land` step** — New builtin step with `fast-path: lf ops land`. On the happy path, no agent needed. On failure, agent gets error context and the ops API reference.
+
+Plus: shortname worktrees are now protected from `wt prune`.
 
 ## Key choices
 
-**Ordering:** Sprints 01 and 04 share the `fast-path` dependency — 01 builds it, 04 consumes it. Sprints 02 and 03 are a separate dependency chain (release notes quality → release cadence). This lets 02 start before 01 ships.
+**`fast-path` is a step-level feature, not a hook system.** One field in frontmatter, one code path in each runner. Hooks would need event types, ordering, error handling — over-engineered for the pattern we actually need (try command, fall back to agent).
 
-**`fast-path` as general infrastructure:** Rather than hardcoding land/rebase behavior, `fast-path` is a step frontmatter field any step can use. This means future ops-as-steps (deploy, migrate, etc.) get the same pattern for free.
+**Rotation happens on intent, not merge.** The PR enables auto-merge or merges locally — either way, the branch's work is done. Waiting for CI to finish merging would block the user unnecessarily.
 
-**Dot heuristic for shortname detection:** `preserve_worktree()` always produces `{name}.{unix_ts}`, so `.contains('.')` reliably distinguishes preserved from active worktrees. No filesystem lookups needed.
+**Dot heuristic for shortname detection.** `preserve_worktree()` always produces `{name}.{unix_ts}`, so `name.contains('.')` reliably distinguishes preserved from active worktrees. No filesystem lookups.
 
-**Rotation on intent, not merge:** Worktree rotates when `lf land` commits intent to merge (enables auto-merge), not when CI finishes and the PR actually merges. The user shouldn't wait.
+**Failure context injected as `<lf:fast-path-failure>` XML tag.** The agent sees command, exit code, stdout, and stderr immediately at the top of the prompt.
+
+**post_step_sync skipped on fast-path success.** The fast-path command (e.g. `lf ops land`) handles its own side effects. Running commit+push afterward would fail (branch merged, worktree renamed).
 
 ## How it fits together
 
 ```
-wave/opsflows/           → wave plan (this branch)
-scratch/opsflows-land-rotation.md  → sprint 01 design doc
+engine/fast_path.rs          — try_fast_path() + FailureContext Display
+engine/flow.rs               — fast_path field on Step + StepFrontmatter
+engine/builtins/steps/ops/land.md  — lf land step prompt
 
-Sprint 01: fast-path + land rotation (in progress)
-Sprint 02: release notes quality (independent)
-Sprint 03: release step + cadence (depends on 02)
-Sprint 04: rebase step (depends on 01's fast-path)
+lf/commands/run.rs           — CLI fast-path integration (before agent launch)
+lf/commands/flow.rs          — auto-commit between flow steps
+lf/commands/ops/mod.rs       — shell directive after rotation
+lf/discovery.rs              — "land" in builtin categories
+
+lfd/executor/wave/mod.rs     — daemon fast-path integration
+lfd/executor/helpers.rs      — post_step_sync uses commit_workflow
+
+ops/land.rs                  — rotate_worktree(), has_wave_items(), RotationResult
+engine/worktrees.rs          — shortname prune protection
 ```
-
-The opsflows wave uses the `ship-wave` flow (ingest → kickoff → build) with `alive` + `simplicity` directions. Area scopes to ops Rust code, builtin ops prompts, lfd triggers, and Swift.
 
 ## Risks and bottlenecks
 
-- **Worktree rename while cwd is inside it.** Design addresses this: CLI uses `write_shell_directive` to cd the user's shell; lfd renames post-run.
-- **Release notes quality is subjective.** Sprint 02 is prompt-driven — expect iteration after seeing real output.
-- **Ops decomposition scope.** Sprint 03 splits `lf ops release` into sub-commands. Biggest Rust surface area. Existing monolithic command should keep working during transition.
+- **Worktree rename while cwd is inside it.** Mitigated: CLI uses `write_shell_directive` to move the user's shell. Daemon renames post-run; `cleanup_run_worktree()` handles missing paths gracefully.
+- **fast-path runs arbitrary shell commands.** By design — step authors control the command. Same trust boundary as the agent itself.
+- **`has_wave_items()` only checks for `.md` files, ignoring README.** If a wave uses non-markdown items, they won't be detected. Acceptable since all current wave items are markdown.
 
 ## What's not included
 
-- Concerto UI for release config (sprint 03 defines it but it's a separate implementation concern)
-- lfd wave scheduling changes (daemon already handles step advancement)
-- Any code implementation — this is purely the wave plan
+- Concerto UI for rotation or land status
+- `lf rebase` step (sprint 04 — just a step file that consumes fast-path)
+- Release notes improvements (sprints 02/03 — separate dependency chain)
+- `lfd` scheduling changes (daemon already handles step advancement)
 
-## Unstaged changes
+## Wave alignment
 
-The working tree has editorial improvements not yet committed:
+Goals advanced:
+- "`lf land` lands the PR, rotates the shortname worktree, advances to next wave item — fast-path, no agent" — done
+- "`fast-path` as a general step feature — any step can declare a fast command that skips the agent on success" — done
 
-1. **`01-land-rotation.md` deleted** — ingested to `scratch/`. Standard wave workflow.
-2. **`02-release-notes.md` trimmed** — removed sub-agent overflow detail and noisy code comments. Cleaner.
-3. **`03-release-cadence.md` consolidated** — merged redundant ops API listing and step frontmatter. More direct.
-4. **`README.md` refined** — resolved the worktree risk with concrete mitigation (`write_shell_directive` + post-run rename). Removed cron metric (captured in sprint 03's done-when).
-
-All improvements. Should be staged and committed before merging.
+Wave README updated to reflect sprint 01 completion. Goals and risks that are now resolved have been removed.

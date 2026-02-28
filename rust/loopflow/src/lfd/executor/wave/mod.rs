@@ -14,6 +14,7 @@ use time::OffsetDateTime;
 
 use crate::engine::agent::build_agent_command;
 use crate::engine::config::{load_config_or_default, parse_agent};
+use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
 };
@@ -389,7 +390,7 @@ impl WaveExecutor {
             }
 
             match next_action(&plan, run.step_index as usize) {
-                FlowAction::RunStep { step } => {
+                FlowAction::RunStep { mut step } => {
                     // Pre-step sync: pick up sibling pushes.
                     if let Err(err) = pre_step_sync(
                         Path::new(&run.snapshot.repo),
@@ -398,6 +399,39 @@ impl WaveExecutor {
                     ) {
                         warn!(run_id = %run.id, error = %err, "pre-step sync failed, continuing");
                     }
+
+                    // Try fast-path before spinning up an agent.
+                    if let Some(ref cmd) = step.step.fast_path {
+                        info!(run_id = %run.id, step = %step.step.name, cmd = cmd, "trying fast-path");
+                        match try_fast_path(cmd, Path::new(&run.worktree)) {
+                            Ok(FastPathResult::Success) => {
+                                info!(run_id = %run.id, step = %step.step.name, "fast-path succeeded, skipping agent");
+                                // Skip agent AND post_step_sync — the command handled everything.
+                                // post_step_sync would fail here anyway (e.g. branch merged, worktree renamed).
+                                self.advance_run_step(&mut run, &plan, wave.id()).await?;
+                                continue;
+                            }
+                            Ok(FastPathResult::Failed {
+                                exit_code,
+                                stdout,
+                                stderr,
+                            }) => {
+                                info!(run_id = %run.id, step = %step.step.name, exit_code, "fast-path failed, falling back to agent");
+                                let ctx = FailureContext {
+                                    cmd,
+                                    exit_code,
+                                    stdout: &stdout,
+                                    stderr: &stderr,
+                                };
+                                let body = step.step.content.as_deref().unwrap_or("");
+                                step.step.content = Some(format!("{ctx}{body}"));
+                            }
+                            Err(err) => {
+                                warn!(run_id = %run.id, step = %step.step.name, error = %err, "fast-path execution error, falling back to agent");
+                            }
+                        }
+                    }
+
                     // Ensure area summary is fresh before each step
                     if let Err(err) = self.ensure_summary_fresh(&wave, &run).await {
                         warn!(run_id = %run.id, error = %err, "summary refresh failed, continuing");

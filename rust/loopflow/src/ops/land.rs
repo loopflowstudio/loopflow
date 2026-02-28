@@ -4,7 +4,10 @@ use std::process::Command;
 use crate::engine::git::{
     current_branch, get_default_branch, is_clean, land as git_land, LandStrategy,
 };
-use crate::engine::worktrees::{main_repo_root, worktree_path};
+use crate::engine::worktrees::{
+    create_with_schema, main_repo_root, preserve_worktree, wave_name_from_worktree_and_main,
+    worktree_path,
+};
 
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -24,6 +27,18 @@ pub struct LandOptions {
 #[derive(Debug, Clone)]
 pub struct LandResult {
     pub merged: bool,
+    pub rotation: Option<RotationResult>,
+}
+
+#[derive(Debug, Clone)]
+pub enum RotationResult {
+    /// Worktree preserved and a new one created for the next wave item.
+    Advanced {
+        preserved: PathBuf,
+        new_path: PathBuf,
+    },
+    /// Worktree preserved but wave has no more items.
+    Complete { preserved: PathBuf },
 }
 
 pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<LandResult> {
@@ -36,12 +51,16 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
 
     if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
-        return Ok(LandResult { merged: true });
+    } else {
+        ensure_pr(&repo_root, &feature_branch, options, progress)?;
+        finalize_remote(&repo_root, progress)?;
     }
 
-    ensure_pr(&repo_root, &feature_branch, options, progress)?;
-    finalize_remote(&repo_root, progress)?;
-    Ok(LandResult { merged: true })
+    let rotation = rotate_worktree(&repo_root, &main_repo, progress)?;
+    Ok(LandResult {
+        merged: true,
+        rotation,
+    })
 }
 
 fn prepare_land(
@@ -291,4 +310,68 @@ fn current_pr_url(repo: &Path) -> OpsResult<Option<String>> {
 
 fn open_url(url: &str) {
     crate::engine::platform::open_url(url);
+}
+
+fn rotate_worktree(
+    repo_root: &Path,
+    main_repo: &Path,
+    progress: &impl Progress,
+) -> OpsResult<Option<RotationResult>> {
+    let wave_name = match wave_name_from_worktree_and_main(repo_root, main_repo) {
+        Some(name) => name,
+        None => return Ok(None),
+    };
+
+    // Only rotate shortname worktrees (no timestamp suffix).
+    // preserve_worktree() always produces {name}.{unix_ts}, so a dot means preserved.
+    if wave_name.contains('.') {
+        return Ok(None);
+    }
+
+    let preserved = preserve_worktree(main_repo, repo_root)?;
+    progress.status(&format!(
+        "Preserved {} → {}",
+        repo_root.display(),
+        preserved.display()
+    ));
+
+    let wave_dir = main_repo.join("wave").join(&wave_name);
+    let has_items = wave_dir.exists() && has_wave_items(&wave_dir)?;
+
+    if has_items {
+        let result = create_with_schema(main_repo, &wave_name, None, None)?;
+        progress.status(&format!(
+            "Created new worktree at {}",
+            result.path.display()
+        ));
+        Ok(Some(RotationResult::Advanced {
+            preserved,
+            new_path: result.path,
+        }))
+    } else {
+        progress.status("Wave complete — no more items");
+        Ok(Some(RotationResult::Complete { preserved }))
+    }
+}
+
+/// Check if a wave directory has actionable items (markdown files that aren't config).
+fn has_wave_items(wave_dir: &Path) -> OpsResult<bool> {
+    for entry in std::fs::read_dir(wave_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let ext = path.extension().and_then(|e| e.to_str());
+        if ext != Some("md") {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        // Skip config files — only count actionable wave items.
+        if name.eq_ignore_ascii_case("readme.md") {
+            continue;
+        }
+        return Ok(true);
+    }
+    Ok(false)
 }

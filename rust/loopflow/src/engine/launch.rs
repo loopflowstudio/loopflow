@@ -453,6 +453,7 @@ Test step body.
                     action_style: Some("procedural".to_string()),
                     interactive: Some(true),
                     content: Some("Skill body".to_string()),
+                    fast_path: None,
                 }),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()

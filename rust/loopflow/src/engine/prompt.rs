@@ -1847,6 +1847,7 @@ mod tests {
                 directions: vec![],
                 interactive: None,
                 action_style: None,
+                fast_path: None,
             }),
             wave_memory: Some(Document {
                 path: "wave/living/MEMORY.md".to_string(),
@@ -1895,6 +1896,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -1933,6 +1935,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -1957,6 +1960,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -1980,6 +1984,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             docs: vec![Document {
                 path: "doc.md".to_string(),
@@ -2197,6 +2202,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -2219,6 +2225,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -2335,6 +2342,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             diff: Some("diff content".to_string()),
             clipboard: Some("clipboard content".to_string()),
@@ -2861,6 +2869,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -2896,6 +2905,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -2940,6 +2950,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };
@@ -2978,6 +2989,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             message: Some("login page crashes".to_string()),
             ..Default::default()
@@ -2998,6 +3010,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                fast_path: None,
             }),
             ..Default::default()
         };

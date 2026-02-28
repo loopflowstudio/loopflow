@@ -97,6 +97,7 @@ impl WaveExecutor {
                 action_style: None,
                 interactive: Some(false),
                 content: None,
+                fast_path: None,
             },
             flow_parents: Vec::new(),
         };

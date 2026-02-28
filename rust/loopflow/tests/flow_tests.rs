@@ -46,6 +46,7 @@ fn flow_parsing_parity() {
             action_style: None,
             interactive: None,
             content: None,
+            fast_path: None,
         })
     );
     assert_eq!(
@@ -58,6 +59,7 @@ fn flow_parsing_parity() {
             action_style: None,
             interactive: Some(true),
             content: None,
+            fast_path: None,
         })
     );
 }

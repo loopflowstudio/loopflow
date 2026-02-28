@@ -5,6 +5,7 @@ pub mod command;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod fast_path;
 pub mod flow;
 pub mod fork;
 pub mod git;

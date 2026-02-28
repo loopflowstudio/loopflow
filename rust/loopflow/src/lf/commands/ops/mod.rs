@@ -8,7 +8,7 @@ use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, publish_release,
     rebase_with_recovery, release_status, AbandonOptions, CommitOptions, LandOptions, NextOptions,
-    PrOptions, Progress, PublishOptions, RebaseOptions,
+    PrOptions, Progress, PublishOptions, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, Write};
@@ -153,7 +153,8 @@ fn land_current(
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let _ = land(
+    let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
+    let result = land(
         &repo_root,
         &LandOptions {
             strict,
@@ -164,6 +165,17 @@ fn land_current(
         },
         progress,
     )?;
+
+    match result.rotation {
+        Some(RotationResult::Advanced { new_path, .. }) => {
+            let _ = write_shell_directive(&format!("cd {}", new_path.display()));
+        }
+        Some(RotationResult::Complete { .. }) => {
+            let _ = write_shell_directive(&format!("cd {}", main_repo.display()));
+        }
+        None => {}
+    }
+
     Ok(())
 }
 

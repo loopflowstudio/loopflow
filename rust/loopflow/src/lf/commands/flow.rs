@@ -11,6 +11,7 @@ use crate::lf::Cli;
 use crate::lfd::executor::{
     cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
 };
+use crate::ops::{commit_workflow, CommitOptions, NullProgress};
 use anyhow::{anyhow, Context, Result};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -56,6 +57,7 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
         let action = next_action(items, index);
         match action {
             FlowAction::RunStep { step } | FlowAction::WaitInteractive { step } => {
+                let step_name = step.step.name.clone();
                 let colors = Colors::new();
                 eprintln!(
                     "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
@@ -64,17 +66,30 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                     bold = colors.bold,
                     current = index + 1,
                     total = total,
-                    name = step.step.name,
+                    name = step_name,
                 );
-                crate::lf::commands::run::run(Some(&step.step.name), message, cli)?;
+                crate::lf::commands::run::run(Some(&step_name), message, cli)?;
+                commit_step_work(repo, &step_name)?;
             }
             FlowAction::Fork { fork } => {
                 run_fork(&fork, message, cli, repo)?;
+                commit_step_work(repo, "fork")?;
             }
             FlowAction::Complete => break,
         }
     }
 
+    Ok(())
+}
+
+/// Commit any uncommitted changes left by the previous step.
+fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
+    let options = CommitOptions {
+        add: true,
+        message: Some(format!("lf commit: {step_name}")),
+        ..CommitOptions::for_task(step_name)
+    };
+    commit_workflow(repo, &options, &NullProgress)?;
     Ok(())
 }
 

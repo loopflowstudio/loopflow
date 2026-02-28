@@ -4,7 +4,7 @@
 
 ## What to build
 
-Depends on sprint 01's `fast-path` feature.
+`fast-path` is built (sprint 01). This sprint is the second consumer — just a step file.
 
 **`lf rebase` step:**
 

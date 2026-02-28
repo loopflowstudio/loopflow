@@ -63,7 +63,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         ],
     ),
     ("Scan", &["scan/scan-report", "scan/scan-plan"]),
-    ("Git", &["commit", "rebase"]),
+    ("Git", &["commit", "rebase", "land"]),
     (
         "Ops",
         &[
@@ -95,6 +95,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("ci-fix", "Fix latest CI failures for current PR"),
         ("commit", "Commit with generated message"),
         ("rebase", "Rebase onto main"),
+        ("land", "Land PR, rotate worktree"),
         ("refine", "Iteratively refine text"),
         ("compress", "Simplify touched code"),
         ("gate", "Ship-ready check with reviewer docs"),
@@ -465,6 +466,7 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
         directions: Vec::new(),
         action_style: None,
         interactive: Some(true),
+        fast_path: None,
     })
 }
 

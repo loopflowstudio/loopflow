@@ -1,8 +1,6 @@
-# v0.9.4
+# v0.9.5
 
-Release notes written to `RELEASE_NOTES.md`. 39 PRs distilled into four sections:
+Release notes written to `RELEASE_NOTES.md`. 5 PRs across two sections:
 
-- **11 new capabilities** — voice input, tmux plugin, cross-repo DAG, mobile discovery, inline glance, live git state, usage aggregation, provider catalog, repo onboarding, containerized daemon, provider auth in Concerto
-- **9 improvements** — per-wave agent overrides, parallel chords, multi-step forks, target-scoped releases, context audit split, dynamic voice, "ride a wave", wave name normalization, session metering
-- **3 security** — DB-backed tokens, proactive refresh, git sync hardening
-- **6 infra/reliability** — two-stage releases, iOS multi-client, e2e concurrent tests, stream parser, Codex flag fix, skill injection removal
+- **2 new capabilities** — sandbox executor with adaptive container routing, fast-path step runner with worktree rotation
+- **3 improvements** — config-driven directions with `--no-direction` override, descendant doc gathering for area context, dirty/remote-gone awareness in worktree pruning

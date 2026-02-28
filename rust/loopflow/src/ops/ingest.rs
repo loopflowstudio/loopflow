@@ -76,6 +76,8 @@ pub fn ingest(
         item.filename, dest_name
     ));
 
+    // Can't use fs::rename — source (wave/) may be in the main repo
+    // while dest (scratch/) is in a worktree on a different mount point.
     std::fs::copy(&source, &dest)?;
     std::fs::remove_file(&source)?;
 

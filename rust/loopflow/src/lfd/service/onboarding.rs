@@ -35,15 +35,20 @@ pub fn run_install_onboarding(no_interactive: bool) -> Result<()> {
     println!("Connecting accounts...");
     println!();
 
-    let claude_connected = connect_primary_agent(&client)?;
+    let mut has_agent = try_connect_agent(&client, Provider::Claude)?;
     ensure_required_provider_connected(&client, Provider::GitHub)?;
 
-    if claude_connected {
+    if has_agent {
         offer_optional_provider(&client, Provider::Codex)?;
+        offer_optional_provider(&client, Provider::OpenCodeZen)?;
     } else {
-        ensure_required_provider_connected(&client, Provider::Codex)?;
+        has_agent = try_connect_agent(&client, Provider::Codex)?;
+        if has_agent {
+            offer_optional_provider(&client, Provider::OpenCodeZen)?;
+        } else {
+            try_connect_agent(&client, Provider::OpenCodeZen)?;
+        }
     }
-    offer_optional_provider(&client, Provider::OpenCodeZen)?;
 
     let final_statuses = client.list_statuses()?;
     if !required_providers_connected(&final_statuses) {
@@ -62,21 +67,19 @@ pub fn run_install_onboarding(no_interactive: bool) -> Result<()> {
     Ok(())
 }
 
-fn connect_primary_agent(client: &OnboardingClient) -> Result<bool> {
-    let provider = Provider::Claude;
+fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bool> {
     let status = client.provider_status(provider)?;
     if status.is_active() {
         print_connected(provider, &status);
         return Ok(true);
     }
 
-    match connect_provider(client, provider)? {
-        true => Ok(true),
-        false => {
-            println!("  ! Claude not connected; continuing with Codex requirement.");
-            Ok(false)
-        }
+    if connect_provider(client, provider)? {
+        return Ok(true);
     }
+
+    println!("  ! {} not connected.", provider_display_name(provider));
+    Ok(false)
 }
 
 fn ensure_required_provider_connected(client: &OnboardingClient, provider: Provider) -> Result<()> {
@@ -181,12 +184,13 @@ fn poll_until_connected(
 }
 
 fn print_connected(provider: Provider, status: &AuthProviderStatus) {
+    let name = provider_display_name(provider);
     let login = status
         .login
         .as_deref()
         .map(|login| format_login(provider, login))
         .unwrap_or_else(|| "authenticated".to_string());
-    println!("  ✓ Connected as {login}");
+    println!("  ✓ {name} connected as {login}");
 }
 
 fn prompt_optional(provider: Provider) -> Result<bool> {
@@ -207,7 +211,8 @@ fn prompt_optional(provider: Provider) -> Result<bool> {
 fn required_providers_connected(statuses: &[AuthProviderStatus]) -> bool {
     let github_connected = provider_is_active(statuses, Provider::GitHub);
     let has_agent = provider_is_active(statuses, Provider::Claude)
-        || provider_is_active(statuses, Provider::Codex);
+        || provider_is_active(statuses, Provider::Codex)
+        || provider_is_active(statuses, Provider::OpenCodeZen);
     github_connected && has_agent
 }
 
@@ -480,6 +485,10 @@ mod tests {
         assert!(required_providers_connected(&[
             active("github"),
             active("codex")
+        ]));
+        assert!(required_providers_connected(&[
+            active("github"),
+            active("opencodezen")
         ]));
         assert!(!required_providers_connected(&[
             active("claude"),

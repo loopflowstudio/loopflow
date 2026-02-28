@@ -60,7 +60,6 @@ Additional free sections are welcome — data models, tech direction, guardrails
 
 **README.md must not contain:**
 
-- Roadmap tables or phase lists — denormalized; the sprint files are the roadmap
 - Status indicators (shipped / in-progress / planned)
 - Retrospectives — context for remaining sprints gets folded into those sprints
 

@@ -37,6 +37,7 @@ The fix: detection-only setup that works on any platform, docs restructured arou
 - **Docs restructure touches 12+ pages.** Risk of inconsistency during transition. Mitigate by doing architecture (nav, structure, new pages) in sprint 2, accuracy (content verification) in sprint 3.
 - **Wave content model is still evolving.** Auto-loop, ship-roadmap, ci-fix triggers — some of this is new. Document what's stable, flag what's experimental.
 - **Three-workflow framing might not survive contact with users.** The lf-raw / Concerto / remote-lfd split is clean but might not match how people actually discover loopflow. Validate by writing the getting-started page and seeing if it flows.
+- **Prompt terminology divergence.** `.lf/steps/` uses "sprint"; builtin copies use "item"/"stage"/"roadmap." Not introduced by this wave, but documenting prompts in sprint 02/03 will surface it. Consider consolidating terminology during the accuracy pass.
 
 ## Metrics
 

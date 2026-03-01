@@ -8,7 +8,7 @@
 
 **Duplicate utilities.** Remove one of the two `copy_to_clipboard` wrappers (one in `lf/commands/util.rs`, one in `lf/commands/ops/mod.rs`). Remove the duplicate `branch_exists` in `combine.rs` — use the engine's version.
 
-**Dead code.** Remove or implement `sync` and `full` fields on `WtCommand::List`. Wire up `register_session`/`unregister_session` on `Scheduler` or remove. Remove `HttpState.output_hub` dead field.
+**Dead code.** Remove or implement `sync` and `full` fields on `WtCommand::List`. Wire up `register_session`/`unregister_session` on `Scheduler` or remove (currently `#[allow(dead_code)]` with "reserved" comment).
 
 **lfd binary parsing.** Migrate `bin/lfd.rs` management subcommands (`migrate`, `install`, `uninstall`, `start`, `stop`, `status`, `token`) from manual `args.get(1)` matching to Clap.
 

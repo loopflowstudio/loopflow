@@ -137,3 +137,70 @@ fn should_pause_for_max_iterations(stimulus: &Stimulus, wave: &Wave) -> bool {
         + 1;
     max > 0 && cycle_iterations >= max
 }
+
+#[cfg(test)]
+mod tests {
+    use super::should_pause_for_max_iterations;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::types::{Signal, Stimulus, Wave, WaveMode, WaveStatus};
+    use time::OffsetDateTime;
+
+    fn make_stimulus(max_iterations: Option<u32>) -> Stimulus {
+        let mut stimulus = Stimulus::new(LfdId::new(), LfdId::new(), Signal::Watch);
+        stimulus.max_iterations = max_iterations;
+        stimulus
+    }
+
+    fn make_wave(iteration: u32, cycle_start_iteration: u32) -> Wave {
+        Wave {
+            id: LfdId::new(),
+            name: "loop-wave".to_string(),
+            repo: "/tmp/repo".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration,
+            cycle_start_iteration,
+            created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
+        }
+    }
+
+    #[test]
+    fn no_max_iterations() {
+        let stimulus = make_stimulus(None);
+        let wave = make_wave(2, 0);
+        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+    }
+
+    #[test]
+    fn max_zero() {
+        let stimulus = make_stimulus(Some(0));
+        let wave = make_wave(2, 0);
+        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+    }
+
+    #[test]
+    fn below_limit() {
+        let stimulus = make_stimulus(Some(5));
+        let wave = make_wave(2, 0);
+        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+    }
+
+    #[test]
+    fn at_limit() {
+        let stimulus = make_stimulus(Some(5));
+        let wave = make_wave(4, 0);
+        assert!(should_pause_for_max_iterations(&stimulus, &wave));
+    }
+
+    #[test]
+    fn with_offset() {
+        let stimulus = make_stimulus(Some(5));
+        let wave = make_wave(7, 5);
+        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+    }
+}

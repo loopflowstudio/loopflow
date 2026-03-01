@@ -121,6 +121,16 @@ struct WatchCheck {
     update_sha: bool,
 }
 
+fn paths_match_areas(areas: &[String], paths: &[&Path]) -> bool {
+    if areas.is_empty() {
+        return true;
+    }
+
+    paths
+        .iter()
+        .any(|path| areas.iter().any(|area| path.starts_with(area)))
+}
+
 fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, git2::Error> {
     let repo = Repository::open(wave.repo())?;
 
@@ -171,14 +181,11 @@ fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, 
         }
     };
 
-    let area_match = if wave.area().is_empty() {
-        true
-    } else {
-        diff.deltas().any(|delta| {
-            let path = delta.new_file().path().unwrap_or(Path::new(""));
-            wave.area().iter().any(|area| path.starts_with(area))
-        })
-    };
+    let changed_paths: Vec<&Path> = diff
+        .deltas()
+        .map(|delta| delta.new_file().path().unwrap_or(Path::new("")))
+        .collect();
+    let area_match = paths_match_areas(wave.area(), &changed_paths);
 
     Ok(WatchCheck {
         from_sha: prev.to_string(),
@@ -186,4 +193,44 @@ fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, 
         trigger: area_match,
         update_sha: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::paths_match_areas;
+    use std::path::Path;
+
+    #[test]
+    fn empty_areas_matches_everything() {
+        let paths = [Path::new("docs/README.md")];
+        assert!(paths_match_areas(&[], &paths));
+    }
+
+    #[test]
+    fn prefix_match() {
+        let areas = vec!["src/api/".to_string()];
+        let paths = [Path::new("src/api/handler.rs")];
+        assert!(paths_match_areas(&areas, &paths));
+    }
+
+    #[test]
+    fn no_match() {
+        let areas = vec!["src/api/".to_string()];
+        let paths = [Path::new("docs/README.md")];
+        assert!(!paths_match_areas(&areas, &paths));
+    }
+
+    #[test]
+    fn nested_path_matches_parent_area() {
+        let areas = vec!["src/".to_string()];
+        let paths = [Path::new("src/api/deep/file.rs")];
+        assert!(paths_match_areas(&areas, &paths));
+    }
+
+    #[test]
+    fn multiple_areas_any_match() {
+        let areas = vec!["src/".to_string(), "docs/".to_string()];
+        let paths = [Path::new("docs/README.md")];
+        assert!(paths_match_areas(&areas, &paths));
+    }
 }

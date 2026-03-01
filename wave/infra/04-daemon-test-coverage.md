@@ -1,29 +1,11 @@
 # 04: Daemon Test Coverage
 
-**Finish line:** Every lfd trigger loop (cron, loop_ticker, recovery, watch) has inline tests. Wave CRUD and stimulus HTTP handlers have handler-level tests. Token counting assertions use exact values.
+**Finish line:** Session handler integration tests exist. Postgres parity test runs when `DATABASE_URL` is set.
 
 ## Scope
 
-**Trigger loop tests.** Inline `#[cfg(test)]` modules in each file. Real SQLite stores, no mocks. Test both decision functions (pure) and check functions (store reads/writes).
+**Session handler tests.** `create_session_handler` and `get_session_handler` are standard JSON handlers — test with the same `test_http_state()` + direct handler call pattern used for wave CRUD. Skip `stream_session_events_handler` (SSE streaming body) and `send_session_input_handler`. The existing `backfill_lagged_events` test in `sessions.rs` covers event replay logic — the gap is handler-level CRUD coverage.
 
-| Module | What to test |
-|--------|--------------|
-| `cron.rs` | `should_activate_cron` with never-triggered, just-triggered, past-due, invalid expression. `check_cron_waves` with seeded cron wave. |
-| `loop_ticker.rs` | `should_pause_for_max_iterations` at boundary and with max=0. `tick_loop_waves` skipping active/pending waves, activating idle loopable wave. |
-| `recovery.rs` | `recover_stuck_runs` — agent over 4h threshold marked Failed (cascading to run and wave), agent under threshold untouched, multiple stuck agents independent. Insert records with past timestamps for time manipulation. |
-| `watch.rs` | `check_watch_stimulus` — matching area triggers, non-matching area skips, no new commits skips, first-ever check bootstraps SHA. Use `TestRepo` from `loopflow-test-support` (local bare remote, real git2 codepath). |
+`test_http_state()` is defined inside `waves.rs`'s test module. Either extract to a shared test helper or duplicate in `sessions.rs`.
 
-**Skip `token_refresh.rs`** (already has 6 tests with FakeTokenRefresher) and **`queue_reconcile.rs`** (40-line dispatch loop, testing it just verifies iteration).
-
-**Wave CRUD handler tests.** Call handlers directly with `State(state)`, `Json(payload)`, `Path(id)` extractors. Cover `create_wave_handler`, `get_wave_handler`, `list_waves_handler`, `update_wave_handler`, `delete_wave_handler`, `add_stimulus_handler`, `remove_stimulus_handler`.
-
-**Skip orchestration handlers** (`run_wave_handler`, `stop_wave_handler`, `land_wave_handler`, `combine_wave_handler`, `next_wave_handler`) — they depend on WaveExecutor which spawns real agents. Testing at handler level would be mock wiring.
-
-**Token counting.** Replace `>= 1` assertions in `token_tests.rs` with exact values for `"hello"` and `"a".repeat(30)` using cl100k_base.
-
-**Out of scope:** Postgres parity (needs CI infrastructure), session handler tests, queue_reconcile tests.
-
-## Risks
-
-- **watch.rs tests are the most complex** — TestRepo setup with commits, fetches, and area filtering. Most likely place for implementation friction.
-- **recovery.rs needs past timestamps** — insert records with `created_at` in the past rather than mocking `Utc::now()`.
+**Postgres parity test.** Same store operations against SQLite and Postgres, gated on `DATABASE_URL` env var. Low priority until Postgres is available in CI.

@@ -301,8 +301,87 @@ fn map_session_error(err: SessionManagerError) -> (StatusCode, Json<ErrorRespons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::http::routes::test_helpers::test_http_state;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::sessions::types::SessionStatus;
     use crate::lfd::store::{open_store, StorageConfig};
+    use axum::extract::{Path, State};
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn get_session_handler_returns_dto() {
+        let state = test_http_state().await;
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            harness: "claude".to_string(),
+            status: SessionStatus::Active,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig {
+                step: "design".to_string(),
+                repo_root: "/tmp/repo".to_string(),
+                ..Default::default()
+            },
+            created_at: time::OffsetDateTime::now_utc(),
+            ended_at: None,
+        };
+        state
+            .store
+            .create_session(&session)
+            .await
+            .expect("seed session");
+
+        let Json(dto) = get_session_handler(State(state), Path(session_id.to_string()))
+            .await
+            .expect("get session");
+
+        assert_eq!(dto.id, session_id.to_string());
+        assert_eq!(dto.object, "session");
+        assert_eq!(dto.harness, "claude");
+        assert_eq!(dto.status, "active");
+        assert_eq!(dto.config.step, "design");
+    }
+
+    #[tokio::test]
+    async fn get_session_handler_not_found() {
+        let state = test_http_state().await;
+        let fake_id = LfdId::new().to_string();
+        let result = get_session_handler(State(state), Path(fake_id)).await;
+        assert!(matches!(result, Err((StatusCode::NOT_FOUND, _))));
+    }
+
+    #[tokio::test]
+    async fn delete_session_handler_terminal_is_idempotent() {
+        let state = test_http_state().await;
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            harness: "claude".to_string(),
+            status: SessionStatus::Ended,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionConfig {
+                step: "implement".to_string(),
+                repo_root: "/tmp/repo".to_string(),
+                ..Default::default()
+            },
+            created_at: time::OffsetDateTime::now_utc(),
+            ended_at: Some(time::OffsetDateTime::now_utc()),
+        };
+        state
+            .store
+            .create_session(&session)
+            .await
+            .expect("seed session");
+
+        let Json(dto) = delete_session_handler(State(state), Path(session_id.to_string()))
+            .await
+            .expect("delete ended session");
+
+        assert_eq!(dto.id, session_id.to_string());
+        assert_eq!(dto.status, "ended");
+    }
 
     #[tokio::test]
     async fn backfill_lagged_events_replays_from_store_after_last_seq() {

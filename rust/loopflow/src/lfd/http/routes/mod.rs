@@ -6,6 +6,7 @@ pub mod providers;
 pub mod repos;
 pub mod sessions;
 pub mod system;
+pub mod tokens;
 pub mod usage;
 pub mod wave_config;
 pub mod wave_runs;

@@ -53,12 +53,14 @@ final class BundledDaemonManager {
     private var containerName: String?
     private var credentialServer: CredentialSocketServer?
     private var terminationObserver: NSObjectProtocol?
+    private var runningSettings: RuntimeSettings?
 
     private(set) var port: Int?
     private(set) var token: String?
     private(set) var state: DaemonState = .stopped
 
     private static let preferNativeModeDefaultsKey = "concerto.bundledDaemon.preferNativeMode"
+    private static let connectWithPhoneDefaultsKey = "concerto.bundledDaemon.connectWithPhone"
 
     static var prefersNativeMode: Bool {
         UserDefaults.standard.bool(forKey: preferNativeModeDefaultsKey)
@@ -66,6 +68,14 @@ final class BundledDaemonManager {
 
     static func setPreferNativeMode(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: preferNativeModeDefaultsKey)
+    }
+
+    static var connectWithPhoneEnabled: Bool {
+        UserDefaults.standard.bool(forKey: connectWithPhoneDefaultsKey)
+    }
+
+    static func setConnectWithPhoneEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: connectWithPhoneDefaultsKey)
     }
 
     init(
@@ -89,7 +99,14 @@ final class BundledDaemonManager {
     }
 
     func start() async throws -> ServerConnection {
-        if case .running = state, let connection = runtimeConnection {
+        let settings = RuntimeSettings(
+            preferNativeMode: Self.prefersNativeMode,
+            connectWithPhone: Self.connectWithPhoneEnabled
+        )
+
+        if case .running = state,
+           runningSettings == settings,
+           let connection = runtimeConnection {
             return connection
         }
 
@@ -100,26 +117,47 @@ final class BundledDaemonManager {
             return connection
         }
 
+        if case .running = state {
+            stop()
+        }
+
         state = .starting
 
         do {
             let token = try generateSessionToken()
             let port = try allocatePort()
 
-            if Self.prefersNativeMode {
-                try startNativeDaemon(token: token, port: port)
+            if settings.preferNativeMode {
+                try startNativeDaemon(
+                    token: token,
+                    port: port,
+                    connectWithPhone: settings.connectWithPhone
+                )
             } else if try await dockerAvailable() {
                 do {
-                    try await startContainerDaemon(token: token, port: port)
+                    try await startContainerDaemon(
+                        token: token,
+                        port: port,
+                        connectWithPhone: settings.connectWithPhone
+                    )
                 } catch {
-                    try startNativeDaemon(token: token, port: port)
+                    try startNativeDaemon(
+                        token: token,
+                        port: port,
+                        connectWithPhone: settings.connectWithPhone
+                    )
                 }
             } else {
-                try startNativeDaemon(token: token, port: port)
+                try startNativeDaemon(
+                    token: token,
+                    port: port,
+                    connectWithPhone: settings.connectWithPhone
+                )
             }
 
             self.token = token
             self.port = port
+            self.runningSettings = settings
 
             try await waitForHealth()
             let connection = try requireRuntimeConnection()
@@ -159,7 +197,7 @@ final class BundledDaemonManager {
         resetRuntime()
     }
 
-    private func startNativeDaemon(token: String, port: Int) throws {
+    private func startNativeDaemon(token: String, port: Int, connectWithPhone: Bool) throws {
         let dbPath = try sqlitePath()
         let process = Process()
         guard let lfdPath = executableProvider("lfd") else {
@@ -167,12 +205,12 @@ final class BundledDaemonManager {
         }
 
         process.executableURL = lfdPath
-        process.arguments = ["serve"]
+        process.arguments = connectWithPhone ? ["serve", "--allow-insecure-bind"] : ["serve"]
 
         var env = ProcessInfo.processInfo.environment
-        env["LFD_HTTP_ADDR"] = "127.0.0.1:\(port)"
+        env["LFD_HTTP_ADDR"] = connectWithPhone ? "0.0.0.0:\(port)" : "127.0.0.1:\(port)"
         env["LFD_DB_PATH"] = dbPath.path
-        env["LFD_AUTH_PROVIDER"] = "static"
+        env["LFD_AUTH_PROVIDER"] = connectWithPhone ? "studio" : "static"
         env["LFD_AUTH_TOKEN"] = token
         process.environment = env
 
@@ -192,7 +230,11 @@ final class BundledDaemonManager {
         self.process = process
     }
 
-    private func startContainerDaemon(token: String, port: Int) async throws {
+    private func startContainerDaemon(
+        token: String,
+        port: Int,
+        connectWithPhone: Bool
+    ) async throws {
         guard try await dockerAvailable() else {
             throw ManagerError.dockerNotAvailable
         }
@@ -214,7 +256,8 @@ final class BundledDaemonManager {
             port: port,
             token: token,
             credentialSocketPath: credentialServer.socketPath,
-            srcPath: srcDirectory()
+            srcPath: srcDirectory(),
+            connectWithPhone: connectWithPhone
         )
         let runResult = try runProcess(docker, arguments: args)
         guard runResult.terminationStatus == 0 else {
@@ -309,19 +352,22 @@ final class BundledDaemonManager {
         port: Int,
         token: String,
         credentialSocketPath: URL,
-        srcPath: URL
+        srcPath: URL,
+        connectWithPhone: Bool
     ) -> [String] {
+        let portMapping = connectWithPhone ? "\(port):2486" : "127.0.0.1:\(port):2486"
+        let authProvider = connectWithPhone ? "studio" : "static"
         var args = [
             "run", "-d",
             "--name", containerName,
-            "-p", "127.0.0.1:\(port):2486",
+            "-p", portMapping,
             "-v", "\(srcPath.path):/workspace/src:ro",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
             "-v", "concerto-lfd-data:/data",
             "-v", "\(credentialSocketPath.path):/var/run/concerto-auth.sock:ro",
             "-e", "LFD_HTTP_ADDR=0.0.0.0:2486",
             "-e", "LFD_DB_PATH=/data/concerto.db",
-            "-e", "LFD_AUTH_PROVIDER=static",
+            "-e", "LFD_AUTH_PROVIDER=\(authProvider)",
             "-e", "LFD_AUTH_TOKEN=\(token)",
             "-e", "LFD_CREDENTIAL_SOCKET=/var/run/concerto-auth.sock",
             "-e", "LFD_MODE=container",
@@ -346,7 +392,9 @@ final class BundledDaemonManager {
             }
         }
 
-        args += [lfdContainerImage(), "serve"]
+        args += connectWithPhone
+            ? [lfdContainerImage(), "serve", "--allow-insecure-bind"]
+            : [lfdContainerImage(), "serve"]
         return args
     }
 
@@ -428,9 +476,15 @@ final class BundledDaemonManager {
         credentialServer = nil
         port = nil
         token = nil
+        runningSettings = nil
     }
 }
 
 private struct ProcessResult {
     let terminationStatus: Int32
+}
+
+private struct RuntimeSettings: Equatable {
+    let preferNativeMode: Bool
+    let connectWithPhone: Bool
 }

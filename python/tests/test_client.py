@@ -218,6 +218,26 @@ class TestClientResponses:
             client.providers()
         client.close()
 
+    def test_revoke_connection_tokens_posts_expected_payload(self):
+        def handler(request):
+            assert request.url.path == "/v0/tokens/revoke"
+            assert request.method == "POST"
+            assert json.loads(request.content) == {"all": False, "prefix": "abc123"}
+            return httpx.Response(200, json={"revoked": 2})
+
+        client = _mock_client(handler)
+        assert client.revoke_connection_tokens(prefix="abc123") == 2
+        client.close()
+
+    def test_revoke_connection_tokens_rejects_invalid_response(self):
+        def handler(request):
+            return httpx.Response(200, json={"revoked": "two"})
+
+        client = _mock_client(handler)
+        with pytest.raises(LoopflowError, match="invalid token revoke response payload"):
+            client.revoke_connection_tokens(revoke_all=True)
+        client.close()
+
     def test_waves_parses_list(self):
         def handler(request):
             return httpx.Response(200, json={"object": "list", "data": [WAVE_MINIMAL]})

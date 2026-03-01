@@ -1,8 +1,10 @@
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::connect_info::ConnectInfo;
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
+use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tokio_stream::wrappers::BroadcastStream;
@@ -16,15 +18,24 @@ use crate::lfd::types::Event;
 
 pub async fn ws_handler(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
 ) -> Result<impl IntoResponse, (StatusCode, axum::Json<ErrorResponse>)> {
+    let bearer_token = crate::lfd::auth::bearer_token(&headers);
+    let source_ip = peer.ip();
     let ws = ws
         .max_frame_size(state.http_security.max_ws_frame_bytes)
         .max_message_size(state.http_security.max_ws_message_bytes);
-    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state)))
+    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state, bearer_token, source_ip)))
 }
 
-async fn handle_ws(mut socket: WebSocket, state: HttpState) {
+async fn handle_ws(
+    mut socket: WebSocket,
+    state: HttpState,
+    bearer_token: Option<String>,
+    source_ip: std::net::IpAddr,
+) {
     let connected = match current_snapshot(&state).await {
         Ok(snapshot) => snapshot,
         Err(err) => {
@@ -68,6 +79,8 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
     let mut events = BroadcastStream::new(state.event_hub.subscribe());
     let mut output = BroadcastStream::new(state.output_hub.subscribe());
     let mut ticker = interval(Duration::from_secs(30));
+    let mut revalidate_ticker = interval(Duration::from_secs(60));
+    revalidate_ticker.tick().await;
     let mut malformed_messages = 0_u32;
     let malformed_limit = state.http_security.max_ws_malformed;
 
@@ -76,6 +89,17 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
             _ = ticker.tick() => {
                 let ping = serde_json::json!({ "type": "ping" }).to_string();
                 if !enqueue_message(&outbound_tx, text_message(ping)) {
+                    break;
+                }
+            }
+            _ = revalidate_ticker.tick() => {
+                if state
+                    .auth
+                    .validate(bearer_token.as_deref(), source_ip)
+                    .await
+                    .is_err()
+                {
+                    let _ = enqueue_message(&outbound_tx, unauthorized_close_message());
                     break;
                 }
             }
@@ -140,6 +164,13 @@ fn enqueue_message(sender: &mpsc::Sender<Message>, message: Message) -> bool {
 
 fn text_message(text: String) -> Message {
     Message::Text(text.into())
+}
+
+fn unauthorized_close_message() -> Message {
+    Message::Close(Some(CloseFrame {
+        code: 4401,
+        reason: "token revoked".into(),
+    }))
 }
 
 fn is_valid_client_envelope(text: &str) -> bool {
@@ -221,6 +252,18 @@ mod tests {
         assert!(!record_malformed(&mut counter, 3));
         assert!(!record_malformed(&mut counter, 3));
         assert!(record_malformed(&mut counter, 3));
+    }
+
+    #[test]
+    fn unauthorized_close_message_uses_private_code() {
+        let message = unauthorized_close_message();
+        match message {
+            Message::Close(Some(frame)) => {
+                assert_eq!(frame.code, 4401);
+                assert_eq!(frame.reason.as_str(), "token revoked");
+            }
+            _ => panic!("expected close frame"),
+        }
     }
 
     #[tokio::test]

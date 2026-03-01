@@ -220,6 +220,8 @@ lfq auth claude      # connect Claude in your browser
 lfq auth codex       # connect Codex in your browser
 lfq auth zen         # connect OpenCode Zen in your browser
 lfq auth disconnect github
+lfq token revoke abc123   # revoke connection tokens by hash prefix
+lfq token revoke --all    # revoke all connection tokens
 ```
 
 `uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  

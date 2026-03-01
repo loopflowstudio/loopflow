@@ -10,6 +10,11 @@ Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is not a shrunke
 
 - Bundled daemon on phone/tablet (iOS is remote-client only)
 - Studio relay path for discovery (discovery is additive to manual host/port)
+- TLS certificate loading and serving (separate work; `--allow-insecure-bind` is the current escape hatch for `0.0.0.0` bind)
+- Per-repo or per-capability token scoping
+- Auto-revoke on suspicious patterns (same token from multiple IPs)
+- `advertise_url` config for reverse proxy setups
+- Tailscale LocalAPI migration
 
 ## Strategy
 
@@ -29,7 +34,9 @@ Action buttons are the primary interaction path on mobile. Multi-client continui
 - Action quality depends on model prompt adherence
 - SwiftUI multiplatform behavior still differs in navigation and selection APIs
 - Tailscale remains a prerequisite for remote discovery-based connectivity
-- Studio dependency for token distribution: lfd validates locally, but token pool management requires studio coordination
+- Studio dependency for token distribution: lfd validates locally, but studio needs pool storage and token handout endpoints (don't exist yet) for end-to-end flow
+- WS re-validation (60s interval in WebSocket select loop) is a new pattern on a critical path — if `validate()` is slow, it could stall the event stream
+- SQLite sidecar for token ledger (`~/.lf/connection_tokens.db`) is a second data store alongside Postgres; acceptable for v1 since tokens are ephemeral (1-hour TTL)
 
 ## Metrics
 

@@ -122,10 +122,6 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "025_credential_type",
         sql: include_str!("migrations/025_credential_type.sql"),
     },
-    Migration {
-        version: "027_connection_tokens",
-        sql: include_str!("migrations/027_connection_tokens.sql"),
-    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

@@ -142,11 +142,7 @@ impl TokenLedger {
                 if !record.allows_use(now) {
                     return Ok(false);
                 }
-                if record.state == ConnectionTokenState::Available {
-                    self.mark_claimed(&hash, now).await?;
-                    record.state = ConnectionTokenState::Claimed;
-                    record.claimed_at = Some(now);
-                }
+                self.claim_if_available(record, &hash, now).await?;
                 return Ok(true);
             }
         }
@@ -157,11 +153,7 @@ impl TokenLedger {
         if !record.allows_use(now) {
             return Ok(false);
         }
-        if record.state == ConnectionTokenState::Available {
-            self.mark_claimed(&hash, now).await?;
-            record.state = ConnectionTokenState::Claimed;
-            record.claimed_at = Some(now);
-        }
+        self.claim_if_available(&mut record, &hash, now).await?;
 
         self.cache.write().await.insert(hash, record);
         Ok(true)
@@ -339,6 +331,20 @@ impl TokenLedger {
             .map_err(TokenLedgerError::from)
         })
         .await
+    }
+
+    async fn claim_if_available(
+        &self,
+        record: &mut ConnectionTokenRecord,
+        token_hash: &str,
+        now: i64,
+    ) -> Result<(), TokenLedgerError> {
+        if record.state == ConnectionTokenState::Available {
+            self.mark_claimed(token_hash, now).await?;
+            record.state = ConnectionTokenState::Claimed;
+            record.claimed_at = Some(now);
+        }
+        Ok(())
     }
 
     async fn mark_claimed(

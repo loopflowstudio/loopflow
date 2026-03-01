@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -80,7 +81,7 @@ pub struct RegistrationClient {
     http: SafeHttpClient,
     state: Arc<RwLock<RegistrationState>>,
     token_ledger: Option<TokenLedger>,
-    should_replenish_tokens: Arc<RwLock<bool>>,
+    should_replenish_tokens: Arc<AtomicBool>,
     store: Option<SharedStore>,
     bind_addr: Option<SocketAddr>,
 }
@@ -114,7 +115,7 @@ impl RegistrationClient {
             http: SafeHttpClient::new().expect("safe HTTP client should initialize"),
             state: Arc::new(RwLock::new(RegistrationState::default())),
             token_ledger,
-            should_replenish_tokens: Arc::new(RwLock::new(false)),
+            should_replenish_tokens: Arc::new(AtomicBool::new(false)),
             store,
             bind_addr,
         }
@@ -313,12 +314,9 @@ impl RegistrationClient {
     }
 
     async fn next_heartbeat_tokens(&self) -> Result<Vec<String>, RegistrationError> {
-        let mut replenish = self.should_replenish_tokens.write().await;
-        if !*replenish {
+        if !self.should_replenish_tokens.swap(false, Ordering::Relaxed) {
             return Ok(Vec::new());
         }
-        *replenish = false;
-        drop(replenish);
         self.mint_tokens(TOKEN_POOL_SIZE).await
     }
 
@@ -339,7 +337,7 @@ impl RegistrationClient {
             .tokens_remaining
             .is_some_and(|remaining| remaining < TOKEN_REPLENISH_THRESHOLD)
         {
-            *self.should_replenish_tokens.write().await = true;
+            self.should_replenish_tokens.store(true, Ordering::Relaxed);
         }
     }
 

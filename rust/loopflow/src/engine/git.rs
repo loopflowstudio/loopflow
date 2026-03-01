@@ -233,9 +233,7 @@ pub fn is_clean_ignoring_scratch(repo: &Path) -> Result<bool, GitError> {
         });
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let has_real_changes = stdout
-        .lines()
-        .any(|line| !line.starts_with("?? scratch/"));
+    let has_real_changes = stdout.lines().any(|line| !line.starts_with("?? scratch/"));
     Ok(!has_real_changes)
 }
 

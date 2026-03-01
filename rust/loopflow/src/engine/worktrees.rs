@@ -2,8 +2,7 @@ use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
-    is_squash_merged, rev_parse,
-    worktree_add, worktree_move, WorktreeBranch,
+    is_squash_merged, rev_parse, worktree_add, worktree_move, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, wave_name_from_branch};
 use crate::lfd::security::sanitize_fs_component;
@@ -323,13 +322,11 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
                 .unwrap_or(false)
         };
         let merged = branch.as_deref().is_some_and(|b| {
-            !is_default
-                && has_commits
-                && is_ancestor(repo, b, &merge_target).unwrap_or(false)
+            !is_default && has_commits && is_ancestor(repo, b, &merge_target).unwrap_or(false)
         });
-        let squash_merged_flag = branch.as_deref().is_some_and(|b| {
-            !is_default && squash_merged.contains(b)
-        });
+        let squash_merged_flag = branch
+            .as_deref()
+            .is_some_and(|b| !is_default && squash_merged.contains(b));
         let dirty = !is_clean_ignoring_scratch(&path).unwrap_or(true);
         let mut prunable = !is_default && (merged || squash_merged_flag || !has_commits);
 

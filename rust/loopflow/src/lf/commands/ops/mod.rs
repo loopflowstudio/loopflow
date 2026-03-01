@@ -521,8 +521,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         let marker = if row.is_current { "*" } else { " " };
 
         let any_merged = row.merged || row.squash_merged;
-        let fresh =
-            !row.is_main && !any_merged && row.diff_stat.is_empty() && !row.dirty;
+        let fresh = !row.is_main && !any_merged && row.diff_stat.is_empty() && !row.dirty;
         let landed_dirty = any_merged && row.dirty;
         let name_color = if row.is_main || any_merged || fresh {
             c.dim

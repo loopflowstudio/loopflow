@@ -121,6 +121,20 @@ class Client:
             raise LoopflowError("invalid providers response payload")
         return [ProviderInfo.model_validate(item) for item in payload]
 
+    def revoke_connection_tokens(
+        self,
+        prefix: Optional[str] = None,
+        revoke_all: bool = False,
+    ) -> int:
+        body: dict[str, Any] = {"all": revoke_all}
+        if prefix is not None:
+            body["prefix"] = prefix
+        payload = self._request_json("POST", "/v0/tokens/revoke", json=body)
+        revoked = payload.get("revoked")
+        if not isinstance(revoked, int):
+            raise LoopflowError("invalid token revoke response payload")
+        return revoked
+
     def usage_summary(
         self,
         group_by: str = "wave",

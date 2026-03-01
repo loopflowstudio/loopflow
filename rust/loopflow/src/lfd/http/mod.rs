@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    auth as auth_routes, chords, flows, hooks, providers, repos, sessions, system, usage,
+    auth as auth_routes, chords, flows, hooks, providers, repos, sessions, system, tokens, usage,
     wave_runs, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
@@ -167,6 +167,7 @@ pub fn router(state: HttpState) -> Router {
             "/usage/timeseries",
             get(usage::get_usage_timeseries_handler),
         )
+        .route("/tokens/revoke", post(tokens::revoke_tokens_handler))
         .route("/wave_runs", get(wave_runs::list_wave_runs_handler))
         .route("/worktrees", get(worktrees::list_worktrees_handler))
         .layer(DefaultBodyLimit::max(max_json_body_bytes))

@@ -27,8 +27,10 @@ from loopflow.models import (
 app = typer.Typer(help="Query lfd and manage waves.")
 auth_app = typer.Typer(help="Manage provider authentication.")
 repos_app = typer.Typer(help="Manage registered repositories.")
+token_app = typer.Typer(help="Manage connection tokens.")
 app.add_typer(auth_app, name="auth")
 app.add_typer(repos_app, name="repos")
+app.add_typer(token_app, name="token")
 console = Console()
 
 
@@ -617,6 +619,25 @@ def auth_configure(
     typer.echo(f"API key auth bills per token. OAuth uses your existing subscription.")
     status = api.configure_api_key(provider, api_key)
     typer.echo(f"{_provider_label(status.provider)} switched to API key")
+
+
+@token_app.command("revoke", help="Revoke connection token hash prefixes or revoke all tokens.")
+def token_revoke(
+    prefix: Optional[str] = typer.Argument(None, help="Token hash prefix."),
+    all_tokens: bool = typer.Option(False, "--all", help="Revoke all connection tokens."),
+) -> None:
+    normalized_prefix = prefix.strip() if prefix else None
+    if not all_tokens and not normalized_prefix:
+        raise typer.BadParameter("Provide a token hash prefix or pass --all.")
+
+    revoked = api.revoke_connection_tokens(
+        prefix=normalized_prefix,
+        revoke_all=all_tokens,
+    )
+    if all_tokens:
+        typer.echo(f"Revoked {revoked} connection tokens.")
+    else:
+        typer.echo(f"Revoked {revoked} connection tokens for prefix {normalized_prefix}.")
 
 
 @repos_app.callback(invoke_without_command=True)

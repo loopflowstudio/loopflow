@@ -12,25 +12,25 @@
 
 **Single-claim, not single-use.** A token transitions `Available → Claimed` on first use and stays `Claimed`. WebSocket reconnects reuse the same token. Claimed tokens work until expiry (1 hour) or revocation.
 
-**In-memory cache backed by SQLite.** `RwLock<HashMap>` in front of SQLite `tokens` table. Normal operation hits only memory. SQLite provides persistence across daemon restarts. Cache misses fall through to SQLite (startup case).
+**In-memory only.** `RwLock<HashMap>` holds the token pool. Daemon restart mints a fresh pool via registration — no persistence needed. Tokens have 1-hour TTL and the pool replenishes well before exhaustion, so surviving restarts adds complexity for no benefit.
 
 **Loopback restriction on static token.** In DualAuth mode, static token only accepted from loopback. Connection tokens work remotely.
 
 **DualAuth as a fourth `AuthProvider` variant.** Auth dispatch is a match arm, not a conditional chain. Keeps the type system doing the work.
 
-**Store token hashes, not tokens.** SHA-256 hash of the token persists in SQLite. Minting returns raw tokens; only hashes are stored.
+**Store token hashes, not raw tokens.** SHA-256 hash in the `HashMap`. Minting returns raw tokens; only hashes are stored.
 
 **TLS is a startup guard, not a feature.** Refuse to start DualAuth/Studio on non-loopback, non-Tailscale HTTP binds. Actual TLS serving is separate work.
 
 ## What to build
 
-1. **Token ledger** (`lfd/token_ledger.rs`) — `TokenLedger` struct with `mint`, `validate`, `revoke`, `revoke_all`, `prune`. Migration `027_connection_tokens.sql`. Prune task every 5 minutes, TTL 1 hour. Pool size 5, replenish threshold 2.
+1. **Token ledger** (`lfd/token_ledger.rs`) — `TokenLedger` struct with `mint`, `validate`, `revoke`, `revoke_all`, `prune`. In-memory `RwLock<HashMap>`. Prune task every 5 minutes, TTL 1 hour. Pool size 5, replenish threshold 2.
 
 2. **`AuthProvider::DualAuth`** (`lfd/auth.rs`) — new variant `DualAuth { local_token, ledger }`. Loopback + static token match → true. Otherwise → `ledger.validate()`. Config value: `auth.provider: "dual"`.
 
 3. **Registration extension** (`lfd/registration.rs`) — `connection_tokens` array in register payload. `new_tokens` in heartbeat request, `tokens_remaining` and `revoke` in heartbeat response. Replenish when `tokens_remaining < 2`.
 
-4. **WebSocket re-validation** (`lfd/http/routes/ws.rs`) — extract bearer token before upgrade, pass into `handle_ws`. 60-second interval timer in `tokio::select!`. Re-validate token; close with `4401` on failure. New `validate()` method on `AuthProvider`.
+4. **WebSocket re-validation** (`lfd/http/routes/ws.rs`) — extract bearer token before upgrade, pass into `handle_ws`. 60-second interval timer in `tokio::select!`. Re-validate token; close with `4401` on failure. Mobile client treats `4401` as "token revoked" — requests a new token from studio and reconnects. New `validate()` method on `AuthProvider`.
 
 5. **Desktop toggle** (Swift, `ConnectionSettingsView`) — "Connect with my phone" toggle. On: check studio sign-in, restart lfd with `LFD_AUTH_PROVIDER=dual` + `LFD_HTTP_ADDR=0.0.0.0:port`. Off: restart with `static` + `127.0.0.1:port`, deregister. Docker: port mapping changes from `127.0.0.1:port:2486` to `port:2486`.
 
@@ -58,8 +58,6 @@ Build bottom-up, each step testable independently:
 **Studio coordination.** Studio needs pool storage and token handout endpoints. These don't exist yet. lfd-side implementation can proceed independently, but end-to-end testing requires studio work.
 
 **WS re-validation is architecturally new.** No per-session token check exists today. The 60-second interval timer in the WebSocket select loop is a new pattern on a critical path. Needs careful testing.
-
-**Pool exhaustion.** If many mobile users connect rapidly and studio doesn't report `tokens_remaining` fast enough, the pool could empty before replenishment. Mitigated by pool of 5 and threshold of 2, but high-concurrency scenarios aren't analyzed.
 
 ## Studio-side dependencies
 

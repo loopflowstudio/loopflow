@@ -5,6 +5,7 @@ import AppKit
 struct ConnectionSettingsView: View {
     @Environment(RepoState.self) private var repoState
     @Environment(OutputBuffer.self) private var outputBuffer
+    @Environment(\.authService) private var authService
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
 
@@ -17,6 +18,7 @@ struct ConnectionSettingsView: View {
     @State private var cliMessage: String?
     @State private var selectedInstallDirectory = CLIInstallManager.defaultInstallDir.path
     @State private var browserFallbackProviders: Set<AuthProvider> = []
+    @State private var connectWithPhone = BundledDaemonManager.connectWithPhoneEnabled
 
     private let cliInstallManager = CLIInstallManager()
 
@@ -121,6 +123,16 @@ struct ConnectionSettingsView: View {
                         .font(Typography.caption(11))
                         .foregroundStyle(Color.statusWarning)
                 }
+
+                Toggle("Connect with my phone", isOn: $connectWithPhone)
+                    .font(Typography.caption())
+                    .onChange(of: connectWithPhone) { _, enabled in
+                        handleConnectWithPhoneChange(enabled)
+                    }
+
+                Text("Enables DualAuth and exposes lfd for mobile discovery when signed in to loopflow.studio.")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
             }
 
             cliToolsContent
@@ -367,6 +379,7 @@ struct ConnectionSettingsView: View {
         } else {
             serverURL = ""
             token = ""
+            connectWithPhone = BundledDaemonManager.connectWithPhoneEnabled
         }
 
         if case .remote(let path, _) = repoState.repoTarget {
@@ -477,5 +490,22 @@ struct ConnectionSettingsView: View {
             return false
         }
         return errorMessage.localizedCaseInsensitiveContains("docker is not running")
+    }
+
+    private func handleConnectWithPhoneChange(_ enabled: Bool) {
+        if enabled && authService.currentToken() == nil {
+            connectWithPhone = false
+            errorMessage = "Sign in to loopflow.studio on this Mac before enabling phone access."
+            return
+        }
+        if !enabled && !BundledDaemonManager.connectWithPhoneEnabled {
+            return
+        }
+
+        errorMessage = nil
+        BundledDaemonManager.setConnectWithPhoneEnabled(enabled)
+
+        guard mode == .bundled else { return }
+        connect()
     }
 }

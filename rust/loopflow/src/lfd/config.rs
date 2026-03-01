@@ -29,6 +29,7 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 /// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
 /// - `"static"`: validate against a pre-shared token
 /// - `"loopflow.studio"`: register with loopflow.studio, validate via API
+/// - `"dual"`: static token on loopback + studio-distributed connection tokens remotely
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthConfig {
     #[serde(default = "default_provider")]
@@ -341,13 +342,18 @@ impl RawLfdConfig {
         let profile = ModeProfile::for_mode(self.mode, self.executor.sandbox);
         self.executor.limits.validate()?;
 
+        let mut auth = self.auth;
+        if self.mode == Mode::Container && auth.provider == "local" && auth.token.is_none() {
+            auth.provider = "loopflow.studio".to_string();
+        }
+
         Ok(LfdConfig {
             mode: self.mode,
             service_manager: profile.service_manager,
             runtime_backend: profile.runtime_backend,
             storage: profile.storage,
             credential_socket: self.credential_socket,
-            auth: self.auth,
+            auth,
             executor: ExecutorConfig {
                 r#type: profile.executor_type,
                 image: self.executor.image,
@@ -896,6 +902,7 @@ mod tests {
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+        assert_eq!(resolved.auth.provider, "loopflow.studio");
     }
 
     #[test]
@@ -920,6 +927,19 @@ executor:
         let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
         let resolved = config.resolve().expect("container resolves");
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
+    }
+
+    #[test]
+    fn mode_container_preserves_explicit_local_token_auth() {
+        let raw = r#"
+mode: container
+auth:
+  provider: local
+  token: explicit-token
+"#;
+        let config: RawLfdConfig = serde_yaml_ng::from_str(raw).expect("yaml parses");
+        let resolved = config.resolve().expect("container resolves");
+        assert_eq!(resolved.auth.provider, "local");
     }
 
     #[test]

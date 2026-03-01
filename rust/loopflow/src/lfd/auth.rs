@@ -17,6 +17,7 @@ use subtle::ConstantTimeEq;
 use crate::lfd::http;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::registration::ConnectionValidator;
+use crate::lfd::token_ledger::TokenLedger;
 
 const THROTTLE_WINDOW: Duration = Duration::from_secs(60);
 const MAX_BEARER_TOKEN_BYTES: usize = 4096;
@@ -34,13 +35,88 @@ pub enum AuthProvider {
     Static { token: SecretString },
     /// Validate via loopflow.studio registration.
     Studio { validator: ConnectionValidator },
+    /// Static local token on loopback plus connection-token validation elsewhere.
+    DualAuth {
+        local_token: SecretString,
+        ledger: TokenLedger,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ParsedToken<'a> {
+pub(crate) enum ParsedToken<'a> {
     Missing,
     Malformed,
     Present(&'a str),
+}
+
+impl AuthProvider {
+    pub async fn validate(
+        &self,
+        provided_token: Option<&str>,
+        source: IpAddr,
+    ) -> Result<(), (StatusCode, &'static str)> {
+        match self {
+            AuthProvider::Local { session_token } => {
+                authorize_expected_token(session_token, provided_token)
+            }
+            AuthProvider::Static { token } => authorize_expected_token(token, provided_token),
+            AuthProvider::Studio { validator } => {
+                authorize_connection_token(validator, provided_token).await
+            }
+            AuthProvider::DualAuth {
+                local_token,
+                ledger,
+            } => match provided_token {
+                Some(token) if source.is_loopback() && token_matches(local_token, token) => Ok(()),
+                Some(token) => match ledger.validate(token).await {
+                    Ok(true) => Ok(()),
+                    Ok(false) => {
+                        if source.is_loopback() {
+                            Err((StatusCode::UNAUTHORIZED, "invalid token"))
+                        } else {
+                            Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "connection token validation failed");
+                        Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "connection token validation failed",
+                        ))
+                    }
+                },
+                None => {
+                    if source.is_loopback() {
+                        Err((StatusCode::UNAUTHORIZED, "missing token"))
+                    } else {
+                        Err((StatusCode::UNAUTHORIZED, "missing connection token"))
+                    }
+                }
+            },
+        }
+    }
+
+    pub fn local_admin_authorized(&self, provided_token: Option<&str>, source: IpAddr) -> bool {
+        if !source.is_loopback() {
+            return false;
+        }
+        let Some(token) = provided_token else {
+            return false;
+        };
+
+        match self {
+            AuthProvider::Static { token: local_token } => token_matches(local_token, token),
+            AuthProvider::DualAuth { local_token, .. } => token_matches(local_token, token),
+            _ => false,
+        }
+    }
+
+    pub fn connection_ledger(&self) -> Option<TokenLedger> {
+        match self {
+            AuthProvider::DualAuth { ledger, .. } => Some(ledger.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -128,9 +204,9 @@ pub async fn auth_middleware(
     }
 
     let auth_result = match provided_token {
-        ParsedToken::Malformed => Err(malformed_token_error(&state.auth)),
-        ParsedToken::Missing => authorize_with_provider(&state.auth, None).await,
-        ParsedToken::Present(token) => authorize_with_provider(&state.auth, Some(token)).await,
+        ParsedToken::Malformed => Err(malformed_token_error(&state.auth, source)),
+        ParsedToken::Missing => state.auth.validate(None, source).await,
+        ParsedToken::Present(token) => state.auth.validate(Some(token), source).await,
     };
 
     match auth_result {
@@ -149,21 +225,6 @@ pub async fn auth_middleware(
             } else {
                 http::api_error_response(status, message)
             }
-        }
-    }
-}
-
-async fn authorize_with_provider(
-    auth: &AuthProvider,
-    provided_token: Option<&str>,
-) -> Result<(), (StatusCode, &'static str)> {
-    match auth {
-        AuthProvider::Local { session_token } => {
-            authorize_expected_token(session_token, provided_token)
-        }
-        AuthProvider::Static { token } => authorize_expected_token(token, provided_token),
-        AuthProvider::Studio { validator } => {
-            authorize_connection_token(validator, provided_token).await
         }
     }
 }
@@ -203,16 +264,23 @@ fn token_matches(expected: &SecretString, provided: &str) -> bool {
         .into()
 }
 
-fn malformed_token_error(auth: &AuthProvider) -> (StatusCode, &'static str) {
+fn malformed_token_error(auth: &AuthProvider, source: IpAddr) -> (StatusCode, &'static str) {
     match auth {
         AuthProvider::Local { .. } | AuthProvider::Static { .. } => {
             (StatusCode::UNAUTHORIZED, "malformed token")
         }
         AuthProvider::Studio { .. } => (StatusCode::UNAUTHORIZED, "malformed connection token"),
+        AuthProvider::DualAuth { .. } => {
+            if source.is_loopback() {
+                (StatusCode::UNAUTHORIZED, "malformed token")
+            } else {
+                (StatusCode::UNAUTHORIZED, "malformed connection token")
+            }
+        }
     }
 }
 
-fn extract_token(headers: &HeaderMap) -> ParsedToken<'_> {
+pub(crate) fn extract_token(headers: &HeaderMap) -> ParsedToken<'_> {
     let Some(auth_value) = headers.get("authorization") else {
         return ParsedToken::Missing;
     };
@@ -239,6 +307,13 @@ fn extract_token(headers: &HeaderMap) -> ParsedToken<'_> {
     }
 
     ParsedToken::Present(token)
+}
+
+pub fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    match extract_token(headers) {
+        ParsedToken::Present(token) => Some(token.to_string()),
+        ParsedToken::Missing | ParsedToken::Malformed => None,
+    }
 }
 
 fn auth_context_hash(token: ParsedToken<'_>) -> String {
@@ -330,6 +405,7 @@ mod tests {
     use crate::lfd::scheduler::Scheduler;
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
+    use crate::lfd::token_ledger::TokenLedger;
     use axum::http::HeaderValue;
     use axum::routing::{get, post};
     use axum::Json;
@@ -633,5 +709,61 @@ mod tests {
         let payload: serde_json::Value = response.json().await.expect("json response");
         assert_eq!(payload["error"]["message"], "invalid connection token");
         assert_eq!(validation_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn dual_auth_accepts_local_static_token_on_loopback() {
+        let tmp = tempdir().expect("tempdir");
+        let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
+            .await
+            .expect("ledger");
+        let auth = AuthProvider::DualAuth {
+            local_token: token("local-static"),
+            ledger,
+        };
+
+        let result = auth
+            .validate(Some("local-static"), IpAddr::from([127, 0, 0, 1]))
+            .await;
+        assert_eq!(result, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn dual_auth_accepts_connection_token_for_remote_source() {
+        let tmp = tempdir().expect("tempdir");
+        let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
+            .await
+            .expect("ledger");
+        let mut minted = ledger.mint(1).await.expect("mint");
+        let connection_token = minted.pop().expect("token");
+        let auth = AuthProvider::DualAuth {
+            local_token: token("local-static"),
+            ledger,
+        };
+
+        let result = auth
+            .validate(Some(&connection_token), IpAddr::from([203, 0, 113, 7]))
+            .await;
+        assert_eq!(result, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn dual_auth_rejects_static_token_for_remote_source() {
+        let tmp = tempdir().expect("tempdir");
+        let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
+            .await
+            .expect("ledger");
+        let auth = AuthProvider::DualAuth {
+            local_token: token("local-static"),
+            ledger,
+        };
+
+        let result = auth
+            .validate(Some("local-static"), IpAddr::from([203, 0, 113, 7]))
+            .await;
+        assert_eq!(
+            result,
+            Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
+        );
     }
 }

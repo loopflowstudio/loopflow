@@ -24,6 +24,7 @@ pub mod service;
 pub mod session_token;
 pub mod sessions;
 pub mod store;
+pub mod token_ledger;
 pub mod triggers;
 pub mod types;
 
@@ -35,7 +36,8 @@ use tokio_util::sync::CancellationToken;
 use self::auth::AuthProvider;
 use self::config::LfdConfig;
 use self::registration::{ConnectionValidator, RegistrationClient};
-use self::store::SharedStore;
+use self::store::{SharedStore, StorageConfig};
+use self::token_ledger::TokenLedger;
 
 /// Set up auth provider based on config.
 ///
@@ -44,6 +46,7 @@ use self::store::SharedStore;
 pub async fn setup_auth(
     config: &LfdConfig,
     store: SharedStore,
+    storage_config: &StorageConfig,
     http_addr: SocketAddr,
     cancel: CancellationToken,
 ) -> (
@@ -69,6 +72,7 @@ pub async fn setup_auth(
             (AuthProvider::Static { token }, None, None)
         }
         "loopflow.studio" => setup_studio_registration(config, store, http_addr, cancel).await,
+        "dual" => setup_dual_registration(config, store, storage_config, http_addr, cancel).await,
         other => {
             tracing::error!(provider = other, "unknown auth provider");
             std::process::exit(1);
@@ -125,6 +129,86 @@ async fn setup_studio_registration(
         }
         Err(e) => {
             tracing::error!(error = %e, "registration with loopflow.studio failed");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn setup_dual_registration(
+    config: &LfdConfig,
+    store: SharedStore,
+    storage_config: &StorageConfig,
+    http_addr: SocketAddr,
+    cancel: CancellationToken,
+) -> (
+    AuthProvider,
+    Option<RegistrationClient>,
+    Option<(String, String)>,
+) {
+    let local_token = config
+        .auth
+        .token
+        .as_ref()
+        .unwrap_or_else(|| {
+            tracing::error!("auth.provider=dual requires auth.token in config or LFD_AUTH_TOKEN");
+            std::process::exit(1);
+        })
+        .clone();
+
+    let Some(jwt) = self::credentials::load_jwt() else {
+        tracing::error!("auth.provider=dual requires a JWT in ~/.lf/credentials.json");
+        std::process::exit(1);
+    };
+
+    let path = match storage_config {
+        StorageConfig::Sqlite { path } => path.clone(),
+        StorageConfig::Postgres { .. } => crate::lfd::lf_home_dir().join("connection_tokens.db"),
+    };
+    let ledger = TokenLedger::new(path.clone())
+        .await
+        .unwrap_or_else(|error| {
+            tracing::error!(error = %error, "failed to initialize connection token ledger");
+            std::process::exit(1);
+        });
+
+    let prune_ledger = ledger.clone();
+    let prune_cancel = cancel.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = prune_cancel.cancelled() => break,
+                _ = interval.tick() => {
+                    if let Err(error) = prune_ledger.prune().await {
+                        tracing::warn!(error = %error, "connection token prune failed");
+                    }
+                }
+            }
+        }
+    });
+
+    let mid = self::machine_id::machine_id();
+    let machine_name = self::machine_id::machine_name();
+    let base_url = &config.auth.base_url;
+    let client =
+        RegistrationClient::with_context_and_ledger(base_url, store, http_addr, ledger.clone());
+
+    match client.register(&jwt, &mid, &machine_name).await {
+        Ok(_) => {
+            tracing::info!(
+                machine_name = %machine_name,
+                "registered dual-auth daemon with loopflow.studio"
+            );
+            let auth = AuthProvider::DualAuth {
+                local_token,
+                ledger,
+            };
+            client.start_heartbeat(jwt.clone(), mid.clone(), cancel);
+            (auth, Some(client), Some((jwt, mid)))
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "dual-auth registration failed");
             std::process::exit(1);
         }
     }

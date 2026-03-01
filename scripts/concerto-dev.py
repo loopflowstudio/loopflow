@@ -550,19 +550,46 @@ def cmd_release() -> int:
 
     # Create DMG
     dmg_path = dist_dir / "LoopflowConcerto.dmg"
-    dmg_tmp = dist_dir / "dmg_tmp"
-    dmg_tmp.mkdir()
-    shutil.copytree(dist_dir / f"{app_name}.app", dmg_tmp / f"{app_name}.app")
-    (dmg_tmp / "Applications").symlink_to("/Applications")
+    dmg_staging = dist_dir / "dmg_staging"
+    dmg_staging.mkdir()
+    shutil.copytree(dist_dir / f"{app_name}.app", dmg_staging / f"{app_name}.app")
 
-    run([
-        "hdiutil", "create",
-        "-volname", app_name,
-        "-srcfolder", str(dmg_tmp),
-        "-ov", "-format", "UDZO",
-        str(dmg_path),
-    ])
-    shutil.rmtree(dmg_tmp)
+    bg_image = SWIFT_DIR / "Concerto" / "dmg-background.png"
+    has_create_dmg = shutil.which("create-dmg") is not None
+
+    if has_create_dmg and bg_image.exists():
+        # Polished DMG with background and drag-to-install layout
+        cmd = [
+            "create-dmg",
+            "--volname", app_name,
+            "--window-pos", "200", "120",
+            "--window-size", "660", "400",
+            "--icon-size", "128",
+            "--icon", f"{app_name}.app", "180", "185",
+            "--app-drop-link", "480", "185",
+            "--background", str(bg_image),
+            "--hide-extension", f"{app_name}.app",
+            "--no-internet-enable",
+            str(dmg_path),
+            str(dmg_staging),
+        ]
+        result = run(cmd, check=False)
+        # create-dmg exits 2 when it can't set custom icon (non-fatal)
+        if result.returncode not in (0, 2):
+            shutil.rmtree(dmg_staging)
+            return result.returncode
+    else:
+        # Fallback: plain hdiutil
+        (dmg_staging / "Applications").symlink_to("/Applications")
+        run([
+            "hdiutil", "create",
+            "-volname", app_name,
+            "-srcfolder", str(dmg_staging),
+            "-ov", "-format", "UDZO",
+            str(dmg_path),
+        ])
+
+    shutil.rmtree(dmg_staging)
 
     print()
     print("Release built:")

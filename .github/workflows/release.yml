@@ -46,6 +46,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
+      - name: Install create-dmg
+        run: brew install create-dmg
       - name: Build DMG
         run: python3 scripts/concerto-dev.py release
         working-directory: ${{ github.workspace }}
@@ -61,7 +63,7 @@ jobs:
               aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"].strip(),
               region_name="auto",
           )
-          bucket = "loopflow-downloads"
+          bucket = "downloads"
           dmg = "swift/dist/LoopflowConcerto.dmg"
           for key, cache in [
               (f"LoopflowConcerto-{version}.dmg", "public, max-age=31536000, immutable"),

@@ -21,6 +21,7 @@ Release is decomposed into focused ops commands (`release-check`, `release-notes
 ## Risks
 
 - **Release notes quality is subjective.** Plan to iterate on the prompt after seeing real output.
+- **No golden test for rebase.** The rebase step embeds correctly (existing golden tests pass), but prompt regressions for rebase specifically wouldn't be caught. Low priority — note if adding golden tests for other steps.
 
 ## Metrics
 

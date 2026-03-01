@@ -103,7 +103,7 @@ fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bo
     if let Some(env_name) = api_key_env_name(provider) {
         if let Ok(api_key) = std::env::var(env_name) {
             if !api_key.trim().is_empty() && prompt_api_key_fallback(provider, env_name)? {
-                client.configure_credential(provider, "apikey", Some(&api_key))?;
+                client.configure_api_key(provider, &api_key)?;
                 println!(
                     "  ✓ {} connected via API key (pay-per-token billing)",
                     provider_display_name(provider)
@@ -419,16 +419,8 @@ impl OnboardingClient {
             .with_context(|| format!("failed to parse response body for {path}"))
     }
 
-    fn configure_credential(
-        &self,
-        provider: Provider,
-        credential_type: &str,
-        api_key: Option<&str>,
-    ) -> Result<()> {
-        let mut body = serde_json::json!({ "credential_type": credential_type });
-        if let Some(key) = api_key {
-            body["api_key"] = serde_json::Value::String(key.to_string());
-        }
+    fn configure_api_key(&self, provider: Provider, api_key: &str) -> Result<()> {
+        let body = serde_json::json!({ "api_key": api_key });
         let request = self.client.put(format!(
             "{}/v0/auth/{}/credential",
             self.base_url,
@@ -440,13 +432,13 @@ impl OnboardingClient {
             .send()
             .with_context(|| {
                 format!(
-                    "failed to configure {} credential",
+                    "failed to configure {} API key",
                     provider_display_name(provider)
                 )
             })?;
 
         if !response.status().is_success() {
-            return Err(response_error(response, "configure credential"));
+            return Err(response_error(response, "configure API key"));
         }
         Ok(())
     }

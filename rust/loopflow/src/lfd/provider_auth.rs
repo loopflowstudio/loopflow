@@ -1687,7 +1687,7 @@ pub fn api_key_env_names() -> &'static [&'static str] {
 
 /// Return the env var name and value for a given provider token, based on its
 /// credential_type. This is the single decision point for executors.
-fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
+pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
     match (token.provider.as_str(), token.credential_type) {
         ("github", _) => Some(("GH_TOKEN".to_string(), token.access_token.clone())),
         ("claude", CredentialType::OAuth) => Some((

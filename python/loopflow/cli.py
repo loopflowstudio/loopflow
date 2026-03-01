@@ -595,37 +595,28 @@ def auth_disconnect(provider: str) -> None:
         typer.echo(f"Updated {_provider_label(status.provider)} status to {status.status}")
 
 
-@auth_app.command("configure", help="Switch credential type for a provider.")
+@auth_app.command("configure", help="Use an API key for a provider. To switch back to OAuth, run `lfq auth <provider>`.")
 def auth_configure(
     provider: str,
-    credential: str = typer.Option(..., "--credential", "-c", help="oauth or apikey"),
 ) -> None:
-    if credential not in ("oauth", "apikey"):
-        typer.echo("Error: --credential must be 'oauth' or 'apikey'", err=True)
+    env_names = {
+        "claude": "ANTHROPIC_API_KEY",
+        "codex": "OPENAI_API_KEY",
+        "opencodezen": "OPENCODE_API_KEY",
+    }
+    env_name = env_names.get(provider.lower())
+    if not env_name:
+        typer.echo(f"Error: {provider} does not support API key auth", err=True)
         raise typer.Exit(1)
 
-    api_key = None
-    if credential == "apikey":
-        env_names = {
-            "claude": "ANTHROPIC_API_KEY",
-            "codex": "OPENAI_API_KEY",
-            "opencodezen": "OPENCODE_API_KEY",
-        }
-        env_name = env_names.get(provider.lower())
-        if env_name:
-            api_key = os.environ.get(env_name)
-        if not api_key:
-            typer.echo(
-                f"Error: set {env_name or 'the API key env var'} in your environment first",
-                err=True,
-            )
-            raise typer.Exit(1)
-        typer.echo(f"⚠ API key auth bills per token. OAuth uses your existing subscription.")
+    api_key = os.environ.get(env_name)
+    if not api_key:
+        typer.echo(f"Error: set {env_name} in your environment first", err=True)
+        raise typer.Exit(1)
 
-    status = api.configure_credential(provider, credential, api_key=api_key)
-    label = _provider_label(status.provider)
-    ct = status.credential_type or credential
-    typer.echo(f"{label} credential type set to {ct}")
+    typer.echo(f"API key auth bills per token. OAuth uses your existing subscription.")
+    status = api.configure_api_key(provider, api_key)
+    typer.echo(f"{_provider_label(status.provider)} switched to API key")
 
 
 @repos_app.callback(invoke_without_command=True)

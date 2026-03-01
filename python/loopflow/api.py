@@ -55,12 +55,11 @@ def disconnect_auth(provider: str) -> AuthProviderStatus:
     return _client().disconnect_auth(provider)
 
 
-def configure_credential(
+def configure_api_key(
     provider: str,
-    credential_type: str,
-    api_key: Optional[str] = None,
+    api_key: str,
 ) -> AuthProviderStatus:
-    return _client().configure_credential(provider, credential_type, api_key=api_key)
+    return _client().configure_api_key(provider, api_key)
 
 
 def providers() -> list[ProviderInfo]:
@@ -316,7 +315,7 @@ __all__ = [
     "auth_status",
     "start_auth",
     "disconnect_auth",
-    "configure_credential",
+    "configure_api_key",
     "providers",
     "usage_summary",
     "waves",

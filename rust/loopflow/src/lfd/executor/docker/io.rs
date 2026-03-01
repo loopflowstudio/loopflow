@@ -120,35 +120,17 @@ impl DockerExecutor {
             }
         }
 
-        // Inject provider tokens cached during executor initialization.
-        // Use credential_type from the DB to determine the correct env var;
-        // fall back to OAuth-style vars if no DB token exists.
-        for provider in ["github", "claude", "codex"] {
-            let Some(credential) = self.cached_credentials.get(provider) else {
-                continue;
-            };
-            let env_var = match self.store.get_provider_token(provider).await {
-                Ok(Some(token)) => match (provider, token.credential_type) {
-                    ("github", _) => "GH_TOKEN",
-                    ("claude", crate::lfd::store::CredentialType::ApiKey) => "ANTHROPIC_API_KEY",
-                    ("claude", _) => "CLAUDE_CODE_OAUTH_TOKEN",
-                    ("codex", crate::lfd::store::CredentialType::ApiKey) => "OPENAI_API_KEY",
-                    _ => continue,
-                },
-                _ => match provider {
-                    "github" => "GH_TOKEN",
-                    "claude" => "CLAUDE_CODE_OAUTH_TOKEN",
-                    "codex" => continue,
-                    _ => continue,
-                },
-            };
-            if env
-                .iter()
-                .any(|entry| entry.starts_with(&format!("{env_var}=")))
-            {
-                continue;
+        // Inject provider tokens from the DB. One query, then use the
+        // canonical env_var_for_token() mapping for each.
+        if let Ok(tokens) = self.store.list_provider_tokens().await {
+            for token in tokens {
+                if let Some((env_var, value)) = crate::lfd::provider_auth::env_var_for_token(&token)
+                {
+                    if !env.iter().any(|e| e.starts_with(&format!("{env_var}="))) {
+                        env.push(format!("{env_var}={value}"));
+                    }
+                }
             }
-            env.push(format!("{env_var}={}", credential.token));
         }
 
         // When SSH credentials are mounted, build a GIT_SSH_COMMAND that:

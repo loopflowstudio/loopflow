@@ -104,86 +104,37 @@ pub async fn disconnect_auth_handler(
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigureCredentialRequest {
-    pub credential_type: String,
-    pub api_key: Option<String>,
+    pub api_key: String,
 }
 
+/// Store an API key for a provider. To switch back to OAuth, run the normal
+/// OAuth connect flow (`lfq auth <provider>`) which overwrites the token and
+/// resets credential_type to OAuth.
 pub async fn configure_credential_handler(
     State(state): State<HttpState>,
     Path(provider): Path<String>,
     Json(body): Json<ConfigureCredentialRequest>,
 ) -> ApiResult<AuthProviderStatusDto> {
     let provider = parse_provider(&provider)?;
-    let credential_type = match body.credential_type.as_str() {
-        "oauth" => CredentialType::OAuth,
-        "apikey" => CredentialType::ApiKey,
-        _ => {
-            return Err(api_error(
-                StatusCode::BAD_REQUEST,
-                "credential_type must be 'oauth' or 'apikey'",
-            ))
-        }
+
+    let token = crate::lfd::store::ProviderToken {
+        provider: provider.as_str().to_string(),
+        access_token: body.api_key,
+        refresh_token: None,
+        expires_at: None,
+        login: None,
+        updated_at: crate::lfd::store::rows::now_unix(),
+        credential_type: CredentialType::ApiKey,
     };
-
-    let store = &state.store;
-
-    match credential_type {
-        CredentialType::ApiKey => {
-            let api_key = body.api_key.ok_or_else(|| {
-                api_error(
-                    StatusCode::BAD_REQUEST,
-                    "api_key is required when credential_type is 'apikey'",
-                )
-            })?;
-            let token = crate::lfd::store::ProviderToken {
-                provider: provider.as_str().to_string(),
-                access_token: api_key,
-                refresh_token: None,
-                expires_at: None,
-                login: None,
-                updated_at: crate::lfd::store::rows::now_unix(),
-                credential_type: CredentialType::ApiKey,
-            };
-            store
-                .upsert_provider_token(&token)
-                .await
-                .map_err(map_store_error)?;
-            info!(
-                provider = %provider,
-                "switched to API key (pay-per-token billing)"
-            );
-        }
-        CredentialType::OAuth => {
-            // Switching to OAuth: require an existing token in the DB
-            let existing = store
-                .get_provider_token(provider.as_str())
-                .await
-                .map_err(map_store_error)?;
-            match existing {
-                Some(mut token) => {
-                    token.credential_type = CredentialType::OAuth;
-                    token.updated_at = crate::lfd::store::rows::now_unix();
-                    store
-                        .upsert_provider_token(&token)
-                        .await
-                        .map_err(map_store_error)?;
-                    info!(
-                        provider = %provider,
-                        "switched to OAuth (subscription billing)"
-                    );
-                }
-                None => {
-                    return Err(api_error(
-                        StatusCode::BAD_REQUEST,
-                        ApiMessage::Safe(format!(
-                            "no existing token for {}; run `lfq auth {}` first",
-                            provider, provider
-                        )),
-                    ))
-                }
-            }
-        }
-    }
+    state
+        .store
+        .upsert_provider_token(&token)
+        .await
+        .map_err(map_store_error)?;
+    info!(
+        provider = %provider,
+        "switched to API key (pay-per-token billing)"
+    );
 
     let snapshot = state
         .provider_auth

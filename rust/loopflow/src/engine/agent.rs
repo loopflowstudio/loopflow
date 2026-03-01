@@ -54,7 +54,7 @@ pub struct LaunchResult {
 }
 
 /// Configuration for launching an agent.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct AgentConfig {
     /// System/context prompt content.
     pub system_prompt: String,
@@ -70,6 +70,26 @@ pub struct AgentConfig {
     pub skip_permissions: bool,
     /// Engine-injected structured replies (rendered via harness prompt guidance).
     pub structured_replies: Vec<StructuredReply>,
+}
+
+impl std::fmt::Debug for AgentConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentConfig")
+            .field(
+                "system_prompt",
+                &format_args!("({} bytes)", self.system_prompt.len()),
+            )
+            .field(
+                "task_prompt",
+                &format_args!("({} bytes)", self.task_prompt.len()),
+            )
+            .field("agent", &self.agent)
+            .field("max_turns", &self.max_turns)
+            .field("cwd", &self.cwd)
+            .field("skip_permissions", &self.skip_permissions)
+            .field("structured_replies", &self.structured_replies)
+            .finish()
+    }
 }
 
 /// Build the effective system prompt including structured reply guidance.

@@ -333,9 +333,8 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
         let dirty = !is_clean_ignoring_scratch(&path).unwrap_or(true);
         let mut prunable = !is_default && (merged || squash_merged_flag || !has_commits);
 
-        // Protect shortname worktrees from pruning unless squash-merged.
-        // Squash-merged means the content is already in main — safe to remove.
-        if prunable && !squash_merged_flag {
+        // Protect shortname worktrees from pruning unless content is in main.
+        if prunable && !merged && !squash_merged_flag {
             let is_shortname = wave_name_from_worktree_and_main(&path, repo)
                 .map(|name| !name.contains('.'))
                 .unwrap_or(false);

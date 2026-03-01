@@ -130,19 +130,19 @@ git config --system init.defaultBranch main
 git config --system safe.directory /workspace
 
 # Install lf binary
-arch="$(dpkg --print-architecture)"
 case "$arch" in
   amd64) lf_arch="x86_64-unknown-linux-gnu" ;;
   arm64) lf_arch="aarch64-unknown-linux-gnu" ;;
-  *)
-    echo "unsupported arch for lf: $arch" >&2
-    exit 1
-    ;;
+  *)     lf_arch="" ;;
 esac
 
-if curl -fsSL "https://github.com/loopflowstudio/loopflow/releases/latest/download/lf-${lf_arch}" \
-  -o /usr/local/bin/lf 2>/dev/null; then
-  chmod +x /usr/local/bin/lf
+if [[ -n "$lf_arch" ]]; then
+  if curl -fsSL "https://github.com/loopflowstudio/loopflow/releases/latest/download/lf-${lf_arch}" \
+    -o /usr/local/bin/lf 2>/dev/null; then
+    chmod +x /usr/local/bin/lf
+  else
+    echo "warning: lf install failed (optional)" >&2
+  fi
 else
-  echo "warning: lf install failed (optional)" >&2
+  echo "warning: lf not available for arch $arch (optional)" >&2
 fi

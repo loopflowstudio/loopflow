@@ -8,7 +8,7 @@ Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is a fast check-
 
 ### Not here
 
-- Vertical feature UI (chord grouping, portfolio edges, context breakdown — those live with Scale, Foundation, Context)
+- Vertical feature UI (chord grouping, portfolio edges, context breakdown — those live with Scale and Context)
 - Backend work that happens to have a UI
 - Bundled daemon behavior (that's Foundation)
 

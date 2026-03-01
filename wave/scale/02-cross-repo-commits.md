@@ -2,10 +2,6 @@
 
 **Finish line:** Sessions that modify files across multiple repos detect which repo each file belongs to and produce separate commits per repo.
 
-## What to build
-
-When a session modifies files across multiple repos, detect which repo each file belongs to and produce separate commits per repo.
-
 ## Key insight
 
 lf already doesn't prevent writing to other repos — if an area points at `/other/repo/src/`, the agent can edit files there. The missing piece is commit handling: today's commit logic assumes all changed files belong to one repo.

@@ -24,7 +24,7 @@ lf ops release-status   -> workflow status
 
 Version selection is human input, not agent judgment. The "Release Now" button provides that input. Cron waves handle the automated case.
 
-Design doc estimated ~400 LOC of Swift for config editing. "Release Now" button is the higher-value surface — config editing can be minimal (on/off toggle + cron string) since the wave YAML is simple.
+"Release Now" button is the higher-value surface — config editing can be minimal (on/off toggle + cron string) since the wave YAML is simple.
 
 ## Done when
 

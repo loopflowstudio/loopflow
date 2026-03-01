@@ -8,11 +8,10 @@ Loopflow manages an org's work, not just one task. Cross-repo portfolios, wave c
 
 - Single-wave execution improvements (that's engine/craft work)
 - Remote connectivity (that's foundation/trust)
-- UI for scale features (Concerto sprints live here because they're vertical — you can't build chord UI without understanding FlowRun)
 
 ## Strategy
 
-Build the execution model first (FlowRun container), then cross-repo primitives (commits, stimulus), then surfaces (chord UI, portfolio UI). Each layer teaches what the next layer needs.
+Build the execution model first (FlowRun container), then cross-repo primitives (commits, stimulus), then surfaces (chord UI, portfolio UI). Each layer teaches what the next layer needs. Vertical UI sprints (chord grouping, portfolio view) live here — you can't build chord UI without understanding FlowRun.
 
 ## Goals
 

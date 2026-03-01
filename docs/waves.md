@@ -105,6 +105,10 @@ loopflow.run_wave("ux")
 PY
 ```
 
+### CiFailure
+
+Runs the `ci-fix` step when CI fails on a wave's PR. Every new wave ships with this stimulus by default.
+
 ### Multiple Stimuli
 
 A wave can have multiple stimuli. Any stimulus firing activates the wave.

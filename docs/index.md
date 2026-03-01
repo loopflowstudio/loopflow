@@ -88,7 +88,7 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Flow** | Chains steps together | `.lf/flows/*.yaml` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Area** | Focuses on part of the codebase | path argument |
-| **Stimulus** | When to run: once, loop, watch, cron | command |
+| **Stimulus** | When to run: once, loop, watch, cron, listen | command |
 
 A wave is **area × direction × flow**. Stimuli are separate — they control *when* the wave runs.
 
@@ -100,6 +100,7 @@ Area is the path you pass—not a file. It scopes what the wave sees and changes
 | **Loop** | Continuously until stopped |
 | **Watch** | Area changes on main |
 | **Cron** | On schedule |
+| **Listen** | Another wave completes |
 
 ---
 

@@ -213,6 +213,7 @@ Control when and how the wave runs:
 | **Watch** | Activates when area files change on main |
 | **Cron** | Runs on schedule (`0 9 * * *`) |
 | **Listen** | Triggers when another wave runs |
+| **CiFailure** | Runs ci-fix when CI fails on the wave's PR |
 
 ```python
 import loopflow.api as loopflow

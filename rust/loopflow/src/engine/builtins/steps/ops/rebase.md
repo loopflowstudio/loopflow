@@ -25,11 +25,9 @@ Note which files this branch modified and what it's trying to accomplish.
 
 If `<lf:fast-path-failure>` is present, read it first to understand what already failed.
 
-### 2. Re-initiate the rebase
+### 2. Rebase
 
-Use the same target branch/ref that failed, if the context provides one (for example `--onto BRANCH` or `Rebase onto: ...`).
-
-If no explicit target is provided, rebase onto `origin/main`:
+Use the target from the failure context if present (`--onto BRANCH` or `Rebase onto: ...`). Default to `origin/main`:
 
 ```bash
 git fetch origin main
@@ -60,12 +58,11 @@ Repeat until `git rebase --continue` completes without conflicts.
 
 ### 4. Verify and push
 ```bash
-# Verify nothing broke — run the project's test suite
-# Check TESTING.md or CI config for the right commands
+# Run the project's test suite (see TESTING.md)
 git push --force-with-lease
 ```
 
-## If rebase goes wrong
+## Abort
 
 ```bash
 # Abort and return to pre-rebase state

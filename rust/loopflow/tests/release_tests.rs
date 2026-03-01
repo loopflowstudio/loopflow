@@ -3,7 +3,9 @@ mod support;
 use std::fs;
 use std::process::Command;
 
-use loopflow::ops::{bump_version, generate_release, release_status, NullProgress};
+use loopflow::ops::{
+    bump_version, generate_release, release_bump, release_check, release_status, NullProgress,
+};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
@@ -119,6 +121,49 @@ fn bump_version_major() {
 #[test]
 fn bump_version_invalid_format() {
     assert!(bump_version("1.2", "patch").is_err());
+}
+
+#[test]
+fn release_check_returns_merged_prs() {
+    let gh_script = write_gh_script(
+        r#"[{"number":42,"title":"Add feature","body":"New stuff","additions":100,"deletions":10,"changedFiles":3}]"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+
+    let prs = release_check(repo.path(), None).expect("check should succeed");
+    assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].number, 42);
+    assert_eq!(prs[0].title, "Add feature");
+}
+
+#[test]
+fn release_check_returns_empty_without_tag() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    // No tags — release_check should return empty vec (no tag to compare against)
+    let prs = release_check(repo.path(), None).expect("check should succeed");
+    assert!(prs.is_empty());
+}
+
+#[test]
+fn release_bump_updates_cargo_toml() {
+    let repo = TestRepo::new();
+    fs::write(
+        repo.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.9.0\"\n",
+    )
+    .unwrap();
+
+    release_bump(repo.path(), "0.9.1", None, &NullProgress).expect("bump should succeed");
+
+    let content = fs::read_to_string(repo.path().join("Cargo.toml")).unwrap();
+    assert!(content.contains("version = \"0.9.1\""));
+    assert!(!content.contains("version = \"0.9.0\""));
 }
 
 #[test]

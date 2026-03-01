@@ -248,6 +248,44 @@ pub enum OpsCommand {
         #[arg(long = "status")]
         status: bool,
     },
+    /// Check if PRs have merged since the last tag
+    #[command(name = "release-check")]
+    ReleaseCheck {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Generate release notes for a version
+    #[command(name = "release-notes")]
+    ReleaseNotes {
+        /// Version (e.g. 0.9.6)
+        version: String,
+        #[arg(long = "prev-tag")]
+        prev_tag: Option<String>,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Bump version in manifest files
+    #[command(name = "release-bump")]
+    ReleaseBump {
+        /// Version to bump to (e.g. 0.9.6)
+        version: String,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Create a git tag and push it
+    #[command(name = "release-tag")]
+    ReleaseTag {
+        /// Version to tag (e.g. 0.9.6)
+        version: String,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Check release workflow status
+    #[command(name = "release-status")]
+    ReleaseStatus {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
     /// Run configured lint checks
     Lint,
     /// Run configured test checks

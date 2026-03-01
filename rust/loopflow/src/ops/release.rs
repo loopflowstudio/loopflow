@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::engine::agent::{
     launch_agent, AgentCapabilities, AgentConfig, LaunchResult, ProcessConfig,
@@ -23,15 +23,15 @@ use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
 
 /// A merged PR with enough context for release notes.
-#[derive(Debug, Clone)]
-struct MergedPr {
-    number: u32,
-    title: String,
-    body: Option<String>,
-    files: Vec<String>,
-    additions: u64,
-    deletions: u64,
-    changed_files: u64,
+#[derive(Debug, Clone, Serialize)]
+pub struct MergedPr {
+    pub number: u32,
+    pub title: String,
+    pub body: Option<String>,
+    pub files: Vec<String>,
+    pub additions: u64,
+    pub deletions: u64,
+    pub changed_files: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,9 +192,7 @@ pub fn publish_release(
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, options.target.as_deref(), &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, options.target.as_deref())?;
 
     if needs_bootstrap(&main_repo, &target)? {
         if options.dry_run {
@@ -387,9 +385,7 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, target_name, &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let latest_tag = latest_tag_optional(&main_repo, &target)?;
     let (workflow, release_exists) = match latest_tag.as_deref() {
@@ -408,6 +404,82 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
         workflow_url: workflow.and_then(|run| run.url),
         release_exists,
     })
+}
+
+/// Check if any PRs have merged since the last tag.
+///
+/// Returns the list of merged PRs if changes exist, empty vec if not.
+pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Vec<MergedPr>> {
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+
+    let prev_tag = match latest_tag_optional(&main_repo, &target)? {
+        Some(tag) => tag,
+        None => return Ok(Vec::new()),
+    };
+
+    merged_prs_since(&main_repo, &prev_tag, &target)
+}
+
+/// Generate release notes for the given version.
+///
+/// Writes RELEASE_NOTES.md. Returns the generated notes content.
+pub fn release_notes(
+    repo: &Path,
+    version: &str,
+    prev_tag: Option<&str>,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> OpsResult<String> {
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+
+    let resolved_prev_tag = match prev_tag {
+        Some(tag) => tag.to_string(),
+        None => latest_tag(&main_repo, &target)?,
+    };
+
+    let version = normalize_version(version);
+
+    progress.status("Collecting merged PRs...");
+    let prs = merged_prs_since(&main_repo, &resolved_prev_tag, &target)?;
+
+    progress.status("Generating release notes...");
+    let notes = generate_release_notes(&main_repo, &prs, &version, &resolved_prev_tag, &target)?;
+
+    progress.status("Writing RELEASE_NOTES.md...");
+    write_release_notes(&main_repo, &notes, &version)?;
+
+    Ok(notes)
+}
+
+/// Bump version in all manifest files for the target.
+pub fn release_bump(
+    repo: &Path,
+    version: &str,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+
+    let version = normalize_version(version);
+    bump_manifest_versions(&main_repo, &target, &version, progress)
+}
+
+/// Create a git tag and push it to the remote.
+///
+/// Returns the full tag string (e.g. `v0.9.6`).
+pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> OpsResult<String> {
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+
+    let version = normalize_version(version);
+    tag_and_push(&main_repo, &version, &target)
 }
 
 fn generate_release_with_target(
@@ -465,6 +537,19 @@ fn resolve_target(
         .ok_or_else(|| OpsError::Message(format!("unknown release target: {selected_name}")))?;
 
     Ok(build_release_target(&selected_name, target_config, repo))
+}
+
+/// Resolve the main repo root and release target from a repo path and optional target name.
+///
+/// Common preamble for all decomposed release functions.
+fn resolve_repo_and_target(
+    repo: &Path,
+    target_name: Option<&str>,
+) -> OpsResult<(PathBuf, ReleaseTarget)> {
+    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let config = load_config_or_default(Some(&main_repo));
+    let target = resolve_target(&config, target_name, &main_repo)?;
+    Ok((main_repo, target))
 }
 
 fn build_release_target(name: &str, config: &ReleaseTargetConfig, repo: &Path) -> ReleaseTarget {

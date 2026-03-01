@@ -29,7 +29,7 @@ pub use pr::{create_or_update_pr, current_pr, update_pr, PrInfo, PrOptions, PrRe
 pub use progress::{NullProgress, Progress};
 pub use rebase::{rebase_with_recovery, RebaseOptions};
 pub use release::{
-    bump_version, generate_release, publish_release, release_status, PublishOptions, PublishResult,
-    ReleaseStatusResult,
+    bump_version, generate_release, publish_release, release_bump, release_check, release_notes,
+    release_status, release_tag, MergedPr, PublishOptions, PublishResult, ReleaseStatusResult,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

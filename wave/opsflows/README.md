@@ -8,9 +8,9 @@ Invert the ops layer. Today `lf ops <verb>` is the interface and steps are add-o
 
 `fast-path` is built — steps declare a shell command in frontmatter that runs before the agent. Exit 0 = done, no agent spun up. Non-zero = agent starts with failure output as context. `lf land` is the first consumer; sprint 04 (`lf rebase`) is the second.
 
-Sprint 02 shipped narrative release notes — diff stats, full PR bodies, previous notes for voice continuity, and a narrative-first prompt template. The release agent now gets rich context and researches diffs selectively for large PRs.
+Release is decomposed into focused ops commands (`release-check`, `release-notes`, `release-bump`, `release-tag`, `release-status`). The `lf release` step orchestrates them with agent judgment on release notes, mechanical execution on everything else. Cron waves run daily patch and monthly minor releases. The monolith (`lf ops release patch`) still works for manual use.
 
-Remaining sprints: 03 decomposes `lf ops release` into finer-grained ops commands and wraps them in a `lf release` step with cron cadence. Sprint 04 is just a step file that consumes the fast-path infrastructure.
+Remaining sprints: 04 wraps `lf ops rebase` in a step with fast-path for no-conflict rebases. 05 brings release config and "Release Now" to Concerto.
 
 ## Goals
 
@@ -23,7 +23,6 @@ Remaining sprints: 03 decomposes `lf ops release` into finer-grained ops command
 ## Risks
 
 - **Release notes quality is subjective.** Plan to iterate on the prompt after seeing real output.
-- **Ops decomposition scope.** Splitting `lf ops release` into sub-commands is the biggest Rust change. Keep the existing monolithic command working during transition.
 
 ## Metrics
 

@@ -1,9 +1,0 @@
-flow: ship-wave
-area:
-  - docs/
-  - rust/loopflow/src/engine/builtins/steps/ops/init.md
-  - README.md
-  - TESTING.md
-direction:
-  - clarity
-  - accessibility

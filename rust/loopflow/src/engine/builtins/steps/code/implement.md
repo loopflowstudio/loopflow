@@ -49,3 +49,7 @@ If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 If the design doc is unclear, make the simplest choice and move on. Note your assumption in `scratch/questions.md`.
 
 If implementation reveals a design flaw, note it but keep going. The design was scaffolding—diverge when reality demands it.
+
+## Adaptation
+
+If you had to discover a convention that wasn't documented — error handling pattern, test structure, naming style, import conventions — add it to the repo's style guide (CLAUDE.md, STYLE.md) so the next session doesn't have to rediscover it.

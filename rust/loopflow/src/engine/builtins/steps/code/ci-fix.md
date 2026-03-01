@@ -58,3 +58,7 @@ Find the wave's current PR, identify the latest failing checks on its head commi
 - Stay scoped to CI failures on this PR.
 - Prefer targeted fixes over broad refactors.
 - Do not ignore failing tests to get green.
+
+## Adaptation
+
+After fixing the immediate failure, ask: why did this get to CI? Could gate have caught it? If the answer points to a missing check in gate, a missing convention in repo docs, or a recurring ci-fix pattern — make that update. The fix addresses the symptom; the step or doc update prevents recurrence.

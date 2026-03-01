@@ -9,6 +9,9 @@ pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 /// Bundled RLM.md — recursive language model instructions for agents.
 pub const RLM_DOC: &str = include_str!("builtins/RLM.md");
 
+/// Bundled VOICE.md — default voice/tone guidance for agent output.
+pub const VOICE_DOC: &str = include_str!("builtins/VOICE.md");
+
 /// Surface instruction prompts, one per surface variant.
 pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md");
 pub const SURFACE_CLI: &str = include_str!("builtins/surfaces/cli.md");

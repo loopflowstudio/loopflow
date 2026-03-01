@@ -84,3 +84,7 @@ If lint or CI failures prevent landing, fix them and retry.
 
 - Do not ask questions. Make decisions and proceed.
 - If the PR already has a good title and body, you may run `lf ops land` without `--title`/`--body` to keep the existing content.
+
+## Adaptation
+
+If you discovered repo-specific landing conventions — merge strategy, branch protection rules, CI wait behavior, cleanup steps — copy this step to `.lf/steps/land.md` and encode them.

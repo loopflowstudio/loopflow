@@ -91,6 +91,65 @@ Don't split work into separate commits or PRs unless each piece stands on its ow
 
 Target ~1000 LOC per PR. Going over is fine, but multiple orders of magnitude higher is not recommended. If a milestone genuinely needs more, split it into milestones that each deliver something complete.
 
+---
+
+## Adaptation
+
+Loopflow adapts to each repo through use. When you learn something repo-specific, write it down in `.lf/`.
+
+**Steps**: When a builtin step doesn't fit this repo, copy it to `.lf/steps/<name>.md` and adapt it. Your copy overrides the builtin — even inside builtin flows.
+
+**Voice**: When the user expresses a communication preference, update `.lf/voice.md`.
+
+**Config**: When a setting should be different, update `.lf/config.yaml`.
+
+**Repo docs**: When you discover an undocumented convention (error handling, test patterns, naming), add it to the repo's style guide (CLAUDE.md, STYLE.md).
+
+Changes to `.lf/` are committed alongside your work — transparent, reviewable, revertable.
+
+### What's configurable
+
+Everything in `.lf/` overrides builtins. User-global `~/.lf/` sits between repo and defaults. Full documentation at https://www.loopflow.studio/docs.
+
+**Steps** — `.lf/steps/<name>.md` overrides any builtin step, even inside builtin flows. Copy a builtin, adapt it.
+
+**Directions** — `.lf/directions/<name>.md` overrides builtin directions. Create groups with `.lf/directions/<group>/`.
+
+**Voice** — `.lf/voice.md` (or `~/.lf/voice.md` for user-global). Overrides the builtin voice guidance.
+
+**Config** — `.lf/config.yaml` (repo) merges with `~/.lf/config.yaml` (global). Scalars override; lists marked additive combine.
+
+```yaml
+# .lf/config.yaml
+agent: claude:sonnet              # default model (harness:model)
+direction: [clarity, care]        # default directions for all steps
+area: src/                        # default area scope
+lint: "cargo fmt --check && cargo clippy -- -D warnings"
+test: "cargo test --all"
+push: true                        # auto-push after commits
+pr: true                          # auto-create PR after push
+land: gh                          # land strategy: "gh" or "local"
+context:                          # extra files always in context (additive)
+  - docs/architecture.md
+exclude:                          # glob patterns to exclude (additive)
+  - "target/"
+  - "node_modules/"
+budgets:                          # token budgets for prompt sections
+  area: 50000
+  docs: 30000
+  diff: 20000
+summaries:                        # codebase overview docs (additive)
+  - path: src/
+    tokens: 5000
+branch_names:
+  schema: "{user}.{name}.{timestamp}"
+release:                          # release targets and scoping
+  targets:
+    default:
+      tag_prefix: "v"
+      manifests: ["Cargo.toml", "pyproject.toml"]
+```
+
 </lf:loopflow>
 
 <lf:rlm>
@@ -301,5 +360,9 @@ If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 If the design doc is unclear, make the simplest choice and move on. Note your assumption in `scratch/questions.md`.
 
 If implementation reveals a design flaw, note it but keep going. The design was scaffolding—diverge when reality demands it.
+
+## Adaptation
+
+If you had to discover a convention that wasn't documented — error handling pattern, test structure, naming style, import conventions — add it to the repo's style guide (CLAUDE.md, STYLE.md) so the next session doesn't have to rediscover it.
 
 </lf:step:implement>

@@ -786,6 +786,35 @@ pub trait SessionStore: Send + Sync {
     async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CredentialType {
+    OAuth,
+    ApiKey,
+}
+
+impl CredentialType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OAuth => "oauth",
+            Self::ApiKey => "apikey",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Self {
+        match value {
+            "apikey" => Self::ApiKey,
+            _ => Self::OAuth,
+        }
+    }
+}
+
+impl std::fmt::Display for CredentialType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderToken {
     pub provider: String,
@@ -794,6 +823,7 @@ pub struct ProviderToken {
     pub expires_at: Option<i64>,
     pub login: Option<String>,
     pub updated_at: i64,
+    pub credential_type: CredentialType,
 }
 
 #[async_trait::async_trait]
@@ -2463,6 +2493,7 @@ mod tests {
             expires_at: Some(1700000000),
             login: Some("octocat".to_string()),
             updated_at: 1699000000,
+            credential_type: super::CredentialType::OAuth,
         };
         store
             .upsert_provider_token(&token)
@@ -2500,6 +2531,8 @@ mod tests {
         assert_eq!(reloaded.access_token, "gho_new456");
         assert!(reloaded.refresh_token.is_none());
 
+        assert_eq!(reloaded.credential_type, super::CredentialType::OAuth);
+
         // Add a second provider and list
         let claude_token = super::ProviderToken {
             provider: "claude".to_string(),
@@ -2508,6 +2541,7 @@ mod tests {
             expires_at: None,
             login: None,
             updated_at: 1699000000,
+            credential_type: super::CredentialType::OAuth,
         };
         store
             .upsert_provider_token(&claude_token)

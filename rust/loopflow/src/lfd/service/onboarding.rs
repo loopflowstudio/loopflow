@@ -67,6 +67,15 @@ pub fn run_install_onboarding(no_interactive: bool) -> Result<()> {
     Ok(())
 }
 
+fn api_key_env_name(provider: Provider) -> Option<&'static str> {
+    match provider {
+        Provider::Claude => Some("ANTHROPIC_API_KEY"),
+        Provider::Codex => Some("OPENAI_API_KEY"),
+        Provider::OpenCodeZen => Some("OPENCODE_API_KEY"),
+        Provider::GitHub => None,
+    }
+}
+
 fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bool> {
     let status = client.provider_status(provider)?;
     if status.is_active() {
@@ -74,12 +83,54 @@ fn try_connect_agent(client: &OnboardingClient, provider: Provider) -> Result<bo
         return Ok(true);
     }
 
+    // Detect API key in environment and warn about billing
+    if let Some(env_name) = api_key_env_name(provider) {
+        if std::env::var(env_name)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+        {
+            println!(
+                "  Found {env_name}. API key auth bills per token — OAuth uses your existing subscription. We recommend OAuth."
+            );
+        }
+    }
+
     if connect_provider(client, provider)? {
         return Ok(true);
     }
 
+    // OAuth failed/skipped — offer API key fallback if available
+    if let Some(env_name) = api_key_env_name(provider) {
+        if let Ok(api_key) = std::env::var(env_name) {
+            if !api_key.trim().is_empty() && prompt_api_key_fallback(provider, env_name)? {
+                client.configure_api_key(provider, &api_key)?;
+                println!(
+                    "  ✓ {} connected via API key (pay-per-token billing)",
+                    provider_display_name(provider)
+                );
+                return Ok(true);
+            }
+        }
+    }
+
     println!("  ! {} not connected.", provider_display_name(provider));
     Ok(false)
+}
+
+fn prompt_api_key_fallback(provider: Provider, env_name: &str) -> Result<bool> {
+    print!(
+        "  Use {} for {}? [y/N] ",
+        env_name,
+        provider_display_name(provider)
+    );
+    io::stdout().flush().context("failed to flush stdout")?;
+
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .context("failed to read user input")?;
+
+    Ok(is_affirmative_input(&input))
 }
 
 fn ensure_required_provider_connected(client: &OnboardingClient, provider: Provider) -> Result<()> {
@@ -366,6 +417,30 @@ impl OnboardingClient {
         response
             .json()
             .with_context(|| format!("failed to parse response body for {path}"))
+    }
+
+    fn configure_api_key(&self, provider: Provider, api_key: &str) -> Result<()> {
+        let body = serde_json::json!({ "api_key": api_key });
+        let request = self.client.put(format!(
+            "{}/v0/auth/{}/credential",
+            self.base_url,
+            provider.as_str()
+        ));
+        let response = self
+            .authorize(request)
+            .json(&body)
+            .send()
+            .with_context(|| {
+                format!(
+                    "failed to configure {} API key",
+                    provider_display_name(provider)
+                )
+            })?;
+
+        if !response.status().is_success() {
+            return Err(response_error(response, "configure API key"));
+        }
+        Ok(())
     }
 
     fn authorize(

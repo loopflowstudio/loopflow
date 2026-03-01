@@ -6,6 +6,7 @@ from conftest import (
     AUTH_FLOW,
     AUTH_PROVIDER_ACTIVE,
     AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS,
+    AUTH_PROVIDER_APIKEY,
     CHORD_MINIMAL,
     PROVIDER_INFO_FULL,
     PROVIDER_INFO_MINIMAL,
@@ -125,11 +126,20 @@ class TestAuthModels:
         assert status.login == "jackdanger"
         assert status.expires_at is None
         assert status.next_refresh_at is None
+        assert status.credential_type == "oauth"
 
     def test_auth_provider_status_with_timestamps(self):
         status = AuthProviderStatus.model_validate(AUTH_PROVIDER_ACTIVE_WITH_TIMESTAMPS)
         assert status.expires_at is not None
         assert status.next_refresh_at is not None
+        assert status.credential_type == "oauth"
+
+    def test_auth_provider_apikey(self):
+        status = AuthProviderStatus.model_validate(AUTH_PROVIDER_APIKEY)
+        assert status.provider == "codex"
+        assert status.status == "active"
+        assert status.credential_type == "apikey"
+        assert status.login is None
 
     def test_auth_flow(self):
         flow = AuthFlow.model_validate(AUTH_FLOW)

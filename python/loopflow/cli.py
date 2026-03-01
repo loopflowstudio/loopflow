@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import webbrowser
 from datetime import datetime, timezone
@@ -145,20 +146,30 @@ def _auth_status_table(statuses: list[AuthProviderStatus]) -> Table:
     table.add_column("details")
 
     for status in statuses:
+        ct = status.credential_type or "oauth"
         if status.status == "active":
-            icon = "✓"
             details = _status_details(status)
+            if ct == "apikey":
+                icon = "⚠"
+                status_label = "apikey"
+                details = f"{details} · pay-per-token"
+            else:
+                icon = "✓"
+                status_label = "oauth"
         elif status.status == "pending":
             icon = "…"
+            status_label = "pending"
             details = "waiting for browser confirmation"
         elif status.status == "expired":
             icon = "!"
+            status_label = "expired"
             details = "expired"
         else:
             icon = "✗"
+            status_label = "none"
             details = "not connected"
 
-        table.add_row(_provider_label(status.provider), f"{icon} {status.status}", details)
+        table.add_row(_provider_label(status.provider), f"{icon} {status_label}", details)
 
     return table
 
@@ -582,6 +593,30 @@ def auth_disconnect(provider: str) -> None:
         typer.echo(f"Disconnected {_provider_label(status.provider)}")
     else:
         typer.echo(f"Updated {_provider_label(status.provider)} status to {status.status}")
+
+
+@auth_app.command("configure", help="Use an API key for a provider. To switch back to OAuth, run `lfq auth <provider>`.")
+def auth_configure(
+    provider: str,
+) -> None:
+    env_names = {
+        "claude": "ANTHROPIC_API_KEY",
+        "codex": "OPENAI_API_KEY",
+        "opencodezen": "OPENCODE_API_KEY",
+    }
+    env_name = env_names.get(provider.lower())
+    if not env_name:
+        typer.echo(f"Error: {provider} does not support API key auth", err=True)
+        raise typer.Exit(1)
+
+    api_key = os.environ.get(env_name)
+    if not api_key:
+        typer.echo(f"Error: set {env_name} in your environment first", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"API key auth bills per token. OAuth uses your existing subscription.")
+    status = api.configure_api_key(provider, api_key)
+    typer.echo(f"{_provider_label(status.provider)} switched to API key")
 
 
 @repos_app.callback(invoke_without_command=True)

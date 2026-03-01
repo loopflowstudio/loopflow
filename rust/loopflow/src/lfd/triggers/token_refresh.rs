@@ -316,6 +316,7 @@ mod tests {
             expires_at: Some(now_unix() + 60),
             login: login.map(str::to_string),
             updated_at: now_unix(),
+            credential_type: crate::lfd::store::CredentialType::OAuth,
         };
         store
             .upsert_provider_token(&token)
@@ -342,6 +343,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
+            credential_type: crate::lfd::store::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
             Provider::GitHub,
@@ -399,6 +401,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
+            credential_type: crate::lfd::store::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
             Provider::GitHub,
@@ -449,6 +452,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
+            credential_type: crate::lfd::store::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([
             (
@@ -529,6 +533,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
+            credential_type: crate::lfd::store::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
             Provider::GitHub,

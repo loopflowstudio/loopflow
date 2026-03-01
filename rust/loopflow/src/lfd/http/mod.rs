@@ -7,7 +7,7 @@ use axum::http::{StatusCode, Uri};
 use axum::middleware;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use tower_http::trace::TraceLayer;
 
@@ -47,6 +47,10 @@ pub fn router(state: HttpState) -> Router {
             get(auth_routes::get_auth_handler)
                 .post(auth_routes::start_auth_handler)
                 .delete(auth_routes::disconnect_auth_handler),
+        )
+        .route(
+            "/auth/{provider}/credential",
+            put(auth_routes::configure_credential_handler),
         )
         .route("/providers", get(providers::list_providers_handler))
         .route("/flows", get(flows::list_flows_handler))

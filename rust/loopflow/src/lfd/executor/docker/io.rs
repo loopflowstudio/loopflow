@@ -120,20 +120,16 @@ impl DockerExecutor {
             }
         }
 
-        // Inject provider tokens cached during executor initialization.
-        for (provider, env_var) in [
-            ("github", "GH_TOKEN"),
-            ("claude", "ANTHROPIC_API_KEY"),
-            ("codex", "OPENAI_API_KEY"),
-        ] {
-            if env
-                .iter()
-                .any(|entry| entry.starts_with(&format!("{env_var}=")))
-            {
-                continue;
-            }
-            if let Some(credential) = self.cached_credentials.get(provider) {
-                env.push(format!("{env_var}={}", credential.token));
+        // Inject provider tokens from the DB. One query, then use the
+        // canonical env_var_for_token() mapping for each.
+        if let Ok(tokens) = self.store.list_provider_tokens().await {
+            for token in tokens {
+                if let Some((env_var, value)) = crate::lfd::provider_auth::env_var_for_token(&token)
+                {
+                    if !env.iter().any(|e| e.starts_with(&format!("{env_var}="))) {
+                        env.push(format!("{env_var}={value}"));
+                    }
+                }
             }
         }
 

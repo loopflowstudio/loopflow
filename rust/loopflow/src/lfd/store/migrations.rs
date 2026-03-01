@@ -118,6 +118,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "024_signal_cleanup",
         sql: include_str!("migrations/024_signal_cleanup.sql"),
     },
+    Migration {
+        version: "025_credential_type",
+        sql: include_str!("migrations/025_credential_type.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations

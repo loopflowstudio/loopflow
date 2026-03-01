@@ -35,17 +35,36 @@ public enum ProviderAuthStatus: String, Codable, Sendable {
     case expired
 }
 
+public enum CredentialType: String, Codable, Sendable {
+    case oauth
+    case apikey
+}
+
 public struct AuthProviderStatus: Codable, Sendable, Identifiable {
     public let provider: AuthProvider
     public let status: ProviderAuthStatus
     public let login: String?
+    public let credentialType: CredentialType?
 
     public var id: AuthProvider { provider }
 
-    public init(provider: AuthProvider, status: ProviderAuthStatus, login: String? = nil) {
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case status
+        case login
+        case credentialType = "credential_type"
+    }
+
+    public init(
+        provider: AuthProvider,
+        status: ProviderAuthStatus,
+        login: String? = nil,
+        credentialType: CredentialType? = nil
+    ) {
         self.provider = provider
         self.status = status
         self.login = login
+        self.credentialType = credentialType
     }
 }
 

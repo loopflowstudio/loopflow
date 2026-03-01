@@ -1,14 +1,16 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use tracing::info;
 
 use crate::lfd::http::dto::format_datetime;
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
-use crate::lfd::http::{api_error, ApiMessage, ApiResult};
+use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::provider_auth::{AuthError, AuthFlowResponse, Provider, ProviderAuthSnapshot};
+use crate::lfd::store::CredentialType;
 
 #[derive(Debug, Serialize)]
 pub struct AuthProvidersResponse {
@@ -25,6 +27,8 @@ pub struct AuthProviderStatusDto {
     pub expires_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_refresh_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,6 +102,48 @@ pub async fn disconnect_auth_handler(
     Ok(Json(status_dto(snapshot)))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ConfigureCredentialRequest {
+    pub api_key: String,
+}
+
+/// Store an API key for a provider. To switch back to OAuth, run the normal
+/// OAuth connect flow (`lfq auth <provider>`) which overwrites the token and
+/// resets credential_type to OAuth.
+pub async fn configure_credential_handler(
+    State(state): State<HttpState>,
+    Path(provider): Path<String>,
+    Json(body): Json<ConfigureCredentialRequest>,
+) -> ApiResult<AuthProviderStatusDto> {
+    let provider = parse_provider(&provider)?;
+
+    let token = crate::lfd::store::ProviderToken {
+        provider: provider.as_str().to_string(),
+        access_token: body.api_key,
+        refresh_token: None,
+        expires_at: None,
+        login: None,
+        updated_at: crate::lfd::store::rows::now_unix(),
+        credential_type: CredentialType::ApiKey,
+    };
+    state
+        .store
+        .upsert_provider_token(&token)
+        .await
+        .map_err(map_store_error)?;
+    info!(
+        provider = %provider,
+        "switched to API key (pay-per-token billing)"
+    );
+
+    let snapshot = state
+        .provider_auth
+        .status(provider)
+        .await
+        .map_err(map_auth_error)?;
+    Ok(Json(status_dto(snapshot)))
+}
+
 fn parse_provider(raw: &str) -> Result<Provider, ApiError> {
     raw.parse::<Provider>()
         .map_err(|_| api_error(StatusCode::NOT_FOUND, "provider not found"))
@@ -133,6 +179,7 @@ fn status_dto(snapshot: ProviderAuthSnapshot) -> AuthProviderStatusDto {
         login: snapshot.status.login(),
         expires_at: format_unix_timestamp(snapshot.expires_at),
         next_refresh_at: format_unix_timestamp(snapshot.next_refresh_at),
+        credential_type: snapshot.credential_type.map(|ct| ct.as_str().to_string()),
     }
 }
 
@@ -203,6 +250,7 @@ mod tests {
             },
             expires_at: Some(1_893_456_000),
             next_refresh_at: Some(1_893_454_800),
+            credential_type: Some(crate::lfd::store::CredentialType::OAuth),
         });
 
         assert_eq!(dto.provider, "github");

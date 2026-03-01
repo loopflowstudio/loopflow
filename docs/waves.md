@@ -22,13 +22,14 @@ Waves are independent by default. Use a `listen` stimulus when one wave should r
 
 ## Stimulus Types
 
-| Stimulus | Runs when | Command |
-|----------|-----------|---------|
-| **Once** | Single run | `loopflow.run_wave(...)` |
-| **Loop** | Continuously until stopped | `loopflow.run_wave(...)` with loop stimulus |
-| **Watch** | Area changes on main | `loopflow.add_stimulus(..., kind="watch")` |
-| **Cron** | On schedule | `loopflow.add_stimulus(..., kind="cron")` |
-| **Listen** | Another wave runs | `loopflow.add_stimulus(..., kind="listen", source_wave_id=...)` |
+| Stimulus | Runs when |
+|----------|-----------|
+| **Once** | Single run |
+| **Loop** | Continuously until stopped |
+| **Watch** | Area changes on main |
+| **Cron** | On schedule |
+| **Listen** | Another wave runs |
+| **CiFailure** | CI fails on a wave PR |
 
 ### Once
 
@@ -144,19 +145,6 @@ lfq list                         # check progress
 ```
 
 Or run manually: `lfd serve`
-
-## One-Shot
-
-Run exactly one iteration using the once stimulus:
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("runner", repo=".", flow="build", area=["src/"])
-loopflow.run_wave("runner")
-PY
-```
 
 ## Managing Waves
 

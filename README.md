@@ -8,14 +8,13 @@ Waves are first built manually through more interactive exploration. Eventually 
 
 ## Waves
 
-Waves are objects with 4 primary fields.
+A wave is **area × direction × flow**.
 
 | Field | Usage | Form |
 |-------|------|------|
 | **Area** | Scope and context | pathset |
 | **Flow** | Process followed / steps taken | sequence of prompts |
 | **Direction** | Defines success, quality, and aesthetics | prompt |
-| **Stimulus** | Watch, loop, cron, or listen | mode |
 
 ```yaml
 # wave/designer/designer.yaml
@@ -25,6 +24,28 @@ stimulus:
   source: infra
   source_repo: /Users/jack/src/other-repo # optional
 ```
+
+### When Waves Run
+
+Stimuli control when a wave activates. Pick based on what you're trying to do.
+
+**Scheduled** — loop through a backlog, run daily maintenance, or execute once:
+
+| Stimulus | Use case | Example |
+|----------|----------|---------|
+| **Once** | Single run | Ship one feature, run one audit |
+| **Loop** | Continuous until stopped | Work through a backlog, grind PRs |
+| **Cron** | On a schedule | Daily QA pass, weekly dependency scan |
+
+**Reactive** — rebuild when main moves, react to other waves, fix CI when it breaks:
+
+| Stimulus | Use case | Example |
+|----------|----------|---------|
+| **Watch** | Area changes on main | Rebuild docs when API changes |
+| **Listen** | Another wave completes | Run UX review after infra ships |
+| **CiFailure** | CI fails on a wave PR | Auto-fix failing checks |
+
+Every new wave ships with watch and ci-fix stimuli by default.
 
 ## Steps
 
@@ -210,7 +231,10 @@ Install the Rust binaries directly with cargo.
 uv tool install loopflow
 lfq                  # status overview
 lfq list             # list waves
+lfq show engbot      # show wave details
 lfq logs engbot      # tail agent output
+lfq stop engbot      # stop a running wave
+lfq delete engbot    # remove wave and history
 lfq usage            # token usage summary (group by wave)
 lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models

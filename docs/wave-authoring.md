@@ -218,7 +218,7 @@ Control when and how the wave runs:
 import loopflow.api as loopflow
 
 # Loop continuously
-loopflow.update_wave("mywave", stimulus=loopflow.Stimulus(kind="loop"))
+loopflow.add_stimulus("mywave", kind="loop")
 
 # React to another wave
 loopflow.add_stimulus("mywave", kind="listen", source_wave_id="infra")

@@ -5,7 +5,7 @@ title: lfd Daemon Reference
 
 # lfd Daemon Reference
 
-`lfd` runs the wave daemon. It serves the HTTP API on `127.0.0.1:2486` by default.
+`lfd` runs the wave daemon, serving the HTTP API for wave management, agent sessions, and CI integration.
 
 ## Run the daemon
 
@@ -38,12 +38,22 @@ Rotation runbook:
 3. Restart `lfd`.
 4. Verify the old token is rejected and the new token is accepted.
 
+## API examples
+
+Examples below use `$LFD_ADDR`. Set it once per session:
+
+```bash
+export LFD_ADDR=http://127.0.0.1:2486  # default; pick a unique port per daemon
+```
+
+The default listen address is `127.0.0.1:2486`. Override with `LFD_HTTP_ADDR` when running multiple daemons.
+
 ## Authentication transport
 
 Send credentials in the `Authorization` header:
 
 ```bash
-curl -H "Authorization: Bearer <token>" http://127.0.0.1:2486/status
+curl -H "Authorization: Bearer <token>" $LFD_ADDR/status
 ```
 
 `lfd` rejects malformed authorization values before provider validation. Use `Bearer <token>` with a non-empty token (max 4096 bytes) and no embedded whitespace/control characters.
@@ -82,20 +92,20 @@ loopflow.run_wave("engbot")
 Manage chords (wave groups):
 
 ```bash
-curl -s -X POST "http://127.0.0.1:2486/v0/chords" \
+curl -s -X POST "$LFD_ADDR/v0/chords" \
   -H "Content-Type: application/json" \
   -d '{"name":"frontend"}'
 
-curl -s "http://127.0.0.1:2486/v0/chords"
+curl -s "$LFD_ADDR/v0/chords"
 
-curl -s -X POST "http://127.0.0.1:2486/v0/chords/<chord_id>/members" \
+curl -s -X POST "$LFD_ADDR/v0/chords/<chord_id>/members" \
   -H "Content-Type: application/json" \
   -d '{"wave_id":"<wave_id>"}' \
   -i
 
-curl -s "http://127.0.0.1:2486/v0/chords/<chord_id>/members"
+curl -s "$LFD_ADDR/v0/chords/<chord_id>/members"
 
-curl -s "http://127.0.0.1:2486/v0/waves/<wave_id>/chords"
+curl -s "$LFD_ADDR/v0/waves/<wave_id>/chords"
 ```
 
 Membership add/remove and chord delete return `204 No Content`.
@@ -105,7 +115,7 @@ Membership add/remove and chord delete return `204 No Content`.
 Create a session:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:2486/v0/sessions" \
+curl -s -X POST "$LFD_ADDR/v0/sessions" \
   -H "Content-Type: application/json" \
   -d "{
     \"harness\": \"claude\",
@@ -121,7 +131,7 @@ curl -s -X POST "http://127.0.0.1:2486/v0/sessions" \
 Send input:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:2486/v0/sessions/<session_id>/input" \
+curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/input" \
   -H "Content-Type: application/json" \
   -d '{"content":"fix the failing tests"}'
 ```
@@ -131,7 +141,7 @@ curl -s -X POST "http://127.0.0.1:2486/v0/sessions/<session_id>/input" \
 Stream events (replay + live tail):
 
 ```bash
-curl -N "http://127.0.0.1:2486/v0/sessions/<session_id>/events"
+curl -N "$LFD_ADDR/v0/sessions/<session_id>/events"
 ```
 
 Session streams now include metering events:
@@ -145,17 +155,17 @@ Supported harnesses: `codex`, `claude`, `opencode`. Session item payloads use no
 Stop the session:
 
 ```bash
-curl -s -X DELETE "http://127.0.0.1:2486/v0/sessions/<session_id>"
+curl -s -X DELETE "$LFD_ADDR/v0/sessions/<session_id>"
 ```
 
 ## Wave schemas
 
 ```bash
-curl -s "http://127.0.0.1:2486/v0/wave/schemas?repo=$(pwd)" | jq '.data[].name'
+curl -s "$LFD_ADDR/v0/wave/schemas?repo=$(pwd)" | jq '.data[].name'
 ```
 
 ```bash
-curl -s -X POST "http://127.0.0.1:2486/v0/waves" \
+curl -s -X POST "$LFD_ADDR/v0/waves" \
   -H "Content-Type: application/json" \
   -d "{\"repo\":\"$(pwd)\",\"schema\":\"scan\"}"
 ```
@@ -334,7 +344,7 @@ WebSocket streams also emit activation queue events:
 Wave PRs are created as Draft first. `lfd` reconciles queue roles so only the oldest unmerged run is promoted to Ready.
 
 ```bash
-curl -s "http://127.0.0.1:2486/v0/wave_runs?wave_id=<wave_id>&order=stack" | jq '.data[] | {id, stack_position, queue_role, queue_block_reason, next_action}'
+curl -s "$LFD_ADDR/v0/wave_runs?wave_id=<wave_id>&order=stack" | jq '.data[] | {id, stack_position, queue_role, queue_block_reason, next_action}'
 ```
 
 `/v0/wave_runs` now includes:

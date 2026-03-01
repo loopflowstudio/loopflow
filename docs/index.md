@@ -90,7 +90,7 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Area** | Focuses on part of the codebase | path argument |
 | **Stimulus** | When to run: once, loop, watch, cron | command |
 
-A wave is **area × direction × flow × stimulus**.
+A wave is **area × direction × flow**. Stimuli are separate — they control *when* the wave runs.
 
 Area is the path you pass—not a file. It scopes what the wave sees and changes.
 

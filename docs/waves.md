@@ -128,19 +128,8 @@ PY
 # List all triggers
 lfq show swift-falcon
 
-# Remove a stimulus
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.remove_stimulus("swift-falcon", stimulus_id="<id>")
-PY
-
-# Or pause the entire wave
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.update_wave("swift-falcon", status="paused")
-PY
+# Stop the wave
+lfq stop swift-falcon
 ```
 
 When a wave is already running and another stimulus fires, the activation queues. Watch triggers coalesce—multiple commits combine into a single activation with a combined diff.

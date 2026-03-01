@@ -23,7 +23,6 @@ Remaining sprints: 04 wraps `lf ops rebase` in a step with fast-path for no-conf
 ## Risks
 
 - **Release notes quality is subjective.** Plan to iterate on the prompt after seeing real output.
-- **Ops decomposition scope.** Splitting `lf ops release` into sub-commands is the biggest Rust change. Keep the existing monolithic command working during transition.
 
 ## Metrics
 

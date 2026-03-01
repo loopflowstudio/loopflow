@@ -19,7 +19,7 @@ lfd maintains a persisted ledger of connection tokens it has minted, backed by a
 ```rust
 pub struct TokenLedger {
     cache: RwLock<HashMap<String, TokenEntry>>,
-    db: SqlitePool,
+    conn: Arc<Mutex<Connection>>,
 }
 
 struct TokenEntry {
@@ -37,7 +37,7 @@ enum TokenState {
 
 The in-memory `cache` is a read-through cache over the `tokens` SQLite table. Validate hits memory first, falls through to DB on miss. Writes go to both.
 
-**Persistence**: on startup, `TokenLedger::new(db)` loads non-expired tokens from the database and prunes expired ones. This means lfd restarts (toggle off/on, crash recovery) preserve the token pool — no need to re-mint or coordinate replacement with studio.
+**Persistence**: on startup, `TokenLedger::new(conn)` loads non-expired tokens from the database and prunes expired ones. The `conn` is the same `Arc<Mutex<Connection>>` used by `SqliteStore` — shared connection, separate table. This means lfd restarts (toggle off/on, crash recovery) preserve the token pool — no need to re-mint or coordinate replacement with studio.
 
 **Schema**:
 ```sql
@@ -141,7 +141,7 @@ New toggle in `ConnectionSettingsView`, off by default. Persisted in `UserDefaul
 3. lfd deregisters from studio on shutdown (existing behavior).
 4. Reconnect.
 
-The toggle triggers `BundledDaemonManager.restart(mobileAccess: Bool)` which stops and starts with the appropriate env vars.
+The toggle calls `BundledDaemonManager.stop()` then `start()` with the appropriate env vars. `start()` gains a `mobileAccess: Bool` parameter that controls the bind address and auth provider env vars.
 
 ### 6. Token revocation (Rust + Python)
 
@@ -165,7 +165,7 @@ Detection: reuse existing `detect_lfd_url` which already checks Tailscale status
 
 ### 8. Container mode default
 
-In `ModeProfile::for_mode`, when mode is `Container`, default `auth.provider` to `"loopflow.studio"` unless explicitly overridden. Single line change in config resolution.
+In auth provider config resolution (where `LFD_AUTH_PROVIDER` env var is read), when mode is `Container`, default to `"loopflow.studio"` unless explicitly overridden. `ModeProfile::for_mode` handles runtime/storage/executor defaults; auth provider defaults live in the config loading path alongside the existing `LFD_AUTH_PROVIDER` parsing.
 
 ## Alternatives considered
 

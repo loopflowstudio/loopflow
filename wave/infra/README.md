@@ -14,8 +14,6 @@ Each sprint is a standalone PR that makes the system measurably more reliable. N
 
 The review identified issues across all 7 subsystems (lfd daemon, engine, Concerto, CLI/ops, Python client, deploy/CI, testing). Sprints are organized by impact, not by subsystem — a single sprint may touch multiple areas.
 
-Detailed sub-reports for each subsystem live in `.lf/rlm/results/`.
-
 ## Goals
 
 - Long-running lfd daemons don't accumulate unbounded resources
@@ -34,4 +32,3 @@ Detailed sub-reports for each subsystem live in `.lf/rlm/results/`.
 - CI wall-clock time (target: <5min for rust-test job)
 - `lfd` uptime without restart (target: weeks without resource issues)
 - Test count for trigger loops (target: >0)
-- Golden test freshness (target: always passing on main)

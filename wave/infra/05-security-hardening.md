@@ -13,3 +13,5 @@
 **`@unchecked Sendable` audit.** Review all 6+ uses in Swift Concerto services (`WaveService`, `AuthService`, `DiscoveryService`, `CredentialSocketServer`, `CertificatePinningDelegate`, `LoopflowPalette`). Document why each is safe or fix the underlying concurrency issue.
 
 **`BudgetConfig::default()` trap.** Make `BudgetConfig` and `AutopruneConfig` implement `Default` with the real default values (50k/30k/20k) instead of zeros. Or remove the `Default` derive and require explicit construction.
+
+**Webhook security — verified safe, no work needed.** Research during the daemon integrity sprint confirmed: `github_webhook_handler` returns HTTP 503 when `webhook_secret` is empty (before processing any payload), `verify_webhook_signature` rejects empty secrets as a second layer, and HMAC uses constant-time comparison.

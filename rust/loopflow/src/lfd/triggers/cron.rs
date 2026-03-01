@@ -104,11 +104,8 @@ fn should_activate_cron(cron_expr: &str, last_triggered: Option<DateTime<Utc>>) 
     let grace_period = chrono::Duration::hours(24);
     let check_from = last_triggered.unwrap_or(now - grace_period);
 
-    if let Some(scheduled) = schedule.after(&check_from).next() {
-        if scheduled <= now {
-            return true;
-        }
-    }
-
-    false
+    schedule
+        .after(&check_from)
+        .next()
+        .is_some_and(|scheduled| scheduled <= now)
 }

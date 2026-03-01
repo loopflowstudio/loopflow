@@ -16,4 +16,4 @@
 
 **Python cleanup.** Bump `requires-python` to `>=3.10`. Collapse `wave_logs` error handling into `_raise_for_error`. Resolve the dual version source (`pyproject.toml` static + `hatch-vcs`).
 
-**Config env override.** `output_log_retention_days` only supports YAML config — no `LFD_*` env override like other config fields. Add `LFD_OUTPUT_LOG_RETENTION_DAYS` for consistency.
+**Config env override.** `output_log_retention_days` only supports YAML config — no `LFD_*` env override like other config fields. Add `LFD_OUTPUT_LOG_RETENTION_DAYS` for consistency. (Log pruning was shipped with a hardcoded 7-day TTL — `prune_output_logs` runs on startup and every 6 hours, deleting `.log` files older than 7 days by mtime.)

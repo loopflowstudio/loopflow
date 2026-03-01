@@ -1,8 +1,8 @@
 use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    get_default_branch, has_commits_beyond, is_ancestor, is_clean, is_squash_merged, rev_parse,
-    worktree_add, worktree_move, WorktreeBranch,
+    get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
+    is_squash_merged, rev_parse, worktree_add, worktree_move, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, wave_name_from_branch};
 use crate::lfd::security::sanitize_fs_component;
@@ -19,6 +19,7 @@ pub struct WorktreeState {
     pub path: PathBuf,
     pub base_branch: Option<String>,
     pub merged: bool,
+    pub squash_merged: bool,
     pub prunable: bool,
     pub dirty: bool,
     pub remote_gone: bool,
@@ -321,17 +322,16 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
                 .unwrap_or(false)
         };
         let merged = branch.as_deref().is_some_and(|b| {
-            !is_default
-                && has_commits
-                && (is_ancestor(repo, b, &merge_target).unwrap_or(false)
-                    || squash_merged.contains(b))
+            !is_default && has_commits && is_ancestor(repo, b, &merge_target).unwrap_or(false)
         });
-        let dirty = !is_clean(&path).unwrap_or(true);
-        let mut prunable = !is_default && (merged || !has_commits);
+        let squash_merged_flag = branch
+            .as_deref()
+            .is_some_and(|b| !is_default && squash_merged.contains(b));
+        let dirty = !is_clean_ignoring_scratch(&path).unwrap_or(true);
+        let mut prunable = !is_default && (merged || squash_merged_flag || !has_commits);
 
-        // Protect shortname worktrees from pruning. A shortname (no dot in the
-        // wave name) is an active wave worktree that shouldn't be removed.
-        if prunable {
+        // Protect shortname worktrees from pruning unless content is in main.
+        if prunable && !merged && !squash_merged_flag {
             let is_shortname = wave_name_from_worktree_and_main(&path, repo)
                 .map(|name| !name.contains('.'))
                 .unwrap_or(false);
@@ -344,6 +344,7 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
             path,
             base_branch,
             merged,
+            squash_merged: squash_merged_flag,
             prunable,
             dirty,
             remote_gone: false,
@@ -405,12 +406,16 @@ pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut 
                 .is_some_and(|b| !remote_branches.contains(b));
         }
 
-        if !state.prunable && (state.merged || (state.remote_gone && !state.dirty)) {
-            let is_shortname = wave_name_from_worktree_and_main(&state.path, repo)
-                .map(|name| !name.contains('.'))
-                .unwrap_or(false);
-            if !is_shortname {
+        if !state.prunable {
+            if state.merged || state.squash_merged {
                 state.prunable = true;
+            } else if state.remote_gone && !state.dirty {
+                let is_shortname = wave_name_from_worktree_and_main(&state.path, repo)
+                    .map(|name| !name.contains('.'))
+                    .unwrap_or(false);
+                if !is_shortname {
+                    state.prunable = true;
+                }
             }
         }
     }

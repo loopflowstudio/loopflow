@@ -476,6 +476,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         is_current: bool,
         is_main: bool,
         merged: bool,
+        squash_merged: bool,
         dirty: bool,
         remote_gone: bool,
         diff_stat: String,
@@ -506,6 +507,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 is_current,
                 is_main,
                 merged: wt.merged,
+                squash_merged: wt.squash_merged,
                 dirty: wt.dirty,
                 remote_gone: wt.remote_gone,
                 diff_stat,
@@ -518,9 +520,10 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     for row in &rows {
         let marker = if row.is_current { "*" } else { " " };
 
-        let fresh = !row.is_main && !row.merged && row.diff_stat.is_empty() && !row.dirty;
-        let landed_dirty = row.merged && row.dirty;
-        let name_color = if row.is_main || row.merged || fresh {
+        let any_merged = row.merged || row.squash_merged;
+        let fresh = !row.is_main && !any_merged && row.diff_stat.is_empty() && !row.dirty;
+        let landed_dirty = any_merged && row.dirty;
+        let name_color = if row.is_main || any_merged || fresh {
             c.dim
         } else {
             c.bold
@@ -530,6 +533,8 @@ fn wt_list(format: Option<&str>) -> Result<()> {
             ("landed-dirty", c.red)
         } else if row.merged {
             ("merged", c.green)
+        } else if row.squash_merged {
+            ("squash-merged", c.green)
         } else if row.remote_gone {
             ("remote-gone", c.yellow)
         } else if fresh {
@@ -698,6 +703,7 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
 
     // Group by reason
     let mut merged = Vec::new();
+    let mut squash_merged_list = Vec::new();
     let mut remote_gone = Vec::new();
     let mut empty = Vec::new();
     for wt in prunable {
@@ -705,6 +711,8 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
         let entry = (branch, wt.path.display().to_string());
         if wt.merged {
             merged.push(entry);
+        } else if wt.squash_merged {
+            squash_merged_list.push(entry);
         } else if wt.remote_gone {
             remote_gone.push(entry);
         } else {
@@ -714,6 +722,7 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
 
     for (label, group) in [
         ("Merged", &merged),
+        ("Squash-merged", &squash_merged_list),
         ("Remote-gone", &remote_gone),
         ("Empty", &empty),
     ] {

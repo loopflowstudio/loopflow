@@ -220,6 +220,23 @@ pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
+/// Return true if working tree is clean, ignoring untracked `scratch/` entries.
+///
+/// Used for worktree pruning where leftover scratch directories from landed
+/// waves should not block cleanup.
+pub fn is_clean_ignoring_scratch(repo: &Path) -> Result<bool, GitError> {
+    let output = run_git(repo, &["status", "--porcelain"])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git status --porcelain".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let has_real_changes = stdout.lines().any(|line| !line.starts_with("?? scratch/"));
+    Ok(!has_real_changes)
+}
+
 /// Stage all changes.
 pub fn stage_all(repo: &Path) -> Result<(), GitError> {
     git_stdout(repo, &["add", "-A"])?;

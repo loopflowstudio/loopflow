@@ -6,9 +6,7 @@ Connect Concerto to a remote lfd. Same HTTP+WS protocol, different host. lfd run
 
 ## Strategy
 
-Keep protocol parity: Concerto talks to local and remote lfd via the same HTTP/WS surface. Keep orchestration ownership in loopflow while editors handle their native remote transport. Ship remote connectivity incrementally: dogfood deployment first, eliminate fork drift, then studio auth and API breadth.
-
-Infrastructure phases (01–04) shipped the foundation: sandboxed agents in Docker, Compose stack, pre-shared token auth, and API surface gating. Bundled daemon mode shipped as the default local connection, validating protocol parity end-to-end. EC2 dogfood lane (step 1) deployed and smoke-tested. File-based remote seeding from `~/.lf/concerto.yaml` + Keychain token lookup shipped.
+Keep protocol parity: Concerto talks to local and remote lfd via the same HTTP/WS surface. Keep orchestration ownership in loopflow while editors handle their native remote transport. Ship remote connectivity incrementally: dogfood deployment first, then studio auth and API breadth.
 
 ### Multi-repo execution model
 

@@ -27,15 +27,16 @@ Design docs for already-shipped work and other purely historical content can be 
 
 ## Workflow
 
-1. Read the diff (if any) to understand what was actually built.
+1. Read the diff (if any) to understand what was built on this branch.
 2. Read `wave/<wave>/` — README and item files — to understand current state.
-3. Read `scratch/` — every file, completely.
-4. Delete shipped items. Before deleting, fold context that remaining items need into those items.
-5. Fold scratch content into `wave/<wave>/`. Merge into existing sprint items where there's a clear match. Create new sprint items for content that doesn't fit existing ones. Skip only purely historical content (shipped design docs with nothing forward-looking).
-6. If destination files already exist, merge/dedupe — but keep both sides' content. When in doubt, include it.
-7. Remove scratch files after their content has been folded into wave.
-8. If `wave/<wave>/MEMORY.md` exists, fold useful observations into remaining items and trim.
-9. If the wave directory has no remaining work items, delete the entire `wave/<wave>/` directory.
+3. Verify each item against the actual codebase. Check `git log main`, read relevant files, run relevant commands. For each item: is the finish line crossed? If yes, treat it as shipped. For unshipped items: are file paths, function signatures, data structures, and technical approach still accurate given what's on main? Update item content to reflect the codebase as it actually is — not as it was when the item was written.
+4. Read `scratch/` — every file, completely.
+5. Delete shipped items. Before deleting, fold context that remaining items need into those items.
+6. Fold scratch content into `wave/<wave>/`. Merge into existing sprint items where there's a clear match. Create new sprint items for content that doesn't fit existing ones. Skip only purely historical content (shipped design docs with nothing forward-looking).
+7. If destination files already exist, merge/dedupe — but keep both sides' content. When in doubt, include it.
+8. Remove scratch files after their content has been folded into wave.
+9. If `wave/<wave>/MEMORY.md` exists, fold useful observations into remaining items and trim.
+10. If the wave directory has no remaining work items, delete the entire `wave/<wave>/` directory.
 
 ## Creating a new wave
 

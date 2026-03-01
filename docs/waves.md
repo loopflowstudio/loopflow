@@ -16,7 +16,7 @@ loopflow.run_wave("shipper")
 PY
 ```
 
-This runs the `ship` flow on `src/api/` with the `clarity` direction—continuously, creating PRs until you stop it.
+This runs the `build` flow on `src/api/` with the `clarity` direction—continuously, creating PRs until you stop it.
 
 Waves are independent by default. Use a `listen` stimulus when one wave should react to another.
 
@@ -26,8 +26,8 @@ Waves are independent by default. Use a `listen` stimulus when one wave should r
 |----------|-----------|---------|
 | **Once** | Single run | `loopflow.run_wave(...)` |
 | **Loop** | Continuously until stopped | `loopflow.run_wave(...)` with loop stimulus |
-| **Watch** | Area changes on main | `loopflow.update_wave(..., stimulus=watch)` |
-| **Cron** | On schedule | `loopflow.update_wave(..., stimulus=cron)` |
+| **Watch** | Area changes on main | `loopflow.add_stimulus(..., kind="watch")` |
+| **Cron** | On schedule | `loopflow.add_stimulus(..., kind="cron")` |
 | **Listen** | Another wave runs | `loopflow.add_stimulus(..., kind="listen", source_wave_id=...)` |
 
 ### Once
@@ -52,7 +52,7 @@ python - <<'PY'
 import loopflow.api as loopflow
 
 loopflow.create_wave("looper", repo=".", flow="build", area=["src/"])
-loopflow.update_wave("looper", stimulus=loopflow.Stimulus(kind="loop"))
+loopflow.add_stimulus("looper", kind="loop")
 loopflow.run_wave("looper")
 PY
 ```
@@ -68,7 +68,7 @@ python - <<'PY'
 import loopflow.api as loopflow
 
 loopflow.create_wave("watcher", repo=".", flow="build", area=["src/api/"])
-loopflow.update_wave("watcher", stimulus=loopflow.Stimulus(kind="watch"))
+loopflow.add_stimulus("watcher", kind="watch")
 loopflow.run_wave("watcher")
 PY
 ```
@@ -84,7 +84,7 @@ python - <<'PY'
 import loopflow.api as loopflow
 
 loopflow.create_wave("cronner", repo=".", flow="build", area=["."])
-loopflow.update_wave("cronner", stimulus=loopflow.Stimulus(kind="cron", cron="0 9 * * *"))
+loopflow.add_stimulus("cronner", kind="cron", cron="0 9 * * *")
 loopflow.run_wave("cronner")
 PY
 ```
@@ -114,7 +114,7 @@ python - <<'PY'
 import loopflow.api as loopflow
 
 loopflow.create_wave("swift-falcon", repo=".", flow="build", area=["src/"])
-loopflow.update_wave("swift-falcon", stimulus=loopflow.Stimulus(kind="watch"))
+loopflow.add_stimulus("swift-falcon", kind="watch")
 loopflow.run_wave("swift-falcon")
 PY
 
@@ -122,13 +122,20 @@ PY
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.update_wave("swift-falcon", stimulus=loopflow.Stimulus(kind="cron", cron="0 9 * * *"))
+loopflow.add_stimulus("swift-falcon", kind="cron", cron="0 9 * * *")
 PY
 
 # List all triggers
 lfq show swift-falcon
 
-# Disable one trigger
+# Remove a stimulus
+python - <<'PY'
+import loopflow.api as loopflow
+
+loopflow.remove_stimulus("swift-falcon", stimulus_id="<id>")
+PY
+
+# Or pause the entire wave
 python - <<'PY'
 import loopflow.api as loopflow
 

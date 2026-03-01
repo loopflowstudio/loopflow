@@ -92,11 +92,13 @@ branch_names:
 
 ## Flows
 
-Flows are stored as Python files in `.lf/flows/`:
+Flows are YAML files in `.lf/flows/`:
 
-```python
-def flow():
-    return Flow(["implement", "rebase", "polish", "draft_commit"])
+```yaml
+# .lf/flows/my-flow.yaml
+- implement
+- compress
+- gate
 ```
 
 ---
@@ -201,6 +203,8 @@ Default model for all steps.
 | **Default** | unset (resolution falls back to step defaults, then `claude:opus`) |
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
+
+Gemini is supported for direct `lf` commands. Session-based features (waves, `lfd`) require `claude`, `codex`, or `opencode`.
 
 OpenCode passes model strings through to its own provider system:
 

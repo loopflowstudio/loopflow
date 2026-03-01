@@ -104,14 +104,14 @@ Steps chain into flows. Flows feed into waves.
 |------|-------|
 | `build` | implement → compress → lint → gate → update-wave |
 | `design-and-ship` | design → implement → reduce → polish |
-| `ship` | design → build → review |
+| `ship` | design → build → review → land |
 | `pair` | design → build |
 | `grind` | research → iterate → build → gate |
 | `integrate` | rebase → integrate-upstream |
 | `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |
-| `ship-roadmap` | ingest → kickoff → review-design → build → review |
+| `ship-roadmap` | ingest → kickoff → review-design → build → review → land |
 | `qa-deploy` | qa → triage → branch(fix: qa-fix, deploy: deploy) |
 | `qa-fix` | implement → compress → lint → gate |
 | `deploy` | gate → update-wave |

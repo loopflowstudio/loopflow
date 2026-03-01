@@ -185,6 +185,12 @@ pub enum OpsCommand {
         worktree: Option<String>,
         #[arg(long = "no-lint")]
         no_lint: bool,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
     },
     /// Create or update a PR
     Pr {

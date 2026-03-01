@@ -1216,6 +1216,9 @@ pub async fn land_wave_handler(
                     create_pr,
                     worktree: Some(worktree),
                     lint,
+                    commit_message: None,
+                    pr_title: None,
+                    pr_body: None,
                 },
                 &progress,
             )

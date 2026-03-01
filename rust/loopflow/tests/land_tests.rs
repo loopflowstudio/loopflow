@@ -66,6 +66,9 @@ fn land_local_squash_merges_to_main() {
             create_pr: false,
             worktree: None,
             lint: false,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
         },
         &NullProgress,
     )
@@ -108,6 +111,9 @@ fn land_preserves_main_on_failure() {
             create_pr: false,
             worktree: None,
             lint: false,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
         },
         &NullProgress,
     );
@@ -142,6 +148,9 @@ fn land_cleans_up_remote_branch() {
             create_pr: false,
             worktree: None,
             lint: false,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
         },
         &NullProgress,
     )
@@ -170,6 +179,9 @@ fn land_with_lint_gate() {
             create_pr: false,
             worktree: None,
             lint: true,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
         },
         &NullProgress,
     );
@@ -195,6 +207,9 @@ fn land_missing_pr_error_includes_branch_name() {
             create_pr: false,
             worktree: None,
             lint: false,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
         },
         &NullProgress,
     );

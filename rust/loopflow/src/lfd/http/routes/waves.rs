@@ -1499,10 +1499,126 @@ fn rename_wave_worktree(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
+    use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+    use crate::lfd::events::EventHub;
+    use crate::lfd::executor::WaveExecutor;
+    use crate::lfd::output::OutputHub;
+    use crate::lfd::provider_auth::ProviderAuthService;
+    use crate::lfd::scheduler::Scheduler;
+    use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{Signal, Wave, WaveMode, WaveStatus};
+    use std::path::Path as StdPath;
+    use std::process::Command;
+    use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
+    use tokio::sync::Mutex;
+
+    fn make_wave(repo: &str, name: &str) -> Wave {
+        Wave {
+            id: LfdId::new(),
+            name: name.to_string(),
+            repo: repo.to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
+        }
+    }
+
+    async fn test_http_state() -> HttpState {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        let store: crate::lfd::store::SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        );
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_hub = OutputHub::new(128, tmp.path().join("output"));
+        let event_hub = EventHub::new(128);
+        let sessions = SessionManager::new(store.clone());
+        let executor = Arc::new(
+            WaveExecutor::new(
+                store.clone(),
+                scheduler.clone(),
+                output_hub.clone(),
+                event_hub.clone(),
+                sessions.clone(),
+                ExecutorConfig::default(),
+                GitHubConfig::default(),
+            )
+            .expect("build executor"),
+        );
+
+        HttpState {
+            store: store.clone(),
+            scheduler,
+            executor,
+            event_hub,
+            output_hub,
+            provider_auth: ProviderAuthService::new(store),
+            auth: AuthProvider::Local {
+                session_token: secrecy::SecretString::from("test-token".to_string()),
+            },
+            registration: None,
+            started_at: OffsetDateTime::now_utc(),
+            github: GitHubConfig::default(),
+            http_security: HttpSecurityConfig::default(),
+            auth_failure_throttle: AuthFailureThrottle::new(),
+            ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            sessions,
+        }
+    }
+
+    fn init_git_repo(path: &StdPath) {
+        std::fs::create_dir_all(path).expect("create repo directory");
+
+        let status = Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(path)
+            .status()
+            .expect("run git init");
+        assert!(status.success());
+
+        let status = Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(path)
+            .status()
+            .expect("set git user email");
+        assert!(status.success());
+
+        let status = Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(path)
+            .status()
+            .expect("set git user name");
+        assert!(status.success());
+
+        std::fs::write(path.join("README.md"), "seed").expect("write seed file");
+
+        let status = Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .status()
+            .expect("git add");
+        assert!(status.success());
+
+        let status = Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(path)
+            .status()
+            .expect("git commit");
+        assert!(status.success());
+    }
 
     #[test]
     fn listen_stimulus_schema_requires_source() {
@@ -1668,5 +1784,245 @@ mod tests {
                 .await
                 .expect("source should resolve");
         assert_eq!(resolved, Some(source_wave.id().clone()));
+    }
+
+    #[tokio::test]
+    async fn create_and_get_handlers() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+
+        let Json(created) = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo: repo.clone(),
+                name: Some("designer".to_string()),
+                flow: Some("build".to_string()),
+                direction: Some(vec!["clarity".to_string()]),
+                area: Some(vec!["src/".to_string()]),
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        let Json(found) = get_wave_handler(
+            State(state),
+            Path(created.id.clone()),
+            Query(ExpandQuery::default()),
+        )
+        .await
+        .expect("get wave");
+
+        assert_eq!(found.id, created.id);
+        assert_eq!(found.name, "designer");
+        assert_eq!(found.repo, repo);
+        assert_eq!(found.primary_flow, "build");
+        assert_eq!(found.direction, vec!["clarity".to_string()]);
+        assert_eq!(found.area, vec!["src/".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn list_with_repo_filter() {
+        let state = test_http_state().await;
+        let repo_a_tmp = tempdir().expect("tempdir");
+        let repo_b_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_a_tmp.path());
+        init_git_repo(repo_b_tmp.path());
+        let repo_a = repo_a_tmp.path().to_string_lossy().to_string();
+        let repo_b = repo_b_tmp.path().to_string_lossy().to_string();
+
+        let _ = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo: repo_a.clone(),
+                name: Some("wave-a".to_string()),
+                flow: None,
+                direction: None,
+                area: None,
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave in repo a");
+        let _ = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo: repo_b.clone(),
+                name: Some("wave-b".to_string()),
+                flow: None,
+                direction: None,
+                area: None,
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave in repo b");
+
+        let Json(listed) = list_waves_handler(
+            State(state),
+            Query(ListWavesQuery {
+                repo: Some(repo_a.clone()),
+                limit: None,
+                starting_after: None,
+                ending_before: None,
+                expand: ExpandParam::default(),
+            }),
+        )
+        .await
+        .expect("list waves");
+
+        assert_eq!(listed.data.len(), 1);
+        assert_eq!(listed.data[0].repo, repo_a);
+        assert_eq!(listed.data[0].name, "wave-a");
+    }
+
+    #[tokio::test]
+    async fn update_fields_handler() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+
+        let Json(created) = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo,
+                name: Some("before".to_string()),
+                flow: Some("ship-roadmap".to_string()),
+                direction: Some(vec!["infra".to_string()]),
+                area: Some(vec!["src/".to_string()]),
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        let Json(updated) = update_wave_handler(
+            State(state.clone()),
+            Path(created.id.clone()),
+            Json(UpdateWaveRequest {
+                name: Some("after".to_string()),
+                flow: Some("build".to_string()),
+                direction: Some(vec!["clarity".to_string()]),
+                area: Some(vec!["docs/".to_string()]),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("update wave");
+
+        assert_eq!(updated.name, "after");
+        assert_eq!(updated.primary_flow, "build");
+        assert_eq!(updated.direction, vec!["clarity".to_string()]);
+        assert_eq!(updated.area, vec!["docs/".to_string()]);
+
+        let Json(found) = get_wave_handler(
+            State(state),
+            Path(created.id),
+            Query(ExpandQuery::default()),
+        )
+        .await
+        .expect("get updated wave");
+        assert_eq!(found.name, "after");
+        assert_eq!(found.primary_flow, "build");
+        assert_eq!(found.direction, vec!["clarity".to_string()]);
+        assert_eq!(found.area, vec!["docs/".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn delete_then_get_returns_not_found() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+
+        let Json(created) = create_wave_handler(
+            State(state.clone()),
+            Json(CreateWaveRequest {
+                repo,
+                name: Some("delete-me".to_string()),
+                flow: None,
+                direction: None,
+                area: None,
+                run: false,
+                serialized: false,
+            }),
+        )
+        .await
+        .expect("create wave");
+
+        let Json(deleted) = delete_wave_handler(State(state.clone()), Path(created.id.clone()))
+            .await
+            .expect("delete wave");
+        assert!(deleted.deleted);
+
+        let missing = get_wave_handler(
+            State(state),
+            Path(created.id),
+            Query(ExpandQuery::default()),
+        )
+        .await;
+        assert!(matches!(missing, Err((StatusCode::NOT_FOUND, _))));
+    }
+
+    #[tokio::test]
+    async fn stimulus_add_remove_handlers() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo", "stimulus-wave");
+        state.store.create_wave(&wave).await.expect("seed wave");
+
+        let Json(initial) = list_stimuli_handler(State(state.clone()), Path(wave.id().to_string()))
+            .await
+            .expect("list initial stimuli");
+        let initial_data = initial["data"].as_array().expect("stimuli data array");
+        assert!(initial_data.is_empty());
+
+        let Json(added) = add_stimulus_handler(
+            State(state.clone()),
+            Path(wave.id().to_string()),
+            Json(AddStimulusRequest {
+                signal: Signal::Watch,
+                flow: Some("integrate".to_string()),
+                cron: None,
+                source_wave_id: None,
+                max_iterations: None,
+            }),
+        )
+        .await
+        .expect("add stimulus");
+        let stimulus_id = added["id"]
+            .as_str()
+            .expect("stimulus id in add response")
+            .to_string();
+
+        let Json(after_add) =
+            list_stimuli_handler(State(state.clone()), Path(wave.id().to_string()))
+                .await
+                .expect("list added stimuli");
+        let after_add_data = after_add["data"].as_array().expect("stimuli data array");
+        assert_eq!(after_add_data.len(), 1);
+        assert_eq!(
+            after_add_data[0]["id"].as_str().expect("stimulus id"),
+            stimulus_id
+        );
+
+        let _ = remove_stimulus_handler(
+            State(state.clone()),
+            Path((wave.id().to_string(), stimulus_id)),
+        )
+        .await
+        .expect("remove stimulus");
+
+        let Json(after_remove) = list_stimuli_handler(State(state), Path(wave.id().to_string()))
+            .await
+            .expect("list stimuli after remove");
+        let after_remove_data = after_remove["data"].as_array().expect("stimuli data array");
+        assert!(after_remove_data.is_empty());
     }
 }

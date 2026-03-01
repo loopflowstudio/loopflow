@@ -74,3 +74,96 @@ async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lfd::id::LfdId;
+    use crate::lfd::store::{open_store, StorageConfig};
+    use crate::lfd::types::{AgentRun, AgentStatus};
+    use std::sync::Arc;
+    use tempfile::tempdir;
+    use time::Duration;
+
+    fn make_agent(hours_ago: i64) -> AgentRun {
+        AgentRun {
+            id: LfdId::new(),
+            step: "implement".to_string(),
+            repo: "/tmp/repo".to_string(),
+            worktree: "/tmp/worktree".to_string(),
+            wave_run_id: None,
+            status: AgentStatus::Running,
+            started_at: Some(OffsetDateTime::now_utc() - Duration::hours(hours_ago)),
+            ended_at: None,
+            pid: None,
+            container_id: None,
+            agent: "claude".to_string(),
+            run_mode: "headless".to_string(),
+        }
+    }
+
+    async fn test_store() -> SharedStore {
+        let tmp = tempdir().expect("tempdir");
+        let db_path = tmp.path().join("lfd.db");
+        Arc::new(
+            open_store(&StorageConfig::sqlite(db_path))
+                .await
+                .expect("open sqlite store"),
+        )
+    }
+
+    #[tokio::test]
+    async fn agent_over_threshold_returned() {
+        let store = test_store().await;
+        let old_agent = make_agent(5);
+        store
+            .start_agent(&old_agent)
+            .await
+            .expect("insert old agent");
+
+        let stuck = store
+            .get_stuck_agents(4 * 60 * 60)
+            .await
+            .expect("query stuck agents");
+        assert_eq!(stuck.len(), 1);
+        assert_eq!(stuck[0].id, old_agent.id);
+    }
+
+    #[tokio::test]
+    async fn agent_under_threshold_excluded() {
+        let store = test_store().await;
+        let recent_agent = make_agent(3);
+        store
+            .start_agent(&recent_agent)
+            .await
+            .expect("insert recent agent");
+
+        let stuck = store
+            .get_stuck_agents(4 * 60 * 60)
+            .await
+            .expect("query stuck agents");
+        assert!(stuck.is_empty());
+    }
+
+    #[tokio::test]
+    async fn multiple_agents_independent() {
+        let store = test_store().await;
+        let old_agent = make_agent(5);
+        let recent_agent = make_agent(3);
+        store
+            .start_agent(&old_agent)
+            .await
+            .expect("insert old agent");
+        store
+            .start_agent(&recent_agent)
+            .await
+            .expect("insert recent agent");
+
+        let stuck = store
+            .get_stuck_agents(4 * 60 * 60)
+            .await
+            .expect("query stuck agents");
+        assert_eq!(stuck.len(), 1);
+        assert_eq!(stuck[0].id, old_agent.id);
+    }
+}

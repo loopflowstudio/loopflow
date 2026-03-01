@@ -109,3 +109,51 @@ fn should_activate_cron(cron_expr: &str, last_triggered: Option<DateTime<Utc>>) 
         .next()
         .is_some_and(|scheduled| scheduled <= now)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::should_activate_cron;
+    use chrono::{Datelike, Duration, Timelike, Utc};
+
+    #[test]
+    fn never_triggered_within_grace_period() {
+        let now = Utc::now();
+        let expr = format!("0 {} {} * * * *", now.minute(), now.hour());
+        assert!(should_activate_cron(&expr, None));
+    }
+
+    #[test]
+    fn never_triggered_outside_grace_period() {
+        let now = Utc::now();
+        let two_days_ago = now - Duration::days(2);
+        let expr = format!(
+            "0 {} {} {} {} * *",
+            two_days_ago.minute(),
+            two_days_ago.hour(),
+            two_days_ago.day(),
+            two_days_ago.month()
+        );
+        assert!(!should_activate_cron(&expr, None));
+    }
+
+    #[test]
+    fn just_triggered() {
+        let now = Utc::now();
+        let last_triggered = now - Duration::minutes(1);
+        let expr = format!("0 {} * * * * *", last_triggered.minute());
+        assert!(!should_activate_cron(&expr, Some(last_triggered)));
+    }
+
+    #[test]
+    fn past_due() {
+        let now = Utc::now();
+        let expr = format!("0 {} * * * * *", now.minute());
+        let last_triggered = now - Duration::hours(2);
+        assert!(should_activate_cron(&expr, Some(last_triggered)));
+    }
+
+    #[test]
+    fn invalid_expression() {
+        assert!(!should_activate_cron("not-a-cron", None));
+    }
+}

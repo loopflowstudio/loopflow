@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use cron::Schedule;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -57,15 +57,7 @@ async fn check_cron_waves(
             _ => continue,
         };
 
-        // Use the most recent activation log entry as a proxy for last triggered.
-        let last_triggered = store
-            .list_activation_log(wave.id(), 1)
-            .await
-            .ok()
-            .and_then(|logs| logs.into_iter().next())
-            .and_then(|log| DateTime::<Utc>::from_timestamp(log.created_at, 0));
-
-        if should_activate_cron(&cron_expr, last_triggered) {
+        if should_activate_cron(&cron_expr) {
             let reason = format!("cron schedule {cron_expr} due");
             let envelope = ActivationEnvelope::new(
                 wave.id(),
@@ -94,21 +86,17 @@ async fn check_cron_waves(
     }
 }
 
-fn should_activate_cron(cron_expr: &str, last_triggered: Option<DateTime<Utc>>) -> bool {
+fn should_activate_cron(cron_expr: &str) -> bool {
     let schedule = match Schedule::from_str(cron_expr) {
         Ok(schedule) => schedule,
         Err(_) => return false,
     };
 
     let now = Utc::now();
-    let grace_period = chrono::Duration::hours(24);
-    let check_from = last_triggered.unwrap_or(now - grace_period);
+    let check_from = now - chrono::Duration::hours(24);
 
-    if let Some(scheduled) = schedule.after(&check_from).next() {
-        if scheduled <= now {
-            return true;
-        }
-    }
-
-    false
+    schedule
+        .after(&check_from)
+        .next()
+        .is_some_and(|scheduled| scheduled <= now)
 }

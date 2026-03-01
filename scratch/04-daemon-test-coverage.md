@@ -66,7 +66,7 @@ Focus on **waves.rs** — 18 handlers, zero tests, the biggest API surface gap.
 | `add_stimulus_handler` | Add stimulus to wave |
 | `remove_stimulus_handler` | Remove stimulus |
 
-Skip `run_wave`, `stop_wave`, `land_wave`, `combine_wave`, `next_wave` — these orchestrate external processes (git, agents) and need end-to-end tests, not unit tests. Testing them as handler calls would just be testing mock wiring.
+Skip `run_wave_handler`, `stop_wave_handler`, `land_wave_handler`, `combine_wave_handler`, `next_wave_handler` — these orchestrate external processes (git, agents) and need end-to-end tests, not unit tests. Testing them as handler calls would just be testing mock wiring.
 
 ### Token counting
 
@@ -88,7 +88,7 @@ Skip for this PR. The wave item says "requires a Postgres fixture in CI or a con
 
 ## Key decisions
 
-**Skip `token_refresh.rs` and `queue_reconcile.rs`.** The wave item lists both, but token_refresh already has comprehensive tests (FakeTokenRefresher, multi-provider scenarios, timeout handling). queue_reconcile is a 20-line dispatch loop — testing it would just verify that it iterates over waves, which is plumbing.
+**Skip `token_refresh.rs` and `queue_reconcile.rs`.** The wave item lists both, but token_refresh already has comprehensive tests (FakeTokenRefresher, multi-provider scenarios, timeout handling). queue_reconcile is a 40-line dispatch loop — testing it would just verify that it iterates over waves, which is plumbing.
 
 **Inline tests, not integration test files.** The decision functions (`should_activate_cron`, `should_pause_for_max_iterations`) are private. Inline `#[cfg(test)]` modules can access them. This also follows the pattern in `token_refresh.rs`, `hooks.rs`, `repos.rs`.
 

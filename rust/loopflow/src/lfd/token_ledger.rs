@@ -1,3 +1,11 @@
+//! Connection token ledger.
+//!
+//! Tokens are session credentials, not one-time tickets. A token is valid from
+//! mint until expiry (default 1 hour) or explicit revocation. The `Claimed`
+//! state tracks first use for pool accounting but does not restrict further
+//! validation — mobile clients reuse the same token across reconnects and WS
+//! re-validation cycles.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

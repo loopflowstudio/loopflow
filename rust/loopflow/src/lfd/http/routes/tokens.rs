@@ -37,7 +37,7 @@ pub async fn revoke_tokens_handler(
     if !state.auth.local_admin_authorized(provided, peer.ip()) {
         return Err(api_error(
             StatusCode::FORBIDDEN,
-            "local static token required",
+            "local admin token required",
         ));
     }
 
@@ -129,7 +129,7 @@ mod tests {
             event_hub,
             output_hub,
             provider_auth: ProviderAuthService::new(store.clone()),
-            auth: AuthProvider::DualAuth {
+            auth: AuthProvider::Studio {
                 local_token: SecretString::new(local_token.to_string()),
                 ledger,
             },

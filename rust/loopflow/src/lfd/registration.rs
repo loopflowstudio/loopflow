@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -373,82 +373,6 @@ fn summarize_repos(waves: Vec<Wave>) -> Vec<RegistrationRepoSummary> {
         .collect()
 }
 
-#[derive(Debug, Clone)]
-pub struct ConnectionValidator {
-    base_url: String,
-    http: SafeHttpClient,
-    cache: Arc<RwLock<std::collections::HashMap<String, (bool, Instant)>>>,
-}
-
-impl ConnectionValidator {
-    pub fn new(base_url: &str) -> Self {
-        Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-            http: SafeHttpClient::new().expect("safe HTTP client should initialize"),
-            cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
-        }
-    }
-
-    pub async fn validate(&self, token: &str) -> bool {
-        if token.is_empty() {
-            return false;
-        }
-
-        {
-            let cache = self.cache.read().await;
-            if let Some((valid, expires)) = cache.get(token) {
-                if Instant::now() < *expires {
-                    return *valid;
-                }
-            }
-        }
-
-        let valid = self.validate_remote(token).await.unwrap_or(false);
-
-        {
-            let mut cache = self.cache.write().await;
-            cache.insert(
-                token.to_string(),
-                (valid, Instant::now() + Duration::from_secs(60)),
-            );
-        }
-
-        valid
-    }
-
-    async fn validate_remote(&self, token: &str) -> Result<bool, RegistrationError> {
-        let payload = serde_json::json!({
-            "connection_token": token,
-        });
-
-        let response = send_post_json(
-            &self.http,
-            &self.base_url,
-            "api/v1/daemons/validate-connection",
-            &payload,
-            None,
-            Duration::from_secs(5),
-        )
-        .await?;
-
-        if !response.status().is_success() {
-            return Ok(false);
-        }
-
-        #[derive(Deserialize)]
-        struct ValidateResponse {
-            valid: Option<bool>,
-        }
-
-        let data: ValidateResponse = response
-            .json()
-            .await
-            .map_err(|e| RegistrationError::Parse(e.to_string()))?;
-
-        Ok(data.valid.unwrap_or(false))
-    }
-}
-
 async fn send_post_json(
     http: &SafeHttpClient,
     base_url: &str,
@@ -634,7 +558,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dual_auth_registration_replenishes_token_pool_from_heartbeat_signal() {
+    async fn studio_registration_replenishes_token_pool_from_heartbeat_signal() {
         let payloads = Arc::new(Mutex::new(Vec::<(String, serde_json::Value)>::new()));
         let heartbeat_calls = Arc::new(Mutex::new(0_u32));
 
@@ -744,7 +668,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn heartbeat_revoke_prefix_invalidates_token_in_ledger() {
+    async fn studio_heartbeat_revoke_prefix_invalidates_token_in_ledger() {
         let minted_token = Arc::new(Mutex::new(String::new()));
         let app = Router::new()
             .route(

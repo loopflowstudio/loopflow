@@ -9,7 +9,7 @@
 - Emoji reactions bypass the composer and queue immediately — this flow stays unchanged.
 - iOS selection persists after composer dismiss (macOS has `selectionResetToken`). Address as polish here or in a follow-up.
 - Self-sizing `UIViewRepresentable` can trigger extra layout passes during fast streaming. Watch for jank — same pattern as macOS `NSTextView` but UIKit layout differs. Not blocking but worth monitoring.
-- Discovery auth shipped (02): mobile connects via connection tokens, WS re-validation runs on a 60s interval in the select loop. Queue management is client-side only — no auth/protocol changes needed.
+- Discovery auth shipped (02): `auth.provider=studio` — mobile connects via connection tokens (session credentials valid until 1h expiry or revocation), WS re-validation runs on a 60s interval. Queue management is client-side only — no auth/protocol changes needed.
 
 ## What to build
 

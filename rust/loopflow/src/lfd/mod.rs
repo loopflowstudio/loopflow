@@ -35,7 +35,7 @@ use tokio_util::sync::CancellationToken;
 
 use self::auth::AuthProvider;
 use self::config::LfdConfig;
-use self::registration::{ConnectionValidator, RegistrationClient};
+use self::registration::RegistrationClient;
 use self::store::{SharedStore, StorageConfig};
 use self::token_ledger::TokenLedger;
 
@@ -71,8 +71,9 @@ pub async fn setup_auth(
             tracing::info!("static token auth configured");
             (AuthProvider::Static { token }, None, None)
         }
-        "loopflow.studio" => setup_studio_registration(config, store, http_addr, cancel).await,
-        "dual" => setup_dual_registration(config, store, storage_config, http_addr, cancel).await,
+        "studio" => {
+            setup_studio_registration(config, store, storage_config, http_addr, cancel).await
+        }
         other => {
             tracing::error!(provider = other, "unknown auth provider");
             std::process::exit(1);
@@ -101,42 +102,6 @@ pub fn setup_local_auth() -> AuthProvider {
 async fn setup_studio_registration(
     config: &LfdConfig,
     store: SharedStore,
-    http_addr: SocketAddr,
-    cancel: CancellationToken,
-) -> (
-    AuthProvider,
-    Option<RegistrationClient>,
-    Option<(String, String)>,
-) {
-    let Some(jwt) = self::credentials::load_jwt() else {
-        tracing::error!("auth.provider=loopflow.studio requires a JWT in ~/.lf/credentials.json");
-        std::process::exit(1);
-    };
-
-    let mid = self::machine_id::machine_id();
-    let machine_name = self::machine_id::machine_name();
-    let base_url = &config.auth.base_url;
-
-    let client = RegistrationClient::with_context(base_url, store, http_addr);
-    let validator = ConnectionValidator::new(base_url);
-
-    match client.register(&jwt, &mid, &machine_name).await {
-        Ok(_token) => {
-            tracing::info!(machine_name = %machine_name, "registered with loopflow.studio");
-            let auth = AuthProvider::Studio { validator };
-            client.start_heartbeat(jwt.clone(), mid.clone(), cancel);
-            (auth, Some(client), Some((jwt, mid)))
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "registration with loopflow.studio failed");
-            std::process::exit(1);
-        }
-    }
-}
-
-async fn setup_dual_registration(
-    config: &LfdConfig,
-    store: SharedStore,
     storage_config: &StorageConfig,
     http_addr: SocketAddr,
     cancel: CancellationToken,
@@ -150,13 +115,13 @@ async fn setup_dual_registration(
         .token
         .as_ref()
         .unwrap_or_else(|| {
-            tracing::error!("auth.provider=dual requires auth.token in config or LFD_AUTH_TOKEN");
+            tracing::error!("auth.provider=studio requires auth.token in config or LFD_AUTH_TOKEN");
             std::process::exit(1);
         })
         .clone();
 
     let Some(jwt) = self::credentials::load_jwt() else {
-        tracing::error!("auth.provider=dual requires a JWT in ~/.lf/credentials.json");
+        tracing::error!("auth.provider=studio requires a JWT in ~/.lf/credentials.json");
         std::process::exit(1);
     };
 
@@ -198,9 +163,9 @@ async fn setup_dual_registration(
         Ok(_) => {
             tracing::info!(
                 machine_name = %machine_name,
-                "registered dual-auth daemon with loopflow.studio"
+                "registered with studio"
             );
-            let auth = AuthProvider::DualAuth {
+            let auth = AuthProvider::Studio {
                 local_token,
                 ledger,
             };
@@ -208,7 +173,7 @@ async fn setup_dual_registration(
             (auth, Some(client), Some((jwt, mid)))
         }
         Err(error) => {
-            tracing::error!(error = %error, "dual-auth registration failed");
+            tracing::error!(error = %error, "studio registration failed");
             std::process::exit(1);
         }
     }

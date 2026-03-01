@@ -28,8 +28,12 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 /// `provider` selects the auth strategy:
 /// - `"local"` (default): startup session token auth (`~/.lf/session-token`)
 /// - `"static"`: validate against a pre-shared token
-/// - `"loopflow.studio"`: register with loopflow.studio, validate via API
-/// - `"dual"`: static token on loopback + studio-distributed connection tokens remotely
+/// - `"studio"`: registered with studio for discovery. Static token on
+///   loopback, connection tokens validated locally for remote clients.
+///   Connection tokens are session credentials: valid from mint until expiry
+///   (1 hour) or revocation. lfd mints tokens and sends them to studio,
+///   which distributes them to mobile clients. Validation is local (no
+///   round-trip to studio on connect).
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuthConfig {
     #[serde(default = "default_provider")]
@@ -344,7 +348,7 @@ impl RawLfdConfig {
 
         let mut auth = self.auth;
         if self.mode == Mode::Container && auth.provider == "local" && auth.token.is_none() {
-            auth.provider = "loopflow.studio".to_string();
+            auth.provider = "studio".to_string();
         }
 
         Ok(LfdConfig {
@@ -902,7 +906,7 @@ mod tests {
         assert_eq!(resolved.runtime_backend, RuntimeBackend::Compose);
         assert_eq!(resolved.storage, StorageType::Postgres);
         assert_eq!(resolved.executor.r#type, ExecutorType::Docker);
-        assert_eq!(resolved.auth.provider, "loopflow.studio");
+        assert_eq!(resolved.auth.provider, "studio");
     }
 
     #[test]

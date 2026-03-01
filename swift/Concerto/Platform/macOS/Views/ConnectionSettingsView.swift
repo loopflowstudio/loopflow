@@ -130,7 +130,7 @@ struct ConnectionSettingsView: View {
                         handleConnectWithPhoneChange(enabled)
                     }
 
-                Text("Enables DualAuth and exposes lfd for mobile discovery when signed in to loopflow.studio.")
+                Text("Enables mobile access and exposes lfd for discovery when signed in to studio.")
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
             }

@@ -107,7 +107,7 @@ struct DiscoveryView: View {
                     VStack(alignment: .leading, spacing: Spacing.sm) {
                         Text("No lfds found")
                             .font(Typography.sectionTitle())
-                        Text("Start lfd on your Mac with loopflow.studio auth to see it here.")
+                        Text("Start lfd on your Mac with studio auth to see it here.")
                             .font(Typography.body())
                             .foregroundStyle(.secondary)
                     }

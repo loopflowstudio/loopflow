@@ -16,7 +16,6 @@ use subtle::ConstantTimeEq;
 
 use crate::lfd::http;
 use crate::lfd::http::state::HttpState;
-use crate::lfd::registration::ConnectionValidator;
 use crate::lfd::token_ledger::TokenLedger;
 
 const THROTTLE_WINDOW: Duration = Duration::from_secs(60);
@@ -33,10 +32,9 @@ pub enum AuthProvider {
     Local { session_token: SecretString },
     /// Validate against a pre-shared static token.
     Static { token: SecretString },
-    /// Validate via loopflow.studio registration.
-    Studio { validator: ConnectionValidator },
-    /// Static local token on loopback plus connection-token validation elsewhere.
-    DualAuth {
+    /// Registered with studio. Static token on loopback, connection tokens
+    /// validated locally via ledger for remote clients.
+    Studio {
         local_token: SecretString,
         ledger: TokenLedger,
     },
@@ -60,10 +58,7 @@ impl AuthProvider {
                 authorize_expected_token(session_token, provided_token)
             }
             AuthProvider::Static { token } => authorize_expected_token(token, provided_token),
-            AuthProvider::Studio { validator } => {
-                authorize_connection_token(validator, provided_token).await
-            }
-            AuthProvider::DualAuth {
+            AuthProvider::Studio {
                 local_token,
                 ledger,
             } => match provided_token {
@@ -106,14 +101,14 @@ impl AuthProvider {
 
         match self {
             AuthProvider::Static { token: local_token } => token_matches(local_token, token),
-            AuthProvider::DualAuth { local_token, .. } => token_matches(local_token, token),
+            AuthProvider::Studio { local_token, .. } => token_matches(local_token, token),
             _ => false,
         }
     }
 
     pub fn connection_ledger(&self) -> Option<TokenLedger> {
         match self {
-            AuthProvider::DualAuth { ledger, .. } => Some(ledger.clone()),
+            AuthProvider::Studio { ledger, .. } => Some(ledger.clone()),
             _ => None,
         }
     }
@@ -229,22 +224,6 @@ pub async fn auth_middleware(
     }
 }
 
-async fn authorize_connection_token(
-    validator: &ConnectionValidator,
-    provided_token: Option<&str>,
-) -> Result<(), (StatusCode, &'static str)> {
-    match provided_token {
-        Some(token) => {
-            if validator.validate(token).await {
-                Ok(())
-            } else {
-                Err((StatusCode::UNAUTHORIZED, "invalid connection token"))
-            }
-        }
-        None => Err((StatusCode::UNAUTHORIZED, "missing connection token")),
-    }
-}
-
 fn authorize_expected_token(
     expected_token: &SecretString,
     provided_token: Option<&str>,
@@ -269,8 +248,7 @@ fn malformed_token_error(auth: &AuthProvider, source: IpAddr) -> (StatusCode, &'
         AuthProvider::Local { .. } | AuthProvider::Static { .. } => {
             (StatusCode::UNAUTHORIZED, "malformed token")
         }
-        AuthProvider::Studio { .. } => (StatusCode::UNAUTHORIZED, "malformed connection token"),
-        AuthProvider::DualAuth { .. } => {
+        AuthProvider::Studio { .. } => {
             if source.is_loopback() {
                 (StatusCode::UNAUTHORIZED, "malformed token")
             } else {
@@ -394,26 +372,10 @@ fn throttled_response() -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
 
-    use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
-    use crate::lfd::events::EventHub;
-    use crate::lfd::executor::WaveExecutor;
-    use crate::lfd::output::OutputHub;
-    use crate::lfd::provider_auth::ProviderAuthService;
-    use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::sessions::SessionManager;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::token_ledger::TokenLedger;
     use axum::http::HeaderValue;
-    use axum::routing::{get, post};
-    use axum::Json;
-    use axum::Router;
     use tempfile::tempdir;
-    use time::OffsetDateTime;
-    use tokio::net::TcpListener;
-    use tokio::sync::Mutex;
 
     fn token(value: &str) -> SecretString {
         SecretString::new(value.to_string())
@@ -591,133 +553,13 @@ mod tests {
         assert!(throttle.is_throttled(&key, 2));
     }
 
-    async fn test_http_state(auth: AuthProvider) -> HttpState {
-        let tmp = tempdir().expect("tempdir");
-        let db_path = tmp.path().join("lfd.db");
-        let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path))
-                .await
-                .expect("open sqlite store"),
-        );
-        let scheduler = Arc::new(Scheduler::new(1));
-        let output_hub = OutputHub::new(128, tmp.path().join("output"));
-        let event_hub = EventHub::new(128);
-        let executor = Arc::new(
-            WaveExecutor::new(
-                store.clone(),
-                scheduler.clone(),
-                output_hub.clone(),
-                event_hub.clone(),
-                SessionManager::new(store.clone()),
-                ExecutorConfig::default(),
-                GitHubConfig::default(),
-            )
-            .expect("build executor"),
-        );
-
-        HttpState {
-            store: store.clone(),
-            scheduler,
-            executor,
-            event_hub,
-            output_hub,
-            provider_auth: ProviderAuthService::new(store.clone()),
-            auth,
-            registration: None,
-            started_at: OffsetDateTime::now_utc(),
-            github: GitHubConfig::default(),
-            http_security: HttpSecurityConfig::default(),
-            auth_failure_throttle: AuthFailureThrottle::new(),
-            ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            sessions: SessionManager::new(store),
-        }
-    }
-
-    async fn spawn_server(app: Router) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind listener");
-        let addr = listener.local_addr().expect("listener addr");
-        let _server = tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("serve app");
-        });
-        format!("http://{addr}")
-    }
-
-    async fn spawn_connection_validator(valid: bool, calls: Arc<AtomicUsize>) -> String {
-        let app = Router::new().route(
-            "/api/v1/daemons/validate-connection",
-            post(move || {
-                let calls = calls.clone();
-                async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Json(serde_json::json!({ "valid": valid }))
-                }
-            }),
-        );
-        spawn_server(app).await
-    }
-
-    async fn spawn_studio_protected_app(
-        validator_valid: bool,
-        validation_calls: Arc<AtomicUsize>,
-    ) -> String {
-        let validator_base_url =
-            spawn_connection_validator(validator_valid, validation_calls).await;
-        let state = test_http_state(AuthProvider::Studio {
-            validator: ConnectionValidator::new(&validator_base_url),
-        })
-        .await;
-        let app = Router::new()
-            .route("/protected", get(|| async { StatusCode::OK }))
-            .route_layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                auth_middleware,
-            ))
-            .with_state(state);
-        spawn_server(app).await
-    }
-
-    async fn get_protected(base_url: &str, authorization: &str) -> reqwest::Response {
-        reqwest::Client::new()
-            .get(format!("{base_url}/protected"))
-            .header("authorization", authorization)
-            .send()
-            .await
-            .expect("request")
-    }
-
     #[tokio::test]
-    async fn middleware_rejects_malformed_studio_header_before_validator_call() {
-        let validation_calls = Arc::new(AtomicUsize::new(0));
-        let base_url = spawn_studio_protected_app(true, validation_calls.clone()).await;
-        let response = get_protected(&base_url, "Bearer malformed token").await;
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let payload: serde_json::Value = response.json().await.expect("json response");
-        assert_eq!(payload["error"]["message"], "malformed connection token");
-        assert_eq!(validation_calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn middleware_calls_studio_validator_for_present_token() {
-        let validation_calls = Arc::new(AtomicUsize::new(0));
-        let base_url = spawn_studio_protected_app(false, validation_calls.clone()).await;
-        let response = get_protected(&base_url, "Bearer plausible-token").await;
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let payload: serde_json::Value = response.json().await.expect("json response");
-        assert_eq!(payload["error"]["message"], "invalid connection token");
-        assert_eq!(validation_calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn dual_auth_accepts_local_static_token_on_loopback() {
+    async fn studio_accepts_local_static_token_on_loopback() {
         let tmp = tempdir().expect("tempdir");
         let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
             .await
             .expect("ledger");
-        let auth = AuthProvider::DualAuth {
+        let auth = AuthProvider::Studio {
             local_token: token("local-static"),
             ledger,
         };
@@ -729,14 +571,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dual_auth_accepts_connection_token_for_remote_source() {
+    async fn studio_accepts_connection_token_for_remote_source() {
         let tmp = tempdir().expect("tempdir");
         let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
             .await
             .expect("ledger");
         let mut minted = ledger.mint(1).await.expect("mint");
         let connection_token = minted.pop().expect("token");
-        let auth = AuthProvider::DualAuth {
+        let auth = AuthProvider::Studio {
             local_token: token("local-static"),
             ledger,
         };
@@ -748,12 +590,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dual_auth_rejects_static_token_for_remote_source() {
+    async fn studio_rejects_static_token_for_remote_source() {
         let tmp = tempdir().expect("tempdir");
         let ledger = TokenLedger::new(tmp.path().join("tokens.db"))
             .await
             .expect("ledger");
-        let auth = AuthProvider::DualAuth {
+        let auth = AuthProvider::Studio {
             local_token: token("local-static"),
             ledger,
         };

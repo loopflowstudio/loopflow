@@ -381,7 +381,7 @@ fn format_token_rotation_output(token: &str) -> String {
 }
 
 fn requires_secure_bind(provider: &str) -> bool {
-    provider == "loopflow.studio" || provider == "dual"
+    provider == "studio"
 }
 
 fn is_tailscale_ip(ip: std::net::IpAddr) -> bool {
@@ -466,9 +466,8 @@ mod tests {
     }
 
     #[test]
-    fn secure_bind_required_for_studio_and_dual() {
-        assert!(requires_secure_bind("loopflow.studio"));
-        assert!(requires_secure_bind("dual"));
+    fn secure_bind_required_for_studio() {
+        assert!(requires_secure_bind("studio"));
         assert!(!requires_secure_bind("local"));
         assert!(!requires_secure_bind("static"));
     }

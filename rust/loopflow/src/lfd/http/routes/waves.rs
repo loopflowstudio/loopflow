@@ -1581,20 +1581,43 @@ mod tests {
 
     fn init_git_repo(path: &StdPath) {
         std::fs::create_dir_all(path).expect("create repo directory");
-        let git = |args: &[&str]| {
-            let status = Command::new("git")
-                .args(args)
-                .current_dir(path)
-                .status()
-                .unwrap_or_else(|e| panic!("git {}: {e}", args[0]));
-            assert!(status.success(), "git {} failed", args[0]);
-        };
-        git(&["init", "-b", "main"]);
-        git(&["config", "user.email", "test@example.com"]);
-        git(&["config", "user.name", "Test User"]);
+
+        let status = Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(path)
+            .status()
+            .expect("run git init");
+        assert!(status.success());
+
+        let status = Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(path)
+            .status()
+            .expect("set git user email");
+        assert!(status.success());
+
+        let status = Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(path)
+            .status()
+            .expect("set git user name");
+        assert!(status.success());
+
         std::fs::write(path.join("README.md"), "seed").expect("write seed file");
-        git(&["add", "."]);
-        git(&["commit", "-m", "init"]);
+
+        let status = Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .status()
+            .expect("git add");
+        assert!(status.success());
+
+        let status = Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(path)
+            .status()
+            .expect("git commit");
+        assert!(status.success());
     }
 
     #[test]
@@ -1640,8 +1663,36 @@ mod tests {
 
         let repo_a = "/tmp/repo-a";
         let repo_b = "/tmp/repo-b";
-        let wave_a = make_wave(repo_a, "infra");
-        let wave_b = make_wave(repo_b, "infra");
+        let wave_a = Wave {
+            id: LfdId::new(),
+            name: "infra".to_string(),
+            repo: repo_a.to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
+        };
+        let wave_b = Wave {
+            id: LfdId::new(),
+            name: "infra".to_string(),
+            repo: repo_b.to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
+        };
 
         store.create_wave(&wave_a).await.expect("create wave_a");
         store.create_wave(&wave_b).await.expect("create wave_b");
@@ -1701,7 +1752,21 @@ mod tests {
                 .expect("store should open"),
         );
 
-        let source_wave = make_wave("/tmp/source-repo", "infra");
+        let source_wave = Wave {
+            id: LfdId::new(),
+            name: "infra".to_string(),
+            repo: "/tmp/source-repo".to_string(),
+            mode: WaveMode::Loop,
+            primary_flow: "ship-roadmap".to_string(),
+            cron: None,
+            direction: Vec::new(),
+            area: Vec::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            created_at: Some(OffsetDateTime::now_utc()),
+            serialized: false,
+        };
         store
             .create_wave(&source_wave)
             .await

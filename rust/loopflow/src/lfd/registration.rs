@@ -244,11 +244,9 @@ impl RegistrationClient {
             return Err(RegistrationError::Http(response.status().as_u16()));
         }
 
-        let body: HeartbeatResponse = response
-            .json()
-            .await
-            .map_err(|e| RegistrationError::Parse(e.to_string()))?;
-        self.apply_heartbeat_response(body).await;
+        if let Ok(body) = response.json::<HeartbeatResponse>().await {
+            self.apply_heartbeat_response(body).await;
+        }
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

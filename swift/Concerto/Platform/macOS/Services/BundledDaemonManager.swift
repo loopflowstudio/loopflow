@@ -205,7 +205,7 @@ final class BundledDaemonManager {
         }
 
         process.executableURL = lfdPath
-        process.arguments = ["serve"]
+        process.arguments = connectWithPhone ? ["serve", "--allow-insecure-bind"] : ["serve"]
 
         var env = ProcessInfo.processInfo.environment
         env["LFD_HTTP_ADDR"] = connectWithPhone ? "0.0.0.0:\(port)" : "127.0.0.1:\(port)"
@@ -392,7 +392,9 @@ final class BundledDaemonManager {
             }
         }
 
-        args += [lfdContainerImage(), "serve"]
+        args += connectWithPhone
+            ? [lfdContainerImage(), "serve", "--allow-insecure-bind"]
+            : [lfdContainerImage(), "serve"]
         return args
     }
 

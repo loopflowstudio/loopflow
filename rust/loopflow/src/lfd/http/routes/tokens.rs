@@ -8,6 +8,7 @@ use crate::lfd::auth::ParsedToken;
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
+use crate::lfd::token_ledger::TokenLedgerError;
 
 #[derive(Debug, Deserialize)]
 pub struct RevokeTokensRequest {
@@ -62,9 +63,9 @@ pub async fn revoke_tokens_handler(
     Ok(Json(RevokeTokensResponse { revoked }))
 }
 
-fn map_ledger_error(error: crate::lfd::token_ledger::TokenLedgerError) -> ApiError {
+fn map_ledger_error(error: TokenLedgerError) -> ApiError {
     match error {
-        crate::lfd::token_ledger::TokenLedgerError::InvalidPrefix => {
+        TokenLedgerError::InvalidPrefix => {
             api_error(StatusCode::BAD_REQUEST, "invalid token hash prefix")
         }
         other => api_error(

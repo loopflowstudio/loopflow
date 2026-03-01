@@ -1,17 +1,19 @@
 # 05: Security Hardening
 
-**Finish line:** No credentials visible in Debug output. lfd container runs as non-root. Studio auth has a validation cache.
+**Finish line:** No credentials visible in Debug output. lfd container runs as non-root. `@unchecked Sendable` uses are audited.
 
 ## Scope
 
-**Credential redaction.** Replace `Option<String>` with `SecretString` for the GitHub token in `GitHubConfig`, or implement a manual `Debug` that redacts it. `GitHubConfig` derives `Debug` — the token is currently printable.
+**Credential redaction.** `GitHubConfig` derives `Debug` with `token: Option<String>` — the token is printable in debug output. Replace with `SecretString` or implement a manual `Debug` that redacts it.
 
-**Container hardening.** Add a non-root user to `docker/lfd/Dockerfile` (the agent image already has one). Pin `opencode` to a specific version with checksum verification in the agent Dockerfile.
+**Container hardening.** Add a non-root user to `docker/lfd/Dockerfile` (the agent image already has one). Pin `opencode` to a specific version with checksum verification in `install-loopflow.sh`.
 
-**Studio auth caching.** Studio mode makes a network call to the Studio API on every authenticated request. Add a short TTL cache (e.g., 60s) for validated connection tokens to reduce per-request latency and eliminate the DoS amplification vector.
+**`@unchecked Sendable` audit.** 18 uses across 14 Swift files — services (`AuthService`, `DiscoveryService`, `LocalWaveService`, `VoiceInputService`, `NotificationService`, `CertificatePinningDelegate`, `CredentialSocketServer`, `ConnectionSecretStore`, `TokenProvider`), design (`BrandColors`), and tests. Document why each is safe or fix the underlying concurrency issue.
 
-**`@unchecked Sendable` audit.** Review all 6+ uses in Swift Concerto services (`WaveService`, `AuthService`, `DiscoveryService`, `CredentialSocketServer`, `CertificatePinningDelegate`, `LoopflowPalette`). Document why each is safe or fix the underlying concurrency issue.
+**`BudgetConfig::default()` trap.** `BudgetConfig` derives `Default`, but `Default::default()` gives zeros while serde deserialization gives the real defaults (50k/30k/20k). Make `Default` produce the real values, or remove the `Default` derive and require explicit construction.
 
-**`BudgetConfig::default()` trap.** Make `BudgetConfig` and `AutopruneConfig` implement `Default` with the real default values (50k/30k/20k) instead of zeros. Or remove the `Default` derive and require explicit construction.
+## Already verified safe
 
-**Webhook security — verified safe, no work needed.** Research during the daemon integrity sprint confirmed: `github_webhook_handler` returns HTTP 503 when `webhook_secret` is empty (before processing any payload), `verify_webhook_signature` rejects empty secrets as a second layer, and HMAC uses constant-time comparison.
+**Webhook security.** `github_webhook_handler` returns HTTP 503 when `webhook_secret` is empty. `verify_webhook_signature` rejects empty secrets. HMAC uses constant-time comparison.
+
+**Studio auth caching.** `TokenLedger` implements a 1-hour TTL cache for validated connection tokens.

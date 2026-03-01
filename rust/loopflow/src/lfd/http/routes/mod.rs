@@ -14,6 +14,9 @@ pub mod waves;
 pub mod worktrees;
 pub mod ws;
 
+#[cfg(test)]
+pub(crate) mod test_helpers;
+
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
     format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,

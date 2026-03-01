@@ -2030,6 +2030,9 @@ pub type SharedStore = Arc<Store>;
 mod tests {
     use super::{ExecutionStore, ForkRun, ForkRunStatus, StorageConfig};
     use crate::lfd::id::LfdId;
+    use crate::lfd::sessions::types::{
+        Session as SessionRecord, SessionConfig as SessionRecordConfig, SessionStatus,
+    };
     use crate::lfd::types::{
         AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
         QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Signal, Stimulus,
@@ -2089,12 +2092,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn sqlite_store_basic_suite() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
+    async fn run_store_basic_suite(store: &super::Store) {
         let mut wave = make_wave("/repo");
         store.create_wave(&wave).await.expect("create wave");
         assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
@@ -2465,6 +2463,78 @@ mod tests {
             .await
             .expect("get deleted wave")
             .is_none());
+
+        // Session CRUD
+        let session = SessionRecord {
+            id: LfdId::new(),
+            harness: "claude".to_string(),
+            status: SessionStatus::Active,
+            wave_run_id: None,
+            provider_session_id: None,
+            config: SessionRecordConfig {
+                step: "design".to_string(),
+                repo_root: "/tmp/repo".to_string(),
+                ..Default::default()
+            },
+            created_at: OffsetDateTime::now_utc(),
+            ended_at: None,
+        };
+        store
+            .create_session(&session)
+            .await
+            .expect("create session");
+        let loaded_session = store
+            .get_session(&session.id)
+            .await
+            .expect("get session")
+            .expect("session exists");
+        assert_eq!(loaded_session.harness, "claude");
+        assert_eq!(loaded_session.status, SessionStatus::Active);
+
+        store
+            .update_session_status(
+                &session.id,
+                SessionStatus::Ended,
+                Some(OffsetDateTime::now_utc().unix_timestamp()),
+            )
+            .await
+            .expect("update session status");
+        let ended_session = store
+            .get_session(&session.id)
+            .await
+            .expect("get ended session")
+            .expect("session exists");
+        assert_eq!(ended_session.status, SessionStatus::Ended);
+        assert!(ended_session.ended_at.is_some());
+
+        let active_sessions = store
+            .list_sessions_by_statuses(&[SessionStatus::Active])
+            .await
+            .expect("list active sessions");
+        assert!(active_sessions.is_empty());
+        let ended_sessions = store
+            .list_sessions_by_statuses(&[SessionStatus::Ended])
+            .await
+            .expect("list ended sessions");
+        assert_eq!(ended_sessions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_basic_suite() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path);
+        let store = super::open_store(&config).await.expect("store should open");
+        run_store_basic_suite(&store).await;
+    }
+
+    #[tokio::test]
+    #[ignore] // requires DATABASE_URL
+    async fn postgres_store_parity() {
+        let url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let store = super::open_store(&StorageConfig::postgres(url))
+            .await
+            .expect("connect");
+        run_store_basic_suite(&store).await;
     }
 
     #[tokio::test]

@@ -192,9 +192,7 @@ pub fn publish_release(
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, options.target.as_deref(), &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, options.target.as_deref())?;
 
     if needs_bootstrap(&main_repo, &target)? {
         if options.dry_run {
@@ -387,9 +385,7 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, target_name, &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let latest_tag = latest_tag_optional(&main_repo, &target)?;
     let (workflow, release_exists) = match latest_tag.as_deref() {
@@ -418,9 +414,7 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Vec<Me
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, target_name, &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let prev_tag = match latest_tag_optional(&main_repo, &target)? {
         Some(tag) => tag,
@@ -444,9 +438,7 @@ pub fn release_notes(
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, target_name, &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let resolved_prev_tag = match prev_tag {
         Some(tag) => tag.to_string(),
@@ -474,9 +466,7 @@ pub fn release_bump(
     target_name: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, target_name, &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let version = normalize_version(version);
     bump_manifest_versions(&main_repo, &target, &version, progress)
@@ -486,9 +476,7 @@ pub fn release_bump(
 ///
 /// Returns the full tag string (e.g. `v0.9.6`).
 pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> OpsResult<String> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let config = load_config_or_default(Some(&main_repo));
-    let target = resolve_target(&config, target_name, &main_repo)?;
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let version = normalize_version(version);
     tag_and_push(&main_repo, &version, &target)
@@ -549,6 +537,19 @@ fn resolve_target(
         .ok_or_else(|| OpsError::Message(format!("unknown release target: {selected_name}")))?;
 
     Ok(build_release_target(&selected_name, target_config, repo))
+}
+
+/// Resolve the main repo root and release target from a repo path and optional target name.
+///
+/// Common preamble for all decomposed release functions.
+fn resolve_repo_and_target(
+    repo: &Path,
+    target_name: Option<&str>,
+) -> OpsResult<(PathBuf, ReleaseTarget)> {
+    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let config = load_config_or_default(Some(&main_repo));
+    let target = resolve_target(&config, target_name, &main_repo)?;
+    Ok((main_repo, target))
 }
 
 fn build_release_target(name: &str, config: &ReleaseTargetConfig, repo: &Path) -> ReleaseTarget {

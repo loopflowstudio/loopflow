@@ -12,7 +12,7 @@ use crate::engine::worktrees::{
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::{generate_pr_message, resolve_wave_name};
+
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
@@ -22,6 +22,9 @@ pub struct LandOptions {
     pub create_pr: bool,
     pub worktree: Option<String>,
     pub lint: bool,
+    pub commit_message: Option<String>,
+    pub pr_title: Option<String>,
+    pub pr_body: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +56,12 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
     } else {
         ensure_pr(&repo_root, &feature_branch, options, progress)?;
-        finalize_remote(&repo_root, progress)?;
+        finalize_remote(
+            &repo_root,
+            options.pr_title.as_deref(),
+            options.pr_body.as_deref(),
+            progress,
+        )?;
     }
 
     let rotation = rotate_worktree(&repo_root, &main_repo, progress)?;
@@ -79,11 +87,16 @@ fn prepare_land(
     }
 
     if !options.strict {
+        let message = options
+            .commit_message
+            .clone()
+            .unwrap_or_else(|| "lf land: stage uncommitted changes".to_string());
         let commit_options = CommitOptions {
             add: true,
             push: true,
             create_draft_pr: true,
-            ..CommitOptions::for_task("commit")
+            message: Some(message),
+            ..CommitOptions::for_task("land")
         };
         let _ = commit_workflow(repo_root, &commit_options, progress)?;
     }
@@ -146,13 +159,23 @@ fn ensure_pr(
     Ok(())
 }
 
-fn finalize_remote(repo_root: &Path, progress: &impl Progress) -> OpsResult<()> {
-    progress.status("Updating PR...");
-    let wave = resolve_wave_name(repo_root, None);
-    let message = generate_pr_message(repo_root, wave.as_deref())?;
-    update_pr_message(repo_root, &message.title, &message.body)?;
-    mark_ready(repo_root)?;
-    enable_auto_merge(repo_root, &message.title, &message.body)?;
+fn finalize_remote(
+    repo_root: &Path,
+    pr_title: Option<&str>,
+    pr_body: Option<&str>,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    if let Some(title) = pr_title {
+        let body = pr_body.unwrap_or("");
+        progress.status("Updating PR...");
+        update_pr_message(repo_root, title, body)?;
+        mark_ready(repo_root)?;
+        enable_auto_merge(repo_root, title, body)?;
+    } else {
+        progress.status("Enabling auto-merge...");
+        mark_ready(repo_root)?;
+        enable_auto_merge_existing(repo_root)?;
+    }
 
     if let Some(url) = current_pr_url(repo_root)? {
         progress.status(&format!("\n{url}\n"));
@@ -265,6 +288,22 @@ fn enable_auto_merge(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
         cmd.arg("--body").arg(body);
     }
     cmd.current_dir(repo);
+    if let Err(err) = run_command(&mut cmd) {
+        return Err(OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
+        });
+    }
+    Ok(())
+}
+
+fn enable_auto_merge_existing(repo: &Path) -> OpsResult<()> {
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr")
+        .arg("merge")
+        .arg("--squash")
+        .arg("--auto")
+        .current_dir(repo);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

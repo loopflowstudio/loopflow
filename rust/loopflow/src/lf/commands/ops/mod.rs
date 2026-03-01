@@ -33,12 +33,20 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             create_pr,
             worktree,
             no_lint,
+            message,
+            title,
+            body,
         } => land_current(
-            *strict,
-            *local,
-            *create_pr,
-            worktree.as_deref(),
-            !no_lint,
+            &LandOptions {
+                strict: *strict,
+                local: *local,
+                create_pr: *create_pr,
+                worktree: worktree.clone(),
+                lint: !no_lint,
+                commit_message: message.clone(),
+                pr_title: title.clone(),
+                pr_body: body.clone(),
+            },
             &progress,
         ),
         OpsCommand::Pr { refresh, no_lint } => open_pr(*refresh, !no_lint, &progress),
@@ -146,27 +154,10 @@ fn push_current(force: bool) -> Result<()> {
     crate::engine::git::push(&repo_root, force).map_err(Into::into)
 }
 
-fn land_current(
-    strict: bool,
-    local: bool,
-    create_pr: bool,
-    worktree: Option<&str>,
-    lint: bool,
-    progress: &impl Progress,
-) -> Result<()> {
+fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let result = land(
-        &repo_root,
-        &LandOptions {
-            strict,
-            local,
-            create_pr,
-            worktree: worktree.map(str::to_string),
-            lint,
-        },
-        progress,
-    )?;
+    let result = land(&repo_root, options, progress)?;
 
     match result.rotation {
         Some(RotationResult::Advanced { new_path, .. }) => {

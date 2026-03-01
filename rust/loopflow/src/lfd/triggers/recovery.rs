@@ -77,13 +77,12 @@ async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, StorageConfig};
+    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{AgentRun, AgentStatus};
     use std::sync::Arc;
     use tempfile::tempdir;
-    use time::Duration;
+    use time::{Duration, OffsetDateTime};
 
     fn make_agent(hours_ago: i64) -> AgentRun {
         AgentRun {

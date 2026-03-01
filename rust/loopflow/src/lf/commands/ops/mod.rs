@@ -7,12 +7,12 @@ use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
-    publish_release, rebase_with_recovery, release_status, AbandonOptions, CommitOptions,
-    IngestOptions, LandOptions, NextOptions, PrOptions, Progress, PublishOptions, RebaseOptions,
-    RotationResult,
+    publish_release, rebase_with_recovery, release_bump, release_check, release_notes,
+    release_status, release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions,
+    NextOptions, PrOptions, Progress, PublishOptions, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 
 pub fn run(op: &OpsCommand) -> Result<()> {
@@ -78,6 +78,17 @@ pub fn run(op: &OpsCommand) -> Result<()> {
                 release_publish(version, *dry_run, target.as_deref(), &progress)
             }
         }
+        OpsCommand::ReleaseCheck { target } => release_check_cmd(target.as_deref()),
+        OpsCommand::ReleaseNotes {
+            version,
+            prev_tag,
+            target,
+        } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
+        OpsCommand::ReleaseBump { version, target } => {
+            release_bump_cmd(version, target.as_deref(), &progress)
+        }
+        OpsCommand::ReleaseTag { version, target } => release_tag_cmd(version, target.as_deref()),
+        OpsCommand::ReleaseStatus { target } => release_status_cmd(target.as_deref()),
         OpsCommand::Lint => run_check("lint"),
         OpsCommand::Test => run_check("test"),
         OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),
@@ -250,6 +261,65 @@ fn ingest_cmd(wave: Option<&str>, progress: &impl Progress) -> Result<()> {
         progress,
     )?;
     println!("{}", result.dest.display());
+    Ok(())
+}
+
+fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let prs = release_check(&repo_root, target_name)?;
+
+    if prs.is_empty() {
+        eprintln!("No PRs merged since last tag.");
+        std::process::exit(1);
+    }
+
+    let is_tty = std::io::stdout().is_terminal();
+    if is_tty {
+        for pr in &prs {
+            println!(
+                "#{:<6} {} (+{} -{}, {} files)",
+                pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
+            );
+        }
+        println!("\n{} PR(s) merged since last tag.", prs.len());
+    } else {
+        let json = serde_json::to_string_pretty(&prs)?;
+        println!("{}", json);
+    }
+
+    Ok(())
+}
+
+fn release_notes_cmd(
+    version: &str,
+    prev_tag: Option<&str>,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    release_notes(&repo_root, version, prev_tag, target_name, progress)?;
+    println!(
+        "RELEASE_NOTES.md updated for v{}",
+        version.trim_start_matches('v')
+    );
+    Ok(())
+}
+
+fn release_bump_cmd(
+    version: &str,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    release_bump(&repo_root, version, target_name, progress)?;
+    println!("Manifests bumped to v{}", version.trim_start_matches('v'));
+    Ok(())
+}
+
+fn release_tag_cmd(version: &str, target_name: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let tag = release_tag(&repo_root, version, target_name)?;
+    println!("{}", tag);
     Ok(())
 }
 

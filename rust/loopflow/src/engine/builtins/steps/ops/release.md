@@ -1,9 +1,9 @@
 ---
 requires: optional version input in message text (patch|minor|major|vX.Y.Z)
-produces: RELEASE_NOTES.md
+produces: RELEASE_NOTES.md, tagged release
 diff_files: false
 ---
-Generate release notes and update `RELEASE_NOTES.md`.
+Run the full release workflow: check, bump, notes, commit, land, tag, verify.
 
 ## Input
 
@@ -16,21 +16,49 @@ If no input is provided, default to `patch`.
 
 ## Workflow
 
-1. Resolve target version from message text.
-2. Find previous tag:
+1. **Check for changes.** Skip if nothing merged since last tag.
    ```bash
-   git describe --tags --abbrev=0
+   lf ops release-check
    ```
-3. Find merged PRs since that tag (main/default branch):
+   Exit 1 means nothing merged — stop here.
+
+2. **Resolve version.** If input is `patch`/`minor`/`major`, determine the next version from the latest tag. For the remaining steps, use the resolved version.
+
+3. **Bump manifests.**
    ```bash
-   base=$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')
-   gh pr list --state merged --base "$base" --json number,title,body --limit 200
+   lf ops release-bump <version>
    ```
-4. Draft release notes grouped by user-facing impact.
-5. Write `RELEASE_NOTES.md` with `# v<version>` as the top header.
+
+4. **Generate release notes.** Analyze the merged PRs and write narrative notes.
+   ```bash
+   lf ops release-notes <version>
+   ```
+
+5. **Commit and land.**
+   ```bash
+   lf ops commit -m "release: v<version>"
+   lf ops land
+   ```
+
+6. **Tag and push.**
+   ```bash
+   lf ops release-tag <version>
+   ```
+
+7. **Verify.** Confirm the release workflow passes.
+   ```bash
+   lf ops release-status
+   ```
+   If the workflow fails, report the failure and stop.
+
+## Re-entry
+
+Each command is idempotent. Before re-running phases:
+- Check if the version commit already exists on main before re-bumping.
+- Check if the tag already exists before re-tagging.
 
 ## Guardrails
 
-- Be concrete: include real shipped changes, not vague summaries.
-- Keep it scannable: short sections and bullet points.
+- The version comes from the human or wave config. Don't decide it.
+- Be concrete in release notes: include real shipped changes, not vague summaries.
 - If required data is missing (tags/gh auth), state exactly what command failed and what to run.

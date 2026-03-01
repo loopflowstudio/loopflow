@@ -72,3 +72,5 @@ If `<lf:wave>` is present, check `wave/<wave>/README.md` in docs:
 **Concrete over abstract.** "Fast" means nothing. "P95 latency under 100ms" means something.
 
 **Decisions over options.** Don't present choices—make them. The design should be implementable as-is.
+
+**Complete over incremental.** Prefer landing an entire architectural chunk in one go. Splitting a coherent change into pieces creates backwards-compatibility adapters, dual states, and integration ambiguity. Only split when pieces are genuinely independent and each delivers something a user or developer would notice on its own.

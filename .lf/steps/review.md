@@ -33,9 +33,10 @@ Pick the lenses that matter most for this change. Combine or skip lenses as need
 Use review to move the branch forward, not just discuss it.
 
 During the session:
-- Fix straightforward issues directly.
+- Fix clear wins directly. If something is obviously better and relatively small, just do it — don't ask permission. Save questions for genuine tradeoffs.
 - Co-design unresolved decisions with the user when tradeoffs are non-obvious.
-- Offer concrete package options and let the user choose:
+- Prefer completing architectural chunks whole. Splitting a coherent change into pieces often creates backwards-compatibility adapters, dual states, and ambiguity that cost more than a larger PR. A 1500-LOC change where everything is consistent beats three 500-LOC changes that each leave the codebase in a transitional state.
+- When packaging options are genuinely needed, offer them — but don't default to "minimal" out of caution:
   - **Minimal** — smallest safe ship-now set.
   - **One more big push** — one additional meaningful improvement pass, then ship.
   - **Do it all** — complete scope now and accept longer cycle time.

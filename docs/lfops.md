@@ -212,7 +212,7 @@ lf ops wt prune --dry-run # show what would be pruned
 lf ops wt prune --force   # remove prunable worktrees
 ```
 
-Finds worktrees where the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
+Finds worktrees where the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or worktrees with uncommitted changes (scratch/ files are excluded).
 
 | Flag | Description |
 |------|-------------|

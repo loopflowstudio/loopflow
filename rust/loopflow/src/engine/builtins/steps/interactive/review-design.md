@@ -22,7 +22,7 @@ Pause after each major point. Let the human steer depth and order.
 Pick the lenses that matter most here. Combine or skip as needed:
 
 - **Intent and core decisions** — summarize the problem, approach, and the decisions that everything else hinges on.
-- **Scope and seams** — is this the right unit of work, or should it split?
+- **Scope and seams** — is this the right unit of work? Bias toward keeping architectural chunks whole. Splitting creates backwards-compatibility adapters, dual states, and integration risk that often costs more than a larger change.
 - **Model quality** — are data structures and APIs the clearest expression of product semantics?
 - **Alternatives and tradeoffs** — surface real options and sketch them.
 - **Failure modes** — identify where this is most likely to break.
@@ -33,13 +33,13 @@ Pick the lenses that matter most here. Combine or skip as needed:
 Use review as a working session, not a verdict ceremony.
 
 During the session:
-- Fix straightforward issues directly in the design/code path.
+- Fix clear wins directly in the design/code path. If something is obviously better and relatively small, just do it — don't ask permission.
 - Co-design unresolved decisions with the user; don't decide alone when tradeoffs are product-defining.
-- Near the end, run an explicit scope check and offer 2-3 package options:
+- Near the end, run an explicit scope check. Prefer architectural completeness — a design that lands as one coherent change avoids the cruft of transitional states. Only split when pieces are genuinely independent and each stands on its own.
+- If packaging options are genuinely needed, offer 2-3:
   - **Minimal** — smallest safe ship-now set.
   - **One more big push** — one additional high-leverage improvement, then ship.
   - **Do it all** — full intended scope now, with longer cycle/risk.
-- Use this scope check to balance completeness against reviewability. Too-small changes under-deliver. Too-large changes (past ~2500 LOC) become unreviewable.
 - For each package, state what lands now, what defers to the wave roadmap, and what extra risk/validation it adds.
 - Confirm the user has ingested and validated the updated design with explicit feedback.
 

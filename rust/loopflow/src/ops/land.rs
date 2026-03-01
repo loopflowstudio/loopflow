@@ -64,7 +64,7 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
         )?;
     }
 
-    let rotation = rotate_worktree(&repo_root, &main_repo, progress)?;
+    let rotation = rotate_worktree(&repo_root, &main_repo, &feature_branch, progress)?;
     Ok(LandResult {
         merged: true,
         rotation,
@@ -354,6 +354,7 @@ fn open_url(url: &str) {
 fn rotate_worktree(
     repo_root: &Path,
     main_repo: &Path,
+    feature_branch: &str,
     progress: &impl Progress,
 ) -> OpsResult<Option<RotationResult>> {
     let wave_name = match wave_name_from_worktree_and_main(repo_root, main_repo) {
@@ -378,7 +379,7 @@ fn rotate_worktree(
     let has_items = wave_dir.exists() && has_wave_items(&wave_dir)?;
 
     if has_items {
-        let result = create_with_schema(main_repo, &wave_name, None, None)?;
+        let result = create_with_schema(main_repo, &wave_name, Some(feature_branch), None)?;
         progress.status(&format!(
             "Created new worktree at {}",
             result.path.display()
@@ -413,4 +414,93 @@ fn has_wave_items(wave_dir: &Path) -> OpsResult<bool> {
         return Ok(true);
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops::NullProgress;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn git(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn rotate_worktree_bases_on_feature_branch() {
+        let dir = TempDir::new().unwrap();
+        let main_repo = dir.path().join("repo");
+        std::fs::create_dir(&main_repo).unwrap();
+
+        // Set up main repo with an initial commit.
+        git(&main_repo, &["init", "-b", "main"]);
+        git(&main_repo, &["config", "user.email", "test@test.com"]);
+        git(&main_repo, &["config", "user.name", "test"]);
+        std::fs::write(main_repo.join("file.txt"), "initial").unwrap();
+        git(&main_repo, &["add", "."]);
+        git(&main_repo, &["commit", "-m", "initial"]);
+        let main_commit = git(&main_repo, &["rev-parse", "HEAD"]);
+
+        // Create a feature branch with an extra commit ahead of main.
+        let feature_branch = "test.mywave.20260228_1500";
+        git(&main_repo, &["checkout", "-b", feature_branch]);
+        std::fs::write(main_repo.join("feature.txt"), "feature work").unwrap();
+        git(&main_repo, &["add", "."]);
+        git(&main_repo, &["commit", "-m", "feature"]);
+        let feature_commit = git(&main_repo, &["rev-parse", "HEAD"]);
+        git(&main_repo, &["checkout", "main"]);
+
+        assert_ne!(main_commit, feature_commit);
+
+        // Create a worktree at repo.mywave (the naming convention rotate expects).
+        let wt_path = dir.path().join("repo.mywave");
+        git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "wt-temp",
+                wt_path.to_str().unwrap(),
+                "main",
+            ],
+        );
+
+        // Add wave items so rotation creates a new worktree.
+        let wave_dir = main_repo.join("wave").join("mywave");
+        std::fs::create_dir_all(&wave_dir).unwrap();
+        std::fs::write(wave_dir.join("01-next-item.md"), "# Next").unwrap();
+
+        let result = rotate_worktree(&wt_path, &main_repo, feature_branch, &NullProgress)
+            .unwrap()
+            .expect("should produce a rotation");
+
+        let new_path = match result {
+            RotationResult::Advanced { new_path, .. } => new_path,
+            other => panic!("expected Advanced, got {:?}", other),
+        };
+
+        // The new worktree's HEAD must match the feature branch, not main.
+        let new_head = git(&new_path, &["rev-parse", "HEAD"]);
+        assert_eq!(
+            new_head, feature_commit,
+            "new worktree should be based on the feature branch"
+        );
+        assert_ne!(
+            new_head, main_commit,
+            "new worktree should NOT be based on main"
+        );
+    }
 }

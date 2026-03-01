@@ -86,26 +86,34 @@ lf : "add type hints to utils.py"
 
 ## Build Features
 
-Design, implement, polish, ship.
+Design, implement, gate, ship.
 
 ```bash
 lf ops wt create auth-feature       # create worktree
 lf design: add OAuth login         # discuss approach
 lf implement                       # build it
-lf gate                            # tests, lint, PR-ready
+lf gate                            # ship-ready check
 lf ops pr                           # open PR
 ```
 
 ### Steps chain
 
-Each step reads what the previous one wrote:
+| Step | What it does |
+|------|--------------|
+| `design` | Explore the problem, write spec to `scratch/<branch>.md` |
+| `implement` | Read spec, build it |
+| `gate` | Ship-ready check: tests, quality, PR description |
+| `review` | Assess quality, fix issues |
+| `lint` | Run ruff, fix issues |
+
+### How steps chain
 
 | Step | Reads | Writes |
 |------|-------|--------|
 | design | — | `scratch/<branch>.md` |
-| implement | `scratch/<branch>.md` | code, tests |
-| compress | code | simplified code |
-| gate | code, tests | PR description |
+| implement | `scratch/<branch>.md` | code |
+| gate | code, tests | code, PR description |
+| review | code | `scratch/review.md` |
 
 ### Named flows
 

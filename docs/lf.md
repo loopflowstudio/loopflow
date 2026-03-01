@@ -20,7 +20,7 @@ lf --list                    # show all available steps
 ## Examples
 
 ```bash
-lf review                    # run .claude/commands/review.md
+lf review                    # run the review step
 lf implement: add auth       # pass arguments after colon
 lf npx:explain-code          # fetch from npx skills and run
 lf sp:brainstorm             # run superpowers brainstorm skill

@@ -85,7 +85,7 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | Atom | What it does | File |
 |------|--------------|------|
 | **Step** | Runs a prompt with assembled context | `.lf/steps/*.md` |
-| **Flow** | Chains steps together | `.lf/flows/*.py` |
+| **Flow** | Chains steps together | `.lf/flows/*.yaml` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Area** | Focuses on part of the codebase | path argument |
 | **Stimulus** | When to run: once, loop, watch, cron | command |
@@ -141,12 +141,13 @@ Chains steps together with commits between them.
 # .lf/flows/build.yaml
 - implement
 - compress
+- lint
 - gate
 - update-wave
 ```
 
 ```bash
-lf --flow build
+lf build
 ```
 
 Or chain manually:

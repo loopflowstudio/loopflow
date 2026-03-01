@@ -29,7 +29,7 @@ Action buttons are the primary interaction path on mobile. Multi-client continui
 - Action quality depends on model prompt adherence
 - SwiftUI multiplatform behavior still differs in navigation and selection APIs
 - Tailscale remains a prerequisite for remote discovery-based connectivity
-- Discovery introduces an additional lfd→studio validation hop during connect
+- Studio dependency for token distribution: lfd validates locally, but token pool management requires studio coordination
 
 ## Metrics
 

@@ -19,33 +19,38 @@ A wave is **area × direction × flow**.
 ```yaml
 # wave/designer/designer.yaml
 flow: build
-stimulus:
-  kind: listen
-  source: infra
-  source_repo: /Users/jack/src/other-repo # optional
+mode: loop
+direction:
+  - ux
+area:
+  - designs/
+triggers:
+  - signal: wave
+    source_wave_id: infra
+    flow: build
 ```
 
-### When Waves Run
+### Modes
 
-Stimuli control when a wave activates. Pick based on what you're trying to do.
+The wave's `mode` controls its execution pattern.
 
-**Scheduled** — loop through a backlog, run daily maintenance, or execute once:
+| Mode | Behavior | Example |
+|------|----------|---------|
+| **manual** | Single run | Ship one feature, run one audit |
+| **loop** | Continuous until stopped | Work through a backlog, grind PRs |
+| **cron** | On a schedule | Daily QA pass, weekly dependency scan |
 
-| Stimulus | Use case | Example |
-|----------|----------|---------|
-| **Once** | Single run | Ship one feature, run one audit |
-| **Loop** | Continuous until stopped | Work through a backlog, grind PRs |
-| **Cron** | On a schedule | Daily QA pass, weekly dependency scan |
+### Triggers
 
-**Reactive** — rebuild when main moves, react to other waves, fix CI when it breaks:
+A trigger pairs a signal (what changed) with a flow (what to run). Triggers are a list — multiple triggers of the same signal are fine.
 
-| Stimulus | Use case | Example |
-|----------|----------|---------|
-| **Watch** | Area changes on main | Rebuild docs when API changes |
-| **Listen** | Another wave completes | Run UX review after infra ships |
-| **CiFailure** | CI fails on a wave PR | Auto-fix failing checks |
+| Signal | What changed | Default flow |
+|--------|--------------|--------------|
+| **repo** | Paths changed on main | `integrate` |
+| **wave** | Another wave completed | `build` |
+| **ci_failure** | CI failed on a wave PR | `ci-fix` |
 
-Every new wave ships with watch and ci-fix stimuli by default.
+Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`. These don't need to be declared in the YAML.
 
 ## Steps
 
@@ -264,7 +269,7 @@ loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
 loopflow.create_wave("ux", repo=".", flow="build", direction=["ux"], area=["docs/"])
 loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra"], area=["rust/"])
-loopflow.add_stimulus("ux", kind="listen", source_wave_id="infra")
+loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 ```
 

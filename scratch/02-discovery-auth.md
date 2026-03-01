@@ -72,6 +72,8 @@ Tokens are single-claim, not single-use: once claimed, the same token keeps work
 - Per-repo or per-capability token scoping
 - Actual TLS serving (cert loading, config)
 - IP-based access control (security relies on unguessable tokens)
+- Auto-revoke on suspicious patterns (same token from multiple IPs)
+- `advertise_url` config for reverse proxy setups
 - Studio-side endpoints (coordinated but in studio repo)
 - Tailscale LocalAPI migration (follow-up from 01)
 

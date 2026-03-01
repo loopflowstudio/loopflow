@@ -12,6 +12,7 @@ swift/dist/
 
 # Claude Code (personal state)
 .claude/settings.local.json
+.claude/worktrees/
 
 # Loopflow (generated)
 .lf/log/

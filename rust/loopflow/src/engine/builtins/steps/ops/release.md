@@ -62,3 +62,7 @@ Each command is idempotent. Before re-running phases:
 - The version comes from the human or wave config. Don't decide it.
 - Be concrete in release notes: include real shipped changes, not vague summaries.
 - If required data is missing (tags/gh auth), state exactly what command failed and what to run.
+
+## Adaptation
+
+If you discovered repo-specific release conventions — changelog format, tag scheme, deploy hooks, version file locations — copy this step to `.lf/steps/release.md` and encode them.

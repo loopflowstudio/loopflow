@@ -82,3 +82,7 @@ it's a conscious choice, not an oversight.
 - Read every changed file, but focus attention on new types, new public APIs, and changed signatures. Mechanical changes (imports, formatting) aren't worth discussing.
 - When proposing simplifications, be concrete. Show the alternative type or signature, not just "this could be simpler."
 - Quote the diff when discussing specific decisions. Make it easy to see what you're referring to.
+
+## Adaptation
+
+Review sees the full chain. When something is wrong, ask: which upstream step should have caught or prevented this? Update that step's `.lf/steps/` copy, or update repo docs if the issue was missing context. Also update `.lf/steps/review.md` itself when you notice recurring patterns the team cares about.

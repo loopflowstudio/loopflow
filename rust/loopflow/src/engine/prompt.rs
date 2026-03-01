@@ -274,6 +274,8 @@ pub struct PromptComponents {
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
     pub loopflow_doc: Option<String>,
+    /// Voice/tone guidance — resolved from user ~/.lf/ > repo .lf/ > builtin.
+    pub voice_doc: Option<String>,
     /// User message (positional args after step/flow name)
     pub message: Option<String>,
     /// How diff context was tiered
@@ -667,6 +669,9 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     // Load bundled LOOPFLOW.md (system instructions, always included)
     let loopflow_doc = Some(crate::engine::builtins::LOOPFLOW_DOC.to_string());
 
+    // Load voice doc: user ~/.lf/voice.md > repo .lf/voice.md > builtin
+    let voice_doc = resolve_voice_doc(repo_root);
+
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(GatheredContext(PromptComponents {
         surface: opts.surface,
@@ -681,6 +686,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         wave_memory,
         wave: opts.wave.clone(),
         loopflow_doc,
+        voice_doc,
         message: opts.message.clone(),
         diff_tier,
         diff_file_count,
@@ -748,6 +754,25 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     }
 
     Ok(docs)
+}
+
+/// Resolve voice doc: user `~/.lf/voice.md` > repo `.lf/voice.md` > builtin.
+/// Only one is loaded — first match wins.
+fn resolve_voice_doc(repo_root: &Path) -> Option<String> {
+    // 1. User-global
+    if let Some(home) = dirs::home_dir() {
+        let user_voice = home.join(".lf/voice.md");
+        if let Ok(content) = std::fs::read_to_string(&user_voice) {
+            return Some(content);
+        }
+    }
+    // 2. Repo-local
+    let repo_voice = repo_root.join(".lf/voice.md");
+    if let Ok(content) = std::fs::read_to_string(&repo_voice) {
+        return Some(content);
+    }
+    // 3. Builtin default
+    Some(crate::engine::builtins::VOICE_DOC.to_string())
 }
 
 fn gather_scratch_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
@@ -1548,6 +1573,13 @@ fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
             "<lf:rlm>\n{}\n</lf:rlm>",
             crate::engine::builtins::RLM_DOC
         ));
+    }
+
+    // Voice/tone guidance (interactive surfaces only — headless has no user to talk to)
+    if components.surface.is_interactive() {
+        if let Some(ref voice) = components.voice_doc {
+            parts.push(format!("<lf:voice>\n{}\n</lf:voice>", voice));
+        }
     }
 
     // Surface (interaction + rendering guidance)

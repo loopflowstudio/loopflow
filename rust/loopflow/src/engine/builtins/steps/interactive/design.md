@@ -125,3 +125,7 @@ When the idea fits in one commit (~1000 words max):
 **Dream big, detail fully, then size-check.** Don't constrain scope until the idea is fleshed out. Detailing the whole idea often reveals which parts matter most—that's what makes the eventual scoping good.
 
 Completeness is not required. Wrong guesses get fixed in implementation. The goal is to not block the next session, not to predict everything.
+
+## Adaptation
+
+If the design session keeps rediscovering the same context — architecture constraints, API boundaries, team preferences — update repo docs or wave context so future sessions start with it.

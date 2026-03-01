@@ -101,3 +101,7 @@ git diff main...HEAD     # see what changed
 ```
 
 Check `.lf/config.yaml` for `lint:` and `test:` commands. If not configured, check `TESTING.md` or CI config (`.github/workflows/`). A gate that passes locally but fails CI is a broken gate.
+
+## Adaptation
+
+Did you discover a quality check this repo always needs? A linter, a type check, a build step that should run every time? If so, copy this step to `.lf/steps/gate.md` and add it (or update the existing copy). Make the next gate faster by encoding what you learned.

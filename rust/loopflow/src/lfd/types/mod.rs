@@ -9,8 +9,8 @@ mod chat_message;
 mod chord;
 mod event;
 mod repo;
-mod stimulus;
 mod summary;
+mod trigger;
 mod wave;
 
 pub use agent::{AgentRun, AgentStatus};
@@ -19,11 +19,10 @@ pub use chat_message::ChatMessage;
 pub use chord::Chord;
 pub use event::Event;
 pub use repo::{Repo, RepoEdge, RepoId};
-pub use stimulus::{
-    ActivationLog, ActivationOutcome, ActivationSource, PendingActivation, Signal, Stimulus,
-    CI_FIX_FLOW,
-};
 pub use summary::Summary;
+pub use trigger::{
+    ActivationLog, ActivationOutcome, PendingActivation, Signal, Trigger, CI_FIX_FLOW,
+};
 pub use wave::{
     LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,
     Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus, WaveStatus,

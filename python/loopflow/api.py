@@ -17,7 +17,7 @@ from .models import (
     Session,
     SessionConfig,
     SessionEventEnvelope,
-    Stimulus,
+    Trigger,
     TokenTotals,
     UsageSummary,
     UsageSummaryGroup,
@@ -207,24 +207,24 @@ def run_wave(
     )
 
 
-def add_stimulus(
+def add_trigger(
     name_or_id: str,
-    kind: str,
-    cron: Optional[str] = None,
+    signal: str,
+    flow: Optional[str] = None,
     source_wave_id: Optional[str] = None,
     max_iterations: Optional[int] = None,
 ) -> dict[str, Any]:
-    return _client().add_stimulus(
+    return _client().add_trigger(
         name_or_id,
-        kind,
-        cron=cron,
+        signal,
+        flow=flow,
         source_wave_id=source_wave_id,
         max_iterations=max_iterations,
     )
 
 
-def remove_stimulus(name_or_id: str, stimulus_id: str) -> dict[str, Any]:
-    return _client().remove_stimulus(name_or_id, stimulus_id)
+def remove_trigger(name_or_id: str, trigger_id: str) -> dict[str, Any]:
+    return _client().remove_trigger(name_or_id, trigger_id)
 
 
 def stop_wave(name_or_id: str) -> dict[str, Any]:
@@ -311,7 +311,7 @@ __all__ = [
     "Session",
     "SessionConfig",
     "SessionEventEnvelope",
-    "Stimulus",
+    "Trigger",
     "TokenTotals",
     "UsageSummary",
     "UsageSummaryGroup",
@@ -346,8 +346,8 @@ __all__ = [
     "list_chord_members",
     "list_wave_chords",
     "run_wave",
-    "add_stimulus",
-    "remove_stimulus",
+    "add_trigger",
+    "remove_trigger",
     "stop_wave",
     "land_wave",
     "next_wave",

@@ -10,7 +10,7 @@ use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{ActivationSource, Event, Signal, Stimulus, CI_FIX_FLOW};
+use crate::lfd::types::{Event, Signal, Trigger, CI_FIX_FLOW};
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -80,15 +80,14 @@ async fn handle_ci_failure_event(
     event_hub: &EventHub,
     activation: CiFailureActivation,
 ) -> Result<(), String> {
-    let stimulus = resolve_ci_failure_stimulus(store, &activation.wave_id).await?;
+    let trigger = resolve_ci_failure_trigger(store, &activation.wave_id).await?;
     let reason = format!(
         "CI failure for PR #{} on {} ({}): {}",
         activation.pr_number, activation.branch, activation.check_name, activation.logs_url
     );
     let envelope = ActivationEnvelope::new(
         &activation.wave_id,
-        Some(&stimulus.id),
-        ActivationSource::Push,
+        Some(&trigger.id),
         reason,
         &activation.commit_sha,
         &activation.commit_sha,
@@ -112,7 +111,7 @@ async fn handle_ci_failure_event(
         if matches!(outcome, Some(EnqueueOutcome::Dropped)) {
             tracing::warn!(
                 wave_id = %activation.wave_id,
-                stimulus_id = %stimulus.id,
+                trigger_id = %trigger.id,
                 "dropped CI failure activation because queue is full"
             );
         }
@@ -123,7 +122,7 @@ async fn handle_ci_failure_event(
             scheduler,
             event_hub,
             &wave,
-            stimulus.flow.clone(),
+            trigger.flow.clone(),
             envelope,
         )
         .await;
@@ -131,28 +130,27 @@ async fn handle_ci_failure_event(
     Ok(())
 }
 
-async fn resolve_ci_failure_stimulus(
+async fn resolve_ci_failure_trigger(
     store: &SharedStore,
     wave_id: &LfdId,
-) -> Result<Stimulus, String> {
-    let stimuli = store
-        .list_stimuli(Some(wave_id))
+) -> Result<Trigger, String> {
+    let triggers = store
+        .list_triggers(Some(wave_id))
         .await
         .map_err(|err| err.to_string())?;
-    if let Some(existing) = stimuli
+    if let Some(existing) = triggers
         .into_iter()
-        .find(|stimulus| stimulus.signal == Signal::CiFailure)
+        .find(|trigger| trigger.signal == Signal::CiFailure)
     {
         return Ok(existing);
     }
 
-    let stimulus = Stimulus {
+    let trigger = Trigger {
         id: LfdId::new(),
         wave_id: wave_id.clone(),
         source_wave_id: None,
         signal: Signal::CiFailure,
         flow: Some(CI_FIX_FLOW.to_string()),
-        cron: None,
         last_main_sha: None,
         last_triggered_at: Some(OffsetDateTime::now_utc().unix_timestamp()),
         created_at: Some(OffsetDateTime::now_utc()),
@@ -160,10 +158,10 @@ async fn resolve_ci_failure_stimulus(
         max_iterations: None,
     };
     store
-        .create_stimulus(&stimulus)
+        .create_trigger(&trigger)
         .await
         .map_err(|err| err.to_string())?;
-    Ok(stimulus)
+    Ok(trigger)
 }
 
 #[cfg(test)]
@@ -202,14 +200,13 @@ mod tests {
         wave
     }
 
-    async fn create_ci_failure_stimulus(store: &SharedStore, wave: &Wave) -> Stimulus {
-        let stimulus = Stimulus {
+    async fn create_ci_failure_trigger(store: &SharedStore, wave: &Wave) -> Trigger {
+        let trigger = Trigger {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
             source_wave_id: None,
             signal: Signal::CiFailure,
             flow: Some(CI_FIX_FLOW.to_string()),
-            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -217,42 +214,42 @@ mod tests {
             max_iterations: None,
         };
         store
-            .create_stimulus(&stimulus)
+            .create_trigger(&trigger)
             .await
-            .expect("create stimulus");
-        stimulus
+            .expect("create trigger");
+        trigger
     }
 
     #[tokio::test]
-    async fn resolve_ci_failure_stimulus_reuses_existing() {
+    async fn resolve_ci_failure_trigger_reuses_existing() {
         let store = create_store().await;
         let wave = create_wave(&store).await;
-        let existing = create_ci_failure_stimulus(&store, &wave).await;
+        let existing = create_ci_failure_trigger(&store, &wave).await;
 
-        let stimulus = resolve_ci_failure_stimulus(&store, &wave.id)
+        let trigger = resolve_ci_failure_trigger(&store, &wave.id)
             .await
-            .expect("resolve stimulus");
-        assert_eq!(stimulus.id, existing.id);
+            .expect("resolve trigger");
+        assert_eq!(trigger.id, existing.id);
 
-        let stimuli = store
-            .list_stimuli(Some(&wave.id))
+        let triggers = store
+            .list_triggers(Some(&wave.id))
             .await
-            .expect("list stimuli");
-        assert_eq!(stimuli.len(), 1);
+            .expect("list triggers");
+        assert_eq!(triggers.len(), 1);
     }
 
     #[tokio::test]
-    async fn resolve_ci_failure_stimulus_creates_default_ci_fix_flow() {
+    async fn resolve_ci_failure_trigger_creates_default_ci_fix_flow() {
         let store = create_store().await;
         let wave = create_wave(&store).await;
 
-        let stimulus = resolve_ci_failure_stimulus(&store, &wave.id)
+        let trigger = resolve_ci_failure_trigger(&store, &wave.id)
             .await
-            .expect("resolve stimulus");
+            .expect("resolve trigger");
 
-        assert_eq!(stimulus.signal, Signal::CiFailure);
-        assert_eq!(stimulus.flow.as_deref(), Some("ci-fix"));
-        assert!(stimulus.enabled);
+        assert_eq!(trigger.signal, Signal::CiFailure);
+        assert_eq!(trigger.flow.as_deref(), Some("ci-fix"));
+        assert!(trigger.enabled);
     }
 
     async fn create_serialized_wave(store: &SharedStore) -> Wave {
@@ -316,7 +313,7 @@ mod tests {
         let store = create_store().await;
         let event_hub = EventHub::new(16);
         let wave = create_serialized_wave(&store).await;
-        let stimulus = create_ci_failure_stimulus(&store, &wave).await;
+        let trigger = create_ci_failure_trigger(&store, &wave).await;
         let activation = CiFailureActivation {
             wave_id: wave.id.clone(),
             pr_number: 42,
@@ -337,8 +334,7 @@ mod tests {
             .await
             .expect("list pending");
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].stimulus_id, Some(stimulus.id));
-        assert_eq!(pending[0].source, ActivationSource::Push);
+        assert_eq!(pending[0].trigger_id, Some(trigger.id));
         assert_eq!(pending[0].from_sha, "abc123");
         assert_eq!(pending[0].to_sha, "abc123");
         assert!(pending[0].reason.contains("PR #42"));

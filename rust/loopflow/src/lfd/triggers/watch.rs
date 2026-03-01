@@ -11,7 +11,7 @@ use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{ActivationSource, Signal, Stimulus, Wave, WaveStatus};
+use crate::lfd::types::{Signal, Trigger, Wave, WaveStatus};
 
 pub fn spawn_watch_poller(
     store: SharedStore,
@@ -29,37 +29,37 @@ pub fn spawn_watch_poller(
                     break;
                 }
                 _ = interval.tick() => {
-                    check_watch_stimuli(&store, &executor, &scheduler, &event_hub).await;
+                    check_repo_triggers(&store, &executor, &scheduler, &event_hub).await;
                 }
             }
         }
     })
 }
 
-async fn check_watch_stimuli(
+async fn check_repo_triggers(
     store: &SharedStore,
     executor: &WaveExecutor,
     scheduler: &Arc<Scheduler>,
     event_hub: &EventHub,
 ) {
-    let stimuli = match store.list_stimuli_by_signal(Signal::Watch.as_i32()).await {
-        Ok(stimuli) => stimuli,
+    let triggers = match store.list_triggers_by_signal(Signal::Repo.as_i32()).await {
+        Ok(triggers) => triggers,
         Err(err) => {
-            tracing::error!(error = %err, "failed to list watch stimuli");
+            tracing::error!(error = %err, "failed to list repo triggers");
             return;
         }
     };
 
-    for stimulus in stimuli {
-        if !stimulus.enabled {
+    for trigger in triggers {
+        if !trigger.enabled {
             continue;
         }
 
-        let wave = match store.get_wave(&stimulus.wave_id).await {
+        let wave = match store.get_wave(&trigger.wave_id).await {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
-                tracing::error!(stimulus_id = %stimulus.id, error = %err, "failed to get wave");
+                tracing::error!(trigger_id = %trigger.id, error = %err, "failed to get wave");
                 continue;
             }
         };
@@ -68,12 +68,12 @@ async fn check_watch_stimuli(
             continue;
         }
 
-        match check_watch_stimulus(&wave, &stimulus) {
+        match check_repo_trigger(&wave, &trigger) {
             Ok(result) => {
                 if result.update_sha {
-                    let mut stimulus = stimulus.clone();
-                    stimulus.last_main_sha = Some(result.current_sha.clone());
-                    let _ = store.update_stimulus(&stimulus).await;
+                    let mut trigger = trigger.clone();
+                    trigger.last_main_sha = Some(result.current_sha.clone());
+                    let _ = store.update_trigger(&trigger).await;
                 }
 
                 if !result.trigger {
@@ -84,9 +84,8 @@ async fn check_watch_stimuli(
                     result.from_sha, result.current_sha
                 );
                 let envelope = ActivationEnvelope::new(
-                    &stimulus.wave_id,
-                    Some(&stimulus.id),
-                    ActivationSource::Poll,
+                    &trigger.wave_id,
+                    Some(&trigger.id),
                     reason,
                     &result.from_sha,
                     &result.current_sha,
@@ -101,14 +100,14 @@ async fn check_watch_stimuli(
                         scheduler,
                         event_hub,
                         &wave,
-                        stimulus.flow.clone(),
+                        trigger.flow.clone(),
                         envelope,
                     )
                     .await;
                 }
             }
             Err(err) => {
-                tracing::warn!(wave_id = %wave.id(), stimulus_id = %stimulus.id, error = %err, "watch check failed");
+                tracing::warn!(wave_id = %wave.id(), trigger_id = %trigger.id, error = %err, "repo trigger check failed");
             }
         }
     }
@@ -131,7 +130,7 @@ fn paths_match_areas(areas: &[String], paths: &[&Path]) -> bool {
         .any(|path| areas.iter().any(|area| path.starts_with(area)))
 }
 
-fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, git2::Error> {
+fn check_repo_trigger(wave: &Wave, trigger: &Trigger) -> Result<WatchCheck, git2::Error> {
     let repo = Repository::open(wave.repo())?;
 
     let mut remote = repo.find_remote("origin")?;
@@ -140,7 +139,7 @@ fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, 
     let reference = repo.find_reference("refs/remotes/origin/main")?;
     let current_sha = reference.peel_to_commit()?.id().to_string();
 
-    let last_sha = stimulus.last_main_sha.as_deref();
+    let last_sha = trigger.last_main_sha.as_deref();
     if last_sha.is_none() {
         return Ok(WatchCheck {
             from_sha: String::new(),

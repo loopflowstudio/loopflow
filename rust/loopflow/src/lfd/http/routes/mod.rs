@@ -19,7 +19,7 @@ pub(crate) mod test_helpers;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, stimulus_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
+    format_datetime, trigger_dto, wave_run_dto, CommitEntryDto, ErrorResponse, WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -100,11 +100,11 @@ pub async fn build_wave_dto(
         }
     );
 
-    let stimuli_list = store
-        .list_stimuli(Some(wave.id()))
+    let triggers_list = store
+        .list_triggers(Some(wave.id()))
         .await
         .unwrap_or_default();
-    let stimuli = stimuli_list.into_iter().map(stimulus_dto).collect();
+    let triggers = triggers_list.into_iter().map(trigger_dto).collect();
     let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
 
     let active_run = if include_active_run {
@@ -151,7 +151,7 @@ pub async fn build_wave_dto(
         stack_count: stack_runs.len() as u32,
         has_stale_pr_state: live_snapshot.has_stale_pr_state(),
         serialized: wave.serialized,
-        stimuli,
+        triggers,
         active_run,
     })
 }

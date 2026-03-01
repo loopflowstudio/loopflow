@@ -1,5 +1,5 @@
 flow: release
 message: minor
-stimulus:
-  kind: cron
-  cron: "0 2 1 * *"
+triggers:
+  - kind: cron
+    cron: "0 2 1 * *"

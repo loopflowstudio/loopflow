@@ -1,10 +1,10 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::store::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 use crate::lfd::types::{
-    ActivationLog, ActivationOutcome, ActivationSource, AgentRun, AgentStatus, ChatMemoryBlock,
-    ChatMessage, Chord, LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo,
-    RepoEdge, RepoId, Signal, Stimulus, Summary, Wave, WaveMode, WaveRun, WaveRunSnapshot,
-    WaveRunStackStatus, WaveRunStatus, WaveStatus,
+    ActivationLog, ActivationOutcome, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
+    LivePrState, LivePullRequestState, PendingActivation, PullRequest, Repo, RepoEdge, RepoId,
+    Signal, Summary, Trigger, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus,
+    WaveRunStatus, WaveStatus,
 };
 
 // -- Row adapter trait -------------------------------------------------------
@@ -234,54 +234,51 @@ pub fn map_live_pr_state_row(row: &impl StoreRow) -> StoreResult<LivePullRequest
     })
 }
 
-/// SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at,
+/// SELECT id, wave_id, signal, flow, last_main_sha, last_triggered_at, created_at,
 ///        enabled, source_wave_id, max_iterations
-pub fn map_stimulus_row(row: &impl StoreRow) -> StoreResult<Stimulus> {
-    let created_at = unix_to_datetime(row.bigint(7)?);
+pub fn map_trigger_row(row: &impl StoreRow) -> StoreResult<Trigger> {
+    let created_at = unix_to_datetime(row.bigint(6)?);
 
-    Ok(Stimulus {
+    Ok(Trigger {
         id: LfdId::from_raw(row.text(0)?),
         wave_id: LfdId::from_raw(row.text(1)?),
-        signal: Signal::from_i32(row.int(2)?),
+        signal: Signal::from_i32(row.int(2)?).expect("stored signal must be valid"),
         flow: row.opt_text(3)?,
-        cron: row.opt_text(4)?,
-        last_main_sha: row.opt_text(5)?,
-        last_triggered_at: row.opt_bigint(6)?,
+        last_main_sha: row.opt_text(4)?,
+        last_triggered_at: row.opt_bigint(5)?,
         created_at: Some(created_at),
-        enabled: row.int(8)? != 0,
-        source_wave_id: row.opt_text(9)?.map(LfdId::from_raw),
-        max_iterations: row.opt_int(10)?.map(|v| v as u32),
+        enabled: row.int(7)? != 0,
+        source_wave_id: row.opt_text(8)?.map(LfdId::from_raw),
+        max_iterations: row.opt_int(9)?.map(|v| v as u32),
     })
 }
 
-/// SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch
+/// SELECT id, wave_id, trigger_id, reason, from_sha, to_sha, queued_at, target_branch
 pub fn map_pending_activation_row(row: &impl StoreRow) -> StoreResult<PendingActivation> {
     Ok(PendingActivation {
         id: LfdId::from_raw(row.text(0)?),
         wave_id: LfdId::from_raw(row.text(1)?),
-        stimulus_id: row.opt_text(2)?.map(LfdId::from_raw),
-        source: ActivationSource::from_i32(row.int(3)?),
-        reason: row.text(4)?,
-        from_sha: row.text(5)?,
-        to_sha: row.text(6)?,
-        queued_at: row.bigint(7)?,
-        target_branch: row.text(8)?,
+        trigger_id: row.opt_text(2)?.map(LfdId::from_raw),
+        reason: row.text(3)?,
+        from_sha: row.text(4)?,
+        to_sha: row.text(5)?,
+        queued_at: row.bigint(6)?,
+        target_branch: row.text(7)?,
     })
 }
 
-/// SELECT id, wave_id, stimulus_id, source, reason, outcome, created_at
+/// SELECT id, wave_id, trigger_id, reason, outcome, created_at
 pub fn map_activation_log_row(row: &impl StoreRow) -> StoreResult<ActivationLog> {
-    let outcome = ActivationOutcome::parse(&row.text(5)?)
+    let outcome = ActivationOutcome::parse(&row.text(4)?)
         .ok_or_else(|| StoreError::InvalidData("invalid activation log outcome".to_string()))?;
 
     Ok(ActivationLog {
         id: LfdId::from_raw(row.text(0)?),
         wave_id: LfdId::from_raw(row.text(1)?),
-        stimulus_id: row.opt_text(2)?.map(LfdId::from_raw),
-        source: ActivationSource::from_i32(row.int(3)?),
-        reason: row.text(4)?,
+        trigger_id: row.opt_text(2)?.map(LfdId::from_raw),
+        reason: row.text(3)?,
         outcome,
-        created_at: row.bigint(6)?,
+        created_at: row.bigint(5)?,
     })
 }
 

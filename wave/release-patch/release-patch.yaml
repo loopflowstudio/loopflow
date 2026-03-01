@@ -1,5 +1,5 @@
 flow: release
 message: patch
-stimulus:
-  kind: cron
-  cron: "0 2 * * *"
+triggers:
+  - kind: cron
+    cron: "0 2 * * *"

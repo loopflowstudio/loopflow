@@ -15,12 +15,12 @@ use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::ensure_wave_worktree;
 use crate::lfd::executor::helpers::{auto_commit_if_dirty, resolve_current_step_name};
 use crate::lfd::http::dto::{
-    activation_log_dto, stimulus_dto, ActivationLogDto, CombineResponse, CombineResponseResult,
+    activation_log_dto, trigger_dto, ActivationLogDto, CombineResponse, CombineResponseResult,
     ContinueWaveResponse, DeletedResourceResponse, ErrorResponse, LandWaveResponse, ListResponse,
     NextWaveResponse, RestartStepResponse, RunWaveResponse, StopWaveResponse, WaveDto,
 };
 use crate::lfd::http::routes::wave_config::{
-    read_wave_config, update_wave_agent_config, StimulusDef,
+    read_wave_config, update_wave_agent_config, TriggerDef,
 };
 use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -31,8 +31,7 @@ use crate::lfd::triggers::{
     spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    ActivationSource, AgentStatus, Event, Signal, Stimulus, Wave, WaveMode, WaveRun, WaveRunStatus,
-    WaveStatus,
+    AgentStatus, Event, Signal, Trigger, Wave, WaveMode, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Deserialize)]
@@ -128,20 +127,17 @@ pub struct RunWaveRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AddStimulusRequest {
-    #[serde(alias = "kind")]
+pub struct AddTriggerRequest {
     signal: Signal,
     flow: Option<String>,
-    cron: Option<String>,
     source_wave_id: Option<String>,
     max_iterations: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
-struct ParsedStimulus {
+struct ParsedTrigger {
     signal: Signal,
     flow: Option<String>,
-    cron: Option<String>,
     source: Option<String>,
     source_repo: Option<String>,
 }
@@ -201,10 +197,10 @@ pub async fn create_wave_handler(
     let id = LfdId::new();
     let name = requested_name.unwrap_or_else(|| format!("wave-{}", id));
     let wave_config = read_wave_config(&repo_path, &name);
-    let config_stimulus = wave_config
+    let config_trigger = wave_config
         .as_ref()
-        .and_then(|config| config.stimulus.as_ref())
-        .map(parse_stimulus)
+        .and_then(|config| config.triggers.as_ref())
+        .map(parse_trigger)
         .transpose()?;
     let direction = direction
         .or_else(|| wave_config.as_ref().and_then(|c| c.direction.clone()))
@@ -220,8 +216,8 @@ pub async fn create_wave_handler(
     if existing {
         return Err(wave_name_exists_error(&name));
     }
-    let listen_source_wave_id =
-        resolve_listen_source_wave_id(&state.store, &repo, &name, config_stimulus.as_ref()).await?;
+    let wave_source_wave_id =
+        resolve_wave_source_wave_id(&state.store, &repo, &name, config_trigger.as_ref()).await?;
 
     let mode = wave_config
         .as_ref()
@@ -261,29 +257,28 @@ pub async fn create_wave_handler(
         return Err(err);
     }
 
-    // Collect stimuli: config-provided first, then defaults.
-    let mut stimuli: Vec<Stimulus> = Vec::new();
+    // Collect triggers: config-provided first, then defaults.
+    let mut triggers: Vec<Trigger> = Vec::new();
 
-    if let Some(parsed) = config_stimulus {
-        let mut s = Stimulus::new(LfdId::new(), wave.id().clone(), parsed.signal);
-        s.source_wave_id = listen_source_wave_id.clone();
+    if let Some(parsed) = config_trigger {
+        let mut s = Trigger::new(LfdId::new(), wave.id().clone(), parsed.signal);
+        s.source_wave_id = wave_source_wave_id.clone();
         s.flow = parsed.flow;
-        s.cron = parsed.cron;
-        stimuli.push(s);
+        triggers.push(s);
     }
 
-    // Every wave gets watch (rebase on main) and ci-fix unless config already covers them.
-    for (signal, flow) in [(Signal::Watch, "integrate"), (Signal::CiFailure, "ci-fix")] {
-        if stimuli.iter().any(|s| s.signal == signal) {
+    // Every wave gets repo (rebase on main) and ci-fix unless config already covers them.
+    for (signal, flow) in [(Signal::Repo, "integrate"), (Signal::CiFailure, "ci-fix")] {
+        if triggers.iter().any(|s| s.signal == signal) {
             continue;
         }
-        let mut s = Stimulus::new(LfdId::new(), wave.id().clone(), signal);
+        let mut s = Trigger::new(LfdId::new(), wave.id().clone(), signal);
         s.flow = Some(flow.to_string());
-        stimuli.push(s);
+        triggers.push(s);
     }
 
-    for stimulus in stimuli {
-        if let Err(err) = state.store.create_stimulus(&stimulus).await {
+    for trigger in triggers {
+        if let Err(err) = state.store.create_trigger(&trigger).await {
             let wave_id = wave.id().clone();
             let _ = state.store.delete_wave(&wave_id).await;
             return Err(map_store_error(err));
@@ -343,73 +338,57 @@ async fn ensure_wave_workspace(
         })
 }
 
-fn parse_stimulus(
-    stimulus: &StimulusDef,
-) -> Result<ParsedStimulus, (StatusCode, Json<ErrorResponse>)> {
-    let signal = match stimulus.kind.as_str() {
-        "watch" => Signal::Watch,
-        "listen" => Signal::Listen,
+fn parse_trigger(trigger: &TriggerDef) -> Result<ParsedTrigger, (StatusCode, Json<ErrorResponse>)> {
+    let signal = match trigger.signal.as_str() {
+        "repo" => Signal::Repo,
+        "wave" => Signal::Wave,
         "ci_failure" => Signal::CiFailure,
         value => {
             return Err(api_error(
                 StatusCode::BAD_REQUEST,
-                ApiMessage::Safe(format!("invalid wave config stimulus kind '{value}'")),
+                ApiMessage::Safe(format!("invalid wave config trigger signal '{value}'")),
             ));
         }
     };
 
-    let cron_value = trimmed_non_empty(stimulus.cron.as_deref());
-    let flow = trimmed_non_empty(stimulus.flow.as_deref());
-    let source = trimmed_non_empty(stimulus.source.as_deref());
-    let source_repo = trimmed_non_empty(stimulus.source_repo.as_deref());
+    let flow = trimmed_non_empty(trigger.flow.as_deref());
+    let source = trimmed_non_empty(trigger.source.as_deref());
+    let source_repo = trimmed_non_empty(trigger.source_repo.as_deref());
 
-    let cron = match signal {
-        Signal::Listen => {
-            if cron_value.is_some() {
-                return Err(api_error(
-                    StatusCode::BAD_REQUEST,
-                    "wave config listen stimulus does not accept cron",
-                ));
-            }
-            None
+    if signal != Signal::Wave {
+        if source.is_some() {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "wave config source is only valid for wave trigger",
+            ));
         }
-        _ => {
-            if source.is_some() {
-                return Err(api_error(
-                    StatusCode::BAD_REQUEST,
-                    "wave config source is only valid for listen stimulus",
-                ));
-            }
-            if source_repo.is_some() {
-                return Err(api_error(
-                    StatusCode::BAD_REQUEST,
-                    "wave config source_repo is only valid for listen stimulus",
-                ));
-            }
-            None
+        if source_repo.is_some() {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "wave config source_repo is only valid for wave trigger",
+            ));
         }
-    };
+    }
 
-    let source = if signal == Signal::Listen {
+    let source = if signal == Signal::Wave {
         Some(source.ok_or_else(|| {
             api_error(
                 StatusCode::BAD_REQUEST,
-                "wave config listen stimulus requires source",
+                "wave config wave trigger requires source",
             )
         })?)
     } else {
         None
     };
-    let source_repo = if signal == Signal::Listen {
+    let source_repo = if signal == Signal::Wave {
         source_repo
     } else {
         None
     };
 
-    Ok(ParsedStimulus {
+    Ok(ParsedTrigger {
         signal,
         flow,
-        cron,
         source,
         source_repo,
     })
@@ -422,27 +401,27 @@ fn trimmed_non_empty(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-async fn resolve_listen_source_wave_id(
+async fn resolve_wave_source_wave_id(
     store: &crate::lfd::store::SharedStore,
     repo: &str,
     wave_name: &str,
-    parsed: Option<&ParsedStimulus>,
+    parsed: Option<&ParsedTrigger>,
 ) -> Result<Option<LfdId>, (StatusCode, Json<ErrorResponse>)> {
     let Some(parsed) = parsed else {
         return Ok(None);
     };
-    if parsed.signal != Signal::Listen {
+    if parsed.signal != Signal::Wave {
         return Ok(None);
     }
     let source = parsed
         .source
         .as_deref()
-        .expect("listen stimulus parsing requires source");
+        .expect("wave trigger parsing requires source");
     let source_repo = parsed.source_repo.as_deref().unwrap_or(repo);
     if source_repo == repo && source == wave_name {
         return Err(api_error(
             StatusCode::BAD_REQUEST,
-            "listen stimulus cannot target the same wave",
+            "wave trigger cannot target the same wave",
         ));
     }
     resolve_wave_id_in_repo(store, source_repo, source)
@@ -730,13 +709,12 @@ async fn start_wave_run(
         .await
         .map_err(map_store_error)?;
 
-    // Re-enable all stimuli (they may have been disabled by a previous stop).
-    let _ = set_wave_stimuli_enabled(state, wave.id(), true).await;
+    // Re-enable all triggers (they may have been disabled by a previous stop).
+    let _ = set_wave_triggers_enabled(state, wave.id(), true).await;
 
     let envelope = ActivationEnvelope::new(
         wave.id(),
         None,
-        ActivationSource::Manual,
         "manual run requested via API",
         "",
         "",
@@ -816,12 +794,12 @@ pub async fn check_wave_ci_handler(
     })))
 }
 
-// Stimulus CRUD handlers
+// Trigger CRUD handlers
 
-pub async fn add_stimulus_handler(
+pub async fn add_trigger_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-    Json(payload): Json<AddStimulusRequest>,
+    Json(payload): Json<AddTriggerRequest>,
 ) -> ApiResult<serde_json::Value> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
@@ -834,18 +812,18 @@ pub async fn add_stimulus_handler(
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
     let source_wave_id = match payload.signal {
-        Signal::Listen => {
+        Signal::Wave => {
             let source = payload.source_wave_id.as_deref().ok_or_else(|| {
                 api_error(
                     StatusCode::BAD_REQUEST,
-                    "listen stimulus requires source_wave_id",
+                    "wave trigger requires source_wave_id",
                 )
             })?;
             let resolved = resolve_wave_id(&state, source).await?;
             if resolved == wave_id {
                 return Err(api_error(
                     StatusCode::BAD_REQUEST,
-                    "listen stimulus cannot target the same wave",
+                    "wave trigger cannot target the same wave",
                 ));
             }
             Some(resolved)
@@ -854,20 +832,19 @@ pub async fn add_stimulus_handler(
             if payload.source_wave_id.is_some() {
                 return Err(api_error(
                     StatusCode::BAD_REQUEST,
-                    "source_wave_id is only valid for listen stimulus",
+                    "source_wave_id is only valid for wave trigger",
                 ));
             }
             None
         }
     };
 
-    let stimulus = Stimulus {
+    let trigger = Trigger {
         id: LfdId::new(),
         wave_id,
         source_wave_id,
         signal: payload.signal,
         flow: payload.flow,
-        cron: payload.cron,
         last_main_sha: None,
         last_triggered_at: None,
         created_at: Some(OffsetDateTime::now_utc()),
@@ -877,49 +854,48 @@ pub async fn add_stimulus_handler(
 
     state
         .store
-        .create_stimulus(&stimulus)
+        .create_trigger(&trigger)
         .await
         .map_err(map_store_error)?;
 
     Ok(Json(serde_json::json!({
-        "id": stimulus.id.to_string(),
-        "kind": stimulus.signal.as_str(),
-        "flow": stimulus.flow,
-        "source_wave_id": stimulus.source_wave_id.as_ref().map(ToString::to_string),
-        "cron": stimulus.cron,
+        "id": trigger.id.to_string(),
+        "signal": trigger.signal.as_str(),
+        "flow": trigger.flow,
+        "source_wave_id": trigger.source_wave_id.as_ref().map(ToString::to_string),
     })))
 }
 
-pub async fn remove_stimulus_handler(
+pub async fn remove_trigger_handler(
     State(state): State<HttpState>,
-    Path((wave_id, stimulus_id)): Path<(String, String)>,
+    Path((wave_id, trigger_id)): Path<(String, String)>,
 ) -> ApiResult<serde_json::Value> {
     let _wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let stimulus_id = LfdId::from_str(&stimulus_id)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid stimulus id"))?;
+    let trigger_id = LfdId::from_str(&trigger_id)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid trigger id"))?;
 
     state
         .store
-        .delete_stimulus(&stimulus_id)
+        .delete_trigger(&trigger_id)
         .await
         .map_err(map_store_error)?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
-pub async fn list_stimuli_handler(
+pub async fn list_triggers_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
 ) -> ApiResult<serde_json::Value> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    let stimuli = state
+    let triggers = state
         .store
-        .list_stimuli(Some(&wave_id))
+        .list_triggers(Some(&wave_id))
         .await
         .map_err(map_store_error)?;
 
-    let dtos: Vec<_> = stimuli.into_iter().map(stimulus_dto).collect();
+    let dtos: Vec<_> = triggers.into_iter().map(trigger_dto).collect();
 
     Ok(Json(serde_json::json!({ "data": dtos })))
 }
@@ -954,8 +930,8 @@ pub async fn stop_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    // Disable all auto stimuli so tickers won't restart the wave.
-    let has_auto_stimulus = set_wave_stimuli_enabled(&state, &wave_id, false).await;
+    // Disable all auto triggers so tickers won't restart the wave.
+    let has_auto_trigger = set_wave_triggers_enabled(&state, &wave_id, false).await;
 
     if let Some(mut run) = run {
         run.status = WaveRunStatus::Failed;
@@ -973,7 +949,7 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.status = if has_auto_stimulus {
+            wave.status = if has_auto_trigger {
                 WaveStatus::Paused
             } else {
                 WaveStatus::Failed
@@ -985,8 +961,8 @@ pub async fn stop_wave_handler(
                 .map_err(map_store_error)?;
         }
         mark_active_agents_failed(&state, &wave_id).await;
-    } else if has_auto_stimulus {
-        // No active run, but still pause the wave so the auto stimulus doesn't restart it.
+    } else if has_auto_trigger {
+        // No active run, but still pause the wave so the auto trigger doesn't restart it.
         if let Some(mut wave) = state
             .store
             .get_wave(&wave_id)
@@ -1426,18 +1402,18 @@ fn resolve_wave_work_dir(
     Ok(worktree)
 }
 
-async fn set_wave_stimuli_enabled(state: &HttpState, wave_id: &LfdId, enabled: bool) -> bool {
-    // All remaining signals (Watch, Listen, CiFailure) are reactive/auto.
-    let stimuli = match state.store.list_stimuli(Some(wave_id)).await {
-        Ok(stimuli) => stimuli,
+async fn set_wave_triggers_enabled(state: &HttpState, wave_id: &LfdId, enabled: bool) -> bool {
+    // All remaining signals (Repo, Wave, CiFailure) are reactive/auto.
+    let triggers = match state.store.list_triggers(Some(wave_id)).await {
+        Ok(triggers) => triggers,
         Err(_) => return false,
     };
     let mut matched = false;
-    for mut stimulus in stimuli {
+    for mut trigger in triggers {
         matched = true;
-        if stimulus.enabled != enabled {
-            stimulus.enabled = enabled;
-            if state.store.update_stimulus(&stimulus).await.is_err() {
+        if trigger.enabled != enabled {
+            trigger.enabled = enabled;
+            if state.store.update_trigger(&trigger).await.is_err() {
                 return false;
             }
         }
@@ -1524,34 +1500,31 @@ mod tests {
     }
 
     #[test]
-    fn listen_stimulus_schema_requires_source() {
-        let stimulus = StimulusDef {
-            kind: "listen".to_string(),
+    fn wave_trigger_schema_requires_source() {
+        let trigger = TriggerDef {
+            signal: "wave".to_string(),
             flow: None,
-            cron: None,
             source: None,
             source_repo: None,
         };
 
-        let result = parse_stimulus(&stimulus);
+        let result = parse_trigger(&trigger);
         assert!(result.is_err());
     }
 
     #[test]
-    fn listen_stimulus_schema_parses_source_and_source_repo() {
-        let stimulus = StimulusDef {
-            kind: "listen".to_string(),
+    fn wave_trigger_schema_parses_source_and_source_repo() {
+        let trigger = TriggerDef {
+            signal: "wave".to_string(),
             flow: None,
-            cron: None,
             source: Some("infra".to_string()),
             source_repo: Some("/tmp/source".to_string()),
         };
 
-        let parsed = parse_stimulus(&stimulus).expect("parse stimulus");
-        assert_eq!(parsed.signal, Signal::Listen);
+        let parsed = parse_trigger(&trigger).expect("parse trigger");
+        assert_eq!(parsed.signal, Signal::Wave);
         assert_eq!(parsed.source.as_deref(), Some("infra"));
         assert_eq!(parsed.source_repo.as_deref(), Some("/tmp/source"));
-        assert!(parsed.cron.is_none());
     }
 
     #[tokio::test]
@@ -1595,7 +1568,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_listen_source_wave_id_rejects_self_target() {
+    async fn resolve_wave_source_wave_id_rejects_self_target() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("test.db");
         let store = std::sync::Arc::new(
@@ -1604,21 +1577,20 @@ mod tests {
                 .expect("store should open"),
         );
 
-        let parsed = ParsedStimulus {
-            signal: Signal::Listen,
+        let parsed = ParsedTrigger {
+            signal: Signal::Wave,
             flow: None,
-            cron: None,
             source: Some("designer".to_string()),
             source_repo: None,
         };
-        let err = resolve_listen_source_wave_id(&store, "/tmp/repo", "designer", Some(&parsed))
+        let err = resolve_wave_source_wave_id(&store, "/tmp/repo", "designer", Some(&parsed))
             .await
             .expect_err("self target should be rejected");
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
-    async fn resolve_listen_source_wave_id_resolves_cross_repo_source() {
+    async fn resolve_wave_source_wave_id_resolves_cross_repo_source() {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("test.db");
         let store = std::sync::Arc::new(
@@ -1633,15 +1605,14 @@ mod tests {
             .await
             .expect("create source wave");
 
-        let parsed = ParsedStimulus {
-            signal: Signal::Listen,
+        let parsed = ParsedTrigger {
+            signal: Signal::Wave,
             flow: None,
-            cron: None,
             source: Some("infra".to_string()),
             source_repo: Some("/tmp/source-repo".to_string()),
         };
         let resolved =
-            resolve_listen_source_wave_id(&store, "/tmp/listener-repo", "designer", Some(&parsed))
+            resolve_wave_source_wave_id(&store, "/tmp/listener-repo", "designer", Some(&parsed))
                 .await
                 .expect("source should resolve");
         assert_eq!(resolved, Some(source_wave.id().clone()));

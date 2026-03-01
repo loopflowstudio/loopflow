@@ -11,8 +11,7 @@ use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::ActivationSource;
-use crate::lfd::types::{Stimulus, Wave, WaveStatus};
+use crate::lfd::types::{Trigger, Wave, WaveStatus};
 
 pub fn spawn_loop_ticker(
     scheduler: Arc<Scheduler>,
@@ -77,14 +76,14 @@ async fn tick_loop_waves(
             continue;
         }
 
-        // Safety valve: check max_iterations on any stimulus for this wave.
-        if let Ok(stimuli) = store.list_stimuli(Some(wave.id())).await {
-            if let Some(stimulus) = stimuli.iter().find(|s| s.max_iterations.is_some()) {
-                if should_pause_for_max_iterations(stimulus, &wave) {
+        // Safety valve: check max_iterations on any trigger for this wave.
+        if let Ok(triggers) = store.list_triggers(Some(wave.id())).await {
+            if let Some(trigger) = triggers.iter().find(|t| t.max_iterations.is_some()) {
+                if should_pause_for_max_iterations(trigger, &wave) {
                     tracing::warn!(
                         wave = %wave.name(),
                         iteration = wave.iteration(),
-                        max = stimulus.max_iterations.unwrap_or(0),
+                        max = trigger.max_iterations.unwrap_or(0),
                         "max iterations exceeded, pausing wave"
                     );
                     let mut paused_wave = wave.clone();
@@ -104,7 +103,6 @@ async fn tick_loop_waves(
         let envelope = ActivationEnvelope::new(
             wave.id(),
             None,
-            ActivationSource::Poll,
             "loop ticker observed idle wave",
             "",
             "",
@@ -127,8 +125,8 @@ async fn tick_loop_waves(
     }
 }
 
-fn should_pause_for_max_iterations(stimulus: &Stimulus, wave: &Wave) -> bool {
-    let Some(max) = stimulus.max_iterations else {
+fn should_pause_for_max_iterations(trigger: &Trigger, wave: &Wave) -> bool {
+    let Some(max) = trigger.max_iterations else {
         return false;
     };
     let cycle_iterations = wave

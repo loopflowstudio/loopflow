@@ -281,16 +281,16 @@ class TestClientResponses:
         assert "area" not in received
         client.close()
 
-    def test_add_stimulus_with_listen_source_sends_correct_body(self):
+    def test_add_trigger_with_wave_source_sends_correct_body(self):
         received = {}
 
         def handler(request):
             received.update(json.loads(request.content))
-            return httpx.Response(200, json={"id": "stim-1", "kind": "listen"})
+            return httpx.Response(200, json={"id": "trig-1", "signal": "wave"})
 
         client = _mock_client(handler)
-        client.add_stimulus("designer", "listen", source_wave_id="infra")
-        assert received["kind"] == "listen"
+        client.add_trigger("designer", "wave", source_wave_id="infra")
+        assert received["signal"] == "wave"
         assert received["source_wave_id"] == "infra"
         client.close()
 

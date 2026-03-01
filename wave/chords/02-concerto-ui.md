@@ -17,8 +17,8 @@ Signal cleanup has landed — `wave.mode` (Loop/Cron/Manual) is on the wave stru
 
 - Sidebar sections for chords — flat list when only the default chord exists, grouped sections when multiple chords
 - Visual grouping of member waves within their chord section
-- Listen stimulus indicator (which wave listens to which)
+- Wave trigger indicator (which wave listens to which)
 - Chord CRUD from the UI: create chord, delete chord, add/remove wave from chord
 - Clean display for ungrouped waves alongside chord groups
-- Branch flow visualization — show which path was taken, routing verdict, cycle status for QA→fix→deploy loops
+- Branch flow visualization — show which path was taken, routing verdict, cycle status for QA->fix->deploy loops
 - Human-in-the-loop branch selection — allow manual path override from the UI

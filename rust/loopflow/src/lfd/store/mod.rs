@@ -7,7 +7,7 @@ use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, 
 use crate::lfd::types::{
     ActivationLog, AgentRun, ChatMemoryBlock, ChatMessage, Chord, LivePrState,
     LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId,
-    Stimulus, Summary, Wave, WaveRun, WaveRunStackStatus,
+    Summary, Trigger, Wave, WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -243,28 +243,28 @@ impl Store {
         WaveStateStore::record_merge_event(self, event).await
     }
 
-    pub async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
-        WaveStateStore::list_stimuli(self, wave_id).await
+    pub async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>> {
+        WaveStateStore::list_triggers(self, wave_id).await
     }
 
-    pub async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
-        WaveStateStore::list_stimuli_by_signal(self, signal).await
+    pub async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>> {
+        WaveStateStore::list_triggers_by_signal(self, signal).await
     }
 
-    pub async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
-        WaveStateStore::get_stimulus(self, stimulus_id).await
+    pub async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>> {
+        WaveStateStore::get_trigger(self, trigger_id).await
     }
 
-    pub async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
-        WaveStateStore::create_stimulus(self, stimulus).await
+    pub async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
+        WaveStateStore::create_trigger(self, trigger).await
     }
 
-    pub async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
-        WaveStateStore::update_stimulus(self, stimulus).await
+    pub async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
+        WaveStateStore::update_trigger(self, trigger).await
     }
 
-    pub async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
-        WaveStateStore::delete_stimulus(self, stimulus_id).await
+    pub async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()> {
+        WaveStateStore::delete_trigger(self, trigger_id).await
     }
 
     pub async fn list_pending_activations(
@@ -292,12 +292,12 @@ impl Store {
         WaveStateStore::delete_pending_activation_by_id(self, activation_id).await
     }
 
-    pub async fn get_pending_for_stimulus(
+    pub async fn get_pending_for_trigger(
         &self,
         wave_id: &LfdId,
-        stimulus_id: Option<&LfdId>,
+        trigger_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
-        WaveStateStore::get_pending_for_stimulus(self, wave_id, stimulus_id).await
+        WaveStateStore::get_pending_for_trigger(self, wave_id, trigger_id).await
     }
 
     pub async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
@@ -636,12 +636,12 @@ pub trait WaveStateStore: Send + Sync {
     async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32>;
     async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool>;
 
-    async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
-    async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>>;
-    async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>>;
-    async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
-    async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
-    async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()>;
+    async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>>;
+    async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>>;
+    async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>>;
+    async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()>;
+    async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()>;
+    async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()>;
     async fn list_pending_activations(
         &self,
         wave_id: &LfdId,
@@ -649,10 +649,10 @@ pub trait WaveStateStore: Send + Sync {
     async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
     async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
     async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32>;
-    async fn get_pending_for_stimulus(
+    async fn get_pending_for_trigger(
         &self,
         wave_id: &LfdId,
-        stimulus_id: Option<&LfdId>,
+        trigger_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>>;
     async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()>;
     async fn list_activation_log(
@@ -1113,62 +1113,62 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
+    async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.cloned();
-                run_sqlite(store, move |store| store.list_stimuli(wave_id.as_ref())).await
+                run_sqlite(store, move |store| store.list_triggers(wave_id.as_ref())).await
             }
-            StoreBackend::Postgres(store) => store.list_stimuli(wave_id).await,
+            StoreBackend::Postgres(store) => store.list_triggers(wave_id).await,
         }
     }
 
-    async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
+    async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_stimuli_by_signal(signal)).await
+                run_sqlite(store, move |store| store.list_triggers_by_signal(signal)).await
             }
-            StoreBackend::Postgres(store) => store.list_stimuli_by_signal(signal).await,
+            StoreBackend::Postgres(store) => store.list_triggers_by_signal(signal).await,
         }
     }
 
-    async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
+    async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let stimulus_id = stimulus_id.clone();
-                run_sqlite(store, move |store| store.get_stimulus(&stimulus_id)).await
+                let trigger_id = trigger_id.clone();
+                run_sqlite(store, move |store| store.get_trigger(&trigger_id)).await
             }
-            StoreBackend::Postgres(store) => store.get_stimulus(stimulus_id).await,
+            StoreBackend::Postgres(store) => store.get_trigger(trigger_id).await,
         }
     }
 
-    async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let stimulus = stimulus.clone();
-                run_sqlite(store, move |store| store.create_stimulus(&stimulus)).await
+                let trigger = trigger.clone();
+                run_sqlite(store, move |store| store.create_trigger(&trigger)).await
             }
-            StoreBackend::Postgres(store) => store.create_stimulus(stimulus).await,
+            StoreBackend::Postgres(store) => store.create_trigger(trigger).await,
         }
     }
 
-    async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let stimulus = stimulus.clone();
-                run_sqlite(store, move |store| store.update_stimulus(&stimulus)).await
+                let trigger = trigger.clone();
+                run_sqlite(store, move |store| store.update_trigger(&trigger)).await
             }
-            StoreBackend::Postgres(store) => store.update_stimulus(stimulus).await,
+            StoreBackend::Postgres(store) => store.update_trigger(trigger).await,
         }
     }
 
-    async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
+    async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
-                let stimulus_id = stimulus_id.clone();
-                run_sqlite(store, move |store| store.delete_stimulus(&stimulus_id)).await
+                let trigger_id = trigger_id.clone();
+                run_sqlite(store, move |store| store.delete_trigger(&trigger_id)).await
             }
-            StoreBackend::Postgres(store) => store.delete_stimulus(stimulus_id).await,
+            StoreBackend::Postgres(store) => store.delete_trigger(trigger_id).await,
         }
     }
 
@@ -1226,22 +1226,22 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn get_pending_for_stimulus(
+    async fn get_pending_for_trigger(
         &self,
         wave_id: &LfdId,
-        stimulus_id: Option<&LfdId>,
+        trigger_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
                 let wave_id = wave_id.clone();
-                let stimulus_id = stimulus_id.cloned();
+                let trigger_id = trigger_id.cloned();
                 run_sqlite(store, move |store| {
-                    store.get_pending_for_stimulus(&wave_id, stimulus_id.as_ref())
+                    store.get_pending_for_trigger(&wave_id, trigger_id.as_ref())
                 })
                 .await
             }
             StoreBackend::Postgres(store) => {
-                store.get_pending_for_stimulus(wave_id, stimulus_id).await
+                store.get_pending_for_trigger(wave_id, trigger_id).await
             }
         }
     }
@@ -2035,8 +2035,8 @@ mod tests {
     };
     use crate::lfd::types::{
         AgentRun, AgentStatus, ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest,
-        QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Signal, Stimulus,
-        Summary, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
+        QueueBlock, QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, Signal, Summary,
+        Trigger, Wave, WaveMode, WaveRun, WaveRunSnapshot, WaveRunStackStatus, WaveRunStatus,
         WaveStatus,
     };
     use std::env;
@@ -2199,13 +2199,12 @@ mod tests {
             .await
             .expect("create source wave");
 
-        let stimulus = Stimulus {
+        let trigger = Trigger {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             source_wave_id: Some(source_wave.id().clone()),
-            signal: Signal::Listen,
+            signal: Signal::Wave,
             flow: None,
-            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -2213,15 +2212,15 @@ mod tests {
             max_iterations: None,
         };
         store
-            .create_stimulus(&stimulus)
+            .create_trigger(&trigger)
             .await
-            .expect("create stimulus");
-        let stimuli = store
-            .list_stimuli(Some(wave.id()))
+            .expect("create trigger");
+        let triggers = store
+            .list_triggers(Some(wave.id()))
             .await
-            .expect("list stimuli");
-        assert_eq!(stimuli.len(), 1);
-        assert_eq!(stimuli[0].source_wave_id.as_ref(), Some(source_wave.id()));
+            .expect("list triggers");
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0].source_wave_id.as_ref(), Some(source_wave.id()));
 
         let chord = store
             .create_chord("ensemble-a")

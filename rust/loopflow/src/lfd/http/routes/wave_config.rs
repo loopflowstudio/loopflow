@@ -4,10 +4,9 @@ use std::path::Path;
 use tracing::warn;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct StimulusDef {
-    pub kind: String,
+pub(crate) struct TriggerDef {
+    pub signal: String,
     pub flow: Option<String>,
-    pub cron: Option<String>,
     pub source: Option<String>,
     pub source_repo: Option<String>,
 }
@@ -20,7 +19,7 @@ pub(crate) struct WaveConfig {
     pub primary_flow: Option<String>,
     pub cron: Option<String>,
     pub area: Option<Vec<String>>,
-    pub stimulus: Option<StimulusDef>,
+    pub triggers: Option<TriggerDef>,
     pub direction: Option<Vec<String>>,
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
@@ -120,21 +119,21 @@ mod tests {
     }
 
     #[test]
-    fn read_wave_config_parses_listen_stimulus_source_repo() {
+    fn read_wave_config_parses_wave_trigger_source_repo() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("scan.yaml"),
-            "flow: build\narea: ['.']\nstimulus:\n  kind: listen\n  source: infra\n  source_repo: /tmp/source\n",
+            "flow: build\narea: ['.']\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let stimulus = config.stimulus.expect("stimulus should exist");
-        assert_eq!(stimulus.kind, "listen");
-        assert_eq!(stimulus.source.as_deref(), Some("infra"));
-        assert_eq!(stimulus.source_repo.as_deref(), Some("/tmp/source"));
+        let trigger = config.triggers.expect("trigger should exist");
+        assert_eq!(trigger.signal, "wave");
+        assert_eq!(trigger.source.as_deref(), Some("infra"));
+        assert_eq!(trigger.source_repo.as_deref(), Some("/tmp/source"));
     }
 
     #[test]

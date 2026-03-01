@@ -292,25 +292,25 @@ class Client:
             body["area"] = area
         return self._request_json("POST", f"/v0/waves/{name_or_id}/run", json=body)
 
-    def add_stimulus(
+    def add_trigger(
         self,
         name_or_id: str,
-        kind: str,
-        cron: Optional[str] = None,
+        signal: str,
+        flow: Optional[str] = None,
         source_wave_id: Optional[str] = None,
         max_iterations: Optional[int] = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"kind": kind}
-        if cron is not None:
-            body["cron"] = cron
+        body: dict[str, Any] = {"signal": signal}
+        if flow is not None:
+            body["flow"] = flow
         if source_wave_id is not None:
             body["source_wave_id"] = source_wave_id
         if max_iterations is not None:
             body["max_iterations"] = max_iterations
-        return self._request_json("POST", f"/v0/waves/{name_or_id}/stimulus", json=body)
+        return self._request_json("POST", f"/v0/waves/{name_or_id}/triggers", json=body)
 
-    def remove_stimulus(self, name_or_id: str, stimulus_id: str) -> dict[str, Any]:
-        return self._request_json("DELETE", f"/v0/waves/{name_or_id}/stimulus/{stimulus_id}")
+    def remove_trigger(self, name_or_id: str, trigger_id: str) -> dict[str, Any]:
+        return self._request_json("DELETE", f"/v0/waves/{name_or_id}/triggers/{trigger_id}")
 
     def stop_wave(self, name_or_id: str) -> dict[str, Any]:
         return self._request_json("POST", f"/v0/waves/{name_or_id}/stop")

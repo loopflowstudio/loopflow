@@ -1,6 +1,0 @@
-flow: ship-wave
-area:
-  - rust/loopflow/src/lfd/
-  - rust/loopflow/src/engine/
-  - swift/LoopflowCore/
-  - swift/Concerto/

@@ -1,0 +1,9 @@
+flow: ship-wave
+area:
+  - rust/loopflow/src/lfd/
+  - rust/loopflow/src/engine/
+  - rust/loopflow/src/lf/
+  - python/loopflow/
+direction:
+  - reliability
+  - simplicity

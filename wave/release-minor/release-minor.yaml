@@ -1,4 +1,0 @@
-flow: release
-message: minor
-mode: cron
-cron: "0 2 1 * *"

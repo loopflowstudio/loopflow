@@ -72,12 +72,19 @@ pub fn next_branch(
     }
 
     if current_pr_number(repo)?.is_none() && options.create_pr {
+        let wave = options
+            .wave_name
+            .clone()
+            .or_else(|| wave_name_from_worktree(repo));
+        let draft_title = wave
+            .map(|name| format!("{name}: draft"))
+            .unwrap_or_else(|| current.clone());
         let _ = crate::ops::pr::create_or_update_pr(
             repo,
             &crate::ops::pr::PrOptions {
-                refresh: true,
-                title: None,
-                body: None,
+                refresh: false,
+                title: Some(draft_title),
+                body: Some("*Draft — title and body will be updated.*".to_string()),
             },
             progress,
         )?;

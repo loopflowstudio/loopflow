@@ -2,8 +2,7 @@ use std::path::Path;
 
 use crate::engine::git::{fetch, rebase};
 
-use crate::ops::error::OpsError;
-use crate::ops::error::OpsResult;
+use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
@@ -17,10 +16,8 @@ pub fn rebase_with_recovery(
     options: &RebaseOptions,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    if options.onto.starts_with("origin/") {
-        if let Some(branch) = options.onto.strip_prefix("origin/") {
-            let _ = fetch(repo, "origin", branch);
-        }
+    if let Some(branch) = options.onto.strip_prefix("origin/") {
+        let _ = fetch(repo, "origin", branch);
     }
 
     // Try auto-rebase first. rebase() aborts on conflict and returns the conflict list.

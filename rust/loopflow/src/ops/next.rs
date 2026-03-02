@@ -73,10 +73,7 @@ pub fn next_branch(
     if current_pr_number(repo)?.is_none() && options.create_pr {
         let _ = crate::ops::pr::create_or_update_pr(
             repo,
-            &crate::ops::pr::PrOptions {
-                refresh: true,
-                lint: false,
-            },
+            &crate::ops::pr::PrOptions { refresh: true },
             progress,
         )?;
     }

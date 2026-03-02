@@ -21,7 +21,6 @@ pub struct LandOptions {
     pub local: bool,
     pub create_pr: bool,
     pub worktree: Option<String>,
-    pub lint: bool,
     pub commit_message: Option<String>,
     pub pr_title: Option<String>,
     pub pr_body: Option<String>,
@@ -82,10 +81,6 @@ fn prepare_land(
         ));
     }
 
-    if options.lint {
-        crate::ops::lint::ensure_lint_passes(repo_root, progress)?;
-    }
-
     if !options.strict {
         let message = options
             .commit_message
@@ -143,10 +138,7 @@ fn ensure_pr(
         if options.create_pr {
             let _ = crate::ops::pr::create_or_update_pr(
                 repo_root,
-                &crate::ops::pr::PrOptions {
-                    refresh: true,
-                    lint: false,
-                },
+                &crate::ops::pr::PrOptions { refresh: true },
                 progress,
             )?;
         } else {

@@ -1,6 +1,7 @@
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::worktrees::{
-    create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree, worktree_path,
+    create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree,
+    wave_name_from_worktree_and_main, worktree_path,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::Colors;
@@ -32,7 +33,6 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             local,
             create_pr,
             worktree,
-            no_lint,
             message,
             title,
             body,
@@ -42,14 +42,13 @@ pub fn run(op: &OpsCommand) -> Result<()> {
                 local: *local,
                 create_pr: *create_pr,
                 worktree: worktree.clone(),
-                lint: !no_lint,
                 commit_message: message.clone(),
                 pr_title: title.clone(),
                 pr_body: body.clone(),
             },
             &progress,
         ),
-        OpsCommand::Pr { refresh, no_lint } => open_pr(*refresh, !no_lint, &progress),
+        OpsCommand::Pr { refresh } => open_pr(*refresh, &progress),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
             create_pr,
@@ -59,8 +58,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             message,
             push,
             no_add,
-            no_lint,
-        } => commit_current(message.as_deref(), *push, !no_add, !no_lint, &progress),
+        } => commit_current(message.as_deref(), *push, !no_add, &progress),
         OpsCommand::Abandon { force, branch } => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
@@ -183,9 +181,9 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn open_pr(refresh: bool, lint: bool, progress: &impl Progress) -> Result<()> {
+fn open_pr(refresh: bool, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(&repo_root, &PrOptions { refresh, lint }, progress)?;
+    let result = create_or_update_pr(&repo_root, &PrOptions { refresh }, progress)?;
     println!("{}", result.url);
     Ok(())
 }
@@ -219,7 +217,6 @@ fn commit_current(
     message: Option<&str>,
     push: bool,
     add: bool,
-    lint: bool,
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
@@ -227,7 +224,6 @@ fn commit_current(
         &repo_root,
         &CommitOptions {
             add,
-            lint,
             push,
             create_draft_pr: true,
             message: message.map(str::to_string),
@@ -435,10 +431,17 @@ fn wt_switch(name: &str) -> Result<()> {
         let mut matches = worktrees
             .into_iter()
             .filter(|wt| {
-                wt.path
-                    .file_name()
-                    .map(|n| n.to_string_lossy() == name)
-                    .unwrap_or(false)
+                let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
+                wt_name.as_deref() == Some(name)
+                    || wt_name
+                        .as_ref()
+                        .map(|n| n.starts_with(&format!("{name}.")))
+                        .unwrap_or(false)
+                    || wt
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy() == name)
+                        .unwrap_or(false)
             })
             .collect::<Vec<_>>();
         if matches.len() == 1 {
@@ -667,6 +670,18 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let current_path = repo_root;
+
+    let prune_output = Command::new("git")
+        .arg("-C")
+        .arg(&main_repo)
+        .args(["worktree", "prune"])
+        .output()?;
+    if !prune_output.status.success() {
+        return Err(anyhow!(
+            "git worktree prune failed: {}",
+            String::from_utf8_lossy(&prune_output.stderr).trim()
+        ));
+    }
 
     let default_branch = get_default_branch(&main_repo)?;
     let _ = crate::engine::git::fetch(&main_repo, "origin", &default_branch);

@@ -1351,7 +1351,6 @@ fn publish_in_worktree(
             local: false,
             create_pr: true,
             worktree: None,
-            lint: false,
             commit_message: None,
             pr_title: None,
             pr_body: None,

@@ -11,7 +11,7 @@ Get this branch merged. Write a PR title and body that help reviewers understand
 ## API
 
 ```
-lf ops land --title "..." --body "..." [-m "commit message"] [--create-pr] [--no-lint] [--local]
+lf ops land --title "..." --body "..." [-m "commit message"] [--create-pr] [--local]
 lf ops rebase
 lf ops commit -m "message"
 ```

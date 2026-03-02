@@ -20,8 +20,6 @@ pub enum OpsError {
     AgentFailed(String),
     #[error("parse error: {0}")]
     Parse(String),
-    #[error("lint failed")]
-    LintFailed,
     #[error("{0}")]
     Message(String),
 }

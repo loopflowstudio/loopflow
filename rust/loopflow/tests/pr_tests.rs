@@ -51,15 +51,8 @@ fn pr_create_calls_gh() {
     repo.create_branch("feature");
     push_branch(&repo, "feature");
 
-    let result = create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            refresh: false,
-            lint: false,
-        },
-        &NullProgress,
-    )
-    .expect("pr");
+    let result =
+        create_or_update_pr(repo.path(), &PrOptions { refresh: false }, &NullProgress).expect("pr");
 
     assert!(result.created);
     assert_eq!(result.url, "https://example.com/pr/1");
@@ -81,15 +74,8 @@ fn pr_update_refreshes_body() {
     repo.create_branch("feature");
     push_branch(&repo, "feature");
 
-    let result = create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            refresh: true,
-            lint: false,
-        },
-        &NullProgress,
-    )
-    .expect("pr");
+    let result =
+        create_or_update_pr(repo.path(), &PrOptions { refresh: true }, &NullProgress).expect("pr");
 
     assert!(result.updated);
     assert!(!result.created);
@@ -111,15 +97,8 @@ fn pr_skips_when_no_diff() {
     repo.create_branch("feature");
     push_branch(&repo, "feature");
 
-    let result = create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            refresh: false,
-            lint: false,
-        },
-        &NullProgress,
-    )
-    .expect("pr");
+    let result =
+        create_or_update_pr(repo.path(), &PrOptions { refresh: false }, &NullProgress).expect("pr");
 
     assert!(!result.created);
     assert!(!result.updated);
@@ -139,15 +118,8 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
     repo.create_branch("feature");
     push_branch(&repo, "feature");
 
-    let result = create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            refresh: false,
-            lint: false,
-        },
-        &NullProgress,
-    )
-    .expect("pr");
+    let result =
+        create_or_update_pr(repo.path(), &PrOptions { refresh: false }, &NullProgress).expect("pr");
 
     assert!(result.created);
     assert_eq!(result.url, "https://example.com/pr/1");

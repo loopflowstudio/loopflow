@@ -148,7 +148,6 @@ pub struct LandWaveRequest {
     local: Option<bool>,
     create_pr: Option<bool>,
     worktree: Option<String>,
-    lint: Option<bool>,
 }
 
 pub async fn list_waves_handler(
@@ -1178,7 +1177,6 @@ pub async fn land_wave_handler(
     let strict = payload.strict.unwrap_or(false);
     let local = payload.local.unwrap_or(false);
     let create_pr = payload.create_pr.unwrap_or(true);
-    let lint = payload.lint.unwrap_or(true);
 
     let repo_path = wave.repo().clone();
     run_blocking_result(
@@ -1191,7 +1189,6 @@ pub async fn land_wave_handler(
                     local,
                     create_pr,
                     worktree: Some(worktree),
-                    lint,
                     commit_message: None,
                     pr_title: None,
                     pr_body: None,

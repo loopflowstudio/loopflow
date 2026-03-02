@@ -15,7 +15,6 @@ use crate::ops::util::{command_exists, stderr_from_output};
 #[derive(Debug, Clone)]
 pub struct PrOptions {
     pub refresh: bool,
-    pub lint: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -49,10 +48,6 @@ pub fn create_or_update_pr(
 ) -> OpsResult<PrResult> {
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
-
-    if options.lint {
-        crate::ops::lint::ensure_lint_passes(repo, progress)?;
     }
 
     // Snapshot origin's view of our branch before any work

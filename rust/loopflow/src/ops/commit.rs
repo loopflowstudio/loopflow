@@ -11,7 +11,6 @@ use crate::ops::trace::{MockResponses, Tracer};
 #[derive(Debug, Clone)]
 pub struct CommitOptions {
     pub add: bool,
-    pub lint: bool,
     pub push: bool,
     pub create_draft_pr: bool,
     pub task: String,
@@ -23,7 +22,6 @@ impl CommitOptions {
     pub fn for_task(task: impl Into<String>) -> Self {
         Self {
             add: false,
-            lint: false,
             push: false,
             create_draft_pr: false,
             task: task.into(),
@@ -52,10 +50,6 @@ pub fn commit_workflow(
     if options.add {
         progress.status("Staging changes...");
         stage_all(repo)?;
-    }
-
-    if options.lint && !crate::ops::lint::ensure_lint_passes(repo, progress)? {
-        return Err(OpsError::LintFailed);
     }
 
     if !has_staged_changes(repo)? {
@@ -181,7 +175,6 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         "commit",
         json!({
             "add": options.add,
-            "lint": options.lint,
             "push": options.push,
             "create_draft_pr": options.create_draft_pr
         }),
@@ -198,15 +191,6 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
     // Stage changes
     if options.add {
         tracer.trace("git:add_all");
-    }
-
-    // Run lint
-    if options.lint {
-        let lint_result = MockResponses::lint_run();
-        tracer.trace_result("lint:run", lint_result);
-        if lint_result != "pass" {
-            return tracer.to_json();
-        }
     }
 
     // Check if anything staged

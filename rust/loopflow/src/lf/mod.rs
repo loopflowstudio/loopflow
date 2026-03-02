@@ -183,8 +183,6 @@ pub enum OpsCommand {
         create_pr: bool,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
         #[arg(long = "title")]
@@ -196,8 +194,6 @@ pub enum OpsCommand {
     Pr {
         #[arg(short = 'r', long = "refresh")]
         refresh: bool,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
     },
     /// Update local main to match origin
     Sync,
@@ -216,8 +212,6 @@ pub enum OpsCommand {
         push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
     },
     /// Abandon branch: close PR, remove worktree, delete branch
     Abandon {

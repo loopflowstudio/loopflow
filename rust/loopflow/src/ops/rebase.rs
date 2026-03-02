@@ -1,9 +1,8 @@
 use std::path::Path;
-use std::time::Duration;
 
 use crate::engine::git::{fetch, rebase};
 
-use crate::ops::agent::{run_builtin_agent, BuiltinAgentOptions};
+use crate::ops::error::OpsError;
 use crate::ops::error::OpsResult;
 use crate::ops::progress::Progress;
 
@@ -33,23 +32,20 @@ pub fn rebase_with_recovery(
         }
         return Ok(());
     }
-
-    // Auto-rebase failed (and was aborted). Launch the rebase agent to handle
-    // the full workflow: re-attempt the rebase, resolve conflicts, continue.
-    progress.status("Auto-rebase failed, launching rebase agent...");
-    run_rebase_agent(repo, &options.onto, progress)?;
-
-    if options.push {
-        crate::ops::commit::push_with_upstream_or_error(repo)?;
-    }
-    Ok(())
-}
-
-fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsResult<()> {
-    let options = BuiltinAgentOptions {
-        step_name: "rebase".to_string(),
-        suffix: format!("Rebase onto: {onto}"),
-        timeout: Some(Duration::from_secs(30 * 60)),
-    };
-    run_builtin_agent(repo, &options, progress)
+    let detail = result
+        .conflicts
+        .filter(|conflicts| !conflicts.is_empty())
+        .map(|conflicts| {
+            let conflict_paths = conflicts
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("conflicts: {conflict_paths}")
+        })
+        .unwrap_or_else(|| "manual resolution required".to_string());
+    Err(OpsError::Message(format!(
+        "rebase onto {} failed ({detail})",
+        options.onto
+    )))
 }

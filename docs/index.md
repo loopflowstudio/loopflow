@@ -88,18 +88,24 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Flow** | Chains steps together | `.lf/flows/*.yaml` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Area** | Focuses on part of the codebase | path argument |
-| **Stimulus** | When to run: once, loop, watch, cron | command |
+| **Mode** | Execution pattern: manual, loop, cron | wave config |
+| **Trigger** | Signal + flow: repo, wave, ci_failure | wave config |
 
-A wave is **area × direction × flow × stimulus**.
+A wave is **area × direction × flow**. Mode controls how it executes. Triggers fire flows in response to external signals.
 
 Area is the path you pass—not a file. It scopes what the wave sees and changes.
 
-| Stimulus | Runs when |
-|----------|-----------|
-| **Once** | Single run (one-shot) |
-| **Loop** | Continuously until stopped |
-| **Watch** | Area changes on main |
-| **Cron** | On schedule |
+| Mode | Runs |
+|------|------|
+| **manual** | Single run |
+| **loop** | Continuously until stopped |
+| **cron** | On schedule |
+
+| Signal | What changed | Default flow |
+|--------|--------------|--------------|
+| **repo** | Paths changed on main | `integrate` |
+| **wave** | Another wave completed | `build` |
+| **ci_failure** | CI failed on a wave PR | `ci-fix` |
 
 ---
 

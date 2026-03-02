@@ -110,14 +110,14 @@ struct WaveRow: View {
                         .accessibilityIdentifier("wave-activity")
                 }
 
-                if let stimulusLabel {
+                if let triggerLabel {
                     Text("•")
                         .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.3))
-                    Text(stimulusLabel)
+                    Text(triggerLabel)
                         .font(Typography.caption())
                         .foregroundStyle(.white.opacity(0.5))
-                        .accessibilityIdentifier("wave-stimulus")
+                        .accessibilityIdentifier("wave-trigger")
                 }
             }
         }
@@ -188,22 +188,13 @@ struct WaveRow: View {
         isNameFocused = false
     }
 
-    private var stimulusLabel: String? {
-        guard let stimulus = wave.stimulus else { return nil }
-        switch stimulus.kind {
-        case .loop: return "loop"
-        case .watch: return "watching"
-        case .cron: return stimulus.cron.map { formatCron($0) }
+    private var triggerLabel: String? {
+        guard let trigger = wave.trigger else { return nil }
+        switch trigger.signal {
+        case .repo: return "repo"
+        case .wave: return "wave"
+        case .ciFailure: return "ci-fix"
         }
-    }
-
-    private func formatCron(_ cron: String) -> String {
-        if cron.hasPrefix("0 9 * * *") {
-            return "9am daily"
-        } else if cron.hasPrefix("0 9 * * MON-FRI") {
-            return "9am weekdays"
-        }
-        return cron
     }
 
     /// Accessibility-friendly description of activity (e.g., "implement, 2 minutes ago").

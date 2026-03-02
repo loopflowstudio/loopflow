@@ -44,7 +44,7 @@ struct RepoStateInteractiveSessionTests {
                 flow: "ship",
                 direction: [],
                 area: ["."],
-                stimuli: [],
+                triggers: [],
                 status: status,
                 iteration: 0
             )

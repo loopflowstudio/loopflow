@@ -11,8 +11,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    ActivationLog, ActivationOutcome, ActivationSource, Event, PendingActivation, Wave, WaveRun,
-    WaveStatus,
+    ActivationLog, ActivationOutcome, Event, PendingActivation, Wave, WaveRun, WaveStatus,
 };
 
 pub const DEFAULT_ACTIVATION_QUEUE_LIMIT: usize = 20;
@@ -20,8 +19,7 @@ pub const DEFAULT_ACTIVATION_QUEUE_LIMIT: usize = 20;
 #[derive(Debug, Clone)]
 pub struct ActivationEnvelope {
     pub wave_id: LfdId,
-    pub stimulus_id: Option<LfdId>,
-    pub source: ActivationSource,
+    pub trigger_id: Option<LfdId>,
     pub reason: String,
     pub from_sha: String,
     pub to_sha: String,
@@ -31,8 +29,7 @@ pub struct ActivationEnvelope {
 impl ActivationEnvelope {
     pub fn new(
         wave_id: &LfdId,
-        stimulus_id: Option<&LfdId>,
-        source: ActivationSource,
+        trigger_id: Option<&LfdId>,
         reason: impl Into<String>,
         from_sha: impl Into<String>,
         to_sha: impl Into<String>,
@@ -40,8 +37,7 @@ impl ActivationEnvelope {
     ) -> Self {
         Self {
             wave_id: wave_id.clone(),
-            stimulus_id: stimulus_id.cloned(),
-            source,
+            trigger_id: trigger_id.cloned(),
             reason: reason.into(),
             from_sha: from_sha.into(),
             to_sha: to_sha.into(),
@@ -86,11 +82,10 @@ pub async fn enqueue_pending_activation(
     envelope: ActivationEnvelope,
 ) -> Option<EnqueueOutcome> {
     match store
-        .get_pending_for_stimulus(&envelope.wave_id, envelope.stimulus_id.as_ref())
+        .get_pending_for_trigger(&envelope.wave_id, envelope.trigger_id.as_ref())
         .await
     {
         Ok(Some(mut existing)) => {
-            existing.source = envelope.source;
             existing.reason = envelope.reason.clone();
             if !envelope.from_sha.is_empty() && existing.from_sha.is_empty() {
                 existing.from_sha = envelope.from_sha.clone();
@@ -101,7 +96,7 @@ pub async fn enqueue_pending_activation(
             if let Err(err) = store.update_pending_activation(&existing).await {
                 tracing::error!(
                     wave_id = %envelope.wave_id,
-                    stimulus_id = ?envelope.stimulus_id,
+                    trigger_id = ?envelope.trigger_id,
                     error = %err,
                     "failed to coalesce pending activation"
                 );
@@ -128,7 +123,7 @@ pub async fn enqueue_pending_activation(
                 Err(err) => {
                     tracing::error!(
                         wave_id = %envelope.wave_id,
-                        stimulus_id = ?envelope.stimulus_id,
+                        trigger_id = ?envelope.trigger_id,
                         error = %err,
                         "failed to inspect pending activation queue"
                     );
@@ -150,8 +145,7 @@ pub async fn enqueue_pending_activation(
             let activation = PendingActivation {
                 id: LfdId::new(),
                 wave_id: envelope.wave_id.clone(),
-                stimulus_id: envelope.stimulus_id.clone(),
-                source: envelope.source,
+                trigger_id: envelope.trigger_id.clone(),
                 reason: envelope.reason.clone(),
                 from_sha: envelope.from_sha.clone(),
                 to_sha: envelope.to_sha.clone(),
@@ -161,7 +155,7 @@ pub async fn enqueue_pending_activation(
             if let Err(err) = store.create_pending_activation(&activation).await {
                 tracing::error!(
                     wave_id = %envelope.wave_id,
-                    stimulus_id = ?envelope.stimulus_id,
+                    trigger_id = ?envelope.trigger_id,
                     error = %err,
                     "failed to queue pending activation"
                 );
@@ -180,9 +174,9 @@ pub async fn enqueue_pending_activation(
         Err(err) => {
             tracing::error!(
                 wave_id = %envelope.wave_id,
-                stimulus_id = ?envelope.stimulus_id,
+                trigger_id = ?envelope.trigger_id,
                 error = %err,
-                "failed to read pending activation for stimulus"
+                "failed to read pending activation for trigger"
             );
             None
         }
@@ -200,7 +194,7 @@ pub async fn spawn_immediate_activation(
     scheduler: &Arc<Scheduler>,
     event_hub: &EventHub,
     wave: &Wave,
-    stimulus_flow_override: Option<String>,
+    flow_override: Option<String>,
     envelope: ActivationEnvelope,
 ) -> Option<WaveRun> {
     if wave.status() == WaveStatus::Paused {
@@ -227,15 +221,14 @@ pub async fn spawn_immediate_activation(
 
     let dispatch_log = ActivationLog::new(
         wave.id().clone(),
-        envelope.stimulus_id.clone(),
-        envelope.source,
+        envelope.trigger_id.clone(),
         envelope.reason.clone(),
         ActivationOutcome::Dispatched,
     );
     if let Err(err) = store.create_activation_log(&dispatch_log).await {
         tracing::error!(
             wave_id = %wave.id(),
-            stimulus_id = ?envelope.stimulus_id,
+            trigger_id = ?envelope.trigger_id,
             error = %err,
             "failed to write immediate activation dispatch log"
         );
@@ -258,7 +251,7 @@ pub async fn spawn_immediate_activation(
             return None;
         }
     };
-    if let Some(flow_override) = stimulus_flow_override {
+    if let Some(flow_override) = flow_override {
         run.snapshot.flow = flow_override;
     }
     run.target_branch = envelope.target_branch.clone();
@@ -347,28 +340,27 @@ pub async fn dispatch_wave_if_ready(
 
     let dispatch_log = ActivationLog::new(
         wave.id().clone(),
-        activation.stimulus_id.clone(),
-        activation.source,
+        activation.trigger_id.clone(),
         activation.reason.clone(),
         ActivationOutcome::Dispatched,
     );
     if let Err(err) = store.create_activation_log(&dispatch_log).await {
         tracing::error!(
             wave_id = %wave.id(),
-            stimulus_id = ?activation.stimulus_id,
+            trigger_id = ?activation.trigger_id,
             error = %err,
             "failed to write activation dispatch log"
         );
         return None;
     }
 
-    let stimulus_flow_override = match &activation.stimulus_id {
-        Some(stim_id) => store
-            .get_stimulus(stim_id)
+    let trigger_flow_override = match &activation.trigger_id {
+        Some(trigger_id) => store
+            .get_trigger(trigger_id)
             .await
             .ok()
             .flatten()
-            .and_then(|stimulus| stimulus.flow),
+            .and_then(|trigger| trigger.flow),
         None => None,
     };
 
@@ -384,7 +376,7 @@ pub async fn dispatch_wave_if_ready(
             return None;
         }
     };
-    if let Some(flow_override) = stimulus_flow_override {
+    if let Some(flow_override) = trigger_flow_override {
         run.snapshot.flow = flow_override;
     }
     run.target_branch = activation.target_branch.clone();
@@ -421,15 +413,14 @@ async fn record_activation_log(
 ) {
     let log = ActivationLog::new(
         envelope.wave_id.clone(),
-        envelope.stimulus_id.clone(),
-        envelope.source,
+        envelope.trigger_id.clone(),
         envelope.reason.clone(),
         outcome,
     );
     if let Err(err) = store.create_activation_log(&log).await {
         tracing::error!(
             wave_id = %envelope.wave_id,
-            stimulus_id = ?envelope.stimulus_id,
+            trigger_id = ?envelope.trigger_id,
             error = %err,
             "failed to write activation log"
         );
@@ -438,8 +429,7 @@ async fn record_activation_log(
 
     tracing::info!(
         wave_id = %envelope.wave_id,
-        stimulus_id = ?envelope.stimulus_id,
-        source = envelope.source.as_str(),
+        trigger_id = ?envelope.trigger_id,
         reason = %envelope.reason,
         queue_depth,
         outcome = outcome.as_str(),
@@ -449,22 +439,19 @@ async fn record_activation_log(
     match outcome {
         ActivationOutcome::Queued => event_hub.send(Event::activation_queued(
             envelope.wave_id.clone(),
-            envelope.stimulus_id.clone(),
-            envelope.source,
+            envelope.trigger_id.clone(),
             envelope.reason.clone(),
             queue_depth,
         )),
         ActivationOutcome::Coalesced => event_hub.send(Event::activation_coalesced(
             envelope.wave_id.clone(),
-            envelope.stimulus_id.clone(),
-            envelope.source,
+            envelope.trigger_id.clone(),
             envelope.reason.clone(),
             queue_depth,
         )),
         ActivationOutcome::Dropped => event_hub.send(Event::activation_dropped(
             envelope.wave_id.clone(),
-            envelope.stimulus_id.clone(),
-            envelope.source,
+            envelope.trigger_id.clone(),
             envelope.reason.clone(),
             queue_depth,
         )),
@@ -476,7 +463,7 @@ async fn record_activation_log(
 mod tests {
     use super::*;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Signal, Stimulus, Wave, WaveMode};
+    use crate::lfd::types::{Signal, Trigger, Wave, WaveMode};
     use time::OffsetDateTime;
 
     async fn create_store() -> SharedStore {
@@ -507,14 +494,13 @@ mod tests {
         wave
     }
 
-    async fn create_stimulus(store: &SharedStore, wave_id: &LfdId) -> Stimulus {
-        let stimulus = Stimulus {
+    async fn create_trigger(store: &SharedStore, wave_id: &LfdId) -> Trigger {
+        let trigger = Trigger {
             id: LfdId::new(),
             wave_id: wave_id.clone(),
             source_wave_id: None,
-            signal: Signal::Watch,
+            signal: Signal::Repo,
             flow: None,
-            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -522,27 +508,26 @@ mod tests {
             max_iterations: None,
         };
         store
-            .create_stimulus(&stimulus)
+            .create_trigger(&trigger)
             .await
-            .expect("create stimulus");
-        stimulus
+            .expect("create trigger");
+        trigger
     }
 
     #[tokio::test]
-    async fn enqueue_coalesces_pending_activation_for_same_stimulus() {
+    async fn enqueue_coalesces_pending_activation_for_same_trigger() {
         let store = create_store().await;
         let event_hub = EventHub::new(16);
         let mut events = event_hub.subscribe();
         let wave = create_wave(&store).await;
-        let stimulus = create_stimulus(&store, &wave.id).await;
+        let trigger = create_trigger(&store, &wave.id).await;
 
         let first = enqueue_pending_activation(
             &store,
             &event_hub,
             ActivationEnvelope::new(
                 &wave.id,
-                Some(&stimulus.id),
-                ActivationSource::Poll,
+                Some(&trigger.id),
                 "watch poll",
                 "abc",
                 "def",
@@ -555,8 +540,7 @@ mod tests {
             &event_hub,
             ActivationEnvelope::new(
                 &wave.id,
-                Some(&stimulus.id),
-                ActivationSource::Push,
+                Some(&trigger.id),
                 "push webhook",
                 "def",
                 "fed",
@@ -573,7 +557,6 @@ mod tests {
             .await
             .expect("list pending");
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].source, ActivationSource::Push);
         assert_eq!(pending[0].to_sha, "fed");
 
         let queued = events.try_recv().expect("queued event");
@@ -589,32 +572,23 @@ mod tests {
         let wave = create_wave(&store).await;
 
         for _ in 0..DEFAULT_ACTIVATION_QUEUE_LIMIT {
-            let stimulus = create_stimulus(&store, &wave.id).await;
+            let trigger = create_trigger(&store, &wave.id).await;
             let outcome = enqueue_pending_activation(
                 &store,
                 &event_hub,
-                ActivationEnvelope::new(
-                    &wave.id,
-                    Some(&stimulus.id),
-                    ActivationSource::Poll,
-                    "fill queue",
-                    "",
-                    "",
-                    "main",
-                ),
+                ActivationEnvelope::new(&wave.id, Some(&trigger.id), "fill queue", "", "", "main"),
             )
             .await;
             assert_eq!(outcome, Some(EnqueueOutcome::Queued));
         }
 
-        let overflow_stimulus = create_stimulus(&store, &wave.id).await;
+        let overflow_trigger = create_trigger(&store, &wave.id).await;
         let outcome = enqueue_pending_activation(
             &store,
             &event_hub,
             ActivationEnvelope::new(
                 &wave.id,
-                Some(&overflow_stimulus.id),
-                ActivationSource::Push,
+                Some(&overflow_trigger.id),
                 "overflow",
                 "",
                 "",

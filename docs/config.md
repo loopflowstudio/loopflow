@@ -95,10 +95,11 @@ branch_names:
 Flows are YAML files in `.lf/flows/`:
 
 ```yaml
-# .lf/flows/my-flow.yaml
+# .lf/flows/build.yaml
 - implement
 - compress
 - gate
+- update-wave
 ```
 
 ---

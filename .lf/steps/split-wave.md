@@ -33,7 +33,7 @@ Sprint files move as-is — each one lands in exactly one child. But the README 
 
 4. Create the new waves
    - `wave/<child>/README.md` — fresh Vision and Goals for each child; Risks and Metrics carried forward and adapted
-   - `wave/<child>/<child>.yaml` — flow, area, optional direction/stimulus
+   - `wave/<child>/<child>.yaml` — flow, area, optional direction/triggers
    - Numbered sprint files from the allocated items, each with a clear finish line
    - Use `### Not here` under Vision to draw boundaries between siblings
 

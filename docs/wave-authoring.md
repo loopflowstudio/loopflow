@@ -111,24 +111,31 @@ Keep items focused. One PR's worth of work — roughly 1000 LOC. If an item feel
 
 ### The Config YAML
 
-Optional. Controls which flow, area, and direction the wave uses:
+Optional. Mirrors the wave's fields in lfd:
 
 ```yaml
 # wave/infra/infra.yaml
 flow: ship-wave
+mode: loop
 area:
   - rust/loopflow/src/lfd/
   - rust/loopflow/src/lfd/store/
 direction:
   - security
   - reliability
+triggers:
+  - signal: wave
+    source_wave_id: backend
+    flow: build
 ```
 
 | Field | What it does |
 |-------|-------------|
 | `flow` | Which flow to run (`build`, `ship-wave`, `grind`, etc.) |
+| `mode` | Execution pattern: `manual`, `loop`, or `cron` |
 | `area` | Paths in scope for this wave |
 | `direction` | Quality lenses applied to every step |
+| `triggers` | Signal + flow pairs (repo, wave, ci_failure). Defaults don't need declaring |
 
 If omitted, the wave uses whatever was set via `lfq create` or the Python API.
 
@@ -202,29 +209,33 @@ loopflow.run_wave("mywave")
 loopflow.waves()             # list all waves
 ```
 
-### Stimulus Types
+### Modes and Triggers
 
-Control when and how the wave runs:
+Mode controls execution pattern. Triggers fire flows in response to signals.
 
-| Stimulus | Behavior |
-|----------|----------|
-| **Once** | Single run, then stop |
-| **Loop** | Continuously until stopped or backlog empty |
-| **Watch** | Activates when area files change on main |
-| **Cron** | Runs on schedule (`0 9 * * *`) |
-| **Listen** | Triggers when another wave runs |
+| Mode | Behavior |
+|------|----------|
+| **manual** | Single run, then stop |
+| **loop** | Continuously until stopped or backlog empty |
+| **cron** | On schedule (`0 9 * * *`) |
+
+| Signal | What changed | Default flow |
+|--------|--------------|--------------|
+| **repo** | Paths changed on main | `integrate` |
+| **wave** | Another wave completed | `build` |
+| **ci_failure** | CI failed on the wave's PR | `ci-fix` |
 
 ```python
 import loopflow.api as loopflow
 
-# Loop continuously
-loopflow.update_wave("mywave", stimulus=loopflow.Stimulus(kind="loop"))
+# Set mode at creation
+loopflow.create_wave("mywave", repo=".", flow="build", mode="loop", area=["src/"])
 
-# React to another wave
-loopflow.add_stimulus("mywave", kind="listen", source_wave_id="infra")
+# Add a trigger — react to another wave
+loopflow.add_trigger("mywave", signal="wave", source_wave_id="infra")
 ```
 
-[Stimulus details →](waves.md)
+[Modes and triggers →](waves.md)
 
 ---
 

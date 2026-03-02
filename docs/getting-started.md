@@ -166,7 +166,7 @@ loopflow.update_wave("shipper", flow="build", area=["src/"], direction=["clarity
 loopflow.run_wave("shipper")
 ```
 
-A wave is **area × direction × flow × stimulus**. The wave picks a task, runs the flow, opens a PR, and loops.
+A wave is **area × direction × flow**. The wave picks a task, runs the flow, opens a PR, and loops. Triggers fire flows in response to signals (repo changes, other waves completing, CI failures).
 
 **Concerto** (macOS) is the native wave experience — create waves, monitor progress, review PRs. Requires `lfd`.
 

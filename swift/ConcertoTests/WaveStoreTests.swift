@@ -27,7 +27,7 @@ struct WaveStoreOptimisticTests {
                 flow: flow,
                 direction: direction,
                 area: area,
-                stimuli: [],
+                triggers: [],
                 status: status,
                 iteration: 0,
                 openPRCount: openPRCount

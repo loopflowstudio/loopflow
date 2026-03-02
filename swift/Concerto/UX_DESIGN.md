@@ -68,7 +68,7 @@ Agents have four dimensions, configured in order:
 1. **Area** - Which folders the agent works on (required to run)
 2. **Goal** - What the agent should accomplish (inline text or preset)
 3. **Flow** - Which steps to execute (ship, debug, etc.)
-4. **Stimulus** - When to run (once, loop, watch, cron)
+4. **Trigger** - When to run (once, loop, watch, cron)
 
 Area is required before running. Other dimensions have sensible defaults.
 
@@ -94,7 +94,7 @@ Sections only appear when they have agents. Empty sections are hidden.
 ## Detail Panel
 
 When an agent is selected:
-- **Header**: Name, status, area/flow/stimulus summary
+- **Header**: Name, status, area/flow/trigger summary
 - **Content Section**: Vision, goals, risks, and roadmap progress parsed from `wave/<name>/README.md` and numbered roadmap files
 - **Config Section** (idle): Area picker, goal selector, flow picker, run button
 - **Progress Section** (active): Current step, live output

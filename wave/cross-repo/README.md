@@ -6,20 +6,20 @@ Two layers:
 
 **lf** already works with arbitrary paths. `lf implement -a /other/repo/src/` loads context from another repo today. There's no parent/child protection at the lf level — you can request whatever areas you want, and lf will read/write wherever you point it.
 
-**lfd** adds the DAG. The portfolio is a set of repos as nodes with directed parent→child edges. lfd maintains these relationships, enforces cycle detection, and auto-resolves child repos by name. This makes cross-repo ergonomic — instead of spelling out full paths, a parent session gets its children resolved automatically.
+**lfd** adds the DAG. The portfolio is a set of repos as nodes with directed parent->child edges. lfd maintains these relationships, enforces cycle detection, and auto-resolves child repos by name. This makes cross-repo ergonomic — instead of spelling out full paths, a parent session gets its children resolved automatically.
 
 | Layer | What it knows | What it does |
 |-------|--------------|--------------|
 | lf | Paths | Accepts any area path. Reads/writes anywhere. No graph awareness. |
 | lfd | DAG edges + repo identity | Resolves children by name, injects related-repo areas, enforces cycles. |
-| Concerto | UI over lfd | Manages edges visually, presents cross-repo areas and stimulus targets. |
+| Concerto | UI over lfd | Manages edges visually, presents cross-repo areas and trigger targets. |
 
 Edge direction determines how lfd sets up sessions — what context it injects, what volumes it mounts in Docker, what paths appear in the agent's workspace:
 
 | Direction | Context | Docker mounts | Listen |
 |-----------|---------|---------------|--------|
-| Parent → Child | Child areas + docs | Child repo R/W | yes |
-| Child → Parent | Parent docs | Parent repo R/O | yes |
+| Parent -> Child | Child areas + docs | Child repo R/W | yes |
+| Child -> Parent | Parent docs | Parent repo R/O | yes |
 
 This is lfd state, not repo config. Managed through Concerto. No cycles.
 
@@ -34,14 +34,14 @@ Repos are identified by GitHub short URL (`owner/repo`). The `Repo` type gains a
 
 ## Strategy
 
-lf already takes arbitrary paths — cross-repo works today at the file level. lfd adds the graph: explicit parent→child edges between repos, auto-resolution of related-repo areas into sessions, and cycle detection. Concerto manages edges visually. Commits stay per-repo (no cross-repo atomicity). Repos are identified by GitHub remote (`owner/repo`).
+lf already takes arbitrary paths — cross-repo works today at the file level. lfd adds the graph: explicit parent->child edges between repos, auto-resolution of related-repo areas into sessions, and cycle detection. Concerto manages edges visually. Commits stay per-repo (no cross-repo atomicity). Repos are identified by GitHub remote (`owner/repo`).
 
 ## Goals
 
 - lf accepts cross-repo area paths (already works, may need polish for commit handling)
 - lfd portfolio model supports directed acyclic edges between repos
 - lfd auto-resolves related repos into session context, making cross-repo seamless
-- Concerto UI for managing edges, cross-repo areas, and cross-repo stimulus targets
+- Concerto UI for managing edges, cross-repo areas, and cross-repo trigger targets
 - Studio is the first consumer, with loopflow as child
 
 ## Risks

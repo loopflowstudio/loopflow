@@ -121,14 +121,17 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
-            "/waves/{wave_id}/stimulus",
-            post(waves::add_stimulus_handler),
+            "/waves/{wave_id}/triggers",
+            post(waves::add_trigger_handler),
         )
         .route(
-            "/waves/{wave_id}/stimulus/{stimulus_id}",
-            delete(waves::remove_stimulus_handler),
+            "/waves/{wave_id}/triggers/{trigger_id}",
+            delete(waves::remove_trigger_handler),
         )
-        .route("/waves/{wave_id}/stimuli", get(waves::list_stimuli_handler))
+        .route(
+            "/waves/{wave_id}/triggers",
+            get(waves::list_triggers_handler),
+        )
         .route(
             "/waves/{wave_id}/chords",
             get(chords::list_wave_chords_handler),

@@ -271,7 +271,7 @@ public final class RepoState {
                     flow: "build",
                     direction: [],
                     area: ["src/auth"],
-                    stimuli: [Stimulus(kind: .loop)],
+                    triggers: [Trigger(signal: .repo, flow: "integrate")],
                     status: .running,
                     iteration: 3
                 ),
@@ -288,7 +288,7 @@ public final class RepoState {
                     flow: "build",
                     direction: ["clarity"],
                     area: ["src/api"],
-                    stimuli: [Stimulus(kind: .loop)],
+                    triggers: [Trigger(signal: .repo, flow: "integrate")],
                     status: .waiting,
                     iteration: 5
                 ),
@@ -304,7 +304,7 @@ public final class RepoState {
                     flow: "debug",
                     direction: [],
                     area: ["."],
-                    stimuli: [],
+                    triggers: [],
                     status: .idle,
                     iteration: 0
                 ),
@@ -319,7 +319,7 @@ public final class RepoState {
                     flow: "polish",
                     direction: [],
                     area: ["."],
-                    stimuli: [Stimulus(kind: .cron, cron: "0 9 * * *")],
+                    triggers: [Trigger(signal: .ciFailure, flow: "ci-fix")],
                     status: .idle,
                     iteration: 12
                 ),
@@ -334,7 +334,7 @@ public final class RepoState {
                     flow: "build",
                     direction: ["clarity"],
                     area: ["src/deploy"],
-                    stimuli: [],
+                    triggers: [],
                     status: .failed,
                     iteration: 2,
                     activeRun: WaveRun(
@@ -733,15 +733,15 @@ public final class RepoState {
         }
     }
 
-    public func addStimulus(wave: WaveViewModel, kind: Stimulus.Kind, cron: String? = nil) async throws {
-        let stimulus = try await waveService.addStimulus(wave.id, kind: kind, cron: cron)
-        _ = waveStore.applyOptimistic(wave.id) { $0.stimuli.append(stimulus) }
+    public func addTrigger(wave: WaveViewModel, signal: Trigger.Signal, flow: String? = nil) async throws {
+        let trigger = try await waveService.addTrigger(wave.id, signal: signal, flow: flow)
+        _ = waveStore.applyOptimistic(wave.id) { $0.triggers.append(trigger) }
         waveStore.commitMutation(wave.id)
     }
 
-    public func removeStimulus(wave: WaveViewModel, stimulusId: String) async throws {
-        try await waveService.removeStimulus(wave.id, stimulusId: stimulusId)
-        _ = waveStore.applyOptimistic(wave.id) { $0.stimuli.removeAll { $0.id == stimulusId } }
+    public func removeTrigger(wave: WaveViewModel, triggerId: String) async throws {
+        try await waveService.removeTrigger(wave.id, triggerId: triggerId)
+        _ = waveStore.applyOptimistic(wave.id) { $0.triggers.removeAll { $0.id == triggerId } }
         waveStore.commitMutation(wave.id)
     }
 
@@ -766,7 +766,7 @@ public final class RepoState {
             flow: wave.api.flow,
             direction: wave.api.direction,
             area: wave.api.area,
-            stimuli: wave.api.stimuli
+            triggers: wave.api.triggers
         )
         let pending = WaveViewModel(api: pendingWave)
         waveStore.insertPending(pending)

@@ -122,6 +122,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "025_credential_type",
         sql: include_str!("migrations/025_credential_type.sql"),
     },
+    Migration {
+        version: "026_rename_stimuli_to_triggers",
+        sql: include_str!("migrations/026_rename_stimuli_to_triggers.sql"),
+    },
 ];
 
 /// Migrations applicable to a backend. Currently returns all migrations
@@ -330,7 +334,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        for expected in ["waves", "sessions", "repos", "stimuli", "wave_runs"] {
+        for expected in ["waves", "sessions", "repos", "triggers", "wave_runs"] {
             assert!(
                 tables.iter().any(|t| t == expected),
                 "expected table {expected} not found; tables: {tables:?}"

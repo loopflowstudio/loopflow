@@ -20,9 +20,7 @@ use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
 use crate::lfd::store::SharedStore;
 use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
-use crate::lfd::types::{
-    ActivationSource, Event, Signal, Stimulus, Wave, WaveRun, WaveStatus, CI_FIX_FLOW,
-};
+use crate::lfd::types::{Event, Signal, Trigger, Wave, WaveRun, WaveStatus, CI_FIX_FLOW};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -158,13 +156,13 @@ async fn enqueue_watch_for_repo(
         return 0;
     }
 
-    let stimuli = match store.list_stimuli_by_signal(Signal::Watch.as_i32()).await {
-        Ok(stimuli) => stimuli,
+    let triggers = match store.list_triggers_by_signal(Signal::Repo.as_i32()).await {
+        Ok(triggers) => triggers,
         Err(err) => {
             tracing::warn!(
                 error = %err,
                 source = repo_target.label(),
-                "failed to list watch stimuli"
+                "failed to list repo triggers"
             );
             return 0;
         }
@@ -175,20 +173,20 @@ async fn enqueue_watch_for_repo(
     let to_sha = to_sha.unwrap_or("");
 
     let mut matched = 0_u32;
-    for mut stimulus in stimuli {
-        if !stimulus.enabled {
+    for mut trigger in triggers {
+        if !trigger.enabled {
             continue;
         }
 
-        let wave = match store.get_wave(&stimulus.wave_id).await {
+        let wave = match store.get_wave(&trigger.wave_id).await {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
                 tracing::warn!(
-                    stimulus_id = %stimulus.id,
+                    trigger_id = %trigger.id,
                     source = repo_target.label(),
                     error = %err,
-                    "failed loading wave for watch trigger"
+                    "failed loading wave for repo trigger"
                 );
                 continue;
             }
@@ -197,15 +195,14 @@ async fn enqueue_watch_for_repo(
             continue;
         }
 
-        update_watch_main_sha(store, &mut stimulus, to_sha).await;
+        update_watch_main_sha(store, &mut trigger, to_sha).await;
 
         let outcome = enqueue_pending_activation(
             store,
             event_hub,
             ActivationEnvelope::new(
-                &stimulus.wave_id,
-                Some(&stimulus.id),
-                ActivationSource::Push,
+                &trigger.wave_id,
+                Some(&trigger.id),
                 reason.clone(),
                 from_sha,
                 to_sha,
@@ -234,13 +231,13 @@ fn wave_matches_watch_repo(wave: &Wave, repo_target: WatchRepoTarget<'_>) -> boo
     }
 }
 
-async fn update_watch_main_sha(store: &SharedStore, stimulus: &mut Stimulus, to_sha: &str) {
+async fn update_watch_main_sha(store: &SharedStore, trigger: &mut Trigger, to_sha: &str) {
     if to_sha.is_empty() {
         return;
     }
 
-    stimulus.last_main_sha = Some(to_sha.to_string());
-    let _ = store.update_stimulus(stimulus).await;
+    trigger.last_main_sha = Some(to_sha.to_string());
+    let _ = store.update_trigger(trigger).await;
 }
 
 fn is_main_ref(value: Option<&str>) -> bool {
@@ -662,8 +659,7 @@ mod tests {
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
-        ActivationSource, PullRequest, Signal, Stimulus, Wave, WaveMode, WaveRunSnapshot,
-        WaveRunStatus, WaveStatus,
+        PullRequest, Signal, Trigger, Wave, WaveMode, WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -807,13 +803,12 @@ mod tests {
             serialized: false,
         };
         state.store.create_wave(&wave).await.expect("create wave");
-        let stimulus = Stimulus {
+        let trigger = Trigger {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
             source_wave_id: None,
-            signal: Signal::Watch,
+            signal: Signal::Repo,
             flow: None,
-            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -822,9 +817,9 @@ mod tests {
         };
         state
             .store
-            .create_stimulus(&stimulus)
+            .create_trigger(&trigger)
             .await
-            .expect("create watch stimulus");
+            .expect("create repo trigger");
 
         let matched = enqueue_watch_for_github_repo(
             &state.store,
@@ -843,7 +838,6 @@ mod tests {
             .await
             .expect("pending activations");
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].source, ActivationSource::Push);
         assert_eq!(pending[0].to_sha, "def");
     }
 

@@ -12,7 +12,6 @@ use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::ActivationSource;
 
 pub fn spawn_cron_poller(
     store: SharedStore,
@@ -67,15 +66,7 @@ async fn check_cron_waves(
 
         if should_activate_cron(&cron_expr, last_triggered) {
             let reason = format!("cron schedule {cron_expr} due");
-            let envelope = ActivationEnvelope::new(
-                wave.id(),
-                None,
-                ActivationSource::Poll,
-                reason,
-                "",
-                "",
-                "main",
-            );
+            let envelope = ActivationEnvelope::new(wave.id(), None, reason, "", "", "main");
             if wave.serialized {
                 let _ = enqueue_pending_activation(store, event_hub, envelope).await;
             } else {

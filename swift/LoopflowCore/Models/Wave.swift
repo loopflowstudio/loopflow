@@ -1,59 +1,65 @@
 // Wave - an autonomous AI coding wave.
-// Stimulus types: loop (continuous), watch (on file change), cron (scheduled).
 
 import Foundation
 import SwiftUI
 
-/// Determines when a wave runs. Stored in the stimuli table — existence means active.
-public struct Stimulus: Sendable, Hashable, Codable, Identifiable {
-    public enum Kind: String, Sendable, Codable, CaseIterable {
-        case loop
-        case watch
-        case cron
+/// Determines when a wave fires. Stored in the triggers table — existence means active.
+public struct Trigger: Sendable, Hashable, Codable, Identifiable {
+    public enum Signal: String, Sendable, Codable, CaseIterable {
+        case repo
+        case wave
+        case ciFailure = "ci_failure"
 
         public var icon: String {
             switch self {
-            case .loop: return "repeat"
-            case .watch: return "eye"
-            case .cron: return "clock"
+            case .repo: return "arrow.triangle.branch"
+            case .wave: return "waveform"
+            case .ciFailure: return "exclamationmark.triangle"
             }
         }
 
         public var label: String {
-            self == .cron ? "Schedule" : rawValue.capitalized
+            switch self {
+            case .repo: return "Repo"
+            case .wave: return "Wave"
+            case .ciFailure: return "CI Fix"
+            }
         }
     }
 
     public var id: String
-    public var kind: Kind
+    public var signal: Signal
     public var enabled: Bool
-    public var cron: String?
+    public var flow: String?
+    public var sourceWaveId: String?
 
-    public init(id: String = UUID().uuidString, kind: Kind, enabled: Bool = true, cron: String? = nil) {
+    public init(id: String = UUID().uuidString, signal: Signal, enabled: Bool = true, flow: String? = nil, sourceWaveId: String? = nil) {
         self.id = id
-        self.kind = kind
+        self.signal = signal
         self.enabled = enabled
-        self.cron = cron
+        self.flow = flow
+        self.sourceWaveId = sourceWaveId
     }
 
     public var description: String {
-        if kind == .cron, let cronExpr = cron {
-            return "cron(\(cronExpr))"
+        if let flow = flow {
+            return "\(signal.rawValue) → \(flow)"
         }
-        return kind.rawValue
+        return signal.rawValue
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        kind = try container.decode(Kind.self, forKey: .kind)
+        signal = try container.decode(Signal.self, forKey: .signal)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        cron = try container.decodeIfPresent(String.self, forKey: .cron)
+        flow = try container.decodeIfPresent(String.self, forKey: .flow)
+        sourceWaveId = try container.decodeIfPresent(String.self, forKey: .sourceWaveId)
     }
 
-    public var icon: String { kind.icon }
+    public var icon: String { signal.icon }
 
-    public var label: String { kind.label }
+    public var label: String { signal.label }
 }
 
 public enum WaveStatus: String, Sendable, Codable {
@@ -174,7 +180,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var area: [String]
     public var agent: String?
     public var stepAgents: [String: String]?
-    public var stimuli: [Stimulus]
+    public var triggers: [Trigger]
     public var status: WaveStatus
     public var iteration: Int
     public var localWorktree: String?
@@ -195,7 +201,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         area: [String] = [],
         agent: String? = nil,
         stepAgents: [String: String]? = nil,
-        stimuli: [Stimulus] = [],
+        triggers: [Trigger] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
         localWorktree: String? = nil,
@@ -215,7 +221,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.area = area
         self.agent = agent
         self.stepAgents = stepAgents
-        self.stimuli = stimuli
+        self.triggers = triggers
         self.status = status
         self.iteration = iteration
         self.localWorktree = localWorktree

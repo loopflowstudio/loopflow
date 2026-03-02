@@ -15,7 +15,7 @@ WAVE_MINIMAL = {
 
 WAVE_FULL = {
     **WAVE_MINIMAL,
-    "stimuli": [{"id": "stim-1", "kind": "watch"}],
+    "triggers": [{"id": "trig-1", "signal": "repo"}],
     "created_at": "2026-02-08T01:56:54Z",
     "flow_steps": ["review", "iterate", "build", "gate"],
     "commits": [

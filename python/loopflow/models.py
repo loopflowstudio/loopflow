@@ -6,11 +6,11 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
-class Stimulus(BaseModel):
+class Trigger(BaseModel):
     id: Optional[str] = None
-    kind: str
+    signal: str
     source_wave_id: Optional[str] = None
-    cron: Optional[str] = None
+    flow: Optional[str] = None
     max_iterations: Optional[int] = None
 
 
@@ -51,7 +51,7 @@ class Wave(BaseModel):
     cron: Optional[str] = None
     direction: list[str]
     area: list[str]
-    stimuli: list[Stimulus] = Field(default_factory=list)
+    triggers: list[Trigger] = Field(default_factory=list)
     status: str
     iteration: int
     local_worktree: Optional[str] = None

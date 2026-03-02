@@ -5,7 +5,7 @@ title: Waves
 
 # Waves
 
-A wave is **area × direction × flow**. Stimuli (triggers) are separate entities that activate the wave.
+A wave is **area × direction × flow**. Mode controls how it executes. Triggers fire flows in response to signals.
 
 ```bash
 python - <<'PY'
@@ -18,19 +18,19 @@ PY
 
 This runs the `build` flow on `src/api/` with the `clarity` direction—continuously, creating PRs until you stop it.
 
-Waves are independent by default. Use a `listen` stimulus when one wave should react to another.
+Waves are independent by default. Add a `wave` trigger when one wave should react to another.
 
-## Stimulus Types
+## Modes
 
-| Stimulus | Runs when | Command |
-|----------|-----------|---------|
-| **Once** | Single run | `loopflow.run_wave(...)` |
-| **Loop** | Continuously until stopped | `loopflow.run_wave(...)` with loop stimulus |
-| **Watch** | Area changes on main | `loopflow.add_stimulus(..., kind="watch")` |
-| **Cron** | On schedule | `loopflow.add_stimulus(..., kind="cron")` |
-| **Listen** | Another wave runs | `loopflow.add_stimulus(..., kind="listen", source_wave_id=...)` |
+The wave's `mode` controls its execution pattern. Set it at creation or update it later.
 
-### Once
+| Mode | Behavior |
+|------|----------|
+| **manual** | Single run, then stop |
+| **loop** | Continuously until stopped |
+| **cron** | On schedule |
+
+### Manual
 
 Single execution. Run a flow once then stop.
 
@@ -38,7 +38,7 @@ Single execution. Run a flow once then stop.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("runner", repo=".", flow="build", area=["swift/"])
+loopflow.create_wave("runner", repo=".", flow="build", mode="manual", area=["swift/"])
 loopflow.run_wave("runner")
 PY
 ```
@@ -51,29 +51,12 @@ Continuous work. Each iteration picks a task, runs the flow, creates a PR.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("looper", repo=".", flow="build", area=["src/"])
-loopflow.add_stimulus("looper", kind="loop")
+loopflow.create_wave("looper", repo=".", flow="build", mode="loop", area=["src/"])
 loopflow.run_wave("looper")
 PY
 ```
 
 When the PR limit is reached, the loop pauses until PRs are merged.
-
-### Watch
-
-React to changes. When files in the area change on main, activates one iteration.
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("watcher", repo=".", flow="build", area=["src/api/"])
-loopflow.add_stimulus("watcher", kind="watch")
-loopflow.run_wave("watcher")
-PY
-```
-
-The area serves as both the context for the wave and the paths to watch. When a watch triggers, the diff of changed files is included in context.
 
 ### Cron
 
@@ -83,15 +66,43 @@ Run on schedule. 24-hour grace period for laptops.
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("cronner", repo=".", flow="build", area=["."])
-loopflow.add_stimulus("cronner", kind="cron", cron="0 9 * * *")
+loopflow.create_wave("cronner", repo=".", flow="build", mode="cron", cron="0 9 * * *", area=["."])
 loopflow.run_wave("cronner")
 PY
 ```
 
-### Listen
+## Triggers
 
-Trigger a wave when another wave runs.
+A trigger pairs a signal (what changed) with a flow (what to run). They fire regardless of mode.
+
+| Signal | What changed | Default flow |
+|--------|--------------|--------------|
+| **repo** | Paths changed on main | `integrate` |
+| **wave** | Another wave completed | `build` |
+| **ci_failure** | CI failed on a wave PR | `ci-fix` |
+
+Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`.
+
+### Repo
+
+React to changes on main. By default watches the whole repo and runs `integrate` (rebase + update wave content). Add a trigger with specific paths to watch a subset.
+
+```bash
+python - <<'PY'
+import loopflow.api as loopflow
+
+# Watch specific paths with a custom flow
+loopflow.create_wave("syncer", repo=".", flow="build", area=["docs/"])
+loopflow.add_trigger("syncer", signal="repo", paths=["src/api/"], flow="build")
+loopflow.run_wave("syncer")
+PY
+```
+
+When a repo trigger fires, the diff of changed files is included in context.
+
+### Wave
+
+React to another wave completing. More deliberate than a repo trigger — signals that specific changes are likely relevant.
 
 ```bash
 python - <<'PY'
@@ -99,51 +110,36 @@ import loopflow.api as loopflow
 
 loopflow.create_wave("ux", repo=".", flow="build", area=["docs/"])
 loopflow.create_wave("infra", repo=".", flow="grind", area=["rust/"])
-loopflow.add_stimulus("ux", kind="listen", source_wave_id="infra")
+loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 PY
 ```
 
-### Multiple Stimuli
+### CiFailure
 
-A wave can have multiple stimuli. Any stimulus firing activates the wave.
+Runs `ci-fix` when CI fails on a wave's PR. Ships as a default trigger — no need to declare it.
+
+### Multiple Triggers
+
+Triggers are a list. Multiple triggers of the same signal are fine — watch different paths, react to different waves.
 
 ```bash
-# Start with a watch stimulus
 python - <<'PY'
 import loopflow.api as loopflow
 
-loopflow.create_wave("swift-falcon", repo=".", flow="build", area=["src/"])
-loopflow.add_stimulus("swift-falcon", kind="watch")
+loopflow.create_wave("swift-falcon", repo=".", flow="build", mode="loop", area=["src/"])
+loopflow.add_trigger("swift-falcon", signal="wave", source_wave_id="infra")
 loopflow.run_wave("swift-falcon")
-PY
-
-# Add a cron trigger too (9am daily)
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.add_stimulus("swift-falcon", kind="cron", cron="0 9 * * *")
 PY
 
 # List all triggers
 lfq show swift-falcon
 
-# Remove a stimulus
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.remove_stimulus("swift-falcon", stimulus_id="<id>")
-PY
-
-# Or pause the entire wave
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.update_wave("swift-falcon", status="paused")
-PY
+# Stop the wave
+lfq stop swift-falcon
 ```
 
-When a wave is already running and another stimulus fires, the activation queues. Watch triggers coalesce—multiple commits combine into a single activation with a combined diff.
+When a wave is already running and another trigger fires, the activation queues. Repo triggers coalesce—multiple commits combine into a single activation with a combined diff.
 
 ---
 
@@ -155,19 +151,6 @@ lfq list                         # check progress
 ```
 
 Or run manually: `lfd serve`
-
-## One-Shot
-
-Run exactly one iteration using the once stimulus:
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("runner", repo=".", flow="build", area=["src/"])
-loopflow.run_wave("runner")
-PY
-```
 
 ## Managing Waves
 
@@ -181,8 +164,8 @@ lfq delete <name>       # remove wave and history
 Status output:
 
 ```
-ID       STIMULUS   AREA                             STATUS     ITER  REPO
-abc1234  loop       src/ [ship] [clarity]           running    12    ~/repo
+ID       MODE   AREA                             STATUS     ITER  REPO
+abc1234  loop   src/ [ship] [clarity]             running    12    ~/repo
 ```
 
 ## Next

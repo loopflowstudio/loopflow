@@ -1,4 +1,4 @@
-// Tests for WaveViewModel and Stimulus struct.
+// Tests for WaveViewModel and Trigger struct.
 
 import Foundation
 import SwiftUI
@@ -15,7 +15,7 @@ struct WaveModelTests {
         flow: String = "design",
         direction: [String] = [],
         area: [String] = [],
-        stimuli: [Stimulus] = [],
+        triggers: [Trigger] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
         recentSteps: [StepRun] = [],
@@ -29,7 +29,7 @@ struct WaveModelTests {
                 flow: flow,
                 direction: direction,
                 area: area,
-                stimuli: stimuli,
+                triggers: triggers,
                 status: status,
                 iteration: iteration
             ),
@@ -94,20 +94,6 @@ struct WaveModelTests {
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle")
-        #expect(indicator.color == .statusNeutral)
-    }
-
-    @Test("statusIndicator returns clock for idle cron wave")
-    func statusIndicatorIdleCron() {
-        let wave = makeWave(
-            id: "test",
-            repo: "/tmp",
-            stimuli: [Stimulus(kind: .cron, cron: "0 9 * * *")],
-            status: .idle
-        )
-        let indicator = wave.statusIndicator
-
-        #expect(indicator.icon == "clock")
         #expect(indicator.color == .statusNeutral)
     }
 
@@ -191,21 +177,21 @@ struct WaveModelTests {
 
     // MARK: - Detail Text
 
-    @Test("detailText combines area, flow, and stimulus")
+    @Test("detailText combines area, flow, and trigger signal")
     func detailTextCombines() {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
             flow: "build",
             area: ["src/"],
-            stimuli: [Stimulus(kind: .loop)]
+            triggers: [Trigger(signal: .repo)]
         )
 
-        #expect(wave.detailText == "src/ · build · loop")
+        #expect(wave.detailText == "src/ · build · repo")
     }
 
-    @Test("detailText omits stimulus when none active")
-    func detailTextOmitsWhenNoStimulus() {
+    @Test("detailText omits trigger when none active")
+    func detailTextOmitsWhenNoTrigger() {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
@@ -606,27 +592,28 @@ struct WaveRunHelpersTests {
     }
 }
 
-@Suite("Stimulus")
-struct StimulusTests {
+@Suite("Trigger")
+struct TriggerTests {
 
-    @Test("description returns kind for non-cron")
-    func descriptionNonCron() {
-        #expect(Stimulus(kind: .loop).description == "loop")
-        #expect(Stimulus(kind: .watch).description == "watch")
+    @Test("description returns signal name")
+    func descriptionSignal() {
+        #expect(Trigger(signal: .repo).description == "repo")
+        #expect(Trigger(signal: .wave).description == "wave")
+        #expect(Trigger(signal: .ciFailure).description == "ci_failure")
     }
 
-    @Test("description includes cron expression")
-    func descriptionCron() {
-        let stimulus = Stimulus(kind: .cron, cron: "0 9 * * *")
+    @Test("description includes flow when set")
+    func descriptionWithFlow() {
+        let trigger = Trigger(signal: .repo, flow: "integrate")
 
-        #expect(stimulus.description == "cron(0 9 * * *)")
+        #expect(trigger.description == "repo → integrate")
     }
 
-    @Test("icon returns correct SF Symbol for each kind")
-    func iconForKind() {
-        #expect(Stimulus(kind: .loop).icon == "repeat")
-        #expect(Stimulus(kind: .watch).icon == "eye")
-        #expect(Stimulus(kind: .cron).icon == "clock")
+    @Test("icon returns correct SF Symbol for each signal")
+    func iconForSignal() {
+        #expect(Trigger(signal: .repo).icon == "arrow.triangle.branch")
+        #expect(Trigger(signal: .wave).icon == "waveform")
+        #expect(Trigger(signal: .ciFailure).icon == "exclamationmark.triangle")
     }
 }
 

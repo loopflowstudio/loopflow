@@ -111,13 +111,13 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         set { api.stepAgents = newValue }
     }
 
-    public var stimuli: [Stimulus] {
-        get { api.stimuli }
-        set { api.stimuli = newValue }
+    public var triggers: [Trigger] {
+        get { api.triggers }
+        set { api.triggers = newValue }
     }
 
-    /// First active stimulus, if any.
-    public var stimulus: Stimulus? { stimuli.first }
+    /// First active trigger, if any.
+    public var trigger: Trigger? { triggers.first }
 
     public var status: WaveStatus {
         get { api.status }
@@ -185,15 +185,15 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         var parts: [String] = []
         if !areaDisplay.isEmpty { parts.append(areaDisplay) }
         if !flow.isEmpty { parts.append(flow) }
-        if let s = stimulus { parts.append(s.kind.rawValue) }
+        if let t = trigger { parts.append(t.signal.rawValue) }
         return parts.joined(separator: " · ")
     }
 
-    public var stimulusText: String {
-        stimulus?.description ?? "manual"
+    public var triggerText: String {
+        trigger?.description ?? "manual"
     }
 
-    public var hasActiveStimulus: Bool { !stimuli.isEmpty }
+    public var hasActiveTrigger: Bool { !triggers.isEmpty }
 
     public var statusIndicator: (icon: String, color: Color) {
         switch status {
@@ -204,9 +204,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         case .failed:
             return ("xmark.circle.fill", .statusError)
         case .idle:
-            if stimulus?.kind == .cron {
-                return ("clock", .statusNeutral)
-            }
             return ("circle", .statusNeutral)
         case .paused:
             return ("pause.circle", .statusNeutral)

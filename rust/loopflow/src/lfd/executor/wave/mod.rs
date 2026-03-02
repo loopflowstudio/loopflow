@@ -35,8 +35,8 @@ use crate::lfd::triggers::{
     spawn_run_task_with_slot, ActivationEnvelope, EnqueueOutcome,
 };
 use crate::lfd::types::{
-    ActivationSource, Event, LivePrState, LivePullRequestState, Signal, Wave, WaveMode, WaveRun,
-    WaveRunStatus, WaveStatus,
+    Event, LivePrState, LivePullRequestState, Signal, Wave, WaveMode, WaveRun, WaveRunStatus,
+    WaveStatus,
 };
 
 use super::adaptive::AdaptiveContainerExecutor;
@@ -785,32 +785,32 @@ impl WaveExecutor {
     }
 
     async fn trigger_listeners_on_completion(&self, source_wave_id: &LfdId, source_branch: &str) {
-        let stimuli = match self
+        let triggers = match self
             .store
-            .list_stimuli_by_signal(Signal::Listen.as_i32())
+            .list_triggers_by_signal(Signal::Wave.as_i32())
             .await
         {
-            Ok(stimuli) => stimuli,
+            Ok(triggers) => triggers,
             Err(err) => {
                 warn!(
                     wave_id = %source_wave_id,
                     error = %err,
-                    "failed to list listen stimuli"
+                    "failed to list wave triggers"
                 );
                 return;
             }
         };
 
-        for mut stimulus in stimuli {
-            if !stimulus.enabled || stimulus.source_wave_id.as_ref() != Some(source_wave_id) {
+        for mut trigger in triggers {
+            if !trigger.enabled || trigger.source_wave_id.as_ref() != Some(source_wave_id) {
                 continue;
             }
 
-            let listener_wave = match self.store.get_wave(&stimulus.wave_id).await {
+            let listener_wave = match self.store.get_wave(&trigger.wave_id).await {
                 Ok(Some(wave)) => wave,
                 Ok(None) => continue,
                 Err(err) => {
-                    warn!(stimulus_id = %stimulus.id, error = %err, "failed to load listening wave");
+                    warn!(trigger_id = %trigger.id, error = %err, "failed to load listening wave");
                     continue;
                 }
             };
@@ -820,13 +820,12 @@ impl WaveExecutor {
             }
 
             let reason = format!(
-                "listen stimulus {} triggered by source wave {}",
-                stimulus.id, source_wave_id
+                "wave trigger {} triggered by source wave {}",
+                trigger.id, source_wave_id
             );
             let envelope = ActivationEnvelope::new(
                 listener_wave.id(),
-                Some(&stimulus.id),
-                ActivationSource::Listen,
+                Some(&trigger.id),
                 reason,
                 "",
                 "",
@@ -855,19 +854,19 @@ impl WaveExecutor {
                     &self.scheduler,
                     &self.event_hub,
                     &listener_wave,
-                    stimulus.flow.clone(),
+                    trigger.flow.clone(),
                     envelope,
                 )
                 .await
                 .is_some()
             };
             if activated {
-                stimulus.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
-                if let Err(err) = self.store.update_stimulus(&stimulus).await {
+                trigger.last_triggered_at = Some(OffsetDateTime::now_utc().unix_timestamp());
+                if let Err(err) = self.store.update_trigger(&trigger).await {
                     warn!(
-                        stimulus_id = %stimulus.id,
+                        trigger_id = %trigger.id,
                         error = %err,
-                        "failed to update listen stimulus last_triggered_at"
+                        "failed to update wave trigger last_triggered_at"
                     );
                 }
             }
@@ -1222,7 +1221,7 @@ mod tests {
     use crate::lfd::sessions::types::{Session, SessionConfig};
     use crate::lfd::sessions::SessionManager;
     use crate::lfd::store::{open_store, StorageConfig};
-    use crate::lfd::types::{Signal, Stimulus, WaveRunSnapshot};
+    use crate::lfd::types::{Signal, Trigger, WaveRunSnapshot};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;
@@ -1435,14 +1434,13 @@ mod tests {
         run
     }
 
-    fn make_listen_stimulus(listener_wave_id: &LfdId, source_wave_id: &LfdId) -> Stimulus {
-        Stimulus {
+    fn make_wave_trigger(listener_wave_id: &LfdId, source_wave_id: &LfdId) -> Trigger {
+        Trigger {
             id: LfdId::new(),
             wave_id: listener_wave_id.clone(),
             source_wave_id: Some(source_wave_id.clone()),
-            signal: Signal::Listen,
+            signal: Signal::Wave,
             flow: None,
-            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -1588,11 +1586,11 @@ mod tests {
             .create_wave(&target_wave)
             .await
             .expect("create target wave");
-        let listen_stimulus = make_listen_stimulus(&target_wave.id, &source_wave_id);
+        let wave_trigger = make_wave_trigger(&target_wave.id, &source_wave_id);
         store
-            .create_stimulus(&listen_stimulus)
+            .create_trigger(&wave_trigger)
             .await
-            .expect("create listen stimulus");
+            .expect("create wave trigger");
 
         let scheduler = Arc::new(Scheduler::new(4));
         let output_dir = tempdir().expect("output dir");
@@ -1629,14 +1627,14 @@ mod tests {
             "listener should start immediately when runnable"
         );
 
-        let updated_stimulus = store
-            .get_stimulus(&listen_stimulus.id)
+        let updated_trigger = store
+            .get_trigger(&wave_trigger.id)
             .await
-            .expect("stimulus lookup should succeed")
-            .expect("stimulus should exist");
+            .expect("trigger lookup should succeed")
+            .expect("trigger should exist");
         assert!(
-            updated_stimulus.last_triggered_at.is_some(),
-            "listen stimulus should record trigger time"
+            updated_trigger.last_triggered_at.is_some(),
+            "wave trigger should record trigger time"
         );
     }
 
@@ -1671,11 +1669,11 @@ mod tests {
         let _listener_active_run =
             create_main_run(&store, &listener_wave, WaveRunStatus::Running).await;
 
-        let stimulus = make_listen_stimulus(listener_wave.id(), source_wave.id());
+        let trigger = make_wave_trigger(listener_wave.id(), source_wave.id());
         store
-            .create_stimulus(&stimulus)
+            .create_trigger(&trigger)
             .await
-            .expect("create listen stimulus");
+            .expect("create wave trigger");
 
         let scheduler = Arc::new(Scheduler::new(1));
         let output_dir = tempdir().expect("output dir");
@@ -1695,22 +1693,22 @@ mod tests {
             .expect("source run should complete");
 
         let pending = store
-            .get_pending_for_stimulus(listener_wave.id(), Some(&stimulus.id))
+            .get_pending_for_trigger(listener_wave.id(), Some(&trigger.id))
             .await
             .expect("pending activation lookup should succeed");
         assert!(
             pending.is_some(),
-            "listen activation should queue while listener is running"
+            "wave activation should queue while listener is running"
         );
 
         let updated = store
-            .get_stimulus(&stimulus.id)
+            .get_trigger(&trigger.id)
             .await
-            .expect("stimulus lookup should succeed")
-            .expect("stimulus should exist");
+            .expect("trigger lookup should succeed")
+            .expect("trigger should exist");
         assert!(
             updated.last_triggered_at.is_some(),
-            "queued listen activation should update last_triggered_at"
+            "queued wave activation should update last_triggered_at"
         );
     }
 
@@ -1741,11 +1739,11 @@ mod tests {
             .expect("create listener wave");
         let source_run = create_main_run(&store, &source_wave, WaveRunStatus::Running).await;
 
-        let stimulus = make_listen_stimulus(listener_wave.id(), source_wave.id());
+        let trigger = make_wave_trigger(listener_wave.id(), source_wave.id());
         store
-            .create_stimulus(&stimulus)
+            .create_trigger(&trigger)
             .await
-            .expect("create listen stimulus");
+            .expect("create wave trigger");
 
         let scheduler = Arc::new(Scheduler::new(0));
         let output_dir = tempdir().expect("output dir");
@@ -1765,12 +1763,12 @@ mod tests {
             .expect("source run should complete");
 
         let pending = store
-            .get_pending_for_stimulus(listener_wave.id(), Some(&stimulus.id))
+            .get_pending_for_trigger(listener_wave.id(), Some(&trigger.id))
             .await
             .expect("pending activation lookup should succeed");
         assert!(
             pending.is_some(),
-            "listen activation should queue when scheduler is full"
+            "wave activation should queue when scheduler is full"
         );
 
         let listener_runs = store

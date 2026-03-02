@@ -1,16 +1,18 @@
 # 01: FlowRun Container
 
-**Finish line:** WaveRun is an iteration container (branch, worktree, PR). FlowRun is one flow execution within it. The executor operates on FlowRuns. Reactive stimuli during active iterations create triggered FlowRuns, not new WaveRuns.
+**Finish line:** WaveRun is an iteration container (branch, worktree, PR). FlowRun is one flow execution within it. The executor operates on FlowRuns. Reactive triggers during active iterations create triggered FlowRuns, not new WaveRuns.
 
 ## Context
 
-Signal cleanup shipped: `Signal` has only Watch/Listen/CiFailure, execution modes live on `wave.mode` (Loop/Cron/Manual), loop/cron tickers query waves by mode, manual starts dispatch directly with `stimulus_id: None`. Incremental migration 022 (not hard reset) — appropriate since FlowRun wasn't included.
+Signal cleanup shipped: `Signal` has only Repo/Wave/CiFailure, execution modes live on `wave.mode` (Loop/Cron/Manual), loop/cron tickers query waves by mode, manual starts dispatch directly with `trigger_id: None`. Incremental migration 022 (not hard reset) — appropriate since FlowRun wasn't included.
+
+Trigger rename shipped: `Stimulus`/`stimuli` renamed to `Trigger`/`triggers` across Rust, Python, docs, and wave config. SQL migration 026 renames the `stimuli` table to `triggers` and updates FK columns. `ActivationSource` removed — trigger ID on the activation is sufficient. Cron promoted from trigger-level to wave-level (`wave.mode` + `wave.cron`).
 
 Key decisions that carry forward:
 
-- **Incremental migration path.** Signal cleanup used ALTER TABLE + table recreation (migration 022). FlowRun can follow the same pattern or consolidate into a hard reset if the migration count becomes unwieldy.
-- **`ActivationEnvelope.stimulus_id` is already `Option<LfdId>`.** No further activation-layer changes needed.
-- **Cron `last_triggered_at` tracking lost.** The old code tracked this on the stimulus. Currently cron waves attempt activation on every 30-second tick, relying on dedup to coalesce. Correct but noisy — add `last_cron_triggered_at` to the wave as part of this sprint.
+- **Incremental migration path.** Signal cleanup used ALTER TABLE + table recreation (migration 022). Trigger rename used ALTER TABLE + DROP COLUMN (migration 026, requires SQLite 3.35.0+). FlowRun can follow the same pattern or consolidate into a hard reset if the migration count becomes unwieldy.
+- **`ActivationEnvelope.trigger_id` is already `Option<LfdId>`.** No further activation-layer changes needed.
+- **Cron `last_triggered_at` tracking lost.** The old code tracked this on the trigger. Currently cron waves attempt activation on every 30-second tick, relying on dedup to coalesce. Correct but noisy — add `last_cron_triggered_at` to the wave as part of this sprint.
 - **No cron active-run check.** Unlike the loop ticker (which checks for active runs before dispatching), the cron ticker always dispatches. Address alongside FlowRun or accept the noise.
 - **API field asymmetry.** Input APIs (`CreateWaveRequest`, `UpdateWaveRequest`) accept `flow`. Output (`WaveDto`) returns `primary_flow`. Intentional but the DTO layer should be consistent — decide whether to rename input to `primary_flow` or keep the asymmetry and document it.
 - **Python API doesn't expose `mode`/`cron` yet.** The Python model deserializes them, but `create_wave`/`update_wave` don't accept them as parameters. Add when building FlowRun Python models.
@@ -72,9 +74,9 @@ CREATE TABLE flow_runs (
 
 Simple FIFO between steps. No mid-step interruption, no suspend/resume.
 
-### Reactive stimulus → triggered flow
+### Reactive trigger -> triggered flow
 
-When Watch/CiFailure/Listen fires and a WaveRun is active:
+When Repo/CiFailure/Wave fires and a WaveRun is active:
 1. Create a FlowRun with `is_primary_flow = 0`, `status = Pending`
 2. The executor picks it up between steps of the primary_flow_run
 
@@ -95,7 +97,7 @@ cargo clippy -- -D warnings
 ```
 
 - WaveRun history shows FlowRuns (primary_flow_run + triggered_flows)
-- Watch/CiFailure during an active run creates a triggered FlowRun on the same iteration
+- Repo/CiFailure during an active run creates a triggered FlowRun on the same iteration
 - Executor operates on FlowRun, not WaveRun fields
 - `WaveRunSnapshot` deleted
 - Cron ticker uses `last_cron_triggered_at` instead of always dispatching

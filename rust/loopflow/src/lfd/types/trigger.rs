@@ -1,4 +1,4 @@
-//! Stimulus and PendingActivation types.
+//! Trigger and PendingActivation types.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -8,24 +8,22 @@ use crate::lfd::id::LfdId;
 /// Flow name used for CI failure remediation runs.
 pub const CI_FIX_FLOW: &str = "ci-fix";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Signal {
-    #[default]
-    Unspecified = 0,
-    Watch = 3,
-    Listen = 5,
-    CiFailure = 6,
+    Repo = 1,
+    Wave = 2,
+    CiFailure = 3,
 }
 
 impl Signal {
-    pub fn from_i32(value: i32) -> Self {
+    pub fn from_i32(value: i32) -> Option<Self> {
         match value {
-            3 => Self::Watch,
-            5 => Self::Listen,
-            6 => Self::CiFailure,
-            _ => Self::Unspecified,
+            1 => Some(Self::Repo),
+            2 => Some(Self::Wave),
+            3 => Some(Self::CiFailure),
+            _ => None,
         }
     }
 
@@ -35,45 +33,9 @@ impl Signal {
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Watch => "watch",
-            Self::Listen => "listen",
+            Self::Repo => "repo",
+            Self::Wave => "wave",
             Self::CiFailure => "ci_failure",
-            Self::Unspecified => "unspecified",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ActivationSource {
-    #[default]
-    Poll = 0,
-    Push = 1,
-    Listen = 2,
-    Manual = 3,
-}
-
-impl ActivationSource {
-    pub fn from_i32(value: i32) -> Self {
-        match value {
-            1 => Self::Push,
-            2 => Self::Listen,
-            3 => Self::Manual,
-            _ => Self::Poll,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Poll => "poll",
-            Self::Push => "push",
-            Self::Listen => "listen",
-            Self::Manual => "manual",
         }
     }
 }
@@ -110,13 +72,12 @@ impl ActivationOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Stimulus {
+pub struct Trigger {
     pub id: LfdId,
     pub wave_id: LfdId,
     pub source_wave_id: Option<LfdId>,
     pub signal: Signal,
     pub flow: Option<String>,
-    pub cron: Option<String>,
     pub last_main_sha: Option<String>,
     pub last_triggered_at: Option<i64>,
     #[serde(with = "time::serde::rfc3339::option")]
@@ -133,7 +94,7 @@ fn default_enabled() -> bool {
     true
 }
 
-impl Stimulus {
+impl Trigger {
     pub fn new(id: LfdId, wave_id: LfdId, signal: Signal) -> Self {
         Self {
             id,
@@ -141,7 +102,6 @@ impl Stimulus {
             source_wave_id: None,
             signal,
             flow: None,
-            cron: None,
             last_main_sha: None,
             last_triggered_at: None,
             created_at: Some(OffsetDateTime::now_utc()),
@@ -155,8 +115,8 @@ impl Stimulus {
 pub struct PendingActivation {
     pub id: LfdId,
     pub wave_id: LfdId,
-    pub stimulus_id: Option<LfdId>,
-    pub source: ActivationSource,
+    /// Which trigger fired. `None` for manual activations.
+    pub trigger_id: Option<LfdId>,
     pub reason: String,
     pub from_sha: String,
     pub to_sha: String,
@@ -173,8 +133,8 @@ fn default_target_branch() -> String {
 pub struct ActivationLog {
     pub id: LfdId,
     pub wave_id: LfdId,
-    pub stimulus_id: Option<LfdId>,
-    pub source: ActivationSource,
+    /// Which trigger fired. `None` for manual activations.
+    pub trigger_id: Option<LfdId>,
     pub reason: String,
     pub outcome: ActivationOutcome,
     pub created_at: i64,
@@ -183,16 +143,14 @@ pub struct ActivationLog {
 impl ActivationLog {
     pub fn new(
         wave_id: LfdId,
-        stimulus_id: Option<LfdId>,
-        source: ActivationSource,
+        trigger_id: Option<LfdId>,
         reason: String,
         outcome: ActivationOutcome,
     ) -> Self {
         Self {
             id: LfdId::new(),
             wave_id,
-            stimulus_id,
-            source,
+            trigger_id,
             reason,
             outcome,
             created_at: OffsetDateTime::now_utc().unix_timestamp(),
@@ -202,39 +160,14 @@ impl ActivationLog {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActivationSource, Signal};
+    use super::Signal;
 
     #[test]
-    fn watch_signal_storage_value_is_stable() {
-        assert_eq!(Signal::Watch.as_i32(), 3);
-        assert_eq!(Signal::from_i32(3), Signal::Watch);
-    }
-
-    #[test]
-    fn listen_signal_storage_value_is_stable() {
-        assert_eq!(Signal::Listen.as_i32(), 5);
-        assert_eq!(Signal::from_i32(5), Signal::Listen);
-    }
-
-    #[test]
-    fn ci_failure_signal_storage_value_is_stable() {
-        assert_eq!(Signal::CiFailure.as_i32(), 6);
-        assert_eq!(Signal::from_i32(6), Signal::CiFailure);
-    }
-
-    #[test]
-    fn removed_discriminants_map_to_unspecified() {
-        assert_eq!(Signal::from_i32(1), Signal::Unspecified); // was Once
-        assert_eq!(Signal::from_i32(2), Signal::Unspecified); // was Loop
-        assert_eq!(Signal::from_i32(4), Signal::Unspecified); // was Cron
-    }
-
-    #[test]
-    fn activation_source_storage_value_is_stable() {
-        assert_eq!(ActivationSource::Poll.as_i32(), 0);
-        assert_eq!(ActivationSource::Push.as_i32(), 1);
-        assert_eq!(ActivationSource::Listen.as_i32(), 2);
-        assert_eq!(ActivationSource::Manual.as_i32(), 3);
-        assert_eq!(ActivationSource::from_i32(3), ActivationSource::Manual);
+    fn signal_round_trips() {
+        assert_eq!(Signal::from_i32(1), Some(Signal::Repo));
+        assert_eq!(Signal::from_i32(2), Some(Signal::Wave));
+        assert_eq!(Signal::from_i32(3), Some(Signal::CiFailure));
+        assert_eq!(Signal::from_i32(0), None);
+        assert_eq!(Signal::from_i32(99), None);
     }
 }

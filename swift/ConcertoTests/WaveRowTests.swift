@@ -13,7 +13,7 @@ struct WaveRowViewTests {
         name: String = "swift-falcon",
         area: [String] = ["src/"],
         flow: String = "build",
-        stimuli: [Stimulus] = []
+        triggers: [Trigger] = []
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -22,7 +22,7 @@ struct WaveRowViewTests {
                 repo: "/tmp/repo",
                 flow: flow,
                 area: area,
-                stimuli: stimuli,
+                triggers: triggers,
                 status: .idle,
                 iteration: 0
             )
@@ -68,22 +68,22 @@ struct WaveRowViewTests {
         #expect(try areaText.string() == "lib/core")
     }
 
-    @Test("Row shows cron schedule for cron waves")
-    func showsCronSchedule() throws {
-        let wave = makeWave(stimuli: [Stimulus(kind: .cron, cron: "0 9 * * *")])
+    @Test("Row shows trigger signal label")
+    func showsTriggerSignal() throws {
+        let wave = makeWave(triggers: [Trigger(signal: .repo, flow: "integrate")])
         let row = makeRow(wave: wave)
 
-        let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-stimulus").text()
-        #expect(try cronText.string() == "9am daily")
+        let triggerText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-trigger").text()
+        #expect(try triggerText.string() == "repo")
     }
 
-    @Test("Row shows raw cron when not a known pattern")
-    func showsRawCron() throws {
-        let wave = makeWave(stimuli: [Stimulus(kind: .cron, cron: "*/15 * * * *")])
+    @Test("Row shows ci-fix for ci_failure trigger")
+    func showsCiFixTrigger() throws {
+        let wave = makeWave(triggers: [Trigger(signal: .ciFailure, flow: "ci-fix")])
         let row = makeRow(wave: wave)
 
-        let cronText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-stimulus").text()
-        #expect(try cronText.string() == "*/15 * * * *")
+        let triggerText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-trigger").text()
+        #expect(try triggerText.string() == "ci-fix")
     }
 
 }

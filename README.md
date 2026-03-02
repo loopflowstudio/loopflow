@@ -8,23 +8,49 @@ Waves are first built manually through more interactive exploration. Eventually 
 
 ## Waves
 
-Waves are objects with 4 primary fields.
+A wave is **area × direction × flow**.
 
 | Field | Usage | Form |
 |-------|------|------|
 | **Area** | Scope and context | pathset |
 | **Flow** | Process followed / steps taken | sequence of prompts |
 | **Direction** | Defines success, quality, and aesthetics | prompt |
-| **Stimulus** | Watch, loop, cron, or listen | mode |
 
 ```yaml
 # wave/designer/designer.yaml
 flow: build
-stimulus:
-  kind: listen
-  source: infra
-  source_repo: /Users/jack/src/other-repo # optional
+mode: loop
+direction:
+  - ux
+area:
+  - designs/
+triggers:
+  - signal: wave
+    source_wave_id: infra
+    flow: build
 ```
+
+### Modes
+
+The wave's `mode` controls its execution pattern.
+
+| Mode | Behavior | Example |
+|------|----------|---------|
+| **manual** | Single run | Ship one feature, run one audit |
+| **loop** | Continuous until stopped | Work through a backlog, grind PRs |
+| **cron** | On a schedule | Daily QA pass, weekly dependency scan |
+
+### Triggers
+
+A trigger pairs a signal (what changed) with a flow (what to run). Triggers are a list — multiple triggers of the same signal are fine.
+
+| Signal | What changed | Default flow |
+|--------|--------------|--------------|
+| **repo** | Paths changed on main | `integrate` |
+| **wave** | Another wave completed | `build` |
+| **ci_failure** | CI failed on a wave PR | `ci-fix` |
+
+Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`. These don't need to be declared in the YAML.
 
 ## Steps
 
@@ -210,7 +236,10 @@ Install the Rust binaries directly with cargo.
 uv tool install loopflow
 lfq                  # status overview
 lfq list             # list waves
+lfq show engbot      # show wave details
 lfq logs engbot      # tail agent output
+lfq stop engbot      # stop a running wave
+lfq delete engbot    # remove wave and history
 lfq usage            # token usage summary (group by wave)
 lfq usage --wave engbot  # usage for one wave (group by step)
 lfq providers        # list providers with auth status and models
@@ -240,7 +269,7 @@ loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
 loopflow.create_wave("ux", repo=".", flow="build", direction=["ux"], area=["docs/"])
 loopflow.create_wave("infra", repo=".", flow="grind", direction=["infra"], area=["rust/"])
-loopflow.add_stimulus("ux", kind="listen", source_wave_id="infra")
+loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
 loopflow.run_wave("ux")
 ```
 

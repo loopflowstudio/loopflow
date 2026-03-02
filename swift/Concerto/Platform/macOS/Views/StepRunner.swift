@@ -11,11 +11,10 @@ struct StepRunner: View {
 
     @State private var selectedFlow: String = ""
     @State private var selectedAgent: String = ""
-    @State private var autoMode: Stimulus.Kind = .loop
-    @State private var cronExpression: String = "0 9 * * *"
+    @State private var triggerSignal: Trigger.Signal = .repo
     @State private var prompt: String = ""
     @State private var isSendingRun = false
-    @State private var isSendingAuto = false
+    @State private var isSendingTrigger = false
     @State private var errorMessage: String?
     @State private var showingError = false
 
@@ -33,16 +32,12 @@ struct StepRunner: View {
                 flowHeader
                 promptField
 
-                if wave.hasActiveStimulus {
-                    activeStimulusView
+                if wave.hasActiveTrigger {
+                    activeTriggerView
                 } else {
-                    if autoMode == .cron {
-                        cronField
-                    }
-
                     HStack(spacing: Spacing.md) {
                         runButton
-                        autoButton
+                        addTriggerButton
                     }
                 }
             }
@@ -57,11 +52,8 @@ struct StepRunner: View {
         .onAppear {
             selectedFlow = wave.flow
             selectedAgent = wave.agent ?? ""
-            if let s = wave.stimulus {
-                autoMode = s.kind
-                if let cron = s.cron {
-                    cronExpression = cron
-                }
+            if let t = wave.trigger {
+                triggerSignal = t.signal
             }
         }
     }
@@ -152,45 +144,29 @@ struct StepRunner: View {
         }
     }
 
-    private var cronField: some View {
+    // MARK: - Active Trigger
+
+    private var activeTriggerView: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            TextField("0 9 * * *", text: $cronExpression)
-                .textFieldStyle(.plain)
-                .font(Typography.code(11))
-                .padding(Spacing.sm)
-                .background(palette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-                .accessibilityLabel("Cron expression")
-
-            Text("Examples: 0 9 * * * (daily 9am), */30 * * * * (every 30 min)")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-        }
-    }
-
-    // MARK: - Active Stimulus
-
-    private var activeStimulusView: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            if let s = wave.stimulus {
+            if let t = wave.trigger {
                 HStack {
-                    Image(systemName: s.icon)
-                    Text(s.label)
+                    Image(systemName: t.icon)
+                    Text(t.label)
                         .fontWeight(.semibold)
-                    if let cron = s.cron {
-                        Text(cron)
+                    if let flow = t.flow {
+                        Text(flow)
                             .font(Typography.code(11))
                             .foregroundStyle(palette.textSecondary)
                     }
                     Spacer()
                     Button {
-                        removeActiveStimulus(s.id)
+                        removeActiveTrigger(t.id)
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(palette.textSecondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Remove stimulus")
+                    .accessibilityLabel("Remove trigger")
                 }
                 .padding(Spacing.md)
                 .background(palette.surface)
@@ -209,8 +185,8 @@ struct StepRunner: View {
         isSendingRun || actionsDisabled
     }
 
-    private var autoDisabled: Bool {
-        isSendingAuto || actionsDisabled
+    private var triggerDisabled: Bool {
+        isSendingTrigger || actionsDisabled
     }
 
     private var runButton: some View {
@@ -238,19 +214,19 @@ struct StepRunner: View {
         .opacity(runDisabled ? 0.5 : 1)
     }
 
-    private var autoButton: some View {
+    private var addTriggerButton: some View {
         HStack(spacing: 0) {
             Button {
-                addAutoStimulus()
+                addTrigger()
             } label: {
                 HStack(spacing: Spacing.sm) {
-                    if isSendingAuto {
+                    if isSendingTrigger {
                         ProgressView()
                             .scaleEffect(0.8)
                     } else {
-                        Image(systemName: autoMode.icon)
+                        Image(systemName: triggerSignal.icon)
                     }
-                    Text(autoMode.label)
+                    Text(triggerSignal.label)
                         .fontWeight(.semibold)
                 }
                 .padding(.vertical, Spacing.lg)
@@ -264,9 +240,9 @@ struct StepRunner: View {
                 .frame(width: 1, height: 20)
 
             Menu {
-                ForEach(Stimulus.Kind.allCases, id: \.rawValue) { kind in
-                    Button { autoMode = kind } label: {
-                        Label(kind.label, systemImage: kind.icon)
+                ForEach(Trigger.Signal.allCases, id: \.rawValue) { signal in
+                    Button { triggerSignal = signal } label: {
+                        Label(signal.label, systemImage: signal.icon)
                     }
                 }
             } label: {
@@ -276,13 +252,13 @@ struct StepRunner: View {
                     .padding(.horizontal, Spacing.sm)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Change auto mode")
+            .accessibilityLabel("Change trigger signal")
         }
-        .background(autoDisabled ? Color.statusNeutral : palette.surface)
-        .foregroundStyle(autoDisabled ? .white : palette.text)
+        .background(triggerDisabled ? Color.statusNeutral : palette.surface)
+        .foregroundStyle(triggerDisabled ? .white : palette.text)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
-        .disabled(autoDisabled)
-        .opacity(autoDisabled ? 0.5 : 1)
+        .disabled(triggerDisabled)
+        .opacity(triggerDisabled ? 0.5 : 1)
     }
 
     // MARK: - Actions
@@ -306,31 +282,29 @@ struct StepRunner: View {
         }
     }
 
-    private func addAutoStimulus() {
+    private func addTrigger() {
         guard !selectedFlow.isEmpty else { return }
 
-        isSendingAuto = true
-        let cron = autoMode == .cron ? cronExpression : nil
+        isSendingTrigger = true
         Task {
             do {
-                try await repoState.addStimulus(
+                try await repoState.addTrigger(
                     wave: wave,
-                    kind: autoMode,
-                    cron: cron
+                    signal: triggerSignal
                 )
             } catch {
                 showError(error)
             }
             await MainActor.run {
-                isSendingAuto = false
+                isSendingTrigger = false
             }
         }
     }
 
-    private func removeActiveStimulus(_ stimulusId: String) {
+    private func removeActiveTrigger(_ triggerId: String) {
         Task {
             do {
-                try await repoState.removeStimulus(wave: wave, stimulusId: stimulusId)
+                try await repoState.removeTrigger(wave: wave, triggerId: triggerId)
             } catch {
                 showError(error)
             }

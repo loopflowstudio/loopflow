@@ -1,5 +1,4 @@
 flow: release
 message: patch
-stimulus:
-  kind: cron
-  cron: "0 2 * * *"
+mode: cron
+cron: "0 2 * * *"

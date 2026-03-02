@@ -29,18 +29,18 @@ pub(crate) enum Query {
     FailOrphanedRuns,
     GetLivePrState,
     UpsertLivePrState,
-    ListStimuli,
-    ListStimuliByWave,
-    ListStimuliBySignal,
-    GetStimulusById,
-    InsertStimulus,
-    UpdateStimulus,
-    DeleteStimulusById,
+    ListTriggers,
+    ListTriggersByWave,
+    ListTriggersBySignal,
+    GetTriggerById,
+    InsertTrigger,
+    UpdateTrigger,
+    DeleteTriggerById,
     ListPendingActivationsByWave,
     InsertPendingActivation,
     UpdatePendingActivation,
     DeletePendingActivationById,
-    GetPendingActivationForStimulus,
+    GetPendingActivationForTrigger,
     InsertActivationLog,
     ListActivationLogByWave,
     GetActivationLogById,
@@ -95,18 +95,18 @@ impl Query {
         Self::FailOrphanedRuns,
         Self::GetLivePrState,
         Self::UpsertLivePrState,
-        Self::ListStimuli,
-        Self::ListStimuliByWave,
-        Self::ListStimuliBySignal,
-        Self::GetStimulusById,
-        Self::InsertStimulus,
-        Self::UpdateStimulus,
-        Self::DeleteStimulusById,
+        Self::ListTriggers,
+        Self::ListTriggersByWave,
+        Self::ListTriggersBySignal,
+        Self::GetTriggerById,
+        Self::InsertTrigger,
+        Self::UpdateTrigger,
+        Self::DeleteTriggerById,
         Self::ListPendingActivationsByWave,
         Self::InsertPendingActivation,
         Self::UpdatePendingActivation,
         Self::DeletePendingActivationById,
-        Self::GetPendingActivationForStimulus,
+        Self::GetPendingActivationForTrigger,
         Self::InsertActivationLog,
         Self::ListActivationLogByWave,
         Self::GetActivationLogById,
@@ -256,52 +256,52 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli ORDER BY created_at",
+        template: "SELECT id, wave_id, signal, flow, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM triggers ORDER BY created_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli WHERE wave_id = {p1} ORDER BY created_at",
+        template: "SELECT id, wave_id, signal, flow, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM triggers WHERE wave_id = {p1} ORDER BY created_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli WHERE signal = {p1} ORDER BY created_at",
+        template: "SELECT id, wave_id, signal, flow, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM triggers WHERE signal = {p1} ORDER BY created_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM stimuli WHERE id = {p1}",
+        template: "SELECT id, wave_id, signal, flow, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations\n             FROM triggers WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO stimuli (id, wave_id, signal, flow, cron, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11})",
+        template: "INSERT INTO triggers (id, wave_id, signal, flow, last_main_sha, last_triggered_at, created_at, enabled, source_wave_id, max_iterations)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10})",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "UPDATE stimuli SET\n                signal = {p1}, flow = {p2}, cron = {p3}, last_main_sha = {p4},\n                last_triggered_at = {p5}, enabled = {p6}, source_wave_id = {p7},\n                max_iterations = {p8}\n             WHERE id = {p9}",
+        template: "UPDATE triggers SET\n                signal = {p1}, flow = {p2}, last_main_sha = {p3},\n                last_triggered_at = {p4}, enabled = {p5}, source_wave_id = {p6},\n                max_iterations = {p7}\n             WHERE id = {p8}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "DELETE FROM stimuli WHERE id = {p1}",
+        template: "DELETE FROM triggers WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} ORDER BY queued_at",
+        template: "SELECT id, wave_id, trigger_id, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} ORDER BY queued_at",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO pending_activations (id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9})",
+        template: "INSERT INTO pending_activations (id, wave_id, trigger_id, reason, from_sha, to_sha, queued_at, target_branch)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8})",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "UPDATE pending_activations SET source = {p1}, reason = {p2}, from_sha = {p3}, to_sha = {p4}, target_branch = {p5} WHERE id = {p6}",
+        template: "UPDATE pending_activations SET reason = {p1}, from_sha = {p2}, to_sha = {p3}, target_branch = {p4} WHERE id = {p5}",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -311,22 +311,22 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} AND stimulus_id = {p2}",
+        template: "SELECT id, wave_id, trigger_id, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} AND trigger_id = {p2}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "INSERT INTO activation_log (id, wave_id, stimulus_id, source, reason, outcome, created_at)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7})",
+        template: "INSERT INTO activation_log (id, wave_id, trigger_id, reason, outcome, created_at)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6})",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, stimulus_id, source, reason, outcome, created_at\n             FROM activation_log\n             WHERE wave_id = {p1}\n             ORDER BY created_at DESC\n             LIMIT {p2}",
+        template: "SELECT id, wave_id, trigger_id, reason, outcome, created_at\n             FROM activation_log\n             WHERE wave_id = {p1}\n             ORDER BY created_at DESC\n             LIMIT {p2}",
         sqlite_override: None,
         postgres_override: None,
     },
     QueryDef {
-        template: "SELECT id, wave_id, stimulus_id, source, reason, outcome, created_at\n             FROM activation_log\n             WHERE id = {p1}",
+        template: "SELECT id, wave_id, trigger_id, reason, outcome, created_at\n             FROM activation_log\n             WHERE id = {p1}",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -462,9 +462,9 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         sqlite_override: None,
         postgres_override: None,
     },
-    // GetPendingActivationForWave — match by wave_id where stimulus_id IS NULL
+    // GetPendingActivationForWave — match by wave_id where trigger_id IS NULL
     QueryDef {
-        template: "SELECT id, wave_id, stimulus_id, source, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} AND stimulus_id IS NULL",
+        template: "SELECT id, wave_id, trigger_id, reason, from_sha, to_sha, queued_at, target_branch\n             FROM pending_activations WHERE wave_id = {p1} AND trigger_id IS NULL",
         sqlite_override: None,
         postgres_override: None,
     },
@@ -520,11 +520,11 @@ pub(crate) fn list_wave_runs_query(has_wave_id: bool, has_limit: bool) -> Query 
     }
 }
 
-pub(crate) fn list_stimuli_query(has_wave_id: bool) -> Query {
+pub(crate) fn list_triggers_query(has_wave_id: bool) -> Query {
     if has_wave_id {
-        Query::ListStimuliByWave
+        Query::ListTriggersByWave
     } else {
-        Query::ListStimuli
+        Query::ListTriggers
     }
 }
 

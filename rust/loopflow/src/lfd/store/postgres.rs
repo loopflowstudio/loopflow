@@ -10,20 +10,20 @@ use crate::lfd::sessions::types::{
     PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
 };
 use crate::lfd::store::catalog::{
-    list_agent_history_query, list_stimuli_query, list_wave_runs_query, list_waves_query, sql,
+    list_agent_history_query, list_triggers_query, list_wave_runs_query, list_waves_query, sql,
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_repo_edge_row, map_repo_row, map_stimulus_row, map_summary_row, map_wave_row,
+    map_repo_edge_row, map_repo_row, map_summary_row, map_trigger_row, map_wave_row,
     map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
     LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
-    RepoEdge, RepoId, Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -1314,65 +1314,64 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
+    pub async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>> {
         self.with_client(|client| async move {
             let rows = if let Some(wave_id) = wave_id {
                 client
-                    .query(Self::sql(list_stimuli_query(true)), &[&wave_id])
+                    .query(Self::sql(list_triggers_query(true)), &[&wave_id])
                     .await?
             } else {
                 client
-                    .query(Self::sql(list_stimuli_query(false)), &[])
+                    .query(Self::sql(list_triggers_query(false)), &[])
                     .await?
             };
-            rows.iter().map(map_stimulus_row).collect()
+            rows.iter().map(map_trigger_row).collect()
         })
         .await
     }
 
-    pub async fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
+    pub async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>> {
         self.with_client(|client| async move {
             let rows = client
-                .query(Self::sql(Query::ListStimuliBySignal), &[&signal])
+                .query(Self::sql(Query::ListTriggersBySignal), &[&signal])
                 .await?;
-            rows.iter().map(map_stimulus_row).collect()
+            rows.iter().map(map_trigger_row).collect()
         })
         .await
     }
 
-    pub async fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
+    pub async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>> {
         self.with_client(|client| async move {
             let row = client
-                .query_opt(Self::sql(Query::GetStimulusById), &[&stimulus_id])
+                .query_opt(Self::sql(Query::GetTriggerById), &[&trigger_id])
                 .await?;
-            row.as_ref().map(map_stimulus_row).transpose()
+            row.as_ref().map(map_trigger_row).transpose()
         })
         .await
     }
 
-    pub async fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    pub async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
         self.with_client(|client| async move {
-            let created_at = stimulus
+            let created_at = trigger
                 .created_at
                 .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
-            let enabled: i32 = if stimulus.enabled { 1 } else { 0 };
+            let enabled: i32 = if trigger.enabled { 1 } else { 0 };
 
             client
                 .execute(
-                    Self::sql(Query::InsertStimulus),
+                    Self::sql(Query::InsertTrigger),
                     &[
-                        &stimulus.id,
-                        &stimulus.wave_id,
-                        &stimulus.signal.as_i32(),
-                        &stimulus.flow,
-                        &stimulus.cron,
-                        &stimulus.last_main_sha,
-                        &stimulus.last_triggered_at,
+                        &trigger.id,
+                        &trigger.wave_id,
+                        &trigger.signal.as_i32(),
+                        &trigger.flow,
+                        &trigger.last_main_sha,
+                        &trigger.last_triggered_at,
                         &created_at,
                         &enabled,
-                        &stimulus.source_wave_id,
-                        &stimulus.max_iterations.map(|v| v as i32),
+                        &trigger.source_wave_id,
+                        &trigger.max_iterations.map(|v| v as i32),
                     ],
                 )
                 .await?;
@@ -1381,22 +1380,21 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    pub async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
         self.with_client(|client| async move {
-            let enabled: i32 = if stimulus.enabled { 1 } else { 0 };
+            let enabled: i32 = if trigger.enabled { 1 } else { 0 };
             let updated = client
                 .execute(
-                    Self::sql(Query::UpdateStimulus),
+                    Self::sql(Query::UpdateTrigger),
                     &[
-                        &stimulus.signal.as_i32(),
-                        &stimulus.flow,
-                        &stimulus.cron,
-                        &stimulus.last_main_sha,
-                        &stimulus.last_triggered_at,
+                        &trigger.signal.as_i32(),
+                        &trigger.flow,
+                        &trigger.last_main_sha,
+                        &trigger.last_triggered_at,
                         &enabled,
-                        &stimulus.source_wave_id,
-                        &stimulus.max_iterations.map(|v| v as i32),
-                        &stimulus.id,
+                        &trigger.source_wave_id,
+                        &trigger.max_iterations.map(|v| v as i32),
+                        &trigger.id,
                     ],
                 )
                 .await?;
@@ -1408,10 +1406,10 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
+    pub async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()> {
         self.with_client(|client| async move {
             client
-                .execute(Self::sql(Query::DeleteStimulusById), &[&stimulus_id])
+                .execute(Self::sql(Query::DeleteTriggerById), &[&trigger_id])
                 .await?;
             Ok(())
         })
@@ -1442,8 +1440,7 @@ impl PostgresStore {
                     &[
                         &activation.id,
                         &activation.wave_id,
-                        &activation.stimulus_id,
-                        &activation.source.as_i32(),
+                        &activation.trigger_id,
                         &activation.reason,
                         &activation.from_sha,
                         &activation.to_sha,
@@ -1466,7 +1463,6 @@ impl PostgresStore {
                 .execute(
                     Self::sql(Query::UpdatePendingActivation),
                     &[
-                        &activation.source.as_i32(),
                         &activation.reason,
                         &activation.from_sha,
                         &activation.to_sha,
@@ -1483,18 +1479,18 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn get_pending_for_stimulus(
+    pub async fn get_pending_for_trigger(
         &self,
         wave_id: &LfdId,
-        stimulus_id: Option<&LfdId>,
+        trigger_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
         self.with_client(|client| async move {
-            let row = match stimulus_id {
-                Some(sid) => {
+            let row = match trigger_id {
+                Some(tid) => {
                     client
                         .query_opt(
-                            Self::sql(Query::GetPendingActivationForStimulus),
-                            &[&wave_id, &sid],
+                            Self::sql(Query::GetPendingActivationForTrigger),
+                            &[&wave_id, &tid],
                         )
                         .await?
                 }
@@ -1530,8 +1526,7 @@ impl PostgresStore {
                     &[
                         &log.id,
                         &log.wave_id,
-                        &log.stimulus_id,
-                        &log.source.as_i32(),
+                        &log.trigger_id,
                         &log.reason,
                         &log.outcome.as_str(),
                         &log.created_at,

@@ -9,20 +9,20 @@ use crate::lfd::sessions::types::{
     PersistedSessionEvent, Session, SessionConfig, SessionEvent, SessionStatus,
 };
 use crate::lfd::store::catalog::{
-    list_agent_history_query, list_stimuli_query, list_wave_runs_query, list_waves_query, sql,
+    list_agent_history_query, list_triggers_query, list_wave_runs_query, list_waves_query, sql,
     Query, SqlDialect,
 };
 use crate::lfd::store::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_chord_row, map_fork_run_row, map_live_pr_state_row, map_pending_activation_row,
-    map_repo_edge_row, map_repo_row, map_stimulus_row, map_summary_row, map_wave_row,
+    map_repo_edge_row, map_repo_row, map_summary_row, map_trigger_row, map_wave_row,
     map_wave_run_row, now_unix, serialize_pr,
 };
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
     LivePullRequestState, PendingActivation, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
-    RepoEdge, RepoId, Stimulus, Summary, Wave, WaveRun, WaveRunStatus, WaveStatus,
+    RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStatus, WaveStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -1155,9 +1155,9 @@ impl SqliteStore {
         Ok(updated as u32)
     }
 
-    pub fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
+    pub fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = Self::sql(list_stimuli_query(wave_id.is_some()));
+        let query = Self::sql(list_triggers_query(wave_id.is_some()));
         let params: Vec<Box<dyn ToSql>> = if let Some(wave_id) = wave_id {
             vec![Box::new(wave_id.clone())]
         } else {
@@ -1167,76 +1167,74 @@ impl SqliteStore {
         let mut stmt = conn.prepare(query)?;
         let params_iter = params.iter().map(|v| v.as_ref() as &dyn ToSql);
         let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
-            Ok(map_stimulus_row(row))
+            Ok(map_trigger_row(row))
         })?;
 
-        let mut stimuli = Vec::new();
-        for stimulus in rows {
-            stimuli.push(stimulus??);
+        let mut triggers = Vec::new();
+        for trigger in rows {
+            triggers.push(trigger??);
         }
-        Ok(stimuli)
+        Ok(triggers)
     }
 
-    pub fn list_stimuli_by_signal(&self, signal: i32) -> StoreResult<Vec<Stimulus>> {
+    pub fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListStimuliBySignal))?;
-        let rows = stmt.query_map(params![signal as i64], |row| Ok(map_stimulus_row(row)))?;
-        let mut stimuli = Vec::new();
-        for stimulus in rows {
-            stimuli.push(stimulus??);
+        let mut stmt = conn.prepare(Self::sql(Query::ListTriggersBySignal))?;
+        let rows = stmt.query_map(params![signal as i64], |row| Ok(map_trigger_row(row)))?;
+        let mut triggers = Vec::new();
+        for trigger in rows {
+            triggers.push(trigger??);
         }
-        Ok(stimuli)
+        Ok(triggers)
     }
 
-    pub fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
+    pub fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::GetStimulusById))?;
-        let stimulus = stmt
-            .query_row(params![stimulus_id], |row| Ok(map_stimulus_row(row)))
+        let mut stmt = conn.prepare(Self::sql(Query::GetTriggerById))?;
+        let trigger = stmt
+            .query_row(params![trigger_id], |row| Ok(map_trigger_row(row)))
             .optional()?;
-        stimulus.transpose()
+        trigger.transpose()
     }
 
-    pub fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    pub fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let created_at = stimulus
+        let created_at = trigger
             .created_at
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
         conn.execute(
-            Self::sql(Query::InsertStimulus),
+            Self::sql(Query::InsertTrigger),
             params![
-                stimulus.id,
-                stimulus.wave_id,
-                stimulus.signal.as_i32() as i64,
-                stimulus.flow,
-                stimulus.cron,
-                stimulus.last_main_sha,
-                stimulus.last_triggered_at,
+                trigger.id,
+                trigger.wave_id,
+                trigger.signal.as_i32() as i64,
+                trigger.flow,
+                trigger.last_main_sha,
+                trigger.last_triggered_at,
                 created_at,
-                stimulus.enabled as i64,
-                stimulus.source_wave_id,
-                stimulus.max_iterations.map(|v| v as i64),
+                trigger.enabled as i64,
+                trigger.source_wave_id,
+                trigger.max_iterations.map(|v| v as i64),
             ],
         )?;
         Ok(())
     }
 
-    pub fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()> {
+    pub fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
-            Self::sql(Query::UpdateStimulus),
+            Self::sql(Query::UpdateTrigger),
             params![
-                stimulus.signal.as_i32() as i64,
-                stimulus.flow,
-                stimulus.cron,
-                stimulus.last_main_sha,
-                stimulus.last_triggered_at,
-                stimulus.enabled as i64,
-                stimulus.source_wave_id,
-                stimulus.max_iterations.map(|v| v as i64),
-                stimulus.id,
+                trigger.signal.as_i32() as i64,
+                trigger.flow,
+                trigger.last_main_sha,
+                trigger.last_triggered_at,
+                trigger.enabled as i64,
+                trigger.source_wave_id,
+                trigger.max_iterations.map(|v| v as i64),
+                trigger.id,
             ],
         )?;
         if updated == 0 {
@@ -1245,9 +1243,9 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
+    pub fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(Self::sql(Query::DeleteStimulusById), params![stimulus_id])?;
+        conn.execute(Self::sql(Query::DeleteTriggerById), params![trigger_id])?;
         Ok(())
     }
 
@@ -1269,8 +1267,7 @@ impl SqliteStore {
             params![
                 activation.id,
                 activation.wave_id,
-                activation.stimulus_id,
-                activation.source.as_i32() as i64,
+                activation.trigger_id,
                 activation.reason,
                 activation.from_sha,
                 activation.to_sha,
@@ -1286,7 +1283,6 @@ impl SqliteStore {
         let updated = conn.execute(
             Self::sql(Query::UpdatePendingActivation),
             params![
-                activation.source.as_i32() as i64,
                 activation.reason,
                 activation.from_sha,
                 activation.to_sha,
@@ -1300,17 +1296,17 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_pending_for_stimulus(
+    pub fn get_pending_for_trigger(
         &self,
         wave_id: &LfdId,
-        stimulus_id: Option<&LfdId>,
+        trigger_id: Option<&LfdId>,
     ) -> StoreResult<Option<PendingActivation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        match stimulus_id {
-            Some(sid) => {
-                let mut stmt = conn.prepare(Self::sql(Query::GetPendingActivationForStimulus))?;
+        match trigger_id {
+            Some(tid) => {
+                let mut stmt = conn.prepare(Self::sql(Query::GetPendingActivationForTrigger))?;
                 let activation = stmt
-                    .query_row(params![wave_id, sid], |row| {
+                    .query_row(params![wave_id, tid], |row| {
                         Ok(map_pending_activation_row(row))
                     })
                     .optional()?;
@@ -1342,8 +1338,7 @@ impl SqliteStore {
             params![
                 log.id,
                 log.wave_id,
-                log.stimulus_id,
-                log.source.as_i32() as i64,
+                log.trigger_id,
                 log.reason,
                 log.outcome.as_str(),
                 log.created_at,

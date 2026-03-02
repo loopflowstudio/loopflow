@@ -22,8 +22,8 @@ public protocol WaveServiceProtocol: Sendable {
     func deleteWave(_ id: String) async throws
     func cloneWave(_ id: String, name: String?) async throws -> Wave
     func run(_ id: String, overrides: RunOverrides?) async throws
-    func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String?) async throws -> Stimulus
-    func removeStimulus(_ waveId: String, stimulusId: String) async throws
+    func addTrigger(_ waveId: String, signal: Trigger.Signal, flow: String?) async throws -> Trigger
+    func removeTrigger(_ waveId: String, triggerId: String) async throws
     func createSession(
         harness: String,
         waveRunId: String?,

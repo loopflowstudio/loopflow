@@ -61,7 +61,14 @@ yolo: true
 #[test]
 fn load_config_or_default_returns_defaults() {
     let temp = TempDir::new().unwrap();
+    // Point HOME to temp dir so we don't pick up ~/.lf/config.yaml
+    let orig_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", temp.path());
     let config = load_config_or_default(Some(temp.path()));
+    match orig_home {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
 
     assert!(config.agent.is_none());
     assert!(!config.yolo);

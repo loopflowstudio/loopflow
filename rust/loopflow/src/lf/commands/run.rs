@@ -304,7 +304,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!(
-            "agent exited with code {}. Check .lf/logs/ for details.",
+            "agent exited with code {}. Check ~/.lf/logs/ for details.",
             result.exit_code
         ))
     }

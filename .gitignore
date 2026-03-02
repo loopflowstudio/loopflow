@@ -15,8 +15,7 @@ swift/dist/
 .claude/worktrees/
 
 # Loopflow (generated)
-.lf/log/
-.lf/logs/
+.lf/prompts/
 .lf/rlm/
 .lf/summaries/
 *.profraw
@@ -29,3 +28,4 @@ reports/
 
 # Environment (secrets)
 .env
+.lf/log/

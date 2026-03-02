@@ -1290,7 +1290,7 @@ mod tests {
     }
 
     fn read_prompt_logs(worktree: &Path) -> String {
-        let log_dir = worktree.join(".lf/log");
+        let log_dir = worktree.join(".lf/prompts");
         if !log_dir.exists() {
             return String::new();
         }

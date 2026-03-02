@@ -126,7 +126,7 @@ fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     Ok(())
 }
 
-fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
+pub(crate) fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
     let output = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")
@@ -144,10 +144,6 @@ fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     push_with_upstream(repo, "origin", &branch)?;
     Ok(())
-}
-
-pub(crate) fn push_with_upstream_or_error(repo: &Path) -> OpsResult<()> {
-    push_with_upstream_if_needed(repo)
 }
 
 /// Traced version of commit_workflow for parity testing.

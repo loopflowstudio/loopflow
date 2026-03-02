@@ -231,7 +231,7 @@ fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     crate::engine::git::stage_all(repo)?;
     if has_staged_changes(repo)? {
         crate::engine::git::commit(repo, "lf land: clear scratch/")?;
-        crate::ops::commit::push_with_upstream_or_error(repo)?;
+        crate::ops::commit::push_with_upstream_if_needed(repo)?;
     }
 
     Ok(())

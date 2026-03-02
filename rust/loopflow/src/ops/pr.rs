@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
@@ -56,6 +56,9 @@ pub fn create_or_update_pr(
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let origin_before = rev_parse(repo, &format!("origin/{branch}")).ok();
 
+    let main_repo = resolve_main_repo(repo);
+    let base_branch = get_default_branch(&main_repo)?;
+
     // Commit before sync — sync_main checks is_clean() and fails on dirty trees
     let commit_options = CommitOptions {
         add: true,
@@ -65,12 +68,10 @@ pub fn create_or_update_pr(
     };
     commit_workflow(repo, &commit_options, progress)?;
 
-    sync_main_repo(repo)?;
+    let _ = sync_main(&main_repo, &base_branch);
 
-    if commits_behind_main(repo)? > 0 {
+    if commits_behind(repo, &base_branch)? > 0 {
         progress.status("Branch behind base, rebasing...");
-        let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-        let base_branch = get_default_branch(&main_repo)?;
         crate::ops::rebase::rebase_with_recovery(
             repo,
             &crate::ops::rebase::RebaseOptions {
@@ -94,66 +95,53 @@ pub fn create_or_update_pr(
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty());
-    let has_message = title.is_some() || body.is_some();
-    if has_message && !(title.is_some() && body.is_some()) {
-        return Err(OpsError::Message(
-            "title and body required — use `lf pr` to generate them.".to_string(),
-        ));
-    }
-    if !options.refresh && !has_message {
-        return Err(OpsError::Message(
-            "title and body required — use `lf pr` to generate them.".to_string(),
-        ));
-    }
 
-    if let Some(pr) = find_open_pr(repo)? {
-        if has_message {
-            progress.status("Updating PR...");
-            update_pr(
-                repo,
-                pr.number,
-                title.expect("checked"),
-                body.expect("checked"),
-            )?;
-            if pr.is_draft {
-                mark_pr_ready(repo, pr.number)?;
+    match (title, body) {
+        (Some(title), Some(body)) => {
+            if let Some(pr) = find_open_pr(repo)? {
+                progress.status("Updating PR...");
+                update_pr(repo, pr.number, title, body)?;
+                if pr.is_draft {
+                    mark_pr_ready(repo, pr.number)?;
+                }
+                open_url(&pr.url);
+                Ok(PrResult {
+                    url: pr.url,
+                    created: false,
+                    updated: true,
+                })
+            } else {
+                progress.status("Creating PR...");
+                let base = pr_target(repo, &main_repo, &base_branch)?;
+                let url = create_pr(repo, title, body, &base)?;
+                if let Some(pr) = find_open_pr(repo)? {
+                    if pr.is_draft {
+                        mark_pr_ready(repo, pr.number)?;
+                    }
+                }
+                open_url(&url);
+                Ok(PrResult {
+                    url,
+                    created: true,
+                    updated: false,
+                })
             }
-            open_url(&pr.url);
-            return Ok(PrResult {
-                url: pr.url,
-                created: false,
-                updated: true,
-            });
         }
-
-        if options.refresh {
-            open_url(&pr.url);
-            return Ok(PrResult {
-                url: pr.url,
-                created: false,
-                updated: has_changes,
-            });
-        }
-
-        return Err(OpsError::Message(
+        (None, None) if options.refresh => match find_open_pr(repo)? {
+            Some(pr) => {
+                open_url(&pr.url);
+                Ok(PrResult {
+                    url: pr.url,
+                    created: false,
+                    updated: has_changes,
+                })
+            }
+            None => Err(OpsError::Message("no open PR to refresh".to_string())),
+        },
+        _ => Err(OpsError::Message(
             "title and body required — use `lf pr` to generate them.".to_string(),
-        ));
+        )),
     }
-
-    progress.status("Creating PR...");
-    let base = pr_target(repo)?;
-    let url = create_pr(repo, title.expect("checked"), body.expect("checked"), &base)?;
-    if let Some(pr) = find_open_pr(repo)? {
-        if pr.is_draft {
-            mark_pr_ready(repo, pr.number)?;
-        }
-    }
-    open_url(&url);
-    Ok(PrResult {
-        url,
-        created: true,
-        updated: false,
-    })
 }
 
 pub fn gh_available() -> bool {
@@ -270,19 +258,11 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<Stri
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn sync_main_repo(repo: &Path) -> OpsResult<()> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let base_branch = get_default_branch(&main_repo)?;
-    // Just fetch origin/main — all downstream code uses origin/ refs.
-    // Best-effort: sync_main will also update local main if it's clean,
-    // but we don't block on it.
-    let _ = sync_main(&main_repo, &base_branch);
-    Ok(())
+fn resolve_main_repo(repo: &Path) -> PathBuf {
+    main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf())
 }
 
-fn commits_behind_main(repo: &Path) -> OpsResult<i32> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let base_branch = get_default_branch(&main_repo)?;
+fn commits_behind(repo: &Path, base_branch: &str) -> OpsResult<i32> {
     let output = Command::new("git")
         .arg("rev-list")
         .arg("--count")
@@ -299,12 +279,11 @@ fn commits_behind_main(repo: &Path) -> OpsResult<i32> {
     Ok(count)
 }
 
-fn pr_target(repo: &Path) -> OpsResult<String> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+fn pr_target(repo: &Path, main_repo: &Path, default_branch: &str) -> OpsResult<String> {
     let current_branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
 
-    if let Ok(worktrees) = list_worktrees(&main_repo) {
+    if let Ok(worktrees) = list_worktrees(main_repo) {
         if let Some(state) = worktrees
             .into_iter()
             .find(|wt| wt.branch.as_deref() == Some(&current_branch))
@@ -317,8 +296,7 @@ fn pr_target(repo: &Path) -> OpsResult<String> {
         }
     }
 
-    let default = get_default_branch(&main_repo)?;
-    Ok(default)
+    Ok(default_branch.to_string())
 }
 
 fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {

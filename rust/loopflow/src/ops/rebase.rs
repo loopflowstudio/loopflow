@@ -25,7 +25,7 @@ pub fn rebase_with_recovery(
     let result = rebase(repo, &options.onto, None)?;
     if result.success {
         if options.push {
-            crate::ops::commit::push_with_upstream_or_error(repo)?;
+            crate::ops::commit::push_with_upstream_if_needed(repo)?;
         }
         return Ok(());
     }

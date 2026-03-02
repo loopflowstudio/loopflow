@@ -8,6 +8,7 @@ use tracing::{debug, error, info, warn};
 use time::OffsetDateTime;
 
 use crate::engine::agent::{AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::builtins::get_builtin_step;
 use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
@@ -32,8 +33,7 @@ use crate::lfd::types::{
     WaveStatus,
 };
 use crate::ops::{
-    commit_workflow, rebase_with_recovery, run_builtin_agent, BuiltinAgentOptions, CommitOptions,
-    NullProgress, Progress, RebaseOptions,
+    commit_workflow, rebase_with_recovery, CommitOptions, NullProgress, Progress, RebaseOptions,
 };
 
 /// Create a wave run using a per-run worktree for parallel execution.
@@ -454,14 +454,13 @@ pub(crate) fn auto_create_pr(
     worktree: &Path,
     wave_name: Option<String>,
 ) -> Option<crate::lfd::types::PullRequest> {
-    use crate::ops::{
-        commit_workflow, current_pr, generate_pr_message, update_pr, CommitOptions, NullProgress,
-    };
+    use crate::ops::{commit_workflow, current_pr, CommitOptions, NullProgress};
 
     let commit_options = CommitOptions {
         add: true,
         push: true,
         create_draft_pr: true,
+        message: Some("lfd: auto-create draft PR".to_string()),
         ..CommitOptions::for_task("commit")
     };
     if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {
@@ -471,20 +470,14 @@ pub(crate) fn auto_create_pr(
 
     match current_pr(worktree) {
         Ok(Some(pr)) => {
-            let mut title = None;
-
-            // Update the draft PR with an LLM-generated title and description,
-            // matching what `lf ops pr` produces. Wave name becomes the PR title prefix.
-            match generate_pr_message(worktree, wave_name.as_deref()) {
-                Ok(message) => {
-                    title = Some(message.title.clone());
-                    if let Err(err) = update_pr(worktree, pr.number, &message.title, &message.body)
-                    {
-                        warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to update title/body");
-                    }
-                }
-                Err(err) => {
-                    warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to generate PR message");
+            let title = draft_pr_title(worktree, wave_name.as_deref());
+            if let Some(draft_title) = title.as_deref() {
+                if let Err(err) = set_pr_title(worktree, pr.number, draft_title) {
+                    warn!(
+                        worktree = %worktree.display(),
+                        error = %err,
+                        "auto-create PR: failed to set draft title"
+                    );
                 }
             }
 
@@ -507,6 +500,68 @@ pub(crate) fn auto_create_pr(
     }
 }
 
+fn draft_pr_title(worktree: &Path, wave_name: Option<&str>) -> Option<String> {
+    if let Some(name) = wave_name.map(str::trim).filter(|name| !name.is_empty()) {
+        return Some(format!("{name}: draft"));
+    }
+
+    first_branch_commit_subject(worktree)
+}
+
+fn first_branch_commit_subject(worktree: &Path) -> Option<String> {
+    let default_branch = get_default_branch(worktree).ok()?;
+    let merge_base_output = std::process::Command::new("git")
+        .args(["merge-base", "HEAD", &format!("origin/{default_branch}")])
+        .current_dir(worktree)
+        .output()
+        .ok()?;
+    if !merge_base_output.status.success() {
+        return None;
+    }
+
+    let merge_base = String::from_utf8_lossy(&merge_base_output.stdout)
+        .trim()
+        .to_string();
+    if merge_base.is_empty() {
+        return None;
+    }
+
+    let range = format!("{merge_base}..HEAD");
+    let log_output = std::process::Command::new("git")
+        .args(["log", "--reverse", "--format=%s", &range])
+        .current_dir(worktree)
+        .output()
+        .ok()?;
+    if !log_output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&log_output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(ToString::to_string)
+}
+
+fn set_pr_title(worktree: &Path, number: u64, title: &str) -> Result<()> {
+    let output = std::process::Command::new("gh")
+        .arg("pr")
+        .arg("edit")
+        .arg(number.to_string())
+        .arg("--title")
+        .arg(title)
+        .current_dir(worktree)
+        .output()
+        .map_err(|err| anyhow!("failed to run gh pr edit: {err}"))?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "gh pr edit failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
 /// Create a new branch in the worktree for the next loop iteration.
 pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result<String> {
     let config = load_config_or_default(Some(worktree));
@@ -521,6 +576,52 @@ pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result
     create_branch(worktree, &new_branch)?;
     push_with_upstream(worktree, "origin", &new_branch)?;
     Ok(new_branch)
+}
+
+#[derive(Debug, Clone)]
+struct BuiltinAgentOptions {
+    step_name: String,
+    suffix: String,
+    timeout: Option<Duration>,
+}
+
+fn run_builtin_agent(
+    repo: &Path,
+    options: &BuiltinAgentOptions,
+    progress: &impl Progress,
+) -> Result<()> {
+    let config = load_config_or_default(Some(repo));
+    let step_content = get_builtin_step(&options.step_name)
+        .ok_or_else(|| anyhow!("built-in step '{}' not found", options.step_name))?;
+    let prompt = format!(
+        "<lf:step>\n{}\n</lf:step>\n\n{}\n",
+        step_content, options.suffix
+    );
+
+    let launch = AgentConfig {
+        task_prompt: prompt,
+        agent: config.agent.clone(),
+        cwd: Some(repo.to_path_buf()),
+        skip_permissions: true,
+        ..Default::default()
+    };
+    let process = ProcessConfig {
+        auto: true,
+        stream: true,
+        timeout: options.timeout,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
+    };
+
+    progress.status(&format!("Launching {} agent...", options.step_name));
+    let result = crate::engine::launch_agent(&launch, &process, &capabilities)
+        .map_err(|err| anyhow!("failed to launch builtin agent: {err}"))?;
+    if result.exit_code != 0 {
+        return Err(anyhow!("builtin agent failed: {}", result.stderr));
+    }
+    Ok(())
 }
 
 /// Pre-step sync: fetch and rebase the worktree onto its remote branch.

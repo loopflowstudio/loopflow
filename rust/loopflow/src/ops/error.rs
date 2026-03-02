@@ -16,12 +16,8 @@ pub enum OpsError {
     Io(#[from] std::io::Error),
     #[error("command failed: {command}\n{stderr}")]
     CommandFailed { command: String, stderr: String },
-    #[error("agent failed: {0}")]
-    AgentFailed(String),
     #[error("parse error: {0}")]
     Parse(String),
-    #[error("lint failed")]
-    LintFailed,
     #[error("{0}")]
     Message(String),
 }

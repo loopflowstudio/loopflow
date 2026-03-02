@@ -183,8 +183,6 @@ pub enum OpsCommand {
         create_pr: bool,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
         #[arg(long = "title")]
@@ -196,8 +194,10 @@ pub enum OpsCommand {
     Pr {
         #[arg(short = 'r', long = "refresh")]
         refresh: bool,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
     },
     /// Update local main to match origin
     Sync,
@@ -208,7 +208,7 @@ pub enum OpsCommand {
         #[arg(long = "no-rebase")]
         no_rebase: bool,
     },
-    /// Generate commit message and commit
+    /// Commit changes (explicit message required)
     Commit {
         #[arg(short = 'm', long = "message", short_alias = 'M')]
         message: Option<String>,
@@ -216,8 +216,6 @@ pub enum OpsCommand {
         push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
     },
     /// Abandon branch: close PR, remove worktree, delete branch
     Abandon {
@@ -236,55 +234,10 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ShellCommand,
     },
-    /// Publish a release: generate notes, land PR, tag
+    /// Release operations (check, notes, bump, tag, status)
     Release {
-        /// Bump type or explicit version (default: patch)
-        #[arg(default_value = "patch")]
-        version: String,
-        #[arg(short = 'n', long = "dry-run")]
-        dry_run: bool,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-        #[arg(long = "status")]
-        status: bool,
-    },
-    /// Check if PRs have merged since the last tag
-    #[command(name = "release-check")]
-    ReleaseCheck {
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Generate release notes for a version
-    #[command(name = "release-notes")]
-    ReleaseNotes {
-        /// Version (e.g. 0.9.6)
-        version: String,
-        #[arg(long = "prev-tag")]
-        prev_tag: Option<String>,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Bump version in manifest files
-    #[command(name = "release-bump")]
-    ReleaseBump {
-        /// Version to bump to (e.g. 0.9.6)
-        version: String,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Create a git tag and push it
-    #[command(name = "release-tag")]
-    ReleaseTag {
-        /// Version to tag (e.g. 0.9.6)
-        version: String,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Check release workflow status
-    #[command(name = "release-status")]
-    ReleaseStatus {
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
+        #[command(subcommand)]
+        cmd: ReleaseCommand,
     },
     /// Run configured lint checks
     Lint,
@@ -295,6 +248,43 @@ pub enum OpsCommand {
         /// Wave name (auto-detected from worktree or branch if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReleaseCommand {
+    /// Check if PRs have merged since the last tag
+    Check {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Generate release notes for a version
+    Notes {
+        /// Version (e.g. 0.9.6)
+        version: String,
+        #[arg(long = "prev-tag")]
+        prev_tag: Option<String>,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Bump version in manifest files
+    Bump {
+        /// Version to bump to (e.g. 0.9.6)
+        version: String,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Create a git tag and push it
+    Tag {
+        /// Version to tag (e.g. 0.9.6)
+        version: String,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Check release workflow status
+    Status {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
     },
 }
 

@@ -1,12 +1,9 @@
 mod abandon;
-mod agent;
 mod combine;
 mod commit;
 mod error;
 mod ingest;
 mod land;
-mod lint;
-mod messages;
 mod next;
 mod pr;
 mod progress;
@@ -16,20 +13,17 @@ pub mod trace;
 mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub use agent::{run_builtin_agent, BuiltinAgentOptions};
 pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use error::{OpsError, OpsResult};
 pub use ingest::{ingest, IngestOptions, IngestResult};
 pub use land::{land, mark_ready, LandOptions, LandResult, RotationResult};
-pub use lint::ensure_lint_passes;
-pub use messages::{generate_commit_message, generate_pr_message, Message};
 pub use next::{next_branch, NextOptions, NextResult};
 pub use pr::{create_or_update_pr, current_pr, update_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{rebase_with_recovery, RebaseOptions};
 pub use release::{
-    bump_version, generate_release, publish_release, release_bump, release_check, release_notes,
-    release_status, release_tag, MergedPr, PublishOptions, PublishResult, ReleaseStatusResult,
+    bump_version, generate_release, release_bump, release_check, release_notes, release_status,
+    release_tag, MergedPr, ReleaseStatusResult,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

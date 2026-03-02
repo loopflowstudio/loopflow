@@ -70,6 +70,11 @@ pub struct AgentConfig {
     pub skip_permissions: bool,
     /// Engine-injected structured replies (rendered via harness prompt guidance).
     pub structured_replies: Vec<StructuredReply>,
+    /// Temp file for relaying shell directives back to the invoking shell.
+    /// When set, the agent subprocess gets `LOOPFLOW_DIRECTIVE_FILE` pointing
+    /// to this path. The caller reads it after the agent exits and forwards
+    /// safe directives (e.g. `cd`) to the real directive file.
+    pub directive_relay: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -88,6 +93,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
+            .field("directive_relay", &self.directive_relay)
             .finish()
     }
 }
@@ -509,6 +515,12 @@ pub fn launch_agent(
     // Agent sessions run arbitrary nested commands; those must not mutate the
     // invoking shell state via the top-level directive file.
     cmd.env_remove("LOOPFLOW_DIRECTIVE_FILE");
+
+    // If the caller set up a directive relay, give the agent a scoped directive
+    // file. The caller will filter and forward safe directives after the agent exits.
+    if let Some(ref relay_path) = launch.directive_relay {
+        cmd.env("LOOPFLOW_DIRECTIVE_FILE", relay_path);
+    }
 
     // Never forward API keys to agent subprocesses. Claude Code, Codex, etc.
     // should use their own auth (subscription/OAuth). A stray ANTHROPIC_API_KEY
@@ -1333,6 +1345,7 @@ mod tests {
             max_turns: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
+            directive_relay: None,
         };
         let args = build_claude_session_turn_args("hello", &config, None);
         assert_eq!(
@@ -1351,6 +1364,7 @@ mod tests {
             max_turns: Some(5),
             skip_permissions: true,
             structured_replies: Vec::new(),
+            directive_relay: None,
         };
         let args = build_claude_session_turn_args("fix tests", &config, Some("sess_abc"));
         assert!(args.contains(&"--resume".to_string()));
@@ -1378,6 +1392,7 @@ mod tests {
                 description: "Suggest actions".to_string(),
                 guidance: "Emit <lf:suggest_actions> JSON.".to_string(),
             }],
+            directive_relay: None,
         };
 
         let args = build_claude_session_turn_args("hello", &config, None);

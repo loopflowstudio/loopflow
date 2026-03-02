@@ -1,10 +1,8 @@
 use std::path::Path;
-use std::time::Duration;
 
 use crate::engine::git::{fetch, rebase};
 
-use crate::ops::agent::{run_builtin_agent, BuiltinAgentOptions};
-use crate::ops::error::OpsResult;
+use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
@@ -18,10 +16,8 @@ pub fn rebase_with_recovery(
     options: &RebaseOptions,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    if options.onto.starts_with("origin/") {
-        if let Some(branch) = options.onto.strip_prefix("origin/") {
-            let _ = fetch(repo, "origin", branch);
-        }
+    if let Some(branch) = options.onto.strip_prefix("origin/") {
+        let _ = fetch(repo, "origin", branch);
     }
 
     // Try auto-rebase first. rebase() aborts on conflict and returns the conflict list.
@@ -29,27 +25,24 @@ pub fn rebase_with_recovery(
     let result = rebase(repo, &options.onto, None)?;
     if result.success {
         if options.push {
-            crate::ops::commit::push_with_upstream_or_error(repo)?;
+            crate::ops::commit::push_with_upstream_if_needed(repo)?;
         }
         return Ok(());
     }
-
-    // Auto-rebase failed (and was aborted). Launch the rebase agent to handle
-    // the full workflow: re-attempt the rebase, resolve conflicts, continue.
-    progress.status("Auto-rebase failed, launching rebase agent...");
-    run_rebase_agent(repo, &options.onto, progress)?;
-
-    if options.push {
-        crate::ops::commit::push_with_upstream_or_error(repo)?;
-    }
-    Ok(())
-}
-
-fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsResult<()> {
-    let options = BuiltinAgentOptions {
-        step_name: "rebase".to_string(),
-        suffix: format!("Rebase onto: {onto}"),
-        timeout: Some(Duration::from_secs(30 * 60)),
-    };
-    run_builtin_agent(repo, &options, progress)
+    let detail = result
+        .conflicts
+        .filter(|conflicts| !conflicts.is_empty())
+        .map(|conflicts| {
+            let conflict_paths = conflicts
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("conflicts: {conflict_paths}")
+        })
+        .unwrap_or_else(|| "manual resolution required".to_string());
+    Err(OpsError::Message(format!(
+        "rebase onto {} failed ({detail})",
+        options.onto
+    )))
 }

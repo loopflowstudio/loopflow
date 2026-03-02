@@ -55,6 +55,7 @@ pub fn next_branch(
         add: true,
         push: true,
         create_draft_pr: true,
+        message: Some("lf ops next: checkpoint".to_string()),
         ..CommitOptions::for_task("commit")
     };
     let _ = commit_workflow(repo, &commit_options, progress)?;
@@ -71,11 +72,19 @@ pub fn next_branch(
     }
 
     if current_pr_number(repo)?.is_none() && options.create_pr {
+        let wave = options
+            .wave_name
+            .clone()
+            .or_else(|| wave_name_from_worktree(repo));
+        let draft_title = wave
+            .map(|name| format!("{name}: draft"))
+            .unwrap_or_else(|| current.clone());
         let _ = crate::ops::pr::create_or_update_pr(
             repo,
             &crate::ops::pr::PrOptions {
-                refresh: true,
-                lint: false,
+                refresh: false,
+                title: Some(draft_title),
+                body: Some("*Draft — title and body will be updated.*".to_string()),
             },
             progress,
         )?;

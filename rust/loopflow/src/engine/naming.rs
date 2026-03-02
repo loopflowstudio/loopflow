@@ -185,7 +185,7 @@ pub fn generate_word_pair() -> String {
     generate_word_pair_with_rng(&mut rng)
 }
 
-fn generate_timestamp() -> String {
+pub fn generate_timestamp() -> String {
     Local::now().format("%Y%m%d_%H%M").to_string()
 }
 

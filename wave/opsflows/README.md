@@ -8,7 +8,7 @@ Invert the ops layer. Today `lf ops <verb>` is the interface and steps are add-o
 
 Steps declare `fast-path` in frontmatter — a shell command that runs before the agent. Exit 0 = done, no agent. Non-zero = agent starts with failure output as context. `lf land` and `lf rebase` are the first consumers.
 
-Release is decomposed into focused ops commands (`release-check`, `release-notes`, `release-bump`, `release-tag`, `release-status`). The `lf release` step orchestrates them — agent judgment on notes, mechanical execution on everything else.
+Release is decomposed into focused ops subcommands (`lf ops release check`, `notes`, `bump`, `tag`, `status`). The `lf release` step orchestrates them — agent judgment on notes, mechanical execution on everything else.
 
 ## Goals
 

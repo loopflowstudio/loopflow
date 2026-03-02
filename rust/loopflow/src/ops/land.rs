@@ -21,7 +21,6 @@ pub struct LandOptions {
     pub local: bool,
     pub create_pr: bool,
     pub worktree: Option<String>,
-    pub lint: bool,
     pub commit_message: Option<String>,
     pub pr_title: Option<String>,
     pub pr_body: Option<String>,
@@ -80,10 +79,6 @@ fn prepare_land(
         return Err(OpsError::Message(
             "uncommitted changes; commit, stash, or rerun without --strict".to_string(),
         ));
-    }
-
-    if options.lint {
-        crate::ops::lint::ensure_lint_passes(repo_root, progress)?;
     }
 
     if !options.strict {
@@ -145,7 +140,8 @@ fn ensure_pr(
                 repo_root,
                 &crate::ops::pr::PrOptions {
                     refresh: true,
-                    lint: false,
+                    title: options.pr_title.clone(),
+                    body: options.pr_body.clone(),
                 },
                 progress,
             )?;
@@ -235,7 +231,7 @@ fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     crate::engine::git::stage_all(repo)?;
     if has_staged_changes(repo)? {
         crate::engine::git::commit(repo, "lf land: clear scratch/")?;
-        crate::ops::commit::push_with_upstream_or_error(repo)?;
+        crate::ops::commit::push_with_upstream_if_needed(repo)?;
     }
 
     Ok(())

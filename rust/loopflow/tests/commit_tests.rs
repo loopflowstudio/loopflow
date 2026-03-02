@@ -1,10 +1,7 @@
-mod support;
-
 use std::process::Command;
 
 use loopflow::ops::{commit_workflow, CommitOptions, NullProgress, OpsError};
 use loopflow_test_support::TestRepo;
-use support::EnvGuard;
 
 fn last_commit_message(repo: &TestRepo) -> String {
     let output = Command::new("git")
@@ -63,22 +60,6 @@ fn commit_skips_empty() {
 }
 
 #[test]
-fn commit_with_lint_failure() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
-    let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "lint: 'false'\nagent: claude\n");
-    repo.create_file("bad.py", "print('hi')\n");
-
-    let options = CommitOptions {
-        lint: true,
-        ..commit_options("lint")
-    };
-
-    let result = commit_workflow(repo.path(), &options, &NullProgress);
-    assert!(matches!(result, Err(OpsError::LintFailed)));
-}
-
-#[test]
 fn commit_with_message_override() {
     let repo = TestRepo::new();
     repo.create_file("override.txt", "hello");
@@ -88,4 +69,21 @@ fn commit_with_message_override() {
     let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
     assert!(committed);
     assert_eq!(last_commit_message(&repo), "override message");
+}
+
+#[test]
+fn commit_requires_message() {
+    let repo = TestRepo::new();
+    repo.create_file("needs-message.txt", "hello");
+
+    let options = CommitOptions {
+        add: true,
+        ..CommitOptions::for_task("commit")
+    };
+
+    let result = commit_workflow(repo.path(), &options, &NullProgress);
+    assert!(matches!(
+        result,
+        Err(OpsError::Message(message)) if message == "message required — use `lf commit` to generate one."
+    ));
 }

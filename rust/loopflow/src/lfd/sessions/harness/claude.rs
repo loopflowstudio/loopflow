@@ -247,6 +247,7 @@ mod tests {
             max_turns: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
+            directive_relay: None,
         });
 
         let first = harness

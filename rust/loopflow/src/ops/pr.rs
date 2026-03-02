@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
@@ -8,14 +8,14 @@ use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::{generate_pr_message, generate_pr_message_from_diff, resolve_wave_name};
 use crate::ops::progress::Progress;
 use crate::ops::util::{command_exists, stderr_from_output};
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
     pub refresh: bool,
-    pub lint: bool,
+    pub title: Option<String>,
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,29 +51,27 @@ pub fn create_or_update_pr(
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    if options.lint {
-        crate::ops::lint::ensure_lint_passes(repo, progress)?;
-    }
-
     // Snapshot origin's view of our branch before any work
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let origin_before = rev_parse(repo, &format!("origin/{branch}")).ok();
 
+    let main_repo = resolve_main_repo(repo);
+    let base_branch = get_default_branch(&main_repo)?;
+
     // Commit before sync — sync_main checks is_clean() and fails on dirty trees
     let commit_options = CommitOptions {
         add: true,
         push: true,
+        message: Some("lf ops pr: prepare branch".to_string()),
         ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress)?;
 
-    sync_main_repo(repo)?;
+    let _ = sync_main(&main_repo, &base_branch);
 
-    if commits_behind_main(repo)? > 0 {
+    if commits_behind(repo, &base_branch)? > 0 {
         progress.status("Branch behind base, rebasing...");
-        let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-        let base_branch = get_default_branch(&main_repo)?;
         crate::ops::rebase::rebase_with_recovery(
             repo,
             &crate::ops::rebase::RebaseOptions {
@@ -87,72 +85,67 @@ pub fn create_or_update_pr(
     // Refresh PR if HEAD moved from where origin was before we started
     let head_now = rev_parse(repo, "HEAD").ok();
     let has_changes = origin_before.is_none() || origin_before != head_now;
-    let wave = resolve_wave_name(repo, None);
+    let title = options
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let body = options
+        .body
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
 
-    if let Some(pr) = find_open_pr(repo)? {
-        if !options.refresh && !has_changes && !pr.is_draft {
-            open_url(&pr.url);
-            return Ok(PrResult {
-                url: pr.url,
-                created: false,
-                updated: false,
-            });
+    match (title, body) {
+        (Some(title), Some(body)) => {
+            if let Some(pr) = find_open_pr(repo)? {
+                progress.status("Updating PR...");
+                update_pr(repo, pr.number, title, body)?;
+                if pr.is_draft {
+                    mark_pr_ready(repo, pr.number)?;
+                }
+                open_url(&pr.url);
+                Ok(PrResult {
+                    url: pr.url,
+                    created: false,
+                    updated: true,
+                })
+            } else {
+                progress.status("Creating PR...");
+                let base = pr_target(repo, &main_repo, &base_branch)?;
+                let url = create_pr(repo, title, body, &base)?;
+                if let Some(pr) = find_open_pr(repo)? {
+                    if pr.is_draft {
+                        mark_pr_ready(repo, pr.number)?;
+                    }
+                }
+                open_url(&url);
+                Ok(PrResult {
+                    url,
+                    created: true,
+                    updated: false,
+                })
+            }
         }
-
-        progress.status("Updating PR...");
-        let message = if let Some(diff) = get_pr_diff(repo)? {
-            generate_pr_message_from_diff(repo, &diff, wave.as_deref())?
-        } else {
-            generate_pr_message(repo, wave.as_deref())?
-        };
-        update_pr(repo, pr.number, &message.title, &message.body)?;
-        if pr.is_draft {
-            mark_pr_ready(repo, pr.number)?;
-        }
-        open_url(&pr.url);
-        return Ok(PrResult {
-            url: pr.url,
-            created: false,
-            updated: true,
-        });
+        (None, None) if options.refresh => match find_open_pr(repo)? {
+            Some(pr) => {
+                open_url(&pr.url);
+                Ok(PrResult {
+                    url: pr.url,
+                    created: false,
+                    updated: has_changes,
+                })
+            }
+            None => Err(OpsError::Message("no open PR to refresh".to_string())),
+        },
+        _ => Err(OpsError::Message(
+            "title and body required — use `lf pr` to generate them.".to_string(),
+        )),
     }
-
-    progress.status("Creating PR...");
-    let message = generate_pr_message(repo, wave.as_deref())?;
-    let base = pr_target(repo)?;
-    let url = create_pr(repo, &message.title, &message.body, &base)?;
-    if let Some(pr) = find_open_pr(repo)? {
-        if pr.is_draft {
-            mark_pr_ready(repo, pr.number)?;
-        }
-    }
-    open_url(&url);
-    Ok(PrResult {
-        url,
-        created: true,
-        updated: false,
-    })
 }
 
 pub fn gh_available() -> bool {
     command_exists("gh")
-}
-
-fn get_pr_diff(repo: &Path) -> OpsResult<Option<String>> {
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("diff")
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-    if diff.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(diff))
-    }
 }
 
 pub fn pr_exists_for_current_branch(repo: &Path) -> OpsResult<bool> {
@@ -265,19 +258,11 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<Stri
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn sync_main_repo(repo: &Path) -> OpsResult<()> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let base_branch = get_default_branch(&main_repo)?;
-    // Just fetch origin/main — all downstream code uses origin/ refs.
-    // Best-effort: sync_main will also update local main if it's clean,
-    // but we don't block on it.
-    let _ = sync_main(&main_repo, &base_branch);
-    Ok(())
+fn resolve_main_repo(repo: &Path) -> PathBuf {
+    main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf())
 }
 
-fn commits_behind_main(repo: &Path) -> OpsResult<i32> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let base_branch = get_default_branch(&main_repo)?;
+fn commits_behind(repo: &Path, base_branch: &str) -> OpsResult<i32> {
     let output = Command::new("git")
         .arg("rev-list")
         .arg("--count")
@@ -294,12 +279,11 @@ fn commits_behind_main(repo: &Path) -> OpsResult<i32> {
     Ok(count)
 }
 
-fn pr_target(repo: &Path) -> OpsResult<String> {
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+fn pr_target(repo: &Path, main_repo: &Path, default_branch: &str) -> OpsResult<String> {
     let current_branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
 
-    if let Ok(worktrees) = list_worktrees(&main_repo) {
+    if let Ok(worktrees) = list_worktrees(main_repo) {
         if let Some(state) = worktrees
             .into_iter()
             .find(|wt| wt.branch.as_deref() == Some(&current_branch))
@@ -312,8 +296,7 @@ fn pr_target(repo: &Path) -> OpsResult<String> {
         }
     }
 
-    let default = get_default_branch(&main_repo)?;
-    Ok(default)
+    Ok(default_branch.to_string())
 }
 
 fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {

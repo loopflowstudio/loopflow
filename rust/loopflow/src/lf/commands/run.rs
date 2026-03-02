@@ -267,13 +267,32 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let mut process = built.process.clone();
     process.context_file = context_file;
     process.stream_format = StreamFormat::Human(use_color);
-    debug!(launch = ?built.agent_config, ?process, ?built.capabilities, "launching agent");
+
+    // Set up directive relay so agent steps can issue shell directives
+    // (e.g. `cd` after `lf ops land` rotates worktrees).
+    let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
+    let mut agent_config = built.agent_config.clone();
+    let relay_path = directive_file.as_ref().and_then(|_| {
+        tempfile::NamedTempFile::new()
+            .ok()
+            .map(|f| f.into_temp_path().to_path_buf())
+    });
+    if let Some(ref path) = relay_path {
+        agent_config.directive_relay = Some(path.clone());
+    }
+
+    debug!(launch = ?agent_config, ?process, ?built.capabilities, "launching agent");
 
     seed_rlm_env(&built.config);
 
     info!(harness = built.harness, "launching agent");
     let launch_start = Instant::now();
-    let result = launch_agent(&built.agent_config, &process, &built.capabilities);
+    let result = launch_agent(&agent_config, &process, &built.capabilities);
+
+    // Relay safe directives from the agent back to the invoking shell.
+    if let (Some(relay), Some(ref target)) = (relay_path, directive_file) {
+        relay_directives(&relay, target);
+    }
 
     let result = result?;
     debug!(
@@ -288,6 +307,36 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
             "agent exited with code {}. Check .lf/logs/ for details.",
             result.exit_code
         ))
+    }
+}
+
+/// Forward safe shell directives from the agent's relay file to the real
+/// directive file. Only `cd` commands are relayed — arbitrary shell commands
+/// from agent subprocesses are not forwarded.
+fn relay_directives(relay: &std::path::Path, target: &str) {
+    let content = match std::fs::read_to_string(relay) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let _ = std::fs::remove_file(relay);
+
+    let safe_lines: Vec<&str> = content
+        .lines()
+        .filter(|line| line.starts_with("cd "))
+        .collect();
+    if safe_lines.is_empty() {
+        return;
+    }
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(target)
+    {
+        use std::io::Write;
+        for line in safe_lines {
+            let _ = writeln!(file, "{}", line);
+        }
     }
 }
 

@@ -1,15 +1,16 @@
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::worktrees::{
-    create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree, worktree_path,
+    create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree,
+    wave_name_from_worktree_and_main, worktree_path,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::Colors;
-use crate::lf::{OpsCommand, ShellCommand, WtCommand};
+use crate::lf::{OpsCommand, ReleaseCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
-    publish_release, rebase_with_recovery, release_bump, release_check, release_notes,
-    release_status, release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions,
-    NextOptions, PrOptions, Progress, PublishOptions, RebaseOptions, RotationResult,
+    rebase_with_recovery, release_bump, release_check, release_notes, release_status, release_tag,
+    AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions, Progress,
+    RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -32,7 +33,6 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             local,
             create_pr,
             worktree,
-            no_lint,
             message,
             title,
             body,
@@ -42,14 +42,17 @@ pub fn run(op: &OpsCommand) -> Result<()> {
                 local: *local,
                 create_pr: *create_pr,
                 worktree: worktree.clone(),
-                lint: !no_lint,
                 commit_message: message.clone(),
                 pr_title: title.clone(),
                 pr_body: body.clone(),
             },
             &progress,
         ),
-        OpsCommand::Pr { refresh, no_lint } => open_pr(*refresh, !no_lint, &progress),
+        OpsCommand::Pr {
+            refresh,
+            title,
+            body,
+        } => open_pr(*refresh, title.clone(), body.clone(), &progress),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
             create_pr,
@@ -59,36 +62,25 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             message,
             push,
             no_add,
-            no_lint,
-        } => commit_current(message.as_deref(), *push, !no_add, !no_lint, &progress),
+        } => commit_current(message.as_deref(), *push, !no_add, &progress),
         OpsCommand::Abandon { force, branch } => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
-        OpsCommand::Release {
-            version,
-            dry_run,
-            target,
-            status,
-        } => {
-            if *status {
-                release_status_cmd(target.as_deref())
-            } else {
-                release_publish(version, *dry_run, target.as_deref(), &progress)
+        OpsCommand::Release { cmd } => match cmd {
+            ReleaseCommand::Check { target } => release_check_cmd(target.as_deref()),
+            ReleaseCommand::Notes {
+                version,
+                prev_tag,
+                target,
+            } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
+            ReleaseCommand::Bump { version, target } => {
+                release_bump_cmd(version, target.as_deref(), &progress)
             }
-        }
-        OpsCommand::ReleaseCheck { target } => release_check_cmd(target.as_deref()),
-        OpsCommand::ReleaseNotes {
-            version,
-            prev_tag,
-            target,
-        } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
-        OpsCommand::ReleaseBump { version, target } => {
-            release_bump_cmd(version, target.as_deref(), &progress)
-        }
-        OpsCommand::ReleaseTag { version, target } => release_tag_cmd(version, target.as_deref()),
-        OpsCommand::ReleaseStatus { target } => release_status_cmd(target.as_deref()),
+            ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
+            ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
+        },
         OpsCommand::Lint => run_check("lint"),
         OpsCommand::Test => run_check("test"),
         OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),
@@ -183,9 +175,22 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn open_pr(refresh: bool, lint: bool, progress: &impl Progress) -> Result<()> {
+fn open_pr(
+    refresh: bool,
+    title: Option<String>,
+    body: Option<String>,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(&repo_root, &PrOptions { refresh, lint }, progress)?;
+    let result = create_or_update_pr(
+        &repo_root,
+        &PrOptions {
+            refresh,
+            title,
+            body,
+        },
+        progress,
+    )?;
     println!("{}", result.url);
     Ok(())
 }
@@ -219,7 +224,6 @@ fn commit_current(
     message: Option<&str>,
     push: bool,
     add: bool,
-    lint: bool,
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
@@ -227,7 +231,6 @@ fn commit_current(
         &repo_root,
         &CommitOptions {
             add,
-            lint,
             push,
             create_draft_pr: true,
             message: message.map(str::to_string),
@@ -323,32 +326,6 @@ fn release_tag_cmd(version: &str, target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn release_publish(
-    version: &str,
-    dry_run: bool,
-    target: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let result = publish_release(
-        &repo_root,
-        &PublishOptions {
-            version_input: version.to_string(),
-            dry_run,
-            target: target.map(str::to_string),
-        },
-        progress,
-    )?;
-    if !dry_run {
-        if let Some(version) = result.version.as_deref() {
-            println!("v{}", version);
-        } else if result.bootstrapped {
-            println!("release bootstrap complete for target {}", result.target);
-        }
-    }
-    Ok(())
-}
-
 fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let status = release_status(&repo_root, target_name)?;
@@ -435,10 +412,17 @@ fn wt_switch(name: &str) -> Result<()> {
         let mut matches = worktrees
             .into_iter()
             .filter(|wt| {
-                wt.path
-                    .file_name()
-                    .map(|n| n.to_string_lossy() == name)
-                    .unwrap_or(false)
+                let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
+                wt_name.as_deref() == Some(name)
+                    || wt_name
+                        .as_ref()
+                        .map(|n| n.starts_with(&format!("{name}.")))
+                        .unwrap_or(false)
+                    || wt
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy() == name)
+                        .unwrap_or(false)
             })
             .collect::<Vec<_>>();
         if matches.len() == 1 {
@@ -667,6 +651,18 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let current_path = repo_root;
+
+    let prune_output = Command::new("git")
+        .arg("-C")
+        .arg(&main_repo)
+        .args(["worktree", "prune"])
+        .output()?;
+    if !prune_output.status.success() {
+        return Err(anyhow!(
+            "git worktree prune failed: {}",
+            String::from_utf8_lossy(&prune_output.stderr).trim()
+        ));
+    }
 
     let default_branch = get_default_branch(&main_repo)?;
     let _ = crate::engine::git::fetch(&main_repo, "origin", &default_branch);

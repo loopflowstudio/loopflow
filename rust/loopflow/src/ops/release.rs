@@ -2,23 +2,15 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::thread;
-use std::time::Duration;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::agent::{
-    launch_agent, AgentCapabilities, AgentConfig, LaunchResult, ProcessConfig,
-};
-use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::command::run_command;
 use crate::engine::config::{load_config_or_default, Config, ReleaseTargetConfig};
-use crate::engine::git::{delete_local_branch, get_default_branch, sync_main, worktree_remove};
-use crate::engine::worktrees::{create_with_schema, main_repo_root};
-use crate::ops::commit::{commit_workflow, CommitOptions};
+use crate::engine::git::get_default_branch;
+use crate::engine::worktrees::main_repo_root;
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::land::{land, LandOptions};
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
 
@@ -63,8 +55,6 @@ struct GhApiPrFile {
 
 #[derive(Debug, Deserialize, Clone)]
 struct GhRunListEntry {
-    #[serde(rename = "databaseId")]
-    id: u64,
     #[serde(default, rename = "headBranch")]
     head_branch: Option<String>,
     #[serde(default, rename = "displayTitle")]
@@ -74,13 +64,6 @@ struct GhRunListEntry {
     conclusion: Option<String>,
     #[serde(default)]
     url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GhRunView {
-    status: String,
-    #[serde(default)]
-    conclusion: Option<String>,
 }
 
 impl From<GhMergedPr> for MergedPr {
@@ -109,20 +92,6 @@ struct ReleaseTarget {
     tag_prefix: String,
     manifests: Vec<PathBuf>,
     workflow: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PublishOptions {
-    pub version_input: String,
-    pub dry_run: bool,
-    pub target: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PublishResult {
-    pub version: Option<String>,
-    pub target: String,
-    pub bootstrapped: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -179,205 +148,6 @@ pub fn bump_version(current: &str, bump: &str) -> OpsResult<String> {
         "patch" => Ok(format!("{}.{}.{}", major, minor, patch + 1)),
         _ => Err(OpsError::Parse(format!("unknown bump type: {bump}"))),
     }
-}
-
-/// Full release workflow: sync main, create worktree, bump versions, generate
-/// release notes, land PR, create tag, and monitor workflow outcomes.
-pub fn publish_release(
-    repo: &Path,
-    options: &PublishOptions,
-    progress: &impl Progress,
-) -> OpsResult<PublishResult> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
-
-    let (main_repo, target) = resolve_repo_and_target(repo, options.target.as_deref())?;
-
-    if needs_bootstrap(&main_repo, &target)? {
-        if options.dry_run {
-            progress.status(&format!(
-                "Would start release bootstrap for target '{}'",
-                target.name
-            ));
-            return Ok(PublishResult {
-                version: None,
-                target: target.name,
-                bootstrapped: true,
-            });
-        }
-
-        progress.status("No tags/workflow detected. Starting release bootstrap...");
-        bootstrap_release(&main_repo, &target)?;
-        progress.status("Bootstrap complete. Re-run `lf ops release`.");
-
-        return Ok(PublishResult {
-            version: None,
-            target: target.name,
-            bootstrapped: true,
-        });
-    }
-
-    let prev_tag = latest_tag(&main_repo, &target)?;
-    let version = resolve_version(&prev_tag, &options.version_input, &target)?;
-
-    // Check for a release that's prepared (notes + manifests) but not yet tagged,
-    // or already tagged but with a failed workflow. Resume instead of starting fresh.
-    if let Some(result) =
-        try_resume_release(&main_repo, &version, &target, options.dry_run, progress)?
-    {
-        return Ok(result);
-    }
-
-    let wt_name = if target.name == "default" {
-        format!("release-v{version}")
-    } else {
-        format!("release-{}-v{version}", target.name)
-    };
-
-    if options.dry_run {
-        progress.status(&format!("Would publish {}", target_tag(&target, &version)));
-        progress.status(&format!("  Target: {}", target.name));
-        progress.status(&format!("  Create worktree: {wt_name}"));
-        progress.status(&format!(
-            "  Bump versions in {} manifest(s)",
-            target.manifests.len()
-        ));
-        progress.status("  Generate release notes");
-        progress.status("  Commit, PR, and land");
-        progress.status(&format!("  Tag {} and push", target_tag(&target, &version)));
-        progress.status("  Monitor release workflow + GitHub Release");
-        return Ok(PublishResult {
-            version: Some(version),
-            target: target.name,
-            bootstrapped: false,
-        });
-    }
-
-    progress.status("Syncing main...");
-    let main_branch = get_default_branch(&main_repo)?;
-    sync_main(&main_repo, &main_branch)?;
-
-    progress.status(&format!("Creating worktree {wt_name}..."));
-    let wt = create_with_schema(&main_repo, &wt_name, Some(&main_branch), None)?;
-    let wt_path = wt.path;
-    let wt_branch = wt.branch;
-
-    let publish_result = publish_in_worktree(&wt_path, &version, &target, progress);
-
-    cleanup_worktree(&main_repo, &wt_path, &wt_branch, progress);
-
-    publish_result?;
-
-    progress.status("Syncing main after merge...");
-    sync_main(&main_repo, &main_branch)?;
-
-    progress.status(&format!("Tagging {}...", target_tag(&target, &version)));
-    let tag = tag_and_push(&main_repo, &version, &target)?;
-
-    monitor_release_workflow(&main_repo, &tag, &target, progress)?;
-
-    progress.status(&format!("{} published.", target_tag(&target, &version)));
-    Ok(PublishResult {
-        version: Some(version),
-        target: target.name,
-        bootstrapped: false,
-    })
-}
-
-/// Check if a release for `version` is already prepared or tagged, and resume it.
-///
-/// Returns `Some(result)` if the release was resumed (or already complete).
-/// Returns `None` to fall through to the fresh workflow.
-fn try_resume_release(
-    repo: &Path,
-    version: &str,
-    target: &ReleaseTarget,
-    dry_run: bool,
-    progress: &impl Progress,
-) -> OpsResult<Option<PublishResult>> {
-    let notes_version = read_release_notes_version(repo);
-    if notes_version.as_deref() != Some(version) {
-        return Ok(None);
-    }
-
-    if !manifests_at_version(repo, target, version) {
-        return Ok(None);
-    }
-
-    let tag = target_tag(target, version);
-    let remote_tag = tag_exists_remote(repo, &tag)?;
-
-    if remote_tag {
-        // Tag exists on remote — check workflow/release status.
-        let release_exists = github_release_exists(repo, &tag)?;
-        let workflow = find_workflow_run(repo, &tag, target)?;
-
-        let workflow_ok = workflow
-            .as_ref()
-            .is_some_and(|r| r.conclusion.as_deref() == Some("success"));
-
-        if release_exists && workflow_ok {
-            progress.status(&format!("{tag} already released."));
-            return Ok(Some(PublishResult {
-                version: Some(version.to_string()),
-                target: target.name.clone(),
-                bootstrapped: false,
-            }));
-        }
-
-        if dry_run {
-            progress.status(&format!(
-                "Would resume {tag} (tag exists, monitoring workflow)"
-            ));
-            return Ok(Some(PublishResult {
-                version: Some(version.to_string()),
-                target: target.name.clone(),
-                bootstrapped: false,
-            }));
-        }
-
-        // Tag pushed but workflow incomplete or failed — monitor/diagnose.
-        progress.status(&format!(
-            "Resuming {tag} (tag exists, checking workflow)..."
-        ));
-        monitor_release_workflow(repo, &tag, target, progress)?;
-
-        progress.status(&format!("{tag} published."));
-        return Ok(Some(PublishResult {
-            version: Some(version.to_string()),
-            target: target.name.clone(),
-            bootstrapped: false,
-        }));
-    }
-
-    // Notes + manifests ready but no remote tag — sync, tag, and push.
-    if dry_run {
-        progress.status(&format!(
-            "Would resume {tag} (notes and manifests ready, tagging)"
-        ));
-        return Ok(Some(PublishResult {
-            version: Some(version.to_string()),
-            target: target.name.clone(),
-            bootstrapped: false,
-        }));
-    }
-
-    progress.status(&format!(
-        "Resuming {tag} (notes and manifests ready, tagging)..."
-    ));
-    let main_branch = get_default_branch(repo)?;
-    sync_main(repo, &main_branch)?;
-
-    let pushed_tag = tag_and_push(repo, version, target)?;
-    monitor_release_workflow(repo, &pushed_tag, target, progress)?;
-
-    progress.status(&format!("{tag} published."));
-    Ok(Some(PublishResult {
-        version: Some(version.to_string()),
-        target: target.name.clone(),
-        bootstrapped: false,
-    }))
 }
 
 pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseStatusResult> {
@@ -451,7 +221,7 @@ pub fn release_notes(
     let prs = merged_prs_since(&main_repo, &resolved_prev_tag, &target)?;
 
     progress.status("Generating release notes...");
-    let notes = generate_release_notes(&main_repo, &prs, &version, &resolved_prev_tag, &target)?;
+    let notes = generate_release_notes(&prs, &version, &resolved_prev_tag, &target)?;
 
     progress.status("Writing RELEASE_NOTES.md...");
     write_release_notes(&main_repo, &notes, &version)?;
@@ -497,7 +267,7 @@ fn generate_release_with_target(
     let prs = merged_prs_since(repo, &prev_tag, target)?;
 
     progress.status("Generating release notes...");
-    let notes = generate_release_notes(repo, &prs, &version, &prev_tag, target)?;
+    let notes = generate_release_notes(&prs, &version, &prev_tag, target)?;
 
     progress.status("Writing RELEASE_NOTES.md...");
     write_release_notes(repo, &notes, &version)?;
@@ -778,57 +548,6 @@ fn tag_glob(target: &ReleaseTarget) -> String {
     format!("{}v*", target.tag_prefix)
 }
 
-/// Read the version from the first line of RELEASE_NOTES.md (`# v{X.Y.Z}`).
-fn read_release_notes_version(repo: &Path) -> Option<String> {
-    let path = repo.join("RELEASE_NOTES.md");
-    let content = fs::read_to_string(path).ok()?;
-    let first_line = content.lines().next()?.trim();
-    let version = first_line.strip_prefix("# v")?;
-    if version.split('.').count() == 3 {
-        Some(version.to_string())
-    } else {
-        None
-    }
-}
-
-/// Check whether all manifests in the target already have the given version.
-fn manifests_at_version(repo: &Path, target: &ReleaseTarget, version: &str) -> bool {
-    if target.manifests.is_empty() {
-        return false;
-    }
-
-    target.manifests.iter().all(|manifest| {
-        let path = repo.join(manifest);
-        let Ok(content) = fs::read_to_string(&path) else {
-            return false;
-        };
-        match manifest.file_name().and_then(|n| n.to_str()) {
-            Some("Cargo.toml") => toml_has_version(&content, version),
-            Some("package.json") => json_has_version(&content, version),
-            Some("pyproject.toml") => toml_has_version(&content, version),
-            _ => false,
-        }
-    })
-}
-
-fn toml_has_version(content: &str, version: &str) -> bool {
-    let target = format!("version = \"{version}\"");
-    content.lines().any(|line| line.trim() == target)
-}
-
-fn json_has_version(content: &str, version: &str) -> bool {
-    let target = format!("\"version\": \"{version}\"");
-    content
-        .lines()
-        .any(|line| line.replace(' ', "").contains(&target.replace(' ', "")))
-}
-
-/// Check if a tag exists on the remote.
-fn tag_exists_remote(repo: &Path, tag: &str) -> OpsResult<bool> {
-    let output = run_stdout(repo, "git", &["ls-remote", "--tags", "origin", tag])?;
-    Ok(!output.trim().is_empty())
-}
-
 fn merged_prs_since(repo: &Path, tag: &str, target: &ReleaseTarget) -> OpsResult<Vec<MergedPr>> {
     let tagged_at = run_stdout(repo, "git", &["log", "-1", "--format=%aI", tag])?;
     if tagged_at.is_empty() {
@@ -1009,63 +728,45 @@ fn glob_to_regex(pattern: &str) -> String {
 }
 
 fn generate_release_notes(
-    repo: &Path,
     prs: &[MergedPr],
     version: &str,
     prev_tag: &str,
     target: &ReleaseTarget,
 ) -> OpsResult<String> {
-    let template = get_builtin_ops_prompt("release_notes")
-        .ok_or_else(|| OpsError::Message("builtin release_notes prompt not found".to_string()))?
-        .replace("{version}", version)
-        .replace("{target_name}", &target.name);
+    let mut lines = vec![
+        format!("## Changes since {prev_tag}"),
+        String::new(),
+        format!("- Target: {}", target.name),
+        format!("- Tag prefix: {}", display_tag_prefix(target)),
+        format!("- Area scope: {}", display_area_scope(target)),
+        String::new(),
+        "## Merged PRs".to_string(),
+        String::new(),
+    ];
 
-    let pr_summary = if prs.is_empty() {
-        "- No merged PRs found in this window.".to_string()
+    if prs.is_empty() {
+        lines.push("- No merged PRs found in this window.".to_string());
     } else {
-        prs.iter()
-            .map(format_pr_for_prompt)
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
-
-    let area_scope = display_area_scope(target);
-
-    let previous_notes = fs::read_to_string(repo.join("RELEASE_NOTES.md")).unwrap_or_default();
-    let previous_notes_section = if previous_notes.trim().is_empty() {
-        String::new()
-    } else {
-        format!("\n\n## Previous release notes\n\n{previous_notes}")
-    };
-
-    let prompt = format!(
-        "{template}\n\n## Release context\n\n- Target version: v{version}\n- Previous tag: {prev_tag}\n- Release target: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Merged PRs\n\n{pr_summary}{previous_notes_section}\n",
-        target.name,
-        display_tag_prefix(target),
-        area_scope
-    );
-
-    let result = launch_ops_agent(repo, prompt, true)?;
-    if result.exit_code != 0 {
-        return Err(OpsError::AgentFailed(result.stderr));
+        for pr in prs {
+            lines.push(format!(
+                "- #{} {} (+{} -{}, {} files)",
+                pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
+            ));
+            if let Some(body) = pr
+                .body
+                .as_deref()
+                .map(str::trim)
+                .filter(|body| !body.is_empty())
+            {
+                let single_line = body.replace('\n', " ");
+                lines.push(format!("  - {}", single_line));
+            }
+        }
     }
 
-    let notes = result.stdout.trim().to_string();
-    if notes.is_empty() {
-        return Err(OpsError::Parse("empty release notes output".to_string()));
-    }
-    Ok(notes)
-}
-
-fn format_pr_for_prompt(pr: &MergedPr) -> String {
-    let header = format!(
-        "- #{} {} (+{} -{}, {} files)",
-        pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
-    );
-    match pr.body.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
-        Some(body) => format!("{header}\n  Body: {body}"),
-        None => header,
-    }
+    lines.push(String::new());
+    lines.push(format!("_Generated mechanically for v{version}._"));
+    Ok(lines.join("\n"))
 }
 
 fn write_release_notes(repo: &Path, notes: &str, version: &str) -> OpsResult<()> {
@@ -1314,183 +1015,11 @@ fn join_lines_like_original(original: &str, lines: Vec<String>) -> String {
     joined
 }
 
-fn publish_in_worktree(
-    wt_path: &Path,
-    version: &str,
-    target: &ReleaseTarget,
-    progress: &impl Progress,
-) -> OpsResult<()> {
-    progress.status(&format!(
-        "Bumping manifest versions for {}...",
-        target_tag(target, version)
-    ));
-    bump_manifest_versions(wt_path, target, version, progress)?;
-
-    progress.status(&format!(
-        "Generating release notes for {}...",
-        target_tag(target, version)
-    ));
-    generate_release_with_target(wt_path, version, target, progress)?;
-
-    progress.status("Committing release changes...");
-    commit_workflow(
-        wt_path,
-        &CommitOptions {
-            add: true,
-            message: Some(release_commit_message(target, version)),
-            ..CommitOptions::for_task("release")
-        },
-        progress,
-    )?;
-
-    progress.status("Creating PR and landing...");
-    land(
-        wt_path,
-        &LandOptions {
-            strict: false,
-            local: false,
-            create_pr: true,
-            worktree: None,
-            lint: false,
-            commit_message: None,
-            pr_title: None,
-            pr_body: None,
-        },
-        progress,
-    )?;
-
-    Ok(())
-}
-
-fn release_commit_message(target: &ReleaseTarget, version: &str) -> String {
-    if target.name == "default" {
-        format!("release: v{version}")
-    } else {
-        format!("release: {} v{version}", target.name)
-    }
-}
-
-fn cleanup_worktree(main_repo: &Path, wt_path: &Path, branch: &str, progress: &impl Progress) {
-    if let Err(err) = worktree_remove(main_repo, wt_path) {
-        progress.error(&format!("Warning: could not remove worktree: {err}"));
-    }
-    let _ = delete_local_branch(main_repo, branch);
-}
-
 fn tag_and_push(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<String> {
     let tag = target_tag(target, version);
     run_stdout(repo, "git", &["tag", &tag])?;
     run_stdout(repo, "git", &["push", "origin", &tag])?;
     Ok(tag)
-}
-
-fn monitor_release_workflow(
-    repo: &Path,
-    tag: &str,
-    target: &ReleaseTarget,
-    progress: &impl Progress,
-) -> OpsResult<()> {
-    monitor_release_workflow_inner(repo, tag, target, progress, 0)
-}
-
-fn monitor_release_workflow_inner(
-    repo: &Path,
-    tag: &str,
-    target: &ReleaseTarget,
-    progress: &impl Progress,
-    attempt: u8,
-) -> OpsResult<()> {
-    if attempt > 2 {
-        return Err(OpsError::Message(
-            "release diagnosis retry limit reached".to_string(),
-        ));
-    }
-
-    progress.status("Waiting for release workflow run...");
-    let run = wait_for_workflow_run(repo, tag, target)?;
-    let Some(run) = run else {
-        return Err(OpsError::Message(format!(
-            "no workflow run found for tag {tag}"
-        )));
-    };
-
-    if let Some(url) = run.url.as_deref() {
-        progress.status(&format!("Workflow: {url}"));
-    }
-
-    loop {
-        let view = view_workflow_run(repo, run.id)?;
-        let conclusion = view
-            .conclusion
-            .clone()
-            .unwrap_or_else(|| "(pending)".to_string());
-        progress.status(&format!(
-            "Workflow run {} status: {} / {}",
-            run.id, view.status, conclusion
-        ));
-
-        if view.status == "completed" {
-            let release_exists = github_release_exists(repo, tag)?;
-
-            if view.conclusion.as_deref() == Some("success") {
-                if release_exists {
-                    progress.status("GitHub Release is published.");
-                } else {
-                    progress.error("Workflow succeeded but GitHub Release not found yet.");
-                }
-                return Ok(());
-            }
-
-            // Workflow failed, but the release job may have succeeded
-            // (e.g. publish-crates failed after GitHub Release was created).
-            // Don't offer retag if the release already exists.
-            let conclusion = view.conclusion.unwrap_or_else(|| "unknown".to_string());
-            if release_exists {
-                progress.error(&format!(
-                    "Release workflow failed ({conclusion}), but GitHub Release is published. \
-                     Check failed jobs: gh run view {}",
-                    run.id
-                ));
-                return Err(OpsError::Message(
-                    "release workflow partially failed; GitHub Release exists".to_string(),
-                ));
-            }
-
-            let logs = workflow_logs(repo, run.id)
-                .unwrap_or_else(|err| format!("failed to fetch workflow logs: {err}"));
-            progress.error(&format!("Release workflow failed: {conclusion}"));
-            if !logs.trim().is_empty() {
-                progress.error(&logs);
-            }
-
-            if !progress.confirm("Diagnose with agent?") {
-                return Err(OpsError::Message(
-                    "release workflow failed; diagnosis skipped".to_string(),
-                ));
-            }
-
-            diagnose_release_failure(repo, tag, target, &logs)?;
-            retag(repo, tag)?;
-            return monitor_release_workflow_inner(repo, tag, target, progress, attempt + 1);
-        }
-
-        thread::sleep(Duration::from_secs(15));
-    }
-}
-
-fn wait_for_workflow_run(
-    repo: &Path,
-    tag: &str,
-    target: &ReleaseTarget,
-) -> OpsResult<Option<GhRunListEntry>> {
-    thread::sleep(Duration::from_secs(5));
-    for _ in 0..20 {
-        if let Some(run) = find_workflow_run(repo, tag, target)? {
-            return Ok(Some(run));
-        }
-        thread::sleep(Duration::from_secs(5));
-    }
-    Ok(None)
 }
 
 fn find_workflow_run(
@@ -1502,7 +1031,7 @@ fn find_workflow_run(
         "run".to_string(),
         "list".to_string(),
         "--json".to_string(),
-        "databaseId,headBranch,displayTitle,status,conclusion,url".to_string(),
+        "headBranch,displayTitle,status,conclusion,url".to_string(),
         "--limit".to_string(),
         "50".to_string(),
     ];
@@ -1527,173 +1056,9 @@ fn find_workflow_run(
     Ok(matching)
 }
 
-fn view_workflow_run(repo: &Path, run_id: u64) -> OpsResult<GhRunView> {
-    let output = run_stdout(
-        repo,
-        "gh",
-        &[
-            "run",
-            "view",
-            &run_id.to_string(),
-            "--json",
-            "status,conclusion,url",
-        ],
-    )?;
-
-    serde_json::from_str(&output)
-        .map_err(|err| OpsError::Parse(format!("failed to parse workflow run view: {err}")))
-}
-
-fn workflow_logs(repo: &Path, run_id: u64) -> OpsResult<String> {
-    run_stdout(repo, "gh", &["run", "view", &run_id.to_string(), "--log"])
-}
-
 fn github_release_exists(repo: &Path, tag: &str) -> OpsResult<bool> {
     let output = run_output(repo, "gh", &["release", "view", tag, "--json", "tagName"])?;
     Ok(output.status.success())
-}
-
-fn diagnose_release_failure(
-    repo: &Path,
-    tag: &str,
-    target: &ReleaseTarget,
-    logs: &str,
-) -> OpsResult<()> {
-    let template = get_builtin_ops_prompt("release_diagnose").ok_or_else(|| {
-        OpsError::Message("builtin release_diagnose prompt not found".to_string())
-    })?;
-
-    let clipped_logs = clip_text(logs, 20_000);
-    let area_scope = display_area_scope(target);
-    let prompt = format!(
-        "{template}\n\n## Failure context\n\n- Tag: {tag}\n- Target: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Workflow logs\n\n{}\n",
-        target.name,
-        display_tag_prefix(target),
-        area_scope,
-        clipped_logs
-    );
-
-    let result = launch_ops_agent(repo, prompt, false)?;
-    if result.exit_code != 0 {
-        return Err(OpsError::AgentFailed(
-            "diagnosis agent session failed".to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
-fn retag(repo: &Path, tag: &str) -> OpsResult<()> {
-    let _ = run_stdout(repo, "git", &["tag", "-d", tag]);
-    let delete_ref = format!(":refs/tags/{tag}");
-    let _ = run_stdout(repo, "git", &["push", "origin", &delete_ref]);
-
-    run_stdout(repo, "git", &["tag", tag])?;
-    run_stdout(repo, "git", &["push", "origin", tag])?;
-    Ok(())
-}
-
-fn clip_text(text: &str, max_chars: usize) -> String {
-    let mut clipped = text.chars().take(max_chars).collect::<String>();
-    if text.chars().count() > max_chars {
-        clipped.push_str("\n\n... (truncated)");
-    }
-    clipped
-}
-
-fn needs_bootstrap(repo: &Path, target: &ReleaseTarget) -> OpsResult<bool> {
-    let has_tag = latest_tag_optional(repo, target)?.is_some();
-    let has_workflow = has_release_workflow(repo, target)?;
-    Ok(!has_tag && !has_workflow)
-}
-
-fn has_release_workflow(repo: &Path, target: &ReleaseTarget) -> OpsResult<bool> {
-    if let Some(workflow) = target.workflow.as_deref() {
-        let configured = repo.join(workflow);
-        if configured.exists() {
-            return Ok(true);
-        }
-    }
-
-    let workflows_dir = repo.join(".github").join("workflows");
-    if !workflows_dir.exists() {
-        return Ok(false);
-    }
-
-    let tag_pattern = format!("{}v*", target.tag_prefix);
-    let entries = fs::read_dir(&workflows_dir)?;
-    for entry in entries {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-        let extension = path.extension().and_then(|ext| ext.to_str());
-        if !matches!(extension, Some("yml") | Some("yaml")) {
-            continue;
-        }
-
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        if content.contains("tags:") && content.contains(&tag_pattern) {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-fn bootstrap_release(repo: &Path, target: &ReleaseTarget) -> OpsResult<()> {
-    let template = get_builtin_ops_prompt("release_init")
-        .ok_or_else(|| OpsError::Message("builtin release_init prompt not found".to_string()))?;
-
-    let manifests = if target.manifests.is_empty() {
-        "(none detected)".to_string()
-    } else {
-        target
-            .manifests
-            .iter()
-            .map(|path| format!("- {}", path.display()))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    let area_scope = display_area_scope(target);
-    let prompt = format!(
-        "{template}\n\n## Release target\n\n- Name: {}\n- Tag prefix: {}\n- Area scope: {}\n\n## Manifest files\n\n{}\n",
-        target.name,
-        display_tag_prefix(target),
-        area_scope,
-        manifests
-    );
-
-    let result = launch_ops_agent(repo, prompt, false)?;
-    if result.exit_code != 0 {
-        return Err(OpsError::AgentFailed(
-            "release bootstrap session failed".to_string(),
-        ));
-    }
-
-    Ok(())
-}
-
-fn launch_ops_agent(repo: &Path, prompt: String, auto: bool) -> OpsResult<LaunchResult> {
-    let config = load_config_or_default(Some(repo));
-    let launch = AgentConfig {
-        task_prompt: prompt,
-        agent: config.agent.clone(),
-        skip_permissions: true,
-        cwd: Some(repo.to_path_buf()),
-        ..Default::default()
-    };
-    let process = ProcessConfig {
-        auto,
-        stream: false,
-        ..Default::default()
-    };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
-    launch_agent(&launch, &process, &capabilities)
-        .map_err(|err| OpsError::AgentFailed(err.to_string()))
 }
 
 fn run_stdout(repo: &Path, command: &str, args: &[&str]) -> OpsResult<String> {
@@ -2015,142 +1380,5 @@ version = "2.0.0"
             workflow: None,
         };
         assert_eq!(target_tag(&target, "2.0.0"), "cli/v2.0.0");
-    }
-
-    // ======================================================================
-    // read_release_notes_version
-    // ======================================================================
-
-    #[test]
-    fn release_notes_version_valid() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("RELEASE_NOTES.md"), "# v0.9.5\n\nNotes.").unwrap();
-        assert_eq!(
-            read_release_notes_version(dir.path()),
-            Some("0.9.5".to_string())
-        );
-    }
-
-    #[test]
-    fn release_notes_version_missing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(read_release_notes_version(dir.path()), None);
-    }
-
-    #[test]
-    fn release_notes_version_no_header() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("RELEASE_NOTES.md"), "Just some text.").unwrap();
-        assert_eq!(read_release_notes_version(dir.path()), None);
-    }
-
-    #[test]
-    fn release_notes_version_invalid_format() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("RELEASE_NOTES.md"),
-            "# v1.0\n\nOnly two parts.",
-        )
-        .unwrap();
-        assert_eq!(read_release_notes_version(dir.path()), None);
-    }
-
-    // ======================================================================
-    // manifests_at_version
-    // ======================================================================
-
-    #[test]
-    fn manifests_match_cargo_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[workspace.package]\nversion = \"1.2.3\"\n",
-        )
-        .unwrap();
-        let target = ReleaseTarget {
-            name: "default".to_string(),
-            area: vec![],
-            tag_prefix: String::new(),
-            manifests: vec![PathBuf::from("Cargo.toml")],
-            workflow: None,
-        };
-        assert!(manifests_at_version(dir.path(), &target, "1.2.3"));
-        assert!(!manifests_at_version(dir.path(), &target, "1.2.4"));
-    }
-
-    #[test]
-    fn manifests_match_pyproject_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("pyproject.toml"),
-            "[project]\nversion = \"0.5.0\"\n",
-        )
-        .unwrap();
-        let target = ReleaseTarget {
-            name: "default".to_string(),
-            area: vec![],
-            tag_prefix: String::new(),
-            manifests: vec![PathBuf::from("pyproject.toml")],
-            workflow: None,
-        };
-        assert!(manifests_at_version(dir.path(), &target, "0.5.0"));
-        assert!(!manifests_at_version(dir.path(), &target, "0.6.0"));
-    }
-
-    #[test]
-    fn manifests_empty_returns_false() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = ReleaseTarget {
-            name: "default".to_string(),
-            area: vec![],
-            tag_prefix: String::new(),
-            manifests: vec![],
-            workflow: None,
-        };
-        assert!(!manifests_at_version(dir.path(), &target, "1.0.0"));
-    }
-
-    #[test]
-    fn manifests_partial_mismatch() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[package]\nversion = \"1.0.0\"\n",
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("pyproject.toml"),
-            "[project]\nversion = \"0.9.0\"\n",
-        )
-        .unwrap();
-        let target = ReleaseTarget {
-            name: "default".to_string(),
-            area: vec![],
-            tag_prefix: String::new(),
-            manifests: vec![PathBuf::from("Cargo.toml"), PathBuf::from("pyproject.toml")],
-            workflow: None,
-        };
-        // Both must match for true
-        assert!(!manifests_at_version(dir.path(), &target, "1.0.0"));
-    }
-
-    // ======================================================================
-    // toml_has_version / json_has_version
-    // ======================================================================
-
-    #[test]
-    fn toml_version_check() {
-        assert!(toml_has_version("version = \"1.0.0\"\n", "1.0.0"));
-        assert!(!toml_has_version("version = \"1.0.0\"\n", "2.0.0"));
-        assert!(toml_has_version(
-            "[package]\nversion = \"1.0.0\"\nedition = \"2021\"\n",
-            "1.0.0"
-        ));
-    }
-
-    #[test]
-    fn json_version_check() {
-        assert!(json_has_version("{\n  \"version\": \"1.0.0\"\n}", "1.0.0"));
-        assert!(!json_has_version("{\n  \"version\": \"1.0.0\"\n}", "2.0.0"));
     }
 }

@@ -7,8 +7,8 @@ Loopflow 0.9.6 ships token-based mobile auth, usage visibility with cost trackin
 - **Connection tokens for mobile** — lfd mints opaque tokens locally instead of validating through studio. SQLite-backed token ledger with 1-hour TTL, session reuse across reconnects, and `lfq token revoke` for revocation. Concerto macOS gets a "Connect with my phone" toggle in Connection Settings
 - **Usage and billing visibility** — `lfq usage` shows token spend grouped by wave, flow, step, or model. `--billing` splits subscription vs metered with dollar cost estimates. `--prompt` breaks down token composition by source. Smart group-by inference: `--wave engbot` auto-groups by step
 - **API key auth** — per-provider credential type tracking (OAuth vs API key). `lfq auth configure claude` reads keys from environment with clear billing warnings. OAuth remains default; connecting via OAuth automatically switches back from API key
-- **Decomposed release workflow** — `lf ops release` splits into five idempotent commands: `release-check`, `release-notes`, `release-bump`, `release-tag`, `release-status`. The `lf release` step orchestrates them with agent judgment for notes and mechanical execution for everything else. Cron waves enable automated daily patches and monthly minors
-- **Wave authoring guide** — new standalone documentation covering wave creation (Concerto, lfq, Python API), directory structure, trigger types, and a worked example. Getting-started rewritten as a clear journey: try it, build features, scale with waves, go remote
+- **Decomposed release workflow** — `lf ops release` becomes five subcommands: `lf ops release check`, `notes`, `bump`, `tag`, `status`. The `lf release` step orchestrates them with agent judgment for notes and mechanical execution for everything else. Cron waves enable automated daily patches and monthly minors
+- **Wave authoring guide** — new standalone documentation covering wave creation (Concerto, lfq, Python API), directory structure, stimulus types, and a worked example. Getting-started rewritten as a clear journey: try it, build features, scale with waves, go remote
 
 ## Improvements
 

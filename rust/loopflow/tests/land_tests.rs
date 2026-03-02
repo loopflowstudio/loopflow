@@ -65,7 +65,6 @@ fn land_local_squash_merges_to_main() {
             local: true,
             create_pr: false,
             worktree: None,
-            lint: false,
             commit_message: None,
             pr_title: None,
             pr_body: None,
@@ -88,7 +87,6 @@ fn land_local_squash_merges_to_main() {
 
 #[test]
 fn land_preserves_main_on_failure() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("conflict.txt", "feature");
@@ -110,7 +108,6 @@ fn land_preserves_main_on_failure() {
             local: true,
             create_pr: false,
             worktree: None,
-            lint: false,
             commit_message: None,
             pr_title: None,
             pr_body: None,
@@ -147,7 +144,6 @@ fn land_cleans_up_remote_branch() {
             local: true,
             create_pr: false,
             worktree: None,
-            lint: false,
             commit_message: None,
             pr_title: None,
             pr_body: None,
@@ -158,35 +154,6 @@ fn land_cleans_up_remote_branch() {
 
     assert!(result.merged);
     assert!(!remote_branch_exists(&repo, "feature"));
-}
-
-#[test]
-fn land_with_lint_gate() {
-    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
-    let repo = TestRepo::new();
-    repo.create_file(".lf/config.yaml", "lint: 'false'\nagent: claude\n");
-    repo.create_branch("feature");
-    repo.create_file("feature.txt", "feature");
-    repo.stage_all();
-    repo.commit("feature work");
-    push_branch(&repo, "feature");
-
-    let result = land(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: true,
-            create_pr: false,
-            worktree: None,
-            lint: true,
-            commit_message: None,
-            pr_title: None,
-            pr_body: None,
-        },
-        &NullProgress,
-    );
-
-    assert!(matches!(result, Err(OpsError::LintFailed)));
 }
 
 #[test]
@@ -206,7 +173,6 @@ fn land_missing_pr_error_includes_branch_name() {
             local: false,
             create_pr: false,
             worktree: None,
-            lint: false,
             commit_message: None,
             pr_title: None,
             pr_body: None,

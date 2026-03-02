@@ -4,14 +4,14 @@ use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
     is_squash_merged, rev_parse, worktree_add, worktree_move, WorktreeBranch,
 };
-use crate::engine::naming::{format_branch_name, wave_name_from_branch};
+use crate::engine::naming::{format_branch_name, generate_timestamp, wave_name_from_branch};
 use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorktreeState {
@@ -552,10 +552,7 @@ fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), GitErr
 }
 
 pub fn preserve_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, GitError> {
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let ts = generate_timestamp();
     let name = worktree
         .file_name()
         .and_then(|n| n.to_str())

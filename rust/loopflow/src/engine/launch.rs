@@ -161,6 +161,7 @@ pub fn prepare_launch_prompt(
         cwd: Some(cwd.unwrap_or(repo_root)),
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
+        directive_relay: None,
     };
 
     Ok(PreparedLaunchPrompt {

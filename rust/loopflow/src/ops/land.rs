@@ -138,7 +138,11 @@ fn ensure_pr(
         if options.create_pr {
             let _ = crate::ops::pr::create_or_update_pr(
                 repo_root,
-                &crate::ops::pr::PrOptions { refresh: true },
+                &crate::ops::pr::PrOptions {
+                    refresh: true,
+                    title: options.pr_title.clone(),
+                    body: options.pr_body.clone(),
+                },
                 progress,
             )?;
         } else {

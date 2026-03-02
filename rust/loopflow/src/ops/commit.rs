@@ -4,7 +4,6 @@ use crate::engine::git::{commit, current_branch, is_clean, push, push_with_upstr
 use serde_json::json;
 
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::generate_commit_message;
 use crate::ops::progress::Progress;
 use crate::ops::trace::{MockResponses, Tracer};
 
@@ -57,18 +56,15 @@ pub fn commit_workflow(
         return Ok(false);
     }
 
-    let message = if let Some(message) = &options.message {
-        message.to_string()
-    } else {
-        progress.status("Generating commit message...");
-        let generated = generate_commit_message(repo)?;
-        format_commit_message(
-            &options.task,
-            &options.flow_parents,
-            &generated.title,
-            &generated.body,
-        )
-    };
+    let message = options
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .ok_or_else(|| {
+            OpsError::Message("message required — use `lf commit` to generate one.".to_string())
+        })?
+        .to_string();
 
     progress.status("Committing...");
     commit(repo, &message)?;
@@ -81,20 +77,6 @@ pub fn commit_workflow(
     }
 
     Ok(true)
-}
-
-fn format_commit_message(task: &str, flow_parents: &[String], title: &str, body: &str) -> String {
-    let prefix = if flow_parents.is_empty() {
-        format!("lf {task}")
-    } else {
-        format!("lf {} {task}", flow_parents.join(" "))
-    };
-
-    if body.trim().is_empty() {
-        format!("{prefix}: {title}")
-    } else {
-        format!("{prefix}: {title}\n\n{body}")
-    }
 }
 
 fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
@@ -176,7 +158,8 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         json!({
             "add": options.add,
             "push": options.push,
-            "create_draft_pr": options.create_draft_pr
+            "create_draft_pr": options.create_draft_pr,
+            "has_message": options.message.is_some()
         }),
     );
 
@@ -201,18 +184,18 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         return tracer.to_json();
     }
 
-    // Agent generates commit message
-    let (title, _body) = MockResponses::agent_commit_message();
-    tracer.trace_args(
-        "agent:run",
-        json!({
-            "prompt_hash": "mock_hash",
-            "model": "claude:opus"
-        }),
-    );
+    // Require explicit commit message.
+    let Some(message) = options
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+    else {
+        tracer.trace_result("commit:message", "missing");
+        return tracer.to_json();
+    };
 
     // Commit
-    let message = format!("lf test: {}", title);
     tracer.trace_args("git:commit", json!({"message": message}));
 
     // Push

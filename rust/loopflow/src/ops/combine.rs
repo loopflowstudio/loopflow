@@ -139,9 +139,6 @@ pub fn combine_prs(
         Some(pr_url)
     };
 
-    // Update the combined PR with an LLM-generated title and description.
-    update_combined_pr_message(repo, progress);
-
     progress.status("Closing previous PRs...");
     let mut closed_prs = Vec::new();
     for pr in &open_prs {
@@ -287,30 +284,6 @@ fn run_command<const N: usize>(repo: &Path, program: &str, args: [&str; N]) -> O
             command: format!("{program} {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         })
-    }
-}
-
-fn update_combined_pr_message(repo: &Path, progress: &impl Progress) {
-    progress.status("Generating PR title...");
-    match crate::ops::generate_pr_message(repo, None) {
-        Ok(message) => {
-            if let Err(err) = run_gh(
-                repo,
-                [
-                    "pr",
-                    "edit",
-                    "--title",
-                    &message.title,
-                    "--body",
-                    &message.body,
-                ],
-            ) {
-                progress.status(&format!("Warning: failed to update PR title: {err}"));
-            }
-        }
-        Err(err) => {
-            progress.status(&format!("Warning: failed to generate PR message: {err}"));
-        }
     }
 }
 

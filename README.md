@@ -114,6 +114,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
+| `pr` | Generate PR title/body and call `lf ops pr --title --body` |
 
 ## Flows
 

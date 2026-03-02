@@ -34,12 +34,11 @@ Options:
 Create or update a PR, open in browser.
 
 ```bash
-lf ops pr
+lf ops pr --title "area: short title" --body "## Summary ..."
+lf ops pr --refresh
 ```
 
-Generates a PR description based on the branch diff, creates the PR (or updates if one exists), and opens it in your browser.
-
-Idempotent: run it to create, or again to update after more commits.
+`--title` and `--body` are required for create/update flows. `--refresh` is the title-free path when a PR already exists and only needs sync/rebase/push.
 
 ## lf ops land
 
@@ -63,13 +62,13 @@ Commits and pushes current changes, optionally rebases, then creates and pushes 
 
 ## lf ops commit
 
-Generate commit message and commit.
+Commit staged changes.
 
 ```bash
-lf ops commit
+lf ops commit -m "message"
 ```
 
-Stages changes, generates a commit message based on the diff, and commits.
+Stages changes and commits with the explicit message. If you want generated messaging, run the `lf commit` step.
 
 Options:
 
@@ -97,29 +96,19 @@ lf ops test
 
 Reads `.lf/config.yaml` and runs `test:` from repo root.
 
-## lf ops release
+## Release ops commands
 
-Publish a release: generate notes, land PR, tag, push.
+Use the decomposed mechanical commands:
 
 ```bash
-lf ops release              # bump patch, publish
-lf ops release minor        # bump minor
-lf ops release 1.0.0        # explicit version
-lf ops release -n           # dry run — show what would happen
-lf ops release --target cli # release a named target from .lf/config.yaml
-lf ops release --status     # latest tag + workflow + release status
+lf ops release-check
+lf ops release-notes 1.2.3
+lf ops release-bump 1.2.3
+lf ops release-tag 1.2.3
+lf ops release-status
 ```
 
-Creates a worktree from `origin/main`, bumps manifest versions, generates release notes via agent, commits, creates and lands a PR, tags and pushes, then reports workflow/release status.
-
-If release infrastructure is missing (no matching tag and no matching workflow), `lf ops release` starts an interactive bootstrap session to set it up.
-
-| Flag | Description |
-|------|-------------|
-| `version` | Bump type (`patch`, `minor`, `major`) or explicit version (default: `patch`) |
-| `-n, --dry-run` | Preview the release without making changes |
-| `-t, --target` | Release a named target from `.lf/config.yaml` |
-| `--status` | Print latest scoped tag, workflow run state, and GitHub Release presence |
+`lf ops release` is deprecated. Use the `lf release` step to orchestrate these commands with agent judgment for narrative notes.
 
 ---
 
@@ -141,7 +130,7 @@ Rebase current branch onto main.
 lf ops rebase
 ```
 
-Fetches main and rebases. If conflicts occur, launches an assistant to help resolve them.
+Fetches main and rebases. On conflicts, exits with conflict details for manual resolution.
 
 ## lf ops sync
 

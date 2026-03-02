@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use loopflow::ops::{commit_workflow, CommitOptions, NullProgress};
+use loopflow::ops::{commit_workflow, CommitOptions, NullProgress, OpsError};
 use loopflow_test_support::TestRepo;
 
 fn last_commit_message(repo: &TestRepo) -> String {
@@ -69,4 +69,21 @@ fn commit_with_message_override() {
     let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
     assert!(committed);
     assert_eq!(last_commit_message(&repo), "override message");
+}
+
+#[test]
+fn commit_requires_message() {
+    let repo = TestRepo::new();
+    repo.create_file("needs-message.txt", "hello");
+
+    let options = CommitOptions {
+        add: true,
+        ..CommitOptions::for_task("commit")
+    };
+
+    let result = commit_workflow(repo.path(), &options, &NullProgress);
+    assert!(matches!(
+        result,
+        Err(OpsError::Message(message)) if message == "message required — use `lf commit` to generate one."
+    ));
 }

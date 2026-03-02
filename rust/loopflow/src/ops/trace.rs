@@ -109,10 +109,6 @@ impl MockResponses {
         true
     }
 
-    pub fn agent_commit_message() -> (&'static str, &'static str) {
-        ("mock commit", "")
-    }
-
     pub fn gh_pr_exists() -> bool {
         false
     }

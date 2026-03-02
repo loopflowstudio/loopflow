@@ -8,13 +8,14 @@ use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::{generate_pr_message, generate_pr_message_from_diff, resolve_wave_name};
 use crate::ops::progress::Progress;
 use crate::ops::util::{command_exists, stderr_from_output};
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
     pub refresh: bool,
+    pub title: Option<String>,
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +60,7 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: true,
+        message: Some("lf ops pr: prepare branch".to_string()),
         ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress)?;
@@ -82,40 +84,65 @@ pub fn create_or_update_pr(
     // Refresh PR if HEAD moved from where origin was before we started
     let head_now = rev_parse(repo, "HEAD").ok();
     let has_changes = origin_before.is_none() || origin_before != head_now;
-    let wave = resolve_wave_name(repo, None);
+    let title = options
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let body = options
+        .body
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let has_message = title.is_some() || body.is_some();
+    if has_message && !(title.is_some() && body.is_some()) {
+        return Err(OpsError::Message(
+            "title and body required — use `lf pr` to generate them.".to_string(),
+        ));
+    }
+    if !options.refresh && !has_message {
+        return Err(OpsError::Message(
+            "title and body required — use `lf pr` to generate them.".to_string(),
+        ));
+    }
 
     if let Some(pr) = find_open_pr(repo)? {
-        if !options.refresh && !has_changes && !pr.is_draft {
+        if has_message {
+            progress.status("Updating PR...");
+            update_pr(
+                repo,
+                pr.number,
+                title.expect("checked"),
+                body.expect("checked"),
+            )?;
+            if pr.is_draft {
+                mark_pr_ready(repo, pr.number)?;
+            }
             open_url(&pr.url);
             return Ok(PrResult {
                 url: pr.url,
                 created: false,
-                updated: false,
+                updated: true,
             });
         }
 
-        progress.status("Updating PR...");
-        let message = if let Some(diff) = get_pr_diff(repo)? {
-            generate_pr_message_from_diff(repo, &diff, wave.as_deref())?
-        } else {
-            generate_pr_message(repo, wave.as_deref())?
-        };
-        update_pr(repo, pr.number, &message.title, &message.body)?;
-        if pr.is_draft {
-            mark_pr_ready(repo, pr.number)?;
+        if options.refresh {
+            open_url(&pr.url);
+            return Ok(PrResult {
+                url: pr.url,
+                created: false,
+                updated: has_changes,
+            });
         }
-        open_url(&pr.url);
-        return Ok(PrResult {
-            url: pr.url,
-            created: false,
-            updated: true,
-        });
+
+        return Err(OpsError::Message(
+            "title and body required — use `lf pr` to generate them.".to_string(),
+        ));
     }
 
     progress.status("Creating PR...");
-    let message = generate_pr_message(repo, wave.as_deref())?;
     let base = pr_target(repo)?;
-    let url = create_pr(repo, &message.title, &message.body, &base)?;
+    let url = create_pr(repo, title.expect("checked"), body.expect("checked"), &base)?;
     if let Some(pr) = find_open_pr(repo)? {
         if pr.is_draft {
             mark_pr_ready(repo, pr.number)?;
@@ -131,23 +158,6 @@ pub fn create_or_update_pr(
 
 pub fn gh_available() -> bool {
     command_exists("gh")
-}
-
-fn get_pr_diff(repo: &Path) -> OpsResult<Option<String>> {
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("diff")
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-    if diff.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(diff))
-    }
 }
 
 pub fn pr_exists_for_current_branch(repo: &Path) -> OpsResult<bool> {

@@ -194,6 +194,10 @@ pub enum OpsCommand {
     Pr {
         #[arg(short = 'r', long = "refresh")]
         refresh: bool,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
     },
     /// Update local main to match origin
     Sync,
@@ -204,7 +208,7 @@ pub enum OpsCommand {
         #[arg(long = "no-rebase")]
         no_rebase: bool,
     },
-    /// Generate commit message and commit
+    /// Commit changes (explicit message required)
     Commit {
         #[arg(short = 'm', long = "message", short_alias = 'M')]
         message: Option<String>,
@@ -230,7 +234,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ShellCommand,
     },
-    /// Publish a release: generate notes, land PR, tag
+    /// Deprecated orchestrator (use `lf release` step or `release-*` ops commands)
     Release {
         /// Bump type or explicit version (default: patch)
         #[arg(default_value = "patch")]

@@ -15,10 +15,6 @@ fn write_gh_script(pr_list: &str) -> String {
     )
 }
 
-fn write_claude_script(output: &str) -> String {
-    format!("#!/bin/sh\ncat <<'EOF'\n{output}\nEOF\n")
-}
-
 fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
     format!(
         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
@@ -44,12 +40,7 @@ fn release_generates_notes_and_writes_file() {
     let gh_script = write_gh_script(
         r#"[{"number":101,"title":"Add release command","body":"Users can now run lf release."}]"#,
     );
-    let claude_script =
-        write_claude_script("## Highlights\n\n- Added automated release notes generation.");
-    let _env = EnvGuard::new(&[
-        ("gh", gh_script.as_str()),
-        ("claude", claude_script.as_str()),
-    ]);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.8.0"]);
@@ -61,17 +52,14 @@ fn release_generates_notes_and_writes_file() {
 
     let notes = fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).expect("read notes");
     assert!(notes.starts_with("# v0.9.1\n\n"));
-    assert!(notes.contains("## Highlights"));
+    assert!(notes.contains("## Merged PRs"));
+    assert!(notes.contains("- #101 Add release command"));
 }
 
 #[test]
 fn release_keeps_existing_header() {
     let gh_script = write_gh_script("[]");
-    let claude_script = write_claude_script("# v0.9.2\n\nAlready has header.");
-    let _env = EnvGuard::new(&[
-        ("gh", gh_script.as_str()),
-        ("claude", claude_script.as_str()),
-    ]);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.1"]);
@@ -86,11 +74,7 @@ fn release_keeps_existing_header() {
 #[test]
 fn release_with_bump_keyword() {
     let gh_script = write_gh_script("[]");
-    let claude_script = write_claude_script("## Changes\n\n- Bug fixes.");
-    let _env = EnvGuard::new(&[
-        ("gh", gh_script.as_str()),
-        ("claude", claude_script.as_str()),
-    ]);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.1"]);

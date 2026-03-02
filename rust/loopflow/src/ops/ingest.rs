@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::resolve_wave_name;
 use crate::ops::progress::Progress;
+use crate::ops::util::resolve_wave_name;
 
 #[derive(Debug, Clone, Default)]
 pub struct IngestOptions {

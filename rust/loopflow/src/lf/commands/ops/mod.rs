@@ -8,9 +8,9 @@ use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
-    publish_release, rebase_with_recovery, release_bump, release_check, release_notes,
-    release_status, release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions,
-    NextOptions, PrOptions, Progress, PublishOptions, RebaseOptions, RotationResult,
+    rebase_with_recovery, release_bump, release_check, release_notes, release_status, release_tag,
+    AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions, Progress,
+    RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -48,7 +48,11 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             },
             &progress,
         ),
-        OpsCommand::Pr { refresh } => open_pr(*refresh, &progress),
+        OpsCommand::Pr {
+            refresh,
+            title,
+            body,
+        } => open_pr(*refresh, title.clone(), body.clone(), &progress),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
             create_pr,
@@ -64,18 +68,9 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
-        OpsCommand::Release {
-            version,
-            dry_run,
-            target,
-            status,
-        } => {
-            if *status {
-                release_status_cmd(target.as_deref())
-            } else {
-                release_publish(version, *dry_run, target.as_deref(), &progress)
-            }
-        }
+        OpsCommand::Release { .. } => Err(anyhow!(
+            "`lf ops release` is deprecated — use `lf release` or the mechanical `lf ops release-*` commands."
+        )),
         OpsCommand::ReleaseCheck { target } => release_check_cmd(target.as_deref()),
         OpsCommand::ReleaseNotes {
             version,
@@ -181,9 +176,22 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn open_pr(refresh: bool, progress: &impl Progress) -> Result<()> {
+fn open_pr(
+    refresh: bool,
+    title: Option<String>,
+    body: Option<String>,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(&repo_root, &PrOptions { refresh }, progress)?;
+    let result = create_or_update_pr(
+        &repo_root,
+        &PrOptions {
+            refresh,
+            title,
+            body,
+        },
+        progress,
+    )?;
     println!("{}", result.url);
     Ok(())
 }
@@ -316,32 +324,6 @@ fn release_tag_cmd(version: &str, target_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let tag = release_tag(&repo_root, version, target_name)?;
     println!("{}", tag);
-    Ok(())
-}
-
-fn release_publish(
-    version: &str,
-    dry_run: bool,
-    target: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let result = publish_release(
-        &repo_root,
-        &PublishOptions {
-            version_input: version.to_string(),
-            dry_run,
-            target: target.map(str::to_string),
-        },
-        progress,
-    )?;
-    if !dry_run {
-        if let Some(version) = result.version.as_deref() {
-            println!("v{}", version);
-        } else if result.bootstrapped {
-            println!("release bootstrap complete for target {}", result.target);
-        }
-    }
     Ok(())
 }
 

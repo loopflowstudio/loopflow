@@ -537,10 +537,7 @@ mod contract_tests {
         assert_eq!(trigger.signal, "wave");
         assert!(trigger.enabled);
         assert_eq!(trigger.flow.as_deref(), Some("build"));
-        assert_eq!(
-            trigger.source_wave_id.as_deref(),
-            Some("wave_upstream")
-        );
+        assert_eq!(trigger.source_wave_id.as_deref(), Some("wave_upstream"));
         assert_eq!(trigger.last_main_sha.as_deref(), Some("deadbeef1234"));
         assert_eq!(trigger.last_triggered_at, Some(1737000000));
     }

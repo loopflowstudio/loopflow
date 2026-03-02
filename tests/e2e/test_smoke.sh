@@ -54,7 +54,7 @@
   git add file.txt
 
   cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- \
-    ops commit -m "smoke test" --no-lint >/dev/null
+    ops commit -m "smoke test" >/dev/null
 
   git log -1 --pretty=%B | grep -q "smoke test"
 

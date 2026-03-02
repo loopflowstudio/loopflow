@@ -31,10 +31,10 @@ git checkout -b feature/full-cycle >/dev/null
 echo "change" >> file.txt
 
 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p lf -- \
-  ops commit -m "lf test: full cycle" --no-lint
+  ops commit -m "lf test: full cycle"
 
 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p lf -- \
-  ops land --local --strict --no-lint
+  ops land --local --strict
 
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$current_branch" != "main" ]; then

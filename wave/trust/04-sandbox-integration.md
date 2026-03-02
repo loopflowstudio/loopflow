@@ -27,7 +27,7 @@ CI `sandbox-smoke` remains probe-gated. It activates only when runners expose re
 
 ### Context and workspace sync
 
-Context files written to `.lf/logs/<step>.context.md` in the worktree should be visible immediately inside sandbox runs. Validate host<->sandbox file visibility in the platform script.
+Context files written to `.lf/prompts/<step>.context.md` in the worktree should be visible immediately inside sandbox runs. Validate host↔sandbox file visibility in the platform script.
 
 ### Cleanup
 

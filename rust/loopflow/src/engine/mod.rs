@@ -38,6 +38,7 @@ pub use prompt::{
     count_tokens, default_gather_sources, drop_native_instruction_docs, format_context_prompt,
     format_prompt, format_task_prompt, gather_context, gather_documents,
     trim_context_with_breakdown, write_prompt_log, BudgetedContext, ContextBreakdown, DiffTier,
+    durable_log_dir,
     Document, DocumentSource, GatherContextOpts, GatherSpec, GatheredContext, PromptComponents,
     PromptFormatMode, RenderedPrompt, Surface, DEFAULT_CONTEXT_BUDGET,
 };

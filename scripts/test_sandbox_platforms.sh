@@ -134,9 +134,9 @@ untrack_sandbox "$platform_id"
 
 section "Context File Sync"
 WORKSPACE=$(create_local_workspace "lf-sandbox-context")
-mkdir -p "$WORKSPACE/.lf/logs"
-echo "test-context-content" > "$WORKSPACE/.lf/logs/test.context.md"
-ctx_file_path="$WORKSPACE/.lf/logs/test.context.md"
+mkdir -p "$WORKSPACE/.lf/prompts"
+echo "test-context-content" > "$WORKSPACE/.lf/prompts/test.context.md"
+ctx_file_path="$WORKSPACE/.lf/prompts/test.context.md"
 
 ctx_id="lf-ctx-test-$RUN_SUFFIX"
 docker sandbox create --name "$ctx_id" claude "$WORKSPACE"

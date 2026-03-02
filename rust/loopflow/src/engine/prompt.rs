@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
+use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -1817,23 +1818,23 @@ pub fn format_task_prompt(components: &BudgetedContext) -> String {
     format_prompt(PromptFormatMode::Task, components).into_string()
 }
 
-/// Write prompt to log file and return the path.
+/// Write prompt to both in-repo and durable locations, return the in-repo path.
+///
+/// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
+/// Durable: `~/.lf/logs/<repo>/<worktree>/<file>` — survives worktree deletion.
 ///
 /// File format: `{timestamp}-{flow_parents}.{step}.md` or `{timestamp}-{step}.md`
 ///
-/// Ensures `.lf/log/` is in the repo's root `.gitignore`.
+/// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
 pub fn write_prompt_log(
     repo_root: &Path,
     prompt: &str,
     step_name: &str,
     flow_parents: Option<&[String]>,
 ) -> Result<PathBuf, CoreError> {
-    let lf_dir = repo_root.join(".lf");
-    let log_dir = lf_dir.join("log");
-    fs::create_dir_all(&log_dir)?;
-
-    // Ensure .lf/log/ is in repo .gitignore
-    ensure_gitignore_entry(repo_root, ".lf/log/")?;
+    let prompts_dir = repo_root.join(".lf/prompts");
+    fs::create_dir_all(&prompts_dir)?;
+    ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     // Replace / with . so namespaced steps (e.g., scan/scan-report) don't create subdirectories.
@@ -1845,10 +1846,38 @@ pub fn write_prompt_log(
         _ => safe_step,
     };
     let filename = format!("{}-{}.md", timestamp, name_part);
-    let path = log_dir.join(&filename);
+    let path = prompts_dir.join(&filename);
 
     fs::write(&path, prompt)?;
+
+    // Best-effort durable copy
+    if let Some(durable_dir) = durable_log_dir(repo_root) {
+        let _ = fs::create_dir_all(&durable_dir);
+        let _ = fs::write(durable_dir.join(&filename), prompt);
+    }
+
     Ok(path)
+}
+
+/// Resolve the durable log directory: `~/.lf/logs/<repo>/<worktree>/`.
+///
+/// `<repo>` is the main repo directory name. `<worktree>` is the wave name
+/// if in a worktree, or `"main"` otherwise.
+pub fn durable_log_dir(repo_root: &Path) -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let (repo_name, worktree_name) = match main_repo_root(repo_root) {
+        Ok(main_root) => {
+            let main_name = main_root.file_name()?.to_str()?.to_string();
+            let wt_name = wave_name_from_worktree_and_main(repo_root, &main_root)
+                .unwrap_or_else(|| "main".to_string());
+            (main_name, wt_name)
+        }
+        Err(_) => {
+            let name = repo_root.file_name()?.to_str()?.to_string();
+            (name, "main".to_string())
+        }
+    };
+    Some(home.join(".lf/logs").join(repo_name).join(worktree_name))
 }
 
 /// Format file documents for inclusion in prompt.
@@ -2914,7 +2943,7 @@ directions:
         let path = write_prompt_log(repo.path(), prompt, "implement", None).unwrap();
 
         assert!(path.exists());
-        assert!(path.to_string_lossy().contains(".lf/log/"));
+        assert!(path.to_string_lossy().contains(".lf/prompts/"));
         assert!(path.to_string_lossy().ends_with("-implement.md"));
 
         let content = fs::read_to_string(&path).unwrap();
@@ -2932,7 +2961,7 @@ directions:
 
         assert!(gitignore_path.exists());
         let content = fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(".lf/log/"));
+        assert!(content.contains(".lf/prompts/"));
     }
 
     #[test]
@@ -2953,13 +2982,13 @@ directions:
     fn write_prompt_log_preserves_existing_gitignore() {
         let repo = init_repo();
         let gitignore_path = repo.path().join(".gitignore");
-        fs::write(&gitignore_path, "target/\n.lf/log/\n").unwrap();
+        fs::write(&gitignore_path, "target/\n.lf/prompts/\n").unwrap();
 
         write_prompt_log(repo.path(), "test", "step", None).unwrap();
 
         let content = fs::read_to_string(&gitignore_path).unwrap();
         // Should not duplicate the entry
-        assert_eq!(content, "target/\n.lf/log/\n");
+        assert_eq!(content, "target/\n.lf/prompts/\n");
     }
 
     #[test]
@@ -2973,7 +3002,7 @@ directions:
         let content = fs::read_to_string(&gitignore_path).unwrap();
         assert!(content.contains("target/"));
         assert!(content.contains("node_modules/"));
-        assert!(content.contains(".lf/log/"));
+        assert!(content.contains(".lf/prompts/"));
     }
 
     // ==========================================================================

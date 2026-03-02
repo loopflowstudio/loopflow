@@ -96,19 +96,17 @@ lf ops test
 
 Reads `.lf/config.yaml` and runs `test:` from repo root.
 
-## Release ops commands
+## lf ops release
 
-Use the decomposed mechanical commands:
+Mechanical release subcommands. Use `lf release` for the full agent-orchestrated workflow.
 
 ```bash
-lf ops release-check
-lf ops release-notes 1.2.3
-lf ops release-bump 1.2.3
-lf ops release-tag 1.2.3
-lf ops release-status
+lf ops release check              # PRs merged since last tag?
+lf ops release notes 1.2.3        # generate RELEASE_NOTES.md
+lf ops release bump 1.2.3         # bump manifests
+lf ops release tag 1.2.3          # create + push git tag
+lf ops release status              # workflow + GitHub Release status
 ```
-
-`lf ops release` is deprecated. Use the `lf release` step to orchestrate these commands with agent judgment for narrative notes.
 
 ---
 

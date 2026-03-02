@@ -15,11 +15,11 @@ Two surfaces:
 The decomposed ops commands are the API the agent calls:
 
 ```
-lf ops release-check    → exit 0 if changes, exit 1 if empty
-lf ops release-bump     <version>
-lf ops release-notes    <version>
-lf ops release-tag      <version>
-lf ops release-status   → workflow status
+lf ops release check    → exit 0 if changes, exit 1 if empty
+lf ops release bump     <version>
+lf ops release notes    <version>
+lf ops release tag      <version>
+lf ops release status   → workflow status
 ```
 
 Version selection is human input, not agent judgment. The "Release Now" button provides that input. Cron waves handle the automated case.

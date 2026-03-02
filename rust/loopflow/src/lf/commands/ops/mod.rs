@@ -5,7 +5,7 @@ use crate::engine::worktrees::{
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::Colors;
-use crate::lf::{OpsCommand, ShellCommand, WtCommand};
+use crate::lf::{OpsCommand, ReleaseCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
     rebase_with_recovery, release_bump, release_check, release_notes, release_status, release_tag,
@@ -68,20 +68,19 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         }
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
-        OpsCommand::Release { .. } => Err(anyhow!(
-            "`lf ops release` is deprecated — use `lf release` or the mechanical `lf ops release-*` commands."
-        )),
-        OpsCommand::ReleaseCheck { target } => release_check_cmd(target.as_deref()),
-        OpsCommand::ReleaseNotes {
-            version,
-            prev_tag,
-            target,
-        } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
-        OpsCommand::ReleaseBump { version, target } => {
-            release_bump_cmd(version, target.as_deref(), &progress)
-        }
-        OpsCommand::ReleaseTag { version, target } => release_tag_cmd(version, target.as_deref()),
-        OpsCommand::ReleaseStatus { target } => release_status_cmd(target.as_deref()),
+        OpsCommand::Release { cmd } => match cmd {
+            ReleaseCommand::Check { target } => release_check_cmd(target.as_deref()),
+            ReleaseCommand::Notes {
+                version,
+                prev_tag,
+                target,
+            } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
+            ReleaseCommand::Bump { version, target } => {
+                release_bump_cmd(version, target.as_deref(), &progress)
+            }
+            ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
+            ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
+        },
         OpsCommand::Lint => run_check("lint"),
         OpsCommand::Test => run_check("test"),
         OpsCommand::Ingest { wave } => ingest_cmd(wave.as_deref(), &progress),

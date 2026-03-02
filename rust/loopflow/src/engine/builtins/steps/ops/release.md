@@ -18,7 +18,7 @@ If no input is provided, default to `patch`.
 
 1. **Check for changes.** Skip if nothing merged since last tag.
    ```bash
-   lf ops release-check
+   lf ops release check
    ```
    Exit 1 means nothing merged — stop here.
 
@@ -26,12 +26,12 @@ If no input is provided, default to `patch`.
 
 3. **Bump manifests.**
    ```bash
-   lf ops release-bump <version>
+   lf ops release bump <version>
    ```
 
 4. **Generate release notes.** Analyze the merged PRs and write narrative notes.
    ```bash
-   lf ops release-notes <version>
+   lf ops release notes <version>
    ```
 
 5. **Commit and land.**
@@ -42,12 +42,12 @@ If no input is provided, default to `patch`.
 
 6. **Tag and push.**
    ```bash
-   lf ops release-tag <version>
+   lf ops release tag <version>
    ```
 
 7. **Verify.** Confirm the release workflow passes.
    ```bash
-   lf ops release-status
+   lf ops release status
    ```
    If the workflow fails, report the failure and stop.
 

@@ -234,55 +234,10 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ShellCommand,
     },
-    /// Deprecated orchestrator (use `lf release` step or `release-*` ops commands)
+    /// Release operations (check, notes, bump, tag, status)
     Release {
-        /// Bump type or explicit version (default: patch)
-        #[arg(default_value = "patch")]
-        version: String,
-        #[arg(short = 'n', long = "dry-run")]
-        dry_run: bool,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-        #[arg(long = "status")]
-        status: bool,
-    },
-    /// Check if PRs have merged since the last tag
-    #[command(name = "release-check")]
-    ReleaseCheck {
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Generate release notes for a version
-    #[command(name = "release-notes")]
-    ReleaseNotes {
-        /// Version (e.g. 0.9.6)
-        version: String,
-        #[arg(long = "prev-tag")]
-        prev_tag: Option<String>,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Bump version in manifest files
-    #[command(name = "release-bump")]
-    ReleaseBump {
-        /// Version to bump to (e.g. 0.9.6)
-        version: String,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Create a git tag and push it
-    #[command(name = "release-tag")]
-    ReleaseTag {
-        /// Version to tag (e.g. 0.9.6)
-        version: String,
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
-    },
-    /// Check release workflow status
-    #[command(name = "release-status")]
-    ReleaseStatus {
-        #[arg(short = 't', long = "target")]
-        target: Option<String>,
+        #[command(subcommand)]
+        cmd: ReleaseCommand,
     },
     /// Run configured lint checks
     Lint,
@@ -293,6 +248,43 @@ pub enum OpsCommand {
         /// Wave name (auto-detected from worktree or branch if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReleaseCommand {
+    /// Check if PRs have merged since the last tag
+    Check {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Generate release notes for a version
+    Notes {
+        /// Version (e.g. 0.9.6)
+        version: String,
+        #[arg(long = "prev-tag")]
+        prev_tag: Option<String>,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Bump version in manifest files
+    Bump {
+        /// Version to bump to (e.g. 0.9.6)
+        version: String,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Create a git tag and push it
+    Tag {
+        /// Version to tag (e.g. 0.9.6)
+        version: String,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Check release workflow status
+    Status {
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
     },
 }
 

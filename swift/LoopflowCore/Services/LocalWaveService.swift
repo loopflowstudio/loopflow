@@ -692,16 +692,21 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        let stimuli: [Stimulus]
-        if let stimArr = json["stimuli"] as? [[String: Any]] {
-            stimuli = stimArr.compactMap { dict in
+        let triggers: [Trigger]
+        if let trigArr = json["triggers"] as? [[String: Any]] {
+            triggers = trigArr.compactMap { dict in
                 guard let id = dict["id"] as? String,
-                      let kindStr = dict["kind"] as? String,
-                      let kind = Stimulus.Kind(rawValue: kindStr) else { return nil }
-                return Stimulus(id: id, kind: kind, cron: dict["cron"] as? String)
+                      let signalStr = dict["signal"] as? String,
+                      let signal = Trigger.Signal(rawValue: signalStr) else { return nil }
+                return Trigger(
+                    id: id,
+                    signal: signal,
+                    flow: dict["flow"] as? String,
+                    sourceWaveId: dict["source_wave_id"] as? String
+                )
             }
         } else {
-            stimuli = []
+            triggers = []
         }
 
         let createdAt: Date?
@@ -743,12 +748,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
             repo: json["repo"] as? String ?? "",
-            flow: json["flow"] as? String ?? "",
+            flow: json["primary_flow"] as? String ?? "",
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
             agent: json["agent"] as? String,
             stepAgents: stepAgents,
-            stimuli: stimuli,
+            triggers: triggers,
             status: status,
             iteration: json["iteration"] as? Int ?? 0,
             localWorktree: json["local_worktree"] as? String,
@@ -826,13 +831,13 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    // MARK: - Stimulus
+    // MARK: - Triggers
 
-    public func addStimulus(_ waveId: String, kind: Stimulus.Kind, cron: String? = nil) async throws -> Stimulus {
-        var body: [String: Any] = ["kind": kind.rawValue]
-        if let cron { body["cron"] = cron }
+    public func addTrigger(_ waveId: String, signal: Trigger.Signal, flow: String? = nil) async throws -> Trigger {
+        var body: [String: Any] = ["signal": signal.rawValue]
+        if let flow { body["flow"] = flow }
         let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus"),
+            apiBaseURL.appendingPathComponent("waves/\(waveId)/triggers"),
             method: "POST",
             body: body,
             contentType: "application/json"
@@ -850,12 +855,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             throw WaveServiceError.commandFailed("Invalid response")
         }
 
-        return Stimulus(id: id, kind: kind, cron: cron)
+        return Trigger(id: id, signal: signal, flow: flow)
     }
 
-    public func removeStimulus(_ waveId: String, stimulusId: String) async throws {
+    public func removeTrigger(_ waveId: String, triggerId: String) async throws {
         let request = try makeRequest(
-            apiBaseURL.appendingPathComponent("waves/\(waveId)/stimulus/\(stimulusId)"),
+            apiBaseURL.appendingPathComponent("waves/\(waveId)/triggers/\(triggerId)"),
             method: "DELETE"
         )
 

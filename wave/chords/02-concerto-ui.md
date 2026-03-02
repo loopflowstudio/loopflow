@@ -4,7 +4,9 @@
 
 ## Context
 
-Signal cleanup has landed — `wave.mode` (Loop/Cron/Manual) is on the wave struct, which affects how waves display in the sidebar. FlowRun container (01) should land before or alongside this — it adds `primary_flow_run` and `triggered_flows` to WaveRun, which feeds the per-iteration detail view. Chord CRUD already works end-to-end from the HTTP API and Python client.
+Signal cleanup has landed — `wave.mode` (Loop/Cron/Manual) is on the wave struct, which affects how waves display in the sidebar. Trigger rename has landed across the full stack (Rust, Python, Swift, docs, wave config). `Stimulus`/`stimuli` fully replaced with `Trigger`/`triggers` including Swift models, services, views, and tests.
+
+FlowRun container (01) should land before or alongside this — it adds `primary_flow_run` and `triggered_flows` to WaveRun, which feeds the per-iteration detail view. Chord CRUD already works end-to-end from the HTTP API and Python client.
 
 ## Key questions
 

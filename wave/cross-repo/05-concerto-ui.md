@@ -4,6 +4,8 @@
 
 Concerto's portfolio view shows parent->child edges between repo cards. Wave configuration becomes cross-repo aware — area pickers, trigger targets, and context sources understand related repos.
 
+Trigger rename has landed across the full stack including Swift/Concerto. `Stimulus`/`stimuli` fully replaced with `Trigger`/`triggers`.
+
 ## Key interactions
 
 ### Portfolio view

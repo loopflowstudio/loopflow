@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
@@ -76,13 +76,13 @@ impl<T> ListResponse<T> {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CommitEntryDto {
     pub sha: String,
     pub message: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDto {
     pub id: String,
     pub object: String,
@@ -127,7 +127,7 @@ pub struct ChordDto {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WaveRunDto {
     pub id: String,
     pub object: String,
@@ -169,7 +169,7 @@ pub struct WaveRunDto {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PullRequestDto {
     pub url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -189,7 +189,7 @@ pub struct RunWaveResponse {
     pub wave_run_id: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TriggerDto {
     pub id: String,
     pub signal: String,
@@ -205,7 +205,7 @@ pub struct TriggerDto {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ActivationLogDto {
     pub id: String,
     pub object: String,
@@ -489,4 +489,72 @@ pub fn wave_run_status_str(status: WaveRunStatus) -> String {
         WaveRunStatus::Unspecified => "unknown",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    fn fixture(name: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures")
+            .join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
+    }
+
+    #[test]
+    fn wave_fixture_deserializes() {
+        let json = fixture("wave.json");
+        let wave: WaveDto = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(wave.id, "wave_abc123");
+        assert_eq!(wave.object, "wave");
+        assert_eq!(wave.name, "engbot");
+        assert_eq!(wave.primary_flow, "build");
+        assert_eq!(wave.mode, "loop");
+        assert_eq!(wave.status, "running");
+        assert_eq!(wave.iteration, 3);
+        assert_eq!(wave.direction, vec!["ux", "clarity"]);
+        assert_eq!(wave.area, vec!["src/"]);
+        assert_eq!(wave.open_pr_count, 1);
+
+        assert_eq!(wave.triggers.len(), 2);
+        assert_eq!(wave.triggers[0].signal, "repo");
+        assert_eq!(wave.triggers[0].flow.as_deref(), Some("integrate"));
+        assert_eq!(wave.triggers[1].signal, "ci_failure");
+
+        assert_eq!(wave.commits.len(), 1);
+        assert_eq!(wave.commits[0].sha, "abc1234");
+    }
+
+    #[test]
+    fn trigger_fixture_deserializes() {
+        let json = fixture("trigger.json");
+        let trigger: TriggerDto = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(trigger.id, "trig_abc123");
+        assert_eq!(trigger.signal, "wave");
+        assert!(trigger.enabled);
+        assert_eq!(trigger.flow.as_deref(), Some("build"));
+        assert_eq!(
+            trigger.source_wave_id.as_deref(),
+            Some("wave_upstream")
+        );
+        assert_eq!(trigger.last_main_sha.as_deref(), Some("deadbeef1234"));
+        assert_eq!(trigger.last_triggered_at, Some(1737000000));
+    }
+
+    #[test]
+    fn activation_log_fixture_deserializes() {
+        let json = fixture("activation_log.json");
+        let log: ActivationLogDto = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(log.id, "act_abc123");
+        assert_eq!(log.object, "activation_log");
+        assert_eq!(log.wave_id, "wave_abc123");
+        assert_eq!(log.trigger_id.as_deref(), Some("trig_001"));
+        assert_eq!(log.outcome, "started");
+        assert!(log.reason.contains("main"));
+    }
 }

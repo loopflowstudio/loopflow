@@ -102,7 +102,7 @@ struct PortfolioRepoStateTests {
             flow: "build",
             direction: [],
             area: ["."],
-            stimuli: [],
+            triggers: [],
             status: status,
             iteration: 0,
             diffStat: diffStat

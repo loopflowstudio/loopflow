@@ -194,7 +194,7 @@ pub async fn spawn_immediate_activation(
     scheduler: &Arc<Scheduler>,
     event_hub: &EventHub,
     wave: &Wave,
-    stimulus_flow_override: Option<String>,
+    flow_override: Option<String>,
     envelope: ActivationEnvelope,
 ) -> Option<WaveRun> {
     if wave.status() == WaveStatus::Paused {
@@ -251,7 +251,7 @@ pub async fn spawn_immediate_activation(
             return None;
         }
     };
-    if let Some(flow_override) = stimulus_flow_override {
+    if let Some(flow_override) = flow_override {
         run.snapshot.flow = flow_override;
     }
     run.target_branch = envelope.target_branch.clone();

@@ -6,9 +6,11 @@
 
 Signal cleanup shipped: `Signal` has only Repo/Wave/CiFailure, execution modes live on `wave.mode` (Loop/Cron/Manual), loop/cron tickers query waves by mode, manual starts dispatch directly with `trigger_id: None`. Incremental migration 022 (not hard reset) — appropriate since FlowRun wasn't included.
 
+Trigger rename shipped: `Stimulus`/`stimuli` renamed to `Trigger`/`triggers` across Rust, Python, docs, and wave config. SQL migration 026 renames the `stimuli` table to `triggers` and updates FK columns. `ActivationSource` removed — trigger ID on the activation is sufficient. Cron promoted from trigger-level to wave-level (`wave.mode` + `wave.cron`).
+
 Key decisions that carry forward:
 
-- **Incremental migration path.** Signal cleanup used ALTER TABLE + table recreation (migration 022). FlowRun can follow the same pattern or consolidate into a hard reset if the migration count becomes unwieldy.
+- **Incremental migration path.** Signal cleanup used ALTER TABLE + table recreation (migration 022). Trigger rename used ALTER TABLE + DROP COLUMN (migration 026, requires SQLite 3.35.0+). FlowRun can follow the same pattern or consolidate into a hard reset if the migration count becomes unwieldy.
 - **`ActivationEnvelope.trigger_id` is already `Option<LfdId>`.** No further activation-layer changes needed.
 - **Cron `last_triggered_at` tracking lost.** The old code tracked this on the trigger. Currently cron waves attempt activation on every 30-second tick, relying on dedup to coalesce. Correct but noisy — add `last_cron_triggered_at` to the wave as part of this sprint.
 - **No cron active-run check.** Unlike the loop ticker (which checks for active runs before dispatching), the cron ticker always dispatches. Address alongside FlowRun or accept the noise.

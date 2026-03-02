@@ -140,13 +140,13 @@ fn should_pause_for_max_iterations(trigger: &Trigger, wave: &Wave) -> bool {
 mod tests {
     use super::should_pause_for_max_iterations;
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{Signal, Stimulus, Wave, WaveMode, WaveStatus};
+    use crate::lfd::types::{Signal, Trigger, Wave, WaveMode, WaveStatus};
     use time::OffsetDateTime;
 
-    fn make_stimulus(max_iterations: Option<u32>) -> Stimulus {
-        let mut stimulus = Stimulus::new(LfdId::new(), LfdId::new(), Signal::Watch);
-        stimulus.max_iterations = max_iterations;
-        stimulus
+    fn make_trigger(max_iterations: Option<u32>) -> Trigger {
+        let mut trigger = Trigger::new(LfdId::new(), LfdId::new(), Signal::Repo);
+        trigger.max_iterations = max_iterations;
+        trigger
     }
 
     fn make_wave(iteration: u32, cycle_start_iteration: u32) -> Wave {
@@ -169,36 +169,36 @@ mod tests {
 
     #[test]
     fn no_max_iterations() {
-        let stimulus = make_stimulus(None);
+        let trigger = make_trigger(None);
         let wave = make_wave(2, 0);
-        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+        assert!(!should_pause_for_max_iterations(&trigger, &wave));
     }
 
     #[test]
     fn max_zero() {
-        let stimulus = make_stimulus(Some(0));
+        let trigger = make_trigger(Some(0));
         let wave = make_wave(2, 0);
-        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+        assert!(!should_pause_for_max_iterations(&trigger, &wave));
     }
 
     #[test]
     fn below_limit() {
-        let stimulus = make_stimulus(Some(5));
+        let trigger = make_trigger(Some(5));
         let wave = make_wave(2, 0);
-        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+        assert!(!should_pause_for_max_iterations(&trigger, &wave));
     }
 
     #[test]
     fn at_limit() {
-        let stimulus = make_stimulus(Some(5));
+        let trigger = make_trigger(Some(5));
         let wave = make_wave(4, 0);
-        assert!(should_pause_for_max_iterations(&stimulus, &wave));
+        assert!(should_pause_for_max_iterations(&trigger, &wave));
     }
 
     #[test]
     fn with_offset() {
-        let stimulus = make_stimulus(Some(5));
+        let trigger = make_trigger(Some(5));
         let wave = make_wave(7, 5);
-        assert!(!should_pause_for_max_iterations(&stimulus, &wave));
+        assert!(!should_pause_for_max_iterations(&trigger, &wave));
     }
 }

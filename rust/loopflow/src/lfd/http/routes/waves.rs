@@ -1804,57 +1804,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stimulus_add_remove_handlers() {
+    async fn trigger_add_remove_handlers() {
         let state = test_http_state().await;
-        let wave = make_wave("/tmp/repo", "stimulus-wave");
+        let wave = make_wave("/tmp/repo", "trigger-wave");
         state.store.create_wave(&wave).await.expect("seed wave");
 
-        let Json(initial) = list_stimuli_handler(State(state.clone()), Path(wave.id().to_string()))
-            .await
-            .expect("list initial stimuli");
-        let initial_data = initial["data"].as_array().expect("stimuli data array");
+        let Json(initial) =
+            list_triggers_handler(State(state.clone()), Path(wave.id().to_string()))
+                .await
+                .expect("list initial triggers");
+        let initial_data = initial["data"].as_array().expect("triggers data array");
         assert!(initial_data.is_empty());
 
-        let Json(added) = add_stimulus_handler(
+        let Json(added) = add_trigger_handler(
             State(state.clone()),
             Path(wave.id().to_string()),
-            Json(AddStimulusRequest {
-                signal: Signal::Watch,
+            Json(AddTriggerRequest {
+                signal: Signal::Repo,
                 flow: Some("integrate".to_string()),
-                cron: None,
                 source_wave_id: None,
                 max_iterations: None,
             }),
         )
         .await
-        .expect("add stimulus");
-        let stimulus_id = added["id"]
+        .expect("add trigger");
+        let trigger_id = added["id"]
             .as_str()
-            .expect("stimulus id in add response")
+            .expect("trigger id in add response")
             .to_string();
 
         let Json(after_add) =
-            list_stimuli_handler(State(state.clone()), Path(wave.id().to_string()))
+            list_triggers_handler(State(state.clone()), Path(wave.id().to_string()))
                 .await
-                .expect("list added stimuli");
-        let after_add_data = after_add["data"].as_array().expect("stimuli data array");
+                .expect("list added triggers");
+        let after_add_data = after_add["data"].as_array().expect("triggers data array");
         assert_eq!(after_add_data.len(), 1);
         assert_eq!(
-            after_add_data[0]["id"].as_str().expect("stimulus id"),
-            stimulus_id
+            after_add_data[0]["id"].as_str().expect("trigger id"),
+            trigger_id
         );
 
-        let _ = remove_stimulus_handler(
+        let _ = remove_trigger_handler(
             State(state.clone()),
-            Path((wave.id().to_string(), stimulus_id)),
+            Path((wave.id().to_string(), trigger_id)),
         )
         .await
-        .expect("remove stimulus");
+        .expect("remove trigger");
 
-        let Json(after_remove) = list_stimuli_handler(State(state), Path(wave.id().to_string()))
+        let Json(after_remove) = list_triggers_handler(State(state), Path(wave.id().to_string()))
             .await
-            .expect("list stimuli after remove");
-        let after_remove_data = after_remove["data"].as_array().expect("stimuli data array");
+            .expect("list triggers after remove");
+        let after_remove_data = after_remove["data"]
+            .as_array()
+            .expect("triggers data array");
         assert!(after_remove_data.is_empty());
     }
 }

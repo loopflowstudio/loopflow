@@ -1,4 +1,0 @@
-flow: release
-message: patch
-mode: cron
-cron: "0 2 * * *"

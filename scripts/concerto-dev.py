@@ -520,6 +520,68 @@ def cmd_run_ios(device: str | None = None) -> int:
     ).returncode
 
 
+def _detect_signing_identity() -> str | None:
+    """Find a Developer ID Application identity in the keychain."""
+    result = run_capture(["security", "find-identity", "-v", "-p", "codesigning"])
+    for line in result.stdout.splitlines():
+        if "Developer ID Application" in line:
+            # Extract the hex hash between quotes isn't needed — use the name
+            start = line.find('"')
+            end = line.rfind('"')
+            if start != -1 and end > start:
+                return line[start + 1:end]
+    return None
+
+
+def _codesign_app(app_path: Path, identity: str, entitlements: Path | None = None) -> int:
+    """Codesign an .app bundle with hardened runtime."""
+    cmd = [
+        "codesign", "--force", "--deep", "--sign", identity,
+        "--options", "runtime",
+        "--timestamp",
+    ]
+    if entitlements and entitlements.exists():
+        cmd += ["--entitlements", str(entitlements)]
+    cmd.append(str(app_path))
+    print(f"Signing with: {identity}")
+    result = run(cmd, check=False)
+    return result.returncode
+
+
+def _notarize_dmg(dmg_path: Path) -> int:
+    """Notarize a DMG and staple the ticket. Reads credentials from env."""
+    key = os.environ.get("NOTARY_KEY")
+    key_id = os.environ.get("NOTARY_KEY_ID")
+    issuer = os.environ.get("NOTARY_ISSUER")
+
+    if not all([key, key_id, issuer]):
+        print("Skipping notarization (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER not set)")
+        return 0
+
+    # Write the key to a temp file (notarytool needs a file path)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".p8", delete=False) as f:
+        f.write(key)
+        key_path = f.name
+
+    try:
+        print("Submitting for notarization...")
+        result = run([
+            "xcrun", "notarytool", "submit", str(dmg_path),
+            "--key", key_path,
+            "--key-id", key_id,
+            "--issuer", issuer,
+            "--wait",
+        ], check=False)
+        if result.returncode != 0:
+            return result.returncode
+
+        print("Stapling notarization ticket...")
+        result = run(["xcrun", "stapler", "staple", str(dmg_path)], check=False)
+        return result.returncode
+    finally:
+        os.unlink(key_path)
+
+
 def cmd_release() -> int:
     """Build release .app and .dmg."""
     print("Building Concerto release...")
@@ -547,6 +609,20 @@ def cmd_release() -> int:
     (app_dir / "PkgInfo").write_text("APPL????")
 
     print(f"Created dist/{app_name}.app")
+
+    # Codesign the .app
+    identity = _detect_signing_identity()
+    if identity:
+        entitlements = SWIFT_DIR / "Concerto" / "Concerto.entitlements"
+        app_path = dist_dir / f"{app_name}.app"
+        rc = _codesign_app(app_path, identity, entitlements)
+        if rc != 0:
+            print("Codesigning failed")
+            return rc
+    else:
+        print("No Developer ID found — signing ad-hoc (DMG will trigger Gatekeeper)")
+        run(["codesign", "--force", "--deep", "--sign", "-",
+             str(dist_dir / f"{app_name}.app")])
 
     # Create DMG
     dmg_path = dist_dir / "LoopflowConcerto.dmg"
@@ -590,6 +666,14 @@ def cmd_release() -> int:
         ])
 
     shutil.rmtree(dmg_staging)
+
+    # Sign and notarize the DMG
+    if identity:
+        run(["codesign", "--force", "--sign", identity, "--timestamp", str(dmg_path)])
+        rc = _notarize_dmg(dmg_path)
+        if rc != 0:
+            print("Notarization failed")
+            return rc
 
     print()
     print("Release built:")

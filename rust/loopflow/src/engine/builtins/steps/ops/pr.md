@@ -24,10 +24,3 @@ Write reviewer-friendly PR copy with agent judgment. Use ops only for execution.
    ```bash
    lf ops pr --title "<title>" --body "<body>"
    ```
-
-## Notes
-
-- If you only need rebase/push refresh with no message changes, use:
-  ```bash
-  lf ops pr --refresh
-  ```

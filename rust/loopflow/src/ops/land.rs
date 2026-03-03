@@ -136,12 +136,15 @@ fn ensure_pr(
 
     if !crate::ops::pr::pr_exists_for_current_branch(repo_root)? {
         if options.create_pr {
+            let title = options.pr_title.as_deref().ok_or_else(|| {
+                OpsError::Message("--create-pr requires --title and --body".to_string())
+            })?;
+            let body = options.pr_body.as_deref().unwrap_or("");
             let _ = crate::ops::pr::create_or_update_pr(
                 repo_root,
                 &crate::ops::pr::PrOptions {
-                    refresh: true,
-                    title: options.pr_title.clone(),
-                    body: options.pr_body.clone(),
+                    title: title.to_string(),
+                    body: body.to_string(),
                 },
                 progress,
             )?;

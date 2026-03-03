@@ -48,11 +48,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             },
             &progress,
         ),
-        OpsCommand::Pr {
-            refresh,
-            title,
-            body,
-        } => open_pr(*refresh, title.clone(), body.clone(), &progress),
+        OpsCommand::Pr { title, body } => open_pr(title, body, &progress),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
             create_pr,
@@ -175,19 +171,13 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn open_pr(
-    refresh: bool,
-    title: Option<String>,
-    body: Option<String>,
-    progress: &impl Progress,
-) -> Result<()> {
+fn open_pr(title: &str, body: &str, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     let result = create_or_update_pr(
         &repo_root,
         &PrOptions {
-            refresh,
-            title,
-            body,
+            title: title.to_string(),
+            body: body.to_string(),
         },
         progress,
     )?;

@@ -82,9 +82,8 @@ pub fn next_branch(
         let _ = crate::ops::pr::create_or_update_pr(
             repo,
             &crate::ops::pr::PrOptions {
-                refresh: false,
-                title: Some(draft_title),
-                body: Some("*Draft — title and body will be updated.*".to_string()),
+                title: draft_title,
+                body: "*Draft — title and body will be updated.*".to_string(),
             },
             progress,
         )?;

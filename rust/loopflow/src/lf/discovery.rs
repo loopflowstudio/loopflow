@@ -63,7 +63,7 @@ pub const BUILTIN_CATEGORIES: &[(&str, &[&str])] = &[
         ],
     ),
     ("Scan", &["scan/scan-report", "scan/scan-plan"]),
-    ("Git", &["commit", "rebase", "land"]),
+    ("Git", &["commit", "rebase", "pr", "land"]),
     (
         "Ops",
         &[
@@ -95,6 +95,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("ci-fix", "Fix latest CI failures for current PR"),
         ("commit", "Commit with generated message"),
         ("rebase", "Rebase onto main"),
+        ("pr", "Open or update PR with generated description"),
         ("land", "Land PR, rotate worktree"),
         ("refine", "Iteratively refine text"),
         ("compress", "Simplify touched code"),

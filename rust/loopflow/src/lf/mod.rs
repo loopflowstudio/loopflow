@@ -192,12 +192,10 @@ pub enum OpsCommand {
     },
     /// Create or update a PR
     Pr {
-        #[arg(short = 'r', long = "refresh")]
-        refresh: bool,
         #[arg(long = "title")]
-        title: Option<String>,
+        title: String,
         #[arg(long = "body")]
-        body: Option<String>,
+        body: String,
     },
     /// Update local main to match origin
     Sync,

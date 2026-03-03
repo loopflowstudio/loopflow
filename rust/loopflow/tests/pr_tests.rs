@@ -41,9 +41,8 @@ fn pr_create_calls_gh() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            refresh: false,
-            title: Some("test title".to_string()),
-            body: Some("test body".to_string()),
+            title: "test title".to_string(),
+            body: "test body".to_string(),
         },
         &NullProgress,
     )
@@ -67,9 +66,8 @@ fn pr_update_refreshes_body() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            refresh: true,
-            title: Some("updated title".to_string()),
-            body: Some("updated body".to_string()),
+            title: "updated title".to_string(),
+            body: "updated body".to_string(),
         },
         &NullProgress,
     )
@@ -77,33 +75,6 @@ fn pr_update_refreshes_body() {
 
     assert!(result.updated);
     assert!(!result.created);
-}
-
-#[test]
-fn pr_skips_when_no_diff() {
-    let gh_script = write_gh_script(
-        r#"[{"url":"https://example.com/pr/1","state":"OPEN","isDraft":false,"number":1}]"#,
-        None,
-    );
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("open", noop_script())]);
-    let repo = TestRepo::new();
-    repo.create_branch("feature");
-    push_branch(&repo, "feature");
-
-    let result = create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            refresh: true,
-            title: None,
-            body: None,
-        },
-        &NullProgress,
-    )
-    .expect("pr");
-
-    assert!(!result.created);
-    assert!(!result.updated);
-    assert_eq!(result.url, "https://example.com/pr/1");
 }
 
 #[test]
@@ -117,9 +88,8 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            refresh: false,
-            title: Some("test title".to_string()),
-            body: Some("test body".to_string()),
+            title: "test title".to_string(),
+            body: "test body".to_string(),
         },
         &NullProgress,
     )
@@ -145,7 +115,7 @@ fn current_pr_surfaces_gh_list_errors() {
 }
 
 #[test]
-fn pr_requires_title_and_body_when_creating() {
+fn pr_requires_title() {
     let gh_script = write_gh_script("[]", None);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("open", noop_script())]);
     let repo = TestRepo::new();
@@ -155,15 +125,14 @@ fn pr_requires_title_and_body_when_creating() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            refresh: false,
-            title: None,
-            body: None,
+            title: "".to_string(),
+            body: "some body".to_string(),
         },
         &NullProgress,
     );
 
     assert!(matches!(
         result,
-        Err(OpsError::Message(message)) if message == "title and body required — use `lf pr` to generate them."
+        Err(OpsError::Message(message)) if message.contains("title required")
     ));
 }

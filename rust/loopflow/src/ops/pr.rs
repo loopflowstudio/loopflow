@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::git::{current_branch, get_default_branch, rev_parse, sync_main};
+use crate::engine::git::{current_branch, get_default_branch, sync_main};
 use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -13,9 +13,8 @@ use crate::ops::util::{command_exists, stderr_from_output};
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
-    pub refresh: bool,
-    pub title: Option<String>,
-    pub body: Option<String>,
+    pub title: String,
+    pub body: String,
 }
 
 #[derive(Debug, Clone)]
@@ -51,11 +50,6 @@ pub fn create_or_update_pr(
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    // Snapshot origin's view of our branch before any work
-    let branch =
-        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    let origin_before = rev_parse(repo, &format!("origin/{branch}")).ok();
-
     let main_repo = resolve_main_repo(repo);
     let base_branch = get_default_branch(&main_repo)?;
 
@@ -82,65 +76,42 @@ pub fn create_or_update_pr(
         )?;
     }
 
-    // Refresh PR if HEAD moved from where origin was before we started
-    let head_now = rev_parse(repo, "HEAD").ok();
-    let has_changes = origin_before.is_none() || origin_before != head_now;
-    let title = options
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let body = options
-        .body
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
+    let title = options.title.trim();
+    let body = options.body.trim();
 
-    match (title, body) {
-        (Some(title), Some(body)) => {
-            if let Some(pr) = find_open_pr(repo)? {
-                progress.status("Updating PR...");
-                update_pr(repo, pr.number, title, body)?;
-                if pr.is_draft {
-                    mark_pr_ready(repo, pr.number)?;
-                }
-                open_url(&pr.url);
-                Ok(PrResult {
-                    url: pr.url,
-                    created: false,
-                    updated: true,
-                })
-            } else {
-                progress.status("Creating PR...");
-                let base = pr_target(repo, &main_repo, &base_branch)?;
-                let url = create_pr(repo, title, body, &base)?;
-                if let Some(pr) = find_open_pr(repo)? {
-                    if pr.is_draft {
-                        mark_pr_ready(repo, pr.number)?;
-                    }
-                }
-                open_url(&url);
-                Ok(PrResult {
-                    url,
-                    created: true,
-                    updated: false,
-                })
+    if title.is_empty() {
+        return Err(OpsError::Message(
+            "title required — use `lf pr` to generate it.".to_string(),
+        ));
+    }
+
+    if let Some(pr) = find_open_pr(repo)? {
+        progress.status("Updating PR...");
+        update_pr(repo, pr.number, title, body)?;
+        if pr.is_draft {
+            mark_pr_ready(repo, pr.number)?;
+        }
+        open_url(&pr.url);
+        Ok(PrResult {
+            url: pr.url,
+            created: false,
+            updated: true,
+        })
+    } else {
+        progress.status("Creating PR...");
+        let base = pr_target(repo, &main_repo, &base_branch)?;
+        let url = create_pr(repo, title, body, &base)?;
+        if let Some(pr) = find_open_pr(repo)? {
+            if pr.is_draft {
+                mark_pr_ready(repo, pr.number)?;
             }
         }
-        (None, None) if options.refresh => match find_open_pr(repo)? {
-            Some(pr) => {
-                open_url(&pr.url);
-                Ok(PrResult {
-                    url: pr.url,
-                    created: false,
-                    updated: has_changes,
-                })
-            }
-            None => Err(OpsError::Message("no open PR to refresh".to_string())),
-        },
-        _ => Err(OpsError::Message(
-            "title and body required — use `lf pr` to generate them.".to_string(),
-        )),
+        open_url(&url);
+        Ok(PrResult {
+            url,
+            created: true,
+            updated: false,
+        })
     }
 }
 

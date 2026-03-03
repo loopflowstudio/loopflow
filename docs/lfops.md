@@ -35,10 +35,9 @@ Create or update a PR, open in browser.
 
 ```bash
 lf ops pr --title "area: short title" --body "## Summary ..."
-lf ops pr --refresh
 ```
 
-`--title` and `--body` are required for create/update flows. `--refresh` is the title-free path when a PR already exists and only needs sync/rebase/push.
+`--title` and `--body` are always required. Use `lf pr` to generate them with agent judgment.
 
 ## lf ops land
 

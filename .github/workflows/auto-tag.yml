@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Extract version and create tag
@@ -41,3 +44,7 @@ jobs:
 
           git tag "$version"
           git push origin "$version"
+
+          # GITHUB_TOKEN tag pushes don't trigger other workflows,
+          # so explicitly dispatch the release workflow.
+          gh workflow run release.yml --ref "$version" -f tag="$version"

@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.9.8). Re-runs publish for an existing tag."
+        required: true
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   # --- Stage 1: Build (failable work) ---
@@ -23,6 +31,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -45,6 +55,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: astral-sh/setup-uv@v4
       - name: Fetch secrets
         uses: dopplerhq/secrets-fetch-action@v1.3.1
@@ -74,7 +86,7 @@ jobs:
         run: |
           uv run --with boto3 python3 - <<'SCRIPT'
           import boto3, os
-          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          version = os.environ["RELEASE_TAG"].lstrip("v")
           client = boto3.client(
               "s3",
               endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com",
@@ -111,6 +123,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/download-artifact@v4
         with:
           pattern: native-*
@@ -213,7 +227,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           body_path: RELEASE_NOTES.md
+          make_latest: true
           files: |
             dist/native/*.tar.gz
             dist/dmg/*.dmg
@@ -224,6 +240,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Fetch secrets
         uses: dopplerhq/secrets-fetch-action@v1.3.1
@@ -233,7 +251,15 @@ jobs:
           doppler-project: loopflow
           doppler-config: prd
       - name: Publish to crates.io
-        run: cargo publish -p loopflow
+        run: |
+          output=$(cargo publish -p loopflow 2>&1) && exit 0
+          # Tolerate "already uploaded" so re-runs succeed
+          if echo "$output" | grep -q "already uploaded"; then
+            echo "Version already on crates.io, skipping"
+          else
+            echo "$output"
+            exit 1
+          fi
 
   publish-pypi:
     needs: [build-dmg]
@@ -244,6 +270,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v4
       - name: Build package
@@ -252,3 +279,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          skip-existing: true

@@ -33,6 +33,42 @@ const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
 ];
 
+fn decrypt_token_row(row: &tokio_postgres::Row) -> StoreResult<super::ProviderToken> {
+    let provider: String = row.get(0);
+    let access_token: String = row.get(1);
+    let refresh_token: Option<String> = row.get(2);
+    let expires_at: Option<i64> = row.get(3);
+    let login: Option<String> = row.get(4);
+    let updated_at: i64 = row.get(5);
+    let ct: String = row.get(6);
+    let encrypted: bool = row.get(7);
+
+    let access_token =
+        token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt access token for provider '{provider}': {error}"
+            ))
+        })?;
+    let refresh_token = refresh_token
+        .as_deref()
+        .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
+        .transpose()
+        .map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt refresh token for provider '{provider}': {error}"
+            ))
+        })?;
+    Ok(super::ProviderToken {
+        provider,
+        access_token,
+        refresh_token,
+        expires_at,
+        login,
+        updated_at,
+        credential_type: super::CredentialType::from_db(&ct),
+    })
+}
+
 #[derive(Debug)]
 pub struct PostgresStore {
     pool: Pool,
@@ -278,39 +314,7 @@ impl PostgresStore {
             let Some(row) = row else {
                 return Ok(None);
             };
-            let provider: String = row.get(0);
-            let access_token: String = row.get(1);
-            let refresh_token: Option<String> = row.get(2);
-            let expires_at: Option<i64> = row.get(3);
-            let login: Option<String> = row.get(4);
-            let updated_at: i64 = row.get(5);
-            let ct: String = row.get(6);
-            let encrypted: bool = row.get(7);
-            let access_token = token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(
-                |error| {
-                    StoreError::InvalidData(format!(
-                        "failed to decrypt access token for provider '{provider}': {error}"
-                    ))
-                },
-            )?;
-            let refresh_token = refresh_token
-                .as_deref()
-                .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
-                .transpose()
-                .map_err(|error| {
-                    StoreError::InvalidData(format!(
-                        "failed to decrypt refresh token for provider '{provider}': {error}"
-                    ))
-                })?;
-            Ok(Some(super::ProviderToken {
-                provider,
-                access_token,
-                refresh_token,
-                expires_at,
-                login,
-                updated_at,
-                credential_type: super::CredentialType::from_db(&ct),
-            }))
+            Ok(Some(decrypt_token_row(&row)?))
         })
         .await
     }
@@ -385,39 +389,7 @@ impl PostgresStore {
                 .await?;
             let mut tokens = Vec::with_capacity(rows.len());
             for row in rows {
-                let provider: String = row.get(0);
-                let access_token: String = row.get(1);
-                let refresh_token: Option<String> = row.get(2);
-                let expires_at: Option<i64> = row.get(3);
-                let login: Option<String> = row.get(4);
-                let updated_at: i64 = row.get(5);
-                let ct: String = row.get(6);
-                let encrypted: bool = row.get(7);
-
-                let access_token = token_crypto::decrypt_if_needed(&access_token, encrypted)
-                    .map_err(|error| {
-                        StoreError::InvalidData(format!(
-                            "failed to decrypt access token for provider '{provider}': {error}"
-                        ))
-                    })?;
-                let refresh_token = refresh_token
-                    .as_deref()
-                    .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
-                    .transpose()
-                    .map_err(|error| {
-                        StoreError::InvalidData(format!(
-                            "failed to decrypt refresh token for provider '{provider}': {error}"
-                        ))
-                    })?;
-                tokens.push(super::ProviderToken {
-                    provider,
-                    access_token,
-                    refresh_token,
-                    expires_at,
-                    login,
-                    updated_at,
-                    credential_type: super::CredentialType::from_db(&ct),
-                });
+                tokens.push(decrypt_token_row(&row)?);
             }
             Ok(tokens)
         })

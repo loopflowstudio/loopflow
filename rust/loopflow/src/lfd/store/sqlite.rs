@@ -81,6 +81,58 @@ fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
     Ok(())
 }
 
+type TokenRow = (
+    String,
+    String,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    i64,
+    String,
+    bool,
+);
+
+fn read_token_row(row: &rusqlite::Row) -> rusqlite::Result<TokenRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+    ))
+}
+
+fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
+    let (provider, access_token, refresh_token, expires_at, login, updated_at, ct, encrypted) = row;
+    let access_token =
+        token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt access token for provider '{provider}': {error}"
+            ))
+        })?;
+    let refresh_token = refresh_token
+        .as_deref()
+        .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
+        .transpose()
+        .map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt refresh token for provider '{provider}': {error}"
+            ))
+        })?;
+    Ok(super::ProviderToken {
+        provider,
+        access_token,
+        refresh_token,
+        expires_at,
+        login,
+        updated_at,
+        credential_type: super::CredentialType::from_db(&ct),
+    })
+}
+
 impl SqliteStore {
     fn sql(query: Query) -> &'static str {
         sql(query, SqlDialect::Sqlite)
@@ -244,59 +296,10 @@ impl SqliteStore {
              FROM provider_tokens WHERE provider = ?1",
         )?;
         let row = stmt
-            .query_row(params![provider], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, bool>(7)?,
-                ))
-            })
+            .query_row(params![provider], read_token_row)
             .optional()?;
 
-        let Some((
-            provider,
-            access_token,
-            refresh_token,
-            expires_at,
-            login,
-            updated_at,
-            ct,
-            encrypted,
-        )) = row
-        else {
-            return Ok(None);
-        };
-
-        let access_token =
-            token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "failed to decrypt access token for provider '{provider}': {error}"
-                ))
-            })?;
-        let refresh_token = refresh_token
-            .as_deref()
-            .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
-            .transpose()
-            .map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "failed to decrypt refresh token for provider '{provider}': {error}"
-                ))
-            })?;
-
-        Ok(Some(super::ProviderToken {
-            provider,
-            access_token,
-            refresh_token,
-            expires_at,
-            login,
-            updated_at,
-            credential_type: super::CredentialType::from_db(&ct),
-        }))
+        row.map(decrypt_token_row).transpose()
     }
 
     pub fn upsert_provider_token(&self, token: &super::ProviderToken) -> StoreResult<()> {
@@ -354,54 +357,10 @@ impl SqliteStore {
             "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
              FROM provider_tokens ORDER BY provider",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, bool>(7)?,
-            ))
-        })?;
+        let rows = stmt.query_map([], read_token_row)?;
         let mut tokens = Vec::new();
         for row in rows {
-            let (
-                provider,
-                access_token,
-                refresh_token,
-                expires_at,
-                login,
-                updated_at,
-                ct,
-                encrypted,
-            ) = row?;
-            let access_token =
-                token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
-                    StoreError::InvalidData(format!(
-                        "failed to decrypt access token for provider '{provider}': {error}"
-                    ))
-                })?;
-            let refresh_token = refresh_token
-                .as_deref()
-                .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
-                .transpose()
-                .map_err(|error| {
-                    StoreError::InvalidData(format!(
-                        "failed to decrypt refresh token for provider '{provider}': {error}"
-                    ))
-                })?;
-            tokens.push(super::ProviderToken {
-                provider,
-                access_token,
-                refresh_token,
-                expires_at,
-                login,
-                updated_at,
-                credential_type: super::CredentialType::from_db(&ct),
-            });
+            tokens.push(decrypt_token_row(row?)?);
         }
         Ok(tokens)
     }

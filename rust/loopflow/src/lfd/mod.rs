@@ -124,12 +124,6 @@ async fn setup_studio_registration(
         tracing::error!("auth.provider=studio requires a JWT in ~/.lf/credentials.json");
         std::process::exit(1);
     };
-    let owner_sub = self::registration::owner_sub_from_jwt(&jwt);
-    if let Some(owner_sub) = owner_sub.as_deref() {
-        tracing::info!(owner_sub = %owner_sub, "parsed owner identity from registration JWT");
-    } else {
-        tracing::warn!("registration JWT did not include a valid sub claim");
-    }
 
     let path = match storage_config {
         StorageConfig::Sqlite { path } => path.clone(),
@@ -167,14 +161,12 @@ async fn setup_studio_registration(
 
     match client.register(&jwt, &mid, &machine_name).await {
         Ok(_) => {
-            if let Some(owner_sub) = owner_sub.as_deref() {
-                tracing::info!(machine_name = %machine_name, owner_sub = %owner_sub, "registered with studio");
-            } else {
-                tracing::info!(
-                    machine_name = %machine_name,
-                    "registered with studio"
-                );
-            }
+            let status = client.status().await;
+            tracing::info!(
+                machine_name = %machine_name,
+                owner_sub = ?status.owner_sub,
+                "registered with studio"
+            );
             let auth = AuthProvider::Studio {
                 local_token,
                 ledger,

@@ -25,7 +25,13 @@ Make directions effortless via defaults and aliasing. Then surface context visib
 ## Risks
 
 - **Config complexity.** More defaults means more places to look when behavior is surprising. The audit breakdown mitigates this.
-- **Concerto data path.** `ContextBreakdown` lives in Rust; Concerto is SwiftUI. Need serialization and an HTTP API endpoint.
+- **Large document lists.** `ContextSnapshot` serializes the full document list per source. Currently unbounded on the Rust side — Concerto caps display at 10 per source. Not a concern at current scale but worth watching if sessions grow to hundreds of documents.
+
+## Follow-ups (from context UI)
+
+- Per-file detail beyond top 10 in Concerto detail panel (data is serialized, display is capped)
+- Budget customization display (bar shows `DEFAULT_CONTEXT_BUDGET`, no UI to change it)
+- Stacked bar precision for very small sources (<1% of total render as zero-width segments)
 
 ## Metrics
 

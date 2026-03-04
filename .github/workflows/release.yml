@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
       - name: Fetch secrets
-        uses: dopplerhq/secrets-fetch-action@v1
+        uses: dopplerhq/secrets-fetch-action@v1.3.1
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
           inject-env-vars: true
@@ -226,7 +226,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Fetch secrets
-        uses: dopplerhq/secrets-fetch-action@v1
+        uses: dopplerhq/secrets-fetch-action@v1.3.1
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
           inject-env-vars: true

@@ -1,31 +1,16 @@
-# v0.9.6
+# v0.9.7
 
-Loopflow 0.9.6 ships token-based mobile auth, usage visibility with cost tracking, and API key support — backed by daemon hardening, comprehensive test coverage, and a restructured documentation journey from first step to autonomous waves.
+Loopflow 0.9.7 strips ~1600 lines of ops scaffolding, signs the macOS installer, and moves agents closer to self-directed execution — they assemble their own context, discover their own checks, and author their own PRs.
 
-## New capabilities
+## Simplification
 
-- **Connection tokens for mobile** — lfd mints opaque tokens locally instead of validating through studio. SQLite-backed token ledger with 1-hour TTL, session reuse across reconnects, and `lfq token revoke` for revocation. Concerto macOS gets a "Connect with my phone" toggle in Connection Settings
-- **Usage and billing visibility** — `lfq usage` shows token spend grouped by wave, flow, step, or model. `--billing` splits subscription vs metered with dollar cost estimates. `--prompt` breaks down token composition by source. Smart group-by inference: `--wave engbot` auto-groups by step
-- **API key auth** — per-provider credential type tracking (OAuth vs API key). `lfq auth configure claude` reads keys from environment with clear billing warnings. OAuth remains default; connecting via OAuth automatically switches back from API key
-- **Decomposed release workflow** — `lf ops release` becomes five subcommands: `lf ops release check`, `notes`, `bump`, `tag`, `status`. The `lf release` step orchestrates them with agent judgment for notes and mechanical execution for everything else. Cron waves enable automated daily patches and monthly minors
-- **Wave authoring guide** — new standalone documentation covering wave creation (Concerto, lfq, Python API), directory structure, stimulus types, and a worked example. Getting-started rewritten as a clear journey: try it, build features, scale with waves, go remote
+- **Agents own their context** — deleted `ops/messages.rs`, `ops/lint.rs`, `ops/agent.rs`, and `ops/combine.rs` (~1400 lines). Agents now assemble context directly through steps instead of the engine pre-building it. Release nests under five focused subcommands: `lf ops release check`, `notes`, `bump`, `tag`, `status`
+- **Agents own their checks** — removed `lf ops lint` and `lf ops test` commands along with the `lint:` and `test:` config fields. Agents discover what to run from `TESTING.md` and CI config, which is where the information already lived
+- **Simpler PR creation** — `lf ops pr` now requires `--title` and `--body` (no more `Option`). Removed the `--refresh` flag and its origin-before/after diff-detection logic. The `lf pr` step handles generation
+- **Prompt handoff renamed** — `.lf/log/` → `.lf/prompts/` for clarity on what it holds (agent-readable prompt files). Diagnostic output moves to `~/.lf/logs/<repo>/<worktree>/` outside the repo, preventing accidental commits
 
-## Improvements
+## Infrastructure
 
-- **Fast-path rebase** — `lf rebase` runs the mechanical operation first; agent only spins up when conflicts exist. Supports `--onto feature` for explicit targeting
-- **Land with PR control** — `lf ops land` accepts `--title` and `--body` flags so agents write PR messaging during the land step. Without flags, enables auto-merge on the existing PR. `ship` and `ship-roadmap` flows now end with `land`
-- **Land stages uncommitted changes** — `lf land` picks up uncommitted work before merging, improving end-of-PR cleanup
-- **Worktree pruning** — `scratch/` files no longer block cleanup of landed worktrees, squash-merged branches get their own status label, land rotation bases the next worktree on the feature branch instead of main
-- **Docs accuracy pass** — fixed stale API signatures, flow format references (Python to YAML), wave API method names, and various command examples across getting-started, config, and waves pages
-- **Polished DMG installer** — `create-dmg` builds the Concerto DMG with a custom background and drag-to-Applications layout
-
-## Reliability
-
-- **Transactional migrations** — SQLite migrations now run in `BEGIN EXCLUSIVE/COMMIT` with rollback on failure
-- **Daemon test coverage** — inline `#[cfg(test)]` modules for all trigger loops (cron, loop_ticker, recovery, watch), wave CRUD HTTP handlers, and session handler tests. Store basic suite runs against both SQLite and Postgres
-- **Resource leak fixes** — output logs pruned on configurable TTL, file handles released after runs, reconcile locks cleaned up on wave deletion
-
-## Fixes
-
-- **Worktree gitlink** — removed accidental worktree gitlink (mode 160000) that broke CI checkout
-- **R2 credentials** — strip whitespace from credentials to prevent silent S3 auth failures
+- **Signed macOS installer** — `concerto-dev.py release` codesigns the .app with Developer ID, signs the DMG, and submits for Apple notarization. CI imports the signing certificate from Doppler and cleans up the keychain afterward. R2 credentials also moved from GitHub Secrets to Doppler
+- **Sibling worktree enforcement** — `wave_name_from_worktree_and_main` now requires worktrees to share the same parent directory as the main repo. Worktrees created inside the repo (e.g., `.claude/worktrees/`) return `None` instead of incorrectly producing a wave name
+- **Land step rewritten** — single `lf ops land` call replaces the manual git/gh sequence. Headless surface detection added for non-interactive sessions

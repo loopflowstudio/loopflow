@@ -618,6 +618,7 @@ private struct StreamPlan {
     }
 }
 
+// SAFETY: internal mutable state is serialized on a private dispatch queue.
 private final class MockSessionService: SessionService, @unchecked Sendable {
     private let queue = DispatchQueue(label: "MockSessionService")
     private var createSessionResults: [Result<AgentSession, Error>]

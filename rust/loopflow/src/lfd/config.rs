@@ -248,7 +248,7 @@ impl RawLfdConfig {
             self.github.token = if token.is_empty() {
                 None
             } else {
-                Some(token.to_string())
+                Some(SecretString::new(token.to_string()))
             };
         }
 
@@ -403,11 +403,26 @@ impl ModeProfile {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct GitHubConfig {
     #[serde(default)]
     pub webhook_secret: String,
-    pub token: Option<String>,
+    pub token: Option<SecretString>,
+}
+
+impl std::fmt::Debug for GitHubConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let webhook_secret = if self.webhook_secret.is_empty() {
+            ""
+        } else {
+            "[REDACTED]"
+        };
+        let token = self.token.as_ref().map(|_| "[REDACTED]");
+        f.debug_struct("GitHubConfig")
+            .field("webhook_secret", &webhook_secret)
+            .field("token", &token)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -831,7 +846,7 @@ fn config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secrecy::ExposeSecret;
+    use secrecy::{ExposeSecret, SecretString};
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
@@ -1078,7 +1093,14 @@ executor:
             }
         );
         assert_eq!(resolved.github.webhook_secret, "env-secret");
-        assert_eq!(resolved.github.token, Some("ghp_env".to_string()));
+        assert_eq!(
+            resolved
+                .github
+                .token
+                .as_ref()
+                .map(|token| token.expose_secret().as_str()),
+            Some("ghp_env")
+        );
         assert_eq!(resolved.http_security.max_json_body_bytes, 2_097_152);
         assert_eq!(resolved.http_security.max_hook_body_bytes, 131_072);
         assert_eq!(resolved.http_security.max_ws_frame_bytes, 32_768);
@@ -1243,5 +1265,18 @@ executor:
             err.to_string(),
             "executor.limits.pids_limit must be greater than zero"
         );
+    }
+
+    #[test]
+    fn github_config_debug_redacts_secrets() {
+        let github = GitHubConfig {
+            webhook_secret: "whsec_123".to_string(),
+            token: Some(SecretString::new("ghp_abc".to_string())),
+        };
+        let rendered = format!("{github:?}");
+        assert!(rendered.contains("webhook_secret: \"[REDACTED]\""));
+        assert!(rendered.contains("token: Some(\"[REDACTED]\")"));
+        assert!(!rendered.contains("whsec_123"));
+        assert!(!rendered.contains("ghp_abc"));
     }
 }

@@ -19,6 +19,7 @@ use crate::lfd::store::rows::{
     map_repo_edge_row, map_repo_row, map_summary_row, map_trigger_row, map_wave_row,
     map_wave_run_row, now_unix, serialize_pr,
 };
+use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
@@ -50,7 +51,9 @@ impl PostgresStore {
                 "postgres schema missing; run `lfd migrate`".to_string(),
             ));
         }
-        Ok(Self { pool })
+        let store = Self { pool };
+        store.migrate_plaintext_provider_tokens().await?;
+        Ok(store)
     }
 
     pub async fn migrate_async(database_url: &str) -> StoreResult<String> {
@@ -81,6 +84,52 @@ impl PostgresStore {
     {
         let client = get_client_with_retry(&self.pool).await?;
         func(client).await
+    }
+
+    async fn migrate_plaintext_provider_tokens(&self) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "SELECT provider, access_token, refresh_token
+                     FROM provider_tokens
+                     WHERE encrypted = FALSE",
+                    &[],
+                )
+                .await?;
+            if rows.is_empty() {
+                return Ok(());
+            }
+
+            for row in rows {
+                let provider: String = row.get(0);
+                let access_token: String = row.get(1);
+                let refresh_token: Option<String> = row.get(2);
+                let encrypted_access =
+                    token_crypto::encrypt_token(&access_token).map_err(|error| {
+                        StoreError::InvalidData(format!(
+                            "failed to encrypt existing access token for provider '{provider}': {error}"
+                        ))
+                    })?;
+                let encrypted_refresh =
+                    token_crypto::encrypt_optional(refresh_token.as_deref()).map_err(|error| {
+                        StoreError::InvalidData(format!(
+                            "failed to encrypt existing refresh token for provider '{provider}': {error}"
+                        ))
+                    })?;
+                client
+                    .execute(
+                        "UPDATE provider_tokens
+                         SET access_token = $1,
+                             refresh_token = $2,
+                             encrypted = TRUE
+                         WHERE provider = $3",
+                        &[&encrypted_access, &encrypted_refresh, &provider],
+                    )
+                    .await?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     async fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -221,22 +270,46 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
-                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type
+                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
                      FROM provider_tokens WHERE provider = $1",
                     &[&provider],
                 )
                 .await?;
-            Ok(row.map(|r| {
-                let ct: String = r.get(6);
-                super::ProviderToken {
-                    provider: r.get(0),
-                    access_token: r.get(1),
-                    refresh_token: r.get(2),
-                    expires_at: r.get(3),
-                    login: r.get(4),
-                    updated_at: r.get(5),
-                    credential_type: super::CredentialType::from_db(&ct),
-                }
+            let Some(row) = row else {
+                return Ok(None);
+            };
+            let provider: String = row.get(0);
+            let access_token: String = row.get(1);
+            let refresh_token: Option<String> = row.get(2);
+            let expires_at: Option<i64> = row.get(3);
+            let login: Option<String> = row.get(4);
+            let updated_at: i64 = row.get(5);
+            let ct: String = row.get(6);
+            let encrypted: bool = row.get(7);
+            let access_token = token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(
+                |error| {
+                    StoreError::InvalidData(format!(
+                        "failed to decrypt access token for provider '{provider}': {error}"
+                    ))
+                },
+            )?;
+            let refresh_token = refresh_token
+                .as_deref()
+                .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
+                .transpose()
+                .map_err(|error| {
+                    StoreError::InvalidData(format!(
+                        "failed to decrypt refresh token for provider '{provider}': {error}"
+                    ))
+                })?;
+            Ok(Some(super::ProviderToken {
+                provider,
+                access_token,
+                refresh_token,
+                expires_at,
+                login,
+                updated_at,
+                credential_type: super::CredentialType::from_db(&ct),
             }))
         })
         .await
@@ -244,22 +317,37 @@ impl PostgresStore {
 
     pub async fn upsert_provider_token(&self, token: &super::ProviderToken) -> StoreResult<()> {
         let token = token.clone();
+        let encrypted_access =
+            token_crypto::encrypt_token(&token.access_token).map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt access token for provider '{}': {error}",
+                    token.provider
+                ))
+            })?;
+        let encrypted_refresh = token_crypto::encrypt_optional(token.refresh_token.as_deref())
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt refresh token for provider '{}': {error}",
+                    token.provider
+                ))
+            })?;
         self.with_client(|client| async move {
             client
                 .execute(
-                    "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
                      ON CONFLICT(provider) DO UPDATE SET
                         access_token = excluded.access_token,
                         refresh_token = excluded.refresh_token,
                         expires_at = excluded.expires_at,
                         login = excluded.login,
                         updated_at = excluded.updated_at,
-                        credential_type = excluded.credential_type",
+                        credential_type = excluded.credential_type,
+                        encrypted = excluded.encrypted",
                     &[
                         &token.provider,
-                        &token.access_token,
-                        &token.refresh_token,
+                        &encrypted_access,
+                        &encrypted_refresh,
                         &token.expires_at,
                         &token.login,
                         &token.updated_at,
@@ -290,26 +378,48 @@ impl PostgresStore {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type
+                    "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
                      FROM provider_tokens ORDER BY provider",
                     &[],
                 )
                 .await?;
-            Ok(rows
-                .iter()
-                .map(|r| {
-                    let ct: String = r.get(6);
-                    super::ProviderToken {
-                        provider: r.get(0),
-                        access_token: r.get(1),
-                        refresh_token: r.get(2),
-                        expires_at: r.get(3),
-                        login: r.get(4),
-                        updated_at: r.get(5),
-                        credential_type: super::CredentialType::from_db(&ct),
-                    }
-                })
-                .collect())
+            let mut tokens = Vec::with_capacity(rows.len());
+            for row in rows {
+                let provider: String = row.get(0);
+                let access_token: String = row.get(1);
+                let refresh_token: Option<String> = row.get(2);
+                let expires_at: Option<i64> = row.get(3);
+                let login: Option<String> = row.get(4);
+                let updated_at: i64 = row.get(5);
+                let ct: String = row.get(6);
+                let encrypted: bool = row.get(7);
+
+                let access_token = token_crypto::decrypt_if_needed(&access_token, encrypted)
+                    .map_err(|error| {
+                        StoreError::InvalidData(format!(
+                            "failed to decrypt access token for provider '{provider}': {error}"
+                        ))
+                    })?;
+                let refresh_token = refresh_token
+                    .as_deref()
+                    .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
+                    .transpose()
+                    .map_err(|error| {
+                        StoreError::InvalidData(format!(
+                            "failed to decrypt refresh token for provider '{provider}': {error}"
+                        ))
+                    })?;
+                tokens.push(super::ProviderToken {
+                    provider,
+                    access_token,
+                    refresh_token,
+                    expires_at,
+                    login,
+                    updated_at,
+                    credential_type: super::CredentialType::from_db(&ct),
+                });
+            }
+            Ok(tokens)
         })
         .await
     }

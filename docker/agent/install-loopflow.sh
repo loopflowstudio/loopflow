@@ -48,6 +48,9 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 missing=()
+OPENCODE_VERSION="v1.2.17"
+OPENCODE_SHA256_X64="dbfe556df45ac999eff95248269ccdd06ee2052983bb03b9501fe9dda2d1f695"
+OPENCODE_SHA256_ARM64="a8c8958274c9b6d9939253b7779a8628c03ec34abbf874cfd5021dd1add12f83"
 
 ensure_apt_package() {
   local package="$1"
@@ -89,7 +92,7 @@ fi
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "would run apt-get install for missing apt dependencies"
   echo "would run npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli"
-  echo "would download opencode binary from anomalyco/opencode releases"
+  echo "would download opencode ${OPENCODE_VERSION} binary from anomalyco/opencode releases and verify SHA256"
   exit 0
 fi
 
@@ -111,20 +114,35 @@ npm cache clean --force
 
 arch="$(dpkg --print-architecture)"
 case "$arch" in
-  amd64) oc_arch="x86_64" ;;
-  arm64) oc_arch="aarch64" ;;
+  amd64)
+    oc_arch="x64"
+    oc_sha256="${OPENCODE_SHA256_X64}"
+    ;;
+  arm64)
+    oc_arch="arm64"
+    oc_sha256="${OPENCODE_SHA256_ARM64}"
+    ;;
   *)
     echo "unsupported arch: $arch" >&2
     exit 1
     ;;
 esac
 
-if curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${oc_arch}.tar.gz" \
-  | tar -xz -C /usr/local/bin opencode 2>/dev/null; then
-  chmod +x /usr/local/bin/opencode
+opencode_archive="$(mktemp)"
+opencode_url="https://github.com/anomalyco/opencode/releases/download/${OPENCODE_VERSION}/opencode-linux-${oc_arch}.tar.gz"
+if curl -fsSL "${opencode_url}" -o "${opencode_archive}"; then
+  actual_sha256="$(sha256sum "${opencode_archive}" | awk '{print $1}')"
+  if [[ "${actual_sha256}" != "${oc_sha256}" ]]; then
+    echo "warning: opencode checksum mismatch (expected ${oc_sha256}, got ${actual_sha256})" >&2
+  elif tar -xz -C /usr/local/bin -f "${opencode_archive}" opencode 2>/dev/null; then
+    chmod +x /usr/local/bin/opencode
+  else
+    echo "warning: opencode archive extraction failed (optional)" >&2
+  fi
 else
-  echo "warning: opencode install failed (optional)" >&2
+  echo "warning: opencode download failed (optional)" >&2
 fi
+rm -f "${opencode_archive}"
 
 git config --system init.defaultBranch main
 git config --system safe.directory /workspace

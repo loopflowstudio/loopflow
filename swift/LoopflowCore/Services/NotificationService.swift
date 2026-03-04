@@ -8,6 +8,8 @@ import UserNotifications
 import AppKit
 #endif
 
+// SAFETY: Notification center delegates are invoked on serialized system queues
+// and this type has no shared mutable state beyond delegate registration.
 public final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     public static let shared = NotificationService()
 

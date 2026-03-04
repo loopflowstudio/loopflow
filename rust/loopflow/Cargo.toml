@@ -53,7 +53,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # --- Dependencies from lfd ---
 async-trait = "0.1"
+aes-gcm = "0.10"
 axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
 bytes = "1"
 bollard = "0.19"
 cron = "0.12"

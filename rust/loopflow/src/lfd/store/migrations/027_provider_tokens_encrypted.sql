@@ -1,0 +1,1 @@
+ALTER TABLE provider_tokens ADD COLUMN encrypted BOOLEAN NOT NULL DEFAULT 0;

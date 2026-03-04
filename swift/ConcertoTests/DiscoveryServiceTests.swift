@@ -146,6 +146,7 @@ private final class MockAuthTokenProvider: StudioAuthTokenProvider {
     }
 }
 
+// SAFETY: handler state is protected by NSLock and used only in test context.
 private final class DiscoveryStubURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var _handler: ((URLRequest) throws -> StubResponse)?

@@ -430,6 +430,8 @@ private final class CountingVoicePermissionClient: VoiceInputPermissionClient {
     }
 }
 
+// SAFETY: test double mutation stays on the test actor/task and is not shared
+// with production concurrent code.
 private final class MockVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     private let partials: [String]
     private let finalTranscript: String
@@ -507,6 +509,8 @@ private final class MockVoiceInputEngine: VoiceInputEngine, @unchecked Sendable 
     }
 }
 
+// SAFETY: this test double's mutable state is only touched by a single test
+// task at a time.
 private final class SlowCancelVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     private var isStreaming = false
     private var startCount = 0

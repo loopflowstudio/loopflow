@@ -9,6 +9,8 @@ public struct NoAuthProvider: TokenProvider {
     public func token() async throws -> String { "" }
 }
 
+// SAFETY: KeychainTokenProvider wraps AuthService and performs read-only token
+// lookups, with no internal mutable shared state.
 public final class KeychainTokenProvider: TokenProvider, @unchecked Sendable {
     private let authService: AuthService
 

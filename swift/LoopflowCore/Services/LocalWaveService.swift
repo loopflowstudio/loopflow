@@ -71,6 +71,8 @@ public struct ConnectionInfo: Sendable {
     }
 }
 
+// SAFETY: WaveService is a value type with immutable captured dependencies;
+// request state is per-call and not shared across concurrent tasks.
 public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
     public typealias SessionFactory = @Sendable (
         _ requestTimeout: TimeInterval,

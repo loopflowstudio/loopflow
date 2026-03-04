@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -30,6 +31,7 @@ pub struct RegistrationState {
     pub last_heartbeat: Option<f64>,
     pub machine_id: Option<String>,
     pub machine_name: Option<String>,
+    pub owner_sub: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -175,6 +177,7 @@ impl RegistrationClient {
             .map_err(|e| RegistrationError::Parse(e.to_string()))?;
 
         {
+            let owner_sub = owner_sub_from_jwt(jwt);
             let mut state = self.state.write().await;
             state.enabled = true;
             state.registered = true;
@@ -182,6 +185,7 @@ impl RegistrationClient {
             state.last_error = None;
             state.machine_id = Some(machine_id.to_string());
             state.machine_name = Some(machine_name.to_string());
+            state.owner_sub = owner_sub;
         }
 
         Ok(data
@@ -373,6 +377,21 @@ fn summarize_repos(waves: Vec<Wave>) -> Vec<RegistrationRepoSummary> {
         .collect()
 }
 
+pub(crate) fn owner_sub_from_jwt(jwt: &str) -> Option<String> {
+    let payload = jwt.split('.').nth(1)?;
+    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload))
+        .ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
+    value
+        .get("sub")
+        .and_then(|sub| sub.as_str())
+        .map(str::trim)
+        .filter(|sub| !sub.is_empty())
+        .map(ToString::to_string)
+}
+
 async fn send_post_json(
     http: &SafeHttpClient,
     base_url: &str,
@@ -408,9 +427,10 @@ pub enum RegistrationError {
 #[cfg(test)]
 mod tests {
     use super::{
-        summarize_repos, RegistrationClient, RegistrationPublicSummary, RegistrationRepoSummary,
-        RegistrationState,
+        owner_sub_from_jwt, summarize_repos, RegistrationClient, RegistrationPublicSummary,
+        RegistrationRepoSummary, RegistrationState,
     };
+    use base64::Engine;
     use std::sync::Arc;
 
     use axum::extract::Json;
@@ -485,6 +505,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn owner_sub_from_jwt_extracts_subject_claim() {
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"alg":"none","typ":"JWT"}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"sub":"user_123","exp":4102444800}"#);
+        let token = format!("{header}.{payload}.sig");
+        assert_eq!(owner_sub_from_jwt(&token).as_deref(), Some("user_123"));
+    }
+
     #[tokio::test]
     async fn register_and_heartbeat_send_url_and_repos() {
         let recorded_payloads = Arc::new(Mutex::new(Vec::<(String, serde_json::Value)>::new()));
@@ -555,6 +585,39 @@ mod tests {
                 .iter()
                 .any(|repo| repo["name"] == "repo-a" && repo["wave_count"] == 2));
         }
+    }
+
+    #[tokio::test]
+    async fn register_records_owner_sub_in_state() {
+        let app = Router::new().route(
+            "/api/v1/daemons/register",
+            post(|Json(_payload): Json<serde_json::Value>| async move {
+                Json(serde_json::json!({
+                    "connection_token": "token",
+                    "expires_at": null
+                }))
+            }),
+        );
+        let base_url = spawn_server(app).await;
+        let (store, _tmp) = seeded_store().await;
+        let client = RegistrationClient::with_context(
+            &base_url,
+            store,
+            "127.0.0.1:2486".parse().expect("socket addr"),
+        );
+
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(r#"{"alg":"none","typ":"JWT"}"#);
+        let payload =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"owner-42"}"#);
+        let jwt = format!("{header}.{payload}.sig");
+        client
+            .register(&jwt, "machine-1", "devbox")
+            .await
+            .expect("register should succeed");
+
+        let state = client.status().await;
+        assert_eq!(state.owner_sub.as_deref(), Some("owner-42"));
     }
 
     #[tokio::test]

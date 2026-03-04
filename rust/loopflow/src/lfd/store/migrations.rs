@@ -10,7 +10,7 @@ pub struct Migration {
 /// All migrations in order. Add new migrations here.
 ///
 /// Each migration should work for both sqlite and postgres using portable SQL
-/// (TEXT, INTEGER — no JSONB, BOOLEAN, or backend-specific syntax).
+/// (TEXT/INTEGER/BOOLEAN — no backend-specific syntax).
 ///
 /// If a migration genuinely requires different SQL per backend, add separate
 /// entries and filter them in `migrations()`.
@@ -125,6 +125,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
     Migration {
         version: "026_rename_stimuli_to_triggers",
         sql: include_str!("migrations/026_rename_stimuli_to_triggers.sql"),
+    },
+    Migration {
+        version: "027_provider_tokens_encrypted",
+        sql: include_str!("migrations/027_provider_tokens_encrypted.sql"),
     },
 ];
 

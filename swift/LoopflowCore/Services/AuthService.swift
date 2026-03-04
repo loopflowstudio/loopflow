@@ -8,6 +8,8 @@ import AppKit
 import UIKit
 #endif
 
+// SAFETY: AuthService is main-actor driven UI/auth orchestration and mutable
+// state (`authSession`) is only touched on the main thread.
 public final class AuthService: NSObject, @unchecked Sendable {
     private let keychainService = "studio.loopflow.auth"
     private let keychainAccount = "jwt"

@@ -169,9 +169,9 @@ extension VoiceInputEngine {
     func stopVADSession() async {}
 }
 
-// Safety: all access is serialized through the @MainActor VoiceInputService.
-// @unchecked because WhisperKit types aren't Sendable and @MainActor on the class
-// conflicts with WhisperKit's background callbacks.
+// SAFETY: all engine access is serialized through @MainActor VoiceInputService.
+// WhisperKit callback types are non-Sendable, so we provide external
+// synchronization rather than requiring strict Sendable checking here.
 final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     private let modelVariant = "tiny"
     private let modelDownloadBase: URL
@@ -459,9 +459,9 @@ private actor AppleTranscriptBuffer {
     }
 }
 
-// Safety: all access is serialized through the @MainActor VoiceInputService.
-// @unchecked because SpeechAnalyzer/DictationTranscriber types aren't Sendable
-// and @MainActor on the class conflicts with the audio capture callback.
+// SAFETY: all engine access is serialized through @MainActor VoiceInputService.
+// SpeechAnalyzer/DictationTranscriber are non-Sendable framework types and are
+// only touched through this serialized access path.
 @available(macOS 26.0, iOS 26.0, *)
 final class AppleDictationVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
     private let locale: Locale

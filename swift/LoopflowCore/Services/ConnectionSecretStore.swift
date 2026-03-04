@@ -1,6 +1,8 @@
 import Foundation
 import Security
 
+// SAFETY: operations delegate to Keychain APIs which are thread-safe and this
+// type holds no mutable shared state.
 public final class ConnectionSecretStore: @unchecked Sendable {
     public static let shared = ConnectionSecretStore()
 
@@ -55,6 +57,8 @@ public final class ConnectionSecretStore: @unchecked Sendable {
     }
 }
 
+// SAFETY: UserDefaults access is thread-safe for these simple string get/set
+// operations and this wrapper keeps no additional mutable state.
 public final class CertificatePinStore: @unchecked Sendable {
     public static let shared = CertificatePinStore()
 

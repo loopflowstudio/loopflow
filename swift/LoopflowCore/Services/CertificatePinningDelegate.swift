@@ -2,6 +2,8 @@ import CryptoKit
 import Foundation
 import Security
 
+// SAFETY: mutable trust state is serialized through `stateQueue`; networking
+// callbacks only access shared state via that queue.
 final class CertificatePinningDelegate: NSObject, @unchecked Sendable {
     private let connection: ServerConnection
     private let pinStore: CertificatePinStore

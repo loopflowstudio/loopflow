@@ -3,6 +3,8 @@ import Darwin
 import Foundation
 import Security
 
+// SAFETY: lifecycle methods (`start`/`stop`) are called from the main app
+// thread; the background listener thread only touches per-connection locals.
 final class CredentialSocketServer: @unchecked Sendable {
     let socketPath: URL
 

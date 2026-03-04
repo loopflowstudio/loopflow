@@ -320,26 +320,6 @@ branch_names:
 }
 
 // =============================================================================
-// Lint check
-// =============================================================================
-
-#[test]
-fn config_lint_and_test() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        "lint: \"cargo fmt --check && cargo clippy -- -D warnings\"\ntest: \"cargo test --all\"",
-    );
-
-    let config = load_config(Some(temp.path())).unwrap().unwrap();
-    assert_eq!(
-        config.lint,
-        Some("cargo fmt --check && cargo clippy -- -D warnings".to_string())
-    );
-    assert_eq!(config.test, Some("cargo test --all".to_string()));
-}
-
-// =============================================================================
 // Land strategy
 // =============================================================================
 

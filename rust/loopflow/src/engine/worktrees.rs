@@ -92,8 +92,19 @@ pub fn wave_name_from_worktree(repo: &Path) -> Option<String> {
 /// Extract the wave name using an already-resolved main repo path.
 ///
 /// Use this to avoid repeatedly shelling out to git when iterating many worktrees.
+/// Only recognizes sibling worktrees (e.g., `../repo.feature`) — the worktree must
+/// share the same parent directory as the main repo. Worktrees elsewhere (e.g.,
+/// `.claude/worktrees/`) return `None`.
 pub fn wave_name_from_worktree_and_main(repo: &Path, main_repo: &Path) -> Option<String> {
     if repo == main_repo {
+        return None;
+    }
+
+    // Only recognize sibling worktrees: same parent directory as main repo.
+    // Canonicalize to resolve symlinks (macOS: /tmp → /private/tmp).
+    let repo_parent = repo.parent()?.canonicalize().ok()?;
+    let main_parent = main_repo.parent()?.canonicalize().ok()?;
+    if repo_parent != main_parent {
         return None;
     }
 

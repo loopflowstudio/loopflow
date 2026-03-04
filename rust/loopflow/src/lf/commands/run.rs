@@ -124,7 +124,11 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             repo_root: repo_root.clone(),
             step: step.map(|value| value.to_string()),
             resolved_step: discovered_step.clone(),
-            surface: Surface::Cli,
+            surface: if is_interactive {
+                Surface::Cli
+            } else {
+                Surface::Headless
+            },
             directions: cli.direction.clone(),
             area: cli
                 .area

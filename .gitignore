@@ -28,4 +28,3 @@ reports/
 
 # Environment (secrets)
 .env
-.lf/log/

@@ -52,6 +52,53 @@ for feedback. Be concise—bullets, short snippets, minimal back-and-forth.
 
 ---
 
+## Worktrees
+
+Loopflow uses git worktrees as the unit of parallel work. Each feature
+branch lives in its own worktree, created as a **sibling** of the main
+repo:
+
+```
+~/src/myproject/              # main repo
+~/src/myproject.auth-fix/     # worktree
+~/src/myproject.new-feature/  # worktree
+```
+
+The sibling naming convention (`<repo>.<name>`) is load-bearing.
+Wave rotation, `lf ops wt switch`, `lf ops wt prune`, and `lf ops land`
+all derive the wave name from the directory name. Worktrees created
+elsewhere (nested inside the repo, in `.claude/worktrees/`, etc.) won't
+be recognized and may be corrupted during land rotation.
+
+Always use `lf ops wt create` to create worktrees. Never use
+agent-provided worktree tools (e.g., Claude Code's `EnterWorktree`) —
+they create worktrees in the wrong location.
+
+```bash
+lf ops wt create my-feature            # ../myproject.my-feature
+lf ops wt create my-feature --stack    # branch from current branch
+lf ops wt switch my-feature            # cd to existing worktree
+lf ops wt list                         # show all worktrees
+lf ops wt prune                        # clean up merged worktrees
+```
+
+---
+
+## Operations
+
+`lf ops` handles mechanical git operations. Use these instead of raw
+git/gh when the operation has loopflow-specific behavior:
+
+```bash
+lf ops commit -m "message" -p          # commit and push
+lf ops pr --title "..." --body "..."   # create/update PR
+lf ops land                            # submit to merge queue
+lf ops rebase                          # rebase onto main
+lf ops next                            # preserve worktree, fresh branch
+```
+
+---
+
 ## Commits
 
 In headless mode, commit when a step completes. Small, atomic commits. Don't leave the branch broken.
@@ -123,8 +170,6 @@ Everything in `.lf/` overrides builtins. User-global `~/.lf/` sits between repo 
 agent: claude:sonnet              # default model (harness:model)
 direction: [clarity, care]        # default directions for all steps
 area: src/                        # default area scope
-lint: "cargo fmt --check && cargo clippy -- -D warnings"
-test: "cargo test --all"
 push: true                        # auto-push after commits
 pr: true                          # auto-create PR after push
 land: gh                          # land strategy: "gh" or "local"

@@ -46,9 +46,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
+      - name: Fetch secrets
+        uses: dopplerhq/secrets-fetch-action@v1
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
+          inject-env-vars: true
+          doppler-project: loopflow
+          doppler-config: prd
+      - name: Import signing certificate
+        run: |
+          KEYCHAIN="build.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm /tmp/cert.p12
       - name: Install create-dmg
         run: brew install create-dmg
-      - name: Build DMG
+      - name: Build, sign, and notarize DMG
         run: python3 scripts/concerto-dev.py release
         working-directory: ${{ github.workspace }}
       - name: Upload DMG to R2
@@ -75,10 +94,9 @@ jobs:
               })
               print(f"Uploaded {key}")
           SCRIPT
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain build.keychain-db 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
           name: dmg
@@ -207,10 +225,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch secrets
+        uses: dopplerhq/secrets-fetch-action@v1
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
+          inject-env-vars: true
+          doppler-project: loopflow
+          doppler-config: prd
       - name: Publish to crates.io
         run: cargo publish -p loopflow
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   publish-pypi:
     needs: [build-dmg]

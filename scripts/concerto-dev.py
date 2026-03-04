@@ -35,6 +35,7 @@ Streaming logs (long-running commands):
 """
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -520,6 +521,68 @@ def cmd_run_ios(device: str | None = None) -> int:
     ).returncode
 
 
+def _detect_signing_identity() -> str | None:
+    """Find a Developer ID Application identity in the keychain."""
+    result = run_capture(["security", "find-identity", "-v", "-p", "codesigning"])
+    for line in result.stdout.splitlines():
+        if "Developer ID Application" in line:
+            # Extract the hex hash between quotes isn't needed — use the name
+            start = line.find('"')
+            end = line.rfind('"')
+            if start != -1 and end > start:
+                return line[start + 1:end]
+    return None
+
+
+def _codesign_app(app_path: Path, identity: str, entitlements: Path | None = None) -> int:
+    """Codesign an .app bundle with hardened runtime."""
+    cmd = [
+        "codesign", "--force", "--deep", "--sign", identity,
+        "--options", "runtime",
+        "--timestamp",
+    ]
+    if entitlements and entitlements.exists():
+        cmd += ["--entitlements", str(entitlements)]
+    cmd.append(str(app_path))
+    print(f"Signing with: {identity}")
+    result = run(cmd, check=False)
+    return result.returncode
+
+
+def _notarize_dmg(dmg_path: Path) -> int:
+    """Notarize a DMG and staple the ticket. Reads credentials from env."""
+    key = os.environ.get("NOTARY_KEY")
+    key_id = os.environ.get("NOTARY_KEY_ID")
+    issuer = os.environ.get("NOTARY_ISSUER")
+
+    if not all([key, key_id, issuer]):
+        print("Skipping notarization (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER not set)")
+        return 0
+
+    # Write the key to a temp file (notarytool needs a file path)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".p8", delete=False) as f:
+        f.write(key)
+        key_path = f.name
+
+    try:
+        print("Submitting for notarization...")
+        result = run([
+            "xcrun", "notarytool", "submit", str(dmg_path),
+            "--key", key_path,
+            "--key-id", key_id,
+            "--issuer", issuer,
+            "--wait",
+        ], check=False)
+        if result.returncode != 0:
+            return result.returncode
+
+        print("Stapling notarization ticket...")
+        result = run(["xcrun", "stapler", "staple", str(dmg_path)], check=False)
+        return result.returncode
+    finally:
+        os.unlink(key_path)
+
+
 def cmd_release() -> int:
     """Build release .app and .dmg."""
     print("Building Concerto release...")
@@ -547,6 +610,20 @@ def cmd_release() -> int:
     (app_dir / "PkgInfo").write_text("APPL????")
 
     print(f"Created dist/{app_name}.app")
+
+    # Codesign the .app
+    identity = _detect_signing_identity()
+    if identity:
+        entitlements = SWIFT_DIR / "Concerto" / "Concerto.entitlements"
+        app_path = dist_dir / f"{app_name}.app"
+        rc = _codesign_app(app_path, identity, entitlements)
+        if rc != 0:
+            print("Codesigning failed")
+            return rc
+    else:
+        print("No Developer ID found — signing ad-hoc (DMG will trigger Gatekeeper)")
+        run(["codesign", "--force", "--deep", "--sign", "-",
+             str(dist_dir / f"{app_name}.app")])
 
     # Create DMG
     dmg_path = dist_dir / "LoopflowConcerto.dmg"
@@ -590,6 +667,14 @@ def cmd_release() -> int:
         ])
 
     shutil.rmtree(dmg_staging)
+
+    # Sign and notarize the DMG
+    if identity:
+        run(["codesign", "--force", "--sign", identity, "--timestamp", str(dmg_path)])
+        rc = _notarize_dmg(dmg_path)
+        if rc != 0:
+            print("Notarization failed")
+            return rc
 
     print()
     print("Release built:")
@@ -1110,6 +1195,34 @@ def cmd_ghostty_build() -> int:
         return 1
 
 
+def _load_r2_credentials() -> tuple[str, str, str] | None:
+    """Load R2 credentials from Doppler, falling back to env."""
+    # Prefer Doppler — env vars may be stale from old shell sessions
+    try:
+        result = run_capture(
+            ["doppler", "secrets", "download", "--no-file", "--project", "loopflow", "--config", "prd"]
+        )
+        if result.returncode == 0:
+            secrets = json.loads(result.stdout)
+            account_id = secrets.get("R2_ACCOUNT_ID", "").strip()
+            access_key = secrets.get("R2_ACCESS_KEY_ID", "").strip()
+            secret_key = secrets.get("R2_SECRET_ACCESS_KEY", "").strip()
+            if all([account_id, access_key, secret_key]):
+                return account_id, access_key, secret_key
+    except FileNotFoundError:
+        pass
+
+    # Fall back to env
+    account_id = os.environ.get("R2_ACCOUNT_ID", "").strip()
+    access_key = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+    if all([account_id, access_key, secret_key]):
+        return account_id, access_key, secret_key
+
+    print("R2 credentials not found in Doppler or env (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)")
+    return None
+
+
 def cmd_ghostty_update() -> int:
     """Build GhosttyKit, upload to R2, and update Package.swift."""
     # Build first
@@ -1142,11 +1255,32 @@ def cmd_ghostty_update() -> int:
 
     # Upload to R2
     print("Uploading to R2...")
-    from loopflow.publish import upload_file
-    success, msg = upload_file(zip_path, zip_name, "application/zip", bucket="bin")
-    print(msg)
-    if not success:
+    try:
+        import boto3
+    except ImportError:
+        print("boto3 required: uv pip install boto3")
         return 1
+
+    r2_env = _load_r2_credentials()
+    if not r2_env:
+        return 1
+    account_id, access_key, secret_key = r2_env
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="auto",
+    )
+    client.upload_file(
+        str(zip_path), "bin", zip_name,
+        ExtraArgs={
+            "ContentType": "application/zip",
+            "CacheControl": "public, max-age=31536000, immutable",
+        },
+    )
+    print(f"Uploaded to {R2_URL}/{zip_name}")
 
     # Update Package.swift
     url = f"{R2_URL}/{zip_name}"

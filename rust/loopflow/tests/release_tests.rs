@@ -23,17 +23,7 @@ fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
 }
 
 fn git(repo: &TestRepo, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(repo.path())
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let _ = git_output(repo, args);
 }
 
 fn git_output(repo: &TestRepo, args: &[&str]) -> String {

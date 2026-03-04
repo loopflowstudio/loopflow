@@ -106,7 +106,7 @@ pub fn builtin_descriptions() -> HashMap<&'static str, &'static str> {
         ("update-wave", "Create, update, or delete wave state"),
         ("synthesize", "Combine multiple perspectives"),
         ("validate", "Validate flows, steps, and directions"),
-        ("release", "Generate release notes from merged PRs"),
+        ("release", "Run one-shot release workflow"),
         ("scan/scan-report", "Scan deps and APIs for issues"),
         ("scan/scan-plan", "Turn scan report into action plan"),
     ])

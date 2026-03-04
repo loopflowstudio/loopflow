@@ -8,9 +8,9 @@ use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ReleaseCommand, ShellCommand, WtCommand};
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
-    rebase_with_recovery, release_bump, release_check, release_notes, release_status, release_tag,
-    AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions, Progress,
-    RebaseOptions, RotationResult,
+    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
+    release_tag, AbandonOptions, CommitOptions, IngestOptions, LandOptions, NextOptions, PrOptions,
+    Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -65,6 +65,9 @@ pub fn run(op: &OpsCommand) -> Result<()> {
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
         OpsCommand::Release { cmd } => match cmd {
+            ReleaseCommand::Run { version, target } => {
+                release_run_cmd(version.as_deref(), target.as_deref(), &progress)
+            }
             ReleaseCommand::Check { target } => release_check_cmd(target.as_deref()),
             ReleaseCommand::Notes {
                 version,
@@ -252,6 +255,26 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
         println!("{}", json);
     }
 
+    Ok(())
+}
+
+fn release_run_cmd(
+    version_input: Option<&str>,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let input = version_input.unwrap_or("patch");
+    let result = release_run(&repo_root, input, target_name, progress)?;
+
+    println!("Released {} ({})", result.tag, result.target);
+    if let Some(url) = result.workflow_url.as_deref() {
+        println!("Workflow URL: {url}");
+    }
+    println!(
+        "GitHub Release: {}",
+        if result.release_exists { "yes" } else { "no" }
+    );
     Ok(())
 }
 

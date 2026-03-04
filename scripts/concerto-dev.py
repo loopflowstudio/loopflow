@@ -602,12 +602,19 @@ def cmd_release() -> int:
     (app_dir / "Resources").mkdir(parents=True)
 
     # Copy files
-    shutil.copy(SWIFT_DIR / ".build" / "release" / "Concerto", app_dir / "MacOS")
+    build_dir = SWIFT_DIR / ".build" / "release"
+    shutil.copy(build_dir / "Concerto", app_dir / "MacOS")
     shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
     shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
     shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS", profile="release")
     (app_dir / "PkgInfo").write_text("APPL????")
+
+    # Copy SPM resource bundles (fonts, etc.) — Bundle.module looks
+    # at Bundle.main.bundleURL/<name>.bundle, which is the .app root
+    app_root = app_dir.parent
+    for bundle in build_dir.glob("*.bundle"):
+        shutil.copytree(bundle, app_root / bundle.name)
 
     print(f"Created dist/{app_name}.app")
 

@@ -2,15 +2,19 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::command::run_command;
 use crate::engine::config::{load_config_or_default, Config, ReleaseTargetConfig};
-use crate::engine::git::get_default_branch;
-use crate::engine::worktrees::main_repo_root;
+use crate::engine::git::{delete_local_branch, get_default_branch, worktree_remove};
+use crate::engine::worktrees::{create_with_schema, main_repo_root};
+use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::land::{land, LandOptions};
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
 
@@ -66,6 +70,25 @@ struct GhRunListEntry {
     url: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GhPrSummary {
+    number: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrMergeCommit {
+    oid: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrView {
+    state: String,
+    #[serde(default, rename = "mergeCommit")]
+    merge_commit: Option<GhPrMergeCommit>,
+    #[serde(default)]
+    url: Option<String>,
+}
+
 impl From<GhMergedPr> for MergedPr {
     fn from(value: GhMergedPr) -> Self {
         Self {
@@ -100,6 +123,15 @@ pub struct ReleaseStatusResult {
     pub latest_tag: Option<String>,
     pub workflow_status: Option<String>,
     pub workflow_conclusion: Option<String>,
+    pub workflow_url: Option<String>,
+    pub release_exists: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReleaseRunResult {
+    pub target: String,
+    pub version: String,
+    pub tag: String,
     pub workflow_url: Option<String>,
     pub release_exists: bool,
 }
@@ -250,6 +282,272 @@ pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> Ops
 
     let version = normalize_version(version);
     tag_and_push(&main_repo, &version, &target)
+}
+
+/// Run the full release workflow in one shot.
+///
+/// Flow:
+/// 1) check merged PRs since previous tag
+/// 2) bump manifests + generate notes in a temporary worktree
+/// 3) commit, open PR, and enqueue auto-merge
+/// 4) wait for merge queue completion
+/// 5) tag merged commit and push
+/// 6) wait for release workflow/release publication
+pub fn release_run(
+    repo: &Path,
+    version_input: &str,
+    target_name: Option<&str>,
+    progress: &impl Progress,
+) -> OpsResult<ReleaseRunResult> {
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    let prev_tag = latest_tag(&main_repo, &target)?;
+    let merged_prs = merged_prs_since(&main_repo, &prev_tag, &target)?;
+    if merged_prs.is_empty() {
+        return Err(OpsError::Message(
+            "no PRs merged since last tag; nothing to release".to_string(),
+        ));
+    }
+
+    let version = resolve_version(&prev_tag, version_input, &target)?;
+    let main_branch = get_default_branch(&main_repo)?;
+    let wt_name = if target.name == "default" {
+        format!("release.default.v{version}")
+    } else {
+        format!("release.{}.v{version}", target.name)
+    };
+
+    progress.status(&format!("Creating release worktree {wt_name}..."));
+    let wt = create_with_schema(&main_repo, &wt_name, Some(&main_branch), None)?;
+    let wt_path = wt.path;
+    let wt_branch = wt.branch;
+
+    let prepared = prepare_release_in_worktree(&wt_path, &version, &target, progress);
+    cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, progress);
+    let prepared = prepared?;
+
+    progress.status("Waiting for release PR to merge...");
+    let merged_commit = wait_for_pr_merge(&main_repo, prepared.pr_number, progress)?;
+
+    progress.status(&format!("Tagging {}...", target_tag(&target, &version)));
+    let tag = tag_and_push_ref(&main_repo, &version, &target, Some(&merged_commit))?;
+
+    progress.status(&format!("Waiting for release pipeline for {tag}..."));
+    let (workflow_url, release_exists) =
+        wait_for_release_publication(&main_repo, &tag, &target, progress)?;
+
+    Ok(ReleaseRunResult {
+        target: target.name,
+        version,
+        tag,
+        workflow_url,
+        release_exists,
+    })
+}
+
+#[derive(Debug)]
+struct PreparedRelease {
+    pr_number: u64,
+}
+
+fn prepare_release_in_worktree(
+    wt_path: &Path,
+    version: &str,
+    target: &ReleaseTarget,
+    progress: &impl Progress,
+) -> OpsResult<PreparedRelease> {
+    progress.status(&format!(
+        "Bumping manifests for {}...",
+        target_tag(target, version)
+    ));
+    bump_manifest_versions(wt_path, target, version, progress)?;
+
+    progress.status(&format!(
+        "Generating RELEASE_NOTES.md for {}...",
+        target_tag(target, version)
+    ));
+    generate_release_with_target(wt_path, version, target, progress)?;
+
+    progress.status("Committing release changes...");
+    let _ = commit_workflow(
+        wt_path,
+        &CommitOptions {
+            add: true,
+            push: true,
+            create_draft_pr: true,
+            message: Some(release_commit_message(target, version)),
+            ..CommitOptions::for_task("release")
+        },
+        progress,
+    )?;
+
+    let pr = current_pr_summary(wt_path)?;
+
+    progress.status("Enqueuing release PR for merge...");
+    land(
+        wt_path,
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+        },
+        progress,
+    )?;
+
+    Ok(PreparedRelease {
+        pr_number: pr.number,
+    })
+}
+
+fn cleanup_release_worktree(
+    main_repo: &Path,
+    wt_path: &Path,
+    branch: &str,
+    progress: &impl Progress,
+) {
+    if let Err(err) = worktree_remove(main_repo, wt_path) {
+        progress.error(&format!(
+            "Warning: could not remove release worktree {}: {err}",
+            wt_path.display()
+        ));
+    }
+    let _ = delete_local_branch(main_repo, branch);
+}
+
+fn release_commit_message(target: &ReleaseTarget, version: &str) -> String {
+    if target.name == "default" {
+        format!("release: v{version}")
+    } else {
+        format!("release: {} v{version}", target.name)
+    }
+}
+
+fn current_pr_summary(repo: &Path) -> OpsResult<GhPrSummary> {
+    let output = run_stdout(repo, "gh", &["pr", "view", "--json", "number"])?;
+    serde_json::from_str(&output)
+        .map_err(|err| OpsError::Parse(format!("failed to parse PR summary: {err}")))
+}
+
+fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> OpsResult<String> {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(60 * 60);
+    let poll = Duration::from_secs(10);
+    let pr_number_arg = pr_number.to_string();
+    let mut attempt: u64 = 0;
+
+    loop {
+        let output = run_stdout(
+            repo,
+            "gh",
+            &[
+                "pr",
+                "view",
+                &pr_number_arg,
+                "--json",
+                "state,mergeCommit,url",
+            ],
+        )?;
+        let view: GhPrView = serde_json::from_str(&output)
+            .map_err(|err| OpsError::Parse(format!("failed to parse PR state: {err}")))?;
+
+        match view.state.as_str() {
+            "MERGED" => {
+                let commit = view.merge_commit.ok_or_else(|| {
+                    OpsError::Message(format!(
+                        "PR #{pr_number} is merged but merge commit is unavailable"
+                    ))
+                })?;
+                return Ok(commit.oid);
+            }
+            "CLOSED" => {
+                let url = view.url.unwrap_or_else(|| format!("PR #{pr_number}"));
+                return Err(OpsError::Message(format!(
+                    "{url} was closed without merging"
+                )));
+            }
+            _ => {}
+        }
+
+        if started.elapsed() >= timeout {
+            return Err(OpsError::Message(format!(
+                "timed out waiting for PR #{pr_number} to merge"
+            )));
+        }
+
+        if attempt.is_multiple_of(6) {
+            progress.status(&format!("PR #{pr_number} still in merge queue..."));
+        }
+        attempt += 1;
+        thread::sleep(poll);
+    }
+}
+
+fn wait_for_release_publication(
+    repo: &Path,
+    tag: &str,
+    target: &ReleaseTarget,
+    progress: &impl Progress,
+) -> OpsResult<(Option<String>, bool)> {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(60 * 60);
+    let poll = Duration::from_secs(10);
+    let no_workflow_grace = Duration::from_secs(90);
+    let mut attempt: u64 = 0;
+    let mut saw_workflow = false;
+
+    loop {
+        let workflow = find_workflow_run(repo, tag, target)?;
+        let release_exists = github_release_exists(repo, tag)?;
+
+        if let Some(run) = workflow {
+            saw_workflow = true;
+            if run.status == "completed" {
+                let conclusion = run
+                    .conclusion
+                    .unwrap_or_else(|| "unknown".to_string())
+                    .to_lowercase();
+                if conclusion == "success" {
+                    return Ok((run.url, release_exists));
+                }
+
+                let url = run
+                    .url
+                    .unwrap_or_else(|| "(workflow URL unavailable)".to_string());
+                return Err(OpsError::Message(format!(
+                    "release workflow failed for {tag}: {conclusion} ({url})"
+                )));
+            }
+        } else if release_exists {
+            return Ok((None, true));
+        } else if !saw_workflow
+            && target.workflow.is_none()
+            && started.elapsed() >= no_workflow_grace
+        {
+            progress.status(&format!(
+                "No release workflow detected for {tag}; tag push complete"
+            ));
+            return Ok((None, false));
+        }
+
+        if started.elapsed() >= timeout {
+            return Err(OpsError::Message(format!(
+                "timed out waiting for release workflow for {tag}"
+            )));
+        }
+
+        if attempt.is_multiple_of(6) {
+            progress.status(&format!("Release workflow for {tag} still running..."));
+        }
+        attempt += 1;
+        thread::sleep(poll);
+    }
 }
 
 fn generate_release_with_target(
@@ -1016,10 +1314,95 @@ fn join_lines_like_original(original: &str, lines: Vec<String>) -> String {
 }
 
 fn tag_and_push(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<String> {
+    tag_and_push_ref(repo, version, target, None)
+}
+
+fn tag_and_push_ref(
+    repo: &Path,
+    version: &str,
+    target: &ReleaseTarget,
+    target_ref: Option<&str>,
+) -> OpsResult<String> {
     let tag = target_tag(target, version);
-    run_stdout(repo, "git", &["tag", &tag])?;
-    run_stdout(repo, "git", &["push", "origin", &tag])?;
-    Ok(tag)
+    let ref_name = target_ref.unwrap_or("HEAD");
+    let target_sha = run_stdout(repo, "git", &["rev-parse", ref_name])?;
+    let target_sha = target_sha.trim().to_string();
+
+    if let Some(remote_sha) = remote_tag_sha(repo, &tag)? {
+        if remote_sha == target_sha {
+            eprintln!("Tag {tag} already exists on origin at target commit, skipping");
+            return Ok(tag);
+        }
+        return Err(OpsError::Message(format!(
+            "tag {tag} already exists on origin at {remote_sha}, expected {target_sha}"
+        )));
+    }
+
+    match local_tag_sha(repo, &tag)? {
+        Some(local_sha) if local_sha == target_sha => {}
+        Some(local_sha) => {
+            return Err(OpsError::Message(format!(
+                "local tag {tag} exists at {local_sha}, expected {target_sha}"
+            )));
+        }
+        None => {
+            run_stdout(repo, "git", &["tag", &tag, ref_name])?;
+        }
+    }
+
+    let push_output = run_output(repo, "git", &["push", "origin", &tag])?;
+    if push_output.status.success() {
+        return Ok(tag);
+    }
+
+    let stderr = String::from_utf8_lossy(&push_output.stderr).to_string();
+    if stderr.contains("already exists")
+        && remote_tag_sha(repo, &tag)?
+            .as_deref()
+            .is_some_and(|remote_sha| remote_sha == target_sha)
+    {
+        eprintln!("Tag {tag} was created concurrently, continuing");
+        return Ok(tag);
+    }
+
+    Err(OpsError::CommandFailed {
+        command: format!("git push origin {tag}"),
+        stderr,
+    })
+}
+
+fn local_tag_sha(repo: &Path, tag: &str) -> OpsResult<Option<String>> {
+    let output = run_output(repo, "git", &["rev-list", "-n", "1", tag])?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(sha))
+    }
+}
+
+fn remote_tag_sha(repo: &Path, tag: &str) -> OpsResult<Option<String>> {
+    let pattern = format!("refs/tags/{tag}");
+    let output = run_output(repo, "git", &["ls-remote", "--tags", "origin", &pattern])?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("git ls-remote --tags origin {pattern}"),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let sha = stdout
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().next())
+        .map(str::to_string);
+
+    Ok(sha)
 }
 
 fn find_workflow_run(

@@ -232,7 +232,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ShellCommand,
     },
-    /// Release operations (check, notes, bump, tag, status)
+    /// Release operations (run, check, notes, bump, tag, status)
     Release {
         #[command(subcommand)]
         cmd: ReleaseCommand,
@@ -247,6 +247,13 @@ pub enum OpsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ReleaseCommand {
+    /// Run the full release workflow end-to-end
+    Run {
+        /// Version to release: patch|minor|major|X.Y.Z (default: patch)
+        version: Option<String>,
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
     /// Check if PRs have merged since the last tag
     Check {
         #[arg(short = 't', long = "target")]

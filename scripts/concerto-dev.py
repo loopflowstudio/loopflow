@@ -35,6 +35,7 @@ Streaming logs (long-running commands):
 """
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -1198,12 +1199,11 @@ def _load_r2_credentials() -> tuple[str, str, str] | None:
     """Load R2 credentials from Doppler, falling back to env."""
     # Prefer Doppler — env vars may be stale from old shell sessions
     try:
-        import json as _json
         result = run_capture(
             ["doppler", "secrets", "download", "--no-file", "--project", "loopflow", "--config", "prd"]
         )
         if result.returncode == 0:
-            secrets = _json.loads(result.stdout)
+            secrets = json.loads(result.stdout)
             account_id = secrets.get("R2_ACCOUNT_ID", "").strip()
             access_key = secrets.get("R2_ACCESS_KEY_ID", "").strip()
             secret_key = secrets.get("R2_SECRET_ACCESS_KEY", "").strip()

@@ -628,8 +628,6 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     }
     breakdown.source_counts = source_counts;
 
-    breakdown.area_doc_count = breakdown.source_count(DocumentSource::Area);
-    breakdown.diff_file_count = breakdown.source_count(DocumentSource::Diff);
     if breakdown.documents.len() > 100 {
         warn!(
             document_count = breakdown.documents.len(),

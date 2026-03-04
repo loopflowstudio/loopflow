@@ -5,8 +5,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 
 use crate::engine::prompt::{
-    ContextBreakdown, DiffTier, DocumentEntry as BreakdownDocumentEntry, DocumentSource, Surface,
-    DEFAULT_CONTEXT_BUDGET,
+    ContextBreakdown, DiffTier, DocumentSource, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lfd::id::LfdId;
 
@@ -225,17 +224,11 @@ impl From<&ContextBreakdown> for ContextSnapshot {
             documents: breakdown
                 .documents
                 .iter()
-                .map(
-                    |BreakdownDocumentEntry {
-                         path,
-                         source,
-                         tokens,
-                     }| DocumentEntry {
-                        path: path.clone(),
-                        source: source_key(*source),
-                        tokens: *tokens as u64,
-                    },
-                )
+                .map(|d| DocumentEntry {
+                    path: d.path.clone(),
+                    source: source_key(d.source),
+                    tokens: d.tokens as u64,
+                })
                 .collect(),
             budget: DEFAULT_CONTEXT_BUDGET as u64,
             total: breakdown.total() as u64,
@@ -449,7 +442,7 @@ mod tests {
                 (DocumentSource::Diff, 450),
             ]),
             source_counts: HashMap::from([(DocumentSource::Diff, 8), (DocumentSource::RepoDoc, 2)]),
-            documents: vec![BreakdownDocumentEntry {
+            documents: vec![crate::engine::prompt::DocumentEntry {
                 path: "README.md".to_string(),
                 source: DocumentSource::RepoDoc,
                 tokens: 100,

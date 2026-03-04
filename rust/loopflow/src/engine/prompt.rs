@@ -117,30 +117,14 @@ impl ContextBreakdown {
     }
 }
 
-fn build_source_counts(
-    components: &PromptComponents,
-    diff_file_count: usize,
-) -> HashMap<DocumentSource, usize> {
-    let mut counts = HashMap::new();
-    for doc in &components.docs {
-        *counts.entry(doc.source).or_insert(0) += 1;
+fn push_doc_entries(entries: &mut Vec<DocumentEntry>, docs: &[Document], tokens: &[usize]) {
+    for (doc, &t) in docs.iter().zip(tokens) {
+        entries.push(DocumentEntry {
+            path: doc.path.clone(),
+            source: doc.source,
+            tokens: t,
+        });
     }
-    if !components.summaries.is_empty() {
-        counts.insert(DocumentSource::Summary, components.summaries.len());
-    }
-    if components.wave_memory.is_some() {
-        counts.insert(DocumentSource::WaveMemory, 1);
-    }
-    if !components.area_docs.is_empty() {
-        counts.insert(DocumentSource::Area, components.area_docs.len());
-    }
-    let has_diff_context = components.diff.is_some() || !components.diff_files.is_empty();
-    if has_diff_context && diff_file_count > 0 {
-        counts.insert(DocumentSource::Diff, diff_file_count);
-    } else if has_diff_context && !components.diff_files.is_empty() {
-        counts.insert(DocumentSource::Diff, components.diff_files.len());
-    }
-    counts
 }
 
 fn build_document_entries(
@@ -153,29 +137,8 @@ fn build_document_entries(
 ) -> Vec<DocumentEntry> {
     let mut entries = Vec::new();
 
-    for (doc, tokens) in components
-        .diff_files
-        .iter()
-        .zip(diff_file_tokens.iter().copied())
-    {
-        entries.push(DocumentEntry {
-            path: doc.path.clone(),
-            source: doc.source,
-            tokens,
-        });
-    }
-
-    for (doc, tokens) in components
-        .summaries
-        .iter()
-        .zip(summary_tokens.iter().copied())
-    {
-        entries.push(DocumentEntry {
-            path: doc.path.clone(),
-            source: doc.source,
-            tokens,
-        });
-    }
+    push_doc_entries(&mut entries, &components.diff_files, diff_file_tokens);
+    push_doc_entries(&mut entries, &components.summaries, summary_tokens);
 
     if let (Some(doc), Some(tokens)) = (&components.wave_memory, wave_memory_tokens) {
         entries.push(DocumentEntry {
@@ -185,25 +148,8 @@ fn build_document_entries(
         });
     }
 
-    for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
-        entries.push(DocumentEntry {
-            path: doc.path.clone(),
-            source: doc.source,
-            tokens,
-        });
-    }
-
-    for (doc, tokens) in components
-        .area_docs
-        .iter()
-        .zip(area_doc_tokens.iter().copied())
-    {
-        entries.push(DocumentEntry {
-            path: doc.path.clone(),
-            source: doc.source,
-            tokens,
-        });
-    }
+    push_doc_entries(&mut entries, &components.docs, doc_tokens);
+    push_doc_entries(&mut entries, &components.area_docs, area_doc_tokens);
 
     entries
 }
@@ -669,19 +615,21 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
         &doc_tokens,
         &area_doc_tokens,
     );
-    breakdown.source_counts = build_source_counts(&components, breakdown.diff_file_count);
-    breakdown.area_doc_count = breakdown.source_count(DocumentSource::Area);
-    if let Some(diff_count) = if components.diff.is_some() {
-        Some(breakdown.source_count(DocumentSource::Diff))
-    } else if !components.diff_files.is_empty() {
-        Some(components.diff_files.len())
-    } else {
-        None
-    } {
-        breakdown.diff_file_count = diff_count;
-    } else {
-        breakdown.diff_file_count = 0;
+
+    // Derive source counts from document entries.
+    let mut source_counts: HashMap<DocumentSource, usize> = HashMap::new();
+    for entry in &breakdown.documents {
+        *source_counts.entry(entry.source).or_insert(0) += 1;
     }
+    // Diff count may include files not loaded as document entries.
+    let has_diff = components.diff.is_some() || !components.diff_files.is_empty();
+    if has_diff && breakdown.diff_file_count > 0 {
+        source_counts.insert(DocumentSource::Diff, breakdown.diff_file_count);
+    }
+    breakdown.source_counts = source_counts;
+
+    breakdown.area_doc_count = breakdown.source_count(DocumentSource::Area);
+    breakdown.diff_file_count = breakdown.source_count(DocumentSource::Diff);
     if breakdown.documents.len() > 100 {
         warn!(
             document_count = breakdown.documents.len(),

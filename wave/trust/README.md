@@ -12,25 +12,19 @@ Safe to leave running overnight. Credentials are encrypted, execution is isolate
 
 ## Strategy
 
-Start with a broad security survey (hardening), then protect credentials at rest (encryption), then replace static tokens with real identity (studio auth), then isolate execution (sandboxes — when unblocked).
+Hardening, credential encryption, and studio auth are shipped. Remaining work is sandbox isolation — blocked on Docker Sandbox CLI plugin availability in Linux containers.
 
 ## Goals
 
-- No credentials visible in Debug output
-- API keys encrypted at rest in lfd's database
-- Studio identity replaces static tokens for remote auth
 - Agent execution in isolated sandboxes (when Docker Sandbox CLI is available)
 
 ## Risks
 
-- **Credential encryption key management.** Where does the decryption key live? macOS Keychain, filesystem, derived from password? Wrong choice is hard to migrate.
-- **Studio auth is cross-repo.** Changes must land in both loopflow and studio simultaneously.
+- **Key loss = token loss.** Encryption key lives in platform keychain (macOS Keychain / Linux secret-tool) with file fallback at `~/.lf/provider-token.key`. If both are lost, encrypted tokens are unrecoverable. No key rotation mechanism yet.
 - **Sandboxes are blocked.** DinD validation needs Docker Sandbox CLI plugin in the lfd container image.
-- **Docker executor per-provider DB calls.** Each container launch makes 3 credential lookups. Batching + encryption should land together.
+- **Keychain prompts on macOS.** First `security add-generic-password` may trigger a Keychain Access dialog in non-headless contexts. Fallback path handles this but sandbox/DinD contexts need testing.
 
 ## Metrics
 
-- Number of credential fields visible in Debug output (target: 0)
-- % of token expiry events that resolve via automatic refresh (target: 100% for GitHub/Codex)
-- Studio-auth end-to-end success rate on both remote lanes (target: >99%)
 - Sandbox executor parity with Docker executor (target: identical behavior)
+- Platform validation pass rate across macOS/Linux (target: 100%)

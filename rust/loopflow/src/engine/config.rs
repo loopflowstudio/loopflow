@@ -265,14 +265,6 @@ pub struct Config {
     #[serde(default)]
     pub branch_names: Option<BranchNameConfig>,
 
-    /// Command to check if lint passes (e.g. "cargo fmt --check && cargo clippy -- -D warnings")
-    #[serde(default)]
-    pub lint: Option<String>,
-
-    /// Command to run tests (e.g. "cargo test --all")
-    #[serde(default)]
-    pub test: Option<String>,
-
     /// Autoprune configuration
     #[serde(default)]
     pub autoprune: AutopruneConfig,
@@ -339,8 +331,6 @@ impl Default for Config {
             summary_tokens: default_summary_tokens(),
             skill_sources: Vec::new(),
             branch_names: None,
-            lint: None,
-            test: None,
             autoprune: AutopruneConfig::default(),
             budgets: BudgetConfig::default(),
             rlm_agent: None,
@@ -814,20 +804,6 @@ branch_names:
             config.branch_names.as_ref().unwrap().schema_,
             "{user}.{name}.{date}_{ts}"
         );
-    }
-
-    #[test]
-    fn config_from_yaml_lint_and_test() {
-        let yaml = r#"
-lint: "cargo fmt --check && cargo clippy -- -D warnings"
-test: "cargo test --all"
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(
-            config.lint,
-            Some("cargo fmt --check && cargo clippy -- -D warnings".to_string())
-        );
-        assert_eq!(config.test, Some("cargo test --all".to_string()));
     }
 
     #[test]

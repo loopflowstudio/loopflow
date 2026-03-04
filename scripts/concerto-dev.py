@@ -1194,6 +1194,35 @@ def cmd_ghostty_build() -> int:
         return 1
 
 
+def _load_r2_credentials() -> tuple[str, str, str] | None:
+    """Load R2 credentials from Doppler, falling back to env."""
+    # Prefer Doppler — env vars may be stale from old shell sessions
+    try:
+        import json as _json
+        result = run_capture(
+            ["doppler", "secrets", "download", "--no-file", "--project", "loopflow", "--config", "prd"]
+        )
+        if result.returncode == 0:
+            secrets = _json.loads(result.stdout)
+            account_id = secrets.get("R2_ACCOUNT_ID", "").strip()
+            access_key = secrets.get("R2_ACCESS_KEY_ID", "").strip()
+            secret_key = secrets.get("R2_SECRET_ACCESS_KEY", "").strip()
+            if all([account_id, access_key, secret_key]):
+                return account_id, access_key, secret_key
+    except FileNotFoundError:
+        pass
+
+    # Fall back to env
+    account_id = os.environ.get("R2_ACCOUNT_ID", "").strip()
+    access_key = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+    if all([account_id, access_key, secret_key]):
+        return account_id, access_key, secret_key
+
+    print("R2 credentials not found in Doppler or env (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)")
+    return None
+
+
 def cmd_ghostty_update() -> int:
     """Build GhosttyKit, upload to R2, and update Package.swift."""
     # Build first
@@ -1226,11 +1255,32 @@ def cmd_ghostty_update() -> int:
 
     # Upload to R2
     print("Uploading to R2...")
-    from loopflow.publish import upload_file
-    success, msg = upload_file(zip_path, zip_name, "application/zip", bucket="bin")
-    print(msg)
-    if not success:
+    try:
+        import boto3
+    except ImportError:
+        print("boto3 required: uv pip install boto3")
         return 1
+
+    r2_env = _load_r2_credentials()
+    if not r2_env:
+        return 1
+    account_id, access_key, secret_key = r2_env
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="auto",
+    )
+    client.upload_file(
+        str(zip_path), "bin", zip_name,
+        ExtraArgs={
+            "ContentType": "application/zip",
+            "CacheControl": "public, max-age=31536000, immutable",
+        },
+    )
+    print(f"Uploaded to {R2_URL}/{zip_name}")
 
     # Update Package.swift
     url = f"{R2_URL}/{zip_name}"

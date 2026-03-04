@@ -7,7 +7,7 @@ Run lint and format checks. Fix failures. If everything passes, stop immediately
 
 ### 1. Find the project's lint commands
 
-Check `.lf/config.yaml` for a `lint:` field. If not configured, check `TESTING.md` or CI config (`.github/workflows/`).
+Use repo guidance first: `TESTING.md`, `README.md`, and relevant module docs. Then cross-check CI (`.github/workflows/`) so local checks match what CI enforces.
 
 ### 2. Run them
 

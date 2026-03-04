@@ -237,7 +237,6 @@ def land_wave(
     local: Optional[bool] = None,
     create_pr: Optional[bool] = None,
     worktree: Optional[str] = None,
-    lint: Optional[bool] = None,
 ) -> dict[str, Any]:
     return _client().land_wave(
         name_or_id,
@@ -245,7 +244,6 @@ def land_wave(
         local=local,
         create_pr=create_pr,
         worktree=worktree,
-        lint=lint,
     )
 
 

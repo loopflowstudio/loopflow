@@ -75,26 +75,6 @@ Options:
 |------|-------------|
 | `-p, --push` | Push after committing |
 
-## lf ops lint
-
-Run the configured lint command.
-
-```bash
-lf ops lint
-```
-
-Reads `.lf/config.yaml` and runs `lint:` from repo root. Use this to match your gate checks locally.
-
-## lf ops test
-
-Run the configured test command.
-
-```bash
-lf ops test
-```
-
-Reads `.lf/config.yaml` and runs `test:` from repo root.
-
 ## lf ops release
 
 Mechanical release subcommands. Use `lf release` for the full agent-orchestrated workflow.

@@ -165,6 +165,25 @@ fn wt_switch_finds_timestamped_worktree_by_short_name() {
 }
 
 #[test]
+fn nested_worktree_not_recognized_as_wave() {
+    // Worktrees under the main repo (e.g., .claude/worktrees/repo.feature)
+    // should NOT be recognized — only siblings count.
+    let dir = tempfile::TempDir::new().unwrap();
+    let main_repo = dir.path().join("repo");
+    let nested = main_repo
+        .join(".claude")
+        .join("worktrees")
+        .join("repo.feature");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    let result = wave_name_from_worktree_and_main(&nested, &main_repo);
+    assert_eq!(
+        result, None,
+        "nested worktree should not produce a wave name"
+    );
+}
+
+#[test]
 fn preserve_worktree_uses_human_readable_timestamp() {
     let repo = TestRepo::new();
     let result = create_with_schema(repo.path(), "feature", None, None).expect("create");

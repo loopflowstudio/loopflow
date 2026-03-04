@@ -36,7 +36,11 @@ Make the implementation as clean as possible.
    Example: Run through the main user flows the branch touches. Click every button. Time the response. If something feels sluggish, profile it.
 
 4. **Tests and lints**
-   Run the project's test suite and lint checks. Check `.lf/config.yaml` for `lint:` and `test:` commands. If not configured, check `TESTING.md` or CI config. Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
+   Run the project's test suite and all required lint checks.
+   - Follow the repo's documented guidance first (`TESTING.md`, `README.md`, and relevant module docs).
+   - Use the repo's standard command entrypoints and CI definitions.
+   - Run everything CI enforces for the files you touched.
+   Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 
 5. **Cleanup**
    - Remove dead code, debug prints, resolved TODOs
@@ -98,4 +102,4 @@ If nothing needs fixing and tests pass, say so—but still write the design revi
 git diff main...HEAD     # see what changed
 ```
 
-Check `.lf/config.yaml` for `lint:` and `test:` commands. If not configured, check `TESTING.md` or CI config (`.github/workflows/`). A gate that passes locally but fails CI is a broken gate.
+Find lint/test commands from repo guidance (`TESTING.md`, `README.md`, docs) and mirror CI checks. A gate that passes locally but fails CI is a broken gate.

@@ -28,8 +28,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "GhosttyKit",
-            url: "https://bin.loopflow.studio/GhosttyKit-061a0ae.xcframework.zip",
-            checksum: "1bbc50b79356ccf2a1e22b96d34a1fcd1c4b4a31c6e88756f9b3683c1a5532ca"
+            url: "https://bin.loopflow.studio/GhosttyKit-4c83872.xcframework.zip",
+            checksum: "b0e75385d69477d92f673962f2361642b1a22b228ad249036cbef53c0788a74d"
         ),
         .executableTarget(
             name: "Concerto",
@@ -42,7 +42,7 @@ let package = Package(
                 ),
             ],
             path: "Concerto",
-            exclude: ["Info.plist", "Concerto.sdef", "Concerto.entitlements", "UX_DESIGN.md", "AppIcon.icns", "Services/Ghostty/README.md"],
+            exclude: ["Info.plist", "Concerto.sdef", "Concerto.entitlements", "UX_DESIGN.md", "AppIcon.icns", "logo.svg", "dmg-background.png", "Services/Ghostty/README.md"],
             resources: [
                 .copy("Fonts")
             ],

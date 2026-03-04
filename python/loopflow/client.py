@@ -322,7 +322,6 @@ class Client:
         local: Optional[bool] = None,
         create_pr: Optional[bool] = None,
         worktree: Optional[str] = None,
-        lint: Optional[bool] = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {}
         if strict is not None:
@@ -333,8 +332,6 @@ class Client:
             body["create_pr"] = create_pr
         if worktree is not None:
             body["worktree"] = worktree
-        if lint is not None:
-            body["lint"] = lint
         return self._request_json("POST", f"/v0/waves/{name_or_id}/land", json=body)
 
     def next_wave(self, name_or_id: str) -> dict[str, Any]:

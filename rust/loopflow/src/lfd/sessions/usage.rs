@@ -677,9 +677,16 @@ mod tests {
             event: SessionEvent::ContextSnapshot {
                 snapshot: ContextSnapshot {
                     sources,
+                    source_counts: HashMap::new(),
+                    documents: Vec::new(),
                     budget: 200_000,
                     total: 460,
                     diff_tier: "UnifiedDiff".to_string(),
+                    step_name: None,
+                    direction_names: Vec::new(),
+                    area_name: None,
+                    wave_name: None,
+                    has_clipboard: false,
                 },
             },
             created_at: OffsetDateTime::now_utc(),

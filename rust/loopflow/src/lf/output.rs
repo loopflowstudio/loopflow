@@ -54,6 +54,8 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     let scratch_tokens = breakdown.source_tokens(DocumentSource::Scratch);
     let wave_tokens = breakdown.source_tokens(DocumentSource::Wave)
         + breakdown.source_tokens(DocumentSource::Summary);
+    let wave_file_count = breakdown.source_count(DocumentSource::Wave)
+        + breakdown.source_count(DocumentSource::Summary);
     let diff_tokens = breakdown.source_tokens(DocumentSource::Diff);
     let docs_tokens = breakdown.source_tokens(DocumentSource::RepoDoc);
     let wave_memory_tokens = breakdown.source_tokens(DocumentSource::WaveMemory);
@@ -98,7 +100,7 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
         lines.push(format_row(
             "wave",
             wave_tokens,
-            &format!("{} files", breakdown.source_count(DocumentSource::Wave)),
+            &format!("{} files", wave_file_count),
         ));
     }
 
@@ -121,10 +123,11 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     }
 
     // Area
-    if area_tokens > 0 && breakdown.area_doc_count > 0 {
+    let area_doc_count = breakdown.source_count(DocumentSource::Area);
+    if area_tokens > 0 && area_doc_count > 0 {
         let area_detail = match &breakdown.area_name {
-            Some(name) => format!("{} ({} files)", name, breakdown.area_doc_count),
-            None => format!("{} files", breakdown.area_doc_count),
+            Some(name) => format!("{} ({} files)", name, area_doc_count),
+            None => format!("{} files", area_doc_count),
         };
         lines.push(format_row("area", area_tokens, &area_detail));
     }

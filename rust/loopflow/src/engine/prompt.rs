@@ -49,6 +49,14 @@ pub struct Document {
     pub source: DocumentSource,
 }
 
+/// Per-document token usage entry for context breakdown drill-down.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentEntry {
+    pub path: String,
+    pub source: DocumentSource,
+    pub tokens: usize,
+}
+
 /// Default maximum tokens for pre-fill context.
 pub const DEFAULT_CONTEXT_BUDGET: usize = 75_000;
 
@@ -69,6 +77,7 @@ pub enum DiffTier {
 pub struct ContextBreakdown {
     pub source_tokens: HashMap<DocumentSource, usize>,
     pub source_counts: HashMap<DocumentSource, usize>,
+    pub documents: Vec<DocumentEntry>,
     pub system_tokens: usize,
     /// Display metadata
     pub step_name: Option<String>,
@@ -98,23 +107,105 @@ impl ContextBreakdown {
         *self.source_tokens.entry(source).or_insert(0) += tokens;
     }
 
-    fn add_source_count(&mut self, source: DocumentSource, count: usize) {
-        *self.source_counts.entry(source).or_insert(0) += count;
-    }
-
     fn subtract_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
         let entry = self.source_tokens.entry(source).or_insert(0);
         *entry = entry.saturating_sub(tokens);
     }
 
-    fn subtract_source_count(&mut self, source: DocumentSource, count: usize) {
-        let entry = self.source_counts.entry(source).or_insert(0);
-        *entry = entry.saturating_sub(count);
-    }
-
     fn set_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
         self.source_tokens.insert(source, tokens);
     }
+}
+
+fn build_source_counts(
+    components: &PromptComponents,
+    diff_file_count: usize,
+) -> HashMap<DocumentSource, usize> {
+    let mut counts = HashMap::new();
+    for doc in &components.docs {
+        *counts.entry(doc.source).or_insert(0) += 1;
+    }
+    if !components.summaries.is_empty() {
+        counts.insert(DocumentSource::Summary, components.summaries.len());
+    }
+    if components.wave_memory.is_some() {
+        counts.insert(DocumentSource::WaveMemory, 1);
+    }
+    if !components.area_docs.is_empty() {
+        counts.insert(DocumentSource::Area, components.area_docs.len());
+    }
+    let has_diff_context = components.diff.is_some() || !components.diff_files.is_empty();
+    if has_diff_context && diff_file_count > 0 {
+        counts.insert(DocumentSource::Diff, diff_file_count);
+    } else if has_diff_context && !components.diff_files.is_empty() {
+        counts.insert(DocumentSource::Diff, components.diff_files.len());
+    }
+    counts
+}
+
+fn build_document_entries(
+    components: &PromptComponents,
+    diff_file_tokens: &[usize],
+    summary_tokens: &[usize],
+    wave_memory_tokens: Option<usize>,
+    doc_tokens: &[usize],
+    area_doc_tokens: &[usize],
+) -> Vec<DocumentEntry> {
+    let mut entries = Vec::new();
+
+    for (doc, tokens) in components
+        .diff_files
+        .iter()
+        .zip(diff_file_tokens.iter().copied())
+    {
+        entries.push(DocumentEntry {
+            path: doc.path.clone(),
+            source: doc.source,
+            tokens,
+        });
+    }
+
+    for (doc, tokens) in components
+        .summaries
+        .iter()
+        .zip(summary_tokens.iter().copied())
+    {
+        entries.push(DocumentEntry {
+            path: doc.path.clone(),
+            source: doc.source,
+            tokens,
+        });
+    }
+
+    if let (Some(doc), Some(tokens)) = (&components.wave_memory, wave_memory_tokens) {
+        entries.push(DocumentEntry {
+            path: doc.path.clone(),
+            source: doc.source,
+            tokens,
+        });
+    }
+
+    for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
+        entries.push(DocumentEntry {
+            path: doc.path.clone(),
+            source: doc.source,
+            tokens,
+        });
+    }
+
+    for (doc, tokens) in components
+        .area_docs
+        .iter()
+        .zip(area_doc_tokens.iter().copied())
+    {
+        entries.push(DocumentEntry {
+            path: doc.path.clone(),
+            source: doc.source,
+            tokens,
+        });
+    }
+
+    entries
 }
 
 /// Specification for which context sources to gather.
@@ -487,9 +578,7 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
     breakdown.add_source_tokens(DocumentSource::WaveMemory, wave_memory_tokens);
     for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
         breakdown.add_source_tokens(doc.source, tokens);
-        breakdown.add_source_count(doc.source, 1);
     }
-    breakdown.add_source_count(DocumentSource::Wave, components.summaries.len());
 
     // Area
     let mut area_doc_tokens: Vec<usize> = components
@@ -532,7 +621,6 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
             if let Some(tokens) = summary_tokens.pop() {
                 breakdown.subtract_source_tokens(DocumentSource::Summary, tokens);
                 total = total.saturating_sub(tokens);
-                breakdown.subtract_source_count(DocumentSource::Wave, 1);
             }
         }
         while total > max_tokens && !components.docs.is_empty() {
@@ -540,7 +628,6 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
             if let Some(tokens) = doc_tokens.pop() {
                 if let Some(doc) = removed {
                     breakdown.subtract_source_tokens(doc.source, tokens);
-                    breakdown.subtract_source_count(doc.source, 1);
                 }
                 total = total.saturating_sub(tokens);
             }
@@ -567,6 +654,40 @@ pub fn trim_context_with_breakdown(context: GatheredContext, max_tokens: usize) 
             components.clipboard = None;
             breakdown.set_source_tokens(DocumentSource::Clipboard, 0);
         }
+    }
+
+    let wave_memory_tokens = if components.wave_memory.is_some() {
+        Some(wave_memory_tokens)
+    } else {
+        None
+    };
+    breakdown.documents = build_document_entries(
+        &components,
+        &diff_file_tokens,
+        &summary_tokens,
+        wave_memory_tokens,
+        &doc_tokens,
+        &area_doc_tokens,
+    );
+    breakdown.source_counts = build_source_counts(&components, breakdown.diff_file_count);
+    breakdown.area_doc_count = breakdown.source_count(DocumentSource::Area);
+    if let Some(diff_count) = if components.diff.is_some() {
+        Some(breakdown.source_count(DocumentSource::Diff))
+    } else if !components.diff_files.is_empty() {
+        Some(components.diff_files.len())
+    } else {
+        None
+    } {
+        breakdown.diff_file_count = diff_count;
+    } else {
+        breakdown.diff_file_count = 0;
+    }
+    if breakdown.documents.len() > 100 {
+        warn!(
+            document_count = breakdown.documents.len(),
+            area = components.area.as_deref().unwrap_or_default(),
+            "context breakdown has more than 100 documents; consider narrowing area or diff scope"
+        );
     }
 
     components.diff_file_count = components.diff_files.len();
@@ -1962,6 +2083,81 @@ mod tests {
 
         let trimmed = trim_context_with_breakdown(GatheredContext(components.clone()), 1000000);
         assert_eq!(trimmed.components().docs.len(), 1);
+    }
+
+    #[test]
+    fn trim_context_breakdown_includes_documents_and_source_counts() {
+        let components = PromptComponents {
+            docs: vec![
+                Document {
+                    path: "README.md".to_string(),
+                    content: "Repo docs".to_string(),
+                    source: DocumentSource::RepoDoc,
+                },
+                Document {
+                    path: "scratch/plan.md".to_string(),
+                    content: "Scratch plan".to_string(),
+                    source: DocumentSource::Scratch,
+                },
+            ],
+            summaries: vec![Document {
+                path: "wave-summary.md".to_string(),
+                content: "Summary".to_string(),
+                source: DocumentSource::Summary,
+            }],
+            wave_memory: Some(Document {
+                path: "wave/dev/MEMORY.md".to_string(),
+                content: "Memory".to_string(),
+                source: DocumentSource::WaveMemory,
+            }),
+            diff: Some("diff --git a/src/a.rs b/src/a.rs".to_string()),
+            diff_files: vec![Document {
+                path: "src/a.rs".to_string(),
+                content: "fn main() {}".to_string(),
+                source: DocumentSource::Diff,
+            }],
+            diff_file_count: 3,
+            area_docs: vec![Document {
+                path: "src/README.md".to_string(),
+                content: "Area".to_string(),
+                source: DocumentSource::Area,
+            }],
+            ..Default::default()
+        };
+
+        let trimmed = trim_context_with_breakdown(GatheredContext(components), usize::MAX);
+        let breakdown = trimmed.breakdown();
+
+        assert_eq!(breakdown.source_count(DocumentSource::RepoDoc), 1);
+        assert_eq!(breakdown.source_count(DocumentSource::Scratch), 1);
+        assert_eq!(breakdown.source_count(DocumentSource::Summary), 1);
+        assert_eq!(breakdown.source_count(DocumentSource::WaveMemory), 1);
+        assert_eq!(breakdown.source_count(DocumentSource::Area), 1);
+        assert_eq!(breakdown.source_count(DocumentSource::Diff), 3);
+        assert!(breakdown
+            .documents
+            .iter()
+            .any(|entry| entry.path == "README.md"));
+        assert!(breakdown
+            .documents
+            .iter()
+            .any(|entry| entry.path == "scratch/plan.md"));
+        assert!(breakdown
+            .documents
+            .iter()
+            .any(|entry| entry.path == "wave-summary.md"));
+        assert!(breakdown
+            .documents
+            .iter()
+            .any(|entry| entry.path == "wave/dev/MEMORY.md"));
+        assert!(breakdown
+            .documents
+            .iter()
+            .any(|entry| entry.path == "src/a.rs"));
+        assert!(breakdown
+            .documents
+            .iter()
+            .any(|entry| entry.path == "src/README.md"));
     }
 
     #[test]

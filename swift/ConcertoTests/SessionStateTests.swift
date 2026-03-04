@@ -565,6 +565,47 @@ struct SessionStateTests {
 
         #expect(state.suggestedActions.isEmpty)
     }
+
+    @MainActor
+    @Test("context snapshot updates session state")
+    func contextSnapshotUpdatesState() async {
+        let snapshot = ContextSnapshot(
+            sources: ["step": 1200, "diff": 4000, "system": 3000],
+            sourceCounts: ["diff": 8],
+            documents: [
+                DocumentEntry(path: "src/api/mod.rs", source: "diff", tokens: 1200),
+                DocumentEntry(path: "src/api/routes.rs", source: "diff", tokens: 900),
+            ],
+            budget: 75_000,
+            total: 8_200,
+            diffTier: "UnifiedDiff",
+            stepName: "implement",
+            directionNames: ["clarity"],
+            areaName: "src/",
+            waveName: "context-ui",
+            hasClipboard: false
+        )
+        let service = MockSessionService(
+            streamPlans: [
+                .init(events: [
+                    .success(AgentSessionEventEnvelope(seq: 0, event: .contextSnapshot(snapshot))),
+                    .success(AgentSessionEventEnvelope(seq: 1, event: .turnStarted(turnId: "turn_1"))),
+                    .success(AgentSessionEventEnvelope(seq: 2, event: .turnCompleted(turnId: "turn_1", status: "completed"))),
+                ])
+            ]
+        )
+        let state = SessionState(
+            waveId: "wave-test",
+            sessionConfig: AgentSessionConfig(step: "design", repoRoot: "/tmp/repo"),
+            waveService: service,
+            userDefaults: makeUserDefaults("context-snapshot")
+        )
+
+        await state.send("hello")
+        await waitUntil { state.turnState == .completed }
+
+        #expect(state.contextSnapshot == snapshot)
+    }
 }
 
 private struct StreamPlan {

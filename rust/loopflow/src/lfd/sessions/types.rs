@@ -5,7 +5,8 @@ use serde_json::Value;
 use time::OffsetDateTime;
 
 use crate::engine::prompt::{
-    ContextBreakdown, DiffTier, DocumentSource, Surface, DEFAULT_CONTEXT_BUDGET,
+    ContextBreakdown, DiffTier, DocumentEntry as BreakdownDocumentEntry, DocumentSource, Surface,
+    DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lfd::id::LfdId;
 
@@ -169,28 +170,81 @@ pub struct TurnUsage {
 
 /// Prompt composition snapshot at session start.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DocumentEntry {
+    pub path: String,
+    pub source: String,
+    pub tokens: u64,
+}
+
+/// Prompt composition snapshot at session start.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextSnapshot {
     /// Tokens per source category ("step", "direction", "diff", "area", "repo_doc", etc.)
+    #[serde(default)]
     pub sources: HashMap<String, u64>,
+    /// Document counts per source category.
+    #[serde(default)]
+    pub source_counts: HashMap<String, u64>,
+    /// Per-document entries for file-level breakdown.
+    #[serde(default)]
+    pub documents: Vec<DocumentEntry>,
     /// Total context budget available.
     pub budget: u64,
     /// Total tokens used.
     pub total: u64,
     /// Diff representation tier ("UnifiedDiff", "StatOnly", "None").
     pub diff_tier: String,
+    #[serde(default)]
+    pub step_name: Option<String>,
+    #[serde(default)]
+    pub direction_names: Vec<String>,
+    #[serde(default)]
+    pub area_name: Option<String>,
+    #[serde(default)]
+    pub wave_name: Option<String>,
+    #[serde(default)]
+    pub has_clipboard: bool,
 }
 
 impl From<&ContextBreakdown> for ContextSnapshot {
     fn from(breakdown: &ContextBreakdown) -> Self {
+        let mut sources: HashMap<String, u64> = breakdown
+            .source_tokens
+            .iter()
+            .map(|(source, tokens)| (source_key(*source), *tokens as u64))
+            .collect();
+        sources.insert("system".to_string(), breakdown.system_tokens as u64);
+
         Self {
-            sources: breakdown
-                .source_tokens
+            sources,
+            source_counts: breakdown
+                .source_counts
                 .iter()
-                .map(|(source, tokens)| (source_key(*source), *tokens as u64))
+                .map(|(source, count)| (source_key(*source), *count as u64))
+                .collect(),
+            documents: breakdown
+                .documents
+                .iter()
+                .map(
+                    |BreakdownDocumentEntry {
+                         path,
+                         source,
+                         tokens,
+                     }| DocumentEntry {
+                        path: path.clone(),
+                        source: source_key(*source),
+                        tokens: *tokens as u64,
+                    },
+                )
                 .collect(),
             budget: DEFAULT_CONTEXT_BUDGET as u64,
             total: breakdown.total() as u64,
             diff_tier: diff_tier_key(&breakdown.diff_tier).to_string(),
+            step_name: breakdown.step_name.clone(),
+            direction_names: breakdown.direction_names.clone(),
+            area_name: breakdown.area_name.clone(),
+            wave_name: breakdown.wave_name.clone(),
+            has_clipboard: breakdown.has_clipboard,
         }
     }
 }
@@ -394,8 +448,19 @@ mod tests {
                 (DocumentSource::Direction, 80),
                 (DocumentSource::Diff, 450),
             ]),
+            source_counts: HashMap::from([(DocumentSource::Diff, 8), (DocumentSource::RepoDoc, 2)]),
+            documents: vec![BreakdownDocumentEntry {
+                path: "README.md".to_string(),
+                source: DocumentSource::RepoDoc,
+                tokens: 100,
+            }],
             system_tokens: 25,
             diff_tier: DiffTier::StatOnly,
+            step_name: Some("implement".to_string()),
+            direction_names: vec!["clarity".to_string(), "care".to_string()],
+            area_name: Some("src/".to_string()),
+            wave_name: Some("context-ui".to_string()),
+            has_clipboard: true,
             ..ContextBreakdown::default()
         };
 
@@ -403,9 +468,25 @@ mod tests {
         assert_eq!(snapshot.sources.get("step"), Some(&120));
         assert_eq!(snapshot.sources.get("direction"), Some(&80));
         assert_eq!(snapshot.sources.get("diff"), Some(&450));
+        assert_eq!(snapshot.sources.get("system"), Some(&25));
+        assert_eq!(snapshot.source_counts.get("diff"), Some(&8));
+        assert_eq!(snapshot.source_counts.get("repo_doc"), Some(&2));
+        assert_eq!(
+            snapshot.documents,
+            vec![DocumentEntry {
+                path: "README.md".to_string(),
+                source: "repo_doc".to_string(),
+                tokens: 100,
+            }]
+        );
         assert_eq!(snapshot.total, 675);
         assert_eq!(snapshot.budget, DEFAULT_CONTEXT_BUDGET as u64);
         assert_eq!(snapshot.diff_tier, "StatOnly");
+        assert_eq!(snapshot.step_name.as_deref(), Some("implement"));
+        assert_eq!(snapshot.direction_names, vec!["clarity", "care"]);
+        assert_eq!(snapshot.area_name.as_deref(), Some("src/"));
+        assert_eq!(snapshot.wave_name.as_deref(), Some("context-ui"));
+        assert!(snapshot.has_clipboard);
     }
 
     #[test]
@@ -429,9 +510,20 @@ mod tests {
     fn context_snapshot_round_trips_through_json() {
         let snapshot = ContextSnapshot {
             sources: HashMap::from([("step".to_string(), 200), ("direction".to_string(), 50)]),
+            source_counts: HashMap::from([("repo_doc".to_string(), 3)]),
+            documents: vec![DocumentEntry {
+                path: "README.md".to_string(),
+                source: "repo_doc".to_string(),
+                tokens: 180,
+            }],
             budget: 75_000,
             total: 250,
             diff_tier: "UnifiedDiff".to_string(),
+            step_name: Some("implement".to_string()),
+            direction_names: vec!["clarity".to_string()],
+            area_name: Some("src/".to_string()),
+            wave_name: Some("context-ui".to_string()),
+            has_clipboard: false,
         };
 
         let value = serde_json::to_value(&snapshot).expect("serialize snapshot");

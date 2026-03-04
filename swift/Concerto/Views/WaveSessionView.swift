@@ -26,6 +26,12 @@ struct WaveSessionView: View {
 
     var body: some View {
         VStack(spacing: Spacing.md) {
+            if let snapshot = state.contextSnapshot {
+                SessionContextView(snapshot: snapshot)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.top, Spacing.sm)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {

@@ -130,6 +130,7 @@ public final class SessionState {
     public var streamPhase: StreamPhase = .idle
     public var awaitingSessionJoin: Bool = false
     public var suggestedActions: [SuggestedAction] = []
+    public var contextSnapshot: ContextSnapshot?
 
     public private(set) var itemsById: [String: SessionItem] = [:]
 
@@ -472,6 +473,7 @@ public final class SessionState {
         assistantEntryIdByTurnId.removeAll()
         messageEntryIdByItemId.removeAll()
         clearSuggestedActions()
+        contextSnapshot = nil
     }
 
     private func appendMessage(role: MessageRole, content: String) {
@@ -552,6 +554,9 @@ public final class SessionState {
             } else {
                 turnState = .failed
             }
+
+        case .contextSnapshot(let snapshot):
+            contextSnapshot = snapshot
 
         case .textDelta(let turnId, let content):
             guard !content.isEmpty else { return }

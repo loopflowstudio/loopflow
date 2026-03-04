@@ -14,18 +14,17 @@ Transparent (you see exactly what's in the prompt) and smart about defaults (goo
 
 ## Strategy
 
-Make directions effortless via defaults and aliasing. Then surface context visibility in Concerto so it's not CLI-only.
+Make directions effortless via defaults and aliasing. Context visibility (audit breakdown in CLI, context panel in Concerto) is shipped — remaining work is direction aliases and context UI polish.
 
 ## Goals
 
 - Directions flow from config defaults and personal aliases, not just CLI flags
-- See exactly what's in the prompt: scratch, wave, repo docs, area docs each get their own audit line
-- Concerto shows context breakdown visually — what's in the prompt, how tokens are spent
+- Context UI polish: per-file detail beyond top 10, budget customization display, stacked bar precision for small sources
 
 ## Risks
 
 - **Config complexity.** More defaults means more places to look when behavior is surprising. The audit breakdown mitigates this.
-- **Concerto data path.** `ContextBreakdown` lives in Rust; Concerto is SwiftUI. Need serialization and an HTTP API endpoint.
+- **Large document lists.** `ContextSnapshot` serializes the full document list per source. Currently unbounded on the Rust side — Concerto caps display at 10 per source. Not a concern at current scale but worth watching if sessions grow to hundreds of documents.
 
 ## Metrics
 

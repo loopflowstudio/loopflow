@@ -1332,6 +1332,11 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
                 turnId: json["turn_id"] as? String ?? "",
                 status: json["status"] as? String ?? "completed"
             )
+        case "context_snapshot":
+            guard let snapshotJSON = json["snapshot"] as? [String: Any] else {
+                return .other(type: type, payload: parseJSONValue(json))
+            }
+            return .contextSnapshot(parseContextSnapshot(snapshotJSON))
         case "item_started":
             let turnId = json["turn_id"] as? String ?? ""
             guard let itemJSON = json["item"] as? [String: Any] else {
@@ -1464,6 +1469,45 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         return ItemStatus(rawValue: rawString)
     }
 
+    private static func parseContextSnapshot(_ json: [String: Any]) -> ContextSnapshot {
+        let sources = parseStringUInt64Map(json["sources"])
+        let sourceCounts = parseStringUInt64Map(json["source_counts"])
+        let documents: [DocumentEntry] = (json["documents"] as? [[String: Any]] ?? []).compactMap {
+            documentJSON -> DocumentEntry? in
+            guard let path = documentJSON["path"] as? String,
+                  let source = documentJSON["source"] as? String
+            else { return nil }
+            return DocumentEntry(
+                path: path,
+                source: source,
+                tokens: normalizeUInt64(documentJSON["tokens"])
+            )
+        }
+        return ContextSnapshot(
+            sources: sources,
+            sourceCounts: sourceCounts,
+            documents: documents,
+            budget: normalizeUInt64(json["budget"]),
+            total: normalizeUInt64(json["total"]),
+            diffTier: json["diff_tier"] as? String ?? "None",
+            stepName: json["step_name"] as? String,
+            directionNames: normalizeStringList(json["direction_names"]),
+            areaName: json["area_name"] as? String,
+            waveName: json["wave_name"] as? String,
+            hasClipboard: json["has_clipboard"] as? Bool ?? false
+        )
+    }
+
+    private static func parseStringUInt64Map(_ raw: Any?) -> [String: UInt64] {
+        guard let sourceMap = raw as? [String: Any] else { return [:] }
+        var parsed: [String: UInt64] = [:]
+        parsed.reserveCapacity(sourceMap.count)
+        for (key, value) in sourceMap {
+            parsed[key] = normalizeUInt64(value)
+        }
+        return parsed
+    }
+
     private static func parseJSONValueOptional(_ value: Any?) -> JSONValue? {
         guard let value else { return nil }
         return parseJSONValue(value)
@@ -1594,6 +1638,10 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    private static func normalizeUInt64(_ value: Any?) -> UInt64 {
+        normalizeOptionalUInt64(value) ?? 0
     }
 
     private static func parseRemoteRepo(_ json: [String: Any]) -> RemoteRepo? {

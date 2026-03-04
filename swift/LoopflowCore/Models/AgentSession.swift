@@ -236,9 +236,62 @@ public struct AgentSession: Sendable, Hashable {
     }
 }
 
+public struct DocumentEntry: Sendable, Hashable {
+    public let path: String
+    public let source: String
+    public let tokens: UInt64
+
+    public init(path: String, source: String, tokens: UInt64) {
+        self.path = path
+        self.source = source
+        self.tokens = tokens
+    }
+}
+
+public struct ContextSnapshot: Sendable, Hashable {
+    public let sources: [String: UInt64]
+    public let sourceCounts: [String: UInt64]
+    public let documents: [DocumentEntry]
+    public let budget: UInt64
+    public let total: UInt64
+    public let diffTier: String
+    public let stepName: String?
+    public let directionNames: [String]
+    public let areaName: String?
+    public let waveName: String?
+    public let hasClipboard: Bool
+
+    public init(
+        sources: [String: UInt64],
+        sourceCounts: [String: UInt64],
+        documents: [DocumentEntry],
+        budget: UInt64,
+        total: UInt64,
+        diffTier: String,
+        stepName: String?,
+        directionNames: [String],
+        areaName: String?,
+        waveName: String?,
+        hasClipboard: Bool
+    ) {
+        self.sources = sources
+        self.sourceCounts = sourceCounts
+        self.documents = documents
+        self.budget = budget
+        self.total = total
+        self.diffTier = diffTier
+        self.stepName = stepName
+        self.directionNames = directionNames
+        self.areaName = areaName
+        self.waveName = waveName
+        self.hasClipboard = hasClipboard
+    }
+}
+
 public enum AgentSessionEvent: Sendable, Hashable {
     case turnStarted(turnId: String)
     case turnCompleted(turnId: String, status: String)
+    case contextSnapshot(ContextSnapshot)
     case itemStarted(turnId: String, item: SessionItem)
     case itemUpdated(turnId: String, itemId: String, delta: ItemDelta)
     case itemCompleted(turnId: String, item: SessionItem)

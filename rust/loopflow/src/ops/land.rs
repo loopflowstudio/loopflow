@@ -118,7 +118,6 @@ fn read_cached_pr_copy(
         return Ok(None);
     }
 
-    let current_head = head_sha(repo_root)?;
     let copied_for = match std::fs::read_to_string(&ref_path) {
         Ok(value) => value.trim().to_string(),
         Err(_) => {
@@ -126,7 +125,7 @@ fn read_cached_pr_copy(
             return Ok(None);
         }
     };
-    if copied_for != current_head {
+    if !is_ancestor(repo_root, &copied_for)? {
         progress.status("Ignoring cached PR copy: branch changed since gate output");
         return Ok(None);
     }
@@ -135,19 +134,15 @@ fn read_cached_pr_copy(
     Ok(Some((title, body)))
 }
 
-fn head_sha(repo_root: &Path) -> OpsResult<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
+/// Check if `commit` is an ancestor of HEAD. This is more tolerant than an
+/// exact SHA match — it accepts the case where the flow runner committed
+/// gate's output (moving HEAD one commit past the pr-copy-ref).
+fn is_ancestor(repo_root: &Path, commit: &str) -> OpsResult<bool> {
+    let status = Command::new("git")
+        .args(["merge-base", "--is-ancestor", commit, "HEAD"])
         .current_dir(repo_root)
-        .output()?;
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: "git rev-parse HEAD".to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .status()?;
+    Ok(status.success())
 }
 
 fn prepare_land(

@@ -10,8 +10,6 @@ skill_sources:
     path: ~/.superpowers
 exclude:
   - uv.lock
-push: true
-
 summary_tokens: 25000
 
 summaries:

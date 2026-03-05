@@ -171,7 +171,6 @@ Everything in `.lf/` overrides builtins. User-global `~/.lf/` sits between repo 
 agent: claude:sonnet              # default model (harness:model)
 direction: [clarity, care]        # default directions for all steps
 area: src/                        # default area scope
-push: true                        # auto-push after commits
 pr: true                          # auto-create PR after push
 land: gh                          # land strategy: "gh" or "local"
 context:                          # extra files always in context (additive)

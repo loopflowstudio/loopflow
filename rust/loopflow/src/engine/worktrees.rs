@@ -337,7 +337,7 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
         });
         let squash_merged_flag = branch
             .as_deref()
-            .is_some_and(|b| !is_default && squash_merged.contains(b));
+            .is_some_and(|b| !is_default && has_commits && squash_merged.contains(b));
         let dirty = !is_clean_ignoring_scratch(&path).unwrap_or(true);
         let mut prunable = !is_default && (merged || squash_merged_flag || !has_commits);
 
@@ -545,7 +545,7 @@ pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
     });
 }
 
-fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), GitError> {
+pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), GitError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree)
@@ -562,8 +562,14 @@ fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), GitErr
     Ok(())
 }
 
-pub fn preserve_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, GitError> {
-    let ts = generate_timestamp();
+pub fn preserve_worktree(
+    repo: &Path,
+    worktree: &Path,
+    suffix: Option<&str>,
+) -> Result<PathBuf, GitError> {
+    let ts = suffix
+        .map(|s| s.to_string())
+        .unwrap_or_else(generate_timestamp);
     let name = worktree
         .file_name()
         .and_then(|n| n.to_str())

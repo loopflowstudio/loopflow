@@ -2,7 +2,8 @@ use std::process::Command;
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
-    create_with_schema, list_worktrees, preserve_worktree, wave_name_from_worktree_and_main,
+    create_with_schema, list_worktrees, list_worktrees_local, preserve_worktree,
+    wave_name_from_worktree_and_main,
 };
 use loopflow_test_support::TestRepo;
 
@@ -188,7 +189,7 @@ fn preserve_worktree_uses_human_readable_timestamp() {
     let repo = TestRepo::new();
     let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
 
-    let preserved = preserve_worktree(repo.path(), &result.path).expect("preserve");
+    let preserved = preserve_worktree(repo.path(), &result.path, None).expect("preserve");
     let dir_name = preserved.file_name().unwrap().to_string_lossy().to_string();
 
     // Should end with .YYYYMMDD_HHMM, not a unix epoch
@@ -208,5 +209,48 @@ fn preserve_worktree_uses_human_readable_timestamp() {
     assert!(
         time.chars().all(|c| c.is_ascii_digit()),
         "time should be all digits: {time}"
+    );
+}
+
+#[test]
+fn preserve_worktree_uses_explicit_suffix_when_provided() {
+    let repo = TestRepo::new();
+    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+
+    let preserved =
+        preserve_worktree(repo.path(), &result.path, Some("20260304_1442")).expect("preserve");
+    let dir_name = preserved
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    assert!(
+        dir_name.ends_with(".20260304_1442"),
+        "should use the provided suffix, got: {dir_name}"
+    );
+}
+
+#[test]
+fn branch_at_main_not_detected_as_squash_merged() {
+    let repo = TestRepo::new();
+    // Create a worktree whose branch points to the same commit as main.
+    let result = create_with_schema(repo.path(), "fresh", None, None).expect("create");
+    // Make the worktree dirty (simulates lf ingest writing to scratch/).
+    std::fs::write(result.path.join("scratch.txt"), "notes").expect("write");
+
+    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let wt = states
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some(&result.branch))
+        .expect("should find worktree");
+
+    assert!(
+        !wt.squash_merged,
+        "branch at same commit as main should not be squash-merged"
+    );
+    assert!(
+        !wt.prunable,
+        "dirty worktree that hasn't diverged should not be prunable"
     );
 }

@@ -47,6 +47,7 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
     prepare_land(&repo_root, options, progress)?;
     let main_branch = rebase_land(&repo_root, &main_repo, progress)?;
     clear_scratch(&repo_root, progress)?;
@@ -54,11 +55,18 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
     if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
     } else {
-        ensure_pr(&repo_root, &feature_branch, options, progress)?;
+        ensure_pr(
+            &repo_root,
+            &feature_branch,
+            options.create_pr,
+            pr_title.as_deref(),
+            pr_body.as_deref(),
+            progress,
+        )?;
         finalize_remote(
             &repo_root,
-            options.pr_title.as_deref(),
-            options.pr_body.as_deref(),
+            pr_title.as_deref(),
+            pr_body.as_deref(),
             progress,
         )?;
     }
@@ -68,6 +76,73 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
         merged: true,
         rotation,
     })
+}
+
+fn resolve_pr_copy(
+    repo_root: &Path,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<(Option<String>, Option<String>)> {
+    let mut pr_title = options.pr_title.clone();
+    let mut pr_body = options.pr_body.clone();
+
+    if pr_title.is_some() {
+        return Ok((pr_title, pr_body));
+    }
+
+    if let Some((title, body)) = read_cached_pr_copy(repo_root, progress)? {
+        progress.status("Using cached PR copy from scratch/");
+        pr_title = Some(title);
+        if pr_body.is_none() {
+            pr_body = Some(body);
+        }
+    }
+
+    Ok((pr_title, pr_body))
+}
+
+fn read_cached_pr_copy(
+    repo_root: &Path,
+    progress: &impl Progress,
+) -> OpsResult<Option<(String, String)>> {
+    let title_path = repo_root.join("scratch/pr-title.txt");
+    let body_path = repo_root.join("scratch/pr-body.md");
+    let ref_path = repo_root.join("scratch/.pr-copy-ref");
+
+    if !title_path.exists() || !body_path.exists() {
+        return Ok(None);
+    }
+
+    let title = std::fs::read_to_string(&title_path)?.trim().to_string();
+    if title.is_empty() {
+        return Ok(None);
+    }
+
+    let copied_for = match std::fs::read_to_string(&ref_path) {
+        Ok(value) => value.trim().to_string(),
+        Err(_) => {
+            progress.status("Ignoring cached PR copy: scratch/.pr-copy-ref is missing");
+            return Ok(None);
+        }
+    };
+    if !is_ancestor(repo_root, &copied_for)? {
+        progress.status("Ignoring cached PR copy: branch changed since gate output");
+        return Ok(None);
+    }
+
+    let body = std::fs::read_to_string(body_path)?;
+    Ok(Some((title, body)))
+}
+
+/// Check if `commit` is an ancestor of HEAD. This is more tolerant than an
+/// exact SHA match — it accepts the case where the flow runner committed
+/// gate's output (moving HEAD one commit past the pr-copy-ref).
+fn is_ancestor(repo_root: &Path, commit: &str) -> OpsResult<bool> {
+    let status = Command::new("git")
+        .args(["merge-base", "--is-ancestor", commit, "HEAD"])
+        .current_dir(repo_root)
+        .status()?;
+    Ok(status.success())
 }
 
 fn prepare_land(
@@ -127,7 +202,9 @@ fn finalize_local(
 fn ensure_pr(
     repo_root: &Path,
     feature_branch: &str,
-    options: &LandOptions,
+    create_pr: bool,
+    pr_title: Option<&str>,
+    pr_body: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<()> {
     if !crate::ops::pr::gh_available() {
@@ -135,11 +212,13 @@ fn ensure_pr(
     }
 
     if !crate::ops::pr::pr_exists_for_current_branch(repo_root)? {
-        if options.create_pr {
-            let title = options.pr_title.as_deref().ok_or_else(|| {
-                OpsError::Message("--create-pr requires --title and --body".to_string())
+        if create_pr {
+            let title = pr_title.ok_or_else(|| {
+                OpsError::Message(
+                    "no PR title provided; run `lf gate` or pass --title/--body".to_string(),
+                )
             })?;
-            let body = options.pr_body.as_deref().unwrap_or("");
+            let body = pr_body.unwrap_or("");
             let _ = crate::ops::pr::create_or_update_pr(
                 repo_root,
                 &crate::ops::pr::PrOptions {
@@ -168,13 +247,11 @@ fn finalize_remote(
         let body = pr_body.unwrap_or("");
         progress.status("Updating PR...");
         update_pr_message(repo_root, title, body)?;
-        mark_ready(repo_root)?;
-        enable_auto_merge(repo_root, title, body)?;
     } else {
         progress.status("Enabling auto-merge...");
-        mark_ready(repo_root)?;
-        enable_auto_merge_existing(repo_root)?;
     }
+    mark_ready(repo_root)?;
+    enable_auto_merge(repo_root, pr_title, pr_body)?;
 
     if let Some(url) = current_pr_url(repo_root)? {
         progress.status(&format!("\n{url}\n"));
@@ -275,34 +352,16 @@ pub fn mark_ready(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-fn enable_auto_merge(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
+fn enable_auto_merge(repo: &Path, title: Option<&str>, body: Option<&str>) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("merge")
-        .arg("--squash")
-        .arg("--auto")
-        .arg("--subject")
-        .arg(title);
-    if !body.trim().is_empty() {
+    cmd.arg("pr").arg("merge").arg("--squash").arg("--auto");
+    if let Some(title) = title {
+        cmd.arg("--subject").arg(title);
+    }
+    if let Some(body) = body.filter(|b| !b.trim().is_empty()) {
         cmd.arg("--body").arg(body);
     }
     cmd.current_dir(repo);
-    if let Err(err) = run_command(&mut cmd) {
-        return Err(OpsError::CommandFailed {
-            command: err.command_line(),
-            stderr: err.stderr,
-        });
-    }
-    Ok(())
-}
-
-fn enable_auto_merge_existing(repo: &Path) -> OpsResult<()> {
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("merge")
-        .arg("--squash")
-        .arg("--auto")
-        .current_dir(repo);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

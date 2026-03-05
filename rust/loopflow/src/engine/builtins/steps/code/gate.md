@@ -38,7 +38,11 @@ Make the implementation as clean as possible.
    Example: Run through the main user flows the branch touches. Click every button. Time the response. If something feels sluggish, profile it.
 
 4. **Tests and lints**
-   Run the project's test suite and lint checks. Check `.lf/config.yaml` for `lint:` and `test:` commands. If not configured, check `TESTING.md` or CI config. Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
+   Run the project's test suite and all required lint checks.
+   - Follow the repo's documented guidance first (`TESTING.md`, `README.md`, and relevant module docs).
+   - Use the repo's standard command entrypoints and CI definitions.
+   - Run everything CI enforces for the files you touched.
+   Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 
 5. **Cleanup**
    - Remove dead code, debug prints, resolved TODOs
@@ -64,16 +68,23 @@ Make the change easy to review.
 
    This isn't a changelog. It's a guide for someone reading the PR cold.
 
-2. **Update README and docs**
+2. **Write PR copy for ops handoff**
+   - `scratch/pr-title.txt` — one-line PR title
+   - `scratch/pr-body.md` — markdown PR body
+   - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
+
+   `lf ops land` consumes these files. Keep title/body concrete and reviewer-friendly.
+
+3. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it
    - Examples must work. Commands must be current.
    - Check: `README.md`, module READMEs, docstrings on public APIs
 
-3. **Inline documentation**
+4. **Inline documentation**
    - Add comments where the "why" isn't obvious
    - Don't document the obvious. `# increment counter` above `counter += 1` is noise.
 
-4. **Wave alignment** (if running in a wave context)
+5. **Wave alignment** (if running in a wave context)
    - Does the shipped code advance the wave's Goals?
    - Were any known Risks from the wave README introduced or ignored?
    - Are there observable Metrics to note in the review doc?
@@ -90,7 +101,13 @@ Make the change easy to review.
 
 ## Output
 
-Phase 1 produces clean, tested code. Phase 2 produces `scratch/<branch>-review.md` and updated docs.
+Phase 1 produces clean, tested code. Phase 2 produces:
+
+- `scratch/<branch>-review.md`
+- `scratch/pr-title.txt`
+- `scratch/pr-body.md`
+- `scratch/.pr-copy-ref`
+- updated docs
 
 If nothing needs fixing and tests pass, say so—but still write the design review doc.
 
@@ -100,7 +117,7 @@ If nothing needs fixing and tests pass, say so—but still write the design revi
 git diff main...HEAD     # see what changed
 ```
 
-Check `.lf/config.yaml` for `lint:` and `test:` commands. If not configured, check `TESTING.md` or CI config (`.github/workflows/`). A gate that passes locally but fails CI is a broken gate.
+Find lint/test commands from repo guidance (`TESTING.md`, `README.md`, docs) and mirror CI checks. A gate that passes locally but fails CI is a broken gate.
 
 ## Adaptation
 

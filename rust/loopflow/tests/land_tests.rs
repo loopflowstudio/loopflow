@@ -1,5 +1,6 @@
 mod support;
 
+use std::fs;
 use std::process::{Command, Stdio};
 
 use loopflow::ops::{land, LandOptions, NullProgress, OpsError};
@@ -47,6 +48,34 @@ fi
 
 exit 0
 "#
+}
+
+fn gh_land_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+echo "$@" >> "{log_path}"
+
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+
+if [ "$1 $2" = "pr create" ]; then
+  echo "https://example.com/pr/1"
+  exit 0
+fi
+
+if [ "$1 $2" = "pr view" ]; then
+  echo "https://example.com/pr/1"
+  exit 0
+fi
+
+exit 0
+"#
+    )
 }
 
 #[test]
@@ -184,4 +213,85 @@ fn land_missing_pr_error_includes_branch_name() {
         panic!("expected missing PR message");
     };
     assert!(message.contains("no open PR found for branch 'feature'"));
+}
+
+#[test]
+fn land_uses_cached_pr_copy_when_available() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+
+    let scratch = repo.path().join("scratch");
+    fs::create_dir_all(&scratch).expect("create scratch");
+    fs::write(scratch.join("pr-title.txt"), "cached title").expect("write title");
+    fs::write(scratch.join("pr-body.md"), "cached body").expect("write body");
+    fs::write(scratch.join(".pr-copy-ref"), repo.head_sha()).expect("write ref");
+
+    let log_path = repo.path().join("gh.log");
+    let script = gh_land_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::new(&[("gh", script.as_str())]);
+
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: false,
+            local: false,
+            create_pr: true,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+        },
+        &NullProgress,
+    )
+    .expect("land with cached copy");
+
+    assert!(result.merged);
+    let log = fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains("--title cached title"));
+    assert!(log.contains("--body cached body"));
+}
+
+#[test]
+fn land_requires_title_when_cached_pr_copy_is_stale() {
+    let _env = EnvGuard::new(&[("gh", gh_no_pr_script())]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+
+    let scratch = repo.path().join("scratch");
+    fs::create_dir_all(&scratch).expect("create scratch");
+    fs::write(scratch.join("pr-title.txt"), "stale title").expect("write title");
+    fs::write(scratch.join("pr-body.md"), "stale body").expect("write body");
+    fs::write(
+        scratch.join(".pr-copy-ref"),
+        "0000000000000000000000000000000000000000",
+    )
+    .expect("write stale ref");
+
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: false,
+            local: false,
+            create_pr: true,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: None,
+        },
+        &NullProgress,
+    );
+
+    let Err(OpsError::Message(message)) = result else {
+        panic!("expected stale copy error");
+    };
+    assert!(message.contains("no PR title provided"));
+    assert!(message.contains("lf gate"));
 }

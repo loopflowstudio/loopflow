@@ -1,4 +1,4 @@
 - design
 - build
 - review
-- land
+- ops: land --create-pr

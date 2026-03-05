@@ -4,7 +4,8 @@ use std::fs;
 use std::process::Command;
 
 use loopflow::ops::{
-    bump_version, generate_release, release_bump, release_check, release_status, NullProgress,
+    bump_version, generate_release, release_bump, release_check, release_status, release_tag,
+    NullProgress,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -22,6 +23,10 @@ fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
 }
 
 fn git(repo: &TestRepo, args: &[&str]) {
+    let _ = git_output(repo, args);
+}
+
+fn git_output(repo: &TestRepo, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
         .current_dir(repo.path())
@@ -33,6 +38,24 @@ fn git(repo: &TestRepo, args: &[&str]) {
         args,
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn git_output_bare(repo: &TestRepo, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(args)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git --git-dir {:?} {:?} failed: {}",
+        repo.bare_path(),
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 #[test]
@@ -195,4 +218,34 @@ release:
     assert_eq!(status.target, "cli");
     assert_eq!(status.latest_tag.as_deref(), Some("cli/v1.2.3"));
     assert!(status.release_exists);
+}
+
+#[test]
+fn release_tag_is_idempotent_when_remote_tag_matches_head() {
+    let repo = TestRepo::new();
+    let head = git_output(&repo, &["rev-parse", "HEAD"]);
+
+    let tag = release_tag(repo.path(), "0.9.1", None).expect("first tag should succeed");
+    assert_eq!(tag, "v0.9.1");
+
+    let second = release_tag(repo.path(), "0.9.1", None).expect("second tag should be no-op");
+    assert_eq!(second, "v0.9.1");
+
+    let remote_tag = git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.1"]);
+    assert_eq!(remote_tag, head);
+}
+
+#[test]
+fn release_tag_fails_if_remote_tag_points_to_different_commit() {
+    let repo = TestRepo::new();
+    release_tag(repo.path(), "0.9.1", None).expect("initial tag should succeed");
+
+    repo.create_file("CHANGELOG.md", "new release prep");
+    repo.stage_all();
+    repo.commit("change after tag");
+
+    let err = release_tag(repo.path(), "0.9.1", None).expect_err("mismatched tag should fail");
+    let message = err.to_string();
+    assert!(message.contains("already exists on origin"));
+    assert!(message.contains("expected"));
 }

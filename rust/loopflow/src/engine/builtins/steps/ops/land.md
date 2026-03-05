@@ -2,14 +2,14 @@
 requires: code on branch
 produces: landed PR + rotated worktree
 ---
-Land the current branch. Write PR content, then call `lf ops land` to rebase, create/update the PR, and enable auto-merge.
+Land the current branch. Rebase, create/update the PR, and enable auto-merge.
 
 ## API
 
-`lf ops land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge. Your job is to understand the branch and write the PR content.
+`lf ops land` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, and enabling auto-merge.
 
 ```
-lf ops land --title "..." --body "..." [--create-pr] [-m "commit message"]
+lf ops land [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
 **Do not run git commit, git push, gh pr create, or gh pr merge directly.** `lf ops land` does all of this. Running those commands manually means auto-merge never gets enabled.
@@ -27,9 +27,13 @@ Check `scratch/` for context. If `scratch/<branch>-review.md` exists (from gate)
 
 Stage and include all changes — committed and uncommitted — in the PR. If the working tree is dirty, compose a commit message for the uncommitted changes (pass it as `-m` in step 3). Never ask which files to include; everything on the branch ships together.
 
-### 2. Write PR title and body
+### 2. Prepare PR copy
 
-**Title:** lowercase, concise, area prefix when focused.
+If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exist (from `lf gate`), `lf ops land` reuses them automatically.
+
+If those files are missing or stale, write title/body manually and pass `--title` + `--body`.
+
+**Title guidelines:** lowercase, concise, area prefix when focused.
 
 Examples:
 - `mobile: quote replies on iOS`
@@ -45,7 +49,13 @@ Examples:
 ### 3. Land
 
 ```bash
-lf ops land --title "<title>" --body "<body>" --create-pr
+lf ops land --create-pr
+```
+
+If you wrote title/body manually, include them:
+
+```bash
+lf ops land --create-pr --title "<title>" --body "<body>"
 ```
 
 Include `-m "<message>"` if the working tree was dirty in step 1.

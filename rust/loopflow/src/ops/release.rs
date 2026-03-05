@@ -325,7 +325,14 @@ pub fn release_run(
     let wt_path = wt.path;
     let wt_branch = wt.branch;
 
-    let prepared = prepare_release_in_worktree(&wt_path, &version, &target, progress);
+    let prepared = prepare_release_in_worktree(
+        &wt_path,
+        &version,
+        &prev_tag,
+        &merged_prs,
+        &target,
+        progress,
+    );
     cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, progress);
     let prepared = prepared?;
 
@@ -356,6 +363,8 @@ struct PreparedRelease {
 fn prepare_release_in_worktree(
     wt_path: &Path,
     version: &str,
+    prev_tag: &str,
+    merged_prs: &[MergedPr],
     target: &ReleaseTarget,
     progress: &impl Progress,
 ) -> OpsResult<PreparedRelease> {
@@ -366,10 +375,10 @@ fn prepare_release_in_worktree(
     bump_manifest_versions(wt_path, target, version, progress)?;
 
     progress.status(&format!(
-        "Generating RELEASE_NOTES.md for {}...",
+        "Generating release notes for {}...",
         target_tag(target, version)
     ));
-    generate_release_with_target(wt_path, version, target, progress)?;
+    run_release_notes_step(wt_path, version, prev_tag, merged_prs, target)?;
 
     progress.status("Committing release changes...");
     let _ = commit_workflow(
@@ -404,6 +413,59 @@ fn prepare_release_in_worktree(
     Ok(PreparedRelease {
         pr_number: pr.number,
     })
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseNotesContext {
+    version: String,
+    prev_tag: String,
+    target: String,
+    tag_prefix: String,
+    area_scope: Vec<String>,
+    merged_prs: Vec<MergedPr>,
+    previous_release_notes: Option<String>,
+}
+
+fn run_release_notes_step(
+    repo: &Path,
+    version: &str,
+    prev_tag: &str,
+    merged_prs: &[MergedPr],
+    target: &ReleaseTarget,
+) -> OpsResult<()> {
+    let previous_notes = fs::read_to_string(repo.join("RELEASE_NOTES.md")).ok();
+    let context = ReleaseNotesContext {
+        version: version.to_string(),
+        prev_tag: prev_tag.to_string(),
+        target: target.name.clone(),
+        tag_prefix: target.tag_prefix.clone(),
+        area_scope: target.area.clone(),
+        merged_prs: merged_prs.to_vec(),
+        previous_release_notes: previous_notes,
+    };
+
+    let mut context_file = tempfile::NamedTempFile::new_in(repo)?;
+    serde_json::to_writer_pretty(&mut context_file, &context)
+        .map_err(|err| OpsError::Parse(format!("failed to encode release-notes context: {err}")))?;
+    let context_path = context_file.path().to_string_lossy().to_string();
+
+    let mut cmd = Command::new("lf");
+    cmd.arg("--batch")
+        .arg("release-notes")
+        .current_dir(repo)
+        .env("LF_RELEASE_NOTES_CONTEXT", &context_path);
+    run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+        command: err.command_line(),
+        stderr: err.stderr,
+    })?;
+
+    if !repo.join("RELEASE_NOTES.md").exists() {
+        return Err(OpsError::Message(
+            "release-notes step did not write RELEASE_NOTES.md".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 fn cleanup_release_worktree(

@@ -1,8 +1,0 @@
-{
-  "event": "wave.created",
-  "timestamp": "2026-01-27T10:00:00Z",
-  "wave_created": {
-    "wave_id": "wave_xyz789",
-    "name": "swift-falcon"
-  }
-}

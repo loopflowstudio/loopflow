@@ -1,6 +1,6 @@
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::worktrees::{
-    create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree,
+    create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
     wave_name_from_worktree_and_main, worktree_path,
 };
 use crate::lf::commands::util::find_repo_root;
@@ -48,7 +48,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             },
             &progress,
         ),
-        OpsCommand::Pr { title, body } => open_pr(title, body, &progress),
+        OpsCommand::Pr { title, body } => open_pr(title.clone(), body.clone(), &progress),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
             create_pr,
@@ -133,29 +133,23 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let result = land(&repo_root, options, progress)?;
 
-    match result.rotation {
-        Some(RotationResult::Advanced { new_path, .. }) => {
-            let _ = write_shell_directive(&format!("cd {}", new_path.display()));
+    let cd_target = match &result.rotation {
+        Some(RotationResult::Advanced { new_path, .. }) => Some(new_path.clone()),
+        Some(RotationResult::Complete { .. }) => Some(main_repo),
+        None => None,
+    };
+    if let Some(target) = cd_target {
+        if !write_shell_directive(&format!("cd {}", target.display()))? {
+            println!("cd {}", target.display());
         }
-        Some(RotationResult::Complete { .. }) => {
-            let _ = write_shell_directive(&format!("cd {}", main_repo.display()));
-        }
-        None => {}
     }
 
     Ok(())
 }
 
-fn open_pr(title: &str, body: &str, progress: &impl Progress) -> Result<()> {
+fn open_pr(title: Option<String>, body: Option<String>, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(
-        &repo_root,
-        &PrOptions {
-            title: title.to_string(),
-            body: body.to_string(),
-        },
-        progress,
-    )?;
+    let result = create_or_update_pr(&repo_root, &PrOptions { title, body }, progress)?;
     println!("{}", result.url);
     Ok(())
 }
@@ -367,7 +361,8 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
         .ok()
         .flatten();
     let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-    let result = create_with_schema(&main_repo, name, base_branch.as_deref(), branch_config)?;
+    let result =
+        create_with_schema_synced(&main_repo, name, base_branch.as_deref(), branch_config)?;
 
     println!("Created worktree: {}", result.path.display());
     if result.branch != name {
@@ -860,7 +855,8 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 
 const SHELL_INIT_ZSH: &str = r#"# loopflow shell integration for zsh
 #
-# Enables directory switching after `lf ops wt create`.
+# Enables directory switching after commands that emit shell directives
+# (for example `lf ops wt create`, `lf ops wt switch`, `lf ops land`).
 
 if command -v lf >/dev/null 2>&1; then
     lf() {
@@ -884,7 +880,8 @@ fi
 
 const SHELL_INIT_BASH: &str = r#"# loopflow shell integration for bash
 #
-# Enables directory switching after `lf ops wt create`.
+# Enables directory switching after commands that emit shell directives
+# (for example `lf ops wt create`, `lf ops wt switch`, `lf ops land`).
 
 if command -v lf >/dev/null 2>&1; then
     lf() {

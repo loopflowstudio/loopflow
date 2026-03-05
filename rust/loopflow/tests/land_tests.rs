@@ -3,6 +3,7 @@ mod support;
 use std::fs;
 use std::process::{Command, Stdio};
 
+use loopflow::engine::worktrees::create_with_schema;
 use loopflow::ops::{land, LandOptions, NullProgress, OpsError};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -50,6 +51,10 @@ exit 0
 "#
 }
 
+fn noop_open_script() -> &'static str {
+    "#!/bin/sh\nexit 0\n"
+}
+
 fn gh_land_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
@@ -76,6 +81,10 @@ fi
 exit 0
 "#
     )
+}
+
+fn claude_script() -> &'static str {
+    "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
 }
 
 #[test]
@@ -187,7 +196,11 @@ fn land_cleans_up_remote_branch() {
 
 #[test]
 fn land_missing_pr_error_includes_branch_name() {
-    let _env = EnvGuard::new(&[("gh", gh_no_pr_script())]);
+    let _env = EnvGuard::new(&[
+        ("gh", gh_no_pr_script()),
+        ("claude", claude_script()),
+        ("open", noop_open_script()),
+    ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -232,7 +245,7 @@ fn land_uses_cached_pr_copy_when_available() {
 
     let log_path = repo.path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::new(&[("gh", script.as_str())]);
+    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
     let result = land(
         repo.path(),
@@ -256,8 +269,12 @@ fn land_uses_cached_pr_copy_when_available() {
 }
 
 #[test]
-fn land_requires_title_when_cached_pr_copy_is_stale() {
-    let _env = EnvGuard::new(&[("gh", gh_no_pr_script())]);
+fn land_generates_copy_when_cached_pr_copy_is_stale() {
+    let _env = EnvGuard::new(&[
+        ("gh", gh_no_pr_script()),
+        ("claude", claude_script()),
+        ("open", noop_open_script()),
+    ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -287,11 +304,60 @@ fn land_requires_title_when_cached_pr_copy_is_stale() {
             pr_body: None,
         },
         &NullProgress,
-    );
+    )
+    .expect("land with stale cached copy should regenerate");
 
-    let Err(OpsError::Message(message)) = result else {
-        panic!("expected stale copy error");
-    };
-    assert!(message.contains("no PR title provided"));
-    assert!(message.contains("lf gate"));
+    assert!(result.merged);
+}
+
+#[test]
+fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
+    let repo = TestRepo::new();
+    let log_path = repo.path().join("gh.log");
+    let script = gh_land_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
+
+    let worktree = create_with_schema(repo.path(), "land", None, None).expect("create worktree");
+
+    fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(&worktree.path)
+        .status()
+        .expect("git add");
+    assert!(status.success(), "git add should succeed");
+    let status = Command::new("git")
+        .args(["commit", "-m", "feature work"])
+        .current_dir(&worktree.path)
+        .status()
+        .expect("git commit");
+    assert!(status.success(), "git commit should succeed");
+    push_branch(&repo, &worktree.branch);
+
+    let directive_path = repo.path().join("directive.txt");
+    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "ops",
+            "land",
+            "--strict",
+            "--create-pr",
+            "--title",
+            "test title",
+            "--body",
+            "test body",
+        ])
+        .current_dir(&worktree.path)
+        .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
+        .status()
+        .expect("run lf ops land");
+    assert!(status.success(), "lf ops land should succeed");
+
+    let directive = fs::read_to_string(&directive_path).expect("read directive file");
+    let target = directive
+        .trim()
+        .strip_prefix("cd ")
+        .expect("directive should start with cd");
+    let actual = fs::canonicalize(target).expect("canonicalize directive path");
+    let expected = fs::canonicalize(repo.path()).expect("canonicalize main repo");
+    assert_eq!(actual, expected);
 }

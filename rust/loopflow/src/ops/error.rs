@@ -20,4 +20,6 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
+    #[error("rebase onto {onto} failed ({detail})")]
+    RebaseConflict { onto: String, detail: String },
 }

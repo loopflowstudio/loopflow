@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use git2::Repository;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -130,14 +129,12 @@ fn paths_match_areas(areas: &[String], paths: &[&Path]) -> bool {
         .any(|path| areas.iter().any(|area| path.starts_with(area)))
 }
 
-fn check_repo_trigger(wave: &Wave, trigger: &Trigger) -> Result<WatchCheck, git2::Error> {
-    let repo = Repository::open(wave.repo())?;
+fn check_repo_trigger(wave: &Wave, trigger: &Trigger) -> Result<WatchCheck, crate::engine::error::GitError> {
+    use crate::engine::git;
 
-    let mut remote = repo.find_remote("origin")?;
-    remote.fetch(&["main"], None, None)?;
-
-    let reference = repo.find_reference("refs/remotes/origin/main")?;
-    let current_sha = reference.peel_to_commit()?.id().to_string();
+    let repo = Path::new(wave.repo());
+    git::fetch(repo, "origin", "main")?;
+    let current_sha = git::rev_parse(repo, "refs/remotes/origin/main")?;
 
     let last_sha = trigger.last_main_sha.as_deref();
     if last_sha.is_none() {
@@ -158,18 +155,9 @@ fn check_repo_trigger(wave: &Wave, trigger: &Trigger) -> Result<WatchCheck, git2
         });
     }
 
-    let prev = last_sha.unwrap_or("");
-    let prev_oid = git2::Oid::from_str(prev)?;
-    let curr_oid = git2::Oid::from_str(&current_sha)?;
-
-    let prev_commit = repo.find_commit(prev_oid)?;
-    let curr_commit = repo.find_commit(curr_oid)?;
-
-    let prev_tree = prev_commit.tree()?;
-    let curr_tree = curr_commit.tree()?;
-
-    let diff = match repo.diff_tree_to_tree(Some(&prev_tree), Some(&curr_tree), None) {
-        Ok(diff) => diff,
+    let prev = last_sha.expect("checked above");
+    let changed_paths = match git::diff_names(repo, prev, &current_sha) {
+        Ok(paths) => paths,
         Err(_) => {
             return Ok(WatchCheck {
                 from_sha: prev.to_string(),
@@ -180,11 +168,8 @@ fn check_repo_trigger(wave: &Wave, trigger: &Trigger) -> Result<WatchCheck, git2
         }
     };
 
-    let changed_paths: Vec<&Path> = diff
-        .deltas()
-        .map(|delta| delta.new_file().path().unwrap_or(Path::new("")))
-        .collect();
-    let area_match = paths_match_areas(wave.area(), &changed_paths);
+    let path_refs: Vec<&Path> = changed_paths.iter().map(|p| p.as_path()).collect();
+    let area_match = paths_match_areas(wave.area(), &path_refs);
 
     Ok(WatchCheck {
         from_sha: prev.to_string(),

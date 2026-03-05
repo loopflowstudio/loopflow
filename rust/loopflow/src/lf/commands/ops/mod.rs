@@ -1,11 +1,16 @@
+use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
+use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::worktrees::{
     create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
     wave_name_from_worktree_and_main, worktree_path,
 };
+use crate::engine::{prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, Surface};
 use crate::lf::commands::util::find_repo_root;
+use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
 use crate::lf::{OpsCommand, ReleaseCommand, ShellCommand, WtCommand};
+use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, ingest, land, next_branch,
     rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
@@ -14,6 +19,7 @@ use crate::ops::{
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
+use std::path::Path;
 use std::process::Command;
 
 pub fn run(op: &OpsCommand) -> Result<()> {
@@ -112,15 +118,24 @@ fn rebase_current(onto: Option<&str>, progress: &impl Progress) -> Result<()> {
     let onto_ref = onto
         .map(|value| value.to_string())
         .unwrap_or_else(|| format!("origin/{base}"));
-    rebase_with_recovery(
+    match rebase_with_recovery(
         &repo_root,
         &RebaseOptions {
-            onto: onto_ref,
+            onto: onto_ref.clone(),
             push: true,
         },
         progress,
-    )?;
-    Ok(())
+    ) {
+        Ok(()) => Ok(()),
+        Err(OpsError::RebaseConflict { onto, detail }) => {
+            let context = format!(
+                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
+            );
+            progress.status("Launching rebase agent to resolve conflicts...");
+            launch_step_agent(&repo_root, "rebase", Some(&context))
+        }
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn push_current(force: bool) -> Result<()> {
@@ -131,7 +146,19 @@ fn push_current(force: bool) -> Result<()> {
 fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let result = land(&repo_root, options, progress)?;
+    let result = match land(&repo_root, options, progress) {
+        Ok(result) => result,
+        Err(OpsError::RebaseConflict { onto, detail }) => {
+            let context = format!(
+                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
+            );
+            progress.status("Launching rebase agent to resolve conflicts...");
+            launch_step_agent(&repo_root, "rebase", Some(&context))?;
+            progress.status("Retrying land after rebase...");
+            land(&repo_root, options, progress)?
+        }
+        Err(err) => return Err(err.into()),
+    };
 
     let cd_target = match &result.rotation {
         Some(RotationResult::Advanced { new_path, .. }) => Some(new_path.clone()),
@@ -149,7 +176,19 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
 
 fn open_pr(title: Option<String>, body: Option<String>, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(&repo_root, &PrOptions { title, body }, progress)?;
+    let result = match create_or_update_pr(&repo_root, &PrOptions { title: title.clone(), body: body.clone() }, progress) {
+        Ok(result) => result,
+        Err(OpsError::RebaseConflict { onto, detail }) => {
+            let context = format!(
+                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
+            );
+            progress.status("Launching rebase agent to resolve conflicts...");
+            launch_step_agent(&repo_root, "rebase", Some(&context))?;
+            progress.status("Retrying PR creation after rebase...");
+            create_or_update_pr(&repo_root, &PrOptions { title, body }, progress)?
+        }
+        Err(err) => return Err(err.into()),
+    };
     println!("{}", result.url);
     Ok(())
 }
@@ -339,7 +378,10 @@ fn run_worktree(cmd: &WtCommand) -> Result<()> {
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, .. } => wt_list(format.as_deref()),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
-        WtCommand::Prune { dry_run, force, .. } => wt_prune(*dry_run, *force),
+        WtCommand::Prune {
+            dry_run,
+            include_fresh,
+        } => wt_prune(*dry_run, *include_fresh),
         WtCommand::Ci { watch, logs } => wt_ci(*watch, *logs),
     }
 }
@@ -441,6 +483,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         is_main: bool,
         merged: bool,
         squash_merged: bool,
+        fresh: bool,
         dirty: bool,
         remote_gone: bool,
         diff_stat: String,
@@ -472,6 +515,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 is_main,
                 merged: wt.merged,
                 squash_merged: wt.squash_merged,
+                fresh: wt.fresh,
                 dirty: wt.dirty,
                 remote_gone: wt.remote_gone,
                 diff_stat,
@@ -485,9 +529,8 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         let marker = if row.is_current { "*" } else { " " };
 
         let any_merged = row.merged || row.squash_merged;
-        let fresh = !row.is_main && !any_merged && row.diff_stat.is_empty() && !row.dirty;
         let landed_dirty = any_merged && row.dirty;
-        let name_color = if row.is_main || any_merged || fresh {
+        let name_color = if row.is_main || any_merged || row.fresh {
             c.dim
         } else {
             c.bold
@@ -501,7 +544,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
             ("squash-merged", c.green)
         } else if row.remote_gone {
             ("remote-gone", c.yellow)
-        } else if fresh {
+        } else if row.fresh {
             ("fresh", c.dim)
         } else {
             ("active", c.cyan)
@@ -627,7 +670,7 @@ fn parse_shortstat(raw: &str) -> String {
     format!("+{ins} -{del} ({files} files)")
 }
 
-fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
+fn wt_prune(dry_run: bool, include_fresh: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let current_path = repo_root;
@@ -648,66 +691,58 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
     let _ = crate::engine::git::fetch(&main_repo, "origin", &default_branch);
 
     let worktrees = list_worktrees(&main_repo)?;
-    let mut prunable = worktrees
+    let targets: Vec<_> = worktrees
         .into_iter()
-        .filter(|wt| wt.prunable)
         .filter(|wt| wt.path != current_path)
-        .filter(|wt| !wt.dirty)
-        .collect::<Vec<_>>();
+        .filter(|wt| {
+            if wt.fresh {
+                // Fresh worktrees: only with --include-fresh, never if dirty
+                return include_fresh && !wt.dirty;
+            }
+            if !wt.prunable {
+                return false;
+            }
+            // Merged/squash-merged/remote-gone: prune even if dirty
+            // (landed-dirty or abandoned branch)
+            true
+        })
+        .collect();
 
-    if prunable.is_empty() {
+    if targets.is_empty() {
         println!("No prunable worktrees.");
         return Ok(());
     }
 
-    if force {
-        for wt in prunable.drain(..) {
-            crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
-            if let Some(branch) = wt.branch {
-                if branch != default_branch {
-                    let _ = delete_local_branch(&main_repo, &branch);
-                }
-            }
-            println!("Removed {}", wt.path.display());
+    if dry_run {
+        for wt in &targets {
+            let reason = if wt.merged {
+                "merged"
+            } else if wt.squash_merged {
+                "squash-merged"
+            } else if wt.remote_gone {
+                "remote-gone"
+            } else if wt.fresh {
+                "fresh"
+            } else {
+                "prunable"
+            };
+            println!(
+                "  {} ({reason})  {}",
+                wt.branch.as_deref().unwrap_or("detached"),
+                wt.path.display()
+            );
         }
         return Ok(());
     }
 
-    if !dry_run {
-        println!("Run with --force to remove prunable worktrees.");
-    }
-
-    // Group by reason
-    let mut merged = Vec::new();
-    let mut squash_merged_list = Vec::new();
-    let mut remote_gone = Vec::new();
-    let mut empty = Vec::new();
-    for wt in prunable {
-        let branch = wt.branch.clone().unwrap_or_else(|| "detached".to_string());
-        let entry = (branch, wt.path.display().to_string());
-        if wt.merged {
-            merged.push(entry);
-        } else if wt.squash_merged {
-            squash_merged_list.push(entry);
-        } else if wt.remote_gone {
-            remote_gone.push(entry);
-        } else {
-            empty.push(entry);
-        }
-    }
-
-    for (label, group) in [
-        ("Merged", &merged),
-        ("Squash-merged", &squash_merged_list),
-        ("Remote-gone", &remote_gone),
-        ("Empty", &empty),
-    ] {
-        if !group.is_empty() {
-            println!("{}:", label);
-            for (branch, path) in group {
-                println!("  {}  {}", branch, path);
+    for wt in targets {
+        crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
+        if let Some(branch) = wt.branch {
+            if branch != default_branch {
+                let _ = delete_local_branch(&main_repo, &branch);
             }
         }
+        println!("Removed {}", wt.path.display());
     }
     Ok(())
 }
@@ -907,6 +942,57 @@ const SHELL_INSTALL_LINE_ZSH: &str =
     "if command -v lf >/dev/null 2>&1; then eval \"$(command lf ops shell init zsh)\"; fi";
 const SHELL_INSTALL_LINE_BASH: &str =
     "if command -v lf >/dev/null 2>&1; then eval \"$(command lf ops shell init bash)\"; fi";
+
+// ==========================================================================
+// Step agent fallback
+// ==========================================================================
+
+/// Launch an agent with a named step when an ops command needs judgment.
+///
+/// Used when mechanical operations hit a situation that requires agent
+/// reasoning — e.g., rebase conflicts that need conflict resolution.
+fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -> Result<()> {
+    let step = discover_step(repo_root, step_name)?;
+    let config = load_config_or_default(Some(repo_root));
+
+    let message = context.map(|value| value.to_string());
+    let prepared = prepare_launch_prompt(
+        &config,
+        LaunchPromptInput {
+            repo_root: repo_root.to_path_buf(),
+            step: Some(step_name.to_string()),
+            resolved_step: Some(step),
+            surface: Surface::Headless,
+            message,
+            cwd: Some(repo_root.to_path_buf()),
+            yolo_mode: config.yolo,
+            source_overrides: ContextSourceOverrides {
+                diff_files: Some(true),
+                ..Default::default()
+            },
+            ..LaunchPromptInput::default()
+        },
+    )?;
+
+    let process = ProcessConfig {
+        auto: true,
+        stream: true,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
+    };
+
+    let result = launch_agent(&prepared.config, &process, &capabilities)?;
+    if result.exit_code != 0 {
+        return Err(anyhow!(
+            "agent exited with code {} while resolving {}",
+            result.exit_code,
+            step_name,
+        ));
+    }
+    Ok(())
+}
 
 // ==========================================================================
 // lf ops cp

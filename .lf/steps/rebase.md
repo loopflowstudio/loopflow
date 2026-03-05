@@ -1,18 +1,11 @@
 ---
 produces: rebased branch (or no-op if up-to-date)
-fast-path: lf ops rebase
 ---
-Rebase this branch onto main.
+Rebase this branch onto main, resolving conflicts.
 
 ## Goal
 
-Keep the branch current so merging is painless later. Most runs should finish in the fast-path. If the agent runs, recover from conflicts safely and push a clean branch.
-
-## API
-
-```bash
-lf ops rebase [--onto BRANCH]
-```
+Recover from rebase conflicts and push a clean branch.
 
 ## Workflow
 
@@ -23,11 +16,11 @@ git diff main...HEAD --stat
 ```
 Note which files this branch modified and what it's trying to accomplish.
 
-If `<lf:fast-path-failure>` is present, read it first to understand what already failed.
+If `<lf:rebase-conflict>` is present, read it to understand what conflicted.
 
 ### 2. Rebase
 
-Use the target from the failure context if present (`--onto BRANCH` or `Rebase onto: ...`). Default to `origin/main`:
+Use the target from the conflict context if present. Default to `origin/main`:
 
 ```bash
 git fetch origin main

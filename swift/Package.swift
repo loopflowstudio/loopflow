@@ -11,7 +11,6 @@ let package = Package(
     products: [
         .library(name: "LoopflowCore", targets: ["LoopflowCore"]),
         .executable(name: "Concerto", targets: ["Concerto"]),
-        .executable(name: "Symphonia", targets: ["Symphonia"]),
     ],
     dependencies: [
         .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0"),
@@ -56,11 +55,6 @@ let package = Package(
                 .linkedFramework("IOKit", .when(platforms: [.macOS])),
                 .linkedLibrary("c++", .when(platforms: [.macOS])),
             ]
-        ),
-        .executableTarget(
-            name: "Symphonia",
-            dependencies: ["LoopflowCore"],
-            path: "Symphonia"
         ),
         .testTarget(
             name: "ConcertoTests",

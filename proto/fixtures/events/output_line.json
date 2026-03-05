@@ -1,8 +1,0 @@
-{
-  "event": "output.line",
-  "timestamp": "2026-01-27T12:01:15Z",
-  "output_line": {
-    "session_id": "sr_abc123def456",
-    "text": "Running tests... 42 passed, 0 failed"
-  }
-}

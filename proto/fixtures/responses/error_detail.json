@@ -1,8 +1,0 @@
-{
-  "code": "WAVE_NOT_FOUND",
-  "message": "Wave with ID 'wave_unknown' does not exist",
-  "retryable": false,
-  "retry_after_seconds": 0,
-  "trace_id": "trace_abc123def456",
-  "idempotency_key": "get_wave_20260127_xyz"
-}

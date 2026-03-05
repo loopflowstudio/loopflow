@@ -77,6 +77,24 @@ When editing Rust tests:
 - Integration tests go in `tests/` directory
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 
+# Goals
+
+## Clarity
+
+Design around data structures and public APIs. Aim for a 1:1 mapping between real-world concepts and their representation in code.
+
+Write code that demonstrates its own correctness. If a feature exists, write a test that proves it works. Assume you won't finish everything you start—make it easy to see what's done and what's broken.
+
+## Simplicity
+
+Every line of code must earn its place. Readable code is not terse code; don't sacrifice clarity for brevity. But recognize that lines can be net-negative:
+
+* Unused code
+* Comments that restate the obvious
+* Checks for impossible conditions
+
+Start with minimal data structures and APIs. If the core is right, trimming excess at the edges is straightforward.
+
 # Development Environment
 
 Use `uv` for Python package management. Never use pip directly.
@@ -162,6 +180,12 @@ When in doubt: if you'd write an `assert`, raise an exception instead—it's eas
 
 # Documentation
 
+The best documentation is simple code. Descriptive names, type hints, and clear APIs often suffice.
+
+The worst documentation is wrong documentation. If it can drift from the code, it will. Update docs when you change code—or delete them.
+
+Put documentation next to code. A few paragraphs at the top of a key file beats a separate doc that nobody maintains.
+
 Skip obvious docstrings:
 
 ```python
@@ -183,6 +207,10 @@ def open_warp(path: Path) -> None:
     """Open Warp terminal at path."""
     subprocess.run(["open", f"warp://action/new_window?path={path}"])
 ```
+
+Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
+
+Start features with a design doc under `scratch/`. After implementation, `lf review` writes its assessment under `scratch/`. `lf ops pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
 
 ## User-Facing Documentation
 
@@ -206,6 +234,13 @@ lf debug -c    # paste an error, watch it fix
 ```
 
 # Testing
+
+Test user behavior, not implementation details. A good test proves that something users care about actually works. Most tests don't meet that bar. Delete them.
+
+Aim for a mix:
+- **Smoke tests**: Does the system run without crashing?
+- **Edge case tests**: What happens at boundaries?
+- **Value tests**: Does this feature do what users expect?
 
 ## When to Mock
 

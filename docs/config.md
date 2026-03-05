@@ -72,7 +72,6 @@ Example repo config:
 
 ```yaml
 agent: claude:opus
-push: true
 
 direction: clarity
 
@@ -270,15 +269,6 @@ Enable browser automation for Claude Code.
 | **Default** | `false` |
 
 Requires the [Chrome extension](https://chromewebstore.google.com/detail/claude-browser-tool/gfbkicmkbhdjacjmfjffcldkdopkfjgk) and a paid Claude plan.
-
-### Push
-
-Auto-push after commits in auto mode.
-
-| | |
-|---|---|
-| **Config** | `push: true` |
-| **Default** | `false` |
 
 ### Yolo
 

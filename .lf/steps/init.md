@@ -14,6 +14,7 @@ command -v claude
 command -v codex
 command -v opencode
 test -f .lf/config.yaml && echo "config exists"
+test -f ~/.lf/config.yaml && echo "user config exists"
 ```
 
 Use `command -v` (POSIX builtin) — not `which`.
@@ -28,6 +29,7 @@ Checking environment...
 
 Platform: Linux
 Config: not initialized
+User config: ~/.lf/config.yaml (exists)
 ```
 
 ## Phase 2: Agent guidance
@@ -47,7 +49,10 @@ Then run `lf init` again.
 
 Do not run package managers. Init detects — it never installs.
 
-## Phase 3: Create or update config
+## Phase 3: Create or update repo config
+
+Repo config (`.lf/config.yaml`) is for team conventions. Only write repo
+properties — never personal preferences like yolo, ide, chrome, or autoprune.
 
 **No `.lf/config.yaml`:**
 - Ask: "Initialize loopflow in this repo? This creates .lf/config.yaml"
@@ -60,33 +65,38 @@ Do not run package managers. Init detects — it never installs.
 - If everything matches, report "Config is up to date" and move on
 - Never overwrite custom `exclude` patterns or other user-tuned fields
 
-Config template:
+Repo config template:
 ```yaml
-# Loopflow configuration
 agent: <detected-default>
 
 supported_harnesses:
   - <detected-agents>
 
-context: "."
-
 exclude:
   - "*.lock"
   - node_modules
   - .venv
-
-yolo: false
-push: false
-
-skill_registry:
-  enabled: false
 ```
 
 Use the agent name without model suffix: `agent: claude` not `agent: claude:opus`.
 
-Init creates `.lf/config.yaml` and nothing else — no flows README, no IDE config.
+## Phase 4: User config
 
-## Phase 4: Optional extras
+Personal preferences (yolo, ide, chrome, autoprune) belong in `~/.lf/config.yaml`.
+Repo config wins when both files set the same key, so personal prefs should live
+in the user file.
+
+**User config exists:** Mention it and move on. Don't modify it.
+
+**No user config:** Offer to create `~/.lf/config.yaml` with a couple of common
+preferences:
+- Skip permission prompts (yolo)? [y/N]
+- Preferred IDE setup? [skip]
+
+Keep it brief — two questions, not an interrogation. Generate only what the user
+chose. If they skip everything, don't create the file.
+
+## Phase 5: Optional extras
 
 **superpowers:** If `~/.superpowers` doesn't exist, offer:
 "Install superpowers skill library? Adds community prompts via `lf sp:` commands"
@@ -98,7 +108,7 @@ Init creates `.lf/config.yaml` and nothing else — no flows README, no IDE conf
 - Yes: set `skill_registry.enabled: true` in `.lf/config.yaml`
 - No: skip
 
-## Phase 5: Next steps
+## Phase 6: Next steps
 
 Platform-aware guidance:
 

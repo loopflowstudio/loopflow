@@ -460,6 +460,62 @@ impl WaveExecutor {
                         return Ok(());
                     }
                 }
+                FlowAction::RunOps { ops } => {
+                    if let Err(err) = pre_step_sync(
+                        Path::new(&run.snapshot.repo),
+                        Path::new(&run.worktree),
+                        &run.branch,
+                    ) {
+                        warn!(run_id = %run.id, error = %err, "pre-ops sync failed, continuing");
+                    }
+
+                    let command = if ops.item.args.is_empty() {
+                        ops.item.command.clone()
+                    } else {
+                        format!("{} {}", ops.item.command, ops.item.args.join(" "))
+                    };
+                    info!(
+                        run_id = %run.id,
+                        command = %command,
+                        step_index = run.step_index,
+                        "running ops item"
+                    );
+
+                    let worktree = run.worktree.clone();
+                    let item = ops.item.clone();
+                    let op_result = tokio::task::spawn_blocking(move || {
+                        crate::ops::execute_flow_ops(
+                            Path::new(&worktree),
+                            &item,
+                            &crate::ops::NullProgress,
+                        )
+                    })
+                    .await;
+
+                    match op_result {
+                        Ok(Ok(())) => {
+                            self.advance_run_step(&mut run, &plan, wave.id()).await?;
+                        }
+                        Ok(Err(err)) => {
+                            self.fail_run(
+                                &mut run,
+                                &wave,
+                                format!("ops item '{command}' failed: {err}"),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
+                        Err(err) => {
+                            self.fail_run(
+                                &mut run,
+                                &wave,
+                                format!("ops item '{command}' panicked: {err}"),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
+                    }
+                }
                 FlowAction::WaitInteractive { step } => {
                     let (session, initial_user_message) = self
                         .create_interactive_session(&wave, &run, &step)
@@ -997,6 +1053,7 @@ impl WaveExecutor {
         // Auto-commit any changes left by the interactive step.
         let step_name = match next_action(&plan, run.step_index as usize) {
             FlowAction::WaitInteractive { step } | FlowAction::RunStep { step } => step.step.name,
+            FlowAction::RunOps { ops } => format!("ops {}", ops.item.command),
             _ => format!("step-{}", run.step_index),
         };
         let worktree = run.worktree.clone();

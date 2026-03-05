@@ -114,6 +114,7 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `synthesize` | Combine multiple perspectives into one |
 | `validate` | Validate flows, steps, and directions |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
+| `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
 | `pr` | Generate PR title/body and call `lf ops pr --title --body` |
 
 ## Flows
@@ -124,6 +125,14 @@ lf build                                # or use a named flow
 ```
 
 Steps chain into flows. Flows feed into waves.
+
+Flows can include mechanical ops items directly:
+
+```yaml
+- implement
+- gate
+- ops: land --create-pr
+```
 
 ### Code flows (`code/`)
 

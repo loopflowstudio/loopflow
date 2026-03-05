@@ -30,6 +30,7 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
         .iter()
         .map(|item| match item {
             ConcreteItem::Step(s) => s.step.name.as_str(),
+            ConcreteItem::Ops(_) => "[ops]",
             ConcreteItem::Fork(_) => "[fork]",
             ConcreteItem::Branch(_) => "[branch]",
         })
@@ -71,6 +72,24 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                 );
                 crate::lf::commands::run::run(Some(&step_name), message, cli)?;
                 commit_step_work(repo, &step_name)?;
+            }
+            FlowAction::RunOps { ops } => {
+                let colors = Colors::new();
+                let command = if ops.item.args.is_empty() {
+                    ops.item.command.clone()
+                } else {
+                    format!("{} {}", ops.item.command, ops.item.args.join(" "))
+                };
+                eprintln!(
+                    "{dim}[{current}/{total}]{reset} {bold}ops:{reset} {cmd}",
+                    dim = colors.dim,
+                    reset = colors.reset,
+                    bold = colors.bold,
+                    current = index + 1,
+                    total = total,
+                    cmd = command,
+                );
+                crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
             }
             FlowAction::Fork { fork } => {
                 run_fork(&fork, message, cli, repo)?;

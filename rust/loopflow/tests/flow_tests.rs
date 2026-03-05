@@ -153,6 +153,33 @@ fn flow_ref_parses_into_items() {
 }
 
 #[test]
+fn ops_item_parses_and_expands() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    write_flow(
+        repo,
+        "ship-ish",
+        r#"
+- implement
+- ops: land --create-pr
+"#,
+    );
+
+    let flow = load_flow("ship-ish", repo).unwrap();
+    assert_eq!(flow.items.len(), 2);
+    match &flow.items[1] {
+        FlowItem::Ops(item) => {
+            assert_eq!(item.command, "land");
+            assert_eq!(item.args, vec!["--create-pr"]);
+        }
+        other => panic!("expected ops item, got {other:?}"),
+    }
+
+    let expanded = expand_flow(&flow, repo).unwrap();
+    assert!(matches!(&expanded[1], ConcreteItem::Ops(_)));
+}
+
+#[test]
 fn expand_flow_tracks_parents() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
@@ -288,4 +315,15 @@ fn builtin_wave_reduce_expands_to_update_wave() {
         ConcreteItem::Step(s) => assert_eq!(s.step.name, "update-wave"),
         _ => panic!("expected update-wave step"),
     }
+}
+
+#[test]
+fn builtin_ship_uses_ops_land_item() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    let flow = load_flow("ship", repo).unwrap();
+    let items = expand_flow(&flow, repo).unwrap();
+    assert!(!items.is_empty());
+    assert!(matches!(items.last(), Some(ConcreteItem::Ops(_))));
 }

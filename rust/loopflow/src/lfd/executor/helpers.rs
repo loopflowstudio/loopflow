@@ -314,6 +314,7 @@ fn has_run_suffix(path_component: &str) -> bool {
 pub(crate) fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) -> Vec<String> {
     match items.get(step_index as usize) {
         Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
+        Some(ConcreteItem::Ops(ops)) => ops.flow_parents.clone(),
         Some(ConcreteItem::Fork(fork)) => fork.flow_parents.clone(),
         Some(ConcreteItem::Branch(branch)) => branch.flow_parents.clone(),
         None => Vec::new(),
@@ -328,6 +329,7 @@ pub(crate) fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> Strin
         .and_then(|plan| match next_action(&plan, step_index as usize) {
             FlowAction::WaitInteractive { step } => Some(step.step.name),
             FlowAction::RunStep { step } => Some(step.step.name),
+            FlowAction::RunOps { ops } => Some(format!("ops {}", ops.item.command)),
             _ => None,
         });
     name.unwrap_or_else(|| format!("step-{step_index}"))

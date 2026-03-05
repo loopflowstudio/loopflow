@@ -45,9 +45,17 @@ impl Step {
 #[serde(tag = "type", content = "data")]
 pub enum FlowItem {
     Step(Step),
+    Ops(OpsItem),
     Fork { branches: Vec<FlowItem> },
     FlowRef(String),
     Branch(BranchDef),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpsItem {
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -67,6 +75,7 @@ pub struct BranchPath {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlowAction {
     RunStep { step: ConcreteStep },
+    RunOps { ops: ConcreteOps },
     WaitInteractive { step: ConcreteStep },
     Fork { fork: ConcreteFork },
     Branch { branch: ConcreteBranch },
@@ -120,8 +129,15 @@ pub struct ConcreteBranch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteOps {
+    pub item: OpsItem,
+    pub flow_parents: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConcreteItem {
     Step(ConcreteStep),
+    Ops(ConcreteOps),
     Fork(ConcreteFork),
     Branch(ConcreteBranch),
 }
@@ -146,6 +162,7 @@ pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
                 FlowAction::RunStep { step }
             }
         }
+        ConcreteItem::Ops(ops) => FlowAction::RunOps { ops },
         ConcreteItem::Fork(fork) => FlowAction::Fork { fork },
         ConcreteItem::Branch(branch) => FlowAction::Branch { branch },
     }
@@ -475,12 +492,37 @@ fn parse_flow_mapping(map: &serde_yaml_ng::Mapping) -> Result<FlowItem, LoadErro
     if let Some(fork_value) = map.get(key("fork")) {
         return parse_fork_value(fork_value);
     }
+    if let Some(ops_value) = map.get(key("ops")) {
+        return parse_ops_value(ops_value);
+    }
     if let Some(branch_value) = map.get(key("branch")) {
         return parse_branch_value(branch_value);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, flow, fork, or branch".to_string(),
+        "flow item mapping must include step, ops, flow, fork, or branch".to_string(),
     ))
+}
+
+fn parse_ops_value(value: &Value) -> Result<FlowItem, LoadError> {
+    let raw = value
+        .as_str()
+        .ok_or_else(|| LoadError::InvalidFlow("ops value must be string".to_string()))?
+        .trim();
+
+    if raw.is_empty() {
+        return Err(LoadError::InvalidFlow(
+            "ops value must include a command".to_string(),
+        ));
+    }
+
+    let mut parts = raw.split_whitespace();
+    let command = parts
+        .next()
+        .ok_or_else(|| LoadError::InvalidFlow("ops value must include a command".to_string()))?
+        .to_string();
+    let args = parts.map(ToString::to_string).collect();
+
+    Ok(FlowItem::Ops(OpsItem { command, args }))
 }
 
 fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
@@ -699,6 +741,12 @@ fn validate_branch_paths(branch_def: &BranchDef, repo: &Path) -> Result<(), Load
         for item in &items {
             match item {
                 ConcreteItem::Step(_) => {}
+                ConcreteItem::Ops(_) => {
+                    return Err(LoadError::InvalidFlow(format!(
+                        "branch path '{key}' references flow '{flow_name}' which contains an ops item; \
+                         branch sub-flows must contain only steps"
+                    )));
+                }
                 ConcreteItem::Fork(_) => {
                     return Err(LoadError::InvalidFlow(format!(
                         "branch path '{key}' references flow '{flow_name}' which contains a fork; \
@@ -821,6 +869,12 @@ fn expand_with_chain(
                 nested_chain.push(name.clone());
                 items.extend(expand_with_chain(&nested, repo, nested_chain, depth + 1)?);
             }
+            FlowItem::Ops(item) => {
+                items.push(ConcreteItem::Ops(ConcreteOps {
+                    item: item.clone(),
+                    flow_parents: chain.clone(),
+                }));
+            }
             FlowItem::Fork { branches } => {
                 let fork = expand_fork(branches, repo, &chain, depth)?;
                 items.push(ConcreteItem::Fork(fork));
@@ -883,6 +937,9 @@ fn expand_fork_branch(
             })
         }
         FlowItem::FlowRef(name) => expand_flow_ref_branch(name, &[], repo, chain, depth),
+        FlowItem::Ops(_) => Err(LoadError::InvalidFlow(
+            "fork branches cannot contain ops items".to_string(),
+        )),
         FlowItem::Fork { .. } => Err(LoadError::InvalidFlow(
             "fork branches cannot contain nested forks".to_string(),
         )),
@@ -952,6 +1009,11 @@ fn extract_fork_branch_steps(
     for item in items {
         match item {
             ConcreteItem::Step(s) => steps.push(s.clone()),
+            ConcreteItem::Ops(_) => {
+                return Err(LoadError::InvalidFlow(format!(
+                    "fork branch flow ref '{flow_name}' contains an ops item"
+                )))
+            }
             ConcreteItem::Fork(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "fork branch flow ref '{flow_name}' contains a nested fork"
@@ -1317,6 +1379,13 @@ Be careful.
                             }
                         }
                     }
+                    ConcreteItem::Ops(ops) => {
+                        assert!(
+                            !ops.item.command.is_empty(),
+                            "builtin flow '{}' contains empty ops command",
+                            name
+                        );
+                    }
                     ConcreteItem::Branch(branch) => {
                         for (path_key, path) in &branch.paths {
                             if let Some(ref flow_name) = path.flow {
@@ -1386,6 +1455,41 @@ Be careful.
             }
             other => panic!("expected Step, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_ops_mapping_accepts_command_and_args() {
+        let yaml = r#"
+- ops: land --create-pr
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 1);
+
+        match &items[0] {
+            FlowItem::Ops(item) => {
+                assert_eq!(item.command, "land");
+                assert_eq!(item.args, vec!["--create-pr"]);
+            }
+            other => panic!("expected Ops item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn next_action_returns_ops_action() {
+        let items = vec![ConcreteItem::Ops(ConcreteOps {
+            item: OpsItem {
+                command: "rebase".to_string(),
+                args: Vec::new(),
+            },
+            flow_parents: vec!["ship".to_string()],
+        })];
+
+        let action = next_action(&items, 0);
+        assert!(
+            matches!(action, FlowAction::RunOps { .. }),
+            "expected RunOps action, got {action:?}"
+        );
     }
 
     #[test]

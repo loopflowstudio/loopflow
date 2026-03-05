@@ -47,6 +47,7 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
     prepare_land(&repo_root, options, progress)?;
     let main_branch = rebase_land(&repo_root, &main_repo, progress)?;
     clear_scratch(&repo_root, progress)?;
@@ -54,11 +55,18 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
     if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
     } else {
-        ensure_pr(&repo_root, &feature_branch, options, progress)?;
+        ensure_pr(
+            &repo_root,
+            &feature_branch,
+            options.create_pr,
+            pr_title.as_deref(),
+            pr_body.as_deref(),
+            progress,
+        )?;
         finalize_remote(
             &repo_root,
-            options.pr_title.as_deref(),
-            options.pr_body.as_deref(),
+            pr_title.as_deref(),
+            pr_body.as_deref(),
             progress,
         )?;
     }
@@ -68,6 +76,84 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
         merged: true,
         rotation,
     })
+}
+
+#[derive(Debug, Clone)]
+struct CachedPrCopy {
+    title: String,
+    body: String,
+}
+
+fn resolve_pr_copy(
+    repo_root: &Path,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<(Option<String>, Option<String>)> {
+    let mut pr_title = options.pr_title.clone();
+    let mut pr_body = options.pr_body.clone();
+
+    if pr_title.is_some() {
+        return Ok((pr_title, pr_body));
+    }
+
+    if let Some(copy) = read_cached_pr_copy(repo_root, progress)? {
+        progress.status("Using cached PR copy from scratch/");
+        pr_title = Some(copy.title);
+        if pr_body.is_none() {
+            pr_body = Some(copy.body);
+        }
+    }
+
+    Ok((pr_title, pr_body))
+}
+
+fn read_cached_pr_copy(
+    repo_root: &Path,
+    progress: &impl Progress,
+) -> OpsResult<Option<CachedPrCopy>> {
+    let title_path = repo_root.join("scratch/pr-title.txt");
+    let body_path = repo_root.join("scratch/pr-body.md");
+    let ref_path = repo_root.join("scratch/.pr-copy-ref");
+
+    if !title_path.exists() || !body_path.exists() {
+        return Ok(None);
+    }
+
+    let title = std::fs::read_to_string(&title_path)?.trim().to_string();
+    if title.is_empty() {
+        return Ok(None);
+    }
+
+    let current_head = head_sha(repo_root)?;
+    let copied_for = match std::fs::read_to_string(&ref_path) {
+        Ok(value) => value.trim().to_string(),
+        Err(_) => {
+            progress.status("Ignoring cached PR copy: scratch/.pr-copy-ref is missing");
+            return Ok(None);
+        }
+    };
+    if copied_for != current_head {
+        progress.status("Ignoring cached PR copy: branch changed since gate output");
+        return Ok(None);
+    }
+
+    let body = std::fs::read_to_string(body_path)?;
+    Ok(Some(CachedPrCopy { title, body }))
+}
+
+fn head_sha(repo_root: &Path) -> OpsResult<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_root)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: "git rev-parse HEAD".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn prepare_land(
@@ -127,7 +213,9 @@ fn finalize_local(
 fn ensure_pr(
     repo_root: &Path,
     feature_branch: &str,
-    options: &LandOptions,
+    create_pr: bool,
+    pr_title: Option<&str>,
+    pr_body: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<()> {
     if !crate::ops::pr::gh_available() {
@@ -135,11 +223,13 @@ fn ensure_pr(
     }
 
     if !crate::ops::pr::pr_exists_for_current_branch(repo_root)? {
-        if options.create_pr {
-            let title = options.pr_title.as_deref().ok_or_else(|| {
-                OpsError::Message("--create-pr requires --title and --body".to_string())
+        if create_pr {
+            let title = pr_title.ok_or_else(|| {
+                OpsError::Message(
+                    "no PR title provided; run `lf gate` or pass --title/--body".to_string(),
+                )
             })?;
-            let body = options.pr_body.as_deref().unwrap_or("");
+            let body = pr_body.unwrap_or("");
             let _ = crate::ops::pr::create_or_update_pr(
                 repo_root,
                 &crate::ops::pr::PrOptions {

@@ -15,6 +15,13 @@ struct FlowProgressPills: View {
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
+    private enum PillKind {
+        case step
+        case ops
+        case branch
+        case fork
+    }
+
     var body: some View {
         HStack(spacing: Spacing.xs) {
             ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
@@ -39,7 +46,7 @@ struct FlowProgressPills: View {
     }
 
     private var accessibilityDescription: String {
-        let currentStep = steps.indices.contains(currentIndex) ? formatStepName(steps[currentIndex]) : "unknown"
+        let currentStep = steps.indices.contains(currentIndex) ? displayStepName(steps[currentIndex]) : "unknown"
         let elapsed = formattedElapsedTime ?? "just started"
         return "Step \(currentIndex + 1) of \(steps.count): \(currentStep), \(elapsed)"
     }
@@ -48,6 +55,8 @@ struct FlowProgressPills: View {
     private func stepPill(step: String, index: Int) -> some View {
         let isCurrent = index == currentIndex
         let isCompleted = index < currentIndex
+        let kind = stepKind(step)
+        let label = displayStepName(step)
 
         HStack(spacing: Spacing.xs) {
             if isCompleted {
@@ -55,7 +64,16 @@ struct FlowProgressPills: View {
                     .font(Typography.caption(9)).fontWeight(.semibold)
             }
 
-            Text(formatStepName(step))
+            if kind == .ops {
+                Text("ops")
+                    .font(Typography.caption(9))
+                    .padding(.horizontal, Spacing.xs)
+                    .padding(.vertical, 1)
+                    .background(Color.statusInfo.opacity(isCurrent ? 0.28 : 0.18))
+                    .clipShape(Capsule())
+            }
+
+            Text(label)
                 .font(Typography.body(11)).fontWeight(isCurrent ? .semibold : .regular)
 
             if isCurrent, let elapsed = formattedElapsedTime {
@@ -89,13 +107,52 @@ struct FlowProgressPills: View {
         .padding(.vertical, Spacing.xs)
         .background(
             Capsule()
-                .fill(isCurrent ? palette.accent : (isCompleted ? palette.accent.opacity(0.1) : palette.surface))
+                .fill(backgroundColor(isCurrent: isCurrent, isCompleted: isCompleted, kind: kind))
         )
-        .foregroundStyle(isCurrent ? .white : (isCompleted ? palette.accent : .primary))
+        .foregroundStyle(foregroundColor(isCurrent: isCurrent, isCompleted: isCompleted, kind: kind))
     }
 
-    private func formatStepName(_ name: String) -> String {
-        name.replacingOccurrences(of: "-", with: " ")
+    private func stepKind(_ value: String) -> PillKind {
+        if value.hasPrefix("ops:") { return .ops }
+        if value == "[branch]" { return .branch }
+        if value == "[fork]" { return .fork }
+        return .step
+    }
+
+    private func displayStepName(_ value: String) -> String {
+        let base: String
+        if value.hasPrefix("ops:") {
+            base = value.split(separator: ":", maxSplits: 1)[1].trimmingCharacters(in: .whitespaces)
+        } else {
+            base = value
+        }
+        return base.replacingOccurrences(of: "-", with: " ")
+    }
+
+    private func backgroundColor(isCurrent: Bool, isCompleted: Bool, kind: PillKind) -> Color {
+        switch kind {
+        case .ops:
+            if isCurrent { return Color.statusInfo }
+            if isCompleted { return Color.statusInfo.opacity(0.14) }
+            return palette.surface
+        case .step, .branch, .fork:
+            if isCurrent { return palette.accent }
+            if isCompleted { return palette.accent.opacity(0.1) }
+            return palette.surface
+        }
+    }
+
+    private func foregroundColor(isCurrent: Bool, isCompleted: Bool, kind: PillKind) -> Color {
+        switch kind {
+        case .ops:
+            if isCurrent { return .white }
+            if isCompleted { return Color.statusInfo }
+            return .primary
+        case .step, .branch, .fork:
+            if isCurrent { return .white }
+            if isCompleted { return palette.accent }
+            return .primary
+        }
     }
 
     private func updateElapsedTime() {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Trigger(BaseModel):
@@ -42,6 +42,27 @@ class CommitEntry(BaseModel):
     message: str
 
 
+class FlowStep(BaseModel):
+    type: str
+    name: str
+
+    @classmethod
+    def from_raw(cls, value: Any) -> "FlowStep":
+        if isinstance(value, FlowStep):
+            return value
+        if isinstance(value, dict):
+            return cls.model_validate(value)
+        if isinstance(value, str):
+            if value.startswith("ops:"):
+                return cls(type="ops", name=value.split(":", 1)[1].strip())
+            if value == "[branch]":
+                return cls(type="branch", name="branch")
+            if value == "[fork]":
+                return cls(type="fork", name="fork")
+            return cls(type="step", name=value)
+        raise TypeError(f"Unsupported flow step value: {value!r}")
+
+
 class Wave(BaseModel):
     id: str
     name: str
@@ -58,13 +79,22 @@ class Wave(BaseModel):
     remote_branch: Optional[str] = None
     commits: list[CommitEntry] = Field(default_factory=list)
     diff_stat: Optional[str] = None
-    flow_steps: list[str] = Field(default_factory=list)
+    flow_steps: list[FlowStep] = Field(default_factory=list)
     active_run: Optional[WaveRun] = None
     created_at: Optional[datetime] = None
 
     branch: Optional[str] = None
     pr_url: Optional[str] = None
     pr_state: Optional[str] = None
+
+    @field_validator("flow_steps", mode="before")
+    @classmethod
+    def _parse_flow_steps(cls, value: Any) -> list[FlowStep]:
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            return []
+        return [FlowStep.from_raw(item) for item in value]
 
 
 class AuthProviderStatus(BaseModel):

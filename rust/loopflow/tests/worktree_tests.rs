@@ -219,11 +219,7 @@ fn preserve_worktree_uses_explicit_suffix_when_provided() {
 
     let preserved =
         preserve_worktree(repo.path(), &result.path, Some("20260304_1442")).expect("preserve");
-    let dir_name = preserved
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+    let dir_name = preserved.file_name().unwrap().to_string_lossy().to_string();
 
     assert!(
         dir_name.ends_with(".20260304_1442"),

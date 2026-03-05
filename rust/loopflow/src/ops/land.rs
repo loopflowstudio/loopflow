@@ -429,8 +429,7 @@ fn rotate_worktree(
 
     // Use the branch's timestamp for the preserved directory name so it
     // matches the work it contains, not when it was archived.
-    let branch_suffix = parse_branch_name(feature_branch, None)
-        .and_then(|parts| parts.timestamp);
+    let branch_suffix = parse_branch_name(feature_branch, None).and_then(|parts| parts.timestamp);
     let preserved = preserve_worktree(main_repo, repo_root, branch_suffix.as_deref())?;
     progress.status(&format!(
         "Preserved {} → {}",

@@ -75,11 +75,6 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
             }
             FlowAction::RunOps { ops } => {
                 let colors = Colors::new();
-                let command = if ops.item.args.is_empty() {
-                    ops.item.command.clone()
-                } else {
-                    format!("{} {}", ops.item.command, ops.item.args.join(" "))
-                };
                 eprintln!(
                     "{dim}[{current}/{total}]{reset} {bold}ops:{reset} {cmd}",
                     dim = colors.dim,
@@ -87,7 +82,7 @@ fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli, repo: &Pa
                     bold = colors.bold,
                     current = index + 1,
                     total = total,
-                    cmd = command,
+                    cmd = ops.item.display_name(),
                 );
                 crate::ops::execute_flow_ops(repo, &ops.item, &NullProgress)?;
             }

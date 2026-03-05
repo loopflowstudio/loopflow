@@ -469,11 +469,7 @@ impl WaveExecutor {
                         warn!(run_id = %run.id, error = %err, "pre-ops sync failed, continuing");
                     }
 
-                    let command = if ops.item.args.is_empty() {
-                        ops.item.command.clone()
-                    } else {
-                        format!("{} {}", ops.item.command, ops.item.args.join(" "))
-                    };
+                    let command = ops.item.display_name();
                     info!(
                         run_id = %run.id,
                         command = %command,
@@ -1053,7 +1049,7 @@ impl WaveExecutor {
         // Auto-commit any changes left by the interactive step.
         let step_name = match next_action(&plan, run.step_index as usize) {
             FlowAction::WaitInteractive { step } | FlowAction::RunStep { step } => step.step.name,
-            FlowAction::RunOps { ops } => format!("ops {}", ops.item.command),
+            FlowAction::RunOps { ops } => ops.item.to_string(),
             _ => format!("step-{}", run.step_index),
         };
         let worktree = run.worktree.clone();

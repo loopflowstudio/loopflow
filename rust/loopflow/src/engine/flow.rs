@@ -58,6 +58,22 @@ pub struct OpsItem {
     pub args: Vec<String>,
 }
 
+impl OpsItem {
+    pub fn display_name(&self) -> String {
+        if self.args.is_empty() {
+            self.command.clone()
+        } else {
+            format!("{} {}", self.command, self.args.join(" "))
+        }
+    }
+}
+
+impl std::fmt::Display for OpsItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ops: {}", self.display_name())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BranchDef {
     pub paths: HashMap<String, BranchPath>,

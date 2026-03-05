@@ -43,7 +43,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             title,
             body,
         } => {
-            let _ = land(
+            land(
                 repo,
                 &LandOptions {
                     strict: *strict,
@@ -75,7 +75,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             Ok(())
         }
         OpsCommand::Pr { title, body } => {
-            let _ = create_or_update_pr(
+            create_or_update_pr(
                 repo,
                 &PrOptions {
                     title: title.clone(),
@@ -87,8 +87,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         }
         OpsCommand::Sync => {
             let base = get_default_branch(repo)?;
-            let ok = sync_main(repo, &base)?;
-            if !ok {
+            if !sync_main(repo, &base)? {
                 return Err(OpsError::Message(
                     "working tree dirty; sync aborted".to_string(),
                 ));
@@ -99,7 +98,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             create_pr,
             no_rebase,
         } => {
-            let _ = next_branch(
+            next_branch(
                 repo,
                 &NextOptions {
                     create_pr: *create_pr,
@@ -115,7 +114,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             push,
             no_add,
         } => {
-            let _ = commit_workflow(
+            commit_workflow(
                 repo,
                 &CommitOptions {
                     add: !*no_add,
@@ -141,7 +140,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         }
         OpsCommand::Release { cmd } => match cmd {
             ReleaseCommand::Run { version, target } => {
-                let _ = release_run(
+                release_run(
                     repo,
                     version.as_deref().unwrap_or("patch"),
                     target.as_deref(),
@@ -150,7 +149,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 Ok(())
             }
             ReleaseCommand::Check { target } => {
-                let _ = release_check(repo, target.as_deref())?;
+                release_check(repo, target.as_deref())?;
                 Ok(())
             }
             ReleaseCommand::Notes {
@@ -158,7 +157,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 prev_tag,
                 target,
             } => {
-                let _ = release_notes(
+                release_notes(
                     repo,
                     version,
                     prev_tag.as_deref(),
@@ -171,16 +170,16 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 release_bump(repo, version, target.as_deref(), progress)
             }
             ReleaseCommand::Tag { version, target } => {
-                let _ = release_tag(repo, version, target.as_deref())?;
+                release_tag(repo, version, target.as_deref())?;
                 Ok(())
             }
             ReleaseCommand::Status { target } => {
-                let _ = release_status(repo, target.as_deref())?;
+                release_status(repo, target.as_deref())?;
                 Ok(())
             }
         },
         OpsCommand::Ingest { wave } => {
-            let _ = ingest(repo, &IngestOptions { wave: wave.clone() }, progress)?;
+            ingest(repo, &IngestOptions { wave: wave.clone() }, progress)?;
             Ok(())
         }
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),

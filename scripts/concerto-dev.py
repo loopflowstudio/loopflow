@@ -610,11 +610,10 @@ def cmd_release() -> int:
     _copy_bundled_tools(app_dir / "MacOS", profile="release")
     (app_dir / "PkgInfo").write_text("APPL????")
 
-    # Copy SPM resource bundles (fonts, etc.) — Bundle.module looks
-    # at Bundle.main.bundleURL/<name>.bundle, which is the .app root
-    app_root = app_dir.parent
+    # Copy SPM resource bundles (fonts, etc.) into Contents/Resources/
+    # so they're inside the sealed bundle (codesign rejects files at the .app root)
     for bundle in build_dir.glob("*.bundle"):
-        shutil.copytree(bundle, app_root / bundle.name)
+        shutil.copytree(bundle, app_dir / "Resources" / bundle.name)
 
     print(f"Created dist/{app_name}.app")
 

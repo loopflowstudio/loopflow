@@ -1,4 +1,4 @@
-// LoopflowCore - Shared models and services for Concerto and Symphonia
+// LoopflowCore - Shared models and services for Concerto
 
 import Foundation
 

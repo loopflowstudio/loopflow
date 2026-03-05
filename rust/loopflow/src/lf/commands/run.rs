@@ -1,9 +1,9 @@
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
-    check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
-    seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextBreakdown,
-    ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents, StreamFormat,
-    Surface, DEFAULT_CONTEXT_BUDGET,
+    check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
+    prepare_launch_prompt, seed_rlm_env, write_prompt_log, AgentCapabilities, AgentConfig, Config,
+    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, ProcessConfig, PromptComponents,
+    StreamFormat, Surface, DEFAULT_CONTEXT_BUDGET,
 };
 use crate::lf::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -307,9 +307,13 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     if result.exit_code == 0 {
         Ok(())
     } else {
+        let log_hint = durable_log_dir(&built.repo_root)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "~/.lf/logs/".to_string());
         Err(anyhow!(
-            "agent exited with code {}. Check ~/.lf/logs/ for details.",
-            result.exit_code
+            "agent exited with code {}. Check {} for details.",
+            result.exit_code,
+            log_hint
         ))
     }
 }

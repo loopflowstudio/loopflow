@@ -109,7 +109,6 @@ fn config_feature_flags() {
         r#"
 yolo: true
 chrome: true
-push: true
 pr: true
 "#,
     );
@@ -117,7 +116,6 @@ pr: true
     let config = load_config(Some(temp.path())).unwrap().unwrap();
     assert!(config.yolo);
     assert!(config.chrome);
-    assert!(config.push);
     assert!(config.pr);
 }
 

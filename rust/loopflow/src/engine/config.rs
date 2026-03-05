@@ -203,10 +203,6 @@ pub struct Config {
     #[serde(default)]
     pub chrome: bool,
 
-    /// Auto-push after commits
-    #[serde(default)]
-    pub push: bool,
-
     /// Create PR after push
     #[serde(default)]
     pub pr: bool,
@@ -230,10 +226,6 @@ pub struct Config {
     /// Tasks that default to interactive mode
     #[serde(default)]
     pub interactive: Vec<String>,
-
-    /// Include bundled LOOPFLOW.md
-    #[serde(default = "default_true")]
-    pub include_loopflow_doc: bool,
 
     /// Include reports/, wave/, scratch/, and root .md files
     #[serde(default = "default_true")]
@@ -323,14 +315,12 @@ impl Default for Config {
             supported_harnesses: Vec::new(),
             yolo: false,
             chrome: false,
-            push: false,
             pr: false,
             land: default_land(),
             context: Vec::new(),
             exclude: Vec::new(),
             ide: IdeConfig::default(),
             interactive: Vec::new(),
-            include_loopflow_doc: true,
             lfdocs: true,
             diff: false,
             diff_files: true,
@@ -544,7 +534,6 @@ mod tests {
         assert!(config.diff_files);
         assert!(!config.diff);
         assert!(!config.chrome);
-        assert!(!config.push);
         assert!(!config.pr);
         assert_eq!(config.land, "gh");
         assert!(config.context.is_empty());

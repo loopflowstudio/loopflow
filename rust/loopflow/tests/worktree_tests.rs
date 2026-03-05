@@ -321,8 +321,61 @@ fn branch_at_main_not_detected_as_squash_merged() {
         !wt.squash_merged,
         "branch at same commit as main should not be squash-merged"
     );
+    assert!(!wt.prunable, "fresh worktree should not be prunable");
     assert!(
-        !wt.prunable,
-        "dirty worktree that hasn't diverged should not be prunable"
+        wt.fresh,
+        "worktree with no commits beyond main should be fresh"
     );
+}
+
+#[test]
+fn fresh_worktree_is_not_prunable() {
+    let repo = TestRepo::new();
+    let result = create_with_schema(repo.path(), "newwave", None, None).expect("create");
+
+    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let wt = states
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some(&result.branch))
+        .expect("should find worktree");
+
+    assert!(wt.fresh, "worktree with no commits should be fresh");
+    assert!(!wt.prunable, "fresh worktree should not be prunable");
+    assert!(!wt.dirty, "clean worktree should not be dirty");
+}
+
+#[test]
+fn fresh_dirty_worktree_is_not_prunable() {
+    let repo = TestRepo::new();
+    let result = create_with_schema(repo.path(), "wip", None, None).expect("create");
+    std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
+
+    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let wt = states
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some(&result.branch))
+        .expect("should find worktree");
+
+    assert!(wt.fresh, "no commits beyond main means fresh");
+    assert!(wt.dirty, "uncommitted changes means dirty");
+    assert!(!wt.prunable, "dirty fresh worktree must not be prunable");
+}
+
+#[test]
+fn worktree_with_commits_is_active_not_fresh() {
+    let repo = TestRepo::new();
+    let result = create_with_schema(repo.path(), "active", None, None).expect("create");
+    std::fs::write(result.path.join("feature.txt"), "work").expect("write");
+    git_stdout(&result.path, &["add", "."]);
+    git_stdout(&result.path, &["commit", "-m", "feature work"]);
+
+    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let wt = states
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some(&result.branch))
+        .expect("should find worktree");
+
+    assert!(!wt.fresh, "worktree with commits beyond main is not fresh");
+    assert!(!wt.prunable, "active worktree should not be prunable");
+    assert!(!wt.merged, "active worktree is not merged");
 }

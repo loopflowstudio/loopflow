@@ -21,6 +21,8 @@ pub struct WorktreeState {
     pub merged: bool,
     pub squash_merged: bool,
     pub prunable: bool,
+    /// No commits beyond main and not merged — a brand new worktree.
+    pub fresh: bool,
     pub dirty: bool,
     pub remote_gone: bool,
 }
@@ -339,17 +341,8 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
             .as_deref()
             .is_some_and(|b| !is_default && has_commits && squash_merged.contains(b));
         let dirty = !is_clean_ignoring_scratch(&path).unwrap_or(true);
-        let mut prunable = !is_default && (merged || squash_merged_flag || !has_commits);
-
-        // Protect shortname worktrees from pruning unless content is in main.
-        if prunable && !merged && !squash_merged_flag {
-            let is_shortname = wave_name_from_worktree_and_main(&path, repo)
-                .map(|name| !name.contains('.'))
-                .unwrap_or(false);
-            if is_shortname {
-                prunable = false;
-            }
-        }
+        let prunable = !is_default && (merged || squash_merged_flag);
+        let fresh = !is_default && !merged && !squash_merged_flag && !has_commits;
         results.push(WorktreeState {
             branch,
             path,
@@ -357,6 +350,7 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
             merged,
             squash_merged: squash_merged_flag,
             prunable,
+            fresh,
             dirty,
             remote_gone: false,
         });
@@ -417,17 +411,14 @@ pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut 
                 .is_some_and(|b| !remote_branches.contains(b));
         }
 
-        if !state.prunable {
-            if state.merged || state.squash_merged {
-                state.prunable = true;
-            } else if state.remote_gone && !state.dirty {
-                let is_shortname = wave_name_from_worktree_and_main(&state.path, repo)
-                    .map(|name| !name.contains('.'))
-                    .unwrap_or(false);
-                if !is_shortname {
-                    state.prunable = true;
-                }
-            }
+        if !state.prunable && (state.merged || state.squash_merged) {
+            state.prunable = true;
+            state.fresh = false;
+        }
+        // remote_gone on a non-fresh worktree means the PR was likely merged
+        // or the branch was deleted upstream — mark prunable.
+        if !state.prunable && !state.fresh && state.remote_gone && !state.dirty {
+            state.prunable = true;
         }
     }
 }

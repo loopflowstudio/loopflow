@@ -52,7 +52,7 @@ fn rebase_conflict_returns_error() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("rebase onto origin/main failed")),
+        matches!(result, Err(OpsError::RebaseConflict { ref onto, .. }) if onto == "origin/main"),
         "expected rebase conflict error, got: {:?}",
         result
     );

@@ -41,8 +41,8 @@ pub fn rebase_with_recovery(
             format!("conflicts: {conflict_paths}")
         })
         .unwrap_or_else(|| "manual resolution required".to_string());
-    Err(OpsError::Message(format!(
-        "rebase onto {} failed ({detail})",
-        options.onto
-    )))
+    Err(OpsError::RebaseConflict {
+        onto: options.onto.clone(),
+        detail,
+    })
 }

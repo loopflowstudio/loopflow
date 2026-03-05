@@ -4,12 +4,15 @@
 install.py local            # build and install everything
 install.py local --service  # also restart lfd service
 
-Remote releases happen via `lf release patch` → merge → auto-tag → CI.
+Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
 
 import os
 import shutil
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 
 import typer
@@ -20,17 +23,38 @@ DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
 app = typer.Typer(help="Build and install loopflow locally.")
 
 
+# --- Streaming output ---
+
+
+def _stream_process(
+    cmd: list[str],
+    label: str,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run a subprocess, streaming its output with a label prefix."""
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        text = line.decode("utf-8", errors="replace").rstrip()
+        print(f"  [{label}] {text}", flush=True)
+    proc.wait()
+    return subprocess.CompletedProcess(cmd, proc.returncode)
+
+
 # --- Build helpers ---
 
 
 def _build_wheel() -> tuple[bool, str]:
-    result = subprocess.run(
-        ["uv", "build"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0, result.stdout + result.stderr
+    typer.echo("Building wheel...")
+    result = _stream_process(["uv", "build"], "wheel", cwd=ROOT)
+    if result.returncode != 0:
+        return False, "uv build failed (see output above)"
+    return True, "Wheel built."
 
 
 def _install_wheel() -> tuple[bool, str]:
@@ -39,34 +63,37 @@ def _install_wheel() -> tuple[bool, str]:
         return False, "No wheel found in dist/"
     wheel = str(wheels[-1])
 
-    # Install into local venv (uv run lfq)
-    result = subprocess.run(
-        ["uv", "pip", "install", "--force-reinstall", wheel],
-        capture_output=True,
-        text=True,
+    typer.echo("Installing wheel into local venv...")
+    result = _stream_process(
+        ["uv", "pip", "install", "--force-reinstall", wheel], "pip"
     )
     if result.returncode != 0:
-        return False, result.stdout + result.stderr
+        return False, "uv pip install failed (see output above)"
 
-    # Install as global tool (lfq on PATH)
-    result = subprocess.run(
-        ["uv", "tool", "install", "--force", "--reinstall", wheel],
-        capture_output=True,
-        text=True,
+    typer.echo("Installing wheel as global tool...")
+    result = _stream_process(
+        ["uv", "tool", "install", "--force", "--reinstall", wheel], "tool"
     )
-    return result.returncode == 0, result.stdout + result.stderr
+    if result.returncode != 0:
+        return False, "uv tool install failed (see output above)"
+    return True, "Wheel installed."
+
+
+def _build_binaries() -> tuple[bool, str]:
+    """Cargo release build only (no install)."""
+    typer.echo("Building lf/lfd (cargo release)...")
+    result = _stream_process(
+        ["cargo", "build", "-p", "loopflow", "--release"], "cargo", cwd=ROOT
+    )
+    if result.returncode != 0:
+        return False, "cargo build failed (see output above)"
+    return True, "Cargo build succeeded."
 
 
 def _install_binaries() -> tuple[bool, str, Path | None]:
+    """Copy pre-built binaries to install dir."""
     install_path = _resolve_install_dir()
     install_path.mkdir(parents=True, exist_ok=True)
-
-    result = subprocess.run(
-        ["cargo", "build", "-p", "loopflow", "--release"],
-        cwd=ROOT,
-    )
-    if result.returncode != 0:
-        return False, "cargo build failed (see output above)", None
 
     built = ROOT / "target" / "release"
     for name in ("lf", "lfd"):
@@ -135,23 +162,28 @@ def _install_binary(src: Path, dst: Path) -> None:
             tmp.unlink(missing_ok=True)
 
 
-def _install_concerto() -> tuple[bool, str]:
+def _build_concerto() -> tuple[bool, str]:
+    """Swift release build only (no install)."""
     swift_dir = ROOT / "swift"
     if not swift_dir.exists():
         return False, f"swift directory not found: {swift_dir}"
 
-    result = subprocess.run(
-        ["swift", "build", "-c", "release"],
-        cwd=swift_dir,
+    typer.echo("Building Concerto (swift release)...")
+    result = _stream_process(
+        ["swift", "build", "-c", "release"], "swift", cwd=swift_dir
     )
     if result.returncode != 0:
         return False, "swift build -c release failed (see output above)"
+    return True, "Swift build succeeded."
 
+
+def _install_concerto() -> tuple[bool, str]:
+    """Install pre-built Concerto into /Applications."""
+    swift_dir = ROOT / "swift"
     app_name = "Loopflow Concerto"
     app_path = Path("/Applications") / f"{app_name}.app"
     app_dir = app_path / "Contents"
 
-    # Clean existing install
     if app_path.exists():
         shutil.rmtree(app_path)
 
@@ -175,6 +207,42 @@ def _install_concerto() -> tuple[bool, str]:
     return True, f"Installed {app_path}"
 
 
+# --- Parallel build runner ---
+
+
+def _run_parallel_builds() -> dict[str, tuple[bool, str]]:
+    """Run wheel, cargo, and swift builds in parallel. Returns results keyed by name."""
+    results: dict[str, tuple[bool, str]] = {}
+    lock = threading.Lock()
+
+    def _run(name: str, fn):
+        start = time.monotonic()
+        try:
+            result = fn()
+        except Exception as e:
+            result = (False, f"Exception: {e}")
+        elapsed = time.monotonic() - start
+        with lock:
+            results[name] = result
+            status = "done" if result[0] else "FAILED"
+            typer.echo(f"\n>>> {name} {status} ({elapsed:.1f}s)")
+
+    threads = [
+        threading.Thread(target=_run, args=("wheel", _build_wheel)),
+        threading.Thread(target=_run, args=("cargo", _build_binaries)),
+        threading.Thread(target=_run, args=("swift", _build_concerto)),
+    ]
+
+    typer.echo("Starting parallel builds: wheel, cargo, swift\n")
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    typer.echo("")
+    return results
+
+
 # --- Service management ---
 
 
@@ -185,11 +253,15 @@ def _restart_lfd() -> None:
     lfd_bin = shutil.which("lfd")
     if lfd_bin:
         typer.echo("Reinstalling lfd service (updates PATH)...")
-        result = subprocess.run([lfd_bin, "install"], capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            [lfd_bin, "install"], capture_output=True, text=True, timeout=15
+        )
         if result.returncode == 0:
             typer.echo("lfd service restarted.")
             return
-        typer.echo(f"lfd install failed, falling back to launchctl: {result.stderr.strip()}")
+        typer.echo(
+            f"lfd install failed, falling back to launchctl: {result.stderr.strip()}"
+        )
 
     if not plist.exists():
         typer.echo("lfd launchd plist not found, skipping restart.")
@@ -215,8 +287,8 @@ def local(
 ):
     """Build and install locally (no publish)."""
     if dry_run:
-        typer.echo("Would build wheel with uv")
-        typer.echo("Would install wheel with uv pip install")
+        typer.echo("Would build wheel, cargo, and swift in parallel")
+        typer.echo("Would install wheel with uv pip install + uv tool install")
         typer.echo("Would install lf/lfd binaries")
         typer.echo("Would install Concerto to /Applications")
         if service:
@@ -225,19 +297,25 @@ def local(
             typer.echo("Would NOT install/restart lfd service (pass --service to enable)")
         return
 
-    typer.echo("Building wheel...")
-    ok, output = _build_wheel()
-    if not ok:
-        typer.echo(f"Build failed:\n{output}", err=True)
-        raise typer.Exit(code=1)
-    typer.echo("Build succeeded.")
+    total_start = time.monotonic()
 
-    typer.echo("Installing locally...")
+    # Phase 1: parallel builds
+    build_results = _run_parallel_builds()
+
+    failed = [name for name, (ok, _) in build_results.items() if not ok]
+    if failed:
+        typer.echo(f"Builds failed: {', '.join(failed)}", err=True)
+        for name in failed:
+            typer.echo(f"  {name}: {build_results[name][1]}", err=True)
+        raise typer.Exit(code=1)
+
+    # Phase 2: sequential installs (fast, just copying files)
+    typer.echo("Installing wheel...")
     ok, output = _install_wheel()
     if not ok:
-        typer.echo(f"Install failed:\n{output}", err=True)
+        typer.echo(f"Wheel install failed:\n{output}", err=True)
         raise typer.Exit(code=1)
-    typer.echo("Installed.")
+    typer.echo(output)
 
     typer.echo("Installing lf/lfd binaries...")
     ok, output, install_path = _install_binaries()
@@ -260,7 +338,7 @@ def local(
                     err=True,
                 )
 
-    typer.echo("Building and installing Concerto...")
+    typer.echo("Installing Concerto...")
     ok, output = _install_concerto()
     if not ok:
         typer.echo(f"Concerto install failed:\n{output}", err=True)
@@ -271,6 +349,9 @@ def local(
         _restart_lfd()
     else:
         typer.echo("Skipping lfd service install/restart. Pass --service to enable.")
+
+    elapsed = time.monotonic() - total_start
+    typer.echo(f"\nTotal install time: {elapsed:.1f}s")
 
 
 if __name__ == "__main__":

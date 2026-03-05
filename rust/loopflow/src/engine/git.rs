@@ -519,6 +519,16 @@ pub fn land(
     })
 }
 
+/// List file paths changed between two commits.
+pub fn diff_names(repo: &Path, old: &str, new: &str) -> Result<Vec<PathBuf>, GitError> {
+    let output = git_stdout(repo, &["diff", "--name-only", old, new])?;
+    Ok(output
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(PathBuf::from)
+        .collect())
+}
+
 /// Hash the contents of areas in a repo using git ls-tree.
 ///
 /// Returns a hex-encoded SHA-256 digest of the `git ls-tree` output for the

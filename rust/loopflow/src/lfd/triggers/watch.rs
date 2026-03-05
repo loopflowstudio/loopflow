@@ -129,7 +129,10 @@ fn paths_match_areas(areas: &[String], paths: &[&Path]) -> bool {
         .any(|path| areas.iter().any(|area| path.starts_with(area)))
 }
 
-fn check_repo_trigger(wave: &Wave, trigger: &Trigger) -> Result<WatchCheck, crate::engine::error::GitError> {
+fn check_repo_trigger(
+    wave: &Wave,
+    trigger: &Trigger,
+) -> Result<WatchCheck, crate::engine::error::GitError> {
     use crate::engine::git;
 
     let repo = Path::new(wave.repo());

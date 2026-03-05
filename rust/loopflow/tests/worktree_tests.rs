@@ -321,11 +321,11 @@ fn branch_at_main_not_detected_as_squash_merged() {
         !wt.squash_merged,
         "branch at same commit as main should not be squash-merged"
     );
+    assert!(!wt.prunable, "fresh worktree should not be prunable");
     assert!(
-        !wt.prunable,
-        "fresh worktree should not be prunable"
+        wt.fresh,
+        "worktree with no commits beyond main should be fresh"
     );
-    assert!(wt.fresh, "worktree with no commits beyond main should be fresh");
 }
 
 #[test]

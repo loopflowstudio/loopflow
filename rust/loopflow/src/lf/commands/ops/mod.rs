@@ -176,7 +176,14 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
 
 fn open_pr(title: Option<String>, body: Option<String>, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = match create_or_update_pr(&repo_root, &PrOptions { title: title.clone(), body: body.clone() }, progress) {
+    let result = match create_or_update_pr(
+        &repo_root,
+        &PrOptions {
+            title: title.clone(),
+            body: body.clone(),
+        },
+        progress,
+    ) {
         Ok(result) => result,
         Err(OpsError::RebaseConflict { onto, detail }) => {
             let context = format!(

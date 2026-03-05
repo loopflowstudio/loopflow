@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::command::run_command;
 use crate::engine::config::{load_config_or_default, Config, ReleaseTargetConfig};
 use crate::engine::git::{delete_local_branch, get_default_branch, worktree_remove};
-use crate::engine::worktrees::{create_with_schema, main_repo_root};
+use crate::engine::worktrees::{create_with_schema_synced, main_repo_root};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{land, LandOptions};
@@ -321,7 +321,7 @@ pub fn release_run(
     };
 
     progress.status(&format!("Creating release worktree {wt_name}..."));
-    let wt = create_with_schema(&main_repo, &wt_name, Some(&main_branch), None)?;
+    let wt = create_with_schema_synced(&main_repo, &wt_name, Some(&main_branch), None)?;
     let wt_path = wt.path;
     let wt_branch = wt.branch;
 

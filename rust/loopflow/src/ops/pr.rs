@@ -3,6 +3,9 @@ use std::process::Command;
 
 use serde::Deserialize;
 
+use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::builtins::get_builtin_ops_prompt;
+use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, get_default_branch, sync_main};
 use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
@@ -13,8 +16,8 @@ use crate::ops::util::{command_exists, stderr_from_output};
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
-    pub title: String,
-    pub body: String,
+    pub title: Option<String>,
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +33,12 @@ pub struct PrInfo {
     pub number: u64,
     pub state: String,
     pub branch: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PrCopy {
+    pub title: String,
+    pub body: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,14 +85,9 @@ pub fn create_or_update_pr(
         )?;
     }
 
-    let title = options.title.trim();
-    let body = options.body.trim();
-
-    if title.is_empty() {
-        return Err(OpsError::Message(
-            "title required — use `lf pr` to generate it.".to_string(),
-        ));
-    }
+    let copy = resolve_pr_copy(repo, options, progress)?;
+    let title = copy.title.trim();
+    let body = copy.body.trim();
 
     if let Some(pr) = find_open_pr(repo)? {
         progress.status("Updating PR...");
@@ -113,6 +117,89 @@ pub fn create_or_update_pr(
             updated: false,
         })
     }
+}
+
+fn resolve_pr_copy(
+    repo: &Path,
+    options: &PrOptions,
+    progress: &impl Progress,
+) -> OpsResult<PrCopy> {
+    if let Some(title) = options
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(PrCopy {
+            title: title.to_string(),
+            body: options.body.clone().unwrap_or_default(),
+        });
+    }
+
+    let mut generated = generate_pr_copy(repo, progress)?;
+    if let Some(body_override) = options.body.as_deref() {
+        generated.body = body_override.to_string();
+    }
+    Ok(generated)
+}
+
+pub fn generate_pr_copy(repo: &Path, progress: &impl Progress) -> OpsResult<PrCopy> {
+    let template = get_builtin_ops_prompt("pr_message")
+        .ok_or_else(|| OpsError::Message("builtin pr_message prompt not found".to_string()))?;
+    let main_repo = resolve_main_repo(repo);
+    let base_branch = get_default_branch(&main_repo)?;
+    let log = git_stdout(
+        repo,
+        &["log", &format!("origin/{base_branch}..HEAD"), "--oneline"],
+    )?;
+    let stat = git_stdout(
+        repo,
+        &["diff", &format!("origin/{base_branch}...HEAD"), "--stat"],
+    )?;
+    let diff = git_stdout(repo, &["diff", &format!("origin/{base_branch}...HEAD")])?;
+    let diff = truncate_chars(&diff, 20_000);
+
+    let prompt = format!(
+        "{template}\n\n## Base branch\n{base_branch}\n\n## Commits\n```\n{log}\n```\n\n## Diff stat\n```\n{stat}\n```\n\n## Unified diff\n```diff\n{diff}\n```\n\nReturn exactly one JSON object with this schema:\n{{\"title\":\"...\",\"body\":\"...\"}}\nNo markdown fences. No explanation."
+    );
+
+    let config = load_config_or_default(Some(repo));
+    let agent = config
+        .agent
+        .clone()
+        .unwrap_or_else(|| "claude:opus".to_string());
+    progress.status("Generating PR title/body...");
+
+    let launch = AgentConfig {
+        task_prompt: prompt,
+        agent: Some(agent),
+        cwd: Some(repo.to_path_buf()),
+        skip_permissions: config.yolo,
+        ..Default::default()
+    };
+    let process = ProcessConfig {
+        auto: true,
+        stream: false,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
+    };
+
+    let result = launch_agent(&launch, &process, &capabilities)
+        .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
+    if result.exit_code != 0 {
+        return Err(OpsError::Message(format!(
+            "PR copy generation failed (exit {}): {}",
+            result.exit_code,
+            result.stderr.trim()
+        )));
+    }
+
+    let combined = format!("{}\n{}", result.stdout, result.stderr);
+    parse_generated_pr_copy(&combined).ok_or_else(|| {
+        OpsError::Message("failed to parse generated PR copy from agent output".to_string())
+    })
 }
 
 pub fn gh_available() -> bool {
@@ -298,4 +385,68 @@ fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
 
 fn open_url(url: &str) {
     crate::engine::platform::open_url(url);
+}
+
+#[derive(Debug, Deserialize)]
+struct GeneratedPrCopy {
+    title: String,
+    body: String,
+}
+
+fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {
+    parse_json_copy(raw)
+        .or_else(|| extract_fenced_json(raw).and_then(parse_json_copy))
+        .or_else(|| extract_json_object(raw).and_then(parse_json_copy))
+}
+
+fn parse_json_copy(raw: &str) -> Option<PrCopy> {
+    let parsed: GeneratedPrCopy = serde_json::from_str(raw.trim()).ok()?;
+    let title = parsed.title.trim().to_string();
+    if title.is_empty() {
+        return None;
+    }
+    Some(PrCopy {
+        title,
+        body: parsed.body,
+    })
+}
+
+fn extract_fenced_json(raw: &str) -> Option<&str> {
+    let start = raw.find("```json")?;
+    let rest = &raw[start + "```json".len()..];
+    let end = rest.find("```")?;
+    Some(rest[..end].trim())
+}
+
+fn extract_json_object(raw: &str) -> Option<&str> {
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    Some(&raw[start..=end])
+}
+
+fn git_stdout(repo: &Path, args: &[&str]) -> OpsResult<String> {
+    let output = Command::new("git").args(args).current_dir(repo).output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("git {}", args.join(" ")),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut iter = text.char_indices();
+    if iter.nth(max_chars).is_none() {
+        return text.to_string();
+    }
+    let end = text
+        .char_indices()
+        .nth(max_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    format!("{}\n\n[diff truncated]", &text[..end])
 }

@@ -1,6 +1,6 @@
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::worktrees::{
-    create_with_schema, list_worktrees, main_repo_root, wave_name_from_worktree,
+    create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
     wave_name_from_worktree_and_main, worktree_path,
 };
 use crate::lf::commands::util::find_repo_root;
@@ -48,7 +48,7 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             },
             &progress,
         ),
-        OpsCommand::Pr { title, body } => open_pr(title, body, &progress),
+        OpsCommand::Pr { title, body } => open_pr(title.clone(), body.clone(), &progress),
         OpsCommand::Sync => sync_current(),
         OpsCommand::Next {
             create_pr,
@@ -147,16 +147,9 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn open_pr(title: &str, body: &str, progress: &impl Progress) -> Result<()> {
+fn open_pr(title: Option<String>, body: Option<String>, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(
-        &repo_root,
-        &PrOptions {
-            title: title.to_string(),
-            body: body.to_string(),
-        },
-        progress,
-    )?;
+    let result = create_or_update_pr(&repo_root, &PrOptions { title, body }, progress)?;
     println!("{}", result.url);
     Ok(())
 }
@@ -368,7 +361,8 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
         .ok()
         .flatten();
     let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-    let result = create_with_schema(&main_repo, name, base_branch.as_deref(), branch_config)?;
+    let result =
+        create_with_schema_synced(&main_repo, name, base_branch.as_deref(), branch_config)?;
 
     println!("Created worktree: {}", result.path.display());
     if result.branch != name {
@@ -861,7 +855,8 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 
 const SHELL_INIT_ZSH: &str = r#"# loopflow shell integration for zsh
 #
-# Enables directory switching after `lf ops wt create`.
+# Enables directory switching after commands that emit shell directives
+# (for example `lf ops wt create`, `lf ops wt switch`, `lf ops land`).
 
 if command -v lf >/dev/null 2>&1; then
     lf() {
@@ -885,7 +880,8 @@ fi
 
 const SHELL_INIT_BASH: &str = r#"# loopflow shell integration for bash
 #
-# Enables directory switching after `lf ops wt create`.
+# Enables directory switching after commands that emit shell directives
+# (for example `lf ops wt create`, `lf ops wt switch`, `lf ops land`).
 
 if command -v lf >/dev/null 2>&1; then
     lf() {

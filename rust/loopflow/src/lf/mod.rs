@@ -193,9 +193,9 @@ pub enum OpsCommand {
     /// Create or update a PR
     Pr {
         #[arg(long = "title")]
-        title: String,
+        title: Option<String>,
         #[arg(long = "body")]
-        body: String,
+        body: Option<String>,
     },
     /// Update local main to match origin
     Sync,

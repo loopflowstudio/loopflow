@@ -2,10 +2,25 @@ use std::process::Command;
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
-    create_with_schema, list_worktrees, list_worktrees_local, preserve_worktree,
-    wave_name_from_worktree_and_main,
+    create_with_schema, create_with_schema_synced, list_worktrees, list_worktrees_local,
+    preserve_worktree, wave_name_from_worktree_and_main,
 };
 use loopflow_test_support::TestRepo;
+
+fn git_stdout(repo: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .expect("git command should run");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
 
 #[test]
 fn worktree_add_creates_directory() {
@@ -72,6 +87,67 @@ fn worktree_move_preserves_content() {
     assert!(!result.path.exists());
     assert!(new_path.exists());
     assert!(new_path.join("note.txt").exists());
+}
+
+#[test]
+fn create_with_schema_synced_updates_main_before_creation() {
+    let repo = TestRepo::new();
+    let original_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
+
+    let clone_dir = tempfile::TempDir::new().expect("temp clone dir");
+    let status = Command::new("git")
+        .args([
+            "clone",
+            repo.bare_path().to_str().expect("remote path"),
+            clone_dir.path().to_str().expect("clone path"),
+        ])
+        .status()
+        .expect("clone remote");
+    assert!(status.success(), "clone should succeed");
+    let status = Command::new("git")
+        .args(["config", "user.email", "test@test.com"])
+        .current_dir(clone_dir.path())
+        .status()
+        .expect("set email");
+    assert!(status.success(), "git config user.email should succeed");
+    let status = Command::new("git")
+        .args(["config", "user.name", "test"])
+        .current_dir(clone_dir.path())
+        .status()
+        .expect("set name");
+    assert!(status.success(), "git config user.name should succeed");
+    std::fs::write(clone_dir.path().join("remote.txt"), "remote update").expect("write file");
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(clone_dir.path())
+        .status()
+        .expect("git add");
+    assert!(status.success(), "git add should succeed");
+    let status = Command::new("git")
+        .args(["commit", "-m", "remote update"])
+        .current_dir(clone_dir.path())
+        .status()
+        .expect("git commit");
+    assert!(status.success(), "git commit should succeed");
+    let status = Command::new("git")
+        .args(["push", "origin", "main"])
+        .current_dir(clone_dir.path())
+        .status()
+        .expect("git push");
+    assert!(status.success(), "git push should succeed");
+
+    let _ = create_with_schema_synced(repo.path(), "sync-check", None, None).expect("create");
+
+    let updated_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
+    let origin_head = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
+    assert_ne!(
+        original_head, updated_head,
+        "main head should advance after sync"
+    );
+    assert_eq!(
+        updated_head, origin_head,
+        "main should be reset to origin/main before worktree creation"
+    );
 }
 
 #[test]

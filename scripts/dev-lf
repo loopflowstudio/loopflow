@@ -16,8 +16,8 @@ echo "running: $REPO/target/debug/lf $*" >&2
 # dev-lf runs as a child process so it can't change the parent shell's cwd,
 # but it prints the directive so the user can copy-paste.
 directive_file="$(mktemp)"
-LOOPFLOW_DIRECTIVE_FILE="$directive_file" "$REPO/target/debug/lf" "$@"
-exit_code=$?
+exit_code=0
+LOOPFLOW_DIRECTIVE_FILE="$directive_file" "$REPO/target/debug/lf" "$@" || exit_code=$?
 
 if [[ -s "$directive_file" ]]; then
     while IFS= read -r line; do

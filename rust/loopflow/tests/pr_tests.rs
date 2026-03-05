@@ -17,6 +17,10 @@ fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
 }
 
+fn claude_script() -> &'static str {
+    "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
+}
+
 fn write_gh_script_reject_base(expected_reject: &str) -> String {
     format!(
         "#!/bin/sh\ncase \"$1 $2\" in\n  'pr list')\n    echo '[]'; exit 0;;\n  'pr diff') exit 1;;\n  'pr create')\n    base=\"\"\n    while [ \"$#\" -gt 0 ]; do\n      if [ \"$1\" = \"--base\" ]; then\n        shift\n        base=\"$1\"\n      fi\n      shift\n    done\n    if [ \"$base\" = \"{expected_reject}\" ]; then\n      echo \"base branch matches head\" >&2\n      exit 1\n    fi\n    echo 'https://example.com/pr/1'\n    exit 0;;\n  'pr edit') exit 0;;\n  'pr ready') exit 0;;\n  'pr view') echo 'OPEN'; exit 0;;\nesac\nexit 0\n"
@@ -33,7 +37,11 @@ fn push_branch(repo: &TestRepo, name: &str) {
 #[test]
 fn pr_create_calls_gh() {
     let gh_script = write_gh_script("[]", None);
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("open", noop_script())]);
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("open", noop_script()),
+        ("claude", claude_script()),
+    ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");
@@ -41,8 +49,8 @@ fn pr_create_calls_gh() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            title: "test title".to_string(),
-            body: "test body".to_string(),
+            title: Some("test title".to_string()),
+            body: Some("test body".to_string()),
         },
         &NullProgress,
     )
@@ -58,7 +66,11 @@ fn pr_update_refreshes_body() {
         r#"[{"url":"https://example.com/pr/1","state":"OPEN","isDraft":false,"number":1}]"#,
         Some("diff"),
     );
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("open", noop_script())]);
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("open", noop_script()),
+        ("claude", claude_script()),
+    ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");
@@ -66,8 +78,8 @@ fn pr_update_refreshes_body() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            title: "updated title".to_string(),
-            body: "updated body".to_string(),
+            title: Some("updated title".to_string()),
+            body: Some("updated body".to_string()),
         },
         &NullProgress,
     )
@@ -80,7 +92,11 @@ fn pr_update_refreshes_body() {
 #[test]
 fn pr_create_uses_default_base_when_upstream_matches_head() {
     let gh_script = write_gh_script_reject_base("feature");
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("open", noop_script())]);
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("open", noop_script()),
+        ("claude", claude_script()),
+    ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");
@@ -88,8 +104,8 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            title: "test title".to_string(),
-            body: "test body".to_string(),
+            title: Some("test title".to_string()),
+            body: Some("test body".to_string()),
         },
         &NullProgress,
     )
@@ -115,9 +131,13 @@ fn current_pr_surfaces_gh_list_errors() {
 }
 
 #[test]
-fn pr_requires_title() {
+fn pr_auto_generates_title_when_missing() {
     let gh_script = write_gh_script("[]", None);
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("open", noop_script())]);
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("open", noop_script()),
+        ("claude", claude_script()),
+    ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     push_branch(&repo, "feature");
@@ -125,14 +145,14 @@ fn pr_requires_title() {
     let result = create_or_update_pr(
         repo.path(),
         &PrOptions {
-            title: "".to_string(),
-            body: "some body".to_string(),
+            title: None,
+            body: Some("some body".to_string()),
         },
         &NullProgress,
     );
 
-    assert!(matches!(
-        result,
-        Err(OpsError::Message(message)) if message.contains("title required")
-    ));
+    let Ok(result) = result else {
+        panic!("expected auto-generated title to succeed");
+    };
+    assert!(result.created);
 }

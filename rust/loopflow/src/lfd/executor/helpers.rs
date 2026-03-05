@@ -21,7 +21,7 @@ use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::write_prompt_log;
 use crate::engine::prompt::Surface;
 use crate::engine::worktrees::{
-    branch_exists, create_with_schema, worktree_path as wave_worktree_path,
+    branch_exists, create_with_schema_synced, worktree_path as wave_worktree_path,
 };
 
 use crate::engine::launch::{prepare_launch_prompt, LaunchPromptInput};
@@ -201,7 +201,7 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
 
     let config = load_config(Some(main_repo)).ok().flatten();
     let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-    let result = create_with_schema(main_repo, wave_name, None, branch_config)?;
+    let result = create_with_schema_synced(main_repo, wave_name, None, branch_config)?;
     Ok((result.path.to_string_lossy().to_string(), result.branch))
 }
 
@@ -251,7 +251,7 @@ pub fn create_run_worktree(
     } else {
         let config = load_config(Some(main_repo)).ok().flatten();
         let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-        let result = create_with_schema(main_repo, wave_name, None, branch_config)?;
+        let result = create_with_schema_synced(main_repo, wave_name, None, branch_config)?;
         result.branch
     };
 

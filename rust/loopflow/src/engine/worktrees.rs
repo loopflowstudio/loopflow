@@ -2,7 +2,7 @@ use crate::engine::config::BranchNameConfig;
 use crate::engine::error::GitError;
 use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
-    is_squash_merged, rev_parse, worktree_add, worktree_move, WorktreeBranch,
+    is_squash_merged, rev_parse, sync_main, worktree_add, worktree_move, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, generate_timestamp, wave_name_from_branch};
 use crate::lfd::security::sanitize_fs_component;
@@ -445,6 +445,31 @@ pub fn create_with_schema(
     base: Option<&str>,
     branch_config: Option<&BranchNameConfig>,
 ) -> Result<CreateWorktreeResult, GitError> {
+    create_with_schema_internal(repo, short_name, base, branch_config, false)
+}
+
+pub fn create_with_schema_synced(
+    repo: &Path,
+    short_name: &str,
+    base: Option<&str>,
+    branch_config: Option<&BranchNameConfig>,
+) -> Result<CreateWorktreeResult, GitError> {
+    create_with_schema_internal(repo, short_name, base, branch_config, true)
+}
+
+fn create_with_schema_internal(
+    repo: &Path,
+    short_name: &str,
+    base: Option<&str>,
+    branch_config: Option<&BranchNameConfig>,
+    sync_default_base: bool,
+) -> Result<CreateWorktreeResult, GitError> {
+    if sync_default_base {
+        if let Ok(default_branch) = get_default_branch(repo) {
+            let _ = sync_main(repo, &default_branch);
+        }
+    }
+
     let remote_branch = format!("origin/{short_name}");
     let has_remote_branch = rev_parse(repo, &remote_branch).is_ok();
     let branch_name = if has_remote_branch {

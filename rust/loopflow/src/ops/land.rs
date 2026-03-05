@@ -13,6 +13,7 @@ use crate::engine::worktrees::{
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::pr::generate_pr_copy;
 
 use crate::ops::progress::Progress;
 
@@ -48,9 +49,9 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
     prepare_land(&repo_root, options, progress)?;
     let main_branch = rebase_land(&repo_root, &main_repo, progress)?;
+    let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
     clear_scratch(&repo_root, progress)?;
 
     if options.local {
@@ -84,6 +85,10 @@ fn resolve_pr_copy(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<(Option<String>, Option<String>)> {
+    if options.local {
+        return Ok((options.pr_title.clone(), options.pr_body.clone()));
+    }
+
     let mut pr_title = options.pr_title.clone();
     let mut pr_body = options.pr_body.clone();
 
@@ -97,8 +102,14 @@ fn resolve_pr_copy(
         if pr_body.is_none() {
             pr_body = Some(body);
         }
+        return Ok((pr_title, pr_body));
     }
 
+    let generated = generate_pr_copy(repo_root, progress)?;
+    pr_title = Some(generated.title);
+    if pr_body.is_none() {
+        pr_body = Some(generated.body);
+    }
     Ok((pr_title, pr_body))
 }
 
@@ -126,7 +137,7 @@ fn read_cached_pr_copy(
             return Ok(None);
         }
     };
-    if !is_ancestor(repo_root, &copied_for)? {
+    if !is_recent_ancestor(repo_root, &copied_for, 1)? {
         progress.status("Ignoring cached PR copy: branch changed since gate output");
         return Ok(None);
     }
@@ -135,15 +146,22 @@ fn read_cached_pr_copy(
     Ok(Some((title, body)))
 }
 
-/// Check if `commit` is an ancestor of HEAD. This is more tolerant than an
-/// exact SHA match — it accepts the case where the flow runner committed
-/// gate's output (moving HEAD one commit past the pr-copy-ref).
-fn is_ancestor(repo_root: &Path, commit: &str) -> OpsResult<bool> {
-    let status = Command::new("git")
-        .args(["merge-base", "--is-ancestor", commit, "HEAD"])
+/// Check if HEAD is no more than `max_ahead` commits ahead of `commit`.
+/// This tolerates one bookkeeping commit after gate output while still
+/// forcing regeneration if substantive commits were added later.
+fn is_recent_ancestor(repo_root: &Path, commit: &str, max_ahead: u32) -> OpsResult<bool> {
+    let output = Command::new("git")
+        .args(["rev-list", "--count", &format!("{commit}..HEAD")])
         .current_dir(repo_root)
-        .status()?;
-    Ok(status.success())
+        .output()?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let ahead = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .unwrap_or(u32::MAX);
+    Ok(ahead <= max_ahead)
 }
 
 fn prepare_land(
@@ -223,8 +241,8 @@ fn ensure_pr(
             let _ = crate::ops::pr::create_or_update_pr(
                 repo_root,
                 &crate::ops::pr::PrOptions {
-                    title: title.to_string(),
-                    body: body.to_string(),
+                    title: Some(title.to_string()),
+                    body: Some(body.to_string()),
                 },
                 progress,
             )?;

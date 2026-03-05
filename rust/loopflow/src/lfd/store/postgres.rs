@@ -123,7 +123,7 @@ impl PostgresStore {
     }
 
     async fn migrate_plaintext_provider_tokens(&self) -> StoreResult<()> {
-        self.with_client(|client| async move {
+        self.with_client(|mut client| async move {
             let rows = client
                 .query(
                     "SELECT provider, access_token, refresh_token
@@ -136,6 +136,7 @@ impl PostgresStore {
                 return Ok(());
             }
 
+            let tx = client.transaction().await?;
             for row in rows {
                 let provider: String = row.get(0);
                 let access_token: String = row.get(1);
@@ -152,8 +153,7 @@ impl PostgresStore {
                             "failed to encrypt existing refresh token for provider '{provider}': {error}"
                         ))
                     })?;
-                client
-                    .execute(
+                tx.execute(
                         "UPDATE provider_tokens
                          SET access_token = $1,
                              refresh_token = $2,
@@ -163,6 +163,7 @@ impl PostgresStore {
                     )
                     .await?;
             }
+            tx.commit().await?;
             Ok(())
         })
         .await

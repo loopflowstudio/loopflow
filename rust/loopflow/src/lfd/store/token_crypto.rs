@@ -215,7 +215,7 @@ fn store_key_in_secret_tool(encoded: &str) -> Result<bool, TokenCryptoError> {
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
-            .write_all(format!("{encoded}\n").as_bytes())
+            .write_all(encoded.as_bytes())
             .map_err(TokenCryptoError::Io)?;
     }
 
@@ -251,7 +251,7 @@ fn store_key_in_file(encoded: &str) -> Result<(), TokenCryptoError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    write_with_private_permissions(&path, format!("{encoded}\n").as_bytes())?;
+    write_with_private_permissions(&path, encoded.as_bytes())?;
     Ok(())
 }
 

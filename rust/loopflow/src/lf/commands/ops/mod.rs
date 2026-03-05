@@ -133,14 +133,15 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let result = land(&repo_root, options, progress)?;
 
-    match result.rotation {
-        Some(RotationResult::Advanced { new_path, .. }) => {
-            let _ = write_shell_directive(&format!("cd {}", new_path.display()));
+    let cd_target = match &result.rotation {
+        Some(RotationResult::Advanced { new_path, .. }) => Some(new_path.clone()),
+        Some(RotationResult::Complete { .. }) => Some(main_repo),
+        None => None,
+    };
+    if let Some(target) = cd_target {
+        if !write_shell_directive(&format!("cd {}", target.display()))? {
+            println!("cd {}", target.display());
         }
-        Some(RotationResult::Complete { .. }) => {
-            let _ = write_shell_directive(&format!("cd {}", main_repo.display()));
-        }
-        None => {}
     }
 
     Ok(())

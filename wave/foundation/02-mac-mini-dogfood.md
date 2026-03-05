@@ -1,4 +1,4 @@
-# 03: Mac Mini Dogfood Lane
+# 02: Mac Mini Dogfood Lane
 
 **Finish line:** Remote behavior parity proven on a native host (launchd), not only Docker-on-EC2.
 

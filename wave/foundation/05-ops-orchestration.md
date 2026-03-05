@@ -12,6 +12,10 @@ Design doc: `5e2ebef6` deleted agent-invocation code from ops. This sprint resto
 
 Each phase of a procedure should be safe to re-run. Don't build state-inspection code to figure out where a previous attempt left off — make tag creation tolerate existing tags, make publish tolerate already-published versions, make PR creation tolerate existing PRs.
 
+## Prior work
+
+`release_tag` idempotency is now tested: same-commit re-tag succeeds, different-commit re-tag fails. Test helpers `git_output` and `git_output_bare` verify both local and remote state. Gap: `tag_and_push_ref` with a non-HEAD `target_ref` (used by `release_run` when tagging a merged commit) is exercised by the full flow but not unit-tested in isolation.
+
 ## Items
 
 ### OpsItem in flows

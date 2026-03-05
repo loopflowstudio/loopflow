@@ -21,7 +21,7 @@ const ADDITIVE_KEYS: &[&str] = &[
 ];
 
 /// Token budgets for prompt sections.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BudgetConfig {
     #[serde(default = "default_area_budget")]
     pub area: usize,
@@ -39,6 +39,16 @@ fn default_docs_budget() -> usize {
 }
 fn default_diff_budget() -> usize {
     20000
+}
+
+impl Default for BudgetConfig {
+    fn default() -> Self {
+        Self {
+            area: default_area_budget(),
+            docs: default_docs_budget(),
+            diff: default_diff_budget(),
+        }
+    }
 }
 
 /// Summary configuration for a specific path.
@@ -564,12 +574,10 @@ mod tests {
 
     #[test]
     fn default_budget_config() {
-        // Note: Default trait gives zeros, serde deserialize gives proper defaults
         let budgets = BudgetConfig::default();
-        // Default trait uses 0, serde uses default functions
-        assert_eq!(budgets.area, 0);
-        assert_eq!(budgets.docs, 0);
-        assert_eq!(budgets.diff, 0);
+        assert_eq!(budgets.area, 50000);
+        assert_eq!(budgets.docs, 30000);
+        assert_eq!(budgets.diff, 20000);
     }
 
     #[test]

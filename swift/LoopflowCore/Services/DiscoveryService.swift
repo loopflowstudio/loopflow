@@ -31,6 +31,8 @@ public enum DiscoveryServiceError: LocalizedError {
     }
 }
 
+// SAFETY: DiscoveryService stores immutable dependencies and delegates
+// concurrency to URLSession, which is thread-safe.
 public final class DiscoveryService: @unchecked Sendable {
     private let authService: StudioAuthTokenProvider
     private let baseURL: URL

@@ -103,6 +103,7 @@ private struct StubResponse {
     let body: Data
 }
 
+// SAFETY: lock-guarded test recorder; all mutation is serialized via NSLock.
 private final class TimeoutRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var requestTimeout: TimeInterval?
@@ -147,6 +148,7 @@ private func makeService(
     )
 }
 
+// SAFETY: static handler access is synchronized with NSLock for test isolation.
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var _handler: (@Sendable (URLRequest) throws -> StubResponse)?

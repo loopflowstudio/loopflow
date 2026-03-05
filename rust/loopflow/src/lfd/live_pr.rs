@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use secrecy::ExposeSecret;
 use time::OffsetDateTime;
 
 use crate::lfd::config::GitHubConfig;
@@ -64,8 +65,8 @@ pub async fn build_live_pr_snapshot(
     if !targets.is_empty() {
         let token = github_config
             .token
-            .as_deref()
-            .map(str::trim)
+            .as_ref()
+            .map(|token| token.expose_secret().trim())
             .unwrap_or_default();
         if token.is_empty() {
             stale_keys.extend(targets.iter().cloned());

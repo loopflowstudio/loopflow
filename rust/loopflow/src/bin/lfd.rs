@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ipnet::IpNet;
+use secrecy::ExposeSecret;
 use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -262,7 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Err(err) = loopflow::lfd::http::routes::hooks::poll_all_waves_ci(
             &store,
             &event_hub,
-            &token,
+            token.expose_secret(),
             &ci_failure_cache,
         )
         .await

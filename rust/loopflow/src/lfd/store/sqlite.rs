@@ -18,6 +18,7 @@ use crate::lfd::store::rows::{
     map_repo_edge_row, map_repo_row, map_summary_row, map_trigger_row, map_wave_row,
     map_wave_run_row, now_unix, serialize_pr,
 };
+use crate::lfd::store::token_crypto;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SessionFilters, StoreError, StoreResult};
 use crate::lfd::types::{
     ActivationLog, AgentRun, AgentStatus, ChatMemoryBlock, ChatMessage, Chord,
@@ -28,6 +29,108 @@ use crate::lfd::types::{
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+}
+
+fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
+    let mut scan = conn.prepare(
+        "SELECT provider, access_token, refresh_token
+         FROM provider_tokens
+         WHERE encrypted = 0",
+    )?;
+    let rows = scan.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    let mut pending = Vec::new();
+    for row in rows {
+        pending.push(row?);
+    }
+    drop(scan);
+
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn.transaction()?;
+    for (provider, access_token, refresh_token) in pending {
+        let encrypted_access = token_crypto::encrypt_token(&access_token).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to encrypt existing access token for provider '{provider}': {error}"
+            ))
+        })?;
+        let encrypted_refresh =
+            token_crypto::encrypt_optional(refresh_token.as_deref()).map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt existing refresh token for provider '{provider}': {error}"
+                ))
+            })?;
+        tx.execute(
+            "UPDATE provider_tokens
+             SET access_token = ?1,
+                 refresh_token = ?2,
+                 encrypted = 1
+             WHERE provider = ?3",
+            params![encrypted_access, encrypted_refresh, provider],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+type TokenRow = (
+    String,
+    String,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    i64,
+    String,
+    bool,
+);
+
+fn read_token_row(row: &rusqlite::Row) -> rusqlite::Result<TokenRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+    ))
+}
+
+fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
+    let (provider, access_token, refresh_token, expires_at, login, updated_at, ct, encrypted) = row;
+    let access_token =
+        token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt access token for provider '{provider}': {error}"
+            ))
+        })?;
+    let refresh_token = refresh_token
+        .as_deref()
+        .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
+        .transpose()
+        .map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt refresh token for provider '{provider}': {error}"
+            ))
+        })?;
+    Ok(super::ProviderToken {
+        provider,
+        access_token,
+        refresh_token,
+        expires_at,
+        login,
+        updated_at,
+        credential_type: super::CredentialType::from_db(&ct),
+    })
 }
 
 impl SqliteStore {
@@ -42,12 +145,13 @@ impl SqliteStore {
             })?;
         }
 
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
         )?;
 
         super::migrations::apply_sqlite(&conn)?;
+        migrate_plaintext_provider_tokens(&mut conn)?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -188,41 +292,47 @@ impl SqliteStore {
     pub fn get_provider_token(&self, provider: &str) -> StoreResult<Option<super::ProviderToken>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type
+            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
              FROM provider_tokens WHERE provider = ?1",
         )?;
-        stmt.query_row(params![provider], |row| {
-            let ct: String = row.get(6)?;
-            Ok(super::ProviderToken {
-                provider: row.get(0)?,
-                access_token: row.get(1)?,
-                refresh_token: row.get(2)?,
-                expires_at: row.get(3)?,
-                login: row.get(4)?,
-                updated_at: row.get(5)?,
-                credential_type: super::CredentialType::from_db(&ct),
-            })
-        })
-        .optional()
-        .map_err(Into::into)
+        let row = stmt
+            .query_row(params![provider], read_token_row)
+            .optional()?;
+
+        row.map(decrypt_token_row).transpose()
     }
 
     pub fn upsert_provider_token(&self, token: &super::ProviderToken) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let encrypted_access =
+            token_crypto::encrypt_token(&token.access_token).map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt access token for provider '{}': {error}",
+                    token.provider
+                ))
+            })?;
+        let encrypted_refresh = token_crypto::encrypt_optional(token.refresh_token.as_deref())
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt refresh token for provider '{}': {error}",
+                    token.provider
+                ))
+            })?;
         conn.execute(
-            "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
              ON CONFLICT(provider) DO UPDATE SET
                 access_token = excluded.access_token,
                 refresh_token = excluded.refresh_token,
                 expires_at = excluded.expires_at,
                 login = excluded.login,
                 updated_at = excluded.updated_at,
-                credential_type = excluded.credential_type",
+                credential_type = excluded.credential_type,
+                encrypted = excluded.encrypted",
             params![
                 token.provider,
-                token.access_token,
-                token.refresh_token,
+                encrypted_access,
+                encrypted_refresh,
                 token.expires_at,
                 token.login,
                 token.updated_at,
@@ -244,24 +354,13 @@ impl SqliteStore {
     pub fn list_provider_tokens(&self) -> StoreResult<Vec<super::ProviderToken>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type
+            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
              FROM provider_tokens ORDER BY provider",
         )?;
-        let rows = stmt.query_map([], |row| {
-            let ct: String = row.get(6)?;
-            Ok(super::ProviderToken {
-                provider: row.get(0)?,
-                access_token: row.get(1)?,
-                refresh_token: row.get(2)?,
-                expires_at: row.get(3)?,
-                login: row.get(4)?,
-                updated_at: row.get(5)?,
-                credential_type: super::CredentialType::from_db(&ct),
-            })
-        })?;
+        let rows = stmt.query_map([], read_token_row)?;
         let mut tokens = Vec::new();
         for row in rows {
-            tokens.push(row?);
+            tokens.push(decrypt_token_row(row?)?);
         }
         Ok(tokens)
     }

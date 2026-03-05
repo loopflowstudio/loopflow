@@ -161,8 +161,10 @@ async fn setup_studio_registration(
 
     match client.register(&jwt, &mid, &machine_name).await {
         Ok(_) => {
+            let status = client.status().await;
             tracing::info!(
                 machine_name = %machine_name,
+                owner_sub = ?status.owner_sub,
                 "registered with studio"
             );
             let auth = AuthProvider::Studio {

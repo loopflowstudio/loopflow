@@ -1,6 +1,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 use std::path::{Path as FsPath, PathBuf};
 use std::str::FromStr;
@@ -776,7 +777,7 @@ pub async fn check_wave_ci_handler(
         &state.event_hub,
         &state.ci_failure_cache,
         &wave_id,
-        &token,
+        token.expose_secret(),
     )
     .await
     .map_err(|err| {

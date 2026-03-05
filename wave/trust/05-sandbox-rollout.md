@@ -1,6 +1,6 @@
 # 05: Full Sandbox Rollout
 
-**Status (2026-02-28):** Deferred from production path. Host sandbox capability is validated, but DinD remains blocked on Linux sandbox CLI plugin distribution.
+**Status (2026-03-04):** Deferred from production path. Host sandbox capability is validated, but DinD remains blocked on Linux sandbox CLI plugin distribution. Provider tokens are now AES-256-GCM encrypted at rest — credential proxy design (open question below) should use `token_crypto::decrypt_if_needed()` rather than reading raw DB values.
 
 **Finish line:** All harnesses route through `SandboxExecutor`, `DockerExecutor` and Bollard dependency are deleted, and restart rehydration reattaches to running sandbox streams.
 

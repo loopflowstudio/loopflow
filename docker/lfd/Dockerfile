@@ -31,8 +31,10 @@ COPY python /build/python
 RUN SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 python3 -m pip install --no-cache-dir --break-system-packages /build \
     && rm -rf /build
 
-RUN mkdir -p /root/.lf
-WORKDIR /root
+RUN addgroup --system lfd && adduser --system --ingroup lfd lfd
+RUN mkdir -p /app/.lf && chown -R lfd:lfd /app
+WORKDIR /app
+USER lfd
 
 EXPOSE 2486
 ENTRYPOINT ["lfd"]

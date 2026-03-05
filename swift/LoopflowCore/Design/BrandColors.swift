@@ -6,7 +6,7 @@ public extension Color {
     static let loopflowCream = Color(hex: 0xFAF8F5)
 }
 
-public struct LoopflowPalette: @unchecked Sendable {
+public struct LoopflowPalette: Sendable {
     public let background: Color
     public let surface: Color
     public let surfaceMuted: Color

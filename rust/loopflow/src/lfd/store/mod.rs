@@ -15,6 +15,7 @@ pub mod migrations;
 pub mod postgres;
 pub mod rows;
 pub mod sqlite;
+mod token_crypto;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2639,6 +2640,90 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn provider_tokens_are_encrypted_at_rest_in_sqlite() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let config = StorageConfig::sqlite(db_path.clone());
+        let store = super::open_store(&config).await.expect("store should open");
+        let token = super::ProviderToken {
+            provider: "github".to_string(),
+            access_token: "gho_secret_access".to_string(),
+            refresh_token: Some("ghr_secret_refresh".to_string()),
+            expires_at: Some(1700000000),
+            login: Some("octocat".to_string()),
+            updated_at: 1699000000,
+            credential_type: super::CredentialType::OAuth,
+        };
+        store
+            .upsert_provider_token(&token)
+            .await
+            .expect("upsert token");
+
+        let conn = rusqlite::Connection::open(db_path).expect("open sqlite db");
+        let (raw_access, raw_refresh, encrypted): (String, Option<String>, bool) = conn
+            .query_row(
+                "SELECT access_token, refresh_token, encrypted FROM provider_tokens WHERE provider = 'github'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("query provider token");
+
+        assert_ne!(raw_access, "gho_secret_access");
+        assert_ne!(
+            raw_refresh.as_deref(),
+            Some("ghr_secret_refresh"),
+            "refresh token should be encrypted"
+        );
+        assert!(encrypted, "encrypted flag should be true");
+    }
+
+    #[tokio::test]
+    async fn sqlite_open_migrates_existing_plaintext_provider_tokens() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open sqlite db");
+            super::migrations::apply_sqlite(&conn).expect("apply migrations");
+            conn.execute(
+                "INSERT INTO provider_tokens
+                 (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+                rusqlite::params![
+                    "github",
+                    "gho_plaintext",
+                    "ghr_plaintext",
+                    1700000000_i64,
+                    "octocat",
+                    1699000000_i64,
+                    "oauth",
+                ],
+            )
+            .expect("insert plaintext token");
+        }
+
+        let store = super::open_store(&StorageConfig::sqlite(db_path.clone()))
+            .await
+            .expect("open store");
+
+        let loaded = store
+            .get_provider_token("github")
+            .await
+            .expect("get token")
+            .expect("token exists");
+        assert_eq!(loaded.access_token, "gho_plaintext");
+        assert_eq!(loaded.refresh_token.as_deref(), Some("ghr_plaintext"));
+
+        let conn = rusqlite::Connection::open(db_path).expect("open sqlite db");
+        let (raw_access, encrypted): (String, bool) = conn
+            .query_row(
+                "SELECT access_token, encrypted FROM provider_tokens WHERE provider = 'github'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query provider token");
+        assert_ne!(raw_access, "gho_plaintext");
+        assert!(encrypted);
     }
 
     #[tokio::test]

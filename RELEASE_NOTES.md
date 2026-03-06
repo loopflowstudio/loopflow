@@ -32,4 +32,5 @@ Changes since `v0.9.7`.
 - **Init separates repo and user config** — `lf init` now distinguishes repo config (agent, harnesses, exclude) from user config (yolo, ide, chrome) and offers to create `~/.lf/config.yaml` when missing
 - **DMG codesigning pipeline** — `concerto-dev.py release` codesigns the .app with Developer ID, signs the DMG, and submits for Apple notarization. Resource bundles moved into `Contents/Resources/` to fix unsealed-contents errors
 - **Worktree rotation improved** — creation syncs the default branch from origin before branching; archived worktrees use the branch's own timestamp; squash-merge detection tightened to avoid false positives; sibling directory layout enforced
+- **Install builds only wheel** — `uv build --wheel` skips unnecessary sdist during install
 - **`git2` crate removed** — replaced by git CLI calls

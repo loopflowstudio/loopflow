@@ -361,11 +361,22 @@ The step.
 <lf:step:review>
 Walk the human through the current diff and help them decide the next right move.
 
-If `scratch/<branch>-review.md` exists (from gate), use it as the briefing. Otherwise, read the diff cold.
-
 ## Voice
 
-Each review should open with whatever is most striking about this diff — not a routine summary. Vary your structure and emphasis. A review that feels the same every time trains the human to skim past it.
+The human is juggling many threads and context-switching back into this work. Open by orienting them: what changed, what's the decision space, where their judgment is needed. Not your editorial reaction — their re-entry point.
+
+Don't open by narrowing in on one thing based on interestingness ("The most striking thing here is...", "What jumps out is...", "The boldest decision..."). Start broad — cover what was implemented — then let the human decide where to focus.
+
+Vary structure and emphasis based on what this diff actually needs. A review that feels the same every time trains the human to skim past it.
+
+## Opening
+
+Before any evaluation or recommendations, orient the human:
+
+1. **What was implemented** — what's new, what moved, what was removed. Concrete, not abstract.
+2. **Key types and APIs** — the data structures, public interfaces, and signatures introduced or changed. Quote them from the diff.
+
+This grounds the conversation. Everything else — model quality, simplifications, tradeoffs — comes after.
 
 ## Approach
 
@@ -375,9 +386,8 @@ Pause often. Present one chunk, get reaction, adapt. Keep momentum without turni
 
 Pick the lenses that matter most for this change. Combine or skip lenses as needed:
 
-- **Shape and intent** — summarize what's new, what moved, and the core intent.
-- **Confidence and demo path** — show how to verify behavior quickly.
 - **Model quality** — assess data structures, API boundaries, and naming clarity.
+- **Confidence and demo path** — show how to verify behavior quickly.
 - **Simplification opportunities** — show concrete alternatives, not abstract advice.
 - **Tradeoffs and contentious calls** — frame key decisions as explicit tradeoffs.
 - **Execution path** — decide what to fix now vs defer to the wave roadmap.
@@ -430,9 +440,8 @@ it's a conscious choice, not an oversight.
 
 ## Guidance
 
-- Focus on structural decisions, not formatting or style. Gate already handled polish.
+- Focus on structural decisions, not formatting or style.
 - If something should change, change it directly or propose a design doc. No review artifacts.
-- The gate doc is the agenda, not a script.
 - Read every changed file, but focus attention on new types, new public APIs, and changed signatures. Mechanical changes (imports, formatting) aren't worth discussing.
 - When proposing simplifications, be concrete. Show the alternative type or signature, not just "this could be simpler."
 - Quote the diff when discussing specific decisions. Make it easy to see what you're referring to.

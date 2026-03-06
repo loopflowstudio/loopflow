@@ -1,6 +1,6 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
+use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
 use crate::engine::worktrees::{
     create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
     wave_name_from_worktree_and_main, worktree_path,
@@ -472,6 +472,8 @@ fn wt_switch(name: &str) -> Result<()> {
 fn wt_list(format: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
+    let default_branch = get_default_branch(&main_repo)?;
+    let _ = sync_main(&main_repo, &default_branch);
     let worktrees = list_worktrees(&main_repo)?;
 
     if matches!(format, Some("json")) {
@@ -481,8 +483,6 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     }
 
     let c = Colors::new();
-    let default_branch = get_default_branch(&main_repo)?;
-
     // Collect display info for all worktrees
     struct Row {
         name: String,
@@ -535,7 +535,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     for row in &rows {
         let marker = if row.is_current { "*" } else { " " };
 
-        let any_merged = row.merged || row.squash_merged;
+        let any_merged = row.merged || (row.squash_merged && !row.fresh);
         let landed_dirty = any_merged && row.dirty;
         let name_color = if row.is_main || any_merged || row.fresh {
             c.dim
@@ -547,12 +547,12 @@ fn wt_list(format: Option<&str>) -> Result<()> {
             ("landed-dirty", c.red)
         } else if row.merged {
             ("merged", c.green)
+        } else if row.fresh {
+            ("fresh", c.dim)
         } else if row.squash_merged {
             ("squash-merged", c.green)
         } else if row.remote_gone {
             ("remote-gone", c.yellow)
-        } else if row.fresh {
-            ("fresh", c.dim)
         } else {
             ("active", c.cyan)
         };
@@ -681,7 +681,8 @@ fn wt_prune(dry_run: bool, include_fresh: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let current_path = repo_root;
-
+    let default_branch = get_default_branch(&main_repo)?;
+    let _ = sync_main(&main_repo, &default_branch);
     let prune_output = Command::new("git")
         .arg("-C")
         .arg(&main_repo)
@@ -693,9 +694,6 @@ fn wt_prune(dry_run: bool, include_fresh: bool) -> Result<()> {
             String::from_utf8_lossy(&prune_output.stderr).trim()
         ));
     }
-
-    let default_branch = get_default_branch(&main_repo)?;
-    let _ = crate::engine::git::fetch(&main_repo, "origin", &default_branch);
 
     let worktrees = list_worktrees(&main_repo)?;
     let targets: Vec<_> = worktrees
@@ -724,12 +722,12 @@ fn wt_prune(dry_run: bool, include_fresh: bool) -> Result<()> {
         for wt in &targets {
             let reason = if wt.merged {
                 "merged"
+            } else if wt.fresh {
+                "fresh"
             } else if wt.squash_merged {
                 "squash-merged"
             } else if wt.remote_gone {
                 "remote-gone"
-            } else if wt.fresh {
-                "fresh"
             } else {
                 "prunable"
             };

@@ -379,3 +379,38 @@ fn worktree_with_commits_is_active_not_fresh() {
     assert!(!wt.prunable, "active worktree should not be prunable");
     assert!(!wt.merged, "active worktree is not merged");
 }
+
+#[test]
+fn branch_from_squash_merged_parent_stays_fresh() {
+    let repo = TestRepo::new();
+
+    let landed = create_with_schema(repo.path(), "rules-old", None, None).expect("create landed");
+    std::fs::write(landed.path.join("rules.txt"), "rule").expect("write");
+    git_stdout(&landed.path, &["add", "."]);
+    git_stdout(&landed.path, &["commit", "-m", "add rule"]);
+
+    // Simulate a squash merge into main.
+    git_stdout(repo.path(), &["merge", "--squash", landed.branch.as_str()]);
+    git_stdout(repo.path(), &["commit", "-m", "land rules"]);
+    git_stdout(repo.path(), &["push", "origin", "main"]);
+
+    // Create the next branch from the landed branch tip (land rotation behavior).
+    let fresh = create_with_schema(repo.path(), "rules-new", Some(landed.branch.as_str()), None)
+        .expect("create fresh from landed");
+
+    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let wt = states
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some(&fresh.branch))
+        .expect("should find fresh worktree");
+
+    assert!(
+        wt.squash_merged,
+        "branch should be tree-equal to main after squash merge"
+    );
+    assert!(wt.fresh, "rotated branch should still be treated as fresh");
+    assert!(
+        !wt.prunable,
+        "fresh branch must not be pruned immediately after rotation"
+    );
+}

@@ -51,7 +51,7 @@ def _stream_process(
 
 def _build_wheel() -> tuple[bool, str]:
     typer.echo("Building wheel...")
-    result = _stream_process(["uv", "build"], "wheel", cwd=ROOT)
+    result = _stream_process(["uv", "build", "--wheel"], "wheel", cwd=ROOT)
     if result.returncode != 0:
         return False, "uv build failed (see output above)"
     return True, "Wheel built."

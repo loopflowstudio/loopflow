@@ -1,7 +1,12 @@
 use std::path::Path;
 
-use crate::engine::git::{commit, current_branch, is_clean, push, push_with_upstream, stage_all};
+use serde::Deserialize;
 use serde_json::json;
+
+use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::builtins::get_builtin_ops_prompt;
+use crate::engine::config::load_config_or_default;
+use crate::engine::git::{commit, current_branch, is_clean, push, push_with_upstream, stage_all};
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -56,15 +61,22 @@ pub fn commit_workflow(
         return Ok(false);
     }
 
-    let message = options
+    let message = if let Some(message) = options
         .message
         .as_deref()
         .map(str::trim)
         .filter(|message| !message.is_empty())
-        .ok_or_else(|| {
-            OpsError::Message("message required — use `lf commit` to generate one.".to_string())
-        })?
-        .to_string();
+    {
+        message.to_string()
+    } else {
+        progress.status("Generating commit message...");
+        let generated = generate_commit_message(repo);
+        format_commit_message(
+            &options.task,
+            &options.flow_parents,
+            generated.as_ref().map(|m| m.title.as_str()).ok(),
+        )
+    };
 
     progress.status("Committing...");
     commit(repo, &message)?;
@@ -87,6 +99,121 @@ fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
         .current_dir(repo)
         .status()?;
     Ok(!output.success())
+}
+
+fn format_commit_message(task: &str, flow_parents: &[String], title: Option<&str>) -> String {
+    let prefix = if flow_parents.is_empty() {
+        format!("lf {task}")
+    } else {
+        format!("lf {} {task}", flow_parents.join(" "))
+    };
+
+    match title {
+        Some(title) if !title.is_empty() => format!("{prefix}: {title}"),
+        _ => prefix,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CommitMessage {
+    title: String,
+    #[allow(dead_code)]
+    body: String,
+}
+
+fn generate_commit_message(repo: &Path) -> OpsResult<CommitMessage> {
+    let template = get_builtin_ops_prompt("commit_message")
+        .ok_or_else(|| OpsError::Message("builtin commit_message prompt not found".to_string()))?;
+
+    let diff = staged_diff(repo)?;
+    let diff = truncate_chars(&diff, 20_000);
+
+    let prompt = format!(
+        "{template}\n\n## Staged diff\n```diff\n{diff}\n```\n\n\
+         Return exactly one JSON object with this schema:\n\
+         {{\"title\":\"...\",\"body\":\"...\"}}\n\
+         No markdown fences. No explanation."
+    );
+
+    let config = load_config_or_default(Some(repo));
+    let agent = config
+        .agent
+        .clone()
+        .unwrap_or_else(|| "claude:haiku".to_string());
+
+    let launch = AgentConfig {
+        task_prompt: prompt,
+        agent: Some(agent),
+        cwd: Some(repo.to_path_buf()),
+        skip_permissions: true,
+        ..Default::default()
+    };
+    let process = ProcessConfig {
+        auto: true,
+        stream: false,
+        ..Default::default()
+    };
+    let capabilities = AgentCapabilities {
+        chrome: config.chrome,
+    };
+
+    let result = launch_agent(&launch, &process, &capabilities)
+        .map_err(|err| OpsError::Message(format!("commit message generation failed: {err}")))?;
+    if result.exit_code != 0 {
+        return Err(OpsError::Message(format!(
+            "commit message generation failed (exit {}): {}",
+            result.exit_code,
+            result.stderr.trim()
+        )));
+    }
+
+    let combined = format!("{}\n{}", result.stdout, result.stderr);
+    parse_commit_message(&combined)
+        .ok_or_else(|| OpsError::Message("failed to parse commit message from agent".to_string()))
+}
+
+fn staged_diff(repo: &Path) -> OpsResult<String> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--cached"])
+        .current_dir(repo)
+        .output()?;
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn parse_commit_message(raw: &str) -> Option<CommitMessage> {
+    let trimmed = raw.trim();
+    // Try direct JSON parse
+    if let Ok(msg) = serde_json::from_str::<CommitMessage>(trimmed) {
+        return Some(msg);
+    }
+    // Try fenced JSON
+    if let Some(start) = trimmed.find("```json") {
+        let rest = &trimmed[start + "```json".len()..];
+        if let Some(end) = rest.find("```") {
+            if let Ok(msg) = serde_json::from_str::<CommitMessage>(rest[..end].trim()) {
+                return Some(msg);
+            }
+        }
+    }
+    // Try extracting JSON object
+    let start = trimmed.find('{')?;
+    let end = trimmed.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str::<CommitMessage>(&trimmed[start..=end]).ok()
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let end = text
+        .char_indices()
+        .nth(max_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    format!("{}\n\n[diff truncated]", &text[..end])
 }
 
 fn push_with_fallback(repo: &Path) -> OpsResult<()> {
@@ -180,15 +307,17 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         return tracer.to_json();
     }
 
-    // Require explicit commit message.
-    let Some(message) = options
+    // Resolve commit message: explicit or generated.
+    let message = if let Some(message) = options
         .message
         .as_deref()
         .map(str::trim)
         .filter(|message| !message.is_empty())
-    else {
-        tracer.trace_result("commit:message", "missing");
-        return tracer.to_json();
+    {
+        message.to_string()
+    } else {
+        tracer.trace("commit:generate_message");
+        format_commit_message(&options.task, &options.flow_parents, Some("generated title"))
     };
 
     // Commit

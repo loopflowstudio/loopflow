@@ -340,7 +340,7 @@ pub fn build_codex_command(
         cmd.push(cwd.to_string_lossy().to_string());
     }
 
-    if process.stream && matches!(process.stream_format, StreamFormat::Raw) {
+    if process.stream {
         cmd.push("--json".to_string());
     }
 

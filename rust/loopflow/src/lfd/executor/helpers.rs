@@ -14,8 +14,7 @@ use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteItem, ConcreteStep, FlowAction,
 };
 use crate::engine::git::{
-    commit, create_branch, current_branch, fetch, get_default_branch, is_clean, push_with_upstream,
-    rev_parse, stage_all,
+    create_branch, current_branch, fetch, get_default_branch, push_with_upstream, rev_parse,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::prompt::write_prompt_log;
@@ -336,12 +335,13 @@ pub(crate) fn resolve_current_step_name(run: &WaveRun, step_index: u32) -> Strin
 }
 
 pub(crate) fn auto_commit_if_dirty(worktree: &Path, step_name: &str) -> Result<()> {
-    if is_clean(worktree)? {
-        return Ok(());
-    }
-    stage_all(worktree)?;
-    let message = format!("lfd: auto-commit after interactive step '{step_name}'");
-    commit(worktree, &message)?;
+    let options = CommitOptions {
+        add: true,
+        message: None,
+        ..CommitOptions::for_task(step_name)
+    };
+    commit_workflow(worktree, &options, &NullProgress)
+        .map_err(|err| anyhow!("auto-commit failed: {err}"))?;
     Ok(())
 }
 
@@ -462,7 +462,7 @@ pub(crate) fn auto_create_pr(
         add: true,
         push: true,
         create_draft_pr: true,
-        message: Some("lfd: auto-create draft PR".to_string()),
+        message: None,
         ..CommitOptions::for_task("commit")
     };
     if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {
@@ -650,7 +650,7 @@ pub(crate) fn post_step_sync(worktree: &Path, branch: &str, step_name: &str) -> 
 
     let options = CommitOptions {
         add: true,
-        message: Some(format!("lf commit: {step_name}")),
+        message: None,
         ..CommitOptions::for_task(step_name)
     };
     let committed = commit_workflow(worktree, &options, &NullProgress)

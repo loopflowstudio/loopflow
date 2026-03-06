@@ -462,7 +462,7 @@ pub(crate) fn auto_create_pr(
         add: true,
         push: true,
         create_draft_pr: true,
-        message: None,
+        message: Some("lfd: auto-create draft PR".to_string()),
         ..CommitOptions::for_task("commit")
     };
     if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {

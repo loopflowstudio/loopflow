@@ -66,8 +66,8 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: true,
-        message: None,
-        ..CommitOptions::for_task("pr")
+        message: Some("lf ops pr: prepare branch".to_string()),
+        ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress)?;
 

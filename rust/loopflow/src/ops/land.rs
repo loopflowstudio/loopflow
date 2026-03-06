@@ -176,11 +176,15 @@ fn prepare_land(
     }
 
     if !options.strict {
+        let message = options
+            .commit_message
+            .clone()
+            .unwrap_or_else(|| "lf land: stage uncommitted changes".to_string());
         let commit_options = CommitOptions {
             add: true,
             push: true,
             create_draft_pr: true,
-            message: options.commit_message.clone(),
+            message: Some(message),
             ..CommitOptions::for_task("land")
         };
         let _ = commit_workflow(repo_root, &commit_options, progress)?;

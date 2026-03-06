@@ -12,7 +12,7 @@ Key decisions that carry forward:
 
 - **Incremental migration path.** Signal cleanup used ALTER TABLE + table recreation (migration 022). Trigger rename used ALTER TABLE + DROP COLUMN (migration 026, requires SQLite 3.35.0+). FlowRun can follow the same pattern or consolidate into a hard reset if the migration count becomes unwieldy.
 - **`ActivationEnvelope.trigger_id` is already `Option<LfdId>`.** No further activation-layer changes needed.
-- **Cron `last_triggered_at` tracking lost.** The old code tracked this on the trigger. Currently cron waves attempt activation on every 30-second tick, relying on dedup to coalesce. Correct but noisy — add `last_cron_triggered_at` to the wave as part of this sprint.
+- **Cron `last_triggered_at` tracking lost.** The old code tracked this on the trigger. Currently cron waves attempt activation on every 30-second tick, relying on dedup to coalesce. Correct but noisy — add `last_cron_triggered_at` to the wave as part of this item.
 - **No cron active-run check.** Unlike the loop ticker (which checks for active runs before dispatching), the cron ticker always dispatches. Address alongside FlowRun or accept the noise.
 - **API field asymmetry.** Input APIs (`CreateWaveRequest`, `UpdateWaveRequest`) accept `flow`. Output (`WaveDto`) returns `primary_flow`. Intentional but the DTO layer should be consistent — decide whether to rename input to `primary_flow` or keep the asymmetry and document it.
 - **Python API doesn't expose `mode`/`cron` yet.** The Python model deserializes them, but `create_wave`/`update_wave` don't accept them as parameters. Add when building FlowRun Python models.

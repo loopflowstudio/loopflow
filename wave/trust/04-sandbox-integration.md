@@ -1,6 +1,6 @@
 # 04: Sandbox Integration and Validation
 
-**Status (2026-03-04):** Experimental track. Host validation passes on Docker Sandbox CLI v0.12.0, but DinD validation is blocked because the bundled lfd image lacks the sandbox CLI plugin. lfd container now runs as non-root user `lfd` (hardened in trust sprint 01-03).
+**Status (2026-03-04):** Experimental track. Host validation passes on Docker Sandbox CLI v0.12.0, but DinD validation is blocked because the bundled lfd image lacks the sandbox CLI plugin. lfd container now runs as non-root user `lfd` (hardened in trust items 01-03).
 
 **Finish line:** Sandbox executor runs Claude end-to-end on macOS (self-hosted + Concerto), and cleanup works across all lifecycle events.
 

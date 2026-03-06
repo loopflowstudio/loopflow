@@ -11,7 +11,7 @@ Loopflow manages an org's work, not just one task. Cross-repo portfolios, wave c
 
 ## Strategy
 
-Build the execution model first (FlowRun container), then cross-repo primitives (commits, stimulus), then surfaces (chord UI, portfolio UI). Each layer teaches what the next layer needs. Vertical UI sprints (chord grouping, portfolio view) live here — you can't build chord UI without understanding FlowRun.
+Build the execution model first (FlowRun container), then cross-repo primitives (commits, stimulus), then surfaces (chord UI, portfolio UI). Each layer teaches what the next layer needs. Vertical UI items (chord grouping, portfolio view) live here — you can't build chord UI without understanding FlowRun.
 
 ## Goals
 

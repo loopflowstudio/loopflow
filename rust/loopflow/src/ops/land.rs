@@ -445,6 +445,11 @@ fn rotate_worktree(
         return Ok(None);
     }
 
+    // Check wave items from the worktree (feature branch) before preserving,
+    // since update-wave removes shipped items on the branch, not on main.
+    let wave_dir = repo_root.join("wave").join(&wave_name);
+    let has_items = wave_dir.exists() && has_wave_items(&wave_dir)?;
+
     // Use the branch's timestamp for the preserved directory name so it
     // matches the work it contains, not when it was archived.
     let branch_suffix = parse_branch_name(feature_branch, None).and_then(|parts| parts.timestamp);
@@ -454,9 +459,6 @@ fn rotate_worktree(
         repo_root.display(),
         preserved.display()
     ));
-
-    let wave_dir = main_repo.join("wave").join(&wave_name);
-    let has_items = wave_dir.exists() && has_wave_items(&wave_dir)?;
 
     if has_items {
         let result = create_with_schema(main_repo, &wave_name, Some(feature_branch), None)?;
@@ -564,8 +566,9 @@ mod tests {
             ],
         );
 
-        // Add wave items so rotation creates a new worktree.
-        let wave_dir = main_repo.join("wave").join("mywave");
+        // Add wave items to the worktree (feature branch) so rotation detects them.
+        // rotate_worktree checks repo_root (the worktree), not main_repo.
+        let wave_dir = wt_path.join("wave").join("mywave");
         std::fs::create_dir_all(&wave_dir).unwrap();
         std::fs::write(wave_dir.join("01-next-item.md"), "# Next").unwrap();
 

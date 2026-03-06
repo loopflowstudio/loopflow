@@ -15,7 +15,7 @@ Is sandbox reliable enough to be the only container executor? What breaks when w
 - Full restart rehydration for active sandbox runs (stream reattach)
 - Bollard removal (delete `DockerExecutor` and Bollard dependency)
 
-## Context from validation (sprint 04)
+## Context from validation (item 04)
 
 ### DinD decision
 

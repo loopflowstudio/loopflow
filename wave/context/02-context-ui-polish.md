@@ -2,7 +2,7 @@
 
 **Finish line:** Concerto's context panel shows all files (not capped at 10), budget is customizable from the UI, and small sources render visibly in the stacked bar.
 
-Polish items from the context UI sprint. The data path is already wired — `ContextSnapshot` serializes the full document list per source. These are display-layer improvements.
+Polish items from the context UI work. The data path is already wired — `ContextSnapshot` serializes the full document list per source. These are display-layer improvements.
 
 ## What to build
 

@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use loopflow::ops::{commit_workflow, CommitOptions, NullProgress, OpsError};
+use loopflow::ops::{commit_workflow, CommitOptions, NullProgress};
 use loopflow_test_support::TestRepo;
 
 fn last_commit_message(repo: &TestRepo) -> String {
@@ -72,18 +72,21 @@ fn commit_with_message_override() {
 }
 
 #[test]
-fn commit_requires_message() {
+fn commit_generates_message_when_none() {
     let repo = TestRepo::new();
     repo.create_file("needs-message.txt", "hello");
 
     let options = CommitOptions {
         add: true,
-        ..CommitOptions::for_task("commit")
+        ..CommitOptions::for_task("implement")
     };
 
-    let result = commit_workflow(repo.path(), &options, &NullProgress);
-    assert!(matches!(
-        result,
-        Err(OpsError::Message(message)) if message == "message required — use `lf commit` to generate one."
-    ));
+    // Without an agent available, generation fails and falls back to prefix-only.
+    let committed = commit_workflow(repo.path(), &options, &NullProgress).expect("commit");
+    assert!(committed);
+    let message = last_commit_message(&repo);
+    assert!(
+        message.starts_with("lf implement"),
+        "expected 'lf implement' prefix, got: {message}"
+    );
 }

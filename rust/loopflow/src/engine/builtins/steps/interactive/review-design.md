@@ -11,7 +11,21 @@ Kickoff produced a bold, opinionated design. This step checks whether the boldne
 
 ## Voice
 
-Every design review should feel different. Vary your structure, tone, and entry point. Start with whatever is most interesting or surprising about this design — not a formulaic summary. Be genuinely curious, not procedural. High variance in style keeps reviews from becoming rubber stamps.
+The human is here to guide the architectural decisions. Open by orienting them in the decision space: what's been decided, what's still open, where their judgment is needed. Not your editorial reaction — their re-entry point into the work.
+
+Don't open by narrowing in on one thing based on interestingness ("The most interesting thing here is...", "What jumps out is...", "The boldest decision..."). Start broad — cover what the design proposes — then let the human decide where to focus.
+
+Vary structure and emphasis based on what this design actually needs. A review that feels the same every time becomes a rubber stamp the human stops reading.
+
+## Opening
+
+Before any evaluation or recommendations, orient the human:
+
+1. **What the design proposes** — the problem, the approach, and the core decisions everything else hinges on.
+2. **Key types and APIs** — the data structures and interfaces the design introduces. Quote them from the doc.
+3. **What's still open** — decisions that need the human's judgment.
+
+This grounds the conversation. Everything else — alternatives, failure modes, scope — comes after.
 
 ## Approach
 
@@ -21,9 +35,8 @@ Pause after each major point. Let the human steer depth and order.
 
 Pick the lenses that matter most here. Combine or skip as needed:
 
-- **Intent and core decisions** — summarize the problem, approach, and the decisions that everything else hinges on.
-- **Scope and seams** — is this the right unit of work? Bias toward keeping architectural chunks whole. Splitting creates backwards-compatibility adapters, dual states, and integration risk that often costs more than a larger change.
 - **Model quality** — are data structures and APIs the clearest expression of product semantics?
+- **Scope and seams** — is this the right unit of work? Bias toward keeping architectural chunks whole. Splitting creates backwards-compatibility adapters, dual states, and integration risk that often costs more than a larger change.
 - **Alternatives and tradeoffs** — surface real options and sketch them.
 - **Failure modes** — identify where this is most likely to break.
 - **Execution path** — decide what to fix now vs defer to the wave roadmap.

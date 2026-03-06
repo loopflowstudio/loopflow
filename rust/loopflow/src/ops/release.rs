@@ -313,6 +313,16 @@ pub fn release_run(
     }
 
     let version = resolve_version(&prev_tag, version_input, &target)?;
+
+    // Fail fast if the tag already exists on origin — don't create a worktree, PR, etc.
+    let new_tag = target_tag(&target, &version);
+    if let Some(remote_sha) = remote_tag_sha(&main_repo, &new_tag)? {
+        return Err(OpsError::Message(format!(
+            "tag {new_tag} already exists on origin (at {remote_sha}); \
+             nothing to release or use a higher version"
+        )));
+    }
+
     let main_branch = get_default_branch(&main_repo)?;
     let wt_name = if target.name == "default" {
         format!("release.default.v{version}")
@@ -890,6 +900,9 @@ fn latest_tag(repo: &Path, target: &ReleaseTarget) -> OpsResult<String> {
 }
 
 fn latest_tag_optional(repo: &Path, target: &ReleaseTarget) -> OpsResult<Option<String>> {
+    // Fetch tags from origin so we see tags created in worktrees or other clones.
+    let _ = run_output(repo, "git", &["fetch", "origin", "--tags", "--quiet"]);
+
     let pattern = tag_glob(target);
     let tags = run_stdout(
         repo,

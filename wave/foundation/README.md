@@ -14,7 +14,7 @@ The system works correctly. Tests cover the important paths, code is clean, APIs
 
 Map the gaps first (test coverage), then clean up (dead code, layer violations), then validate on real infrastructure (dogfood), then fill API gaps (remote APIs), then harden the container boundary.
 
-Each sprint is a standalone PR that makes the system measurably more solid.
+Each item is a standalone PR that makes the system measurably more solid.
 
 ## Goals
 
@@ -26,7 +26,7 @@ Each sprint is a standalone PR that makes the system measurably more solid.
 
 ## Risks
 
-- Test coverage sprints could produce tests that test implementation rather than behavior
+- Test coverage items could produce tests that test implementation rather than behavior
 - Remote dogfooding may surface issues that cascade into other waves
 - API expansion scope could creep beyond what remote Concerto needs
 

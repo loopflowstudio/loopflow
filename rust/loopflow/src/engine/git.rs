@@ -417,6 +417,34 @@ pub fn is_squash_merged(repo: &Path, branch: &str, target: &str) -> Result<bool,
     Ok(result_tree == target_tree)
 }
 
+/// Find the fork point for a stacked branch whose parent was squash-merged.
+///
+/// When branch B is stacked on A, and A gets squash-merged into `target`,
+/// a plain rebase replays A's commits (already in target) causing conflicts.
+/// This function finds the last commit whose patch is already in `target`,
+/// so we can `rebase --onto target <fork_point>` to skip them.
+///
+/// Returns `None` if no commits are already in target (normal case).
+pub fn squash_merge_fork_point(repo: &Path, target: &str) -> Result<Option<String>, GitError> {
+    // `git cherry target HEAD` marks commits whose patches are already in target with `-`.
+    // We want the last `-` commit in a leading run — once we hit a `+` commit, stop.
+    let output = run_git(repo, &["cherry", target, "HEAD"])?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut last_absorbed = None;
+    for line in stdout.lines() {
+        if let Some(sha) = line.strip_prefix("- ") {
+            last_absorbed = Some(sha.trim().to_string());
+        } else {
+            // Hit a `+` (not-in-target) commit — stop scanning.
+            break;
+        }
+    }
+    Ok(last_absorbed)
+}
+
 pub fn rebase(
     worktree: &Path,
     onto: &str,

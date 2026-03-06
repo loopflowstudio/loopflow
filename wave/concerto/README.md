@@ -14,7 +14,7 @@ Concerto is one multiplatform app — Mac, iPad, iPhone. Mobile is a fast check-
 
 ## Strategy
 
-Start with small, low-risk sprints that teach the Swift codebase (queue management, API key entry), then build up to more complex interaction patterns (release UI, voice auto-send).
+Start with small, low-risk items that teach the Swift codebase (queue management, API key entry), then build up to more complex interaction patterns (release UI, voice auto-send).
 
 ## Goals
 

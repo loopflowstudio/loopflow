@@ -22,6 +22,7 @@ Pause often. Present one chunk, get reaction, adapt. Keep momentum without turni
 Pick the lenses that matter most for this change. Combine or skip lenses as needed:
 
 - **Shape and intent** — summarize what's new, what moved, and the core intent.
+- **Results and metrics** — if the change has measurable outcomes, lead with the numbers. Run the validation procedure from the design doc if one exists in `scratch/`. Show before/after. Skip if not quantitative.
 - **Confidence and demo path** — show how to verify behavior quickly.
 - **Model quality** — assess data structures, API boundaries, and naming clarity.
 - **Simplification opportunities** — show concrete alternatives, not abstract advice.

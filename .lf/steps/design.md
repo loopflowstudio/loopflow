@@ -115,6 +115,7 @@ When the idea fits in one commit (~1000 words max):
 - **Key functions** — Signatures with one-line intent.
 - **Constraints** — What would require rewriting if guessed wrong.
 - **Done when** — Verification command and expected output.
+- **Measure** (when applicable) — What to measure before and after. Performance benchmarks, accuracy numbers, latency, size, error rates. Specify the command to run and what "better" looks like. Not every change is quantitative — skip for pure refactors, UI work without perf concerns, etc.
 
 ## Conversation guidance
 

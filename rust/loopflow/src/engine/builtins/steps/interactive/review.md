@@ -20,7 +20,8 @@ Vary structure and emphasis based on what this diff actually needs. A review tha
 Before any evaluation or recommendations, orient the human:
 
 1. **What was implemented** — what's new, what moved, what was removed. Concrete, not abstract.
-2. **Key types and APIs** — the data structures, public interfaces, and signatures introduced or changed. Quote them from the diff.
+2. **Results and metrics** — if the change has measurable outcomes (performance, accuracy, latency, size, error rates), lead with the numbers. Run the validation procedure from the design doc if one exists in `scratch/`. Show before/after. If there are no metrics, skip this — not every change is quantitative.
+3. **Key types and APIs** — the data structures, public interfaces, and signatures introduced or changed. Quote them from the diff.
 
 This grounds the conversation. Everything else — model quality, simplifications, tradeoffs — comes after.
 

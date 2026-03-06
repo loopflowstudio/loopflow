@@ -68,23 +68,44 @@ Make the change easy to review.
 
    This isn't a changelog. It's a guide for someone reading the PR cold.
 
-2. **Write PR copy for ops handoff**
+2. **Run validation and capture results**
+   - Run the "done when" check from the design doc (`scratch/<branch>.md`)
+   - If the work has measurable outcomes (performance, accuracy, latency, size, counts), run before/after comparisons and record the numbers
+   - If the work is a UI or UX change, capture the key states and interactions
+   - Not every PR has metrics — but when they exist, capture them now. The reviewer shouldn't have to reproduce your setup to see the impact.
+
+3. **Write PR copy for ops handoff**
+
+   The PR body is written for an engineer picking this up cold. They're asking:
+   - What is the intention of this change?
+   - What assumptions does it make?
+   - What does it accomplish?
+   - How can I tinker with it and evaluate it myself?
+
+   Structure:
+   - **Try it!** — lead with this. Concrete commands to run, what the reviewer will see. Make it easy to tinker. If there are metrics, show them here: "Before: X, After: Y."
+   - **Intent** — one paragraph. Why this change exists and what it accomplishes. Not a file-by-file changelog.
+   - **Assumptions** — what this relies on being true. Environmental, architectural, or domain assumptions the reviewer should validate.
+   - **Key decisions** — choices that weren't obvious. What you picked and why.
+   - **Not included** — intentional omissions, if any.
+
+   Write to:
    - `scratch/pr-title.txt` — one-line PR title
    - `scratch/pr-body.md` — markdown PR body
    - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
 
-   `lf ops land` consumes these files. Keep title/body concrete and reviewer-friendly.
+   `lf ops land` consumes these files.
 
-3. **Update README and docs**
+4. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it
    - Examples must work. Commands must be current.
    - Check: `README.md`, module READMEs, docstrings on public APIs
 
-4. **Inline documentation**
+5. **Inline documentation**
    - Add comments where the "why" isn't obvious
    - Don't document the obvious. `# increment counter` above `counter += 1` is noise.
 
-5. **Wave alignment** (if running in a wave context)
+6. **Wave alignment** (if running in a wave context)
    - Does the shipped code advance the wave's Goals?
    - Were any known Risks from the wave README introduced or ignored?
    - Are there observable Metrics to note in the review doc?

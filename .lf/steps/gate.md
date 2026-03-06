@@ -66,16 +66,21 @@ Make the change easy to review.
 
    This isn't a changelog. It's a guide for someone reading the PR cold.
 
-2. **Update README and docs**
+2. **Run validation and capture results**
+   - Run the "done when" check from the design doc (`scratch/<branch>.md`)
+   - If the work has measurable outcomes (performance, accuracy, latency, size, counts), run before/after comparisons and record the numbers
+   - Not every PR has metrics — but when they exist, capture them now
+
+3. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it
    - Examples must work. Commands must be current.
    - Check: `README.md`, module READMEs, docstrings on public APIs
 
-3. **Inline documentation**
+4. **Inline documentation**
    - Add comments where the "why" isn't obvious
    - Don't document the obvious. `# increment counter` above `counter += 1` is noise.
 
-4. **Wave alignment** (if running in a wave context)
+5. **Wave alignment** (if running in a wave context)
    - Does the shipped code advance the wave's Goals?
    - Were any known Risks from the wave README introduced or ignored?
    - Are there observable Metrics to note in the review doc?

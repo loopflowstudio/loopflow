@@ -24,15 +24,9 @@ extension AppearanceMode {
 }
 
 private enum AppFontRegistration {
-    private static var fontBundle: Bundle {
-        #if SWIFT_PACKAGE
-        Bundle.module
-        #else
-        Bundle.main
-        #endif
-    }
-
     static func registerBundledFonts() {
+        guard let fontsDir = findFontsDirectory() else { return }
+
         let fontFiles = [
             "CormorantGaramond-Regular.otf",
             "CormorantGaramond-Medium.otf",
@@ -43,11 +37,42 @@ private enum AppFontRegistration {
         ]
 
         for file in fontFiles {
-            guard let url = fontBundle.url(forResource: file, withExtension: nil, subdirectory: "Fonts") else {
-                continue
-            }
+            let url = fontsDir.appendingPathComponent(file)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }
+    }
+
+    private static func findFontsDirectory() -> URL? {
+        let fm = FileManager.default
+
+        // SPM resource bundle in Contents/Resources/ (release .app)
+        if let resourceURL = Bundle.main.resourceURL {
+            let spmBundle = resourceURL
+                .appendingPathComponent("LoopflowSwift_Concerto.bundle")
+                .appendingPathComponent("Fonts")
+            if fm.fileExists(atPath: spmBundle.path) {
+                return spmBundle
+            }
+        }
+
+        // SPM resource bundle adjacent to executable (dev builds via `swift run`)
+        let executableBundle = Bundle.main.bundleURL
+            .appendingPathComponent("LoopflowSwift_Concerto.bundle")
+            .appendingPathComponent("Fonts")
+        if fm.fileExists(atPath: executableBundle.path) {
+            return executableBundle
+        }
+
+        // Fonts directly in Resources/ (xcodegen builds)
+        if let resourceURL = Bundle.main.resourceURL {
+            let direct = resourceURL.appendingPathComponent("Fonts")
+            if fm.fileExists(atPath: direct.path) {
+                return direct
+            }
+        }
+
+        return nil
     }
 }
 

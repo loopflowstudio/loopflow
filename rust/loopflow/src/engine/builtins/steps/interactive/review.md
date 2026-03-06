@@ -95,4 +95,4 @@ it's a conscious choice, not an oversight.
 
 ## Adaptation
 
-Review sees the full chain. When something is wrong, ask: which upstream step should have caught or prevented this? Update that step's `.lf/steps/` copy, or update repo docs if the issue was missing context. Also update `.lf/steps/review.md` itself when you notice recurring patterns the team cares about.
+Review sees the full chain. When something is wrong, ask: which upstream step should have caught or prevented this? Encode what you learned. Most discoveries belong in repo docs (CLAUDE.md, TESTING.md) where all steps benefit. Create or update `.lf/steps/` copies when the repo needs a step to work differently — a changed workflow, different review style, or team preferences about what review covers.

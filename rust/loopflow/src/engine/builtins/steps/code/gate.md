@@ -142,4 +142,4 @@ Find lint/test commands from repo guidance (`TESTING.md`, `README.md`, docs) and
 
 ## Adaptation
 
-Did you discover a quality check this repo always needs? A linter, a type check, a build step that should run every time? If so, copy this step to `.lf/steps/gate.md` and add it (or update the existing copy). Make the next gate faster by encoding what you learned.
+Did you discover a quality check this repo always needs? A linter, a type check, a build step that should run every time? Encode it so the next gate is faster. Most discoveries belong in repo docs (CLAUDE.md, TESTING.md) where all steps can see them. Copy this step to `.lf/steps/gate.md` when the repo needs gate to work differently — a changed workflow, different quality bar, or team preferences about what gate checks and how.

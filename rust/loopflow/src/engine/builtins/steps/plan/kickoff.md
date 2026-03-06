@@ -54,6 +54,10 @@ Update `scratch/<slug>.md`:
 ## Done when
 
 <Verification command or observable outcome>
+
+## Measure (if applicable)
+
+<What to measure before and after. Command to run, baseline to capture, what "better" looks like. Skip for changes without quantitative outcomes.>
 ```
 
 ## Wave alignment

@@ -68,4 +68,4 @@ If `lf ops land` fails due to rebase conflicts, launch a sub-agent to run the `r
 
 ## Adaptation
 
-If you discovered repo-specific landing conventions — merge strategy, branch protection rules, CI wait behavior, cleanup steps — copy this step to `.lf/steps/land.md` and encode them.
+If you discovered repo-specific landing conventions — merge strategy, branch protection rules, CI wait behavior, cleanup steps — encode them. Most belong in repo docs where all steps benefit. Copy this step to `.lf/steps/land.md` when the repo needs land to work differently — a changed workflow, or team preferences about how landing happens.

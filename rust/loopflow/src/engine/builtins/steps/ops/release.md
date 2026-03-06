@@ -42,4 +42,4 @@ That command is responsible for:
 
 ## Adaptation
 
-If you discovered repo-specific release conventions — changelog format, tag scheme, deploy hooks, version file locations — copy this step to `.lf/steps/release.md` and encode them.
+If you discovered repo-specific release conventions — changelog format, tag scheme, deploy hooks, version file locations — encode them. Most belong in repo docs where all steps benefit. Copy this step to `.lf/steps/release.md` when the repo needs release to work differently — a changed workflow, or team preferences about how releases happen.

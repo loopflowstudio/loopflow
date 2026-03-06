@@ -317,7 +317,11 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         message.to_string()
     } else {
         tracer.trace("commit:generate_message");
-        format_commit_message(&options.task, &options.flow_parents, Some("generated title"))
+        format_commit_message(
+            &options.task,
+            &options.flow_parents,
+            Some("generated title"),
+        )
     };
 
     // Commit

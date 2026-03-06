@@ -341,8 +341,11 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
             .as_deref()
             .is_some_and(|b| !is_default && has_commits && squash_merged.contains(b));
         let dirty = !is_clean_ignoring_scratch(&path).unwrap_or(true);
-        let prunable = !is_default && (merged || squash_merged_flag);
-        let fresh = !is_default && !merged && !squash_merged_flag && !has_commits;
+        // "Fresh" means no net content delta against main yet.
+        // This includes newly-rotated branches that were forked from a landed
+        // branch (commit graph differs, but tree is identical to main).
+        let fresh = !is_default && !merged && (!has_commits || squash_merged_flag);
+        let prunable = !is_default && (merged || (squash_merged_flag && !fresh));
         results.push(WorktreeState {
             branch,
             path,
@@ -389,6 +392,15 @@ pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut 
     let pr_merged = pr_handle.join().unwrap_or_default();
     let remote_branches = remote_handle.join().unwrap_or_default();
 
+    apply_network_enrichment(states, default_branch, &pr_merged, &remote_branches);
+}
+
+fn apply_network_enrichment(
+    states: &mut [WorktreeState],
+    default_branch: &str,
+    pr_merged: &HashSet<String>,
+    remote_branches: &HashSet<String>,
+) {
     for state in states.iter_mut() {
         let is_default = state.branch.as_deref() == Some(default_branch);
         if is_default {
@@ -411,9 +423,12 @@ pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut 
                 .is_some_and(|b| !remote_branches.contains(b));
         }
 
-        if !state.prunable && (state.merged || state.squash_merged) {
+        if !state.prunable && state.merged {
             state.prunable = true;
             state.fresh = false;
+        }
+        if !state.prunable && state.squash_merged && !state.fresh {
+            state.prunable = true;
         }
         // remote_gone on a non-fresh worktree means the PR was likely merged
         // or the branch was deleted upstream — mark prunable.
@@ -600,7 +615,10 @@ pub fn preserve_worktree(
 
 #[cfg(test)]
 mod tests {
-    use super::{worktree_path, worktree_path_with_config};
+    use super::{
+        apply_network_enrichment, worktree_path, worktree_path_with_config, WorktreeState,
+    };
+    use std::collections::HashSet;
     use std::path::Path;
 
     #[test]
@@ -623,5 +641,55 @@ mod tests {
             None,
         );
         assert_eq!(path, Path::new("/tmp/repo.mobile"));
+    }
+
+    #[test]
+    fn network_enrichment_keeps_squash_fresh_branch_unprunable() {
+        let mut states = vec![
+            WorktreeState {
+                branch: Some("old".to_string()),
+                path: Path::new("/tmp/repo.old").to_path_buf(),
+                base_branch: None,
+                merged: false,
+                squash_merged: true,
+                prunable: false,
+                fresh: true,
+                dirty: false,
+                remote_gone: false,
+            },
+            WorktreeState {
+                branch: Some("new".to_string()),
+                path: Path::new("/tmp/repo.new").to_path_buf(),
+                base_branch: None,
+                merged: false,
+                squash_merged: true,
+                prunable: false,
+                fresh: true,
+                dirty: false,
+                remote_gone: false,
+            },
+        ];
+
+        let pr_merged = HashSet::from(["old".to_string()]);
+        let remote_branches = HashSet::from(["old".to_string(), "new".to_string()]);
+        apply_network_enrichment(&mut states, "main", &pr_merged, &remote_branches);
+
+        let old = states
+            .iter()
+            .find(|state| state.branch.as_deref() == Some("old"))
+            .unwrap();
+        assert!(old.merged, "merged PR branch should be marked merged");
+        assert!(old.prunable, "merged PR branch should be prunable");
+        assert!(!old.fresh, "merged PR branch should not stay fresh");
+
+        let new = states
+            .iter()
+            .find(|state| state.branch.as_deref() == Some("new"))
+            .unwrap();
+        assert!(
+            !new.prunable,
+            "new squashed-equivalent branch should stay unprunable while fresh"
+        );
+        assert!(new.fresh, "new branch should remain fresh");
     }
 }

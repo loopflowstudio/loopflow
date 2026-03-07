@@ -58,6 +58,7 @@ final class BundledDaemonManager {
     private(set) var port: Int?
     private(set) var token: String?
     private(set) var state: DaemonState = .stopped
+    private var startTask: Task<ServerConnection, Error>?
 
     private static let preferNativeModeDefaultsKey = "concerto.bundledDaemon.preferNativeMode"
     private static let connectWithPhoneDefaultsKey = "concerto.bundledDaemon.connectWithPhone"
@@ -98,7 +99,28 @@ final class BundledDaemonManager {
         }
     }
 
+    /// Start the daemon eagerly. Later calls to `start()` will join this in-flight task.
+    func eagerStart() {
+        guard startTask == nil else { return }
+        startTask = Task {
+            try await performStart()
+        }
+    }
+
     func start() async throws -> ServerConnection {
+        // Join an in-flight eager start if one exists.
+        if let task = startTask {
+            return try await task.value
+        }
+
+        let task = Task {
+            try await performStart()
+        }
+        startTask = task
+        return try await task.value
+    }
+
+    private func performStart() async throws -> ServerConnection {
         let settings = RuntimeSettings(
             preferNativeMode: Self.prefersNativeMode,
             connectWithPhone: Self.connectWithPhoneEnabled
@@ -107,13 +129,6 @@ final class BundledDaemonManager {
         if case .running = state,
            runningSettings == settings,
            let connection = runtimeConnection {
-            return connection
-        }
-
-        if case .starting = state {
-            try await waitForHealth()
-            let connection = try requireRuntimeConnection()
-            state = .running
             return connection
         }
 
@@ -164,6 +179,7 @@ final class BundledDaemonManager {
             state = .running
             return connection
         } catch {
+            startTask = nil
             stop()
             state = .failed(error)
             throw error
@@ -171,6 +187,7 @@ final class BundledDaemonManager {
     }
 
     func stop() {
+        startTask = nil
         state = .stopped
 
         if let process {
@@ -280,6 +297,10 @@ final class BundledDaemonManager {
         )
     }
 
+    var currentConnection: ServerConnection? {
+        runtimeConnection
+    }
+
     private func requireRuntimeConnection() throws -> ServerConnection {
         guard let connection = runtimeConnection else {
             throw ManagerError.invalidRuntimeState
@@ -298,7 +319,7 @@ final class BundledDaemonManager {
 
             let url = URL(string: "http://127.0.0.1:\(port)/health")!
             var request = URLRequest(url: url)
-            request.timeoutInterval = 0.75
+            request.timeoutInterval = 0.25
 
             do {
                 let (_, response) = try await urlSession.data(for: request)
@@ -309,7 +330,7 @@ final class BundledDaemonManager {
                 // Keep polling until timeout or success.
             }
 
-            try await Task.sleep(for: .milliseconds(120))
+            try await Task.sleep(for: .milliseconds(50))
         }
 
         throw ManagerError.healthCheckTimedOut(port)

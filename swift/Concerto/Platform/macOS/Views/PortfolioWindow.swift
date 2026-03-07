@@ -63,11 +63,15 @@ struct PortfolioWindow: View {
             }
         }
         .background(palette.background.ignoresSafeArea())
+        .onAppear {
+            ensureRepoStates()
+        }
         .task {
             await syncRepoStates()
             await startEventSubscription()
         }
         .onChange(of: repoPaths) { _, _ in
+            ensureRepoStates()
             Task {
                 await syncRepoStates()
             }
@@ -81,7 +85,7 @@ struct PortfolioWindow: View {
         }
     }
 
-    private func syncRepoStates() async {
+    private func ensureRepoStates() {
         let desiredRepos = portfolioService.repos
         let desiredPaths = Set(desiredRepos.map(\.path))
 
@@ -94,9 +98,18 @@ struct PortfolioWindow: View {
         let token = connectionStore.token(for: connection)
 
         for repo in desiredRepos where repoStates[repo.path] == nil {
-            let state = PortfolioRepoState(repo: repo, connection: connection, token: token)
-            repoStates[repo.path] = state
-            await state.refresh()
+            repoStates[repo.path] = PortfolioRepoState(repo: repo, connection: connection, token: token)
+        }
+    }
+
+    private func syncRepoStates() async {
+        ensureRepoStates()
+
+        let statesToRefresh = repoStates.values.filter { $0.isLoading }
+        await withTaskGroup(of: Void.self) { group in
+            for state in statesToRefresh {
+                group.addTask { await state.refresh() }
+            }
         }
     }
 

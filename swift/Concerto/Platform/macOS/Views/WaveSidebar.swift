@@ -11,18 +11,12 @@ struct WaveSidebar: View {
     @State private var showingConnectionSettings = false
     @State private var actionError: String?
     @State private var showingActionError = false
-    @AppStorage("wave-sidebar.show-orphan-worktrees") private var showingOrphanWorktrees = false
-
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
     @State private var isEditingWaveName = false
 
     private var waveGroups: WaveGroups {
         repoState.waveGroups
-    }
-
-    private var orphanWorktrees: [WorktreeInfo] {
-        repoState.worktreeStore.orphans
     }
 
     private func sectionHeader(_ title: String, icon: String, count: Int) -> some View {
@@ -72,9 +66,11 @@ struct WaveSidebar: View {
             header
             analyticsRow
 
-            if repoState.waves.isEmpty && !repoState.lfdConnected {
+            if repoState.isActivelyConnecting {
+                connectingState
+            } else if repoState.waves.isEmpty && !repoState.lfdConnected {
                 disconnectedState
-            } else if repoState.waves.isEmpty && orphanWorktrees.isEmpty {
+            } else if repoState.waves.isEmpty {
                 emptyState
             } else {
                 waveList
@@ -233,6 +229,27 @@ struct WaveSidebar: View {
         .accessibleButton("Start designing")
     }
 
+    private var connectingState: some View {
+        VStack(spacing: 0) {
+            Spacer()
+                .frame(maxHeight: .infinity)
+
+            VStack(spacing: Spacing.md) {
+                ProgressView()
+                    .tint(.white)
+
+                Text(repoState.connectionSummary)
+                    .font(Typography.caption())
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            Spacer()
+                .frame(maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+    }
+
     private var disconnectedState: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -323,39 +340,6 @@ struct WaveSidebar: View {
                     sectionHeader("Idle", icon: "circle", count: waveGroups.idle.count)
                     waveRows(waveGroups.idle)
                 }
-
-                // Orphan worktrees — on disk but not tracked by any wave
-                if !orphanWorktrees.isEmpty {
-                    Divider()
-                        .background(.white.opacity(0.15))
-                        .padding(.vertical, Spacing.xs)
-
-                    DisclosureGroup(isExpanded: $showingOrphanWorktrees) {
-                        VStack(spacing: Spacing.xs) {
-                            ForEach(orphanWorktrees) { worktree in
-                                WorktreeRow(worktree: worktree) {
-                                    upgradeWorktree(worktree)
-                                }
-                            }
-                        }
-                        .padding(.top, Spacing.xs)
-                    } label: {
-                        HStack(spacing: Spacing.xs) {
-                            Image(systemName: "folder")
-                                .foregroundStyle(.white.opacity(0.25))
-                            Text("WORKTREES")
-                                .foregroundStyle(.white.opacity(0.25))
-                                .tracking(0.5)
-                            Text("\(orphanWorktrees.count)")
-                                .foregroundStyle(.white.opacity(0.2))
-                        }
-                        .font(Typography.caption(9))
-                        .padding(.leading, Spacing.sm)
-                        .padding(.top, Spacing.sm)
-                        .padding(.bottom, Spacing.xs)
-                    }
-                    .tint(.white.opacity(0.7))
-                }
             }
             .padding(.horizontal, Spacing.sm)
         }
@@ -405,18 +389,6 @@ struct WaveSidebar: View {
         repoState.selectedWaveId = waveId
         keyboardFocusedId = waveId
         repoState.showingAnalytics = false
-    }
-
-    private func upgradeWorktree(_ worktree: WorktreeInfo) {
-        guard let name = worktree.shortName else { return }
-        Task {
-            do {
-                try await repoState.createWave(name: name)
-            } catch {
-                actionError = error.localizedDescription
-                showingActionError = true
-            }
-        }
     }
 
     private func openDesignEntry() {

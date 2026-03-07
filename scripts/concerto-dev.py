@@ -132,7 +132,7 @@ def run_app_bundle_with_log(app_path: Path, log_path: Path) -> int:
         return run(open_cmd, check=False).returncode
     except KeyboardInterrupt:
         print("\nStopping app...")
-        run(["osascript", "-e", 'tell application id "com.loopflow.concerto" to quit'], check=False)
+        _stop_concerto_app(app_path)
         return 130
     finally:
         if tail_process.poll() is None:
@@ -141,6 +141,31 @@ def run_app_bundle_with_log(app_path: Path, log_path: Path) -> int:
                 tail_process.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 tail_process.kill()
+
+
+def _stop_concerto_app(app_path: Path) -> None:
+    """Quit Concerto Dev, falling back to killing the app if a modal blocks quit."""
+    executable = app_path / "Contents" / "MacOS" / "Concerto"
+    bundled_lfd = app_path / "Contents" / "MacOS" / "lfd"
+
+    run(["osascript", "-e", 'tell application id "com.loopflow.concerto" to quit'], check=False)
+    if _wait_for_process_exit(str(executable), timeout_seconds=3):
+        return
+
+    print("App did not quit cleanly; forcing shutdown...")
+    run(["pkill", "-f", str(executable)], check=False)
+    run(["pkill", "-f", f"{bundled_lfd} serve"], check=False)
+    _wait_for_process_exit(str(executable), timeout_seconds=2)
+
+
+def _wait_for_process_exit(pattern: str, timeout_seconds: float) -> bool:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        result = run_capture(["pgrep", "-f", pattern])
+        if result.returncode != 0:
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def _read_session_token() -> str | None:

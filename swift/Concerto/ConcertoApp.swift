@@ -96,6 +96,11 @@ private func bootstrapConcertoApp() {
     Task { @MainActor in
         VoiceInputWarmup.start()
     }
+    #if os(macOS)
+    Task { @MainActor in
+        SharedDaemon.eagerStart()
+    }
+    #endif
 }
 
 #if os(macOS)

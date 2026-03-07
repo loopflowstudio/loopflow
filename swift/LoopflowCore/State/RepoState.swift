@@ -917,11 +917,10 @@ public final class RepoState {
                 try await waveService.listRepos()
             }
 
+            availableRemoteRepos = repos
             if let remote = repos.first {
-                availableRemoteRepos = repos
                 selectRemoteRepo(path: remote.path)
             } else {
-                availableRemoteRepos = repos
                 repoTarget = nil
             }
         }

@@ -91,9 +91,7 @@ final class CredentialSocketServer: @unchecked Sendable {
             var clientAddress = sockaddr()
             var clientLength = socklen_t(MemoryLayout<sockaddr>.size)
             let clientFD = withUnsafeMutablePointer(to: &clientAddress) { pointer in
-                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    accept(listenerFD, sockaddrPtr, &clientLength)
-                }
+                accept(listenerFD, pointer, &clientLength)
             }
 
             if clientFD < 0 {
@@ -245,10 +243,8 @@ final class CredentialSocketServer: @unchecked Sendable {
     }
 
     private func readCredential(provider: CredentialProvider) -> CredentialResponse? {
-        if let credential = FileCredentialReader(homeDirectory: homeDirectory).read(provider: provider) {
-            return credential
-        }
-        return readKeychain(provider: provider)
+        FileCredentialReader(homeDirectory: homeDirectory).read(provider: provider)
+            ?? readKeychain(provider: provider)
     }
 
     private func readKeychain(provider: CredentialProvider) -> CredentialResponse? {

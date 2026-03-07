@@ -6,6 +6,14 @@
 
 API key auth shipped with CLI-only key entry (`lfq auth configure <provider> --credential apikey`). The `AuthProviderCard` shows a credential type badge, but there's no UI for entering or switching keys. Users without terminal access can't opt into API key auth.
 
+### From Phase 1 auth redesign (shipped)
+
+- `FileCredentialReader` reads Claude (`~/.claude/.credentials.json`) and Codex (`~/.codex/auth.json`) credentials from disk, including nested `tokens.access_token` for ChatGPT-style Codex auth.
+- `CredentialSocketServer` serves these via `/credentials/{provider}` endpoints for the containerized daemon.
+- Keychain fallback exists for GitHub (`gh:github.com` service) and Claude/Codex safe storage.
+- API keys stored in DB via `access_token` column, differentiated by `credential_type` — this is the same column API key entry will write to.
+- The design doc proposes an `ApiKeyStep { placeholder, help_url, validate_on_submit }` model for Phase 2 typed auth methods — API key entry UI should align with that shape.
+
 ## What to build
 
 ### ConnectionSettingsView

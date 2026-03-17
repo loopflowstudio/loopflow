@@ -1,2 +1,0 @@
-- Attention item migration creates the new `attention_items` table and drops `wave_queue_blocks`, but does not copy legacy queue-block rows. Assumption: queue reconciliation will repopulate current queue failures quickly after upgrade, and preserving stale historical blocks is lower priority than shipping the attention queue end-to-end.
-- Initial implementation creates attention items for code review, queue failures, and step failures. `design_review` and `calibration` kinds are modeled in the API/UI but not yet surfaced by executor hooks.

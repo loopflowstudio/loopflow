@@ -1,12 +1,12 @@
 # 02: Tend Flow Steps
 
-**Finish line:** A registered `redesign` wave completes a real `lf tend` cycle against live member-wave state. The run writes scan and routing artifacts from lfd-backed data, chooses a real path (`chord`, `reorg`, or `silence`), and leaves a reviewer-visible recipe for reproducing the cycle.
+**Finish line:** A registered `redesign` wave completes a real `lf tend` cycle against live member-wave state. The run writes scan and routing artifacts from lfd-backed data, chooses a real path (`tune` or `silence`), and leaves a reviewer-visible recipe for reproducing the cycle.
 
 ## Context
 
 The structural wiring is in place now:
-- `tend` expands as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
-- `tend-chord` expands to `draft-chord -> review-chord -> apply-chord`
+- `tend` expands as `scan-waves -> or(router: tend/assess)` with `tune` and `silence` paths
+- `tend-tune` expands to `draft-chord -> review-chord -> apply-chord`
 - `scan-waves` reads live lfd state through `lfq show <wave> --json`
 - `WaveDto` now exposes the runtime fields `scan-waves` needs today: `flow_steps`, `triggers`, `open_pr_count`, `stack_count`, and optional `active_run` PR / queue state
 - `ship-roadmap` still allows ops inside an `or` sub-flow, so tend can branch without giving up mechanical follow-through
@@ -14,7 +14,9 @@ The structural wiring is in place now:
 - Python, docs, and lfd HTTP routes no longer expose standalone chord CRUD
 - Rust flow tests cover tend structure and ops inside `or` sub-flows
 
-What is still missing is the live proof. The redesign/member wave directories exist on disk, but this worktree has not yet started lfd, registered those waves, and exercised the first real tend cycle. Until that happens, the flow is structurally executable but not operationally trusted.
+What is still missing is the live proof. The redesign/member wave directories exist on disk, but this worktree has not yet started lfd, registered those waves, and exercised the first real tend cycle. Until that happens, the flow is structurally executable but not operationally trusted. No other redesign item owns that operational gap — this item does.
+
+Phase 1 also expects `signals/01` to move in parallel. Treat that as coordination pressure, not a prerequisite excuse: this item still needs to close the lfd bootstrap + live tend proof on its own branch of work.
 
 ## Validation baseline
 
@@ -24,10 +26,10 @@ Use the current codebase to re-check the structural slice before attempting the 
 - `cargo test -p loopflow lf::commands::flow::tests`
 - `cargo test --all`
 - `uv run pytest python/tests/`
-- Inspect `rust/loopflow/src/engine/builtins/flows/tend/tend.yaml`, `rust/loopflow/src/engine/builtins/flows/tend/tend-chord.yaml`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
+- Inspect `rust/loopflow/src/engine/builtins/flows/tend/tend.yaml`, `rust/loopflow/src/engine/builtins/flows/tend/tend-tune.yaml`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
 
 Expected results:
-- `tend` parses as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
+- `tend` parses as `scan-waves -> or(router: tend/assess)` with `tune` and `silence` paths
 - `ship-roadmap` keeps working with ops inside an `or` sub-flow
 - Python and docs no longer expose standalone chord CRUD
 - `scan-waves.md` reads lfd state via `lfq show --json` and emits a runtime section
@@ -40,7 +42,7 @@ That baseline is the setup for the real remaining proof: boot lfd, register the 
 
 2. **Run the first real tend cycle.** Execute `lf tend` for `redesign` in the repo-local worktree. Keep the artifacts: `scratch/tend-scan.md`, the router output, and the resulting path execution.
 
-3. **Exercise a real routed path.** Expect the first run to choose `reorg` or `silence` while the chord is quiet. If that happens, create one small, reversible pressure point and rerun so the `chord` path also gets a live exercise.
+3. **Exercise a real routed path.** Expect the first run to choose `silence` while the chord is quiet. If that happens, create one small, reversible pressure point and rerun so the `tune` path also gets a live exercise.
 
 4. **Capture the operating recipe.** Leave one reviewer-friendly script or command sequence showing how to start lfd, bootstrap the waves, run tend, and inspect the resulting artifacts.
 
@@ -52,4 +54,4 @@ That baseline is the setup for the real remaining proof: boot lfd, register the 
 - `lfq show <wave> --json` returns live runtime state for the redesign chord and each member wave
 - A real `lf tend` run against `redesign` completes and writes lfd-backed scan output plus router artifacts
 - At least one routed path completes in a live run, and the branch documents how to reproduce it
-- If the first live run routes to `reorg` or `silence`, a follow-up live run exercises the `chord` path or explicitly documents why that path still cannot run
+- If the first live run routes to `silence`, a follow-up live run exercises the `tune` path or explicitly documents why that path still cannot run

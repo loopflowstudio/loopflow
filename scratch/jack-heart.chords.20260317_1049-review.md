@@ -12,6 +12,6 @@
 ## What to verify
 
 - `scan-waves.md` reads lfd state via `lfq show --json` and emits a runtime section
-- Tend expands as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence`
+- Tend expands as `scan-waves -> or(router: tend/assess)` with `tune` and `silence`
 - `ship-roadmap` still supports ops inside an `or` sub-flow
 - Chord CRUD is gone from Python, docs, and lfd HTTP routes

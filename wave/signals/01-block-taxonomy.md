@@ -10,6 +10,8 @@ Don't design the full taxonomy upfront. Start with the types that will actually 
 
 This item can run in parallel with chord-model/02's live tend-cycle validation. It does not depend on Letta or the trigger work, and the block queue UI is waiting on at least the first concrete block types to exist.
 
+Keep the first slice additive: a `BlockType` enum, the core `Block` model, and the minimal API surface the queue needs. That keeps overlap with chord-model manageable while still unblocking agent-embedding with real types instead of placeholders.
+
 ## What to build
 
 ### Initial block types

@@ -4,10 +4,10 @@
 - `cargo test -p loopflow lf::commands::flow::tests`
 - `cargo test --all`
 - `uv run pytest python/tests/`
-- Inspect `rust/loopflow/src/engine/builtins/flows/tend/tend.yaml`, `rust/loopflow/src/engine/builtins/flows/tend/tend-chord.yaml`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
+- Inspect `rust/loopflow/src/engine/builtins/flows/tend/tend.yaml`, `rust/loopflow/src/engine/builtins/flows/tend/tend-tune.yaml`, `lfq show <wave> --json`, and the built-in tend docs under `rust/loopflow/src/engine/builtins/steps/tend/`
 
 What you should see:
-- tend parses as `scan-waves -> or(router: tend/assess)` with `chord`, `reorg`, and `silence` paths
+- tend parses as `scan-waves -> or(router: tend/assess)` with `tune` and `silence` paths
 - `ship-roadmap` keeps working with ops inside an `or` sub-flow
 - Python and docs no longer expose standalone chord CRUD
 - `scan-waves.md` reads lfd state via `lfq show --json` and emits a runtime section

@@ -8,6 +8,8 @@ Start with the block types that actually occur during this redesign. Don't desig
 
 The self-healing cascade (wave tries -> chord-wave tries -> human decides) is the core architecture. Build it for one block type, then extend.
 
+This wave is the parallel Phase 1 track next to `chord-model/02`, not a later cleanup pass. Start with additive block types and APIs so the work can move now without fighting over the same `lfd/` files that chord-model is still proving live.
+
 ## The cascade
 
 ```

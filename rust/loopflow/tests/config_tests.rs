@@ -1,13 +1,36 @@
 use std::fs;
 use std::path::Path;
+use std::sync::{LazyLock, Mutex};
 
 use loopflow::engine::{load_config, load_config_or_default};
 use tempfile::TempDir;
+
+static HOME_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn write_config(dir: &Path, content: &str) {
     let lf_dir = dir.join(".lf");
     fs::create_dir_all(&lf_dir).unwrap();
     fs::write(lf_dir.join("config.yaml"), content).unwrap();
+}
+
+fn with_temp_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
+    let _lock = HOME_LOCK.lock().unwrap();
+    let previous_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", home);
+
+    struct HomeGuard(Option<String>);
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(home) => std::env::set_var("HOME", home),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    let _guard = HomeGuard(previous_home);
+    f()
 }
 
 // =============================================================================
@@ -17,8 +40,7 @@ fn write_config(dir: &Path, content: &str) {
 #[test]
 fn load_config_or_default_handles_missing_file() {
     let temp = TempDir::new().unwrap();
-    // Should return defaults without error
-    let config = load_config_or_default(Some(temp.path()));
+    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
     assert!(config.agent.is_none());
 }
 
@@ -26,8 +48,7 @@ fn load_config_or_default_handles_missing_file() {
 fn load_config_or_default_handles_empty_file() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "");
-    // Should return defaults without error
-    let config = load_config_or_default(Some(temp.path()));
+    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
     assert!(config.agent.is_none());
 }
 
@@ -35,8 +56,7 @@ fn load_config_or_default_handles_empty_file() {
 fn load_config_or_default_handles_whitespace_only() {
     let temp = TempDir::new().unwrap();
     write_config(temp.path(), "   \n\n  ");
-    // Should return defaults without error
-    let config = load_config_or_default(Some(temp.path()));
+    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
     assert!(config.agent.is_none());
 }
 
@@ -61,14 +81,7 @@ yolo: true
 #[test]
 fn load_config_or_default_returns_defaults() {
     let temp = TempDir::new().unwrap();
-    // Point HOME to temp dir so we don't pick up ~/.lf/config.yaml
-    let orig_home = std::env::var("HOME").ok();
-    std::env::set_var("HOME", temp.path());
-    let config = load_config_or_default(Some(temp.path()));
-    match orig_home {
-        Some(h) => std::env::set_var("HOME", h),
-        None => std::env::remove_var("HOME"),
-    }
+    let config = with_temp_home(temp.path(), || load_config_or_default(Some(temp.path())));
 
     assert!(config.agent.is_none());
     assert!(!config.yolo);

@@ -51,6 +51,16 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     prepare_land(&repo_root, options, progress)?;
     let main_branch = rebase_land(&repo_root, &main_repo, progress)?;
+    let pr_exists = if options.local {
+        false
+    } else {
+        crate::ops::pr::pr_exists_for_current_branch(&repo_root)?
+    };
+    if !options.local && !pr_exists && !options.create_pr {
+        return Err(OpsError::Message(format!(
+            "no open PR found for branch '{feature_branch}'; run lf ops pr or use --create-pr"
+        )));
+    }
     let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
     clear_scratch(&repo_root, progress)?;
 
@@ -59,6 +69,7 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
     } else {
         ensure_pr(
             &repo_root,
+            pr_exists,
             &feature_branch,
             options.create_pr,
             pr_title.as_deref(),
@@ -220,6 +231,7 @@ fn finalize_local(
 
 fn ensure_pr(
     repo_root: &Path,
+    pr_exists: bool,
     feature_branch: &str,
     create_pr: bool,
     pr_title: Option<&str>,
@@ -230,7 +242,7 @@ fn ensure_pr(
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    if !crate::ops::pr::pr_exists_for_current_branch(repo_root)? {
+    if !pr_exists {
         if create_pr {
             let title = pr_title.ok_or_else(|| {
                 OpsError::Message(

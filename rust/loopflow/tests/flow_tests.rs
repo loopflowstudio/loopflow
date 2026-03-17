@@ -341,27 +341,21 @@ fn builtin_tend_flow_structure() {
                 Some("tend/assess"),
                 "or should have tend/assess as router"
             );
-            assert_eq!(or_def.paths.len(), 3);
-            assert!(or_def.paths.contains_key("chord"));
-            assert!(or_def.paths.contains_key("reorg"));
+            assert_eq!(or_def.paths.len(), 2);
+            assert!(or_def.paths.contains_key("tune"));
             assert!(or_def.paths.contains_key("silence"));
-            assert_eq!(or_def.paths["chord"].flow.as_deref(), Some("tend-chord"));
-            assert_eq!(or_def.paths["reorg"].flow.as_deref(), Some("reorg"));
+            assert_eq!(or_def.paths["tune"].flow.as_deref(), Some("tend-tune"));
             assert_eq!(or_def.paths["silence"].flow, None);
             assert_eq!(or_def.paths["silence"].step, None);
         }
         other => panic!("expected Or, got {other:?}"),
     }
 
-    let chord_items = expand_named_flow(repo, "tend-chord");
-    assert_eq!(chord_items.len(), 3);
-    assert_step_name(&chord_items[0], "tend/draft-chord");
-    assert_step_name(&chord_items[1], "tend/review-chord");
-    assert_step_name(&chord_items[2], "tend/apply-chord");
-
-    let reorg_items = expand_named_flow(repo, "reorg");
-    assert_eq!(reorg_items.len(), 1);
-    assert_step_name(&reorg_items[0], "update-wave");
+    let tune_items = expand_named_flow(repo, "tend-tune");
+    assert_eq!(tune_items.len(), 3);
+    assert_step_name(&tune_items[0], "tend/draft-chord");
+    assert_step_name(&tune_items[1], "tend/review-chord");
+    assert_step_name(&tune_items[2], "tend/apply-chord");
 }
 
 #[test]
@@ -370,16 +364,16 @@ fn builtin_ship_roadmap_has_ops_in_or_subflow() {
     let repo = temp.path();
 
     let items = expand_named_flow(repo, "ship-roadmap");
-    let build_flow_name = match &items[1] {
-        ConcreteItem::Or(or_def) => or_def.paths["build"]
+    let play_flow_name = match &items[1] {
+        ConcreteItem::Or(or_def) => or_def.paths["play"]
             .flow
             .as_deref()
-            .expect("build path should point at a sub-flow"),
+            .expect("play path should point at a sub-flow"),
         other => panic!("expected or in ship-roadmap, got {other:?}"),
     };
-    let items = expand_named_flow(repo, build_flow_name);
+    let items = expand_named_flow(repo, play_flow_name);
     assert!(
         items.iter().any(|item| matches!(item, ConcreteItem::Op(_))),
-        "ship-roadmap-build should contain an ops item"
+        "ship-roadmap-play should contain an ops item"
     );
 }

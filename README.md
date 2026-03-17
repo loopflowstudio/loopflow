@@ -157,8 +157,8 @@ Flows can include mechanical ops items directly:
 | `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |
-| `ship-roadmap` | ingest → or(build, reorg) |
-| `ship-roadmap-build` | kickoff → review-design → build → review → land |
+| `ship-roadmap` | ingest → or(play, silence) |
+| `ship-roadmap-play` | kickoff → review-design → build → review → land |
 | `reorg` | update-wave (coherence pass) |
 | `qa-deploy` | qa → triage → or(fix, deploy) |
 | `qa-fix` | implement → compress → lint → gate |
@@ -176,8 +176,8 @@ Flows can include mechanical ops items directly:
 
 | Flow | Steps |
 |------|-------|
-| `tend` | scan-waves → assess → or(chord, reorg) |
-| `tend-chord` | draft-chord → review-chord → apply-chord |
+| `tend` | scan-waves → assess → or(tune, silence) |
+| `tend-tune` | draft-chord → review-chord → apply-chord |
 
 ### Scan flows (`scan/`)
 
@@ -205,14 +205,11 @@ Branches route a flow based on an agent's assessment of the current state. One p
 - or:
     router: tend/assess
     paths:
-      chord:
-        flow: tend-chord
-        description: "Pressure points found — compose and review mutations"
-      reorg:
-        flow: reorg
-        description: "No cross-wave pressure, but waves need coherence passes"
+      tune:
+        flow: tend-tune
+        description: "Adjustments needed — compose and review chord changes"
       silence:
-        description: "Everything is healthy — no action needed this cycle"
+        description: "Everything is in tune — no action needed this cycle"
 ```
 
 The `or` construct runs a router step that reads scratch/ and chooses a path. The router's prompt gets routing instructions appended automatically — the step author focuses on *what to think about*, not *how to express the choice*. A path with no `flow:` or `step:` (like `silence`) is a clean no-op exit.

@@ -2,11 +2,8 @@
 - or:
     router: tend/assess
     paths:
-      chord:
-        flow: tend-chord
-        description: "Pressure points found — compose and review mutations"
-      reorg:
-        flow: reorg
-        description: "No cross-wave pressure, but individual waves need coherence passes"
+      tune:
+        flow: tend-tune
+        description: "Adjustments needed — compose and review chord changes"
       silence:
-        description: "Everything is healthy — no action needed this cycle"
+        description: "Everything is in tune — no action needed this cycle"

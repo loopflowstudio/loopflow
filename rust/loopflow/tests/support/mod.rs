@@ -9,6 +9,7 @@ static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 pub struct EnvGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_path: Option<String>,
+    previous_home: Option<String>,
     _temp: TempDir,
 }
 
@@ -28,9 +29,12 @@ impl EnvGuard {
             None => temp.path().display().to_string(),
         };
         env::set_var("PATH", new_path);
+        let previous_home = env::var("HOME").ok();
+        env::set_var("HOME", temp.path());
         Self {
             _lock: lock,
             previous_path,
+            previous_home,
             _temp: temp,
         }
     }
@@ -42,6 +46,11 @@ impl Drop for EnvGuard {
             env::set_var("PATH", prev);
         } else {
             env::remove_var("PATH");
+        }
+        if let Some(prev) = &self.previous_home {
+            env::set_var("HOME", prev);
+        } else {
+            env::remove_var("HOME");
         }
     }
 }

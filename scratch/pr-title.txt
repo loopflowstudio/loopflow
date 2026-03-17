@@ -1,0 +1,1 @@
+flow: rename tend and roadmap routes to tune/play

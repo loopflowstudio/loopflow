@@ -19,12 +19,7 @@ public final class TerminalWorkspaceStore {
     }
 
     public var selectedSession: TerminalSession? {
-        guard let selectedSessionId else { return nil }
-        return sessionsById[selectedSessionId]
-    }
-
-    public var hasSessions: Bool {
-        !orderedSessions.isEmpty
+        selectedSessionId.flatMap { sessionsById[$0] }
     }
 
     public func configure(repoKey: String?) {
@@ -33,11 +28,10 @@ public final class TerminalWorkspaceStore {
     }
 
     public func setAll(_ sessions: [TerminalSession]) {
-        let persistedOrder = persistedSessionOrder()
         sessionsById = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
         let activeIds = Set(sessionsById.keys)
 
-        orderedSessionIds = persistedOrder.filter(activeIds.contains)
+        orderedSessionIds = orderedSessionIds.filter(activeIds.contains)
         for session in sessions.sorted(by: { $0.createdAt < $1.createdAt }) where !orderedSessionIds.contains(session.id) {
             orderedSessionIds.append(session.id)
         }
@@ -81,10 +75,6 @@ public final class TerminalWorkspaceStore {
         persist()
     }
 
-    public func sessions(for waveId: String) -> [TerminalSession] {
-        orderedSessions.filter { $0.waveId == waveId }
-    }
-
     public func activeSession(for waveId: String) -> TerminalSession? {
         orderedSessions.first { $0.waveId == waveId && !$0.status.isTerminal }
     }
@@ -103,9 +93,5 @@ public final class TerminalWorkspaceStore {
         }
         orderedSessionIds = userDefaults.stringArray(forKey: "terminalWorkspace.order.\(repoKey)") ?? []
         selectedSessionId = userDefaults.string(forKey: "terminalWorkspace.selected.\(repoKey)")
-    }
-
-    private func persistedSessionOrder() -> [String] {
-        orderedSessionIds
     }
 }

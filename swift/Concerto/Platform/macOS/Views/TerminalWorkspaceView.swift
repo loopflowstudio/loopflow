@@ -97,7 +97,6 @@ private struct SessionTerminalSurface: View {
     @Environment(RepoState.self) private var repoState
     @StateObject private var ghosttyManager = GhosttyManager.shared
     @State private var launchSpec: TerminalLaunchSpec?
-    @State private var hasStarted = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -129,10 +128,7 @@ private struct SessionTerminalSurface: View {
             do {
                 let spec = try await repoState.attachTerminalSession(session.id)
                 launchSpec = spec
-                if !hasStarted {
-                    _ = try await repoState.startTerminalSession(session.id)
-                    hasStarted = true
-                }
+                _ = try await repoState.startTerminalSession(session.id)
             } catch {
                 errorMessage = error.localizedDescription
             }

@@ -30,7 +30,7 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
         .iter()
         .map(|item| match item {
             ConcreteItem::Step(s) => s.step.name.as_str(),
-            ConcreteItem::Ops(_) => "[ops]",
+            ConcreteItem::Op(_) => "[op]",
             ConcreteItem::Fork(_) => "[fork]",
             ConcreteItem::Branch(_) => "[branch]",
         })

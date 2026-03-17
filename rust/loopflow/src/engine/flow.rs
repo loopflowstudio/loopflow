@@ -45,20 +45,20 @@ impl Step {
 #[serde(tag = "type", content = "data")]
 pub enum FlowItem {
     Step(Step),
-    Ops(OpsItem),
+    Op(Op),
     Fork { branches: Vec<FlowItem> },
     FlowRef(String),
     Branch(BranchDef),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct OpsItem {
+pub struct Op {
     pub command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
 }
 
-impl OpsItem {
+impl Op {
     pub fn display_name(&self) -> String {
         if self.args.is_empty() {
             self.command.clone()
@@ -68,7 +68,7 @@ impl OpsItem {
     }
 }
 
-impl std::fmt::Display for OpsItem {
+impl std::fmt::Display for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ops: {}", self.display_name())
     }
@@ -91,7 +91,7 @@ pub struct BranchPath {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlowAction {
     RunStep { step: ConcreteStep },
-    RunOps { ops: ConcreteOps },
+    RunOps { ops: ConcreteOp },
     WaitInteractive { step: ConcreteStep },
     Fork { fork: ConcreteFork },
     Branch { branch: ConcreteBranch },
@@ -145,15 +145,15 @@ pub struct ConcreteBranch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConcreteOps {
-    pub item: OpsItem,
+pub struct ConcreteOp {
+    pub item: Op,
     pub flow_parents: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConcreteItem {
     Step(ConcreteStep),
-    Ops(ConcreteOps),
+    Op(ConcreteOp),
     Fork(ConcreteFork),
     Branch(ConcreteBranch),
 }
@@ -178,7 +178,7 @@ pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
                 FlowAction::RunStep { step }
             }
         }
-        ConcreteItem::Ops(ops) => FlowAction::RunOps { ops },
+        ConcreteItem::Op(ops) => FlowAction::RunOps { ops },
         ConcreteItem::Fork(fork) => FlowAction::Fork { fork },
         ConcreteItem::Branch(branch) => FlowAction::Branch { branch },
     }
@@ -538,7 +538,7 @@ fn parse_ops_value(value: &Value) -> Result<FlowItem, LoadError> {
         .to_string();
     let args = parts.map(ToString::to_string).collect();
 
-    Ok(FlowItem::Ops(OpsItem { command, args }))
+    Ok(FlowItem::Op(Op { command, args }))
 }
 
 fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
@@ -745,7 +745,7 @@ fn parse_branch_value(value: &Value) -> Result<FlowItem, LoadError> {
     Ok(FlowItem::Branch(BranchDef { paths }))
 }
 
-/// Validate that flows referenced by branch paths contain only steps.
+/// Validate that flows referenced by branch paths contain only steps and ops.
 /// Forks and nested branches inside branch sub-flows are not supported.
 fn validate_branch_paths(branch_def: &BranchDef, repo: &Path) -> Result<(), LoadError> {
     for (key, path) in &branch_def.paths {
@@ -756,23 +756,17 @@ fn validate_branch_paths(branch_def: &BranchDef, repo: &Path) -> Result<(), Load
         let items = expand_flow(&flow, repo)?;
         for item in &items {
             match item {
-                ConcreteItem::Step(_) => {}
-                ConcreteItem::Ops(_) => {
-                    return Err(LoadError::InvalidFlow(format!(
-                        "branch path '{key}' references flow '{flow_name}' which contains an ops item; \
-                         branch sub-flows must contain only steps"
-                    )));
-                }
+                ConcreteItem::Step(_) | ConcreteItem::Op(_) => {}
                 ConcreteItem::Fork(_) => {
                     return Err(LoadError::InvalidFlow(format!(
                         "branch path '{key}' references flow '{flow_name}' which contains a fork; \
-                         branch sub-flows must contain only steps"
+                         branch sub-flows must contain only steps and ops"
                     )));
                 }
                 ConcreteItem::Branch(_) => {
                     return Err(LoadError::InvalidFlow(format!(
                         "branch path '{key}' references flow '{flow_name}' which contains a nested branch; \
-                         branch sub-flows must contain only steps"
+                         branch sub-flows must contain only steps and ops"
                     )));
                 }
             }
@@ -885,8 +879,8 @@ fn expand_with_chain(
                 nested_chain.push(name.clone());
                 items.extend(expand_with_chain(&nested, repo, nested_chain, depth + 1)?);
             }
-            FlowItem::Ops(item) => {
-                items.push(ConcreteItem::Ops(ConcreteOps {
+            FlowItem::Op(item) => {
+                items.push(ConcreteItem::Op(ConcreteOp {
                     item: item.clone(),
                     flow_parents: chain.clone(),
                 }));
@@ -953,7 +947,7 @@ fn expand_fork_branch(
             })
         }
         FlowItem::FlowRef(name) => expand_flow_ref_branch(name, &[], repo, chain, depth),
-        FlowItem::Ops(_) => Err(LoadError::InvalidFlow(
+        FlowItem::Op(_) => Err(LoadError::InvalidFlow(
             "fork branches cannot contain ops items".to_string(),
         )),
         FlowItem::Fork { .. } => Err(LoadError::InvalidFlow(
@@ -1025,7 +1019,7 @@ fn extract_fork_branch_steps(
     for item in items {
         match item {
             ConcreteItem::Step(s) => steps.push(s.clone()),
-            ConcreteItem::Ops(_) => {
+            ConcreteItem::Op(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "fork branch flow ref '{flow_name}' contains an ops item"
                 )))
@@ -1395,7 +1389,7 @@ Be careful.
                             }
                         }
                     }
-                    ConcreteItem::Ops(ops) => {
+                    ConcreteItem::Op(ops) => {
                         assert!(
                             !ops.item.command.is_empty(),
                             "builtin flow '{}' contains empty ops command",
@@ -1483,7 +1477,7 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            FlowItem::Ops(item) => {
+            FlowItem::Op(item) => {
                 assert_eq!(item.command, "land");
                 assert_eq!(item.args, vec!["--create-pr"]);
             }
@@ -1493,8 +1487,8 @@ Be careful.
 
     #[test]
     fn next_action_returns_ops_action() {
-        let items = vec![ConcreteItem::Ops(ConcreteOps {
-            item: OpsItem {
+        let items = vec![ConcreteItem::Op(ConcreteOp {
+            item: Op {
                 command: "rebase".to_string(),
                 args: Vec::new(),
             },

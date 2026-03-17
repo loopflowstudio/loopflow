@@ -1,0 +1,10 @@
+- tend/scan-waves
+- tend/assess
+- branch:
+    paths:
+      chord:
+        flow: tend-chord
+        description: "Pressure points found — compose and review mutations"
+      reorg:
+        flow: reorg
+        description: "Nothing to tend — waves reorganize internally"

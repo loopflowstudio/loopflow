@@ -70,6 +70,17 @@ If multiple items score similarly, prefer smaller scope—ship something.
 
 The selected item is moved to `scratch/<wave>-<slug>.md`. The original is removed from `wave/<wave>/`.
 
-**If the wave backlog is empty:** Signal completion by writing nothing. This is not an error—it means the wave's work is done. When used in a `loop_until_empty` flow, this signals the loop should terminate.
+**If the wave backlog is empty:** The wave has nothing to build. This is not an error.
+- If the wave is a chord member, it enters silence — alive, watching its area,
+  but not proposing work. Write nothing. The wave stays ready for items to be
+  added by the chord's tend flow or by the human.
+- If the wave is standalone, signal completion by writing nothing. When used in
+  a `loop_until_empty` flow, this signals the loop should terminate.
 
 **If items exist but none are ready:** Write `scratch/questions.md` explaining what's blocking progress.
+
+**If items exist but none are compelling:** This is distinct from "not ready."
+A wave exists in a market for the user's attention. Shipping mediocre work is
+worse than silence — it trains the user to ignore the wave. If no item would
+deliver a genuinely compelling user experience, write nothing. Prioritize
+validating existing experiences over building new ones.

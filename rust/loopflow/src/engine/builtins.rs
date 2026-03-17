@@ -45,6 +45,26 @@ static NAMESPACED_STEPS: std::sync::LazyLock<
         "scan/scan-plan",
         include_str!("builtins/steps/scan/scan-plan.md"),
     );
+    m.insert(
+        "tend/scan-waves",
+        include_str!("builtins/steps/tend/scan-waves.md"),
+    );
+    m.insert(
+        "tend/assess",
+        include_str!("builtins/steps/tend/assess.md"),
+    );
+    m.insert(
+        "tend/draft-chord",
+        include_str!("builtins/steps/tend/draft-chord.md"),
+    );
+    m.insert(
+        "tend/review-chord",
+        include_str!("builtins/steps/tend/review-chord.md"),
+    );
+    m.insert(
+        "tend/apply-chord",
+        include_str!("builtins/steps/tend/apply-chord.md"),
+    );
     m
 });
 

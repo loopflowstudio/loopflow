@@ -176,7 +176,7 @@ fn ops_item_parses_and_expands() {
     }
 
     let expanded = expand_flow(&flow, repo).unwrap();
-    assert!(matches!(&expanded[1], ConcreteItem::Ops(_)));
+    assert!(matches!(&expanded[1], ConcreteItem::Op(_)));
 }
 
 #[test]
@@ -325,5 +325,5 @@ fn builtin_ship_uses_ops_land_item() {
     let flow = load_flow("ship", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
     assert!(!items.is_empty());
-    assert!(matches!(items.last(), Some(ConcreteItem::Ops(_))));
+    assert!(matches!(items.last(), Some(ConcreteItem::Op(_))));
 }

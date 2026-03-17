@@ -98,6 +98,16 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `review-design` | Walk through the design doc, evaluate before implementation |
 | `refine` | Refine existing work |
 
+### Tend steps (`tend/`)
+
+| Step | What it does |
+|------|--------------|
+| `tend/scan-waves` | Read member wave state — PRs, blocks, progress, git activity |
+| `tend/assess` | Judge wave health and identify pressure points |
+| `tend/draft-chord` | Compose coordinated mutations across member waves |
+| `tend/review-chord` | Walk the human through proposed mutations, get verdicts |
+| `tend/apply-chord` | Execute approved mutations to wave configs and items |
+
 ### Scan steps (`scan/`)
 
 | Step | What it does |
@@ -147,7 +157,9 @@ Flows can include mechanical ops items directly:
 | `incident` | debug → 5whys → build |
 | `start` | ingest → kickoff |
 | `ship-wave` | start → build |
-| `ship-roadmap` | ingest → kickoff → review-design → build → review → land |
+| `ship-roadmap` | ingest → branch(build: ship-roadmap-build, reorg: reorg) |
+| `ship-roadmap-build` | kickoff → review-design → build → review → land |
+| `reorg` | update-wave (coherence pass) |
 | `qa-deploy` | qa → triage → branch(fix: qa-fix, deploy: deploy) |
 | `qa-fix` | implement → compress → lint → gate |
 | `deploy` | gate → update-wave |
@@ -159,6 +171,13 @@ Flows can include mechanical ops items directly:
 | `wave-reduce` | fork(reduce×3) → update-wave |
 | `wave-polish` | fork(polish×3) → update-wave |
 | `wave-expand` | fork(expand×3) → update-wave |
+
+### Tend flows (`tend/`)
+
+| Flow | Steps |
+|------|-------|
+| `tend` | scan-waves → assess → branch(chord: tend-chord, reorg: reorg) |
+| `tend-chord` | draft-chord → review-chord → apply-chord |
 
 ### Scan flows (`scan/`)
 

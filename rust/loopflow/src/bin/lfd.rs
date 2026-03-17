@@ -124,7 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler.clone(),
         output.clone(),
         event_hub.clone(),
-        session_manager.clone(),
         lfd_config.executor.clone(),
         lfd_config.github.clone(),
     )?;

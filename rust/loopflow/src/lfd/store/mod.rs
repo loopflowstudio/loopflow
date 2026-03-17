@@ -7,7 +7,8 @@ use crate::lfd::sessions::types::{PersistedSessionEvent, Session, SessionEvent, 
 use crate::lfd::types::{
     ActivationLog, AgentRun, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock,
     ChatMessage, LivePrState, LivePullRequestState, PendingActivation, QueueBlock, QueueMergeEvent,
-    Repo, RepoEdge, RepoId, Summary, Trigger, Wave, WaveRun, WaveRunStackStatus,
+    Repo, RepoEdge, RepoId, Summary, TerminalSession, TerminalSessionStatus, Trigger, Wave,
+    WaveRun, WaveRunStackStatus,
 };
 
 pub mod catalog;
@@ -553,6 +554,36 @@ impl Store {
         SessionStore::list_events_for_sessions(self, session_ids).await
     }
 
+    pub async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+        TerminalSessionStore::create_terminal_session(self, session).await
+    }
+
+    pub async fn get_terminal_session(
+        &self,
+        session_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>> {
+        TerminalSessionStore::get_terminal_session(self, session_id).await
+    }
+
+    pub async fn list_terminal_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+        statuses: Option<&[TerminalSessionStatus]>,
+    ) -> StoreResult<Vec<TerminalSession>> {
+        TerminalSessionStore::list_terminal_sessions(self, wave_id, statuses).await
+    }
+
+    pub async fn get_active_terminal_session_for_wave_run(
+        &self,
+        wave_run_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>> {
+        TerminalSessionStore::get_active_terminal_session_for_wave_run(self, wave_run_id).await
+    }
+
+    pub async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+        TerminalSessionStore::update_terminal_session(self, session).await
+    }
+
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
         TokenStore::get_provider_token(self, provider).await
     }
@@ -783,6 +814,25 @@ pub trait SessionStore: Send + Sync {
     ) -> StoreResult<HashMap<LfdId, Vec<PersistedSessionEvent>>>;
     async fn list_sessions_for_wave(&self, wave_id: &str) -> StoreResult<Vec<Session>>;
     async fn list_sessions_filtered(&self, filters: &SessionFilters) -> StoreResult<Vec<Session>>;
+}
+
+#[async_trait::async_trait]
+pub trait TerminalSessionStore: Send + Sync {
+    async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()>;
+    async fn get_terminal_session(
+        &self,
+        session_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>>;
+    async fn list_terminal_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+        statuses: Option<&[TerminalSessionStatus]>,
+    ) -> StoreResult<Vec<TerminalSession>>;
+    async fn get_active_terminal_session_for_wave_run(
+        &self,
+        wave_run_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>>;
+    async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1900,6 +1950,80 @@ impl SessionStore for Store {
                 run_sqlite(store, move |store| store.list_sessions_filtered(&filters)).await
             }
             StoreBackend::Postgres(store) => store.list_sessions_filtered(filters).await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TerminalSessionStore for Store {
+    async fn create_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session = session.clone();
+                run_sqlite(store, move |store| store.create_terminal_session(&session)).await
+            }
+            StoreBackend::Postgres(store) => store.create_terminal_session(session).await,
+        }
+    }
+
+    async fn get_terminal_session(
+        &self,
+        session_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session_id = session_id.clone();
+                run_sqlite(store, move |store| store.get_terminal_session(&session_id)).await
+            }
+            StoreBackend::Postgres(store) => store.get_terminal_session(session_id).await,
+        }
+    }
+
+    async fn list_terminal_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+        statuses: Option<&[TerminalSessionStatus]>,
+    ) -> StoreResult<Vec<TerminalSession>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.cloned();
+                let statuses = statuses.map(|values| values.to_vec());
+                run_sqlite(store, move |store| {
+                    store.list_terminal_sessions(wave_id.as_ref(), statuses.as_deref())
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => store.list_terminal_sessions(wave_id, statuses).await,
+        }
+    }
+
+    async fn get_active_terminal_session_for_wave_run(
+        &self,
+        wave_run_id: &LfdId,
+    ) -> StoreResult<Option<TerminalSession>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_run_id = wave_run_id.clone();
+                run_sqlite(store, move |store| {
+                    store.get_active_terminal_session_for_wave_run(&wave_run_id)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .get_active_terminal_session_for_wave_run(wave_run_id)
+                    .await
+            }
+        }
+    }
+
+    async fn update_terminal_session(&self, session: &TerminalSession) -> StoreResult<()> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let session = session.clone();
+                run_sqlite(store, move |store| store.update_terminal_session(&session)).await
+            }
+            StoreBackend::Postgres(store) => store.update_terminal_session(session).await,
         }
     }
 }

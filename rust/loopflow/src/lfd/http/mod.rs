@@ -14,8 +14,8 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    attention, auth as auth_routes, flows, hooks, providers, repos, secrets, sessions, system,
-    tokens, usage, wave_runs, waves, worktrees, ws,
+    attention, auth as auth_routes, flows, hooks, providers, repos, sessions, system,
+    terminal_sessions, tokens, usage, wave_runs, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
 use crate::lfd::store::StoreError;
@@ -56,14 +56,6 @@ pub fn router(state: HttpState) -> Router {
             "/auth/{provider}/credential",
             put(auth_routes::configure_credential_handler),
         )
-        .route(
-            "/secrets",
-            get(secrets::secrets_status_handler).delete(secrets::disconnect_secrets_handler),
-        )
-        .route("/secrets/projects", get(secrets::list_projects_handler))
-        .route("/secrets/configs", get(secrets::list_configs_handler))
-        .route("/secrets/select", post(secrets::select_secrets_handler))
-        .route("/secrets/sync", post(secrets::sync_secrets_handler))
         .route("/providers", get(providers::list_providers_handler))
         .route("/flows", get(flows::list_flows_handler))
         .route(
@@ -85,6 +77,31 @@ pub fn router(state: HttpState) -> Router {
             get(repos::list_parents_handler),
         )
         .route("/sessions", post(sessions::create_session_handler))
+        .route(
+            "/terminal-sessions",
+            get(terminal_sessions::list_terminal_sessions_handler)
+                .post(terminal_sessions::create_terminal_session_handler),
+        )
+        .route(
+            "/terminal-sessions/{id}",
+            get(terminal_sessions::get_terminal_session_handler),
+        )
+        .route(
+            "/terminal-sessions/{id}/attach",
+            post(terminal_sessions::attach_terminal_session_handler),
+        )
+        .route(
+            "/terminal-sessions/{id}/start",
+            post(terminal_sessions::start_terminal_session_handler),
+        )
+        .route(
+            "/terminal-sessions/{id}/complete",
+            post(terminal_sessions::complete_terminal_session_handler),
+        )
+        .route(
+            "/terminal-sessions/{id}/cancel",
+            post(terminal_sessions::cancel_terminal_session_handler),
+        )
         .route(
             "/sessions/{id}",
             get(sessions::get_session_handler).delete(sessions::delete_session_handler),

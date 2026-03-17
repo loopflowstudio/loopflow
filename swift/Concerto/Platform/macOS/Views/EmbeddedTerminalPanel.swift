@@ -136,4 +136,3 @@ struct EmbeddedTerminalPanel: View {
         .environment(OutputBuffer())
         .frame(width: 600)
 }
-

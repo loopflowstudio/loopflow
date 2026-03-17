@@ -10,6 +10,7 @@ mod chat_message;
 mod event;
 mod repo;
 mod summary;
+mod terminal_session;
 mod trigger;
 mod wave;
 
@@ -20,6 +21,7 @@ pub use chat_message::ChatMessage;
 pub use event::Event;
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use summary::Summary;
+pub use terminal_session::{TerminalSession, TerminalSessionStatus};
 pub use trigger::{
     ActivationLog, ActivationOutcome, PendingActivation, Signal, Trigger, CI_FIX_FLOW,
 };

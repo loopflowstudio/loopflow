@@ -9,8 +9,8 @@ use crate::lfd::sessions::usage::{
     StepUsageAggregate, TokenTotals, UsageSummaryGroupAggregate, UsageTimeseriesBucketAggregate,
 };
 use crate::lfd::types::{
-    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Trigger,
-    WaveRun, WaveRunStatus,
+    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState,
+    TerminalSession, Trigger, WaveRun, WaveRunStatus,
 };
 
 #[derive(Debug, Serialize)]
@@ -230,6 +230,61 @@ pub fn attention_item_dto(item: AttentionItem) -> AttentionItemDto {
         viewed_at: format_datetime(item.viewed_at),
         resolved_at: format_datetime(item.resolved_at),
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TerminalSessionDto {
+    pub id: String,
+    pub object: String,
+    pub wave_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wave_run_id: Option<String>,
+    pub step: String,
+    pub agent: String,
+    pub cwd: String,
+    pub argv: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub source: String,
+    pub status: String,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attached_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+}
+
+pub fn terminal_session_dto(session: TerminalSession) -> TerminalSessionDto {
+    TerminalSessionDto {
+        id: session.id.to_string(),
+        object: "terminal_session".to_string(),
+        wave_id: session.wave_id.to_string(),
+        wave_run_id: session.wave_run_id.map(|value| value.to_string()),
+        step: session.step,
+        agent: session.agent,
+        cwd: session.cwd,
+        argv: session.argv,
+        env: session.env,
+        source: session.source,
+        status: session.status.as_str().to_string(),
+        created_at: format_datetime(Some(session.created_at)).unwrap_or_default(),
+        attached_at: format_datetime(session.attached_at),
+        started_at: format_datetime(session.started_at),
+        completed_at: format_datetime(session.completed_at),
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TerminalLaunchSpecDto {
+    pub session_id: String,
+    pub wave_id: String,
+    pub step: String,
+    pub agent: String,
+    pub cwd: String,
+    pub argv: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub completion_token: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

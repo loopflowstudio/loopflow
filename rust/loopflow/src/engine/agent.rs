@@ -3,6 +3,7 @@
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -426,6 +427,42 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     } else {
         Some(serde_json::Value::Object(oc_config).to_string())
     }
+}
+
+pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let (harness, _) = parse_agent(agent);
+    match harness.as_str() {
+        "gemini" => {
+            if let Some(ref context_file) = process.context_file {
+                env.insert(
+                    "GEMINI_SYSTEM_MD".to_string(),
+                    context_file.to_string_lossy().to_string(),
+                );
+            }
+        }
+        "opencode" => {
+            if let Some(env_val) = build_opencode_env(process) {
+                env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
+            }
+        }
+        _ => {}
+    }
+
+    let next_depth = std::env::var("RLM_DEPTH")
+        .ok()
+        .and_then(|depth| depth.parse::<usize>().ok())
+        .unwrap_or(0)
+        + 1;
+    env.insert("RLM_DEPTH".to_string(), next_depth.to_string());
+    for var in RLM_PASSTHROUGH_VARS {
+        if let Ok(value) = std::env::var(var) {
+            env.insert((*var).to_string(), value);
+        }
+    }
+
+    env
 }
 
 /// Apply harness-specific environment variables to a command.

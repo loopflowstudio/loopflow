@@ -199,6 +199,8 @@ Auth connects your providers:
 ```bash
 lfq auth github      # connect GitHub
 lfq auth claude      # connect Claude
+lfq auth asana       # store Asana PAT
+lfq auth linear      # store Linear API key
 lfq auth status      # check connections
 ```
 

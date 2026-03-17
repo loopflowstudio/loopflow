@@ -122,6 +122,19 @@ def test_auth_status_table_shows_expiry_details() -> None:
     assert "refresh in" in rendered
 
 
+def test_auth_status_table_shows_new_pm_providers() -> None:
+    statuses = [
+        AuthProviderStatus.model_validate({"provider": "asana", "status": "none"}),
+        AuthProviderStatus.model_validate({"provider": "linear", "status": "active"}),
+    ]
+    console = Console(record=True, width=220)
+    console.print(_auth_status_table(statuses))
+    rendered = console.export_text()
+
+    assert "Asana" in rendered
+    assert "Linear" in rendered
+
+
 def test_repo_table_shows_registration_columns() -> None:
     repo = Repo.model_validate(REPO_MINIMAL)
     console = Console(record=True, width=220)

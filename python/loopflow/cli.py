@@ -90,6 +90,8 @@ def _provider_label(provider: str) -> str:
         "claude": "Claude",
         "codex": "Codex",
         "opencodezen": "OpenCode Zen",
+        "asana": "Asana",
+        "linear": "Linear",
     }
     return labels.get(provider.lower(), provider)
 
@@ -224,6 +226,19 @@ def _connect_provider(provider: str) -> None:
         time.sleep(1)
 
     typer.echo("Authentication still pending. Complete auth in browser and run `lfq auth status`.")
+
+
+def _configure_provider_token(provider: str, env_name: str, prompt_label: str) -> None:
+    api_key = os.environ.get(env_name)
+    if not api_key:
+        api_key = typer.prompt(prompt_label, hide_input=True).strip()
+    if not api_key:
+        typer.echo(f"Error: {env_name} is empty", err=True)
+        raise typer.Exit(1)
+
+    typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
+    status = api.configure_api_key(provider, api_key)
+    typer.echo(f"{_provider_label(status.provider)} switched to API key")
 
 
 def _format_tokens(value: int) -> str:
@@ -606,6 +621,16 @@ def auth_zen() -> None:
     _connect_provider("opencodezen")
 
 
+@auth_app.command("asana", help="Store an Asana personal access token.")
+def auth_asana() -> None:
+    _configure_provider_token("asana", "ASANA_ACCESS_TOKEN", "Asana personal access token")
+
+
+@auth_app.command("linear", help="Store a Linear API key.")
+def auth_linear() -> None:
+    _configure_provider_token("linear", "LINEAR_API_KEY", "Linear API key")
+
+
 @auth_app.command("disconnect", help="Disconnect a provider.")
 def auth_disconnect(provider: str) -> None:
     status = api.disconnect_auth(provider)
@@ -626,20 +651,14 @@ def auth_configure(
         "claude": "ANTHROPIC_API_KEY",
         "codex": "OPENAI_API_KEY",
         "opencodezen": "OPENCODE_API_KEY",
+        "asana": "ASANA_ACCESS_TOKEN",
+        "linear": "LINEAR_API_KEY",
     }
     env_name = env_names.get(provider.lower())
     if not env_name:
         typer.echo(f"Error: {provider} does not support API key auth", err=True)
         raise typer.Exit(1)
-
-    api_key = os.environ.get(env_name)
-    if not api_key:
-        typer.echo(f"Error: set {env_name} in your environment first", err=True)
-        raise typer.Exit(1)
-
-    typer.echo("API key auth bills per token. OAuth uses your existing subscription.")
-    status = api.configure_api_key(provider, api_key)
-    typer.echo(f"{_provider_label(status.provider)} switched to API key")
+    _configure_provider_token(provider, env_name, f"{_provider_label(provider)} API key")
 
 
 @token_app.command("revoke", help="Revoke connection token hash prefixes or revoke all tokens.")

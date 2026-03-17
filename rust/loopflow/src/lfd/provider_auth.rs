@@ -53,6 +53,8 @@ pub enum Provider {
     Claude,
     Codex,
     OpenCodeZen,
+    Asana,
+    Linear,
 }
 
 impl Provider {
@@ -62,11 +64,20 @@ impl Provider {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::OpenCodeZen => "opencodezen",
+            Self::Asana => "asana",
+            Self::Linear => "linear",
         }
     }
 
-    pub fn all() -> [Self; 4] {
-        [Self::GitHub, Self::Claude, Self::Codex, Self::OpenCodeZen]
+    pub fn all() -> [Self; 6] {
+        [
+            Self::GitHub,
+            Self::Claude,
+            Self::Codex,
+            Self::OpenCodeZen,
+            Self::Asana,
+            Self::Linear,
+        ]
     }
 
     /// Whether this provider supports CLI-based token refresh.
@@ -93,6 +104,8 @@ impl FromStr for Provider {
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
+            "asana" => Ok(Self::Asana),
+            "linear" | "lin" => Ok(Self::Linear),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
             }),
@@ -262,6 +275,39 @@ pub struct SocketAuthBroker {
     client: Arc<CredentialSocketClient>,
 }
 
+#[derive(Debug, Clone)]
+struct ApiKeyBroker {
+    provider: Provider,
+}
+
+impl ApiKeyBroker {
+    fn new(provider: Provider) -> Self {
+        Self { provider }
+    }
+}
+
+#[async_trait]
+impl AuthBroker for ApiKeyBroker {
+    fn provider(&self) -> Provider {
+        self.provider
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        Err(AuthError::CommandUnavailable {
+            provider: self.provider,
+            command: "lfq auth configure".to_string(),
+        })
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        Ok(AuthStatus::None)
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        Ok(())
+    }
+}
+
 impl SocketAuthBroker {
     pub fn new(provider: Provider, client: Arc<CredentialSocketClient>) -> Self {
         Self {
@@ -377,6 +423,8 @@ impl ProviderAuthService {
                         Arc::new(SocketAuthBroker::new(Provider::Codex, client.clone()))
                             as Arc<dyn AuthBroker>,
                         Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
+                        Arc::new(ApiKeyBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
+                        Arc::new(ApiKeyBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
                     ],
                     Some(store),
                 );
@@ -389,6 +437,8 @@ impl ProviderAuthService {
                 Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
                 Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
                 Arc::new(OpenCodeZenBroker::default()) as Arc<dyn AuthBroker>,
+                Arc::new(ApiKeyBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
+                Arc::new(ApiKeyBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
             ],
             Some(store),
         )
@@ -1554,6 +1604,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
+        Provider::Asana | Provider::Linear => Err(TokenRefreshError::MissingToken { provider }),
     }
 }
 
@@ -1844,6 +1895,9 @@ mod tests {
         assert_eq!("opencodezen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("zen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("oc".parse::<Provider>(), Ok(Provider::OpenCodeZen));
+        assert_eq!("asana".parse::<Provider>(), Ok(Provider::Asana));
+        assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
+        assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
         assert!("gemini".parse::<Provider>().is_err());
     }
 

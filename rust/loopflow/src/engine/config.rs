@@ -184,6 +184,20 @@ pub struct ReleaseTargetConfig {
     pub workflow: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct AsanaConfig {
+    #[serde(default)]
+    pub workspace: Option<String>,
+    #[serde(default)]
+    pub default_team: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LinearConfig {
+    #[serde(default)]
+    pub team: Option<String>,
+}
+
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -283,6 +297,14 @@ pub struct Config {
     #[serde(default)]
     pub release: ReleaseConfig,
 
+    /// Asana configuration for PM integration.
+    #[serde(default)]
+    pub asana: AsanaConfig,
+
+    /// Linear configuration for PM integration.
+    #[serde(default)]
+    pub linear: LinearConfig,
+
     /// Max concurrent RLM sub-agents
     #[serde(default = "default_rlm_max_parallel")]
     pub rlm_max_parallel: usize,
@@ -335,6 +357,8 @@ impl Default for Config {
             budgets: BudgetConfig::default(),
             rlm_agent: None,
             release: ReleaseConfig::default(),
+            asana: AsanaConfig::default(),
+            linear: LinearConfig::default(),
             rlm_max_parallel: default_rlm_max_parallel(),
             rlm_max_depth: default_rlm_max_depth(),
         }
@@ -518,6 +542,32 @@ mod tests {
         let (harness, model) = parse_agent("custom:model-v2");
         assert_eq!(harness, "custom");
         assert_eq!(model, Some("model-v2".to_string()));
+    }
+
+    #[test]
+    fn config_parses_pm_provider_settings() {
+        let yaml = r#"
+asana:
+  workspace: "1234567890"
+  default_team: "9876543210"
+linear:
+  team: "TEAM-ID"
+"#;
+
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+        assert_eq!(
+            config.asana,
+            AsanaConfig {
+                workspace: Some("1234567890".to_string()),
+                default_team: Some("9876543210".to_string()),
+            }
+        );
+        assert_eq!(
+            config.linear,
+            LinearConfig {
+                team: Some("TEAM-ID".to_string()),
+            }
+        );
     }
 
     // ==========================================================================

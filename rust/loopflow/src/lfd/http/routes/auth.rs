@@ -214,6 +214,8 @@ mod tests {
             Provider::OpenCodeZen
         );
         assert_eq!(parse_provider("zen").expect("zen"), Provider::OpenCodeZen);
+        assert_eq!(parse_provider("asana").expect("asana"), Provider::Asana);
+        assert_eq!(parse_provider("linear").expect("linear"), Provider::Linear);
     }
 
     #[test]

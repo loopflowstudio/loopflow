@@ -72,6 +72,8 @@ fn api_key_env_name(provider: Provider) -> Option<&'static str> {
         Provider::Claude => Some("ANTHROPIC_API_KEY"),
         Provider::Codex => Some("OPENAI_API_KEY"),
         Provider::OpenCodeZen => Some("OPENCODE_API_KEY"),
+        Provider::Asana => Some("ASANA_ACCESS_TOKEN"),
+        Provider::Linear => Some("LINEAR_API_KEY"),
         Provider::GitHub => None,
     }
 }
@@ -283,6 +285,8 @@ fn provider_display_name(provider: Provider) -> &'static str {
         Provider::Claude => "Claude",
         Provider::Codex => "Codex",
         Provider::OpenCodeZen => "OpenCode Zen",
+        Provider::Asana => "Asana",
+        Provider::Linear => "Linear",
     }
 }
 
